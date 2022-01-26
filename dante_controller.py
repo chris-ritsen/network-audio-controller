@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/python3
 
 import codecs
 import curses
@@ -218,9 +218,9 @@ def main():
     screen_max_y, screen_max_x = screen.getmaxyx()
 
     debug_window = curses.newwin(10, screen_max_x, screen_max_y - 10, 0)
-    device_window = curses.newwin(30, int(screen_max_x / 4), 0, 0)
-    rx_channel_window = curses.newwin(16, int(screen_max_x / 2), 17, int(screen_max_x / 4))
-    tx_channel_window = curses.newwin(16, int(screen_max_x / 2), 0, int(screen_max_x / 4))
+    device_window = curses.newwin(30, int(screen_max_x / 3), 0, 0)
+    rx_channel_window = curses.newwin(16, int(screen_max_x / 2), 17, int(screen_max_x / 3))
+    tx_channel_window = curses.newwin(16, int(screen_max_x / 2), 0, int(screen_max_x / 3))
 
     zeroconf = Zeroconf()
     listener = MyListener()
@@ -281,7 +281,7 @@ def main():
 
             if selected_device == key:
                 if not device.error:
-                    line = f'IP: {device.ipv4} | Name: {device.name.ljust(max_name_width)} | Tx {str(len(device.tx_channels)).rjust(3)} | Rx: {str(len(device.rx_channels)).rjust(3)}'
+                    line = f'IP: {device.ipv4} | Tx {str(len(device.tx_channels)).rjust(3)} | Rx: {str(len(device.rx_channels)).rjust(3)}'
                 else:
                     line = f'IP: {device.ipv4} | Error: {device.error}'
 
