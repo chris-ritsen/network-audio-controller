@@ -4,18 +4,16 @@ This is a python program for controlling Dante network audio devices (and possib
 
 ### Current features:
 
-- Curses interface to display all device channels, devices names, IP addresses
-- Logs Tx/Rx channels to a file
-- Logs active subscriptions to a file
-- Simple TUI menu (j/k up/down and tab for navigation)
+- CLI interface
+- Display active subscriptions, Rx, Tx, devices
 - mDNS device discovery
 
 ### Planned features:
 
 - AES67 device support
 - Adding/removing subscriptions
-- CLI interface
 - Changing channel names
 - Changing/displaying device settings (name, latency, encoding, sample rate, level controls, AES67 mode)
 - Command prompt
 - Signal presence indicator
+- TUI interface
