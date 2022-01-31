@@ -46,6 +46,12 @@ def parse_args():
         default=False,
         help='Reset the device name to the manufacturer default')
 
+    parser.add_argument(
+        '--set-device-name',
+        type=str,
+        default=None,
+        help='Set the device name')
+
     #  parser.add_argument(
     #      '--channel-name',
     #      type=str,
@@ -171,7 +177,7 @@ def print_devices(devices):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if True in [args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
+    if (args.set_device_name or args.device) or True in [args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -183,14 +189,18 @@ def control_dante_devices(devices):
         if args.device and len(devices) == 0:
             print('The specified device was not found')
 
-        if args.reset_device_name:
+        if args.reset_device_name or args.set_device_name:
             if not args.device:
                 print('Must specify a device name')
             else:
                 if len(devices) == 1:
                     for key, device in devices.items():
-                        print(f'Resetting device name for "{device.name}" {device.ipv4}')
-                        device.reset_device_name()
+                        if args.reset_device_name:
+                            print(f'Resetting device name for "{device.name}" {device.ipv4}')
+                            device.reset_device_name()
+                        if args.set_device_name:
+                            print(f'Setting device name for "{device.name}" {device.ipv4} to {args.set_device_name}')
+                            device.set_device_name(args.set_device_name)
 
     if args.json:
         json_object = json.dumps(devices, indent=2)

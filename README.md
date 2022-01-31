@@ -10,13 +10,13 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - CLI
 - Display active subscriptions, Rx, Tx, devices
 - JSON output
-- Reset device name
+- Set/reset device name
 - mDNS device discovery
 
 ### Next features to be added
 
 - Adding/removing subscriptions
-- Changing channel/device names
+- Changing channel names
 
 ### Planned features
 
@@ -38,4 +38,4 @@ Install these dependencies with pip:
 - argcomplete
 - zeroconf
 
-Then run with `./dante_controller.py`
+Then run with `./network_audio_controller.py`

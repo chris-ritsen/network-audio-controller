@@ -136,6 +136,12 @@ class Device(object):
         return response
 
 
+    def set_device_name(self, name):
+        response = self.dante_command(command_set_device_name(name))
+        log(f"{response}\n")
+        return response
+
+
     def reset_device_name(self):
         response = self.dante_command(command_reset_device_name())
         log(f"{response}\n")
@@ -420,7 +426,7 @@ def channel_name(hex_str, offset):
     return parsed_channel_name
 
 
-def command_string(command=None, command_args='0000', sequence1='ff', sequence2='ffff'):
+def command_string(command=None, command_args='0000', command_length='00', sequence1='ff', sequence2='ffff'):
     if command == 'channel_count':
         command_length = '0a'
         command_str = '1000'
@@ -437,11 +443,16 @@ def command_string(command=None, command_args='0000', sequence1='ff', sequence2=
         command_length = '0a'
         command_str = '1001'
         command_args = '0000'
+    if command == 'set_device_name':
+        command_str = '1001'
     if command == 'tx_channels':
         command_length = '10'
         command_str = '2000'
 
-    return f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
+    command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
+    log(f"{command}\t\t\t{command_hex}\n")
+
+    return command_hex
 
 
 def command_device_info():
@@ -456,8 +467,20 @@ def command_channel_count():
     return command_string('channel_count')
 
 
+def command_set_device_name(name):
+    args_length = chr(len(name.encode('utf-8')) + 11)
+    args_length = bytes(args_length.encode('utf-8')).hex()
+
+    return command_string('set_device_name', command_length=args_length, command_args=device_name(name))
+
+
 def command_reset_device_name():
     return command_string('reset_device_name')
+
+
+def device_name(name):
+    name_hex = name.encode().hex()
+    return f'0000{name_hex}00'
 
 
 def channel_pagination(page):
@@ -497,6 +520,7 @@ class MdnsListener:
 
 
     def remove_service(self, zeroconf, type, name):
+        #  print(f'service removed \t{name}')
         del self.devices[name]
 
 
