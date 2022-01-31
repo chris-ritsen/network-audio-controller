@@ -189,10 +189,10 @@ class Device(object):
                         not_connected_not_subscribed = status1 == '0000' and status2 == '0000'
                         not_connected_subscribed = status1 == '0000' and status2 == '0001'
 
-                        rx_channel_label = channel_label(hex_rx_response, rx_channel_offset)
+                        rx_channel_name = channel_name(hex_rx_response, rx_channel_offset)
 
                         if not device_offset == '0000':
-                            tx_device_label = channel_label(hex_rx_response, device_offset)
+                            tx_device_label = channel_name(hex_rx_response, device_offset)
 
                             if hex_rx_response[int(device_offset, 16) * 2:].rsplit('00')[0] == '2e':
                                 tx_device_label = self.name
@@ -200,14 +200,14 @@ class Device(object):
                             tx_device_label = self.name
 
                         if not channel_offset == '0000':
-                            tx_channel_label = channel_label(hex_rx_response, channel_offset)
+                            tx_channel_name = channel_name(hex_rx_response, channel_offset)
                         else:
-                            tx_channel_label = rx_channel_label
+                            tx_channel_name = rx_channel_name
 
-                        rx_channels[channel_number] = rx_channel_label
+                        rx_channels[channel_number] = rx_channel_name
 
                         if self_connected or connected_not_self_connected:
-                            subscriptions.append((f"{rx_channel_label}@{self.name}", f"{tx_channel_label}@{tx_device_label}"))
+                            subscriptions.append((f"{rx_channel_name}@{self.name}", f"{tx_channel_name}@{tx_device_label}"))
                             #  subscription = Subscription()
                             #  subscription.rx_channel = 
                             #  subscription.rx_device = 
@@ -250,13 +250,13 @@ class Device(object):
                         if channel_disabled:
                             break
 
-                        tx_channel_label = channel_label(transmitters, channel_offset)
+                        tx_channel_name = channel_name(transmitters, channel_offset)
 
                         tx_channel = Channel()
                         tx_channel.channel_type = 'tx'
                         tx_channel.index = channel_number
                         tx_channel.device = self
-                        tx_channel.name = tx_channel_label
+                        tx_channel.name = tx_channel_name
 
                         tx_channels.add(tx_channel)
 
@@ -402,8 +402,14 @@ class Device(object):
         return json_dict
 
 
-def channel_label(data, offset):
-    return bytes.fromhex(data[int(offset, 16) * 2:].rsplit('00')[0]).decode('utf-8')
+def channel_name(hex_str, offset):
+    parsed_channel_name = None
+    try:
+        data = hex_str[int(offset, 16) * 2:].rsplit('00')[0]
+        parsed_channel_name = bytes.fromhex(data).decode('utf-8')
+    except Exception as e:
+        print(f'Error parsing channel response: {e}')
+    return parsed_channel_name
 
 
 def command_string(command=None, command_args='0000', sequence1='ff', sequence2='ffff'):
@@ -483,9 +489,9 @@ class MdnsListener:
         service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
         device = Device()
 
-        if service_properties['mf']:
+        if 'mf' in service_properties:
             device.manufacturer = service_properties['mf']
-        if service_properties['model']:
+        if 'model' in service_properties:
             device.model = service_properties['model']
 
         device.ipv4 = ipv4
