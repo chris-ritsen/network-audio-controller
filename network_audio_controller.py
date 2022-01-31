@@ -41,6 +41,24 @@ def parse_args():
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
+        '--reset-device-name',
+        action='store_true',
+        default=False,
+        help='Reset the device name to the manufacturer default')
+
+    #  parser.add_argument(
+    #      '--channel-name',
+    #      type=str,
+    #      default=None,
+    #      help='Filter results by device name or network address')
+
+    #  parser.add_argument(
+    #      '--set-channel-name',
+    #      type=str,
+    #      default=None,
+    #      help='Filter results by device name or network address')
+
+    parser.add_argument(
         '-d',
         '--device',
         type=str,
@@ -127,7 +145,7 @@ def get_dante_devices(timeout):
     browser = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
     time.sleep(timeout)
 
-    return listener.devices
+    return dict(listener.devices)
 
 
 def print_devices(devices):
@@ -150,10 +168,10 @@ def print_devices(devices):
                 print(f"{subscription[0]} -> {subscription[1]}")
 
 
-def print_dante_devices(devices):
+def control_dante_devices(devices):
     args = parse_args()
 
-    if True in [args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
+    if True in [args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -161,6 +179,18 @@ def print_dante_devices(devices):
             devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
 
         devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+
+        if args.device and len(devices) == 0:
+            print('The specified device was not found')
+
+        if args.reset_device_name:
+            if not args.device:
+                print('Must specify a device name')
+            else:
+                if len(devices) == 1:
+                    for key, device in devices.items():
+                        print(f'Resetting device name for "{device.name}" {device.ipv4}')
+                        device.reset_device_name()
 
     if args.json:
         json_object = json.dumps(devices, indent=2)
@@ -180,7 +210,7 @@ def cli_mode():
         if len(devices) == 0:
             print('No devices detected. Try increasing the mDNS timeout.')
         else:
-            print_dante_devices(devices)
+            control_dante_devices(devices)
 
 
 def tui_mode():

@@ -1,26 +1,37 @@
-This is a python program for controlling Dante network audio devices (and possibly others in the future). It's very early, but the first goal is to do everything that Dante Controller can do.
 
-[gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html)
+### Description
 
-### Current features:
+This is a python program for controlling Dante network audio devices (and possibly others in the future). It's very early, so expect things to break or switches to change.  The first goal is to do everything that Dante Controller can do that would be useful for control of the devices from a command-line interface or within scripts.  
+
+For more information, check out the [gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
+
+### Features
 
 - CLI
 - Display active subscriptions, Rx, Tx, devices
-- mDNS device discovery
 - JSON output
+- Reset device name
+- mDNS device discovery
 
-### Planned features:
+### Next features to be added
+
+- Adding/removing subscriptions
+- Changing channel/device names
+
+### Planned features
 
 - AES67 device support
-- Adding/removing subscriptions
-- Changing channel names
 - Changing/displaying device settings (name, latency, encoding, sample rate, level controls, AES67 mode)
+- Client/server modes
 - Command prompt
 - Control of Shure wireless devices ([Axient receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and [PSM transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
 - Signal presence indicator
+- Stand-alone command API
 - TUI
+- Web application UI
+- XML output
 
-### Dependences
+### Usage
 
 Install these dependencies with pip:
 

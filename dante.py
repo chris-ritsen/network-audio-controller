@@ -136,6 +136,11 @@ class Device(object):
         return response
 
 
+    def reset_device_name(self):
+        response = self.dante_command(command_reset_device_name())
+        log(f"{response}\n")
+        return response
+
     def get_device_controls(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('', 0))
@@ -428,6 +433,10 @@ def command_string(command=None, command_args='0000', sequence1='ff', sequence2=
     if command == 'rx_channels':
         command_length = '10'
         command_str = '3000'
+    if command == 'reset_device_name':
+        command_length = '0a'
+        command_str = '1001'
+        command_args = '0000'
     if command == 'tx_channels':
         command_length = '10'
         command_str = '2000'
@@ -445,6 +454,10 @@ def command_device_name():
 
 def command_channel_count():
     return command_string('channel_count')
+
+
+def command_reset_device_name():
+    return command_string('reset_device_name')
 
 
 def channel_pagination(page):
@@ -476,6 +489,10 @@ class MdnsListener:
 
 
     def update_service(self, zeroconf, type, name):
+        info = zeroconf.get_service_info(type, name)
+        host = zeroconf.cache.entries_with_name(name)
+        ipv4 = info.parsed_addresses()[0]
+        #  print(f'service updated {ipv4}\t{name}')
         pass
 
 
