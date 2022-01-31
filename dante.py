@@ -52,14 +52,12 @@ class Channel(object):
 
 
     def to_json(self):
-        json_dict = {
+        return {
             #  'channel_type': self.channel_type,
             'device': self.device.name,
             'index': self.index,
             'name': self.name
        }
-
-        return json_dict
 
 
 class Subscription(object):
@@ -391,15 +389,13 @@ class Device(object):
 
 
     def to_json(self):
-        json_dict = {
+        return {
             'ipv4': self.ipv4,
             'name': self.name,
             'receivers': self.rx_channels,
             'subscriptions': self.subscriptions,
             'transmitters': list(self.tx_channels)
        }
-
-        return json_dict
 
 
 def channel_name(hex_str, offset):
