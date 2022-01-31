@@ -45,7 +45,7 @@ def parse_args():
         '--device',
         type=str,
         default=None,
-        help='Filter results by device name')
+        help='Filter results by device name or network address')
 
     parser.add_argument(
         "-t",
@@ -185,14 +185,14 @@ def cli_mode():
     if args:
         print(args)
 
-    if True in [args.json, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
-        devices = get_devices(args.timeout)
+    devices = get_devices(args.timeout)
 
+    if True in [args.json, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
         for key, device in devices.items():
             device.get_device_controls()
 
         if args.device:
-            devices = dict(filter(lambda x: x[1].name == args.device, devices.items()))
+            devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
 
         devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
