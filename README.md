@@ -4,9 +4,10 @@ This is a python program for controlling Dante network audio devices (and possib
 
 ### Current features:
 
-- CLI interface
+- CLI
 - Display active subscriptions, Rx, Tx, devices
 - mDNS device discovery
+- JSON output
 
 ### Planned features:
 
@@ -15,5 +16,15 @@ This is a python program for controlling Dante network audio devices (and possib
 - Changing channel names
 - Changing/displaying device settings (name, latency, encoding, sample rate, level controls, AES67 mode)
 - Command prompt
+- Control of Shure wireless devices ([Axient receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and [PSM transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
 - Signal presence indicator
-- TUI interface
+- TUI
+
+### Dependences
+
+Install these dependencies with pip:
+
+- argcomplete
+- zeroconf
+
+Then run with `./dante_controller.py`

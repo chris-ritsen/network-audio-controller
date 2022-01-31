@@ -3,6 +3,113 @@
 import codecs
 import socket
 
+class Channel(object):
+    def __init__(self):
+        self._channel_type = None
+        self._device = None
+        self._index = None
+        self._name = None
+
+
+    @property
+    def device(self):
+        return self._device
+
+
+    @device.setter
+    def device(self, device):
+        self._device = device
+
+
+    @property
+    def index(self):
+        return self._index
+
+
+    @index.setter
+    def index(self, index):
+        self._index = index
+
+
+    @property
+    def channel_type(self):
+        return self._channel_type
+
+
+    @channel_type.setter
+    def channel_type(self, channel_type):
+        self._channel_type = channel_type
+
+
+    @property
+    def name(self):
+        return self._name
+
+
+    @name.setter
+    def name(self, name):
+        self._name = name
+
+
+    def to_json(self):
+        json_dict = {
+            #  'channel_type': self.channel_type,
+            'device': self.device.name,
+            'index': self.index,
+            'name': self.name
+       }
+
+        return json_dict
+
+
+class Subscription(object):
+    def __init__(self):
+        self._rx_channel = None
+        self._rx_device = None
+        self._tx_channel = None
+        self._tx_device = None
+
+
+    @property
+    def rx_channel(self):
+        return self._rx_channel
+
+
+    @rx_channel.setter
+    def rx_channel(self, rx_channel):
+        self._rx_channel = rx_channel
+
+
+    @property
+    def tx_channel(self):
+        return self._tx_channel
+
+
+    @tx_channel.setter
+    def tx_channel(self, tx_channel):
+        self._tx_channel = tx_channel
+
+
+    @property
+    def rx_device(self):
+        return self._rx_device
+
+
+    @rx_device.setter
+    def rx_device(self, rx_device):
+        self._rx_device = rx_device
+
+
+    @property
+    def tx_device(self):
+        return self._tx_device
+
+
+    @tx_device.setter
+    def tx_device(self, tx_device):
+        self._tx_device = tx_device
+
+
 class Device(object):
     def __init__(self):
         self._error = None
@@ -15,7 +122,7 @@ class Device(object):
         self._rx_count = 0
         self._socket = None
         self._subscriptions = ()
-        self._tx_channels = {}
+        self._tx_channels = set()
         self._tx_count = 0
 
 
@@ -73,7 +180,7 @@ class Device(object):
                         channel_number = int(channel[0], 16)
                         channel_offset = channel[3]
                         device_offset = channel[4]
-                        input_channel_offset = channel[5]
+                        rx_channel_offset = channel[5]
                         status1 = channel[6]
                         status2 = channel[7]
 
@@ -82,31 +189,30 @@ class Device(object):
                         not_connected_not_subscribed = status1 == '0000' and status2 == '0000'
                         not_connected_subscribed = status1 == '0000' and status2 == '0001'
 
-                        input_channel_label = rx_label(hex_rx_response, input_channel_offset)
+                        rx_channel_label = channel_label(hex_rx_response, rx_channel_offset)
 
                         if not device_offset == '0000':
-                            output_device_label = rx_label(hex_rx_response, device_offset)
+                            tx_device_label = channel_label(hex_rx_response, device_offset)
 
                             if hex_rx_response[int(device_offset, 16) * 2:].rsplit('00')[0] == '2e':
-                                output_device_label = self.name
+                                tx_device_label = self.name
                         else:
-                            output_device_label = self.name
+                            tx_device_label = self.name
 
                         if not channel_offset == '0000':
-                            output_channel_label = rx_label(hex_rx_response, channel_offset)
+                            tx_channel_label = channel_label(hex_rx_response, channel_offset)
                         else:
-                            output_channel_label = input_channel_label
+                            tx_channel_label = rx_channel_label
 
-                        rx_channels[channel_number] = input_channel_label
+                        rx_channels[channel_number] = rx_channel_label
 
                         if self_connected or connected_not_self_connected:
-                            subscriptions.append((f"{input_channel_label}@{self.name}", f"{output_channel_label}@{output_device_label}"))
-
-                        #      log(f"Rx: {input_channel_label}@{self.name} -> {output_channel_label}@{output_device_label}\n")
-                        #  if not_connected_not_subscribed:
-                        #      log(f"Rx: {input_channel_label}@{self.name}\n")
-                        #  if not_connected_subscribed:
-                        #      log(f"Rx: {input_channel_label}@{self.name} -> {output_channel_label}@{output_device_label} [subscription unresolved]\n")
+                            subscriptions.append((f"{rx_channel_label}@{self.name}", f"{tx_channel_label}@{tx_device_label}"))
+                            #  subscription = Subscription()
+                            #  subscription.rx_channel = 
+                            #  subscription.rx_device = 
+                            #  subscription.tx_channel = 
+                            #  subscription.tx_device = 
         except Exception as e:
             self.error = e
             print(e)
@@ -116,8 +222,7 @@ class Device(object):
 
 
     def get_tx_channels(self):
-        tx_channels = {}
-        tx_channel_names = []
+        tx_channels = set()
 
         try:
             for page in range(0, max(1, int(self.tx_count / 16), ), 2):
@@ -145,9 +250,15 @@ class Device(object):
                         if channel_disabled:
                             break
 
-                        output_channel_label = rx_label(transmitters, channel_offset)
+                        tx_channel_label = channel_label(transmitters, channel_offset)
 
-                        tx_channels[channel_number] = output_channel_label
+                        tx_channel = Channel()
+                        tx_channel.channel_type = 'tx'
+                        tx_channel.index = channel_number
+                        tx_channel.device = self
+                        tx_channel.name = tx_channel_label
+
+                        tx_channels.add(tx_channel)
 
                 if has_disabled_channels:
                     break
@@ -279,27 +390,62 @@ class Device(object):
         self._rx_count = rx_count
 
 
-def rx_label(data, offset):
+    def to_json(self):
+        json_dict = {
+            'ipv4': self.ipv4,
+            'name': self.name,
+            'receivers': self.rx_channels,
+            'subscriptions': self.subscriptions,
+            'transmitters': list(self.tx_channels)
+       }
+
+        return json_dict
+
+
+def channel_label(data, offset):
     return bytes.fromhex(data[int(offset, 16) * 2:].rsplit('00')[0]).decode('utf-8')
 
 
+def command_string(command=None, command_args='0000', sequence1='ff', sequence2='ffff'):
+    if command == 'channel_count':
+        command_length = '0a'
+        command_str = '1000'
+    if command == 'device_info':
+        command_length = '0a'
+        command_str = '1003'
+    if command == 'device_name':
+        command_length = '0a'
+        command_str = '1002'
+    if command == 'rx_channels':
+        command_length = '10'
+        command_str = '3000'
+    if command == 'tx_channels':
+        command_length = '10'
+        command_str = '2000'
+
+    return f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
+
+
 def command_device_info():
-    return'27ff000affff100300000'
+    return command_string('device_info')
 
 
 def command_device_name():
-    return '27ff000affff10020000'
+    return command_string('device_name')
 
 
 def command_channel_count():
-    return '27ff000affff10000000'
+    return command_string('channel_count')
+
+
+def channel_pagination(page):
+    page_hex = format(page, 'x')
+    return f'0000000100{page_hex}10000'
 
 
 def command_receivers(page=0):
-    page_hex = format(page, 'x')
-    return f'27ff0010ffff30000000000100{page_hex}10000'
+    return command_string('rx_channels', channel_pagination(page))
 
 
 def command_transmitters(page=0):
-    page_hex = format(page, 'x')
-    return f'27ff0010ffff20000000000100{page_hex}10000'
+    return command_string('tx_channels', channel_pagination(page))

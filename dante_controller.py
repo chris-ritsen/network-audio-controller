@@ -2,28 +2,33 @@
 
 import argcomplete
 import argparse
-import asyncio
-import curses
 import enum
-import math
+import json
 import os
 import signal
 import socket
 import sys
+import time
 
+from json import JSONEncoder
 from zeroconf import ServiceBrowser, Zeroconf, DNSAddress
 
 import dante
 
+def _default(self, obj):
+    return getattr(obj.__class__, "to_json", _default.default)(obj)
+
+
+_default.default = JSONEncoder().default
+JSONEncoder.default = _default
+
 def handler(signum, frame):
-    #  curses.endwin()
-    #  screen = curses.initscr()
     pass
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Load files into mpv for playback',
+        description='List and control Dante network audio devices',
         usage='%(prog)s [options]',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -32,7 +37,7 @@ def parse_args():
         '-w',
         '--timeout',
         type=float,
-        default=1.5,
+        default=0.5,
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
@@ -42,13 +47,20 @@ def parse_args():
         default=None,
         help='Filter results by device name')
 
-    #  parser.add_argument(
-    #      "-t",
-    #      "--tui",
-    #      action='store_true',
-    #      default=False,
-    #      help='Enable a terminal user interface'
-    #  )
+    parser.add_argument(
+        "-t",
+        "--tui",
+        action='store_true',
+        default=False,
+        help='Enable a text user interface'
+    )
+
+    parser.add_argument(
+        "--json",
+        action='store_true',
+        default=False,
+        help='Format output in JSON'
+    )
 
     parser.add_argument(
         "-l",
@@ -94,7 +106,7 @@ def log(message):
     file.close()
 
 
-class MyListener:
+class MdnsListener:
     def __init__(self):
         self._devices = {}
 
@@ -125,34 +137,56 @@ class MyListener:
 
         service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
         device = dante.Device()
-        device.manufacturer = service_properties['mf']
-        device.model = service_properties['model']
+
+        if service_properties['mf']:
+            device.manufacturer = service_properties['mf']
+        if service_properties['model']:
+            device.model = service_properties['model']
+
         device.ipv4 = ipv4
         device.port = info.port
 
         self.devices[name] = device
 
 
-async def get_devices(timeout):
+def get_devices(timeout):
     zeroconf = Zeroconf()
-    listener = MyListener()
+    listener = MdnsListener()
 
     browser = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
-    await asyncio.sleep(timeout)
+    time.sleep(timeout)
 
     return listener.devices
 
 
-async def main():
-    signal.signal(signal.SIGWINCH, handler)
+def print_devices(devices):
+    args = parse_args()
 
+    for key, device in devices.items():
+        if args.list_devices:
+            print(f"{device.name}")
+
+        if args.list_rx:
+            for channel_index, channel_name in device.rx_channels.items():
+                print(f"{channel_index}:{channel_name}")
+
+        if args.list_tx:
+            for channel in device.tx_channels:
+                print(f"{channel.index}:{channel.name}")
+
+        if args.list_subscriptions:
+            for subscription in device.subscriptions:
+                print(f"{subscription[0]} -> {subscription[1]}")
+
+
+def cli_mode():
     args = parse_args()
 
     if args:
         print(args)
 
-    if args.list_tx or args.list_subscriptions or args.list_rx or args.list_devices or args.device:
-        devices = await get_devices(args.timeout)
+    if True in [args.json, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
+        devices = get_devices(args.timeout)
 
         for key, device in devices.items():
             device.get_device_controls()
@@ -162,40 +196,32 @@ async def main():
 
         devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
-    if args.list_devices:
-        for key, device in devices.items():
-            print(f"{device.name}")
+    if args.json:
+        json_object = json.dumps(devices, indent=2)
+        print(f"{str(json_object)}")
+    else:
+        print_devices(devices)
 
-            if args.list_rx:
-                for key, device in devices.items():
-                    for channel_index, channel_name in device.rx_channels.items():
-                        print(f"{channel_index}:{channel_name}")
 
-            if args.list_tx:
-                for key, device in devices.items():
-                    for channel_index, channel_name in device.tx_channels.items():
-                        print(f"{channel_index}:{channel_name}")
+def tui_mode():
+    args = parse_args()
+    print('Not implemented')
 
-    if args.list_subscriptions:
-        for key, device in devices.items():
-            for subscription in device.subscriptions:
-                print(f"{subscription[0]} -> {subscription[1]}")
 
-    if not args.list_devices:
-        if args.list_rx:
-            for key, device in devices.items():
-                for channel_index, channel_name in device.rx_channels.items():
-                    print(f"{channel_index}:{channel_name}")
+def main():
+    signal.signal(signal.SIGWINCH, handler)
 
-        if args.list_tx:
-            for key, device in devices.items():
-                for channel_index, channel_name in device.tx_channels.items():
-                    print(f"{channel_index}:{channel_name}")
+    args = parse_args()
 
+    if args.tui:
+        tui_mode()
+    else:
+        cli_mode()
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        main()
+
     except KeyboardInterrupt:
         pass
     try:
