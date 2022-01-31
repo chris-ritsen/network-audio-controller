@@ -449,3 +449,46 @@ def command_receivers(page=0):
 
 def command_transmitters(page=0):
     return command_string('tx_channels', channel_pagination(page))
+
+
+class MdnsListener:
+    def __init__(self):
+        self._devices = {}
+
+
+    @property
+    def devices(self):
+        return self._devices
+
+
+    @devices.setter
+    def devices(self, devices):
+        self._devices = devices
+
+
+    def update_service(self, zeroconf, type, name):
+        pass
+
+
+    def remove_service(self, zeroconf, type, name):
+        del self.devices[name]
+
+
+    def add_service(self, zeroconf, type, name):
+        info = zeroconf.get_service_info(type, name)
+        host = zeroconf.cache.entries_with_name(name)
+        cache = zeroconf.cache.cache
+        ipv4 = info.parsed_addresses()[0]
+
+        service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
+        device = Device()
+
+        if service_properties['mf']:
+            device.manufacturer = service_properties['mf']
+        if service_properties['model']:
+            device.model = service_properties['model']
+
+        device.ipv4 = ipv4
+        device.port = info.port
+
+        self.devices[name] = device

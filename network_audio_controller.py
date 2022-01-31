@@ -28,7 +28,7 @@ def handler(signum, frame):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='List and control Dante network audio devices',
+        description='List and control network audio devices',
         usage='%(prog)s [options]',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -63,11 +63,25 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--xml",
+        action='store_true',
+        default=False,
+        help='Format output in XML'
+    )
+
+    parser.add_argument(
         "-l",
         "--list-devices",
         action='store_true',
         default=False,
-        help='List all Dante devices'
+        help='List devices'
+    )
+
+    parser.add_argument(
+        "--dante",
+        action='store_true',
+        default=True, # for now
+        help='Use Dante devices for operations'
     )
 
     parser.add_argument(
@@ -106,52 +120,9 @@ def log(message):
     file.close()
 
 
-class MdnsListener:
-    def __init__(self):
-        self._devices = {}
-
-
-    @property
-    def devices(self):
-        return self._devices
-
-
-    @devices.setter
-    def devices(self, devices):
-        self._devices = devices
-
-
-    def update_service(self, zeroconf, type, name):
-        pass
-
-
-    def remove_service(self, zeroconf, type, name):
-        del self.devices[name]
-
-
-    def add_service(self, zeroconf, type, name):
-        info = zeroconf.get_service_info(type, name)
-        host = zeroconf.cache.entries_with_name(name)
-        cache = zeroconf.cache.cache
-        ipv4 = info.parsed_addresses()[0]
-
-        service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
-        device = dante.Device()
-
-        if service_properties['mf']:
-            device.manufacturer = service_properties['mf']
-        if service_properties['model']:
-            device.model = service_properties['model']
-
-        device.ipv4 = ipv4
-        device.port = info.port
-
-        self.devices[name] = device
-
-
-def get_devices(timeout):
+def get_dante_devices(timeout):
     zeroconf = Zeroconf()
-    listener = MdnsListener()
+    listener = dante.MdnsListener()
 
     browser = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
     time.sleep(timeout)
@@ -179,15 +150,10 @@ def print_devices(devices):
                 print(f"{subscription[0]} -> {subscription[1]}")
 
 
-def cli_mode():
+def print_dante_devices(devices):
     args = parse_args()
 
-    if args:
-        print(args)
-
-    devices = get_devices(args.timeout)
-
-    if True in [args.json, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
+    if True in [args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices, args.device]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -199,8 +165,22 @@ def cli_mode():
     if args.json:
         json_object = json.dumps(devices, indent=2)
         print(f"{str(json_object)}")
+    elif args.xml:
+        print('Not implemented')
     else:
         print_devices(devices)
+
+
+def cli_mode():
+    args = parse_args()
+
+    if args.dante:
+        devices = get_dante_devices(args.timeout)
+
+        if len(devices) == 0:
+            print('No devices detected. Try increasing the mDNS timeout.')
+        else:
+            print_dante_devices(devices)
 
 
 def tui_mode():
