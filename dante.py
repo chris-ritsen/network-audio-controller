@@ -3,6 +3,11 @@
 import codecs
 import socket
 
+def log(message):
+    file = open('debug.log', 'a')
+    file.write(message)
+    file.close()
+
 class Channel(object):
     def __init__(self):
         self._channel_type = None
@@ -192,7 +197,7 @@ class Device(object):
                         if not device_offset == '0000':
                             tx_device_label = channel_name(hex_rx_response, device_offset)
 
-                            if hex_rx_response[int(device_offset, 16) * 2:].rsplit('00')[0] == '2e':
+                            if tx_device_label == '.':
                                 tx_device_label = self.name
                         else:
                             tx_device_label = self.name
@@ -400,11 +405,13 @@ class Device(object):
 
 def channel_name(hex_str, offset):
     parsed_channel_name = None
+
     try:
-        data = hex_str[int(offset, 16) * 2:].rsplit('00')[0]
-        parsed_channel_name = bytes.fromhex(data).decode('utf-8')
+        hex_substring = hex_str[int(offset, 16) * 2:]
+        partitioned_bytes = bytes.fromhex(hex_substring).partition(b'\x00')[0]
+        parsed_channel_name = partitioned_bytes.decode('utf-8')
     except Exception as e:
-        print(f'Error parsing channel response: {e}')
+        pass
     return parsed_channel_name
 
 
