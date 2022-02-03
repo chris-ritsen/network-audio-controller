@@ -8,6 +8,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 ### Features
 
 - CLI
+- Changing/resetting channel names
 - Display active subscriptions, Rx, Tx, devices
 - JSON output
 - Set/reset device name
@@ -16,12 +17,12 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 ### Next features to be added
 
 - Adding/removing subscriptions
-- Changing channel names
+- Changing/displaying device settings (latency, encoding, sample rate, level controls, AES67 mode)
 
 ### Planned features
 
 - AES67 device support
-- Changing/displaying device settings (name, latency, encoding, sample rate, level controls, AES67 mode)
+- Change channel/device names without affecting existing subscriptions
 - Client/server modes
 - Command prompt
 - Control of Shure wireless devices ([Axient receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and [PSM transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
