@@ -41,6 +41,12 @@ def parse_args():
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
+        '--reset-channel-name',
+        action='store_true',
+        default=False,
+        help='Reset the channel name to the manufacturer default')
+
+    parser.add_argument(
         '--reset-device-name',
         action='store_true',
         default=False,
@@ -52,17 +58,24 @@ def parse_args():
         default=None,
         help='Set the device name')
 
-    #  parser.add_argument(
-    #      '--channel-name',
-    #      type=str,
-    #      default=None,
-    #      help='Filter results by device name or network address')
+    parser.add_argument(
+        '--channel-type',
+        type=str,
+        choices=['rx', 'tx'],
+        default=None,
+        help='Channel type to target for operations')
 
-    #  parser.add_argument(
-    #      '--set-channel-name',
-    #      type=str,
-    #      default=None,
-    #      help='Filter results by device name or network address')
+    parser.add_argument(
+        '--channel-number',
+        type=str,
+        default=None,
+        help='Specify a channel for control by number')
+
+    parser.add_argument(
+        '--set-channel-name',
+        type=str,
+        default=None,
+        help='Specify a value when changing a channel name')
 
     parser.add_argument(
         '-d',
@@ -148,6 +161,7 @@ def get_dante_devices(timeout):
     zeroconf = Zeroconf()
     listener = dante.MdnsListener()
 
+    # TODO get all netaudio service types
     browser = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
     time.sleep(timeout)
 
@@ -162,12 +176,17 @@ def print_devices(devices):
             print(f"{device.name}")
 
         if args.list_rx:
-            for channel_index, channel_name in device.rx_channels.items():
-                print(f"{channel_index}:{channel_name}")
+            for channel_number, channel_name in device.rx_channels.items():
+                print(f"{channel_number}:{channel_name}")
 
         if args.list_tx:
-            for channel in device.tx_channels:
-                print(f"{channel.index}:{channel.name}")
+            tx_channels = sorted(list(device.tx_channels), key=lambda x: x.number)
+
+            for channel in tx_channels:
+                if channel.friendly_name:
+                    print(f"{channel.number}:{channel.friendly_name}")
+                else:
+                    print(f"{channel.number}:{channel.name}")
 
         if args.list_subscriptions:
             for subscription in device.subscriptions:
@@ -177,7 +196,7 @@ def print_devices(devices):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_device_name or args.device) or True in [args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -189,7 +208,7 @@ def control_dante_devices(devices):
         if args.device and len(devices) == 0:
             print('The specified device was not found')
 
-        if args.reset_device_name or args.set_device_name:
+        if args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
             if not args.device:
                 print('Must specify a device name')
             else:
@@ -198,9 +217,18 @@ def control_dante_devices(devices):
                         if args.reset_device_name:
                             print(f'Resetting device name for "{device.name}" {device.ipv4}')
                             device.reset_device_name()
+
                         if args.set_device_name:
                             print(f'Setting device name for "{device.name}" {device.ipv4} to {args.set_device_name}')
                             device.set_device_name(args.set_device_name)
+
+                        if args.reset_channel_name:
+                            print(f'Resetting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4}')
+                            device.reset_channel_name(args.channel_type, args.channel_number)
+
+                        if args.set_channel_name:
+                            print(f'Setting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4} to {args.set_channel_name}')
+                            device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
 
     if args.json:
         json_object = json.dumps(devices, indent=2)

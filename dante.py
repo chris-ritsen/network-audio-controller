@@ -12,7 +12,8 @@ class Channel(object):
     def __init__(self):
         self._channel_type = None
         self._device = None
-        self._index = None
+        self._friendly_name = None
+        self._number = None
         self._name = None
 
 
@@ -27,13 +28,13 @@ class Channel(object):
 
 
     @property
-    def index(self):
-        return self._index
+    def number(self):
+        return self._number
 
 
-    @index.setter
-    def index(self, index):
-        self._index = index
+    @number.setter
+    def number(self, number):
+        self._number = number
 
 
     @property
@@ -47,6 +48,16 @@ class Channel(object):
 
 
     @property
+    def friendly_name(self):
+        return self._friendly_name
+
+
+    @friendly_name.setter
+    def friendly_name(self, friendly_name):
+        self._friendly_name = friendly_name
+
+
+    @property
     def name(self):
         return self._name
 
@@ -57,12 +68,17 @@ class Channel(object):
 
 
     def to_json(self):
-        return {
+        as_json = {
             #  'channel_type': self.channel_type,
-            'device': self.device.name,
-            'index': self.index,
+            #  'device': self.device.name,
+            'number': self.number,
             'name': self.name
-       }
+        }
+
+        if self.friendly_name:
+            as_json['friendly_name'] = self.friendly_name
+
+        return {key:as_json[key] for key in sorted(as_json.keys())}
 
 
 class Subscription(object):
@@ -132,7 +148,20 @@ class Device(object):
     def dante_command(self, command):
         binary_str = codecs.decode(command, 'hex')
         self.socket.send(binary_str)
-        response = self.socket.recvfrom(1024)[0]
+        response = self.socket.recvfrom(2048)[0]
+        return response
+
+
+    def set_channel_name(self, channel_type, channel_number, new_channel_name):
+        response = self.dante_command(command_set_channel_name(channel_type, channel_number, new_channel_name))
+        log(f"{response}\n")
+        return response
+
+
+    def reset_channel_name(self, channel_type, channel_number):
+        request = command_reset_channel_name(channel_type, channel_number)
+        response = self.dante_command(request)
+        log(f"{response}\n")
         return response
 
 
@@ -223,10 +252,10 @@ class Device(object):
                         if self_connected or connected_not_self_connected:
                             subscriptions.append((f"{rx_channel_name}@{self.name}", f"{tx_channel_name}@{tx_device_label}"))
                             #  subscription = Subscription()
-                            #  subscription.rx_channel = 
-                            #  subscription.rx_device = 
-                            #  subscription.tx_channel = 
-                            #  subscription.tx_device = 
+                            #  subscription.rx_channel =
+                            #  subscription.rx_device =
+                            #  subscription.tx_channel =
+                            #  subscription.tx_device =
         except Exception as e:
             self.error = e
             print(e)
@@ -237,10 +266,27 @@ class Device(object):
 
     def get_tx_channels(self):
         tx_channels = set()
+        tx_friendly_channel_names = {}
 
         try:
-            for page in range(0, max(1, int(self.tx_count / 16), ), 2):
-                transmitters = self.dante_command(command_transmitters(page)).hex()
+            for page in range(0, max(1, int(self.tx_count / 16)), 2):
+                tx_request_hex = command_transmitters(page, friendly_names=True)
+                tx_friendly_names = self.dante_command(tx_request_hex).hex()
+
+                for index in range(0, min(self.tx_count, 32)):
+                    str1 = tx_friendly_names[(24 + (index * 12)):(36 + (index * 12))]
+                    n = 4
+                    channel = [str1[i:i + 4] for i in range(0, len(str1), n)]
+                    channel_index = int(channel[0], 16)
+                    channel_number = int(channel[1], 16)
+                    channel_offset = channel[2]
+                    tx_channel_friendly_name = channel_name(tx_friendly_names, channel_offset)
+
+                    if tx_channel_friendly_name:
+                        tx_friendly_channel_names[channel_number] = tx_channel_friendly_name
+
+            for page in range(0, max(1, int(self.tx_count / 16)), 2):
+                transmitters = self.dante_command(command_transmitters(page, friendly_names=False)).hex()
                 has_disabled_channels = transmitters.count('bb80') == 2
                 first_channel = []
 
@@ -268,9 +314,12 @@ class Device(object):
 
                         tx_channel = Channel()
                         tx_channel.channel_type = 'tx'
-                        tx_channel.index = channel_number
+                        tx_channel.number = channel_number
                         tx_channel.device = self
                         tx_channel.name = tx_channel_name
+
+                        if channel_number in tx_friendly_channel_names:
+                            tx_channel.friendly_name = tx_friendly_channel_names[channel_number]
 
                         tx_channels.add(tx_channel)
 
@@ -405,13 +454,17 @@ class Device(object):
 
 
     def to_json(self):
-        return {
+        tx_channels =  sorted(list(self.tx_channels), key=lambda x: x.number)
+
+        as_json = {
             'ipv4': self.ipv4,
             'name': self.name,
             'receivers': self.rx_channels,
             'subscriptions': self.subscriptions,
-            'transmitters': list(self.tx_channels)
-       }
+            'transmitters': tx_channels
+        }
+
+        return {key:as_json[key] for key in sorted(as_json.keys())}
 
 
 def channel_name(hex_str, offset):
@@ -426,7 +479,7 @@ def channel_name(hex_str, offset):
     return parsed_channel_name
 
 
-def command_string(command=None, command_args='0000', command_length='00', sequence1='ff', sequence2='ffff'):
+def command_string(command=None, command_str=None, command_args='0000', command_length='00', sequence1='ff', sequence2='ffff'):
     if command == 'channel_count':
         command_length = '0a'
         command_str = '1000'
@@ -445,11 +498,9 @@ def command_string(command=None, command_args='0000', command_length='00', seque
         command_args = '0000'
     if command == 'set_device_name':
         command_str = '1001'
-    if command == 'tx_channels':
-        command_length = '10'
-        command_str = '2000'
 
     command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
+
     log(f"{command}\t\t\t{command_hex}\n")
 
     return command_hex
@@ -478,6 +529,39 @@ def command_reset_device_name():
     return command_string('reset_device_name')
 
 
+def command_reset_channel_name(channel_type, channel_number):
+    channel_hex = f'{int(channel_number):02x}'
+
+    if channel_type == 'rx':
+        args_length = f'{int(21):02x}'
+        command_args = f'0000020100{channel_hex}00140000000000'
+        command_str = '3001'
+    if channel_type == 'tx':
+        args_length = f'{int(25):02x}'
+        command_args = f'00000201000000{channel_hex}001800000000000000'
+        command_str = '2013'
+
+    return command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length)
+
+
+def command_set_channel_name(channel_type, channel_number, new_channel_name):
+    name_hex = new_channel_name.encode().hex()
+    channel_hex = f'{int(channel_number):02x}'
+
+    if channel_type == 'rx':
+        command_str = '3001'
+        command_args = f'0000020100{channel_hex}001400000000{name_hex}00'
+        args_length = chr(len(new_channel_name.encode('utf-8')) + 21)
+    if channel_type == 'tx':
+        command_str = '2013'
+        command_args = f'00000201000000{channel_hex}0018000000000000{name_hex}00'
+        args_length = chr(len(new_channel_name.encode('utf-8')) + 25)
+
+    args_length = bytes(args_length.encode('utf-8')).hex()
+
+    return command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args)
+
+
 def device_name(name):
     name_hex = name.encode().hex()
     return f'0000{name_hex}00'
@@ -485,15 +569,25 @@ def device_name(name):
 
 def channel_pagination(page):
     page_hex = format(page, 'x')
-    return f'0000000100{page_hex}10000'
+    command_args = f'0000000100{page_hex}10000'
+
+    return command_args
 
 
 def command_receivers(page=0):
-    return command_string('rx_channels', channel_pagination(page))
+    return command_string('rx_channels', command_args=channel_pagination(page))
 
 
-def command_transmitters(page=0):
-    return command_string('tx_channels', channel_pagination(page))
+def command_transmitters(page=0, friendly_names=False):
+    if friendly_names:
+        command_str = '2010'
+    else:
+        command_str = '2000'
+
+    command_length = '10'
+    command_args = channel_pagination(page=page)
+
+    return command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args)
 
 
 class MdnsListener:
