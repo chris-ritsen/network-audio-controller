@@ -158,6 +158,18 @@ class Device(object):
         return response
 
 
+    def add_subscription(self, rx_channel_number, tx_channel_name, tx_device_name):
+        request = command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
+        response = self.dante_command(request)
+        return response
+
+
+    def remove_subscription(self, rx_channel_number):
+        request = command_remove_subscription(rx_channel_number)
+        response = self.dante_command(request)
+        return response
+
+
     def reset_channel_name(self, channel_type, channel_number):
         request = command_reset_channel_name(channel_type, channel_number)
         response = self.dante_command(request)
@@ -459,6 +471,7 @@ class Device(object):
         as_json = {
             'ipv4': self.ipv4,
             'name': self.name,
+            'port': self.port,
             'receivers': self.rx_channels,
             'subscriptions': self.subscriptions,
             'transmitters': tx_channels
@@ -501,10 +514,36 @@ def command_string(command=None, command_str=None, command_args='0000', command_
 
     command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
 
+    if command == 'add_subscription':
+        command_length = f'{int(len(command_hex) / 2):02x}'
+        command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
+
     log(f"{command}\t\t\t{command_hex}\n")
 
     return command_hex
 
+
+def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name):
+    rx_channel_hex = f'{int(rx_channel_number):02x}'
+    command_str = '3010'
+    tx_channel_name_hex =  tx_channel_name.encode().hex()
+    tx_device_name_hex = tx_device_name.encode().hex()
+
+    tx_channel_name_offset = f'{52:02x}'
+    tx_device_name_offset = f'{52 + (len(tx_channel_name) + 1):02x}'
+
+    command_args = f'0000020100{rx_channel_hex}00{tx_channel_name_offset}00{tx_device_name_offset}00000000000000000000000000000000000000000000000000000000000000000000{tx_channel_name_hex}00{tx_device_name_hex}00'
+
+    return command_string('add_subscription', command_str=command_str, command_args=command_args)
+
+
+def command_remove_subscription(rx_channel):
+    rx_channel_hex = f'{int(rx_channel):02x}'
+    command_str = '3014'
+    args_length = '10'
+    command_args = f'00000001000000{rx_channel_hex}'
+
+    return command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args)
 
 def command_device_info():
     return command_string('device_info')

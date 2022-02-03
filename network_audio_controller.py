@@ -41,6 +41,18 @@ def parse_args():
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
+        '--add-subscription',
+        type=str,
+        default=None,
+        help='Add a subscription')
+
+    parser.add_argument(
+        '--remove-subscription',
+        type=str,
+        default=None,
+        help='Remove a subscription')
+
+    parser.add_argument(
         '--reset-channel-name',
         action='store_true',
         default=False,
@@ -57,6 +69,18 @@ def parse_args():
         type=str,
         default=None,
         help='Set the device name')
+
+    parser.add_argument(
+        '--tx-device-name',
+        type=str,
+        default=None,
+        help='Specify a Tx device name')
+
+    parser.add_argument(
+        '--tx-channel-name',
+        type=str,
+        default=None,
+        help='Specify a Tx channel name')
 
     parser.add_argument(
         '--channel-type',
@@ -196,7 +220,7 @@ def print_devices(devices):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -208,12 +232,27 @@ def control_dante_devices(devices):
         if args.device and len(devices) == 0:
             print('The specified device was not found')
 
-        if args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
+        if args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
             if not args.device:
                 print('Must specify a device name')
             else:
                 if len(devices) == 1:
                     for key, device in devices.items():
+                        if args.add_subscription:
+                            if not args.tx_channel_name:
+                                print('Must specify a Tx channel name')
+                            else:
+                                tx_device_name = args.tx_device_name
+
+                                if not tx_device_name:
+                                    tx_device_name = device.name
+
+                                rx_channel_number = args.add_subscription
+                                device.add_subscription(rx_channel_number, args.tx_channel_name, tx_device_name)
+
+                        if args.remove_subscription:
+                            device.remove_subscription(rx_channel_number=args.remove_subscription)
+
                         if args.reset_device_name:
                             print(f'Resetting device name for "{device.name}" {device.ipv4}')
                             device.reset_device_name()

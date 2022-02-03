@@ -7,6 +7,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Features
 
+- Adding/removing subscriptions
 - CLI
 - Changing/resetting channel names
 - Display active subscriptions, Rx, Tx, devices
@@ -16,7 +17,6 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Next features to be added
 
-- Adding/removing subscriptions
 - Changing/displaying device settings (latency, encoding, sample rate, level controls, AES67 mode)
 
 ### Planned features
