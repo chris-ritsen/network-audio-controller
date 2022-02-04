@@ -40,3 +40,5 @@ Install these dependencies with pip:
 - zeroconf
 
 Then run with `./network_audio_controller.py`
+
+[Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
