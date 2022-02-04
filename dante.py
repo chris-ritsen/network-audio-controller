@@ -3,6 +3,8 @@
 import codecs
 import socket
 
+from zeroconf import DNSService
+
 def log(message):
     file = open('debug.log', 'a')
     file.write(message)
@@ -15,6 +17,13 @@ class Channel(object):
         self._friendly_name = None
         self._number = None
         self._name = None
+
+
+    def __repr__(self):
+        if self.friendly_name:
+            return (f"{self.number}:{self.friendly_name}")
+        else:
+            return(f"{self.number}:{self.name}")
 
 
     @property
@@ -136,13 +145,18 @@ class Device(object):
         self._manufacturer = ''
         self._model = ''
         self._name = ''
-        self._port = None
         self._rx_channels = {}
         self._rx_count = 0
+        self._server_name = ''
+        self._services = {}
         self._socket = None
         self._subscriptions = ()
-        self._tx_channels = set()
+        self._tx_channels = {}
         self._tx_count = 0
+
+
+    def __repr__(self):
+        return (f'{self.name}')
 
 
     def dante_command(self, command):
@@ -192,7 +206,12 @@ class Device(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('', 0))
         self.socket.settimeout(5)
-        self.socket.connect((self.ipv4, self.port))
+        try:
+            service = next(filter(lambda x: x[1]['type'] == '_netaudio-arc._udp.local.', self.services.items()))[1]
+            self.socket.connect((self.ipv4, service['port']))
+        except Exception as e:
+            self.error = e
+            print(e)
 
         try:
             if not self.name:
@@ -259,7 +278,13 @@ class Device(object):
                         else:
                             tx_channel_name = rx_channel_name
 
-                        rx_channels[channel_number] = rx_channel_name
+                        rx_channel = Channel()
+                        rx_channel.channel_type = 'rx'
+                        rx_channel.number = channel_number
+                        rx_channel.device = self
+                        rx_channel.name = rx_channel_name
+
+                        rx_channels[channel_number] = rx_channel
 
                         if self_connected or connected_not_self_connected:
                             subscriptions.append((f"{rx_channel_name}@{self.name}", f"{tx_channel_name}@{tx_device_label}"))
@@ -277,7 +302,7 @@ class Device(object):
 
 
     def get_tx_channels(self):
-        tx_channels = set()
+        tx_channels = {}
         tx_friendly_channel_names = {}
 
         try:
@@ -333,7 +358,7 @@ class Device(object):
                         if channel_number in tx_friendly_channel_names:
                             tx_channel.friendly_name = tx_friendly_channel_names[channel_number]
 
-                        tx_channels.add(tx_channel)
+                        tx_channels[channel_number] = tx_channel
 
                 if has_disabled_channels:
                     break
@@ -343,16 +368,6 @@ class Device(object):
             print(e)
 
         self.tx_channels = tx_channels
-
-
-    @property
-    def port(self):
-        return self._port
-
-
-    @port.setter
-    def port(self, port):
-        self._port = port
 
 
     @property
@@ -406,6 +421,16 @@ class Device(object):
 
 
     @property
+    def server_name(self):
+        return self._server_name
+
+
+    @server_name.setter
+    def server_name(self, server_name):
+        self._server_name = server_name
+
+
+    @property
     def socket(self):
         return self._socket
 
@@ -423,6 +448,16 @@ class Device(object):
     @rx_channels.setter
     def rx_channels(self, rx_channels):
         self._rx_channels = rx_channels
+
+
+    @property
+    def services(self):
+        return self._services
+
+
+    @services.setter
+    def services(self, services):
+        self._services = services
 
 
     @property
@@ -466,13 +501,15 @@ class Device(object):
 
 
     def to_json(self):
-        tx_channels =  sorted(list(self.tx_channels), key=lambda x: x.number)
+        rx_channels = dict(sorted(self.rx_channels.items(), key=lambda x: x[1].number))
+        tx_channels = dict(sorted(self.tx_channels.items(), key=lambda x: x[1].number))
 
         as_json = {
             'ipv4': self.ipv4,
             'name': self.name,
-            'port': self.port,
-            'receivers': self.rx_channels,
+            'receivers': rx_channels,
+            'server_name': self.server_name,
+            'services': self.services,
             'subscriptions': self.subscriptions,
             'transmitters': tx_channels
         }
@@ -664,14 +701,28 @@ class MdnsListener:
         ipv4 = info.parsed_addresses()[0]
 
         service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
-        device = Device()
 
-        if 'mf' in service_properties:
-            device.manufacturer = service_properties['mf']
-        if 'model' in service_properties:
-            device.model = service_properties['model']
+        for record in host:
+            if isinstance(record, DNSService):
+                if record.server in self.devices:
+                    device = self.devices[record.server]
+                else:
+                    device = Device()
 
-        device.ipv4 = ipv4
-        device.port = info.port
+                if 'mf' in service_properties:
+                    device.manufacturer = service_properties['mf']
 
-        self.devices[name] = device
+                if 'model' in service_properties:
+                    device.model = service_properties['model']
+
+                device.ipv4 = ipv4
+                device.server_name = record.server
+
+                device.services[name] = {
+                    'name': name,
+                    'port': info.port,
+                    'properties': service_properties,
+                    'type': info.type,
+                }
+
+                self.devices[record.server] = device

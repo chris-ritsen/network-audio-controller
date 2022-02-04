@@ -186,7 +186,9 @@ def get_dante_devices(timeout):
     listener = dante.MdnsListener()
 
     # TODO get all netaudio service types
-    browser = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
+    browser_arc = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
+    browser_dbc = ServiceBrowser(zeroconf, "_netaudio-dbc._udp.local.", listener)
+    browser_cmc = ServiceBrowser(zeroconf, "_netaudio-cmc._udp.local.", listener)
     time.sleep(timeout)
 
     return dict(listener.devices)
@@ -197,24 +199,58 @@ def print_devices(devices):
 
     for key, device in devices.items():
         if args.list_devices:
-            print(f"{device.name}")
+            print(f"{device}")
 
         if args.list_rx:
-            for channel_number, channel_name in device.rx_channels.items():
-                print(f"{channel_number}:{channel_name}")
+            rx_channels = device.rx_channels
+
+            for key, channel in rx_channels.items():
+                print(channel)
 
         if args.list_tx:
-            tx_channels = sorted(list(device.tx_channels), key=lambda x: x.number)
+            tx_channels = device.tx_channels
 
-            for channel in tx_channels:
-                if channel.friendly_name:
-                    print(f"{channel.number}:{channel.friendly_name}")
-                else:
-                    print(f"{channel.number}:{channel.name}")
+            for key, channel in tx_channels.items():
+                print(channel)
 
         if args.list_subscriptions:
             for subscription in device.subscriptions:
                 print(f"{subscription[0]} -> {subscription[1]}")
+
+
+def control_dante_device(device):
+    args = parse_args()
+
+    if args.add_subscription:
+        if not args.tx_channel_name:
+            print('Must specify a Tx channel name')
+        else:
+            tx_device_name = args.tx_device_name
+
+            if not tx_device_name:
+                tx_device_name = device.name
+
+            rx_channel_number = args.add_subscription
+            device.add_subscription(rx_channel_number, args.tx_channel_name, tx_device_name)
+
+    if args.remove_subscription:
+        device.remove_subscription(rx_channel_number=args.remove_subscription)
+
+    if args.reset_device_name:
+        print(f'Resetting device name for "{device.name}" {device.ipv4}')
+        device.reset_device_name()
+
+    if args.set_device_name:
+        print(f'Setting device name for "{device.name}" {device.ipv4} to {args.set_device_name}')
+        device.set_device_name(args.set_device_name)
+
+    if args.reset_channel_name:
+        print(f'Resetting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4}')
+        device.reset_channel_name(args.channel_type, args.channel_number)
+
+    if args.set_channel_name:
+        print(f'Setting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4} to {args.set_channel_name}')
+        device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
 
 
 def control_dante_devices(devices):
@@ -226,51 +262,28 @@ def control_dante_devices(devices):
 
         if args.device:
             devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
+        else:
+            devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
-        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-
-        if args.device and len(devices) == 0:
+        if not args.json and args.device and len(devices) == 0:
             print('The specified device was not found')
 
         if args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
             if not args.device:
                 print('Must specify a device name')
             else:
-                if len(devices) == 1:
-                    for key, device in devices.items():
-                        if args.add_subscription:
-                            if not args.tx_channel_name:
-                                print('Must specify a Tx channel name')
-                            else:
-                                tx_device_name = args.tx_device_name
-
-                                if not tx_device_name:
-                                    tx_device_name = device.name
-
-                                rx_channel_number = args.add_subscription
-                                device.add_subscription(rx_channel_number, args.tx_channel_name, tx_device_name)
-
-                        if args.remove_subscription:
-                            device.remove_subscription(rx_channel_number=args.remove_subscription)
-
-                        if args.reset_device_name:
-                            print(f'Resetting device name for "{device.name}" {device.ipv4}')
-                            device.reset_device_name()
-
-                        if args.set_device_name:
-                            print(f'Setting device name for "{device.name}" {device.ipv4} to {args.set_device_name}')
-                            device.set_device_name(args.set_device_name)
-
-                        if args.reset_channel_name:
-                            print(f'Resetting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4}')
-                            device.reset_channel_name(args.channel_type, args.channel_number)
-
-                        if args.set_channel_name:
-                            print(f'Setting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4} to {args.set_channel_name}')
-                            device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
+                device = list(devices.values())[0]
+                control_dante_device(device)
 
     if args.json:
-        json_object = json.dumps(devices, indent=2)
+        if args.device:
+            if len(devices.values()) == 1:
+                device = list(devices.values())[0]
+            else:
+                device = None
+            json_object = json.dumps(device, indent=2)
+        else:
+            json_object = json.dumps(list(devices.values()), indent=2)
         print(f"{str(json_object)}")
     elif args.xml:
         print('Not implemented')
