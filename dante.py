@@ -5,10 +5,7 @@ import socket
 
 from zeroconf import DNSService
 
-def log(message):
-    file = open('debug.log', 'a')
-    file.write(message)
-    file.close()
+devices = {}
 
 class Channel(object):
     def __init__(self):
@@ -19,7 +16,7 @@ class Channel(object):
         self._name = None
 
 
-    def __repr__(self):
+    def __str__(self):
         if self.friendly_name:
             return (f"{self.number}:{self.friendly_name}")
         else:
@@ -78,8 +75,6 @@ class Channel(object):
 
     def to_json(self):
         as_json = {
-            #  'channel_type': self.channel_type,
-            #  'device': self.device.name,
             'number': self.number,
             'name': self.name
         }
@@ -93,9 +88,63 @@ class Channel(object):
 class Subscription(object):
     def __init__(self):
         self._rx_channel = None
+        self._rx_channel_name = None
         self._rx_device = None
+        self._rx_device_name = None
         self._tx_channel = None
+        self._tx_channel_name = None
         self._tx_device = None
+        self._tx_device_name = None
+
+    def __str__(self):
+       return f"{self.rx_channel_name}@{self.rx_device_name} -> {self.tx_channel_name}@{self.tx_device_name}"
+
+
+    def to_json(self):
+        return [
+           f"{self.rx_channel_name}@{self.rx_device_name}",
+           f"{self.tx_channel_name}@{self.tx_device_name}"
+        ]
+
+
+    @property
+    def rx_channel_name(self):
+        return self._rx_channel_name
+
+
+    @rx_channel_name.setter
+    def rx_channel_name(self, rx_channel_name):
+        self._rx_channel_name = rx_channel_name
+
+
+    @property
+    def tx_channel_name(self):
+        return self._tx_channel_name
+
+
+    @tx_channel_name.setter
+    def tx_channel_name(self, tx_channel_name):
+        self._tx_channel_name = tx_channel_name
+
+
+    @property
+    def rx_device_name(self):
+        return self._rx_device_name
+
+
+    @rx_device_name.setter
+    def rx_device_name(self, rx_device_name):
+        self._rx_device_name = rx_device_name
+
+
+    @property
+    def tx_device_name(self):
+        return self._tx_device_name
+
+
+    @tx_device_name.setter
+    def tx_device_name(self, tx_device_name):
+        self._tx_device_name = tx_device_name
 
 
     @property
@@ -155,7 +204,7 @@ class Device(object):
         self._tx_count = 0
 
 
-    def __repr__(self):
+    def __str__(self):
         return (f'{self.name}')
 
 
@@ -236,6 +285,7 @@ class Device(object):
             self.error = e
             print(e)
 
+
     def get_rx_channels(self):
         rx_channels = {}
         subscriptions = []
@@ -266,12 +316,12 @@ class Device(object):
                         rx_channel_name = channel_name(hex_rx_response, rx_channel_offset)
 
                         if not device_offset == '0000':
-                            tx_device_label = channel_name(hex_rx_response, device_offset)
+                            tx_device_name = channel_name(hex_rx_response, device_offset)
 
-                            if tx_device_label == '.':
-                                tx_device_label = self.name
+                            if tx_device_name == '.':
+                                tx_device_name = self.name
                         else:
-                            tx_device_label = self.name
+                            tx_device_name = self.name
 
                         if not channel_offset == '0000':
                             tx_channel_name = channel_name(hex_rx_response, channel_offset)
@@ -287,12 +337,12 @@ class Device(object):
                         rx_channels[channel_number] = rx_channel
 
                         if self_connected or connected_not_self_connected:
-                            subscriptions.append((f"{rx_channel_name}@{self.name}", f"{tx_channel_name}@{tx_device_label}"))
-                            #  subscription = Subscription()
-                            #  subscription.rx_channel =
-                            #  subscription.rx_device =
-                            #  subscription.tx_channel =
-                            #  subscription.tx_device =
+                            subscription = Subscription()
+                            subscription.rx_channel_name = rx_channel_name
+                            subscription.rx_device_name = self.name
+                            subscription.tx_channel_name = tx_channel_name
+                            subscription.tx_device_name = tx_device_name
+                            subscriptions.append(subscription)
         except Exception as e:
             self.error = e
             print(e)
@@ -582,6 +632,7 @@ def command_remove_subscription(rx_channel):
 
     return command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args)
 
+
 def command_device_info():
     return command_string('device_info')
 
@@ -666,46 +717,25 @@ def command_transmitters(page=0, friendly_names=False):
     return command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args)
 
 
-class MdnsListener:
-    def __init__(self):
-        self._devices = {}
+def get_devices():
+    return devices
 
 
-    @property
-    def devices(self):
-        return self._devices
+def parse_netaudio_services(services):
+    for name, service in dict(services).items():
+        zeroconf = service['zeroconf']
 
-
-    @devices.setter
-    def devices(self, devices):
-        self._devices = devices
-
-
-    def update_service(self, zeroconf, type, name):
-        info = zeroconf.get_service_info(type, name)
+        info = zeroconf.get_service_info(service['type'], name)
         host = zeroconf.cache.entries_with_name(name)
         ipv4 = info.parsed_addresses()[0]
-        #  print(f'service updated {ipv4}\t{name}')
-        pass
-
-
-    def remove_service(self, zeroconf, type, name):
-        #  print(f'service removed \t{name}')
-        del self.devices[name]
-
-
-    def add_service(self, zeroconf, type, name):
-        info = zeroconf.get_service_info(type, name)
         host = zeroconf.cache.entries_with_name(name)
-        cache = zeroconf.cache.cache
-        ipv4 = info.parsed_addresses()[0]
 
         service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
 
         for record in host:
             if isinstance(record, DNSService):
-                if record.server in self.devices:
-                    device = self.devices[record.server]
+                if record.server in devices:
+                    device = devices[record.server]
                 else:
                     device = Device()
 
@@ -725,4 +755,10 @@ class MdnsListener:
                     'type': info.type,
                 }
 
-                self.devices[record.server] = device
+                devices[record.server] = device
+
+
+def log(message):
+    file = open('debug.log', 'a')
+    file.write(message)
+    file.close()
