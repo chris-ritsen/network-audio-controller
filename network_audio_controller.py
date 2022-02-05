@@ -15,6 +15,8 @@ from zeroconf import ServiceBrowser, Zeroconf, DNSAddress
 
 import dante
 
+dante_devices = {}
+
 def _default(self, obj):
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
@@ -181,9 +183,45 @@ def log(message):
     file.close()
 
 
-def get_dante_devices(timeout):
+class MdnsListener:
+    def __init__(self):
+        self._services = {}
+
+
+    @property
+    def services(self):
+        return self._services
+
+
+    @services.setter
+    def services(self, services):
+        self._services = services
+
+
+    def update_service(self, zeroconf, type, name):
+        #  print(f'service updated\t{name}')
+        pass
+
+
+    def remove_service(self, zeroconf, type, name):
+        if name in self.services:
+            del self.services[name]
+            #  dante.parse_netaudio_services(self.services)
+            print(f'service removed\t{name}')
+
+
+    def add_service(self, zeroconf, type, name):
+        self.services[name] = {
+            'type': type,
+            'zeroconf': zeroconf
+        }
+
+        #  print(f'service added \t{name}')
+
+
+def get_dante_services(timeout):
     zeroconf = Zeroconf()
-    listener = dante.MdnsListener()
+    listener = MdnsListener()
 
     # TODO get all netaudio service types
     browser_arc = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
@@ -191,7 +229,7 @@ def get_dante_devices(timeout):
     browser_cmc = ServiceBrowser(zeroconf, "_netaudio-cmc._udp.local.", listener)
     time.sleep(timeout)
 
-    return dict(listener.devices)
+    return listener.services
 
 
 def print_devices(devices):
@@ -215,7 +253,8 @@ def print_devices(devices):
 
         if args.list_subscriptions:
             for subscription in device.subscriptions:
-                print(f"{subscription[0]} -> {subscription[1]}")
+                #  print(f"{subscription[0]} -> {subscription[1]}")
+                print(f"{subscription}")
 
 
 def control_dante_device(device):
@@ -295,12 +334,14 @@ def cli_mode():
     args = parse_args()
 
     if args.dante:
-        devices = get_dante_devices(args.timeout)
+        services = get_dante_services(args.timeout)
+        dante.parse_netaudio_services(services)
+        dante_devices = dante.get_devices()
 
-        if len(devices) == 0:
+        if len(dante_devices) == 0:
             print('No devices detected. Try increasing the mDNS timeout.')
         else:
-            control_dante_devices(devices)
+            control_dante_devices(dante_devices)
 
 
 def tui_mode():
