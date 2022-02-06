@@ -67,6 +67,12 @@ def parse_args():
         help='Reset the device name to the manufacturer default')
 
     parser.add_argument(
+        '--set-latency',
+        type=float,
+        default=None,
+        help='Set the device latency in milliseconds')
+
+    parser.add_argument(
         '--set-device-name',
         type=str,
         default=None,
@@ -292,11 +298,15 @@ def control_dante_device(device):
         print(f'Setting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4} to {args.set_channel_name}')
         device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
 
+    if args.set_latency:
+        print(f'Setting latency of "{device}" to {args.set_latency}')
+        device.set_latency(args.set_latency)
+
 
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -308,7 +318,7 @@ def control_dante_devices(devices):
         if not args.json and args.device and len(devices) == 0:
             print('The specified device was not found')
 
-        if args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
+        if args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
             if not args.device:
                 print('Must specify a device name')
             else:
