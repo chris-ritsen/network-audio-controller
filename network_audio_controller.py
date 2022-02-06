@@ -315,15 +315,15 @@ def control_dante_devices(devices):
         else:
             devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
-        if not args.json and args.device and len(devices) == 0:
+        if not args.json and (args.device and len(devices) == 0):
             print('The specified device was not found')
-
-        if args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
-            if not args.device:
-                print('Must specify a device name')
-            else:
-                device = list(devices.values())[0]
-                control_dante_device(device)
+        else:
+            if args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
+                if not args.device:
+                    print('Must specify a device name')
+                else:
+                    device = list(devices.values())[0]
+                    control_dante_device(device)
 
     if args.json:
         if args.device:
