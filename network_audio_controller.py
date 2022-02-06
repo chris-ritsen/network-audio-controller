@@ -39,7 +39,7 @@ def parse_args():
         '-w',
         '--timeout',
         type=float,
-        default=0.5,
+        default=1.25,
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
@@ -227,6 +227,7 @@ def get_dante_services(timeout):
     browser_arc = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
     browser_dbc = ServiceBrowser(zeroconf, "_netaudio-dbc._udp.local.", listener)
     browser_cmc = ServiceBrowser(zeroconf, "_netaudio-cmc._udp.local.", listener)
+    browser_chan = ServiceBrowser(zeroconf, "_netaudio-chan._udp.local.", listener)
     time.sleep(timeout)
 
     return listener.services
