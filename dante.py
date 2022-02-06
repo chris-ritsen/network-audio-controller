@@ -198,7 +198,7 @@ class Device(object):
         self._rx_count = 0
         self._server_name = ''
         self._services = {}
-        self._socket = None
+        self._sockets = {}
         self._subscriptions = ()
         self._tx_channels = {}
         self._tx_count = 0
@@ -208,68 +208,86 @@ class Device(object):
         return (f'{self.name}')
 
 
-    def dante_command(self, command):
+    def dante_command(self, command, service_type):
+        service = self.get_service(service_type)
+        sock = self.sockets[service['port']]
         binary_str = codecs.decode(command, 'hex')
-        self.socket.send(binary_str)
-        response = self.socket.recvfrom(2048)[0]
+        sock.send(binary_str)
+        response = sock.recvfrom(2048)[0]
         return response
 
 
     def set_channel_name(self, channel_type, channel_number, new_channel_name):
-        response = self.dante_command(command_set_channel_name(channel_type, channel_number, new_channel_name))
+        response = self.dante_command(*command_set_channel_name(channel_type, channel_number, new_channel_name))
         log(f"{response}\n")
         return response
 
 
+    def set_latency(self, latency):
+        response = self.dante_command(*command_set_latency(latency))
+        return response
+
+
     def add_subscription(self, rx_channel_number, tx_channel_name, tx_device_name):
-        request = command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
-        response = self.dante_command(request)
+        response = self.dante_command(*command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name))
         return response
 
 
     def remove_subscription(self, rx_channel_number):
-        request = command_remove_subscription(rx_channel_number)
-        response = self.dante_command(request)
+        response = self.dante_command(*command_remove_subscription(rx_channel_number))
         return response
 
 
     def reset_channel_name(self, channel_type, channel_number):
-        request = command_reset_channel_name(channel_type, channel_number)
-        response = self.dante_command(request)
+        response = self.dante_command(*command_reset_channel_name(channel_type, channel_number))
         log(f"{response}\n")
         return response
 
 
     def set_device_name(self, name):
-        response = self.dante_command(command_set_device_name(name))
+        response = self.dante_command(*command_set_device_name(name))
         log(f"{response}\n")
         return response
 
 
     def reset_device_name(self):
-        response = self.dante_command(command_reset_device_name())
+        response = self.dante_command(*command_reset_device_name())
         log(f"{response}\n")
         return response
 
-    def get_device_controls(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind(('', 0))
-        self.socket.settimeout(5)
+
+    def get_service(self, service_type):
+        service = None
 
         try:
-            service = next(filter(lambda x: x[1]['type'] == '_netaudio-arc._udp.local.', self.services.items()))[1]
-            self.socket.connect((self.ipv4, service['port']))
+            service = next(filter(lambda x: x[1]['type'] == service_type, self.services.items()))[1]
+        except Exception as e:
+            self.error = e
+            print(e)
+
+        return service
+
+
+    def get_device_controls(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', 0))
+        sock.settimeout(5)
+
+        try:
+            service = self.get_service('_netaudio-arc._udp.local.')
+            sock.connect((self.ipv4, service['port']))
+            self.sockets[service['port']] = sock
         except Exception as e:
             self.error = e
             print(e)
 
         try:
             if not self.name:
-                self.name = self.dante_command(command_device_name())[10:-1].decode('ascii')
+                self.name = self.dante_command(*command_device_name())[10:-1].decode('ascii')
 
             # get reported rx/tx channel counts
             if not self.rx_count or not self.tx_count:
-                channel_count = self.dante_command(command_channel_count())
+                channel_count = self.dante_command(*command_channel_count())
                 self.rx_count = int.from_bytes(channel_count[15:16], 'big')
                 self.tx_count = int.from_bytes(channel_count[13:14], 'big')
 
@@ -293,7 +311,7 @@ class Device(object):
 
         try:
             for page in range(0, max(int(self.rx_count / 16), 1)):
-                receivers = self.dante_command(command_receivers(page))
+                receivers = self.dante_command(*command_receivers(page))
                 hex_rx_response = receivers.hex()
 
                 for index in range(0, min(self.rx_count, 16)):
@@ -358,8 +376,7 @@ class Device(object):
 
         try:
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
-                tx_request_hex = command_transmitters(page, friendly_names=True)
-                tx_friendly_names = self.dante_command(tx_request_hex).hex()
+                tx_friendly_names = self.dante_command(*command_transmitters(page, friendly_names=True)).hex()
 
                 for index in range(0, min(self.tx_count, 32)):
                     str1 = tx_friendly_names[(24 + (index * 12)):(36 + (index * 12))]
@@ -374,7 +391,7 @@ class Device(object):
                         tx_friendly_channel_names[channel_number] = tx_channel_friendly_name
 
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
-                transmitters = self.dante_command(command_transmitters(page, friendly_names=False)).hex()
+                transmitters = self.dante_command(*command_transmitters(page, friendly_names=False)).hex()
                 has_disabled_channels = transmitters.count('bb80') == 2
                 first_channel = []
 
@@ -482,13 +499,13 @@ class Device(object):
 
 
     @property
-    def socket(self):
-        return self._socket
+    def sockets(self):
+        return self._sockets
 
 
-    @socket.setter
-    def socket(self, socket):
-        self._socket = socket
+    @sockets.setter
+    def sockets(self, sockets):
+        self._sockets = sockets
 
 
     @property
@@ -611,6 +628,15 @@ def command_string(command=None, command_str=None, command_args='0000', command_
     return command_hex
 
 
+def command_set_latency(latency):
+    command_str = '1101'
+    command_length = '28'
+    latency = int(latency * 1000000)
+    latency_hex = f'{latency:06x}'
+    command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
+
+    return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
+
 def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name):
     rx_channel_hex = f'{int(rx_channel_number):02x}'
     command_str = '3010'
@@ -622,7 +648,7 @@ def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
 
     command_args = f'0000020100{rx_channel_hex}00{tx_channel_name_offset}00{tx_device_name_offset}00000000000000000000000000000000000000000000000000000000000000000000{tx_channel_name_hex}00{tx_device_name_hex}00'
 
-    return command_string('add_subscription', command_str=command_str, command_args=command_args)
+    return (command_string('add_subscription', command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
 
 
 def command_remove_subscription(rx_channel):
@@ -631,30 +657,30 @@ def command_remove_subscription(rx_channel):
     args_length = '10'
     command_args = f'00000001000000{rx_channel_hex}'
 
-    return command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args)
+    return (command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args), '_netaudio-arc._udp.local.')
 
 
 def command_device_info():
-    return command_string('device_info')
+    return (command_string('device_info'), '_netaudio-arc._udp.local.')
 
 
 def command_device_name():
-    return command_string('device_name')
+    return (command_string('device_name'), '_netaudio-arc._udp.local.')
 
 
 def command_channel_count():
-    return command_string('channel_count')
+    return (command_string('channel_count'), '_netaudio-arc._udp.local.')
 
 
 def command_set_device_name(name):
     args_length = chr(len(name.encode('utf-8')) + 11)
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return command_string('set_device_name', command_length=args_length, command_args=device_name(name))
+    return (command_string('set_device_name', command_length=args_length, command_args=device_name(name)), '_netaudio-arc._udp.local.')
 
 
 def command_reset_device_name():
-    return command_string('reset_device_name')
+    return (command_string('reset_device_name'), '_netaudio-arc._udp.local.')
 
 
 def command_reset_channel_name(channel_type, channel_number):
@@ -669,7 +695,7 @@ def command_reset_channel_name(channel_type, channel_number):
         command_args = f'00000201000000{channel_hex}001800000000000000'
         command_str = '2013'
 
-    return command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length)
+    return (command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length), '_netaudio-arc._udp.local.')
 
 
 def command_set_channel_name(channel_type, channel_number, new_channel_name):
@@ -687,7 +713,7 @@ def command_set_channel_name(channel_type, channel_number, new_channel_name):
 
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args)
+    return (command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args), '_netaudio-arc._udp.local.')
 
 
 def device_name(name):
@@ -703,7 +729,7 @@ def channel_pagination(page):
 
 
 def command_receivers(page=0):
-    return command_string('rx_channels', command_args=channel_pagination(page))
+    return (command_string('rx_channels', command_args=channel_pagination(page)), '_netaudio-arc._udp.local.')
 
 
 def command_transmitters(page=0, friendly_names=False):
@@ -715,7 +741,7 @@ def command_transmitters(page=0, friendly_names=False):
     command_length = '10'
     command_args = channel_pagination(page=page)
 
-    return command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args)
+    return (command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
 
 
 def get_devices():

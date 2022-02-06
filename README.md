@@ -9,15 +9,16 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 - Adding/removing subscriptions
 - CLI
-- Changing/resetting channel names
 - Display active subscriptions, Rx, Tx, devices
 - JSON output
+- Set device latency
+- Set/reset channel names
 - Set/reset device name
 - mDNS device discovery
 
 ### Next features to be added
 
-- Changing/displaying device settings (latency, encoding, sample rate, level controls, AES67 mode)
+- Changing/displaying device settings (encoding, sample rate, level controls, AES67 mode)
 
 ### Planned features
 
