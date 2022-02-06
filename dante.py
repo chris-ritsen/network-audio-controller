@@ -255,6 +255,7 @@ class Device(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('', 0))
         self.socket.settimeout(5)
+
         try:
             service = next(filter(lambda x: x[1]['type'] == '_netaudio-arc._udp.local.', self.services.items()))[1]
             self.socket.connect((self.ipv4, service['port']))
@@ -730,7 +731,15 @@ def parse_netaudio_services(services):
         ipv4 = info.parsed_addresses()[0]
         host = zeroconf.cache.entries_with_name(name)
 
-        service_properties = {k.decode('utf-8'):v.decode('utf-8') for (k, v) in info.properties.items()}
+        service_properties = {}
+
+        for key, value in info.properties.items():
+            key = key.decode('utf-8')
+
+            if isinstance(value, bytes):
+                value = value.decode('utf-8')
+
+            service_properties[key] = value
 
         for record in host:
             if isinstance(record, DNSService):
