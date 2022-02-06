@@ -208,12 +208,22 @@ class Device(object):
         return (f'{self.name}')
 
 
-    def dante_command(self, command, service_type):
-        service = self.get_service(service_type)
-        sock = self.sockets[service['port']]
+    def dante_command(self, command, service_type=None, port=None):
+        response = None
+        if service_type:
+            service = self.get_service(service_type)
+            sock = self.sockets[service['port']]
+        if port:
+            sock = self.sockets[port]
+
         binary_str = codecs.decode(command, 'hex')
-        sock.send(binary_str)
-        response = sock.recvfrom(2048)[0]
+
+        try:
+            sock.send(binary_str)
+            response = sock.recvfrom(2048)[0]
+        except:
+            pass
+
         return response
 
 
@@ -225,6 +235,16 @@ class Device(object):
 
     def set_latency(self, latency):
         response = self.dante_command(*command_set_latency(latency))
+        return response
+
+
+    def set_encoding(self, encoding):
+        response = self.dante_command(*command_set_encoding(encoding))
+        return response
+
+
+    def set_sample_rate(self, sample_rate):
+        response = self.dante_command(*command_set_sample_rate(sample_rate))
         return response
 
 
@@ -269,14 +289,22 @@ class Device(object):
 
 
     def get_device_controls(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(('', 0))
-        sock.settimeout(5)
-
         try:
-            service = self.get_service('_netaudio-arc._udp.local.')
-            sock.connect((self.ipv4, service['port']))
-            self.sockets[service['port']] = sock
+            for key, service in self.services.items():
+                if service['type'] == '_netaudio-chan._udp.local.':
+                    continue
+
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.bind(('', 0))
+                sock.settimeout(5)
+                sock.connect((self.ipv4, service['port']))
+                self.sockets[service['port']] = sock
+            for port in [8700]:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.bind(('', 0))
+                sock.settimeout(0.01)
+                sock.connect((self.ipv4, port))
+                self.sockets[port] = sock
         except Exception as e:
             self.error = e
             print(e)
@@ -636,6 +664,21 @@ def command_set_latency(latency):
     command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
 
     return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
+
+
+def command_set_encoding(encoding):
+    encoding_hex = f'{encoding:02x}'
+    command_string = f'ffff002803d70000525400c5c2710000417564696e617465072700830000006400000001000000{encoding_hex}'
+
+    return (command_string, None, 8700)
+
+
+def command_set_sample_rate(sample_rate):
+    sample_rate_hex = f'{sample_rate:06x}'
+    command_string = f'ffff002803d40000525400c5c2710000417564696e61746507270081000000640000000100{sample_rate_hex}'
+
+    return (command_string, None, 8700)
+
 
 def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name):
     rx_channel_hex = f'{int(rx_channel_number):02x}'

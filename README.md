@@ -7,18 +7,17 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Features
 
-- Adding/removing subscriptions
+- Add/remove subscriptions
 - CLI
 - Display active subscriptions, Rx, Tx, devices
 - JSON output
-- Set device latency
-- Set/reset channel names
-- Set/reset device name
+- Set device latency, sample rate, encoding
+- Set/reset channel names, device names
 - mDNS device discovery
 
 ### Next features to be added
 
-- Changing/displaying device settings (encoding, sample rate, level controls, AES67 mode)
+- Change/display device settings (level controls, AES67 mode)
 
 ### Planned features
 
@@ -42,4 +41,7 @@ Install these dependencies with pip:
 
 Then run with `./network_audio_controller.py`
 
-[Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
+### Documentation
+
+- [Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
+- [Technical details](https://github.com/chris-ritsen/network-audio-controller/wiki/Technical-details)
