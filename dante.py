@@ -97,7 +97,7 @@ class Subscription(object):
         self._tx_device_name = None
 
     def __str__(self):
-       return f"{self.rx_channel_name}@{self.rx_device_name} -> {self.tx_channel_name}@{self.tx_device_name}"
+       return f"{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}"
 
 
     def to_json(self):
@@ -191,11 +191,13 @@ class Device(object):
     def __init__(self):
         self._error = None
         self._ipv4 = ''
+        self._latency = None
         self._manufacturer = ''
         self._model = ''
         self._name = ''
         self._rx_channels = {}
         self._rx_count = 0
+        self._sample_rate = None
         self._server_name = ''
         self._services = {}
         self._sockets = {}
@@ -301,7 +303,7 @@ class Device(object):
 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
-                sock.settimeout(5)
+                sock.settimeout(2)
                 sock.connect((self.ipv4, service['port']))
                 self.sockets[service['port']] = sock
 
@@ -365,14 +367,12 @@ class Device(object):
                         connected_not_self_connected = status1 == '0101' and status2 == '0009'
                         not_connected_not_subscribed = status1 == '0000' and status2 == '0000'
                         not_connected_subscribed = status1 == '0000' and status2 == '0001'
+                        incorrect_channel_format = status1 == '0000' and status2 == '0010'
 
                         rx_channel_name = channel_name(hex_rx_response, rx_channel_offset)
 
                         if not device_offset == '0000':
                             tx_device_name = channel_name(hex_rx_response, device_offset)
-
-                            if tx_device_name == '.':
-                                tx_device_name = self.name
                         else:
                             tx_device_name = self.name
 
@@ -380,6 +380,16 @@ class Device(object):
                             tx_channel_name = channel_name(hex_rx_response, channel_offset)
                         else:
                             tx_channel_name = rx_channel_name
+
+                        if index == 0 and not device_offset == '0000':
+                            o1 = int(channel_offset, 16) * 2
+                            o2 = ((len(tx_channel_name) + len(tx_device_name)) * 2)
+                            o3 = o1 + o2 + 6
+                            o4 = o1 + o2 + 12
+                            sample_rate_hex = hex_rx_response[o3:o4]
+
+                            if sample_rate_hex != '000000':
+                                self.sample_rate = int(sample_rate_hex, 16)
 
                         rx_channel = Channel()
                         rx_channel.channel_type = 'rx'
@@ -395,7 +405,12 @@ class Device(object):
                             subscription.rx_channel_name = rx_channel_name
                             subscription.rx_device_name = self.name
                             subscription.tx_channel_name = tx_channel_name
-                            subscription.tx_device_name = tx_device_name
+
+                            if tx_device_name == '.':
+                                tx_device_name = self.name
+                            else:
+                                subscription.tx_device_name = tx_device_name
+
                             subscriptions.append(subscription)
         except Exception as e:
             self.error = e
@@ -428,8 +443,12 @@ class Device(object):
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
                 transmitters = self.dante_command(*command_transmitters(page, friendly_names=False)).hex()
 
-                # FIXME: bb80 refers to 48kHz channels and should not be used as a separator
-                has_disabled_channels = transmitters.count('bb80') == 2
+                has_disabled_channels = False
+
+                # TODO: Find the sample rate in the response instead of relying on it being already set from elsewhere
+                if self.sample_rate:
+                    has_disabled_channels = transmitters.count(f'{self.sample_rate:06x}') == 2
+
                 first_channel = []
 
                 for index in range(0, min(self.tx_count, 32)):
@@ -496,6 +515,16 @@ class Device(object):
 
 
     @property
+    def latency(self):
+        return self._latency
+
+
+    @latency.setter
+    def latency(self, latency):
+        self._latency = latency
+
+
+    @property
     def manufacturer(self):
         return self._manufacturer
 
@@ -523,6 +552,16 @@ class Device(object):
     @name.setter
     def name(self, name):
         self._name = name
+
+
+    @property
+    def sample_rate(self):
+        return self._sample_rate
+
+
+    @sample_rate.setter
+    def sample_rate(self, sample_rate):
+        self._sample_rate = sample_rate
 
 
     @property
@@ -618,6 +657,15 @@ class Device(object):
             'subscriptions': self.subscriptions,
             'transmitters': tx_channels
         }
+
+        if self.sample_rate:
+            as_json['sample_rate'] = self.sample_rate
+
+        if self.latency:
+            as_json['latency'] = self.latency
+
+        if self.manufacturer:
+            as_json['manufacturer'] = self.manufacturer
 
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
@@ -841,6 +889,12 @@ def parse_netaudio_services(services):
 
                 if 'model' in service_properties:
                     device.model = service_properties['model']
+
+                if 'rate' in service_properties:
+                    device.sample_rate = int(service_properties['rate'])
+
+                if 'latency_ns' in service_properties:
+                    device.latency = int(service_properties['latency_ns'])
 
                 device.ipv4 = ipv4
                 device.server_name = record.server
