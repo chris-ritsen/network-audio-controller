@@ -98,6 +98,13 @@ def parse_args():
         help='Set the encoding of a device')
 
     parser.add_argument(
+        '--set-gain-level',
+        type=int,
+        choices=list(range(1, 6)),
+        default=None,
+        help='Set the gain level on a an AVIO device. Lower numbers are higher gain.')
+
+    parser.add_argument(
         '--set-sample-rate',
         type=int,
         choices=[44100, 48000, 88200, 96000, 176400, 192000],
@@ -113,7 +120,7 @@ def parse_args():
 
     parser.add_argument(
         '--channel-number',
-        type=str,
+        type=int,
         default=None,
         help='Specify a channel for control by number')
 
@@ -243,7 +250,6 @@ def get_dante_services(timeout):
     zeroconf = Zeroconf()
     listener = MdnsListener()
 
-    # TODO get all netaudio service types
     browser_arc = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
     browser_dbc = ServiceBrowser(zeroconf, "_netaudio-dbc._udp.local.", listener)
     browser_cmc = ServiceBrowser(zeroconf, "_netaudio-cmc._udp.local.", listener)
@@ -312,6 +318,40 @@ def control_dante_device(device):
         print(f'Setting sample rate of "{device.name}" {device.ipv4} to {args.set_sample_rate}')
         device.set_sample_rate(args.set_sample_rate)
 
+    if args.set_gain_level:
+        device_type = None
+        label = None
+
+        if device.model == 'DAI2' or device.model == 'DAI1':
+            device_type = 'input'
+
+            label = {
+                1: '+24 dBu',
+                2: '+4dBu',
+                3: '+0 dBu',
+                4: '0 dBV',
+                5: '-10 dBV'
+            }
+        elif device.model == 'DAO2' or device.model == 'DAO1':
+            device_type = 'output'
+
+            label = {
+                1: '+18 dBu',
+                2: '+4 dBu',
+                3: '+0 dBu',
+                4: '0 dBV',
+                5: '-10 dBV'
+            }
+        else:
+            print('This device does not support gain control')
+
+        if device_type:
+            if args.channel_number:
+                print(f'Setting gain level of "{device.name}" {device.ipv4} to {label[args.set_gain_level]} on channel {args.channel_number}')
+                device.set_gain_level(args.channel_number, args.set_gain_level, device_type)
+            else:
+                print(f'Must specify a channel number')
+
     if args.set_encoding:
         print(f'Setting encoding of "{device.name}" {device.ipv4} to {args.set_encoding}')
         device.set_encoding(args.set_encoding)
@@ -328,7 +368,7 @@ def control_dante_device(device):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -340,7 +380,7 @@ def control_dante_devices(devices):
         if not args.json and (args.device and len(devices) == 0):
             print('The specified device was not found')
         else:
-            if args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
+            if args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
                 if not args.device:
                     print('Must specify a device name')
                 else:
