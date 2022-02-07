@@ -189,6 +189,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--list-sample-rate",
+        action='store_true',
+        default=False,
+        help='List device sample rate'
+    )
+
+    parser.add_argument(
         "--list-subscriptions",
         action='store_true',
         default=False,
@@ -266,6 +273,9 @@ def print_devices(devices):
         if args.list_devices:
             print(f"{device}")
 
+        if args.list_sample_rate and device.sample_rate:
+            print(f"{device.sample_rate}")
+
         if args.list_rx:
             rx_channels = device.rx_channels
 
@@ -280,7 +290,6 @@ def print_devices(devices):
 
         if args.list_subscriptions:
             for subscription in device.subscriptions:
-                #  print(f"{subscription[0]} -> {subscription[1]}")
                 print(f"{subscription}")
 
 
@@ -368,7 +377,7 @@ def control_dante_device(device):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
