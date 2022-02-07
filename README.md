@@ -7,6 +7,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Features
 
+- AVIO input/output gain control
 - Add/remove subscriptions
 - CLI
 - Display active subscriptions, Rx, Tx, devices
@@ -17,7 +18,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Next features to be added
 
-- Change/display device settings (level controls, AES67 mode)
+- Change/display device settings (AES67 mode)
 
 ### Planned features
 

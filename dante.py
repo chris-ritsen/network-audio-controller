@@ -238,6 +238,11 @@ class Device(object):
         return response
 
 
+    def set_gain_level(self, channel_number, gain_level, device_type):
+        response = self.dante_command(*command_set_gain_level(channel_number, gain_level, device_type))
+        return response
+
+
     def set_encoding(self, encoding):
         response = self.dante_command(*command_set_encoding(encoding))
         return response
@@ -299,6 +304,7 @@ class Device(object):
                 sock.settimeout(5)
                 sock.connect((self.ipv4, service['port']))
                 self.sockets[service['port']] = sock
+
             for port in [8700]:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
@@ -383,6 +389,7 @@ class Device(object):
 
                         rx_channels[channel_number] = rx_channel
 
+                        # TODO: store connection state
                         if self_connected or connected_not_self_connected:
                             subscription = Subscription()
                             subscription.rx_channel_name = rx_channel_name
@@ -420,6 +427,8 @@ class Device(object):
 
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
                 transmitters = self.dante_command(*command_transmitters(page, friendly_names=False)).hex()
+
+                # FIXME: bb80 refers to 48kHz channels and should not be used as a separator
                 has_disabled_channels = transmitters.count('bb80') == 2
                 first_channel = []
 
@@ -673,9 +682,19 @@ def command_set_encoding(encoding):
     return (command_string, None, 8700)
 
 
+def command_set_gain_level(channel_number, gain_level, device_type):
+    if device_type == 'input':
+        target = 'ffff003403440000525400c5c2710000417564696e6174650727100a0000000000010001000c001001020000000000'
+    if device_type == 'output':
+        target = 'ffff003403260000525400c5c2710000417564696e6174650727100a0000000000010001000c001002010000000000'
+
+    command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
+
+    return (command_string, None, 8700)
+
+
 def command_set_sample_rate(sample_rate):
-    sample_rate_hex = f'{sample_rate:06x}'
-    command_string = f'ffff002803d40000525400c5c2710000417564696e61746507270081000000640000000100{sample_rate_hex}'
+    command_string = f'ffff002803d40000525400c5c2710000417564696e61746507270081000000640000000100{sample_rate:06x}'
 
     return (command_string, None, 8700)
 
@@ -727,7 +746,7 @@ def command_reset_device_name():
 
 
 def command_reset_channel_name(channel_type, channel_number):
-    channel_hex = f'{int(channel_number):02x}'
+    channel_hex = f'{channel_number:02x}'
 
     if channel_type == 'rx':
         args_length = f'{int(21):02x}'
@@ -743,7 +762,7 @@ def command_reset_channel_name(channel_type, channel_number):
 
 def command_set_channel_name(channel_type, channel_number, new_channel_name):
     name_hex = new_channel_name.encode().hex()
-    channel_hex = f'{int(channel_number):02x}'
+    channel_hex = f'{channel_number:02x}'
 
     if channel_type == 'rx':
         command_str = '3001'
