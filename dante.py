@@ -18,9 +18,9 @@ class Channel(object):
 
     def __str__(self):
         if self.friendly_name:
-            return (f"{self.number}:{self.friendly_name}")
+            return (f'{self.number}:{self.friendly_name}')
         else:
-            return(f"{self.number}:{self.name}")
+            return(f'{self.number}:{self.name}')
 
 
     @property
@@ -97,13 +97,13 @@ class Subscription(object):
         self._tx_device_name = None
 
     def __str__(self):
-       return f"{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}"
+       return f'{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}'
 
 
     def to_json(self):
         return [
-           f"{self.rx_channel_name}@{self.rx_device_name}",
-           f"{self.tx_channel_name}@{self.tx_device_name}"
+           f'{self.rx_channel_name}@{self.rx_device_name}',
+           f'{self.tx_channel_name}@{self.tx_device_name}'
         ]
 
 
@@ -231,7 +231,6 @@ class Device(object):
 
     def set_channel_name(self, channel_type, channel_number, new_channel_name):
         response = self.dante_command(*command_set_channel_name(channel_type, channel_number, new_channel_name))
-        log(f"{response}\n")
         return response
 
 
@@ -267,19 +266,16 @@ class Device(object):
 
     def reset_channel_name(self, channel_type, channel_number):
         response = self.dante_command(*command_reset_channel_name(channel_type, channel_number))
-        log(f"{response}\n")
         return response
 
 
     def set_device_name(self, name):
         response = self.dante_command(*command_set_device_name(name))
-        log(f"{response}\n")
         return response
 
 
     def reset_device_name(self):
         response = self.dante_command(*command_reset_device_name())
-        log(f"{response}\n")
         return response
 
 
@@ -712,8 +708,6 @@ def command_string(command=None, command_str=None, command_args='0000', command_
     if command == 'add_subscription':
         command_length = f'{int(len(command_hex) / 2):02x}'
         command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
-
-    log(f"{command}\t\t\t{command_hex}\n")
 
     return command_hex
 
