@@ -43,6 +43,13 @@ def parse_args():
         help='Timeout for mDNS discovery')
 
     parser.add_argument(
+        '-a',
+        '--list-address',
+        action='store_true',
+        default=False,
+        help='Show device IP address')
+
+    parser.add_argument(
         '--add-subscription',
         type=str,
         default=None,
@@ -271,7 +278,13 @@ def print_devices(devices):
 
     for key, device in devices.items():
         if args.list_devices:
-            print(f"{device}")
+            if args.list_address:
+                print(f"{device} {device.ipv4}")
+            else:
+                print(f"{device}")
+        else:
+            if args.list_address:
+                print(f"{device.ipv4}")
 
         if args.list_sample_rate and device.sample_rate:
             print(f"{device.sample_rate}")
@@ -377,7 +390,7 @@ def control_dante_device(device):
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_devices]:
+    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
