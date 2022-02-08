@@ -7,13 +7,34 @@ from zeroconf import DNSService
 
 devices = {}
 
+ports = {
+    'device_settings': 8700
+}
+
+service_types = {
+    'arc': '_netaudio-arc._udp.local.',
+    'chan': '_netaudio-chan._udp.local.',
+    'cmc': '_netaudio-cmc._udp.local.',
+    'dbc': '_netaudio-dbc._udp.local.'
+}
+
+status = {
+    'connected': 'Connected',
+    'connected_unicast': 'Connected (Unicast)',
+    'incorrect_channel_format': 'Incorrect channel format',
+    'self_subscribed': 'Subscribed to own signal',
+    'unresolved': 'Subscription unresolved'
+}
+
 class Channel(object):
     def __init__(self):
         self._channel_type = None
         self._device = None
         self._friendly_name = None
-        self._number = None
         self._name = None
+        self._number = None
+        self._status_codes = None
+        self._status_text = None
 
 
     def __str__(self):
@@ -41,6 +62,26 @@ class Channel(object):
     @number.setter
     def number(self, number):
         self._number = number
+
+
+    @property
+    def status_codes(self):
+        return self._status_codes
+
+
+    @status_codes.setter
+    def status_codes(self, status_codes):
+        self._status_codes = status_codes
+
+
+    @property
+    def status_text(self):
+        return self._status_text
+
+
+    @status_text.setter
+    def status_text(self, status_text):
+        self._status_text = status_text
 
 
     @property
@@ -82,29 +123,58 @@ class Channel(object):
         if self.friendly_name:
             as_json['friendly_name'] = self.friendly_name
 
+        if self.status_text:
+            as_json['status_text'] = self.status_text
+
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
 
 class Subscription(object):
     def __init__(self):
+        self._error = None
         self._rx_channel = None
         self._rx_channel_name = None
         self._rx_device = None
         self._rx_device_name = None
+        self._status_codes = None
+        self._status_text = None
         self._tx_channel = None
         self._tx_channel_name = None
         self._tx_device = None
         self._tx_device_name = None
 
+
     def __str__(self):
-       return f'{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}'
+        text = f'{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}'
+
+        if self.status_text:
+            return f'{text} [{self.status_text}]'
+        else:
+            return text
 
 
     def to_json(self):
-        return [
-           f'{self.rx_channel_name}@{self.rx_device_name}',
-           f'{self.tx_channel_name}@{self.tx_device_name}'
-        ]
+        as_json = {
+            'rx_channel': self.rx_channel_name,
+            'rx_device': self.rx_device_name,
+            'tx_channel': self.tx_channel_name,
+            'tx_device': self.tx_device_name,
+        }
+
+        if self.status_text:
+            as_json['status_text'] = self.status_text
+
+        return as_json
+
+
+    @property
+    def error(self):
+        return self._error
+
+
+    @error.setter
+    def error(self, error):
+        self._error = error
 
 
     @property
@@ -135,6 +205,26 @@ class Subscription(object):
     @rx_device_name.setter
     def rx_device_name(self, rx_device_name):
         self._rx_device_name = rx_device_name
+
+
+    @property
+    def status_codes(self):
+        return self._status_codes
+
+
+    @status_codes.setter
+    def status_codes(self, status_codes):
+        self._status_codes = status_codes
+
+
+    @property
+    def status_text(self):
+        return self._status_text
+
+
+    @status_text.setter
+    def status_text(self, status_text):
+        self._status_text = status_text
 
 
     @property
@@ -202,7 +292,7 @@ class Device(object):
         self._server_name = ''
         self._services = {}
         self._sockets = {}
-        self._subscriptions = ()
+        self._subscriptions = []
         self._tx_channels = {}
         self._tx_count = 0
 
@@ -295,7 +385,7 @@ class Device(object):
     def get_device_controls(self):
         try:
             for key, service in self.services.items():
-                if service['type'] == '_netaudio-chan._udp.local.':
+                if service['type'] == service_types['chan']:
                     continue
 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -304,7 +394,7 @@ class Device(object):
                 sock.connect((self.ipv4, service['port']))
                 self.sockets[service['port']] = sock
 
-            for port in [8700]:
+            for key, port in ports.items():
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
                 sock.settimeout(0.01)
@@ -360,18 +450,9 @@ class Device(object):
                         status1 = channel[6]
                         status2 = channel[7]
 
-                        self_connected = status1 == '0000' and status2 == '0004'
-                        connected_not_self_connected = status1 == '0101' and status2 == '0009'
-                        not_connected_not_subscribed = status1 == '0000' and status2 == '0000'
-                        not_connected_subscribed = status1 == '0000' and status2 == '0001'
-                        incorrect_channel_format = status1 == '0000' and status2 == '0010'
-
                         rx_channel_name = get_label(hex_rx_response, rx_channel_offset)
 
-                        if not device_offset == '0000':
-                            tx_device_name = get_label(hex_rx_response, device_offset)
-                        else:
-                            tx_device_name = self.name
+                        tx_device_name = get_label(hex_rx_response, device_offset)
 
                         if not channel_offset == '0000':
                             tx_channel_name = get_label(hex_rx_response, channel_offset)
@@ -386,23 +467,52 @@ class Device(object):
                             if sample_rate_hex != '000000':
                                 self.sample_rate = int(sample_rate_hex, 16)
 
+                        self_connected = status1 == '0000' and status2 == '0004'
+                        connected_not_self_connected = status1 == '0101' and status2 == '0009'
+                        not_connected_not_subscribed = status1 == '0000' and status2 == '0000'
+                        unresolved = status1 == '0000' and status2 == '0001'
+                        incorrect_channel_format = status1 == '0000' and status2 == '0010'
+
+                        channel_status_text = None
+                        subscription_status_text = None
+
+                        subscription = Subscription()
                         rx_channel = Channel()
+
+                        if self_connected:
+                            subscription.status_text = channel_status_text = status['self_subscribed']
+
+                        if connected_not_self_connected:
+                            subscription.status_text = channel_status_text = status['connected']
+
+                        if unresolved:
+                            subscription.error = subscription.status_text = status['unresolved']
+
+                        if incorrect_channel_format:
+                            subscription.error = subscription.status_text = status['incorrect_channel_format']
+
                         rx_channel.channel_type = 'rx'
-                        rx_channel.number = channel_number
                         rx_channel.device = self
                         rx_channel.name = rx_channel_name
+                        rx_channel.number = channel_number
+                        rx_channel.status_codes = (status1, status2)
+
+                        if channel_status_text:
+                            rx_channel.status_text = channel_status_text
 
                         rx_channels[channel_number] = rx_channel
 
-                        # TODO: store connection state
-                        if self_connected or connected_not_self_connected:
-                            subscription = Subscription()
+                        if subscription_status_text:
+                            subscription.status_text = subscription_status_text
+
+                        if tx_device_name:
                             subscription.rx_channel_name = rx_channel_name
                             subscription.rx_device_name = self.name
                             subscription.tx_channel_name = tx_channel_name
+                            subscription.status_codes = (status1, status2)
 
                             if tx_device_name == '.':
-                                tx_device_name = self.name
+                                subscription.tx_device_name = self.name
                             else:
                                 subscription.tx_device_name = tx_device_name
 
@@ -735,14 +845,14 @@ def command_set_latency(latency):
     latency_hex = f'{latency:06x}'
     command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
 
-    return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
+    return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
 
 
 def command_set_encoding(encoding):
     encoding_hex = f'{encoding:02x}'
     command_string = f'ffff002803d70000525400c5c2710000417564696e617465072700830000006400000001000000{encoding_hex}'
 
-    return (command_string, None, 8700)
+    return (command_string, None, ports['device_settings'])
 
 
 def command_set_gain_level(channel_number, gain_level, device_type):
@@ -753,13 +863,13 @@ def command_set_gain_level(channel_number, gain_level, device_type):
 
     command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
 
-    return (command_string, None, 8700)
+    return (command_string, None, ports['device_settings'])
 
 
 def command_set_sample_rate(sample_rate):
     command_string = f'ffff002803d40000525400c5c2710000417564696e61746507270081000000640000000100{sample_rate:06x}'
 
-    return (command_string, None, 8700)
+    return (command_string, None, ports['device_settings'])
 
 
 def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name):
@@ -773,7 +883,7 @@ def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
 
     command_args = f'0000020100{rx_channel_hex}00{tx_channel_name_offset}00{tx_device_name_offset}00000000000000000000000000000000000000000000000000000000000000000000{tx_channel_name_hex}00{tx_device_name_hex}00'
 
-    return (command_string('add_subscription', command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
+    return (command_string('add_subscription', command_str=command_str, command_args=command_args), service_types['arc'])
 
 
 def command_remove_subscription(rx_channel):
@@ -782,30 +892,30 @@ def command_remove_subscription(rx_channel):
     args_length = '10'
     command_args = f'00000001000000{rx_channel_hex}'
 
-    return (command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args), '_netaudio-arc._udp.local.')
+    return (command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args), service_types['arc'])
 
 
 def command_device_info():
-    return (command_string('device_info'), '_netaudio-arc._udp.local.')
+    return (command_string('device_info'), service_types['arc'])
 
 
 def command_device_name():
-    return (command_string('device_name'), '_netaudio-arc._udp.local.')
+    return (command_string('device_name'), service_types['arc'])
 
 
 def command_channel_count():
-    return (command_string('channel_count'), '_netaudio-arc._udp.local.')
+    return (command_string('channel_count'), service_types['arc'])
 
 
 def command_set_device_name(name):
     args_length = chr(len(name.encode('utf-8')) + 11)
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return (command_string('set_device_name', command_length=args_length, command_args=device_name(name)), '_netaudio-arc._udp.local.')
+    return (command_string('set_device_name', command_length=args_length, command_args=device_name(name)), service_types['arc'])
 
 
 def command_reset_device_name():
-    return (command_string('reset_device_name'), '_netaudio-arc._udp.local.')
+    return (command_string('reset_device_name'), service_types['arc'])
 
 
 def command_reset_channel_name(channel_type, channel_number):
@@ -820,7 +930,7 @@ def command_reset_channel_name(channel_type, channel_number):
         command_args = f'00000201000000{channel_hex}001800000000000000'
         command_str = '2013'
 
-    return (command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length), '_netaudio-arc._udp.local.')
+    return (command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length), service_types['arc'])
 
 
 def command_set_channel_name(channel_type, channel_number, new_channel_name):
@@ -838,7 +948,7 @@ def command_set_channel_name(channel_type, channel_number, new_channel_name):
 
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return (command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args), '_netaudio-arc._udp.local.')
+    return (command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args), service_types['arc'])
 
 
 def device_name(name):
@@ -854,7 +964,7 @@ def channel_pagination(page):
 
 
 def command_receivers(page=0):
-    return (command_string('rx_channels', command_args=channel_pagination(page)), '_netaudio-arc._udp.local.')
+    return (command_string('rx_channels', command_args=channel_pagination(page)), service_types['arc'])
 
 
 def command_transmitters(page=0, friendly_names=False):
@@ -866,7 +976,7 @@ def command_transmitters(page=0, friendly_names=False):
     command_length = '10'
     command_args = channel_pagination(page=page)
 
-    return (command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args), '_netaudio-arc._udp.local.')
+    return (command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
 
 
 def get_devices():
@@ -899,7 +1009,7 @@ def parse_netaudio_services(services):
                 else:
                     device = Device()
 
-                if 'id' in service_properties and service['type'] == '_netaudio-cmc._udp.local.':
+                if 'id' in service_properties and service['type'] == service_types['cmc']:
                     device.mac_address = service_properties['id']
 
                 if 'mf' in service_properties:
@@ -925,6 +1035,15 @@ def parse_netaudio_services(services):
                 }
 
                 devices[record.server] = device
+
+
+def get_service_types():
+    return service_types
+
+
+def get_service_type(key):
+    if key in service_types:
+        return service_types[key]
 
 
 def log(message):
