@@ -10,20 +10,17 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - AVIO input/output gain control
 - Add/remove subscriptions
 - CLI
-- Display active subscriptions, Rx, Tx, devices
+- Display active subscriptions, Rx and Tx channels, devices names and addresses, subscription status
 - JSON output
 - Set device latency, sample rate, encoding
 - Set/reset channel names, device names
 - mDNS device discovery
 
-### Next features to be added
-
-- Change/display device settings (AES67 mode)
-
 ### Planned features
 
 - AES67 device support
 - Change channel/device names without affecting existing subscriptions
+- Change/display device settings (AES67 mode)
 - Client/server modes
 - Command prompt
 - Control of Shure wireless devices ([Axient receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and [PSM transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
@@ -46,3 +43,4 @@ Then run with `./network_audio_controller.py`
 
 - [Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
 - [Technical details](https://github.com/chris-ritsen/network-audio-controller/wiki/Technical-details)
+- [Testing](https://github.com/chris-ritsen/network-audio-controller/wiki/Testing)
