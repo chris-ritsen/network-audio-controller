@@ -18,7 +18,7 @@ import dante
 dante_devices = {}
 
 def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
+    return getattr(obj.__class__, 'to_json', _default.default)(obj)
 
 
 _default.default = JSONEncoder().default
@@ -145,65 +145,65 @@ def parse_args():
         help='Filter results by device name or network address')
 
     parser.add_argument(
-        "-t",
-        "--tui",
+        '-t',
+        '--tui',
         action='store_true',
         default=False,
         help='Enable a text user interface'
     )
 
     parser.add_argument(
-        "--json",
+        '--json',
         action='store_true',
         default=False,
         help='Format output in JSON'
     )
 
     parser.add_argument(
-        "--xml",
+        '--xml',
         action='store_true',
         default=False,
         help='Format output in XML'
     )
 
     parser.add_argument(
-        "-l",
-        "--list-devices",
+        '-l',
+        '--list-devices',
         action='store_true',
         default=False,
         help='List devices'
     )
 
     parser.add_argument(
-        "--dante",
+        '--dante',
         action='store_true',
         default=True, # for now
         help='Use Dante devices for operations'
     )
 
     parser.add_argument(
-        "--list-tx",
+        '--list-tx',
         action='store_true',
         default=False,
         help='List all Transmitter channels'
     )
 
     parser.add_argument(
-        "--list-rx",
+        '--list-rx',
         action='store_true',
         default=False,
         help='List all Receive channels'
     )
 
     parser.add_argument(
-        "--list-sample-rate",
+        '--list-sample-rate',
         action='store_true',
         default=False,
         help='List device sample rate'
     )
 
     parser.add_argument(
-        "--list-subscriptions",
+        '--list-subscriptions',
         action='store_true',
         default=False,
         help='List all subscriptions'
@@ -264,10 +264,10 @@ def get_dante_services(timeout):
     zeroconf = Zeroconf()
     listener = MdnsListener()
 
-    browser_arc = ServiceBrowser(zeroconf, "_netaudio-arc._udp.local.", listener)
-    browser_dbc = ServiceBrowser(zeroconf, "_netaudio-dbc._udp.local.", listener)
-    browser_cmc = ServiceBrowser(zeroconf, "_netaudio-cmc._udp.local.", listener)
-    browser_chan = ServiceBrowser(zeroconf, "_netaudio-chan._udp.local.", listener)
+    browser_arc = ServiceBrowser(zeroconf, '_netaudio-arc._udp.local.', listener)
+    browser_dbc = ServiceBrowser(zeroconf, '_netaudio-dbc._udp.local.', listener)
+    browser_cmc = ServiceBrowser(zeroconf, '_netaudio-cmc._udp.local.', listener)
+    browser_chan = ServiceBrowser(zeroconf, '_netaudio-chan._udp.local.', listener)
     time.sleep(timeout)
 
     return listener.services
@@ -279,15 +279,15 @@ def print_devices(devices):
     for key, device in devices.items():
         if args.list_devices:
             if args.list_address:
-                print(f"{device} {device.ipv4}")
+                print(f'{device} {device.ipv4}')
             else:
-                print(f"{device}")
+                print(f'{device}')
         else:
             if args.list_address:
-                print(f"{device.ipv4}")
+                print(f'{device.ipv4}')
 
         if args.list_sample_rate and device.sample_rate:
-            print(f"{device.sample_rate}")
+            print(f'{device.sample_rate}')
 
         if args.list_rx:
             rx_channels = device.rx_channels
@@ -303,7 +303,7 @@ def print_devices(devices):
 
         if args.list_subscriptions:
             for subscription in device.subscriptions:
-                print(f"{subscription}")
+                print(f'{subscription}')
 
 
 def control_dante_device(device):
@@ -325,19 +325,19 @@ def control_dante_device(device):
         device.remove_subscription(rx_channel_number=args.remove_subscription)
 
     if args.reset_device_name:
-        print(f'Resetting device name for "{device.name}" {device.ipv4}')
+        print(f'Resetting device name for {device.name} {device.ipv4}')
         device.reset_device_name()
 
     if args.set_device_name:
-        print(f'Setting device name for "{device.name}" {device.ipv4} to {args.set_device_name}')
+        print(f'Setting device name for {device.name} {device.ipv4} to {args.set_device_name}')
         device.set_device_name(args.set_device_name)
 
     if args.reset_channel_name:
-        print(f'Resetting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4}')
+        print(f'Resetting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4}')
         device.reset_channel_name(args.channel_type, args.channel_number)
 
     if args.set_sample_rate:
-        print(f'Setting sample rate of "{device.name}" {device.ipv4} to {args.set_sample_rate}')
+        print(f'Setting sample rate of {device.name} {device.ipv4} to {args.set_sample_rate}')
         device.set_sample_rate(args.set_sample_rate)
 
     if args.set_gain_level:
@@ -369,21 +369,21 @@ def control_dante_device(device):
 
         if device_type:
             if args.channel_number:
-                print(f'Setting gain level of "{device.name}" {device.ipv4} to {label[args.set_gain_level]} on channel {args.channel_number}')
+                print(f'Setting gain level of {device.name} {device.ipv4} to {label[args.set_gain_level]} on channel {args.channel_number}')
                 device.set_gain_level(args.channel_number, args.set_gain_level, device_type)
             else:
                 print(f'Must specify a channel number')
 
     if args.set_encoding:
-        print(f'Setting encoding of "{device.name}" {device.ipv4} to {args.set_encoding}')
+        print(f'Setting encoding of {device.name} {device.ipv4} to {args.set_encoding}')
         device.set_encoding(args.set_encoding)
 
     if args.set_channel_name:
-        print(f'Setting name of {args.channel_type} channel {args.channel_number} for "{device.name}" {device.ipv4} to {args.set_channel_name}')
+        print(f'Setting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4} to {args.set_channel_name}')
         device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
 
     if args.set_latency:
-        print(f'Setting latency of "{device}" to {args.set_latency}')
+        print(f'Setting latency of {device} to {args.set_latency}')
         device.set_latency(args.set_latency)
 
 
@@ -418,7 +418,7 @@ def control_dante_devices(devices):
             json_object = json.dumps(device, indent=2)
         else:
             json_object = json.dumps(list(devices.values()), indent=2)
-        print(f"{str(json_object)}")
+        print(f'{str(json_object)}')
     elif args.xml:
         print('Not implemented')
     else:
