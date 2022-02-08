@@ -192,6 +192,7 @@ class Device(object):
         self._error = None
         self._ipv4 = ''
         self._latency = None
+        self._mac_address = None
         self._manufacturer = ''
         self._model = ''
         self._name = ''
@@ -526,6 +527,16 @@ class Device(object):
 
 
     @property
+    def mac_address(self):
+        return self._mac_address
+
+
+    @mac_address.setter
+    def mac_address(self, mac_address):
+        self._mac_address = mac_address
+
+
+    @property
     def manufacturer(self):
         return self._manufacturer
 
@@ -667,6 +678,9 @@ class Device(object):
 
         if self.manufacturer:
             as_json['manufacturer'] = self.manufacturer
+
+        if self.mac_address:
+            as_json['mac_address'] = self.mac_address
 
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
@@ -882,6 +896,9 @@ def parse_netaudio_services(services):
                     device = devices[record.server]
                 else:
                     device = Device()
+
+                if 'id' in service_properties and service['type'] == '_netaudio-cmc._udp.local.':
+                    device.mac_address = service_properties['id']
 
                 if 'mf' in service_properties:
                     device.manufacturer = service_properties['mf']
