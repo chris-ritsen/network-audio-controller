@@ -32,12 +32,11 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Usage
 
-Install these dependencies with pip:
-
-- argcomplete
-- zeroconf
-
-Then run with `./network_audio_controller.py`
+First, install the dependencies:
+```bash
+pip install -r requirements.txt
+```
+Then, run `./network_audio_controller.py`
 
 ### Documentation
 
