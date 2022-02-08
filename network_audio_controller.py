@@ -24,9 +24,6 @@ def _default(self, obj):
 _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 
-def handler(signum, frame):
-    pass
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -445,8 +442,6 @@ def tui_mode():
 
 
 def main():
-    signal.signal(signal.SIGWINCH, handler)
-
     args = parse_args()
 
     if args.tui:
