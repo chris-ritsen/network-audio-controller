@@ -366,15 +366,15 @@ class Device(object):
                         not_connected_subscribed = status1 == '0000' and status2 == '0001'
                         incorrect_channel_format = status1 == '0000' and status2 == '0010'
 
-                        rx_channel_name = channel_name(hex_rx_response, rx_channel_offset)
+                        rx_channel_name = get_label(hex_rx_response, rx_channel_offset)
 
                         if not device_offset == '0000':
-                            tx_device_name = channel_name(hex_rx_response, device_offset)
+                            tx_device_name = get_label(hex_rx_response, device_offset)
                         else:
                             tx_device_name = self.name
 
                         if not channel_offset == '0000':
-                            tx_channel_name = channel_name(hex_rx_response, channel_offset)
+                            tx_channel_name = get_label(hex_rx_response, channel_offset)
                         else:
                             tx_channel_name = rx_channel_name
 
@@ -430,7 +430,7 @@ class Device(object):
                     channel_index = int(channel[0], 16)
                     channel_number = int(channel[1], 16)
                     channel_offset = channel[2]
-                    tx_channel_friendly_name = channel_name(tx_friendly_names, channel_offset)
+                    tx_channel_friendly_name = get_label(tx_friendly_names, channel_offset)
 
                     if tx_channel_friendly_name:
                         tx_friendly_channel_names[channel_number] = tx_channel_friendly_name
@@ -473,7 +473,7 @@ class Device(object):
                         if channel_disabled:
                             break
 
-                        tx_channel_name = channel_name(transmitters, channel_offset)
+                        tx_channel_name = get_label(transmitters, channel_offset)
 
                         tx_channel = Channel()
                         tx_channel.channel_type = 'tx'
@@ -661,13 +661,15 @@ class Device(object):
         tx_channels = dict(sorted(self.tx_channels.items(), key=lambda x: x[1].number))
 
         as_json = {
+            'channels': {
+                'receivers': rx_channels,
+                'transmitters': tx_channels
+            },
             'ipv4': self.ipv4,
             'name': self.name,
-            'receivers': rx_channels,
             'server_name': self.server_name,
             'services': self.services,
             'subscriptions': self.subscriptions,
-            'transmitters': tx_channels
         }
 
         if self.sample_rate:
@@ -685,16 +687,16 @@ class Device(object):
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
 
-def channel_name(hex_str, offset):
-    parsed_channel_name = None
+def get_label(hex_str, offset):
+    parsed_get_label = None
 
     try:
         hex_substring = hex_str[int(offset, 16) * 2:]
         partitioned_bytes = bytes.fromhex(hex_substring).partition(b'\x00')[0]
-        parsed_channel_name = partitioned_bytes.decode('utf-8')
+        parsed_get_label = partitioned_bytes.decode('utf-8')
     except Exception as e:
         pass
-    return parsed_channel_name
+    return parsed_get_label
 
 
 def command_string(command=None, command_str=None, command_args='0000', command_length='00', sequence1='ff', sequence2='ffff'):
@@ -746,7 +748,7 @@ def command_set_encoding(encoding):
 def command_set_gain_level(channel_number, gain_level, device_type):
     if device_type == 'input':
         target = 'ffff003403440000525400c5c2710000417564696e6174650727100a0000000000010001000c001001020000000000'
-    if device_type == 'output':
+    elif device_type == 'output':
         target = 'ffff003403260000525400c5c2710000417564696e6174650727100a0000000000010001000c001002010000000000'
 
     command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
