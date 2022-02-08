@@ -261,10 +261,9 @@ def get_dante_services(timeout):
     zeroconf = Zeroconf()
     listener = MdnsListener()
 
-    browser_arc = ServiceBrowser(zeroconf, '_netaudio-arc._udp.local.', listener)
-    browser_dbc = ServiceBrowser(zeroconf, '_netaudio-dbc._udp.local.', listener)
-    browser_cmc = ServiceBrowser(zeroconf, '_netaudio-cmc._udp.local.', listener)
-    browser_chan = ServiceBrowser(zeroconf, '_netaudio-chan._udp.local.', listener)
+    for key, service_type in dante.get_service_types().items():
+        ServiceBrowser(zeroconf, service_type, listener)
+
     time.sleep(timeout)
 
     return listener.services
