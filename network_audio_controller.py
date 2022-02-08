@@ -32,179 +32,48 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
-    parser.add_argument(
-        '-w',
-        '--timeout',
-        type=float,
-        default=1.25,
-        help='Timeout for mDNS discovery')
+    parser.set_defaults(device_type='dante')
 
-    parser.add_argument(
-        '-a',
-        '--list-address',
-        action='store_true',
-        default=False,
-        help='Show device IP address')
+    channels = parser.add_argument_group('channels')
+    devices = parser.add_argument_group('devices')
+    output = parser.add_mutually_exclusive_group()
+    settings = parser.add_argument_group('settings')
+    subscriptions = parser.add_argument_group('subscriptions')
+    text_output = parser.add_argument_group('text output')
 
-    parser.add_argument(
-        '--add-subscription',
-        type=str,
-        default=None,
-        help='Add a subscription')
+    parser.add_argument('--timeout', '-w', default=1.25, help='Timeout for mDNS discovery', metavar='<timeout>', type=float)
 
-    parser.add_argument(
-        '--remove-subscription',
-        type=str,
-        default=None,
-        help='Remove a subscription')
+    text_output.add_argument('--list-address', '-a', action='store_true', default=False, help='List device IP addresses')
+    text_output.add_argument('--list-devices', '-l', action='store_true', default=False, help='List devices')
+    text_output.add_argument('--list-rx', action='store_true', default=False, help='List receiver channels')
+    text_output.add_argument('--list-sample-rate', action='store_true', default=False, help='List device sample rate')
+    text_output.add_argument('--list-tx', action='store_true', default=False, help='List transmitter channels')
 
-    parser.add_argument(
-        '--reset-channel-name',
-        action='store_true',
-        default=False,
-        help='Reset the channel name to the manufacturer default')
+    channels.add_argument('--channel-number', default=None, help='Specify a channel for control by number', metavar='<number>', type=int)
+    channels.add_argument('--channel-type', choices=['rx', 'tx'], default=None, help='Channel type to target for operations', type=str)
+    channels.add_argument('--tx-channel-name', default=None, help='Specify a transmitter channel name', metavar='<name>', type=str)
+    channels.add_argument('--tx-device-name', default=None, help='Specify a transmitter device name', metavar='<name>', type=str)
 
-    parser.add_argument(
-        '--reset-device-name',
-        action='store_true',
-        default=False,
-        help='Reset the device name to the manufacturer default')
+    devices.add_argument('--dante', action='store_const', const='dante', dest='device_type', help='Use Dante devices for commands')
+    devices.add_argument('--device', '-d', default=None, help='Filter results by device name or network address', metavar='<device>', type=str)
+    devices.add_argument('--shure', action='store_const', const='shure', dest='device_type', help='Use Shure devices for commands')
 
-    parser.add_argument(
-        '--set-latency',
-        type=float,
-        default=None,
-        help='Set the device latency in milliseconds')
+    subscriptions.add_argument('--add-subscription', default=None, help='Add a subscription. Specify by Rx channel number', metavar='<channel_number>', type=str)
+    subscriptions.add_argument('--list-subscriptions', action='store_true', default=False, help='List all subscriptions')
+    subscriptions.add_argument('--remove-subscription', default=None, help='Remove a subscription. Specify by Rx channel number', metavar='<channel_number>', type=str)
 
-    parser.add_argument(
-        '--set-device-name',
-        type=str,
-        default=None,
-        help='Set the device name')
+    output.add_argument('--json', action='store_true', default=False, help='Format output in JSON')
+    output.add_argument('--tui', '-t', action='store_true', default=False, help='Enable a text user interface')
+    output.add_argument('--xml', action='store_true', default=False, help='Format output in XML')
 
-    parser.add_argument(
-        '--tx-device-name',
-        type=str,
-        default=None,
-        help='Specify a Tx device name')
-
-    parser.add_argument(
-        '--tx-channel-name',
-        type=str,
-        default=None,
-        help='Specify a Tx channel name')
-
-    parser.add_argument(
-        '--set-encoding',
-        type=int,
-        choices=[16, 24, 32],
-        default=None,
-        help='Set the encoding of a device')
-
-    parser.add_argument(
-        '--set-gain-level',
-        type=int,
-        choices=list(range(1, 6)),
-        default=None,
-        help='Set the gain level on a an AVIO device. Lower numbers are higher gain.')
-
-    parser.add_argument(
-        '--set-sample-rate',
-        type=int,
-        choices=[44100, 48000, 88200, 96000, 176400, 192000],
-        default=None,
-        help='Set the sample rate of a device')
-
-    parser.add_argument(
-        '--channel-type',
-        type=str,
-        choices=['rx', 'tx'],
-        default=None,
-        help='Channel type to target for operations')
-
-    parser.add_argument(
-        '--channel-number',
-        type=int,
-        default=None,
-        help='Specify a channel for control by number')
-
-    parser.add_argument(
-        '--set-channel-name',
-        type=str,
-        default=None,
-        help='Specify a value when changing a channel name')
-
-    parser.add_argument(
-        '-d',
-        '--device',
-        type=str,
-        default=None,
-        help='Filter results by device name or network address')
-
-    parser.add_argument(
-        '-t',
-        '--tui',
-        action='store_true',
-        default=False,
-        help='Enable a text user interface'
-    )
-
-    parser.add_argument(
-        '--json',
-        action='store_true',
-        default=False,
-        help='Format output in JSON'
-    )
-
-    parser.add_argument(
-        '--xml',
-        action='store_true',
-        default=False,
-        help='Format output in XML'
-    )
-
-    parser.add_argument(
-        '-l',
-        '--list-devices',
-        action='store_true',
-        default=False,
-        help='List devices'
-    )
-
-    parser.add_argument(
-        '--dante',
-        action='store_true',
-        default=True, # for now
-        help='Use Dante devices for operations'
-    )
-
-    parser.add_argument(
-        '--list-tx',
-        action='store_true',
-        default=False,
-        help='List all Transmitter channels'
-    )
-
-    parser.add_argument(
-        '--list-rx',
-        action='store_true',
-        default=False,
-        help='List all Receive channels'
-    )
-
-    parser.add_argument(
-        '--list-sample-rate',
-        action='store_true',
-        default=False,
-        help='List device sample rate'
-    )
-
-    parser.add_argument(
-        '--list-subscriptions',
-        action='store_true',
-        default=False,
-        help='List all subscriptions'
-    )
+    settings.add_argument('--reset-channel-name', action='store_true', default=False, help='Reset the channel name to the manufacturer default')
+    settings.add_argument('--reset-device-name', action='store_true', default=False, help='Reset the device name to the manufacturer default')
+    settings.add_argument('--set-channel-name', default=None, help='Specify a value when changing a channel name', dest='new_channel_name', metavar='<name>', type=str)
+    settings.add_argument('--set-device-name', default=None, help='Set the device name', dest='new_device_name', metavar='<name>', type=str)
+    settings.add_argument('--set-encoding', choices=[16, 24, 32], default=None, dest='encoding', help='Set the encoding of a device', type=int)
+    settings.add_argument('--set-gain-level', choices=list(range(1, 6)), default=None, dest='gain_level', help='Set the gain level on a an AVIO device. Lower numbers are higher gain', type=int)
+    settings.add_argument('--set-latency', default=None, help='Set the device latency in milliseconds', dest='latency', metavar='<latency>', type=float)
+    settings.add_argument('--set-sample-rate', choices=[44100, 48000, 88200, 96000, 176400, 192000], default=None, dest='sample_rate', help='Set the sample rate of a device', type=int)
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -272,7 +141,7 @@ def get_dante_services(timeout):
 def print_devices(devices):
     args = parse_args()
 
-    for key, device in devices.items():
+    for index, (key, device) in enumerate(devices.items()):
         if args.list_devices:
             if args.list_address:
                 print(f'{device} {device.ipv4}')
@@ -283,10 +152,13 @@ def print_devices(devices):
                 print(f'{device.ipv4}')
 
         if args.list_sample_rate and device.sample_rate:
-            print(f'{device.sample_rate}')
+            print(f'Sample rate: {device.sample_rate}')
 
         if args.list_rx:
             rx_channels = device.rx_channels
+
+            if (len(rx_channels)):
+                print('Rx channels:')
 
             for key, channel in rx_channels.items():
                 print(channel)
@@ -294,10 +166,15 @@ def print_devices(devices):
         if args.list_tx:
             tx_channels = device.tx_channels
 
+            if (len(tx_channels)):
+                print('Tx channels:')
+
             for key, channel in tx_channels.items():
                 print(channel)
 
         if args.list_subscriptions:
+            if (len(device.subscriptions)):
+                print('Subscriptions:')
             for subscription in device.subscriptions:
                 print(f'{subscription}')
 
@@ -324,19 +201,19 @@ def control_dante_device(device):
         print(f'Resetting device name for {device.name} {device.ipv4}')
         device.reset_device_name()
 
-    if args.set_device_name:
-        print(f'Setting device name for {device.name} {device.ipv4} to {args.set_device_name}')
-        device.set_device_name(args.set_device_name)
+    if args.new_device_name:
+        print(f'Setting device name for {device.name} {device.ipv4} to {args.new_device_name}')
+        device.device_name(args.new_device_name)
 
     if args.reset_channel_name:
         print(f'Resetting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4}')
         device.reset_channel_name(args.channel_type, args.channel_number)
 
-    if args.set_sample_rate:
-        print(f'Setting sample rate of {device.name} {device.ipv4} to {args.set_sample_rate}')
-        device.set_sample_rate(args.set_sample_rate)
+    if args.sample_rate:
+        print(f'Setting sample rate of {device.name} {device.ipv4} to {args.sample_rate}')
+        device.set_sample_rate(args.sample_rate)
 
-    if args.set_gain_level:
+    if args.gain_level:
         device_type = None
         label = None
 
@@ -365,28 +242,28 @@ def control_dante_device(device):
 
         if device_type:
             if args.channel_number:
-                print(f'Setting gain level of {device.name} {device.ipv4} to {label[args.set_gain_level]} on channel {args.channel_number}')
-                device.set_gain_level(args.channel_number, args.set_gain_level, device_type)
+                print(f'Setting gain level of {device.name} {device.ipv4} to {label[args.gain_level]} on channel {args.channel_number}')
+                device.set_gain_level(args.channel_number, args.gain_level, device_type)
             else:
                 print(f'Must specify a channel number')
 
-    if args.set_encoding:
-        print(f'Setting encoding of {device.name} {device.ipv4} to {args.set_encoding}')
-        device.set_encoding(args.set_encoding)
+    if args.encoding:
+        print(f'Setting encoding of {device.name} {device.ipv4} to {args.encoding}')
+        device.set_encoding(args.encoding)
 
-    if args.set_channel_name:
-        print(f'Setting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4} to {args.set_channel_name}')
-        device.set_channel_name(args.channel_type, args.channel_number, args.set_channel_name)
+    if args.new_channel_name:
+        print(f'Setting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4} to {args.new_channel_name}')
+        device.set_channel_name(args.channel_type, args.channel_number, args.new_channel_name)
 
-    if args.set_latency:
-        print(f'Setting latency of {device} to {args.set_latency}')
-        device.set_latency(args.set_latency)
+    if args.latency:
+        print(f'Setting latency of {device} to {args.latency}')
+        device.set_latency(args.latency)
 
 
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.set_channel_name or args.set_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
+    if (args.gain_level or args.encoding or args.sample_rate or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -398,7 +275,7 @@ def control_dante_devices(devices):
         if not args.json and (args.device and len(devices) == 0):
             print('The specified device was not found')
         else:
-            if args.set_gain_level or args.set_encoding or args.set_sample_rate or args.set_latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.set_device_name or args.reset_channel_name or args.set_channel_name:
+            if args.gain_level or args.encoding or args.sample_rate or args.latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.new_device_name or args.reset_channel_name or args.new_channel_name:
                 if not args.device:
                     print('Must specify a device name')
                 else:
@@ -424,15 +301,20 @@ def control_dante_devices(devices):
 def cli_mode():
     args = parse_args()
 
-    if args.dante:
+    if args.device_type == 'dante':
         services = get_dante_services(args.timeout)
         dante.parse_netaudio_services(services)
         dante_devices = dante.get_devices()
 
         if len(dante_devices) == 0:
-            print('No devices detected. Try increasing the mDNS timeout.')
+            if not args.json:
+                print('No devices detected. Try increasing the mDNS timeout.')
         else:
+            if not args.json:
+                print(f'{len(dante_devices)} devices found')
             control_dante_devices(dante_devices)
+    else:
+        print('Not implemented')
 
 
 def tui_mode():
