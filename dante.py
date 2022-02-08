@@ -382,11 +382,9 @@ class Device(object):
                             tx_channel_name = rx_channel_name
 
                         if index == 0 and not device_offset == '0000':
-                            o1 = int(channel_offset, 16) * 2
-                            o2 = ((len(tx_channel_name) + len(tx_device_name)) * 2)
-                            o3 = o1 + o2 + 6
-                            o4 = o1 + o2 + 12
-                            sample_rate_hex = hex_rx_response[o3:o4]
+                            o1 = (int(channel[2], 16) * 2) + 2
+                            o2 = o1 + 6
+                            sample_rate_hex = hex_rx_response[o1:o2]
 
                             if sample_rate_hex != '000000':
                                 self.sample_rate = int(sample_rate_hex, 16)
@@ -460,6 +458,13 @@ class Device(object):
                         first_channel = channel
 
                     if channel:
+                        o1 = (int(channel[2], 16) * 2) + 2
+                        o2 = o1 + 6
+                        sample_rate_hex = transmitters[o1:o2]
+
+                        if sample_rate_hex != '000000':
+                            self.sample_rate = int(sample_rate_hex, 16)
+
                         channel_number = int(channel[0], 16)
                         channel_status = channel[1][2:]
                         channel_group = channel[2]
