@@ -57,6 +57,7 @@ def parse_args():
     devices.add_argument('--dante', action='store_const', const='dante', dest='device_type', help='Use Dante devices for commands')
     devices.add_argument('--device', '-d', default=None, help='Filter results by device name or network address', metavar='<device>', type=str)
     devices.add_argument('--shure', action='store_const', const='shure', dest='device_type', help='Use Shure devices for commands')
+    devices.add_argument('--identify', action='store_true', default=False, help='Identify a hardware device by flashing a red LED')
 
     subscriptions.add_argument('--add-subscription', default=None, help='Add a subscription. Specify by Rx channel number', metavar='<channel_number>', type=str)
     subscriptions.add_argument('--list-subscriptions', action='store_true', default=False, help='List all subscriptions')
@@ -259,11 +260,15 @@ def control_dante_device(device):
         print(f'Setting latency of {device} to {args.latency}')
         device.set_latency(args.latency)
 
+    if args.identify:
+        print(f'Identifying {device} {device.ipv4}')
+        device.identify()
+
 
 def control_dante_devices(devices):
     args = parse_args()
 
-    if (args.gain_level or args.encoding or args.sample_rate or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
+    if (args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
 
@@ -275,7 +280,7 @@ def control_dante_devices(devices):
         if not args.json and (args.device and len(devices) == 0):
             print('The specified device was not found')
         else:
-            if args.gain_level or args.encoding or args.sample_rate or args.latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.new_device_name or args.reset_channel_name or args.new_channel_name:
+            if args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.reset_device_name or args.new_device_name or args.reset_channel_name or args.new_channel_name:
                 if not args.device:
                     print('Must specify a device name')
                 else:
