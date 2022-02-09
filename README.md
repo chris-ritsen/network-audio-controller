@@ -1,7 +1,7 @@
 
 ### Description
 
-This is a python program for controlling Dante network audio devices (and possibly others in the future). It's very early, so expect things to break or switches to change.  The first goal is to do everything that Dante Controller can do that would be useful for control of the devices from a command-line interface or within scripts.  
+This is a python program for controlling Dante network audio devices (and possibly others in the future). It's very early, so expect things to break or switches to change.  Use this at your own risk; it's not ready for anything other than a test environment and could make the devices behave unexpectedly. The first goal is to do everything that Dante Controller can do that would be useful for control of the devices from a command-line interface or within scripts.
 
 For more information, check out the [gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
 
