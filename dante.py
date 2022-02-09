@@ -303,9 +303,11 @@ class Device(object):
 
     def dante_command(self, command, service_type=None, port=None):
         response = None
+
         if service_type:
             service = self.get_service(service_type)
             sock = self.sockets[service['port']]
+
         if port:
             sock = self.sockets[port]
 
@@ -322,6 +324,11 @@ class Device(object):
 
     def set_channel_name(self, channel_type, channel_number, new_channel_name):
         response = self.dante_command(*command_set_channel_name(channel_type, channel_number, new_channel_name))
+        return response
+
+
+    def identify(self):
+        response = self.dante_command(*command_identify())
         return response
 
 
@@ -846,6 +853,12 @@ def command_set_latency(latency):
     command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
 
     return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
+
+
+def command_identify():
+    command_string = f'ffff00200bc8000090e2ba610ce00000417564696e6174650731006300000064'
+
+    return (command_string, None, ports['device_settings'])
 
 
 def command_set_encoding(encoding):
