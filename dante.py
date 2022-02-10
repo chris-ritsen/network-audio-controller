@@ -2,12 +2,14 @@
 
 import codecs
 import socket
+import time
 
 from zeroconf import DNSService
 
 devices = {}
 
 ports = {
+    'device_control': 8800,
     'device_settings': 8700
 }
 
@@ -435,6 +437,18 @@ class Device(object):
             print(e)
 
 
+    def get_volume(self, ipv4, mac, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', 0))
+        sock.settimeout(2)
+        sock.connect((self.ipv4, port))
+        self.sockets[port] = sock
+
+        volume_start = self.dante_command(*command_volume_start(self.name, ipv4, mac, port)).hex()
+        #  time.sleep(2)
+        #  volume_stop = self.dante_command(*command_volume_stop(self.name, ipv4, mac, port)).hex()
+
+
     def get_rx_channels(self):
         rx_channels = {}
         subscriptions = []
@@ -843,6 +857,49 @@ def command_string(command=None, command_str=None, command_args='0000', command_
         command_hex = f'27{sequence1}00{command_length}{sequence2}{command_str}{command_args}'
 
     return command_hex
+
+
+def get_name_lengths(device_name):
+    name_len = len(device_name)
+    offset = (name_len & 1) - 2
+    padding = 10 - (name_len + offset)
+    name_len1 = (len(device_name) * 2) + padding
+    name_len2 = name_len1 + 2
+    name_len3 = name_len2 + 4
+
+    return (name_len1, name_len2, name_len3)
+
+
+def command_volume_start(device_name, ipv4, mac, port, timeout=True):
+    data_len = 0
+    device_name_hex = device_name.encode().hex()
+    ip_hex = socket.inet_aton(ipv4).hex()
+
+    name_len1, name_len2, name_len3 = get_name_lengths(device_name)
+
+    if len(device_name) % 2 == 0:
+        device_name_hex = f'{device_name_hex}00'
+
+    data_len = len(device_name) + (len(device_name) & 1) + 54
+    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}000001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
+
+    return (command_string, None, ports['device_control'])
+
+
+def command_volume_stop(device_name, ipv4, mac, port):
+    data_len = 0
+    device_name_hex = device_name.encode().hex()
+    ip_hex = '00000000'
+
+    name_len1, name_len2, name_len3 = get_name_lengths(device_name)
+
+    if len(device_name) % 2 == 0:
+        device_name_hex = f'{device_name_hex}00'
+
+    data_len = len(device_name) + (len(device_name) & 1) + 54
+    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}010016000100{name_len3:02x}0001{port:04x}00010000{ip_hex}{0:04x}0000'
+
+    return (command_string, None, ports['device_control'])
 
 
 def command_set_latency(latency):

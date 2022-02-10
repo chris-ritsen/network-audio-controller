@@ -5,6 +5,7 @@ import argparse
 import enum
 import json
 import os
+import netifaces
 import signal
 import socket
 import sys
@@ -48,6 +49,7 @@ def parse_args():
     text_output.add_argument('--list-rx', action='store_true', default=False, help='List receiver channels')
     text_output.add_argument('--list-sample-rate', action='store_true', default=False, help='List device sample rate')
     text_output.add_argument('--list-tx', action='store_true', default=False, help='List transmitter channels')
+    text_output.add_argument('--list-volume', action='store_true', default=False, help='List volume levels of channels. Not supported on all devices. Partially implemented')
 
     channels.add_argument('--channel-number', default=None, help='Specify a channel for control by number', metavar='<number>', type=int)
     channels.add_argument('--channel-type', choices=['rx', 'tx'], default=None, help='Channel type to target for operations', type=str)
@@ -155,6 +157,7 @@ def print_devices(devices):
         if args.list_sample_rate and device.sample_rate:
             print(f'Sample rate: {device.sample_rate}')
 
+        # TODO: list channel volumes
         if args.list_rx:
             rx_channels = device.rx_channels
 
@@ -204,7 +207,7 @@ def control_dante_device(device):
 
     if args.new_device_name:
         print(f'Setting device name for {device.name} {device.ipv4} to {args.new_device_name}')
-        device.device_name(args.new_device_name)
+        device.set_device_name(args.new_device_name)
 
     if args.reset_channel_name:
         print(f'Resetting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4}')
@@ -268,9 +271,23 @@ def control_dante_device(device):
 def control_dante_devices(devices):
     args = parse_args()
 
+    if args.list_volume:
+        try:
+            interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
+            ipv4 = interface[netifaces.AF_INET][0]['addr']
+            mac = netifaces.ifaddresses('br0')[netifaces.AF_LINK][0]['addr'].replace(':', '')
+        except Exception as e:
+            pass
+
     if (args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         for key, device in devices.items():
             device.get_device_controls()
+
+            if args.list_volume:
+                try:
+                    device.get_volume(ipv4, mac, 8751)
+                except Exception as e:
+                    pass
 
         if args.device:
             devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
