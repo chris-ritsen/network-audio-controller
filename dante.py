@@ -7,6 +7,7 @@ import time
 from zeroconf import DNSService
 
 devices = {}
+sockets = {}
 
 ports = {
     'device_control': 8800,
@@ -37,11 +38,17 @@ class Channel(object):
         self._number = None
         self._status_codes = None
         self._status_text = None
+        self._volume = None
 
 
     def __str__(self):
+        name = self.name
+
         if self.friendly_name:
-            return (f'{self.number}:{self.friendly_name}')
+            name = self.friendly_name
+
+        if self.volume and self.volume != 254:
+            return (f'{self.number}:{name} [{self.volume}]')
         else:
             return(f'{self.number}:{self.name}')
 
@@ -116,6 +123,16 @@ class Channel(object):
         self._name = name
 
 
+    @property
+    def volume(self):
+        return self._volume
+
+
+    @volume.setter
+    def volume(self, volume):
+        self._volume = volume
+
+
     def to_json(self):
         as_json = {
             'number': self.number,
@@ -127,6 +144,9 @@ class Channel(object):
 
         if self.status_text:
             as_json['status_text'] = self.status_text
+
+        if self.volume:
+            as_json['volume'] = self.volume
 
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
@@ -287,6 +307,7 @@ class Device(object):
         self._mac_address = None
         self._manufacturer = ''
         self._model = ''
+        self._model_id = ''
         self._name = ''
         self._rx_channels = {}
         self._rx_count = 0
@@ -437,16 +458,46 @@ class Device(object):
             print(e)
 
 
-    def get_volume(self, ipv4, mac, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind(('', 0))
-        sock.settimeout(2)
-        sock.connect((self.ipv4, port))
-        self.sockets[port] = sock
+    def parse_volume(self, bytes_volume):
+        rx_channels = bytes_volume[-1 - self.rx_count:-1]
+        tx_channels = bytes_volume[-1 - self.rx_count - self.tx_count:-1 - self.rx_count]
 
-        volume_start = self.dante_command(*command_volume_start(self.name, ipv4, mac, port)).hex()
-        #  time.sleep(2)
-        #  volume_stop = self.dante_command(*command_volume_stop(self.name, ipv4, mac, port)).hex()
+        try:
+            for index, channel in self.tx_channels.items():
+                channel.volume = tx_channels[channel.number - 1]
+
+            for channel_number, channel in self.rx_channels.items():
+                channel.volume = rx_channels[channel.number - 1]
+
+        except Exception as e:
+            print(e)
+
+
+    def get_volume(self, ipv4, mac, port):
+        try:
+            if port in sockets:
+                sock = sockets[port]
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.settimeout(0.1)
+                sock.bind((ipv4, port))
+                sockets[port] = sock
+
+            volume_start = self.dante_command(*command_volume_start(self.name, ipv4, mac, port))
+
+            if volume_start:
+                while True:
+                    try:
+                        data, addr = sock.recvfrom(2048)
+                        if addr[0] == self.ipv4:
+                            volume_stop = self.dante_command(*command_volume_stop(self.name, ipv4, mac, port))
+                            self.parse_volume(data)
+                        break
+                    except:
+                        break
+
+        except Exception as e:
+            print(e)
 
 
     def get_rx_channels(self):
@@ -645,6 +696,16 @@ class Device(object):
     @model.setter
     def model(self, model):
         self._model = model
+
+
+    @property
+    def model_id(self):
+        return self._model_id
+
+
+    @model_id.setter
+    def model_id(self, model_id):
+        self._model_id = model_id
 
 
     @property
@@ -1098,7 +1159,7 @@ def parse_netaudio_services(services):
                     device.manufacturer = service_properties['mf']
 
                 if 'model' in service_properties:
-                    device.model = service_properties['model']
+                    device.model_id = service_properties['model']
 
                 if 'rate' in service_properties:
                     device.sample_rate = int(service_properties['rate'])
