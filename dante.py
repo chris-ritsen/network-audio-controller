@@ -474,6 +474,16 @@ class Device(object):
 
 
     def get_volume(self, ipv4, mac, port):
+        if self.model_id and self.model_id in [
+                'DAI1',
+                'DAI2',
+                'DAO1',
+                'DAO2',
+                'DIOUSB',
+                '_86012780000a0003'
+                ]:
+            return
+
         try:
             if port in sockets:
                 sock = sockets[port]
@@ -872,6 +882,9 @@ class Device(object):
 
         if self.manufacturer:
             as_json['manufacturer'] = self.manufacturer
+
+        if self.model_id:
+            as_json['model_id'] = self.model_id
 
         if self.mac_address:
             as_json['mac_address'] = self.mac_address
