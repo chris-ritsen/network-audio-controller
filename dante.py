@@ -907,29 +907,38 @@ def command_set_latency(latency):
     command_length = '28'
     latency = int(latency * 1000000)
     latency_hex = f'{latency:06x}'
+
     command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
 
     return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
 
 
 def command_identify():
-    command_string = f'ffff00200bc8000090e2ba610ce00000417564696e6174650731006300000064'
+    mac = '000000000000'
+    data_len = 32
+
+    command_string = f'ffff00{data_len:02x}0bc80000{mac}0000417564696e6174650731006300000064'
 
     return (command_string, None, ports['device_settings'])
 
 
 def command_set_encoding(encoding):
-    encoding_hex = f'{encoding:02x}'
-    command_string = f'ffff002803d70000525400c5c2710000417564696e617465072700830000006400000001000000{encoding_hex}'
+    ipv4 = '000000'
+    data_len = 40
+
+    command_string = f'ffff00{data_len}03d70000525400{ipv4}0000417564696e617465072700830000006400000001000000{encoding:02x}'
 
     return (command_string, None, ports['device_settings'])
 
 
 def command_set_gain_level(channel_number, gain_level, device_type):
+    ipv4 = '000000'
+    data_len = 52
+
     if device_type == 'input':
-        target = 'ffff003403440000525400c5c2710000417564696e6174650727100a0000000000010001000c001001020000000000'
+        target = f'ffff00{data_len:02x}03440000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001001020000000000'
     elif device_type == 'output':
-        target = 'ffff003403260000525400c5c2710000417564696e6174650727100a0000000000010001000c001002010000000000'
+        target = f'ffff00{data_len:02x}03260000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001002010000000000'
 
     command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
 
@@ -937,7 +946,10 @@ def command_set_gain_level(channel_number, gain_level, device_type):
 
 
 def command_set_sample_rate(sample_rate):
-    command_string = f'ffff002803d40000525400c5c2710000417564696e61746507270081000000640000000100{sample_rate:06x}'
+    ipv4 = '000000'
+    data_len = 40
+
+    command_string = f'ffff00{data_len:02x}03d40000525400{ipv4}0000417564696e61746507270081000000640000000100{sample_rate:06x}'
 
     return (command_string, None, ports['device_settings'])
 

@@ -260,7 +260,7 @@ def control_dante_device(device):
         device.set_channel_name(args.channel_type, args.channel_number, args.new_channel_name)
 
     if args.latency:
-        print(f'Setting latency of {device} to {args.latency}')
+        print(f'Setting latency of {device} to {args.latency:g} ms')
         device.set_latency(args.latency)
 
     if args.identify:
