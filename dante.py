@@ -2,15 +2,25 @@
 
 import codecs
 import socket
+import struct
 import time
 
+from pyee import AsyncIOEventEmitter
+from pyee.cls import evented, on
 from zeroconf import DNSService
+
+ee = AsyncIOEventEmitter()
 
 devices = {}
 sockets = {}
 
+multicast_groups = {
+    'device_info': '224.0.0.231'
+}
+
 ports = {
     'device_control': 8800,
+    'device_info': 8702,
     'device_settings': 8700
 }
 
@@ -299,8 +309,11 @@ class Subscription(object):
         self._tx_device = tx_device
 
 
+@evented
 class Device(object):
     def __init__(self):
+        self._dante_model = ''
+        self._dante_model_id = ''
         self._error = None
         self._ipv4 = ''
         self._latency = None
@@ -414,6 +427,89 @@ class Device(object):
         return service
 
 
+    @on('dante_model_info')
+    def event_handler(self, *args, **kwargs):
+        ipv4 = kwargs['ipv4']
+        mac = kwargs['mac']
+        model = kwargs['model']
+        model_id = kwargs['model_id']
+
+        self.dante_model = model
+        self.dante_model_id = model_id
+
+
+    @on('parse_dante_model_info')
+    def event_handler(self, *args, **kwargs):
+        addr = kwargs['addr']
+        data = kwargs['data']
+        mac = kwargs['mac']
+
+        ipv4 = addr[0]
+
+        model = data[88:].partition(b'\x00')[0].decode('utf-8')
+        model_id = data[43:].partition(b'\x00')[0].decode('utf-8').replace('\u0003', '')
+
+        self.event_emitter.emit('dante_model_info', model_id=model_id, model=model, ipv4=ipv4, mac=mac)
+
+
+    @on('device_make_model_info')
+    def event_handler(self, *args, **kwargs):
+        ipv4 = kwargs['ipv4']
+        mac = kwargs['mac']
+        manufacturer = kwargs['manufacturer']
+        model = kwargs['model']
+
+        self.manufacturer = manufacturer
+        self.model = model
+
+
+    @on('parse_device_make_model_info')
+    def event_handler(self, *args, **kwargs):
+        addr = kwargs['addr']
+        data = kwargs['data']
+        mac = kwargs['mac']
+
+        ipv4 = addr[0]
+
+        manufacturer = data[76:].partition(b'\x00')[0].decode('utf-8')
+        model = data[204:].partition(b'\x00')[0].decode('utf-8')
+
+        self.event_emitter.emit('device_make_model_info', manufacturer=manufacturer, model=model, ipv4=ipv4, mac=mac)
+
+
+    @on('subscription_changed')
+    def event_handler(self, *args, **kwargs):
+        addr = kwargs['addr']
+        data = kwargs['data']
+        mac = kwargs['mac']
+
+
+    @on('received_multicast')
+    def event_handler(self, *args, **kwargs):
+        addr = kwargs['addr']
+        data = kwargs['data']
+        group = kwargs['group']
+        port = kwargs['port']
+
+        data_hex = data.hex()
+        device_ipv4 = addr[0]
+
+        device_mac = data_hex[16:32]
+
+        if self.ipv4 != device_ipv4:
+            return
+
+        sequence_id = data[4:6]
+        command = int.from_bytes(data[26:28], 'big')
+
+        data_len = int.from_bytes(data[2:4], 'big')
+
+        if command == 96:
+            self.event_emitter.emit('parse_dante_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
+        elif command == 192:
+            self.event_emitter.emit('parse_device_make_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
+
+
     def get_device_controls(self):
         try:
             for key, service in self.services.items():
@@ -422,7 +518,7 @@ class Device(object):
 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
-                sock.settimeout(2)
+                sock.settimeout(20)
                 sock.connect((self.ipv4, service['port']))
                 self.sockets[service['port']] = sock
 
@@ -477,7 +573,7 @@ class Device(object):
 
     def get_volume(self, ipv4, mac, port):
         try:
-            if self.software == 'Dante Via' or (self.model_id and self.model_id in ['DAI1', 'DAI2', 'DAO1', 'DAO2', 'DIOUSB', '_86012780000a0003']):
+            if self.software == 'Dante Via' or (self.model_id and (self.manufacturer == 'Audinate' and self.model_id in ['DAI1', 'DAI2', 'DAO1', 'DAO2', 'DIOUSB', 'DIAES3', 'DIUSBC'] or self.model_id in ['_86012780000a0003'])):
                 return
 
             if port in sockets:
@@ -691,6 +787,26 @@ class Device(object):
     @ipv4.setter
     def ipv4(self, ipv4):
         self._ipv4 = ipv4
+
+
+    @property
+    def dante_model(self):
+        return self._dante_model
+
+
+    @dante_model.setter
+    def dante_model(self, dante_model):
+        self._dante_model = dante_model
+
+
+    @property
+    def dante_model_id(self):
+        return self._dante_model_id
+
+
+    @dante_model_id.setter
+    def dante_model_id(self, dante_model_id):
+        self._dante_model_id = dante_model_id
 
 
     @property
@@ -908,6 +1024,16 @@ class Device(object):
         if self.manufacturer:
             as_json['manufacturer'] = self.manufacturer
 
+
+        if self.dante_model:
+            as_json['dante_model'] = self.dante_model
+
+        if self.dante_model_id:
+            as_json['dante_model_id'] = self.dante_model_id
+
+        if self.model:
+            as_json['model'] = self.model
+
         if self.model_id:
             as_json['model_id'] = self.model_id
 
@@ -967,6 +1093,20 @@ def get_name_lengths(device_name):
     name_len3 = name_len2 + 4
 
     return (name_len1, name_len2, name_len3)
+
+
+def command_make_model(mac):
+    cmd_args = '00c100000000'
+    command_string = f'ffff00200fdb0000{mac}0000417564696e6174650731{cmd_args}'
+
+    return (command_string, None, ports['device_settings'])
+
+
+def command_dante_model(mac):
+    cmd_args='006100000000'
+    command_string = f'ffff00200fdb0000{mac}0000417564696e6174650731{cmd_args}'
+
+    return (command_string, None, ports['device_settings'])
 
 
 def command_volume_start(device_name, ipv4, mac, port, timeout=True):
@@ -1177,6 +1317,90 @@ def get_devices():
     return devices
 
 
+@ee.on('received_multicast')
+def event_handler(*args, **kwargs):
+    addr = kwargs['addr']
+    data = kwargs['data']
+    group = kwargs['group']
+    port = kwargs['port']
+
+    data_hex = data.hex()
+
+    device_ipv4 = addr[0]
+    device_mac = data_hex[16:32]
+    data_len = int.from_bytes(data[2:4], 'big')
+
+    devices_filtered = dict(filter(lambda x: x[1].ipv4 == device_ipv4 or x[1].mac_address == device_mac, devices.items()))
+
+    if len(devices_filtered) == 1:
+        device = list(devices_filtered.values())[0]
+
+        try:
+            device.event_emitter.emit('received_multicast', *args, **kwargs)
+        except Exception as e:
+            print(e)
+
+
+def get_make_model_info(mac):
+    multicast_group = multicast_groups['device_info']
+    port = ports['device_info']
+
+    if port in sockets:
+        sock = sockets[port]
+    else:
+        server_address = ('', port)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(0.1)
+        sock.bind(server_address)
+        group = socket.inet_aton(multicast_group)
+        mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        sockets[port] = sock
+
+    for key, device in devices.items():
+        if device.software:
+            continue
+        try:
+            while True:
+                if device.manufacturer and device.model:
+                    break
+
+                device.dante_command(*command_make_model(mac))
+
+                data, addr = sock.recvfrom(2048)
+                data_hex = data.hex()
+
+                device_ipv4 = addr[0]
+                device_mac = data_hex[16:32]
+
+                command = int.from_bytes(data[26:28], 'big')
+
+                if command == 192:
+                    ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=port)
+
+            while True:
+                try:
+                    if device.dante_model:
+                        break
+
+                    device.dante_command(*command_dante_model(mac))
+
+                    data, addr = sock.recvfrom(2048)
+                    data_hex = data.hex()
+
+                    device_ipv4 = addr[0]
+                    device_mac = data_hex[16:32]
+
+                    command = int.from_bytes(data[26:28], 'big')
+
+                    if command == 96:
+                        ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=port)
+                except Exception as e:
+                    pass
+        except Exception as e:
+            print(e)
+
+
 def parse_netaudio_services(services):
     for name, service in dict(services).items():
         zeroconf = service['zeroconf']
@@ -1205,9 +1429,6 @@ def parse_netaudio_services(services):
 
                 if 'id' in service_properties and service['type'] == service_types['cmc']:
                     device.mac_address = service_properties['id']
-
-                if 'mf' in service_properties:
-                    device.manufacturer = service_properties['mf']
 
                 if 'model' in service_properties:
                     device.model_id = service_properties['model']

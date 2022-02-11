@@ -2,19 +2,24 @@
 
 import argcomplete
 import argparse
+import asyncio
 import enum
 import json
-import os
 import netifaces
+import os
 import signal
 import socket
+import struct
 import sys
 import time
 
+from pyee import AsyncIOEventEmitter
 from json import JSONEncoder
 from zeroconf import ServiceBrowser, Zeroconf, DNSAddress
 
 import dante
+
+ee = AsyncIOEventEmitter()
 
 dante_devices = {}
 
@@ -41,6 +46,7 @@ def parse_args():
     settings = parser.add_argument_group('settings')
     subscriptions = parser.add_argument_group('subscriptions')
     text_output = parser.add_argument_group('text output')
+    debug = parser.add_argument_group('debug')
 
     parser.add_argument('--timeout', '-w', default=1.25, help='Timeout for mDNS discovery', metavar='<timeout>', type=float)
 
@@ -77,6 +83,8 @@ def parse_args():
     settings.add_argument('--set-gain-level', choices=list(range(1, 6)), default=None, dest='gain_level', help='Set the gain level on a an AVIO device. Lower numbers are higher gain', type=int)
     settings.add_argument('--set-latency', default=None, help='Set the device latency in milliseconds', dest='latency', metavar='<latency>', type=float)
     settings.add_argument('--set-sample-rate', choices=[44100, 48000, 88200, 96000, 176400, 192000], default=None, dest='sample_rate', help='Set the sample rate of a device', type=int)
+
+    debug.add_argument('--debug-multicast', action='store_true', default=False, help='Show multicast data')
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -126,12 +134,17 @@ class MdnsListener:
             'zeroconf': zeroconf
         }
 
+        info = zeroconf.get_service_info(type, name)
+
         #  print(f'service added \t{name}')
 
 
 def get_dante_services(timeout):
     zeroconf = Zeroconf()
     listener = MdnsListener()
+
+    #  info = zeroconf.get_service_info('_netaudio-arc._udp.local.')
+    #  print(info)
 
     for key, service_type in dante.get_service_types().items():
         ServiceBrowser(zeroconf, service_type, listener)
@@ -268,16 +281,124 @@ def control_dante_device(device):
         device.identify()
 
 
+@ee.on('dante_model_info')
+def event_handler(*args, **kwargs):
+    ipv4 = kwargs['ipv4']
+    mac = kwargs['mac']
+    model = kwargs['model']
+    model_id = kwargs['model_id']
+
+    print(model, model_id, ipv4, mac)
+
+
+@ee.on('parse_dante_model_info')
+def event_handler(*args, **kwargs):
+    addr = kwargs['addr']
+    data = kwargs['data']
+    mac = kwargs['mac']
+
+    ipv4 = addr[0]
+
+    model = data[88:].partition(b'\x00')[0].decode('utf-8')
+    model_id = data[43:].partition(b'\x00')[0].decode('utf-8')
+
+    ee.emit('dante_model_info', model_id=model_id, model=model, ipv4=ipv4, mac=mac)
+
+
+@ee.on('device_make_model_info')
+def event_handler(*args, **kwargs):
+    ipv4 = kwargs['ipv4']
+    mac = kwargs['mac']
+    manufacturer = kwargs['manufacturer']
+    model = kwargs['model']
+
+    print(manufacturer, model, ipv4, mac)
+
+
+@ee.on('parse_device_make_model_info')
+def event_handler(*args, **kwargs):
+    addr = kwargs['addr']
+    data = kwargs['data']
+    mac = kwargs['mac']
+
+    ipv4 = addr[0]
+
+    manufacturer = data[76:].partition(b'\x00')[0].decode('utf-8')
+    model = data[204:].partition(b'\x00')[0].decode('utf-8')
+
+    ee.emit('device_make_model_info', manufacturer=manufacturer, model=model, ipv4=ipv4, mac=mac)
+
+
+@ee.on('subscription_changed')
+def event_handler(*args, **kwargs):
+    addr = kwargs['addr']
+    data = kwargs['data']
+    mac = kwargs['mac']
+
+
+@ee.on('received_multicast')
+def event_handler(*args, **kwargs):
+    addr = kwargs['addr']
+    data = kwargs['data']
+    group = kwargs['group']
+    port = kwargs['port']
+
+    data_hex = data.hex()
+
+    sequence_id = data[4:6]
+    command = int.from_bytes(data[26:28], 'big')
+    print(command)
+
+    device_ipv4 = addr[0]
+    device_mac = data_hex[16:32]
+    data_len = int.from_bytes(data[2:4], 'big')
+
+    if command == 96:
+        ee.emit('parse_dante_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
+    elif command == 98:
+        print('identify')
+    if command == 112:
+        print('firmware update related')
+    elif command == 146:
+        print('device reboot')
+    elif command == 192:
+        ee.emit('parse_device_make_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
+    elif command == 258:
+        print(device_ipv4, command, 'sub/unsub')
+    elif command == 261:
+        print(device_ipv4, command, 'sub/unsub')
+
+
+def debug_multicast():
+    multicast_group = '224.0.0.231'
+    multicast_port = 8702
+    server_address = ('', multicast_port)
+    mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    mc_sock.bind(server_address)
+    group = socket.inet_aton(multicast_group)
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    mc_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    while True:
+        try:
+            data, addr = mc_sock.recvfrom(2048)
+            ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=multicast_port)
+        except Exception as e:
+            print(e)
+
+
 def control_dante_devices(devices):
     args = parse_args()
 
-    if args.list_volume:
-        try:
-            interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
-            ipv4 = interface[netifaces.AF_INET][0]['addr']
-            mac = netifaces.ifaddresses('br0')[netifaces.AF_LINK][0]['addr'].replace(':', '')
-        except Exception as e:
-            pass
+    if args.debug_multicast:
+        debug_multicast()
+
+    try:
+        interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
+        ipv4 = interface[netifaces.AF_INET][0]['addr']
+        mac = netifaces.ifaddresses('br0')[netifaces.AF_LINK][0]['addr'].replace(':', '')
+    except Exception as e:
+        pass
 
     if (args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         for key, device in devices.items():
@@ -288,6 +409,8 @@ def control_dante_devices(devices):
                     device.get_volume(ipv4, mac, 8751)
                 except Exception as e:
                     pass
+
+        dante.get_make_model_info(mac)
 
         if args.device:
             devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
