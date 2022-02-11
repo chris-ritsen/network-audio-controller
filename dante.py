@@ -311,13 +311,15 @@ class Device(object):
         self._name = ''
         self._rx_channels = {}
         self._rx_count = 0
+        self._rx_count_raw = 0
         self._sample_rate = None
         self._server_name = ''
         self._services = {}
         self._sockets = {}
+        self._software = None
         self._subscriptions = []
         self._tx_channels = {}
-        self._tx_count = 0
+        self._tx_count_raw = 0
 
 
     def __str__(self):
@@ -441,8 +443,8 @@ class Device(object):
             # get reported rx/tx channel counts
             if not self.rx_count or not self.tx_count:
                 channel_count = self.dante_command(*command_channel_count())
-                self.rx_count = int.from_bytes(channel_count[15:16], 'big')
-                self.tx_count = int.from_bytes(channel_count[13:14], 'big')
+                self.rx_count_raw = self.rx_count = int.from_bytes(channel_count[15:16], 'big')
+                self.tx_count_raw = self.tx_count = int.from_bytes(channel_count[13:14], 'big')
 
             # get tx channels
             if not self.tx_channels and self.tx_count:
@@ -459,8 +461,8 @@ class Device(object):
 
 
     def parse_volume(self, bytes_volume):
-        rx_channels = bytes_volume[-1 - self.rx_count:-1]
-        tx_channels = bytes_volume[-1 - self.rx_count - self.tx_count:-1 - self.rx_count]
+        rx_channels = bytes_volume[-1 - self.rx_count_raw:-1]
+        tx_channels = bytes_volume[-1 - self.rx_count_raw - self.tx_count_raw:-1 - self.rx_count_raw]
 
         try:
             for index, channel in self.tx_channels.items():
@@ -474,17 +476,10 @@ class Device(object):
 
 
     def get_volume(self, ipv4, mac, port):
-        if self.model_id and self.model_id in [
-                'DAI1',
-                'DAI2',
-                'DAO1',
-                'DAO2',
-                'DIOUSB',
-                '_86012780000a0003'
-                ]:
-            return
-
         try:
+            if self.software == 'Dante Via' or (self.model_id and self.model_id in ['DAI1', 'DAI2', 'DAO1', 'DAO2', 'DIOUSB', '_86012780000a0003']):
+                return
+
             if port in sockets:
                 sock = sockets[port]
             else:
@@ -799,6 +794,16 @@ class Device(object):
 
 
     @property
+    def software(self):
+        return self._software
+
+
+    @software.setter
+    def software(self, software):
+        self._software = software
+
+
+    @property
     def rx_channels(self):
         return self._rx_channels
 
@@ -856,6 +861,26 @@ class Device(object):
     @rx_count.setter
     def rx_count(self, rx_count):
         self._rx_count = rx_count
+
+
+    @property
+    def tx_count_raw(self):
+        return self._tx_count_raw
+
+
+    @tx_count_raw.setter
+    def tx_count_raw(self, tx_count_raw):
+        self._tx_count_raw = tx_count_raw
+
+
+    @property
+    def rx_count_raw(self):
+        return self._rx_count_raw
+
+
+    @rx_count_raw.setter
+    def rx_count_raw(self, rx_count_raw):
+        self._rx_count_raw = rx_count_raw
 
 
     def to_json(self):
@@ -955,7 +980,7 @@ def command_volume_start(device_name, ipv4, mac, port, timeout=True):
         device_name_hex = f'{device_name_hex}00'
 
     data_len = len(device_name) + (len(device_name) & 1) + 54
-    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}000001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
+    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}160001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
 
     return (command_string, None, ports['device_control'])
 
@@ -1176,6 +1201,9 @@ def parse_netaudio_services(services):
 
                 if 'rate' in service_properties:
                     device.sample_rate = int(service_properties['rate'])
+
+                if 'router_info' in service_properties and service_properties['router_info'] == '"Dante Via"':
+                    device.software = 'Dante Via'
 
                 if 'latency_ns' in service_properties:
                     device.latency = int(service_properties['latency_ns'])
