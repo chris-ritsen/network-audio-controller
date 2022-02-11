@@ -11,6 +11,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Add/remove subscriptions
 - CLI
 - Display active subscriptions, Rx and Tx channels, devices names and addresses, subscription status
+- Display channel volume level (on supported devices)
 - JSON output
 - Set device latency, sample rate, encoding
 - Set/reset channel names, device names
@@ -28,7 +29,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Stand-alone command API
 - TUI
 - Web application UI
-- XML output
+- XML output (such as a Dante preset file)
 
 ### Usage
 
