@@ -979,8 +979,15 @@ def command_volume_start(device_name, ipv4, mac, port, timeout=True):
     if len(device_name) % 2 == 0:
         device_name_hex = f'{device_name_hex}00'
 
-    data_len = len(device_name) + (len(device_name) & 1) + 54
-    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}160001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
+    if len(device_name) < 2:
+        data_len = 54
+    elif len(device_name) < 4:
+        data_len = 56
+    else:
+        data_len = len(device_name) + (len(device_name) & 1) + 54
+
+    unknown_arg = '16'
+    command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}{unknown_arg}0001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
 
     return (command_string, None, ports['device_control'])
 
@@ -995,7 +1002,13 @@ def command_volume_stop(device_name, ipv4, mac, port):
     if len(device_name) % 2 == 0:
         device_name_hex = f'{device_name_hex}00'
 
-    data_len = len(device_name) + (len(device_name) & 1) + 54
+    if len(device_name) < 2:
+        data_len = 54
+    elif len(device_name) < 4:
+        data_len = 56
+    else:
+        data_len = len(device_name) + (len(device_name) & 1) + 54
+
     command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}010016000100{name_len3:02x}0001{port:04x}00010000{ip_hex}{0:04x}0000'
 
     return (command_string, None, ports['device_control'])
