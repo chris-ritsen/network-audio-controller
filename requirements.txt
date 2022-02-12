@@ -10,5 +10,9 @@ ifaddr==0.1.7
     # via zeroconf
 netifaces==0.11.0
     # via -r requirements.in
+pyee==9.0.4
+    # via -r requirements.in
+typing-extensions==4.1.0
+    # via pyee
 zeroconf==0.38.3
     # via -r requirements.in
