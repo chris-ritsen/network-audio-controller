@@ -17,6 +17,10 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Set/reset channel names, device names
 - mDNS device discovery
 
+### In progress
+
+- Gather information from multicast traffic (make, model, lock status, subscription changes)
+
 ### Planned features
 
 - AES67 device support

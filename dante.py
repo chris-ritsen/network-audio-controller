@@ -1,35 +1,62 @@
 #!/bin/python3
 
+import asyncio
 import codecs
+import logging
 import socket
-import struct
 import time
+import traceback
+
+from threading import Thread
 
 from pyee import AsyncIOEventEmitter
 from pyee.cls import evented, on
+from twisted.internet import reactor
+from twisted.internet.protocol import DatagramProtocol
 from zeroconf import DNSService
+
+from zeroconf import IPVersion, ServiceStateChange, Zeroconf
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf, AsyncZeroconfServiceTypes
+
+logger = logging.getLogger('dante')
 
 ee = AsyncIOEventEmitter()
 
 devices = {}
+services = {}
 sockets = {}
 
-multicast_groups = {
-    'device_info': '224.0.0.231'
-}
+TASK_GET_DANTE_MODEL_INFO: str = 'dante_model_info'
+TASK_GET_MODEL_INFO: str = 'model_info'
 
-ports = {
-    'device_control': 8800,
-    'device_info': 8702,
-    'device_settings': 8700
-}
+TASKS = [
+    TASK_GET_DANTE_MODEL_INFO,
+    TASK_GET_MODEL_INFO
+]
 
-service_types = {
-    'arc': '_netaudio-arc._udp.local.',
-    'chan': '_netaudio-chan._udp.local.',
-    'cmc': '_netaudio-cmc._udp.local.',
-    'dbc': '_netaudio-dbc._udp.local.'
-}
+DEVICE_CONTROL_PORT: int = 8800
+DEVICE_INFO_PORT: int = 8702
+DEVICE_SETTINGS_PORT: int = 8700
+
+PORTS = [
+    DEVICE_CONTROL_PORT,
+    DEVICE_INFO_PORT,
+    DEVICE_SETTINGS_PORT
+]
+
+DEVICE_INFO: tuple = ('224.0.0.231', DEVICE_INFO_PORT)
+
+ARC_SERVICE: str = '_netaudio-arc._udp.local.'
+CHAN_SERVICE: str = '_netaudio-chan._udp.local.'
+CMC_SERVICE: str = '_netaudio-cmc._udp.local.'
+DBC_SERVICE: str = '_netaudio-dbc._udp.local.'
+
+SERVICE_TYPES = [
+    ARC_SERVICE,
+    CHAN_SERVICE,
+    CMC_SERVICE,
+    DBC_SERVICE
+]
 
 status = {
     'connected': 'Connected',
@@ -39,7 +66,7 @@ status = {
     'unresolved': 'Subscription unresolved'
 }
 
-class Channel(object):
+class Channel():
     def __init__(self):
         self._channel_type = None
         self._device = None
@@ -58,9 +85,11 @@ class Channel(object):
             name = self.friendly_name
 
         if self.volume and self.volume != 254:
-            return (f'{self.number}:{name} [{self.volume}]')
+            text = f'{self.number}:{name} [{self.volume}]'
         else:
-            return(f'{self.number}:{self.name}')
+            text = f'{self.number}:{self.name}'
+
+        return text
 
 
     @property
@@ -161,7 +190,7 @@ class Channel(object):
         return {key:as_json[key] for key in sorted(as_json.keys())}
 
 
-class Subscription(object):
+class Subscription():
     def __init__(self):
         self._error = None
         self._rx_channel = None
@@ -180,9 +209,9 @@ class Subscription(object):
         text = f'{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}'
 
         if self.status_text:
-            return f'{text} [{self.status_text}]'
-        else:
-            return text
+            text = f'{text} [{self.status_text}]'
+
+        return text
 
 
     def to_json(self):
@@ -310,11 +339,12 @@ class Subscription(object):
 
 
 @evented
-class Device(object):
+class Device():
     def __init__(self):
         self._dante_model = ''
         self._dante_model_id = ''
         self._error = None
+        self._initialized = False
         self._ipv4 = ''
         self._latency = None
         self._mac_address = None
@@ -331,12 +361,22 @@ class Device(object):
         self._sockets = {}
         self._software = None
         self._subscriptions = []
+        self._tasks = set()
         self._tx_channels = {}
         self._tx_count_raw = 0
 
 
     def __str__(self):
-        return (f'{self.name}')
+        return f'{self.name}'
+
+
+    def dante_command_new(self, command, control):
+        response = None
+
+        binary_str = codecs.decode(command, 'hex')
+        response = control.sendMessage(binary_str)
+
+        return response
 
 
     def dante_command(self, command, service_type=None, port=None):
@@ -427,6 +467,16 @@ class Device(object):
         return service
 
 
+    @on('init')
+    def event_handler(self, *args, **kwargs):
+        task_name = kwargs['task_name']
+        self.tasks.remove(task_name)
+
+        if len(self.tasks) == 0:
+            self.initialized = True
+            ee.emit('init_check')
+
+
     @on('dante_model_info')
     def event_handler(self, *args, **kwargs):
         ipv4 = kwargs['ipv4']
@@ -436,6 +486,7 @@ class Device(object):
 
         self.dante_model = model
         self.dante_model_id = model_id
+        self.event_emitter.emit('init', task_name=TASK_GET_DANTE_MODEL_INFO)
 
 
     @on('parse_dante_model_info')
@@ -461,6 +512,7 @@ class Device(object):
 
         self.manufacturer = manufacturer
         self.model = model
+        self.event_emitter.emit('init', task_name=TASK_GET_MODEL_INFO)
 
 
     @on('parse_device_make_model_info')
@@ -501,7 +553,6 @@ class Device(object):
 
         sequence_id = data[4:6]
         command = int.from_bytes(data[26:28], 'big')
-
         data_len = int.from_bytes(data[2:4], 'big')
 
         if command == 96:
@@ -513,16 +564,16 @@ class Device(object):
     def get_device_controls(self):
         try:
             for key, service in self.services.items():
-                if service['type'] == service_types['chan']:
+                if service['type'] == CHAN_SERVICE:
                     continue
 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
-                sock.settimeout(20)
+                sock.settimeout(1)
                 sock.connect((self.ipv4, service['port']))
                 self.sockets[service['port']] = sock
 
-            for key, port in ports.items():
+            for port in PORTS:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
                 sock.settimeout(0.01)
@@ -594,7 +645,7 @@ class Device(object):
                             volume_stop = self.dante_command(*command_volume_stop(self.name, ipv4, mac, port))
                             self.parse_volume(data)
                         break
-                    except:
+                    except Exception as e:
                         break
 
         except Exception as e:
@@ -830,6 +881,16 @@ class Device(object):
 
 
     @property
+    def initialized(self):
+        return self._initialized
+
+
+    @initialized.setter
+    def initialized(self, initialized):
+        self._initialized = initialized
+
+
+    @property
     def latency(self):
         return self._latency
 
@@ -937,6 +998,16 @@ class Device(object):
     @services.setter
     def services(self, services):
         self._services = services
+
+
+    @property
+    def tasks(self):
+        return self._tasks
+
+
+    @tasks.setter
+    def tasks(self, tasks):
+        self._tasks = tasks
 
 
     @property
@@ -1099,14 +1170,14 @@ def command_make_model(mac):
     cmd_args = '00c100000000'
     command_string = f'ffff00200fdb0000{mac}0000417564696e6174650731{cmd_args}'
 
-    return (command_string, None, ports['device_settings'])
+    return command_string
 
 
 def command_dante_model(mac):
     cmd_args='006100000000'
     command_string = f'ffff00200fdb0000{mac}0000417564696e6174650731{cmd_args}'
 
-    return (command_string, None, ports['device_settings'])
+    return command_string
 
 
 def command_volume_start(device_name, ipv4, mac, port, timeout=True):
@@ -1129,7 +1200,7 @@ def command_volume_start(device_name, ipv4, mac, port, timeout=True):
     unknown_arg = '16'
     command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}{unknown_arg}0001000100{name_len3:02x}0001{port:04x}{timeout:04x}0000{ip_hex}{port:04x}0000'
 
-    return (command_string, None, ports['device_control'])
+    return (command_string, None, DEVICE_CONTROL_PORT)
 
 
 def command_volume_stop(device_name, ipv4, mac, port):
@@ -1151,7 +1222,7 @@ def command_volume_stop(device_name, ipv4, mac, port):
 
     command_string = f'120000{data_len:02x}ffff301000000000{mac}0000000400{name_len1:02x}000100{name_len2:02x}000a{device_name_hex}010016000100{name_len3:02x}0001{port:04x}00010000{ip_hex}{0:04x}0000'
 
-    return (command_string, None, ports['device_control'])
+    return (command_string, None, DEVICE_CONTROL_PORT)
 
 
 def command_set_latency(latency):
@@ -1162,7 +1233,7 @@ def command_set_latency(latency):
 
     command_args = f'00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}'
 
-    return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
+    return (command_string('set_latency', command_length=command_length, command_str=command_str, command_args=command_args), ARC_SERVICE)
 
 
 def command_identify():
@@ -1171,7 +1242,7 @@ def command_identify():
 
     command_string = f'ffff00{data_len:02x}0bc80000{mac}0000417564696e6174650731006300000064'
 
-    return (command_string, None, ports['device_settings'])
+    return (command_string, None, DEVICE_SETTINGS_PORT)
 
 
 def command_set_encoding(encoding):
@@ -1180,7 +1251,7 @@ def command_set_encoding(encoding):
 
     command_string = f'ffff00{data_len}03d70000525400{ipv4}0000417564696e617465072700830000006400000001000000{encoding:02x}'
 
-    return (command_string, None, ports['device_settings'])
+    return (command_string, None, DEVICE_SETTINGS_PORT)
 
 
 def command_set_gain_level(channel_number, gain_level, device_type):
@@ -1194,7 +1265,7 @@ def command_set_gain_level(channel_number, gain_level, device_type):
 
     command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
 
-    return (command_string, None, ports['device_settings'])
+    return (command_string, None, DEVICE_SETTINGS_PORT)
 
 
 def command_set_sample_rate(sample_rate):
@@ -1203,7 +1274,7 @@ def command_set_sample_rate(sample_rate):
 
     command_string = f'ffff00{data_len:02x}03d40000525400{ipv4}0000417564696e61746507270081000000640000000100{sample_rate:06x}'
 
-    return (command_string, None, ports['device_settings'])
+    return (command_string, None, DEVICE_SETTINGS_PORT)
 
 
 def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name):
@@ -1217,7 +1288,7 @@ def command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
 
     command_args = f'0000020100{rx_channel_hex}00{tx_channel_name_offset}00{tx_device_name_offset}00000000000000000000000000000000000000000000000000000000000000000000{tx_channel_name_hex}00{tx_device_name_hex}00'
 
-    return (command_string('add_subscription', command_str=command_str, command_args=command_args), service_types['arc'])
+    return (command_string('add_subscription', command_str=command_str, command_args=command_args), ARC_SERVICE)
 
 
 def command_remove_subscription(rx_channel):
@@ -1226,30 +1297,30 @@ def command_remove_subscription(rx_channel):
     args_length = '10'
     command_args = f'00000001000000{rx_channel_hex}'
 
-    return (command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args), service_types['arc'])
+    return (command_string('remove_subscription', command_str=command_str, command_length=args_length, command_args=command_args), ARC_SERVICE)
 
 
 def command_device_info():
-    return (command_string('device_info'), service_types['arc'])
+    return (command_string('device_info'), ARC_SERVICE)
 
 
 def command_device_name():
-    return (command_string('device_name'), service_types['arc'])
+    return (command_string('device_name'), ARC_SERVICE)
 
 
 def command_channel_count():
-    return (command_string('channel_count'), service_types['arc'])
+    return (command_string('channel_count'), ARC_SERVICE)
 
 
 def command_set_device_name(name):
     args_length = chr(len(name.encode('utf-8')) + 11)
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return (command_string('set_device_name', command_length=args_length, command_args=device_name(name)), service_types['arc'])
+    return (command_string('set_device_name', command_length=args_length, command_args=device_name(name)), ARC_SERVICE)
 
 
 def command_reset_device_name():
-    return (command_string('reset_device_name'), service_types['arc'])
+    return (command_string('reset_device_name'), ARC_SERVICE)
 
 
 def command_reset_channel_name(channel_type, channel_number):
@@ -1264,7 +1335,7 @@ def command_reset_channel_name(channel_type, channel_number):
         command_args = f'00000201000000{channel_hex}001800000000000000'
         command_str = '2013'
 
-    return (command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length), service_types['arc'])
+    return (command_string('reset_channel_name', command_str=command_str, command_args=command_args, command_length=args_length), ARC_SERVICE)
 
 
 def command_set_channel_name(channel_type, channel_number, new_channel_name):
@@ -1282,7 +1353,7 @@ def command_set_channel_name(channel_type, channel_number, new_channel_name):
 
     args_length = bytes(args_length.encode('utf-8')).hex()
 
-    return (command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args), service_types['arc'])
+    return (command_string('set_channel_name', command_str=command_str, command_length=args_length, command_args=command_args), ARC_SERVICE)
 
 
 def device_name(name):
@@ -1298,7 +1369,7 @@ def channel_pagination(page):
 
 
 def command_receivers(page=0):
-    return (command_string('rx_channels', command_args=channel_pagination(page)), service_types['arc'])
+    return (command_string('rx_channels', command_args=channel_pagination(page)), ARC_SERVICE)
 
 
 def command_transmitters(page=0, friendly_names=False):
@@ -1310,11 +1381,22 @@ def command_transmitters(page=0, friendly_names=False):
     command_length = '10'
     command_args = channel_pagination(page=page)
 
-    return (command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args), service_types['arc'])
+    return (command_string('tx_channels', command_length=command_length, command_str=command_str, command_args=command_args), ARC_SERVICE)
 
 
 def get_devices():
     return devices
+
+
+@ee.on('init_check')
+def event_handler(*args, **kwargs):
+    devices_uninitialized = dict(filter(lambda x: not x[1].initialized, devices.items()))
+
+    if len(devices_uninitialized) == 0:
+        try:
+            reactor.stop()
+        except Exception as e:
+            pass
 
 
 @ee.on('received_multicast')
@@ -1341,64 +1423,71 @@ def event_handler(*args, **kwargs):
             print(e)
 
 
-def get_make_model_info(mac):
-    multicast_group = multicast_groups['device_info']
-    port = ports['device_info']
+class DanteControl(DatagramProtocol):
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
 
-    if port in sockets:
-        sock = sockets[port]
-    else:
-        server_address = ('', port)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(0.1)
-        sock.bind(server_address)
-        group = socket.inet_aton(multicast_group)
-        mreq = struct.pack('4sL', group, socket.INADDR_ANY)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        sockets[port] = sock
 
+    def startProtocol(self):
+        self.transport.connect(self.host, self.port)
+
+
+    def sendMessage(self, data):
+        self.transport.write(data)
+
+
+    def datagramReceived(self, datagram, addr):
+        ee.emit('received_control', data=datagram, addr=addr)
+
+
+class DanteMulticast(DatagramProtocol):
+    def __init__(self, group, port):
+        self.group = group
+        self.port = port
+
+
+    def startProtocol(self):
+        self.transport.joinGroup(self.group)
+
+
+    def datagramReceived(self, datagram, address):
+        ee.emit('received_multicast', data=datagram, addr=address, group=self.group, port=self.port)
+
+
+def run_tasks(tasks, mac):
     for key, device in devices.items():
+        device.tasks = device.tasks.union(tasks)
+        unsupported_tasks = {}
+        port = DEVICE_SETTINGS_PORT
+        control = DanteControl(device.ipv4, DEVICE_SETTINGS_PORT)
+        print(device.ipv4, DEVICE_SETTINGS_PORT, control)
+
         if device.software:
-            continue
+            unsupported_tasks = tasks.intersection({TASK_GET_DANTE_MODEL_INFO, TASK_GET_MODEL_INFO})
+
+        for task in unsupported_tasks:
+            device.event_emitter.emit('init', task_name=task)
+
+        reactor.listenUDP(0, control)
+
         try:
-            while True:
-                if device.manufacturer and device.model:
-                    break
-
-                device.dante_command(*command_make_model(mac))
-
-                data, addr = sock.recvfrom(2048)
-                data_hex = data.hex()
-
-                device_ipv4 = addr[0]
-                device_mac = data_hex[16:32]
-
-                command = int.from_bytes(data[26:28], 'big')
-
-                if command == 192:
-                    ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=port)
-
-            while True:
-                try:
-                    if device.dante_model:
-                        break
-
-                    device.dante_command(*command_dante_model(mac))
-
-                    data, addr = sock.recvfrom(2048)
-                    data_hex = data.hex()
-
-                    device_ipv4 = addr[0]
-                    device_mac = data_hex[16:32]
-
-                    command = int.from_bytes(data[26:28], 'big')
-
-                    if command == 96:
-                        ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=port)
-                except Exception as e:
-                    pass
+            if TASK_GET_DANTE_MODEL_INFO in device.tasks:
+                device.dante_command_new(command_dante_model(mac), control)
+            if TASK_GET_MODEL_INFO in device.tasks:
+                device.dante_command_new(command_make_model(mac), control)
         except Exception as e:
-            print(e)
+            traceback.print_exc()
+
+
+def get_make_model_info(mac):
+    multicast_group, port = DEVICE_INFO
+    reactor.listenMulticast(port, DanteMulticast(multicast_group, port), listenMultiple=True)
+    #  tasks = {TASK_GET_DANTE_MODEL_INFO, TASK_GET_MODEL_INFO}
+    tasks = {TASK_GET_MODEL_INFO}
+    tasks_thread = Thread(target=run_tasks, args=(tasks, mac))
+    tasks_thread.run()
+    reactor.run()
 
 
 def parse_netaudio_services(services):
@@ -1427,7 +1516,7 @@ def parse_netaudio_services(services):
                 else:
                     device = Device()
 
-                if 'id' in service_properties and service['type'] == service_types['cmc']:
+                if 'id' in service_properties and service['type'] == CMC_SERVICE:
                     device.mac_address = service_properties['id']
 
                 if 'model' in service_properties:
@@ -1455,16 +1544,167 @@ def parse_netaudio_services(services):
                 devices[record.server] = device
 
 
-def get_service_types():
-    return service_types
+class DanteBrowser():
+    def __init__(self, mdns_timeout: float) -> None:
+        self._devices = {}
+        self.services = []
+        self._mdns_timeout: float = mdns_timeout
+        self.aio_browser: Optional[AsyncServiceBrowser] = None
+        self.aio_zc: Optional[AsyncZeroconf] = None
 
 
-def get_service_type(key):
-    if key in service_types:
-        return service_types[key]
+    @property
+    def mdns_timeout(self):
+        return self._mdns_timeout
+
+
+    @mdns_timeout.setter
+    def mdns_timeout(self, mdns_timeout):
+        self._mdns_timeout = mdns_timeout
+
+
+    @property
+    def devices(self):
+        return self._devices
+
+
+    @devices.setter
+    def devices(self, devices):
+        self._devices = devices
+
+
+    def async_on_service_state_change(self, zeroconf: Zeroconf, service_type: str, name: str, state_change: ServiceStateChange) -> None:
+        if state_change is not ServiceStateChange.Added:
+            return
+
+        self.services.append(asyncio.ensure_future(self.async_parse_netaudio_service(zeroconf, service_type, name)))
+
+
+    async def async_run(self) -> None:
+        self.aio_zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+        services = SERVICE_TYPES
+
+        self.aio_browser = AsyncServiceBrowser(self.aio_zc.zeroconf, services, handlers=[self.async_on_service_state_change])
+
+        await asyncio.sleep(self.mdns_timeout)
+        await self.async_close()
+
+
+    async def async_close(self) -> None:
+        assert self.aio_zc is not None
+        assert self.aio_browser is not None
+        await self.aio_browser.async_cancel()
+        await self.aio_zc.async_close()
+
+
+    async def get_devices(self) -> None:
+        await self.get_services()
+        await asyncio.gather(*self.services)
+
+        device_hosts = {}
+
+        for service in self.services:
+            service = service.result()
+            server_name = service['server_name']
+
+            if not server_name in device_hosts:
+                device_hosts[server_name] = {}
+
+            device_hosts[server_name][service['name']] = service
+
+        logger.debug(f'Found {len(device_hosts)} device hosts')
+
+        for hostname, device_services in device_hosts.items():
+            keys = device_services.keys()
+            device = Device()
+
+            logger.debug(f'Host {hostname} has {len(device_services.keys())} services')
+
+            try:
+                for service_name, service in device_services.items():
+                    logger.debug(f"  `{service['name']}` on `{service['ipv4']}:{service['port']}`")
+                    device.services[service_name] = service
+
+                    service_properties = service['properties']
+
+                    if not device.ipv4:
+                        device.ipv4 = service['ipv4']
+
+                    if 'id' in service_properties and service['type'] == CMC_SERVICE:
+                        device.mac_address = service_properties['id']
+
+                    if 'model' in service_properties:
+                        device.model_id = service_properties['model']
+
+                    if 'rate' in service_properties:
+                        device.sample_rate = int(service_properties['rate'])
+
+                    if 'router_info' in service_properties and service_properties['router_info'] == '"Dante Via"':
+                        device.software = 'Dante Via'
+
+                    if 'latency_ns' in service_properties:
+                        device.latency = int(service_properties['latency_ns'])
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
+
+            logger.debug(f'Initialized Dante device {service_name}\n')
+            self.devices[hostname] = device
+
+
+    async def get_services(self) -> None:
+        logger.debug(f'get_services')
+
+        try:
+            await self.async_run()
+        except KeyboardInterrupt:
+            await self.async_close()
+
+        logger.debug(f'Found {len(self.services)} services')
+
+
+    async def async_parse_netaudio_service(self, zeroconf: Zeroconf, service_type: str, name: str) -> None:
+        info = AsyncServiceInfo(service_type, name)
+        await info.async_request(zeroconf, 3000)
+
+        if not info:
+            return
+
+
+        host = zeroconf.cache.entries_with_name(name)
+        ipv4 = info.parsed_addresses()[0]
+
+        service_properties = {}
+
+        try:
+            for key, value in info.properties.items():
+                key = key.decode('utf-8')
+
+                if isinstance(value, bytes):
+                    value = value.decode('utf-8')
+
+                service_properties[key] = value
+
+            for record in host:
+                if isinstance(record, DNSService):
+                    service = {
+                        'ipv4': ipv4,
+                        'name': name,
+                        'port': info.port,
+                        'properties': service_properties,
+                        'server_name': record.server,
+                        'type': info.type
+                    }
+
+                    return service
+
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
 
 
 def log(message):
     file = open('debug.log', 'a')
     file.write(message)
     file.close()
+
