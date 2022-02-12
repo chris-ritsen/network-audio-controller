@@ -5,17 +5,16 @@ import argparse
 import asyncio
 import enum
 import json
+import logging
 import netifaces
 import os
 import signal
 import socket
-import struct
 import sys
 import time
 
 from pyee import AsyncIOEventEmitter
 from json import JSONEncoder
-from zeroconf import ServiceBrowser, Zeroconf, DNSAddress
 
 import dante
 
@@ -85,6 +84,7 @@ def parse_args():
     settings.add_argument('--set-sample-rate', choices=[44100, 48000, 88200, 96000, 176400, 192000], default=None, dest='sample_rate', help='Set the sample rate of a device', type=int)
 
     debug.add_argument('--debug-multicast', action='store_true', default=False, help='Show multicast data')
+    parser.add_argument('--debug', action='store_true', default=False, help='Set log level to DEBUG')
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -99,59 +99,6 @@ def log(message):
     file = open('debug.log', 'a')
     file.write(message)
     file.close()
-
-
-class MdnsListener:
-    def __init__(self):
-        self._services = {}
-
-
-    @property
-    def services(self):
-        return self._services
-
-
-    @services.setter
-    def services(self, services):
-        self._services = services
-
-
-    def update_service(self, zeroconf, type, name):
-        #  print(f'service updated\t{name}')
-        pass
-
-
-    def remove_service(self, zeroconf, type, name):
-        if name in self.services:
-            del self.services[name]
-            #  dante.parse_netaudio_services(self.services)
-            print(f'service removed\t{name}')
-
-
-    def add_service(self, zeroconf, type, name):
-        self.services[name] = {
-            'type': type,
-            'zeroconf': zeroconf
-        }
-
-        info = zeroconf.get_service_info(type, name)
-
-        #  print(f'service added \t{name}')
-
-
-def get_dante_services(timeout):
-    zeroconf = Zeroconf()
-    listener = MdnsListener()
-
-    #  info = zeroconf.get_service_info('_netaudio-arc._udp.local.')
-    #  print(info)
-
-    for key, service_type in dante.get_service_types().items():
-        ServiceBrowser(zeroconf, service_type, listener)
-
-    time.sleep(timeout)
-
-    return listener.services
 
 
 def print_devices(devices):
@@ -281,61 +228,6 @@ def control_dante_device(device):
         device.identify()
 
 
-@ee.on('dante_model_info')
-def event_handler(*args, **kwargs):
-    ipv4 = kwargs['ipv4']
-    mac = kwargs['mac']
-    model = kwargs['model']
-    model_id = kwargs['model_id']
-
-    print(model, model_id, ipv4, mac)
-
-
-@ee.on('parse_dante_model_info')
-def event_handler(*args, **kwargs):
-    addr = kwargs['addr']
-    data = kwargs['data']
-    mac = kwargs['mac']
-
-    ipv4 = addr[0]
-
-    model = data[88:].partition(b'\x00')[0].decode('utf-8')
-    model_id = data[43:].partition(b'\x00')[0].decode('utf-8')
-
-    ee.emit('dante_model_info', model_id=model_id, model=model, ipv4=ipv4, mac=mac)
-
-
-@ee.on('device_make_model_info')
-def event_handler(*args, **kwargs):
-    ipv4 = kwargs['ipv4']
-    mac = kwargs['mac']
-    manufacturer = kwargs['manufacturer']
-    model = kwargs['model']
-
-    print(manufacturer, model, ipv4, mac)
-
-
-@ee.on('parse_device_make_model_info')
-def event_handler(*args, **kwargs):
-    addr = kwargs['addr']
-    data = kwargs['data']
-    mac = kwargs['mac']
-
-    ipv4 = addr[0]
-
-    manufacturer = data[76:].partition(b'\x00')[0].decode('utf-8')
-    model = data[204:].partition(b'\x00')[0].decode('utf-8')
-
-    ee.emit('device_make_model_info', manufacturer=manufacturer, model=model, ipv4=ipv4, mac=mac)
-
-
-@ee.on('subscription_changed')
-def event_handler(*args, **kwargs):
-    addr = kwargs['addr']
-    data = kwargs['data']
-    mac = kwargs['mac']
-
-
 @ee.on('received_multicast')
 def event_handler(*args, **kwargs):
     addr = kwargs['addr']
@@ -347,7 +239,7 @@ def event_handler(*args, **kwargs):
 
     sequence_id = data[4:6]
     command = int.from_bytes(data[26:28], 'big')
-    print(command)
+    print(command, data[26:28].hex())
 
     device_ipv4 = addr[0]
     device_mac = data_hex[16:32]
@@ -410,7 +302,7 @@ def control_dante_devices(devices):
                 except Exception as e:
                     pass
 
-        dante.get_make_model_info(mac)
+        #  dante.get_make_model_info(mac)
 
         if args.device:
             devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
@@ -443,13 +335,19 @@ def control_dante_devices(devices):
         print_devices(devices)
 
 
-def cli_mode():
+async def cli_mode():
     args = parse_args()
 
     if args.device_type == 'dante':
-        services = get_dante_services(args.timeout)
-        dante.parse_netaudio_services(services)
-        dante_devices = dante.get_devices()
+        logger = logging.getLogger('dante')
+
+        if args.debug:
+            logger.setLevel(logging.DEBUG)
+
+        dante_browser = dante.DanteBrowser(mdns_timeout=args.timeout)
+        await dante_browser.get_devices()
+        dante_devices = dante_browser.devices
+        logger.debug(f'Initialized {len(dante_devices)} Dante devices')
 
         if len(dante_devices) == 0:
             if not args.json:
@@ -457,27 +355,30 @@ def cli_mode():
         else:
             if not args.json:
                 print(f'{len(dante_devices)} devices found')
+
             control_dante_devices(dante_devices)
     else:
         print('Not implemented')
 
 
-def tui_mode():
+async def tui_mode():
     args = parse_args()
     print('Not implemented')
 
 
-def main():
+async def main():
     args = parse_args()
 
+    logging.basicConfig(level=logging.ERROR)
+
     if args.tui:
-        tui_mode()
+        await tui_mode()
     else:
-        cli_mode()
+        await cli_mode()
 
 if __name__ == '__main__':
     try:
-        main()
+        asyncio.run(main())
 
     except KeyboardInterrupt:
         pass
