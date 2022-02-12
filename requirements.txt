@@ -8,5 +8,7 @@ argparse==1.4.0
     # via -r requirements.in
 ifaddr==0.1.7
     # via zeroconf
+netifaces==0.11.0
+    # via -r requirements.in
 zeroconf==0.38.3
     # via -r requirements.in
