@@ -1617,6 +1617,7 @@ class DanteBrowser():
         for hostname, device_services in device_hosts.items():
             keys = device_services.keys()
             device = Device()
+            device.server_name = hostname
 
             logger.debug(f'Host {hostname} has {len(device_services.keys())} services')
 
@@ -1669,7 +1670,6 @@ class DanteBrowser():
 
         if not info:
             return
-
 
         host = zeroconf.cache.entries_with_name(name)
         ipv4 = info.parsed_addresses()[0]
