@@ -1,4 +1,5 @@
 argparse
 netifaces
 pyee
+twisted
 zeroconf
