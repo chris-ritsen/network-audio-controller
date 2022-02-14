@@ -288,7 +288,7 @@ def control_dante_devices(devices):
     try:
         interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
         ipv4 = interface[netifaces.AF_INET][0]['addr']
-        mac = netifaces.ifaddresses('br0')[netifaces.AF_LINK][0]['addr'].replace(':', '')
+        mac = interface[netifaces.AF_LINK][0]['addr'].replace(':', '')
     except Exception as e:
         pass
 
@@ -347,14 +347,14 @@ async def cli_mode():
         dante_browser = dante.DanteBrowser(mdns_timeout=args.timeout)
         await dante_browser.get_devices()
         dante_devices = dante_browser.devices
-        logger.debug(f'Initialized {len(dante_devices)} Dante devices')
+        logger.debug(f'Initialized {len(dante_devices)} Dante device(s)')
 
         if len(dante_devices) == 0:
             if not args.json:
                 print('No devices detected. Try increasing the mDNS timeout.')
         else:
             if not args.json:
-                print(f'{len(dante_devices)} devices found')
+                print(f'{len(dante_devices)} device(s) found')
 
             control_dante_devices(dante_devices)
     else:
