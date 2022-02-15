@@ -49,6 +49,7 @@ def parse_args():
     text_output.add_argument('--list-sample-rate', action='store_true', default=False, help='List device sample rate')
     text_output.add_argument('--list-tx', action='store_true', default=False, help='List transmitter channels')
     text_output.add_argument('--list-volume', action='store_true', default=False, help='List volume levels of channels. Not supported on all devices.')
+    text_output.add_argument('--log-level', choices=['debug', 'info', 'warning', 'error', 'critical'], default='error', help='Set log level')
 
     channels.add_argument('--channel-number', default=None, help='Specify a channel for control by number', metavar='<number>', type=int)
     channels.add_argument('--channel-type', choices=['rx', 'tx'], default=None, help='Channel type to target for operations', type=str)
@@ -219,7 +220,7 @@ def control_dante_device(args, device):
         device.identify()
 
 
-def control_dante_devices(args, devices):
+async def control_dante_devices(args, devices):
     try:
         interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
         ipv4 = interface[netifaces.AF_INET][0]['addr']
@@ -228,15 +229,18 @@ def control_dante_devices(args, devices):
         pass
 
     if (args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
+        controls = []
+
         for key, device in devices.items():
-            device.get_device_controls()
+            controls.append(device.get_controls())
 
             if args.list_volume:
                 try:
-                    device.get_volume(ipv4, mac, 8751)
+                    controls.append(device.get_volume(ipv4, mac, 8751))
                 except Exception as e:
                     pass
 
+        await asyncio.gather(*controls)
         #  dante.get_make_model_info(mac)
 
         if args.device:
@@ -278,24 +282,26 @@ async def cli_mode(args):
 
         if args.debug:
             logger.setLevel(logging.DEBUG)
+        elif args.log_level:
+            logger.setLevel(logging.getLevelName(args.log_level.upper()))
 
         dante_browser = dante.DanteBrowser(mdns_timeout=args.timeout)
         await dante_browser.get_devices()
         dante_devices = dante_browser.devices
-        logger.debug(f'Initialized {len(dante_devices)} Dante device(s)')
+        logger.info(f'Initialized {len(dante_devices)} Dante device(s)')
 
         if len(dante_devices) == 0:
             if not args.json:
                 print('No devices detected. Try increasing the mDNS timeout.')
         else:
             if not args.json:
-                logger.debug(f'{len(dante_devices)} Dante device(s) found')
+                logger.info(f'{len(dante_devices)} Dante device(s) found')
 
-            control_dante_devices(args, dante_devices)
+            await control_dante_devices(args, dante_devices)
     else:
         print('Not implemented')
 
-    logger.debug(f'time:{time.time() - start:0.03f}s')
+    logger.info(f'time:{time.time() - start:0.03f}s')
 
 
 async def tui_mode(args):
