@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 
-import argcomplete
+import argparse
 import asyncio
 import json
 import logging
 import os
 import sys
 import time
+import traceback
 
 from json import JSONEncoder
 
-import argparse
+import argcomplete
 import netifaces
 
-import dante
+from netaudio import DanteBrowser
 
 
 def _default(self, obj):
@@ -78,7 +79,7 @@ def parse_args():
     settings.add_argument('--set-latency', default=None, help='Set the device latency in milliseconds', dest='latency', metavar='<latency>', type=float)
     settings.add_argument('--set-sample-rate', choices=[44100, 48000, 88200, 96000, 176400, 192000], default=None, dest='sample_rate', help='Set the sample rate of a device', type=int)
 
-    parser.add_argument('--debug', action='store_true', default=False, help='Set log level to DEBUG')
+    debug.add_argument('--debug', action='store_true', default=False, help='Set log level to DEBUG')
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -91,9 +92,9 @@ def parse_args():
 
 
 def log(message):
-    file = open('debug.log', 'a')
-    file.write(message)
-    file.close()
+    with open('debug.log', 'a', encoding='utf-8') as file:
+        file.write(message)
+        file.close()
 
 
 def print_devices(devices):
@@ -131,13 +132,13 @@ def print_devices(devices):
                 print(channel)
 
         if args.list_subscriptions:
-            if (len(device.subscriptions)):
+            if len(device.subscriptions):
                 print('Subscriptions:')
             for subscription in device.subscriptions:
                 print(f'{subscription}')
 
 
-def control_dante_device(args, device):
+async def control_dante_device(args, device):
     if args.add_subscription:
         if not args.tx_channel_name:
             print('Must specify a Tx channel name')
@@ -148,32 +149,32 @@ def control_dante_device(args, device):
                 tx_device_name = device.name
 
             rx_channel_number = args.add_subscription
-            device.add_subscription(rx_channel_number, args.tx_channel_name, tx_device_name)
+            await device.add_subscription(rx_channel_number, args.tx_channel_name, tx_device_name)
 
     if args.remove_subscription:
-        device.remove_subscription(rx_channel_number=args.remove_subscription)
+        await device.remove_subscription(rx_channel_number=args.remove_subscription)
 
     if args.reset_device_name:
         print(f'Resetting device name for {device.name} {device.ipv4}')
-        device.reset_device_name()
+        await device.reset_device_name()
 
     if args.new_device_name:
         print(f'Setting device name for {device.name} {device.ipv4} to {args.new_device_name}')
-        device.set_device_name(args.new_device_name)
+        await device.set_device_name(args.new_device_name)
 
     if args.reset_channel_name:
         print(f'Resetting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4}')
-        device.reset_channel_name(args.channel_type, args.channel_number)
+        await device.reset_channel_name(args.channel_type, args.channel_number)
 
     if args.sample_rate:
         print(f'Setting sample rate of {device.name} {device.ipv4} to {args.sample_rate}')
-        device.set_sample_rate(args.sample_rate)
+        await device.set_sample_rate(args.sample_rate)
 
     if args.gain_level:
         device_type = None
         label = None
 
-        if device.model == 'DAI2' or device.model == 'DAI1':
+        if device.model in ['DAI1', 'DAI2']:
             device_type = 'input'
 
             label = {
@@ -183,7 +184,7 @@ def control_dante_device(args, device):
                 4: '0 dBV',
                 5: '-10 dBV'
             }
-        elif device.model == 'DAO2' or device.model == 'DAO1':
+        elif device.model in ['DAO1', 'DAO2']:
             device_type = 'output'
 
             label = {
@@ -201,23 +202,23 @@ def control_dante_device(args, device):
                 print(f'Setting gain level of {device.name} {device.ipv4} to {label[args.gain_level]} on channel {args.channel_number}')
                 device.set_gain_level(args.channel_number, args.gain_level, device_type)
             else:
-                print(f'Must specify a channel number')
+                print('Must specify a channel number')
 
     if args.encoding:
         print(f'Setting encoding of {device.name} {device.ipv4} to {args.encoding}')
-        device.set_encoding(args.encoding)
+        await device.set_encoding(args.encoding)
 
     if args.new_channel_name:
         print(f'Setting name of {args.channel_type} channel {args.channel_number} for {device.name} {device.ipv4} to {args.new_channel_name}')
-        device.set_channel_name(args.channel_type, args.channel_number, args.new_channel_name)
+        await device.set_channel_name(args.channel_type, args.channel_number, args.new_channel_name)
 
     if args.latency:
         print(f'Setting latency of {device} to {args.latency:g} ms')
-        device.set_latency(args.latency)
+        await device.set_latency(args.latency)
 
     if args.identify:
         print(f'Identifying {device} {device.ipv4}')
-        device.identify()
+        await device.identify()
 
 
 async def control_dante_devices(args, devices):
@@ -226,25 +227,27 @@ async def control_dante_devices(args, devices):
         ipv4 = interface[netifaces.AF_INET][0]['addr']
         mac = interface[netifaces.AF_LINK][0]['addr'].replace(':', '')
     except Exception as e:
-        pass
+        print(e)
+        traceback.print_exc()
 
     if (args.gain_level or args.encoding or args.sample_rate or args.identify or args.latency or args.add_subscription or args.remove_subscription or args.new_channel_name or args.new_device_name or args.device) or True in [args.reset_channel_name, args.reset_device_name, args.json, args.xml, args.list_sample_rate, args.list_tx, args.list_subscriptions, args.list_rx, args.list_address, args.list_devices]:
         controls = []
 
-        for key, device in devices.items():
+        for _, device in devices.items():
             controls.append(device.get_controls())
 
             if args.list_volume:
                 try:
                     controls.append(device.get_volume(ipv4, mac, 8751))
                 except Exception as e:
-                    pass
+                    print(e)
+                    traceback.print_exc()
 
         await asyncio.gather(*controls)
         #  dante.get_make_model_info(mac)
 
         if args.device:
-            devices = dict(filter(lambda x: x[1].name == args.device or x[1].ipv4 == args.device, devices.items()))
+            devices = dict(filter(lambda x: args.device in (x[1].name, x[1].ipv4), devices.items()))
         else:
             devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
@@ -256,7 +259,7 @@ async def control_dante_devices(args, devices):
                     print('Must specify a device name')
                 else:
                     device = list(devices.values())[0]
-                    control_dante_device(args, device)
+                    await control_dante_device(args, device)
 
     if args.json:
         if args.device:
@@ -285,19 +288,15 @@ async def cli_mode(args):
         elif args.log_level:
             logger.setLevel(logging.getLevelName(args.log_level.upper()))
 
-        dante_browser = dante.DanteBrowser(mdns_timeout=args.timeout)
-        await dante_browser.get_devices()
-        dante_devices = dante_browser.devices
+        dante_browser = DanteBrowser(mdns_timeout=args.timeout)
+        dante_devices = await dante_browser.get_devices()
         logger.info(f'Initialized {len(dante_devices)} Dante device(s)')
 
-        if len(dante_devices) == 0:
-            if not args.json:
-                print('No devices detected. Try increasing the mDNS timeout.')
-        else:
-            if not args.json:
-                logger.info(f'{len(dante_devices)} Dante device(s) found')
+        if len(dante_devices) == 0 and not args.json:
+            print('No devices detected. Try increasing the mDNS timeout.')
+            return
 
-            await control_dante_devices(args, dante_devices)
+        await control_dante_devices(args, dante_devices)
     else:
         print('Not implemented')
 
@@ -319,8 +318,7 @@ async def main(args):
 
 if __name__ == '__main__':
     try:
-        args = parse_args()
-        asyncio.run(main(args))
+        asyncio.run(main(parse_args()))
     except KeyboardInterrupt:
         pass
 
