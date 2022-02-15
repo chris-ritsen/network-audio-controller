@@ -1,33 +1,28 @@
 import asyncio
 import logging
+import traceback
 
 from zeroconf import DNSService
 from zeroconf import IPVersion, ServiceStateChange, Zeroconf
-from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf, AsyncZeroconfServiceTypes
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 from .device import DanteDevice
 
+from .const import (
+    SERVICE_CMC,
+    SERVICES
+)
+
 logger = logging.getLogger('dante')
 
-ARC_SERVICE: str = '_netaudio-arc._udp.local.'
-CHAN_SERVICE: str = '_netaudio-chan._udp.local.'
-CMC_SERVICE: str = '_netaudio-cmc._udp.local.'
-DBC_SERVICE: str = '_netaudio-dbc._udp.local.'
-
-SERVICE_TYPES = [
-    ARC_SERVICE,
-    CHAN_SERVICE,
-    CMC_SERVICE,
-    DBC_SERVICE
-]
 
 class DanteBrowser():
     def __init__(self, mdns_timeout: float) -> None:
         self._devices = {}
         self.services = []
         self._mdns_timeout: float = mdns_timeout
-        self.aio_browser: Optional[AsyncServiceBrowser] = None
-        self.aio_zc: Optional[AsyncZeroconf] = None
+        self.aio_browser: AsyncServiceBrowser = None
+        self.aio_zc: AsyncZeroconf = None
 
 
     @property
@@ -59,7 +54,7 @@ class DanteBrowser():
 
     async def async_run(self) -> None:
         self.aio_zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
-        services = SERVICE_TYPES
+        services = SERVICES
 
         self.aio_browser = AsyncServiceBrowser(self.aio_zc.zeroconf, services, handlers=[self.async_on_service_state_change])
 
@@ -92,9 +87,7 @@ class DanteBrowser():
         logger.debug(f'Found {len(device_hosts)} device host(s)')
 
         for hostname, device_services in device_hosts.items():
-            keys = device_services.keys()
-            device = DanteDevice()
-            device.server_name = hostname
+            device = DanteDevice(server_name=hostname)
 
             logger.debug(f'Host {hostname} has {len(device_services.keys())} service(s)')
 
@@ -108,7 +101,7 @@ class DanteBrowser():
                     if not device.ipv4:
                         device.ipv4 = service['ipv4']
 
-                    if 'id' in service_properties and service['type'] == CMC_SERVICE:
+                    if 'id' in service_properties and service['type'] == SERVICE_CMC:
                         device.mac_address = service_properties['id']
 
                     if 'model' in service_properties:
@@ -122,16 +115,19 @@ class DanteBrowser():
 
                     if 'latency_ns' in service_properties:
                         device.latency = int(service_properties['latency_ns'])
+
+                    logger.debug(f'Initialized Dante device {service_name}\n')
             except Exception as e:
                 print(e)
                 traceback.print_exc()
 
-            logger.debug(f'Initialized Dante device {service_name}\n')
             self.devices[hostname] = device
+
+        return self.devices
 
 
     async def get_services(self) -> None:
-        logger.debug(f'get_services')
+        logger.debug('get_services')
 
         try:
             await self.async_run()
