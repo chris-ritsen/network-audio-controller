@@ -16,6 +16,8 @@ import netifaces
 
 from netaudio import DanteBrowser
 
+logger = logging.getLogger('netaudio')
+
 
 def _default(self, obj):
     return getattr(obj.__class__, 'to_json', _default.default)(obj)
@@ -225,7 +227,13 @@ async def control_dante_devices(args, devices):
     try:
         interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
         ipv4 = interface[netifaces.AF_INET][0]['addr']
-        mac = interface[netifaces.AF_LINK][0]['addr'].replace(':', '')
+        mac = None
+
+        if netifaces.AF_LINK in interface:
+            interface_link = interface[netifaces.AF_LINK][0]['addr']
+            mac = interface_link.replace(':', '')
+        else:
+            logger.warning("Couldn't find a MAC address for the default interface")
     except Exception as e:
         print(e)
         traceback.print_exc()
@@ -238,7 +246,8 @@ async def control_dante_devices(args, devices):
 
             if args.list_volume:
                 try:
-                    controls.append(device.get_volume(ipv4, mac, 8751))
+                    if ipv4 and mac:
+                        controls.append(device.get_volume(ipv4, mac, 8751))
                 except Exception as e:
                     print(e)
                     traceback.print_exc()
@@ -281,8 +290,6 @@ async def cli_mode(args):
     start = time.time()
 
     if args.device_type == 'dante':
-        logger = logging.getLogger('dante')
-
         if args.debug:
             logger.setLevel(logging.DEBUG)
         elif args.log_level:

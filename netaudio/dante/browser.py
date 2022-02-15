@@ -13,7 +13,7 @@ from .const import (
     SERVICES
 )
 
-logger = logging.getLogger('dante')
+logger = logging.getLogger('netaudio')
 
 
 class DanteBrowser():
