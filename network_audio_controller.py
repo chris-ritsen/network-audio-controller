@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 
 import argcomplete
-import argparse
 import asyncio
-import enum
 import json
 import logging
-import netifaces
 import os
-import signal
-import socket
 import sys
 import time
 
-from pyee import AsyncIOEventEmitter
 from json import JSONEncoder
+
+import argparse
+import netifaces
 
 import dante
 
-ee = AsyncIOEventEmitter()
-
-dante_devices = {}
 
 def _default(self, obj):
     return getattr(obj.__class__, 'to_json', _default.default)(obj)
@@ -54,7 +48,7 @@ def parse_args():
     text_output.add_argument('--list-rx', action='store_true', default=False, help='List receiver channels')
     text_output.add_argument('--list-sample-rate', action='store_true', default=False, help='List device sample rate')
     text_output.add_argument('--list-tx', action='store_true', default=False, help='List transmitter channels')
-    text_output.add_argument('--list-volume', action='store_true', default=False, help='List volume levels of channels. Not supported on all devices. Partially implemented')
+    text_output.add_argument('--list-volume', action='store_true', default=False, help='List volume levels of channels. Not supported on all devices.')
 
     channels.add_argument('--channel-number', default=None, help='Specify a channel for control by number', metavar='<number>', type=int)
     channels.add_argument('--channel-type', choices=['rx', 'tx'], default=None, help='Channel type to target for operations', type=str)
@@ -83,7 +77,6 @@ def parse_args():
     settings.add_argument('--set-latency', default=None, help='Set the device latency in milliseconds', dest='latency', metavar='<latency>', type=float)
     settings.add_argument('--set-sample-rate', choices=[44100, 48000, 88200, 96000, 176400, 192000], default=None, dest='sample_rate', help='Set the sample rate of a device', type=int)
 
-    debug.add_argument('--debug-multicast', action='store_true', default=False, help='Show multicast data')
     parser.add_argument('--debug', action='store_true', default=False, help='Set log level to DEBUG')
 
     if len(sys.argv) == 1:
@@ -92,6 +85,7 @@ def parse_args():
 
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
+
     return args
 
 
@@ -117,7 +111,6 @@ def print_devices(devices):
         if args.list_sample_rate and device.sample_rate:
             print(f'Sample rate: {device.sample_rate}')
 
-        # TODO: list channel volumes
         if args.list_rx:
             rx_channels = device.rx_channels
 
@@ -143,9 +136,7 @@ def print_devices(devices):
                 print(f'{subscription}')
 
 
-def control_dante_device(device):
-    args = parse_args()
-
+def control_dante_device(args, device):
     if args.add_subscription:
         if not args.tx_channel_name:
             print('Must specify a Tx channel name')
@@ -228,63 +219,7 @@ def control_dante_device(device):
         device.identify()
 
 
-@ee.on('received_multicast')
-def event_handler(*args, **kwargs):
-    addr = kwargs['addr']
-    data = kwargs['data']
-    group = kwargs['group']
-    port = kwargs['port']
-
-    data_hex = data.hex()
-
-    sequence_id = data[4:6]
-    command = int.from_bytes(data[26:28], 'big')
-    print(command, data[26:28].hex())
-
-    device_ipv4 = addr[0]
-    device_mac = data_hex[16:32]
-    data_len = int.from_bytes(data[2:4], 'big')
-
-    if command == 96:
-        ee.emit('parse_dante_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
-    elif command == 98:
-        print('identify')
-    if command == 112:
-        print('firmware update related')
-    elif command == 146:
-        print('device reboot')
-    elif command == 192:
-        ee.emit('parse_device_make_model_info', data=data, addr=addr, group=group, port=port, mac=device_mac)
-    elif command == 258:
-        print(device_ipv4, command, 'sub/unsub')
-    elif command == 261:
-        print(device_ipv4, command, 'sub/unsub')
-
-
-def debug_multicast():
-    multicast_group = '224.0.0.231'
-    multicast_port = 8702
-    server_address = ('', multicast_port)
-    mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    mc_sock.bind(server_address)
-    group = socket.inet_aton(multicast_group)
-    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
-    mc_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-    while True:
-        try:
-            data, addr = mc_sock.recvfrom(2048)
-            ee.emit('received_multicast', data=data, addr=addr, group=multicast_group, port=multicast_port)
-        except Exception as e:
-            print(e)
-
-
-def control_dante_devices(devices):
-    args = parse_args()
-
-    if args.debug_multicast:
-        debug_multicast()
-
+def control_dante_devices(args, devices):
     try:
         interface = netifaces.ifaddresses(list(netifaces.gateways()['default'].values())[0][1])
         ipv4 = interface[netifaces.AF_INET][0]['addr']
@@ -317,7 +252,7 @@ def control_dante_devices(devices):
                     print('Must specify a device name')
                 else:
                     device = list(devices.values())[0]
-                    control_dante_device(device)
+                    control_dante_device(args, device)
 
     if args.json:
         if args.device:
@@ -335,8 +270,8 @@ def control_dante_devices(devices):
         print_devices(devices)
 
 
-async def cli_mode():
-    args = parse_args()
+async def cli_mode(args):
+    start = time.time()
 
     if args.device_type == 'dante':
         logger = logging.getLogger('dante')
@@ -354,34 +289,35 @@ async def cli_mode():
                 print('No devices detected. Try increasing the mDNS timeout.')
         else:
             if not args.json:
-                print(f'{len(dante_devices)} device(s) found')
+                logger.debug(f'{len(dante_devices)} Dante device(s) found')
 
-            control_dante_devices(dante_devices)
+            control_dante_devices(args, dante_devices)
     else:
         print('Not implemented')
 
+    logger.debug(f'time:{time.time() - start:0.03f}s')
 
-async def tui_mode():
-    args = parse_args()
+
+async def tui_mode(args):
     print('Not implemented')
 
 
-async def main():
-    args = parse_args()
-
+async def main(args):
     logging.basicConfig(level=logging.ERROR)
 
     if args.tui:
-        await tui_mode()
+        await tui_mode(args)
     else:
-        await cli_mode()
+        await cli_mode(args)
+
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
-
+        args = parse_args()
+        asyncio.run(main(args))
     except KeyboardInterrupt:
         pass
+
     try:
         sys.exit(0)
     except SystemExit:
