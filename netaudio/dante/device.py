@@ -23,7 +23,7 @@ from .const import (
     STATUS_UNRESOLVED
 )
 
-logger = logging.getLogger('dante')
+logger = logging.getLogger('netaudio')
 
 
 ee = AsyncIOEventEmitter()

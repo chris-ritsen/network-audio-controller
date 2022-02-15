@@ -91,10 +91,11 @@ disable=bad-inline-option,
         no-self-use,
         protected-access,
         raw-checker-failed,
+        relative-beyond-top-level,
         suppressed-message,
         too-man-lines,
         unused-argument,
-        use-symbolic-message-instead
+        use-symbolic-message-instead,
         useless-suppression
 
 
