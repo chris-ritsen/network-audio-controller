@@ -105,7 +105,8 @@ def print_devices(devices):
     for index, (key, device) in enumerate(devices.items()):
         if args.list_devices:
             if args.list_address:
-                print(f'{device} {device.ipv4}')
+                device_info = ' '.join([s for s in [str(device), device.ipv4] if s])
+                print(f"{device_info}")
             else:
                 print(f'{device}')
         else:
@@ -294,6 +295,9 @@ async def cli_mode(args):
             logger.setLevel(logging.DEBUG)
         elif args.log_level:
             logger.setLevel(logging.getLevelName(args.log_level.upper()))
+
+        if args.timeout < 0.35:
+            logger.warning('The mDNS timeout is set too low')
 
         dante_browser = DanteBrowser(mdns_timeout=args.timeout)
         dante_devices = await dante_browser.get_devices()
