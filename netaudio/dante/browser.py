@@ -6,9 +6,9 @@ from zeroconf import DNSService
 from zeroconf import IPVersion, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-from .device import DanteDevice
+from netaudio.dante.device import DanteDevice
 
-from .const import (
+from netaudio.dante.const import (
     SERVICE_CMC,
     SERVICES
 )
@@ -138,6 +138,8 @@ class DanteBrowser():
 
 
     async def async_parse_netaudio_service(self, zeroconf: Zeroconf, service_type: str, name: str) -> None:
+        ipv4 = None
+        service_properties = {}
         info = AsyncServiceInfo(service_type, name)
         await info.async_request(zeroconf, 3000)
 
@@ -145,9 +147,13 @@ class DanteBrowser():
             return
 
         host = zeroconf.cache.entries_with_name(name)
-        ipv4 = info.parsed_addresses()[0]
+        addresses = info.parsed_addresses()
 
-        service_properties = {}
+        if not addresses:
+            logger.warning("Couldn't parse mDNS service address")
+            return
+
+        ipv4 = addresses[0]
 
         try:
             for key, value in info.properties.items():
