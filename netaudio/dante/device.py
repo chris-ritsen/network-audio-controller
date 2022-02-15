@@ -7,10 +7,10 @@ import traceback
 from pyee import AsyncIOEventEmitter
 from pyee.cls import evented, on
 
-from .channel import DanteChannel
-from .subscription import DanteSubscription
+from netaudio.dante.channel import DanteChannel
+from netaudio.dante.subscription import DanteSubscription
 
-from .const import (
+from netaudio.dante.const import (
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
     FEATURE_VOLUME_UNSUPPORTED,
