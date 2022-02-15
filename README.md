@@ -39,9 +39,9 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 First, install the dependencies:
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
-Then, run `./network_audio_controller.py`
+Then, run `python3 -m netaudio`
 
 ### Documentation
 
