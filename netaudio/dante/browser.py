@@ -77,7 +77,13 @@ class DanteBrowser():
 
         for service in self.services:
             service = service.result()
-            server_name = service['server_name']
+
+            if not service:
+                logger.warning('timed out getting mDNS service')
+                continue
+
+            if 'server_name' in service:
+                server_name = service['server_name']
 
             if not server_name in device_hosts:
                 device_hosts[server_name] = {}
@@ -141,9 +147,9 @@ class DanteBrowser():
         ipv4 = None
         service_properties = {}
         info = AsyncServiceInfo(service_type, name)
-        await info.async_request(zeroconf, 3000)
+        info_success = await info.async_request(zeroconf, 3000)
 
-        if not info:
+        if not info_success:
             return
 
         host = zeroconf.cache.entries_with_name(name)

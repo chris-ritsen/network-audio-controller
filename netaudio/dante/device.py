@@ -54,6 +54,7 @@ class DanteDevice():
         self._subscriptions = []
         self._tasks = set()
         self._tx_channels = {}
+        self._tx_count = 0
         self._tx_count_raw = 0
 
 
@@ -89,10 +90,16 @@ class DanteDevice():
 
     async def dante_command(self, command, service_type=None, port=None):
         response = None
+        sock = None
 
         if service_type:
             service = self.get_service(service_type)
-            sock = self.sockets[service['port']]
+
+            if service and service['port'] and service['port'] in self.sockets:
+                sock = self.sockets[service['port']]
+
+        if not sock:
+            return
 
         if port:
             sock = self.sockets[port]
@@ -168,11 +175,10 @@ class DanteDevice():
         service = None
 
         try:
-            service = next(filter(lambda x: x[1]['type'] == service_type, self.services.items()))[1]
+            service = next(filter(lambda x: x and x[1] and 'type' in x[1] and x[1]['type'] == service_type, self.services.items()))[1]
         except Exception as e:
+            logger.warning(f'Failed to get a service by type. {e}')
             self.error = e
-            print(e)
-            traceback.print_exc()
 
         return service
 
@@ -265,13 +271,20 @@ class DanteDevice():
         try:
             if not self.name:
                 response = await self.dante_command(*self.command_device_name())
-                self.name = response[10:-1].decode('ascii')
+
+                if response:
+                    self.name = response[10:-1].decode('ascii')
+                else:
+                    logger.warning('Failed to get Dante device name')
 
             # get reported rx/tx channel counts
             if not self.rx_count or not self.tx_count:
                 channel_count = await self.dante_command(*self.command_channel_count())
-                self.rx_count_raw = self.rx_count = int.from_bytes(channel_count[15:16], 'big')
-                self.tx_count_raw = self.tx_count = int.from_bytes(channel_count[13:14], 'big')
+                if channel_count:
+                    self.rx_count_raw = self.rx_count = int.from_bytes(channel_count[15:16], 'big')
+                    self.tx_count_raw = self.tx_count = int.from_bytes(channel_count[13:14], 'big')
+                else:
+                    logger.warning('Failed to get Dante channel counts')
 
             # get tx channels
             if not self.tx_channels and self.tx_count:
