@@ -92,8 +92,8 @@ class DanteDevice:
         if service_type:
             service = self.get_service(service_type)
 
-            if service and service["port"] and service["port"] in self.sockets:
-                sock = self.sockets[service["port"]]
+            if service and service['port'] and service['port'] in self.sockets:
+                sock = self.sockets[service['port']]
 
         if port:
             sock = self.sockets[port]
