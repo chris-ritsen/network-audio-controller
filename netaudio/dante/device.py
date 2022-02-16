@@ -98,9 +98,6 @@ class DanteDevice():
             if service and service['port'] and service['port'] in self.sockets:
                 sock = self.sockets[service['port']]
 
-        if not sock:
-            return
-
         if port:
             sock = self.sockets[port]
 
@@ -109,9 +106,8 @@ class DanteDevice():
         try:
             sock.send(binary_str)
             response = sock.recvfrom(2048)[0]
-        except Exception as e:
-            print(e)
-            traceback.print_exc()
+        except TimeoutError:
+            pass
 
         return response
 
