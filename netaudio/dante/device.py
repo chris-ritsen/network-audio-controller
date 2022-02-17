@@ -101,6 +101,9 @@ class DanteDevice():
         if port:
             sock = self.sockets[port]
 
+        if not sock:
+            return
+
         binary_str = codecs.decode(command, 'hex')
 
         try:
@@ -118,7 +121,8 @@ class DanteDevice():
 
 
     async def identify(self):
-        response = await self.dante_command(*self.command_identify())
+        command_identify = self.command_identify()
+        response = await self.dante_command(*command_identify)
         return response
 
 
@@ -142,13 +146,13 @@ class DanteDevice():
         return response
 
 
-    async def add_subscription(self, rx_channel_number, tx_channel_name, tx_device_name):
-        response = await self.dante_command(*self.command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name))
+    async def add_subscription(self, rx_channel, tx_channel, tx_device):
+        response = await self.dante_command(*self.command_add_subscription(rx_channel.number, tx_channel.name, tx_device.name))
         return response
 
 
-    async def remove_subscription(self, rx_channel_number):
-        response = await self.dante_command(*self.command_remove_subscription(rx_channel_number))
+    async def remove_subscription(self, rx_channel):
+        response = await self.dante_command(*self.command_remove_subscription(rx_channel.number))
         return response
 
 
@@ -1027,7 +1031,7 @@ class DanteDevice():
         args_length = chr(len(name.encode('utf-8')) + 11)
         args_length = bytes(args_length.encode('utf-8')).hex()
 
-        return (self.command_string('set_device_name', command_length=args_length, command_args=device_name(name)), SERVICE_ARC)
+        return (self.command_string('set_device_name', command_length=args_length, command_args=self.device_name(name)), SERVICE_ARC)
 
 
     def command_reset_device_name(self):
