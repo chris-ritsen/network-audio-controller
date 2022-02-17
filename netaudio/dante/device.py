@@ -1,11 +1,9 @@
 import codecs
+import ipaddress
 import logging
 import random
 import socket
 import traceback
-
-from pyee import AsyncIOEventEmitter
-from pyee.cls import evented, on
 
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.subscription import DanteSubscription
@@ -17,27 +15,18 @@ from netaudio.dante.const import (
     PORTS,
     SERVICE_ARC,
     SERVICE_CHAN,
-    STATUS_CONNECTED,
-    STATUS_INCORRECT_CHANNEL_FORMAT,
-    STATUS_SELF_SUBSCRIBED,
-    STATUS_UNRESOLVED,
 )
 
 logger = logging.getLogger("netaudio")
-
-
-ee = AsyncIOEventEmitter()
 sockets = {}
 
 
-@evented
 class DanteDevice:
     def __init__(self, server_name=""):
         self._dante_model = ""
         self._dante_model_id = ""
         self._error = None
-        self._initialized = False
-        self._ipv4 = ""
+        self._ipv4 = None
         self._latency = None
         self._mac_address = None
         self._manufacturer = ""
@@ -53,7 +42,6 @@ class DanteDevice:
         self._sockets = {}
         self._software = None
         self._subscriptions = []
-        self._tasks = set()
         self._tx_channels = {}
         self._tx_count = 0
         self._tx_count_raw = 0
@@ -92,11 +80,14 @@ class DanteDevice:
         if service_type:
             service = self.get_service(service_type)
 
-            if service and service['port'] and service['port'] in self.sockets:
-                sock = self.sockets[service['port']]
+            if service and service["port"] and service["port"] in self.sockets:
+                sock = self.sockets[service["port"]]
 
         if port:
             sock = self.sockets[port]
+
+        if not sock:
+            return
 
         binary_str = codecs.decode(command, "hex")
 
@@ -114,58 +105,68 @@ class DanteDevice:
                 channel_type, channel_number, new_channel_name
             )
         )
+
         return response
 
     async def identify(self):
-        response = await self.dante_command(*self.command_identify())
+        command_identify = self.command_identify()
+        response = await self.dante_command(*command_identify)
+
         return response
 
     async def set_latency(self, latency):
         response = await self.dante_command(*self.command_set_latency(latency))
+
         return response
 
     async def set_gain_level(self, channel_number, gain_level, device_type):
         response = await self.dante_command(
             *self.command_set_gain_level(channel_number, gain_level, device_type)
         )
+
         return response
 
     async def set_encoding(self, encoding):
         response = await self.dante_command(*self.command_set_encoding(encoding))
+
         return response
 
     async def set_sample_rate(self, sample_rate):
         response = await self.dante_command(*self.command_set_sample_rate(sample_rate))
+
         return response
 
-    async def add_subscription(
-        self, rx_channel_number, tx_channel_name, tx_device_name
-    ):
+    async def add_subscription(self, rx_channel, tx_channel, tx_device):
         response = await self.dante_command(
             *self.command_add_subscription(
-                rx_channel_number, tx_channel_name, tx_device_name
+                rx_channel.number, tx_channel.name, tx_device.name
             )
         )
+
         return response
 
-    async def remove_subscription(self, rx_channel_number):
+    async def remove_subscription(self, rx_channel):
         response = await self.dante_command(
-            *self.command_remove_subscription(rx_channel_number)
+            *self.command_remove_subscription(rx_channel.number)
         )
+
         return response
 
     async def reset_channel_name(self, channel_type, channel_number):
         response = await self.dante_command(
             *self.command_reset_channel_name(channel_type, channel_number)
         )
+
         return response
 
-    async def set_device_name(self, name):
-        response = await self.dante_command(*self.command_set_device_name(name))
+    async def set_name(self, name):
+        response = await self.dante_command(*self.command_set_name(name))
+
         return response
 
-    async def reset_device_name(self):
-        response = await self.dante_command(*self.command_reset_device_name())
+    async def reset_name(self):
+        response = await self.dante_command(*self.command_reset_name())
+
         return response
 
     def get_service(self, service_type):
@@ -187,70 +188,66 @@ class DanteDevice:
 
         return service
 
-    @on("init")
-    def event_handler(self, *args, **kwargs):
-        task_name = kwargs["task_name"]
-        self.tasks.remove(task_name)
+    #  @on("init")
+    #  def event_handler(self, *args, **kwargs):
+    #      task_name = kwargs["task_name"]
+    #      self.tasks.remove(task_name)
 
-        if len(self.tasks) == 0:
-            self.initialized = True
-            ee.emit("init_check")
+    #      if len(self.tasks) == 0:
+    #          self.initialized = True
+    #          ee.emit("init_check")
 
-    @on("dante_model_info")
-    def event_handler(self, *args, **kwargs):
-        #  ipv4 = kwargs['ipv4']
-        #  mac = kwargs['mac']
-        model = kwargs["model"]
-        model_id = kwargs["model_id"]
+    #  @on("dante_model_info")
+    #  def event_handler(self, *args, **kwargs):
+    #      model = kwargs["model"]
+    #      model_id = kwargs["model_id"]
 
-        self.dante_model = model
-        self.dante_model_id = model_id
-        #  self.event_emitter.emit('init', task_name=TASK_GET_DANTE_MODEL_INFO)
+    #      self.dante_model = model
+    #      self.dante_model_id = model_id
+    #      #  self.event_emitter.emit('init', task_name=TASK_GET_DANTE_MODEL_INFO)
 
-    @on("parse_dante_model_info")
-    def event_handler(self, *args, **kwargs):
-        addr = kwargs["addr"]
-        data = kwargs["data"]
-        mac = kwargs["mac"]
+    #  @on("parse_dante_model_info")
+    #  def event_handler(self, *args, **kwargs):
+    #      addr = kwargs["addr"]
+    #      data = kwargs["data"]
+    #      mac = kwargs["mac"]
 
-        ipv4 = addr[0]
+    #      ipv4 = addr[0]
 
-        model = data[88:].partition(b"\x00")[0].decode("utf-8")
-        model_id = data[43:].partition(b"\x00")[0].decode("utf-8").replace("\u0003", "")
+    #      model = data[88:].partition(b"\x00")[0].decode("utf-8")
+    #      model_id = data[43:].partition(b"\x00")[0].decode("utf-8").replace("\u0003", "")
 
-        self.event_emitter.emit(
-            "dante_model_info", model_id=model_id, model=model, ipv4=ipv4, mac=mac
-        )
+    #      self.event_emitter.emit(
+    #          "dante_model_info", model_id=model_id, model=model, ipv4=ipv4, mac=mac
+    #      )
 
-    @on("device_make_model_info")
-    def event_handler(self, *args, **kwargs):
-        #  ipv4 = kwargs['ipv4']
-        #  mac = kwargs['mac']
-        manufacturer = kwargs["manufacturer"]
-        model = kwargs["model"]
+    #  @on("device_make_model_info")
+    #  def event_handler(self, *args, **kwargs):
+    #      manufacturer = kwargs["manufacturer"]
+    #      model = kwargs["model"]
 
-        self.manufacturer = manufacturer
-        self.model = model
-        #  self.event_emitter.emit('init', task_name=TASK_GET_MODEL_INFO)
+    #      self.manufacturer = manufacturer
+    #      self.model = model
+    #      #  self.event_emitter.emit('init', task_name=TASK_GET_MODEL_INFO)
 
-    @on("parse_device_make_model_info")
-    def event_handler(self, *args, **kwargs):
-        addr = kwargs["addr"]
-        data = kwargs["data"]
-        mac = kwargs["mac"]
+    #  @on("parse_device_make_model_info")
+    #  def event_handler(self, *args, **kwargs):
+    #      addr = kwargs["addr"]
+    #      data = kwargs["data"]
+    #      mac = kwargs["mac"]
 
-        ipv4 = addr[0]
+    #      ipv4 = addr[0]
 
-        manufacturer = data[76:].partition(b"\x00")[0].decode("utf-8")
-        model = data[204:].partition(b"\x00")[0].decode("utf-8")
+    #      manufacturer = data[76:].partition(b"\x00")[0].decode("utf-8")
+    #      model = data[204:].partition(b"\x00")[0].decode("utf-8")
 
-        self.event_emitter.emit(
-            "device_make_model_info",
-            manufacturer=manufacturer,
-            model=model,
-            ipv4=ipv4,
-            mac=mac,
-        )
+    #      self.event_emitter.emit(
+    #          "device_make_model_info",
+    #          manufacturer=manufacturer,
+    #          model=model,
+    #          ipv4=ipv4,
+    #          mac=mac,
+    #      )
 
     async def get_controls(self):
         try:
@@ -261,14 +258,14 @@ class DanteDevice:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(("", 0))
                 sock.settimeout(1)
-                sock.connect((self.ipv4, service["port"]))
+                sock.connect((str(self.ipv4), service["port"]))
                 self.sockets[service["port"]] = sock
 
             for port in PORTS:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(("", 0))
                 sock.settimeout(0.01)
-                sock.connect((self.ipv4, port))
+                sock.connect((str(self.ipv4), port))
                 self.sockets[port] = sock
         except Exception as e:
             self.error = e
@@ -338,7 +335,7 @@ class DanteDevice:
             else:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.settimeout(0.1)
-                sock.bind((ipv4, port))
+                sock.bind((str(ipv4), port))
                 sockets[port] = sock
 
             volume_start = await self.dante_command(
@@ -354,7 +351,7 @@ class DanteDevice:
                 try:
                     data, addr = sock.recvfrom(2048)
 
-                    if addr[0] == self.ipv4:
+                    if addr[0] == str(self.ipv4):
                         await self.dante_send_command(
                             *self.command_volume_stop(self.name, ipv4, mac, port)
                         )
@@ -391,8 +388,8 @@ class DanteDevice:
                         channel_offset = channel[3]
                         device_offset = channel[4]
                         rx_channel_offset = channel[5]
-                        status1 = channel[6]
-                        status2 = channel[7]
+                        rx_channel_status_code = int(channel[6], 16)
+                        subscription_status_code = int(channel[7], 16)
 
                         rx_channel_name = self.get_label(
                             hex_rx_response, rx_channel_offset
@@ -410,68 +407,32 @@ class DanteDevice:
                         if index == 0 and not device_offset == "0000":
                             o1 = (int(channel[2], 16) * 2) + 2
                             o2 = o1 + 6
-                            sample_rate_hex = hex_rx_response[o1:o2]
+                            sample_rate = int(hex_rx_response[o1:o2], 16)
 
-                            if sample_rate_hex != "000000":
-                                self.sample_rate = int(sample_rate_hex, 16)
-
-                        self_connected = status1 == "0000" and status2 == "0004"
-                        connected_not_self_connected = (
-                            status1 == "0101" and status2 == "0009"
-                        )
-                        not_connected_not_subscribed = (
-                            status1 == "0000" and status2 == "0000"
-                        )
-                        unresolved = status1 == "0000" and status2 == "0001"
-                        incorrect_channel_format = (
-                            status1 == "0000" and status2 == "0010"
-                        )
+                            if sample_rate:
+                                self.sample_rate = sample_rate
 
                         channel_status_text = None
-                        subscription_status_text = None
 
                         subscription = DanteSubscription()
                         rx_channel = DanteChannel()
-
-                        if self_connected:
-                            subscription.status_text = (
-                                channel_status_text
-                            ) = STATUS_SELF_SUBSCRIBED
-
-                        if connected_not_self_connected:
-                            subscription.status_text = (
-                                channel_status_text
-                            ) = STATUS_CONNECTED
-
-                        if unresolved:
-                            subscription.error = (
-                                subscription.status_text
-                            ) = STATUS_UNRESOLVED
-
-                        if incorrect_channel_format:
-                            subscription.error = (
-                                subscription.status_text
-                            ) = STATUS_INCORRECT_CHANNEL_FORMAT
 
                         rx_channel.channel_type = "rx"
                         rx_channel.device = self
                         rx_channel.name = rx_channel_name
                         rx_channel.number = channel_number
-                        rx_channel.status_codes = (status1, status2)
+                        rx_channel.status_code = rx_channel_status_code
 
                         if channel_status_text:
                             rx_channel.status_text = channel_status_text
 
                         rx_channels[channel_number] = rx_channel
 
-                        if subscription_status_text:
-                            subscription.status_text = subscription_status_text
-
                         if tx_device_name:
                             subscription.rx_channel_name = rx_channel_name
                             subscription.rx_device_name = self.name
                             subscription.tx_channel_name = tx_channel_name
-                            subscription.status_codes = (status1, status2)
+                            subscription.status_code = subscription_status_code
 
                             if tx_device_name == ".":
                                 subscription.tx_device_name = self.name
@@ -588,7 +549,7 @@ class DanteDevice:
 
     @ipv4.setter
     def ipv4(self, ipv4):
-        self._ipv4 = ipv4
+        self._ipv4 = ipaddress.ip_address(ipv4)
 
     @property
     def dante_model(self):
@@ -621,14 +582,6 @@ class DanteDevice:
     @model_id.setter
     def model_id(self, model_id):
         self._model_id = model_id
-
-    @property
-    def initialized(self):
-        return self._initialized
-
-    @initialized.setter
-    def initialized(self, initialized):
-        self._initialized = initialized
 
     @property
     def latency(self):
@@ -691,8 +644,8 @@ class DanteDevice:
         return self._sockets
 
     @sockets.setter
-    def sockets(self, sockets):
-        self._sockets = sockets
+    def sockets(self, _sockets):
+        self._sockets = _sockets
 
     @property
     def software(self):
@@ -717,14 +670,6 @@ class DanteDevice:
     @services.setter
     def services(self, services):
         self._services = services
-
-    @property
-    def tasks(self):
-        return self._tasks
-
-    @tasks.setter
-    def tasks(self, tasks):
-        self._tasks = tasks
 
     @property
     def tx_channels(self):
@@ -780,7 +725,7 @@ class DanteDevice:
 
         as_json = {
             "channels": {"receivers": rx_channels, "transmitters": tx_channels},
-            "ipv4": self.ipv4,
+            "ipv4": str(self.ipv4),
             "name": self.name,
             "server_name": self.server_name,
             "services": self.services,
@@ -820,7 +765,7 @@ class DanteDevice:
             hex_substring = hex_str[int(offset, 16) * 2 :]
             partitioned_bytes = bytes.fromhex(hex_substring).partition(b"\x00")[0]
             parsed_get_label = partitioned_bytes.decode("utf-8")
-        except Exception as e:
+        except Exception:
             pass
             #  traceback.print_exc()
 
@@ -847,11 +792,11 @@ class DanteDevice:
         if command == "rx_channels":
             command_length = "10"
             command_str = "3000"
-        if command == "reset_device_name":
+        if command == "reset_name":
             command_length = "0a"
             command_str = "1001"
             command_args = "0000"
-        if command == "set_device_name":
+        if command == "set_name":
             command_str = "1001"
 
         sequence2 = random.randint(0, 65535)
@@ -892,7 +837,7 @@ class DanteDevice:
     def command_volume_start(self, device_name, ipv4, mac, port, timeout=True):
         data_len = 0
         device_name_hex = device_name.encode().hex()
-        ip_hex = socket.inet_aton(ipv4).hex()
+        ip_hex = ipv4.packed.hex()
 
         name_len1, name_len2, name_len3 = self.get_name_lengths(device_name)
 
@@ -914,7 +859,7 @@ class DanteDevice:
     def command_volume_stop(self, device_name, ipv4, mac, port):
         data_len = 0
         device_name_hex = device_name.encode().hex()
-        ip_hex = "00000000"
+        ip_hex = ipaddress.IPv4Address(0).packed.hex()
 
         name_len1, name_len2, name_len3 = self.get_name_lengths(device_name)
 
@@ -961,31 +906,28 @@ class DanteDevice:
         return (command_string, None, DEVICE_SETTINGS_PORT)
 
     def command_set_encoding(self, encoding):
-        ipv4 = "000000"
         data_len = 40
 
-        command_string = f"ffff00{data_len}03d70000525400{ipv4}0000417564696e617465072700830000006400000001000000{encoding:02x}"
+        command_string = f"ffff00{data_len}03d700005254000000000000417564696e617465072700830000006400000001000000{encoding:02x}"
 
         return (command_string, None, DEVICE_SETTINGS_PORT)
 
     def command_set_gain_level(self, channel_number, gain_level, device_type):
-        ipv4 = "000000"
         data_len = 52
 
         if device_type == "input":
-            target = f"ffff00{data_len:02x}03440000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001001020000000000"
+            target = f"ffff00{data_len:02x}034400005254000000000000417564696e6174650727100a0000000000010001000c001001020000000000"
         elif device_type == "output":
-            target = f"ffff00{data_len:02x}03260000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001002010000000000"
+            target = f"ffff00{data_len:02x}032600005254000000000000417564696e6174650727100a0000000000010001000c001002010000000000"
 
         command_string = f"{target}{channel_number:02x}000000{gain_level:02x}"
 
         return (command_string, None, DEVICE_SETTINGS_PORT)
 
     def command_set_sample_rate(self, sample_rate):
-        ipv4 = "000000"
         data_len = 40
 
-        command_string = f"ffff00{data_len:02x}03d40000525400{ipv4}0000417564696e61746507270081000000640000000100{sample_rate:06x}"
+        command_string = f"ffff00{data_len:02x}03d400005254000000000000417564696e61746507270081000000640000000100{sample_rate:06x}"
 
         return (command_string, None, DEVICE_SETTINGS_PORT)
 
@@ -1034,21 +976,21 @@ class DanteDevice:
     def command_channel_count(self):
         return (self.command_string("channel_count"), SERVICE_ARC)
 
-    def command_set_device_name(self, name):
+    def command_set_name(self, name):
         args_length = chr(len(name.encode("utf-8")) + 11)
         args_length = bytes(args_length.encode("utf-8")).hex()
 
         return (
             self.command_string(
-                "set_device_name",
+                "set_name",
                 command_length=args_length,
                 command_args=self.device_name(name),
             ),
             SERVICE_ARC,
         )
 
-    def command_reset_device_name(self):
-        return (self.command_string("reset_device_name"), SERVICE_ARC)
+    def command_reset_name(self):
+        return (self.command_string("reset_name"), SERVICE_ARC)
 
     def command_reset_channel_name(self, channel_type, channel_number):
         channel_hex = f"{channel_number:02x}"
