@@ -1,5 +1,4 @@
-argcomplete
-argparse
+cleo
 netifaces
 pyee
 twisted

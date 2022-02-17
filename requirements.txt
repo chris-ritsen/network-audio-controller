@@ -4,10 +4,6 @@
 #
 #    pip-compile
 #
-argcomplete==2.0.0
-    # via -r requirements.in
-argparse==1.4.0
-    # via -r requirements.in
 attrs==21.4.0
     # via
     #   automat
