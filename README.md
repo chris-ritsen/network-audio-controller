@@ -37,11 +37,24 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Usage
 
-First, install the dependencies:
+#### Project dependencies on Arch Linux
 ```bash
-pip3 install -r requirements.txt
+community/python-pipx
+community/python-poetry
 ```
-Then, run `python3 -m netaudio`
+
+To run without installing:
+```bash
+poetry install
+poetry run netaudio
+```
+
+To install the package:
+```bash
+pipx install --force --include-deps .
+```
+
+Then run `netaudio`
 
 ### Documentation
 

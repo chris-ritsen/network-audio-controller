@@ -1,4 +1,6 @@
 *.pyc
-.*.sw*
+.eggs
+.sw*
+dist/
 __pycache__
 debug.log

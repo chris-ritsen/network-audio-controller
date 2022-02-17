@@ -5,20 +5,20 @@ class DanteChannel:
         self._friendly_name = None
         self._name = None
         self._number = None
-        self._status_codes = None
+        self._status_code = None
         self._status_text = None
         self._volume = None
 
     def __str__(self):
-        name = self.name
-
         if self.friendly_name:
             name = self.friendly_name
+        else:
+            name = self.name
 
         if self.volume and self.volume != 254:
             text = f"{self.number}:{name} [{self.volume}]"
         else:
-            text = f"{self.number}:{self.name}"
+            text = f"{self.number}:{name}"
 
         return text
 
@@ -39,12 +39,12 @@ class DanteChannel:
         self._number = number
 
     @property
-    def status_codes(self):
-        return self._status_codes
+    def status_code(self):
+        return self._status_code
 
-    @status_codes.setter
-    def status_codes(self, status_codes):
-        self._status_codes = status_codes
+    @status_code.setter
+    def status_code(self, status_code):
+        self._status_code = status_code
 
     @property
     def status_text(self):
@@ -87,7 +87,7 @@ class DanteChannel:
         self._volume = volume
 
     def to_json(self):
-        as_json = {"number": self.number, "name": self.name}
+        as_json = {"name": self.name}
 
         if self.friendly_name:
             as_json["friendly_name"] = self.friendly_name
