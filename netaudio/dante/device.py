@@ -1027,7 +1027,7 @@ class DanteDevice():
         args_length = chr(len(name.encode('utf-8')) + 11)
         args_length = bytes(args_length.encode('utf-8')).hex()
 
-        return (self.command_string('set_device_name', command_length=args_length, command_args=device_name(name)), SERVICE_ARC)
+        return (self.command_string('set_device_name', command_length=args_length, command_args=self.device_name(name)), SERVICE_ARC)
 
 
     def command_reset_device_name(self):
