@@ -1,21 +1,26 @@
 [tool.poetry]
 name = "netaudio"
-version = "0.0.1"
-description = "Control network audio devices"
+version = "0.0.2"
+description = "Control Dante network audio devices without Dante Controller"
 authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
 license = "unlicense"
 
 [tool.poetry.dependencies]
-argcomplete = "^2.0.0"
-argparse = "^1.4.0"
 netifaces = "^0.11.0"
 pyee = "^9.0.4"
 python = "^3.9"
 twisted = "^22.1.0"
 zeroconf = "^0.38.3"
+cleo = "^0.8.1"
 
 [tool.poetry.dev-dependencies]
+black = "^22.1.0"
+pylint = "^2.12.2"
+pipx = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+netaudio = "netaudio:main"
