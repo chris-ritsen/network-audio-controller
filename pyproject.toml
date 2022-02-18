@@ -14,6 +14,9 @@ zeroconf = "^0.38.3"
 cleo = "^0.8.1"
 
 [tool.poetry.dev-dependencies]
+black = "^22.1.0"
+pylint = "^2.12.2"
+pipx = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
