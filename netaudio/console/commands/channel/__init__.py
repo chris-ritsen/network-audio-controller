@@ -1,7 +1,7 @@
 from cleo import Command
 from cleo.helpers import option
 
-from .list import ChannelListCommand
+from ._list import ChannelListCommand
 
 
 class ChannelCommand(Command):

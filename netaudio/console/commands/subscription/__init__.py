@@ -1,9 +1,9 @@
 from cleo import Command
 from cleo.helpers import option
 
-from .add import SubscriptionAddCommand
-from .list import SubscriptionListCommand
-from .remove import SubscriptionRemoveCommand
+from ._add import SubscriptionAddCommand
+from ._list import SubscriptionListCommand
+from ._remove import SubscriptionRemoveCommand
 
 
 class SubscriptionCommand(Command):
