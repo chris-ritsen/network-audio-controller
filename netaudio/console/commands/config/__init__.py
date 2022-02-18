@@ -10,7 +10,7 @@ from netaudio.dante.browser import DanteBrowser
 
 
 def _default(self, obj):
-    return getattr(obj.__class__, 'to_json', _default.default)(obj)
+    return getattr(obj.__class__, "to_json", _default.default)(obj)
 
 
 _default.default = JSONEncoder().default
@@ -18,12 +18,12 @@ JSONEncoder.default = _default
 
 
 class ConfigCommand(Command):
-    name = 'config'
-    description = 'Configure devices'
+    name = "config"
+    description = "Configure devices"
 
     options = [
-        option('device-name', None, 'Specify a device name', flag=False),
-        option('json', None, 'Output as JSON', flag=True)
+        option("device-name", None, "Specify a device name", flag=False),
+        option("json", None, "Output as JSON", flag=True),
     ]
 
     async def device_configure(self):
@@ -34,24 +34,25 @@ class ConfigCommand(Command):
         for _, device in devices.items():
             await device.get_controls()
 
-        if self.option('device-name'):
-            name = self.option('device-name')
+        if self.option("device-name"):
+            name = self.option("device-name")
         else:
-            device_names = sorted(list({k: v.name for k, v in devices.items()}.values()))
-            name = self.choice('Select a device', device_names, None)
+            device_names = sorted(
+                list({k: v.name for k, v in devices.items()}.values())
+            )
+            name = self.choice("Select a device", device_names, None)
 
         if not name:
             return
 
         devices = dict(filter(lambda d: d[1].name == name, devices.items()))
 
-        if self.option('json'):
+        if self.option("json"):
             json_object = json.dumps(devices, indent=2)
-            self.line(f'{json_object}')
+            self.line(f"{json_object}")
         else:
             for _, device in devices.items():
-                self.line(f'{device}')
-
+                self.line(f"{device}")
 
     def handle(self):
         asyncio.run(self.device_configure())

@@ -1,11 +1,10 @@
 from multiprocessing import Process, Pipe
 
 
-class Timeout():
+class Timeout:
     def __init__(self, func, timeout):
         self.func = func
         self.timeout = timeout
-
 
     def __call__(self, *args, **kargs):
         def pmain(pipe, func, args, kargs):
