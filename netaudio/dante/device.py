@@ -1,4 +1,5 @@
 import codecs
+import ipaddress
 import logging
 import random
 import socket
@@ -36,7 +37,7 @@ class DanteDevice():
         self._dante_model_id = ''
         self._error = None
         self._initialized = False
-        self._ipv4 = ''
+        self._ipv4 = None
         self._latency = None
         self._mac_address = None
         self._manufacturer = ''
@@ -109,7 +110,7 @@ class DanteDevice():
         try:
             sock.send(binary_str)
             response = sock.recvfrom(2048)[0]
-        except TimeoutError:
+        except TimeoutError as e:
             pass
 
         return response
@@ -195,8 +196,6 @@ class DanteDevice():
 
     @on('dante_model_info')
     def event_handler(self, *args, **kwargs):
-        #  ipv4 = kwargs['ipv4']
-        #  mac = kwargs['mac']
         model = kwargs['model']
         model_id = kwargs['model_id']
 
@@ -221,8 +220,6 @@ class DanteDevice():
 
     @on('device_make_model_info')
     def event_handler(self, *args, **kwargs):
-        #  ipv4 = kwargs['ipv4']
-        #  mac = kwargs['mac']
         manufacturer = kwargs['manufacturer']
         model = kwargs['model']
 
@@ -254,14 +251,14 @@ class DanteDevice():
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
                 sock.settimeout(1)
-                sock.connect((self.ipv4, service['port']))
+                sock.connect((str(self.ipv4), service['port']))
                 self.sockets[service['port']] = sock
 
             for port in PORTS:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.bind(('', 0))
                 sock.settimeout(0.01)
-                sock.connect((self.ipv4, port))
+                sock.connect((str(self.ipv4), port))
                 self.sockets[port] = sock
         except Exception as e:
             self.error = e
@@ -327,7 +324,7 @@ class DanteDevice():
             else:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.settimeout(0.1)
-                sock.bind((ipv4, port))
+                sock.bind((str(ipv4), port))
                 sockets[port] = sock
 
             volume_start = await self.dante_command(*self.command_volume_start(self.name, ipv4, mac, port))
@@ -341,7 +338,7 @@ class DanteDevice():
                 try:
                     data, addr = sock.recvfrom(2048)
 
-                    if addr[0] == self.ipv4:
+                    if addr[0] == str(self.ipv4):
                         await self.dante_send_command(*self.command_volume_stop(self.name, ipv4, mac, port))
                         self.parse_volume(data)
 
@@ -547,7 +544,7 @@ class DanteDevice():
 
     @ipv4.setter
     def ipv4(self, ipv4):
-        self._ipv4 = ipv4
+        self._ipv4 = ipaddress.ip_address(ipv4)
 
 
     @property
@@ -789,7 +786,7 @@ class DanteDevice():
                 'receivers': rx_channels,
                 'transmitters': tx_channels
             },
-            'ipv4': self.ipv4,
+            'ipv4': str(self.ipv4),
             'name': self.name,
             'server_name': self.server_name,
             'services': self.services,
@@ -898,7 +895,7 @@ class DanteDevice():
     def command_volume_start(self, device_name, ipv4, mac, port, timeout=True):
         data_len = 0
         device_name_hex = device_name.encode().hex()
-        ip_hex = socket.inet_aton(ipv4).hex()
+        ip_hex = ipv4.packed.hex()
 
         name_len1, name_len2, name_len3 = self.get_name_lengths(device_name)
 
@@ -961,22 +958,20 @@ class DanteDevice():
 
 
     def command_set_encoding(self, encoding):
-        ipv4 = '000000'
         data_len = 40
 
-        command_string = f'ffff00{data_len}03d70000525400{ipv4}0000417564696e617465072700830000006400000001000000{encoding:02x}'
+        command_string = f'ffff00{data_len}03d700005254000000000000417564696e617465072700830000006400000001000000{encoding:02x}'
 
         return (command_string, None, DEVICE_SETTINGS_PORT)
 
 
     def command_set_gain_level(self, channel_number, gain_level, device_type):
-        ipv4 = '000000'
         data_len = 52
 
         if device_type == 'input':
-            target = f'ffff00{data_len:02x}03440000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001001020000000000'
+            target = f'ffff00{data_len:02x}034400005254000000000000417564696e6174650727100a0000000000010001000c001001020000000000'
         elif device_type == 'output':
-            target = f'ffff00{data_len:02x}03260000525400{ipv4}0000417564696e6174650727100a0000000000010001000c001002010000000000'
+            target = f'ffff00{data_len:02x}032600005254000000000000417564696e6174650727100a0000000000010001000c001002010000000000'
 
         command_string = f'{target}{channel_number:02x}000000{gain_level:02x}'
 
@@ -984,10 +979,9 @@ class DanteDevice():
 
 
     def command_set_sample_rate(self, sample_rate):
-        ipv4 = '000000'
         data_len = 40
 
-        command_string = f'ffff00{data_len:02x}03d40000525400{ipv4}0000417564696e61746507270081000000640000000100{sample_rate:06x}'
+        command_string = f'ffff00{data_len:02x}03d400005254000000000000417564696e61746507270081000000640000000100{sample_rate:06x}'
 
         return (command_string, None, DEVICE_SETTINGS_PORT)
 

@@ -106,7 +106,6 @@ class DanteChannel():
 
     def to_json(self):
         as_json = {
-            'number': self.number,
             'name': self.name
         }
 
