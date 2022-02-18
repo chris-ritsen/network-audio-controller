@@ -7,10 +7,13 @@ from ._remove import SubscriptionRemoveCommand
 
 
 class SubscriptionCommand(Command):
-    name = 'subscription'
-    description = 'Control subscriptions'
-    commands = [SubscriptionAddCommand(), SubscriptionListCommand(), SubscriptionRemoveCommand()]
-
+    name = "subscription"
+    description = "Control subscriptions"
+    commands = [
+        SubscriptionAddCommand(),
+        SubscriptionListCommand(),
+        SubscriptionRemoveCommand(),
+    ]
 
     def handle(self):
-        return self.call('help', self._config.name)
+        return self.call("help", self._config.name)

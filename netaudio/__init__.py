@@ -7,8 +7,6 @@ from .dante.subscription import DanteSubscription
 
 from .console.application import main
 
-__author__ = 'Chris Ritsen'
-__maintainer__ = 'Chris Ritsen <chris.ritsen@gmail.com>'
-__version__ = '0.0.0'
-
-__all__ = []
+__author__ = "Chris Ritsen"
+__maintainer__ = "Chris Ritsen <chris.ritsen@gmail.com>"
+__version__ = "0.0.1"

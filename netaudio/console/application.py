@@ -1,10 +1,15 @@
 from cleo.application import Application
 
-from netaudio.console.commands import ChannelCommand, ConfigCommand, DeviceCommand, SubscriptionCommand
+from netaudio.console.commands import (
+    ChannelCommand,
+    ConfigCommand,
+    DeviceCommand,
+    SubscriptionCommand,
+)
 
 
 def main() -> int:
-    application = Application('netaudio', '0.0.1', complete=True)
+    application = Application("netaudio", "0.0.1", complete=True)
     application.add(ChannelCommand())
     application.add(ConfigCommand())
     application.add(DeviceCommand())
@@ -13,5 +18,5 @@ def main() -> int:
     return application.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
