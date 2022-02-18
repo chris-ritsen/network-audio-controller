@@ -74,7 +74,6 @@ class SubscriptionListCommand(Command):
             for subscription in device.subscriptions:
                 subscriptions.append(subscription)
 
-
         if self.option('json'):
             json_object = json.dumps(subscriptions, indent=2)
             self.line(f'{json_object}')

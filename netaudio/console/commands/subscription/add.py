@@ -1,4 +1,5 @@
 import asyncio
+import socket
 
 from cleo import Command
 from cleo.helpers import option
@@ -39,7 +40,7 @@ class SubscriptionAddCommand(Command):
             tx_device = next(filter(lambda d: d[1].ipv4 == self.option('tx-device-host'), dante_devices.items()))[1]
 
         if self.option('tx-channel-name'):
-            tx_channel = next(filter(lambda c: c[1].name == self.option('tx-channel-name'), tx_device.tx_channels.items()))[1]
+            tx_channel = next(filter(lambda c: self.option('tx-channel-name') == c[1].friendly_name or self.option('tx-channel-name') == c[1].name and not c[1].friendly_name, tx_device.tx_channels.items()))[1]
         elif self.option('tx-channel-number'):
             tx_channel = next(filter(lambda c: c[1].number == self.option('tx-channel-number'), tx_device.tx_channels.items()))[1]
 
