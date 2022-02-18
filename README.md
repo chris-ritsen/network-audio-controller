@@ -39,8 +39,8 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 #### Project dependencies on Arch Linux
 ```bash
-community/python-poetry
 community/python-pipx
+community/python-poetry
 ```
 
 To run without installing:
@@ -49,7 +49,7 @@ poetry install
 poetry run netaudio
 ```
 
-To install the package with pipx:
+To install the package:
 ```bash
 pipx install --force --include-deps .
 ```

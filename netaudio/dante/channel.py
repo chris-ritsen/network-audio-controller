@@ -11,15 +11,15 @@ class DanteChannel():
 
 
     def __str__(self):
-        name = self.name
-
         if self.friendly_name:
             name = self.friendly_name
+        else:
+            name = self.name
 
         if self.volume and self.volume != 254:
             text = f'{self.number}:{name} [{self.volume}]'
         else:
-            text = f'{self.number}:{self.name}'
+            text = f'{self.number}:{name}'
 
         return text
 
