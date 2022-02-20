@@ -22,7 +22,8 @@ class ConfigCommand(Command):
     description = "Configure devices"
 
     options = [
-        option("device-name", None, "Specify a device name", flag=False),
+        option("device-name", None, "Specify a device to configure", flag=False),
+        option("set-device-name", None, "Specify a device to configure", flag=False),
         option("json", None, "Output as JSON", flag=True),
     ]
 
@@ -45,14 +46,20 @@ class ConfigCommand(Command):
         if not name:
             return
 
-        devices = dict(filter(lambda d: d[1].name == name, devices.items()))
+        device = list(
+            dict(filter(lambda d: d[1].name == name, devices.items())).values()
+        )[0]
+
+        if self.option("set-device-name"):
+            self.line(f"device:{device}")
+            self.line(f"new device name:{self.option('set-device-name')}")
+            await device.set_name(self.option("set-device-name"))
 
         if self.option("json"):
-            json_object = json.dumps(devices, indent=2)
+            json_object = json.dumps(device, indent=2)
             self.line(f"{json_object}")
         else:
-            for _, device in devices.items():
-                self.line(f"{device}")
+            self.line(f"{device}")
 
     def handle(self):
         asyncio.run(self.device_configure())
