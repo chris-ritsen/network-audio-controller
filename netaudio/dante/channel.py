@@ -5,7 +5,7 @@ class DanteChannel:
         self._friendly_name = None
         self._name = None
         self._number = None
-        self._status_codes = None
+        self._status_code = None
         self._status_text = None
         self._volume = None
 
@@ -39,12 +39,12 @@ class DanteChannel:
         self._number = number
 
     @property
-    def status_codes(self):
-        return self._status_codes
+    def status_code(self):
+        return self._status_code
 
-    @status_codes.setter
-    def status_codes(self, status_codes):
-        self._status_codes = status_codes
+    @status_code.setter
+    def status_code(self, status_code):
+        self._status_code = status_code
 
     @property
     def status_text(self):
