@@ -36,6 +36,21 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Installation
 
+To install from PyPI on most systems, use pip or pipx:
+
+```bash
+pipx install netaudio
+```
+
+```bash
+pip install netaudio
+```
+
+To install the package from a clone:
+```bash
+pipx install --force --include-deps .
+```
+
 #### Arch Linux
 
 To install from AUR, use the package [aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio)
@@ -60,23 +75,6 @@ To run without installing:
 ```bash
 poetry install
 poetry run netaudio
-```
-
-To install the package from a clone:
-```bash
-pipx install --force --include-deps .
-```
-
-To install from PyPI:
-
-```bash
-pipx install netaudio
-```
-
-or
-
-```bash
-pip install netaudio
 ```
 
 Then run `netaudio`
