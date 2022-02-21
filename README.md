@@ -11,7 +11,6 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Add/remove subscriptions
 - CLI
 - Display active subscriptions, Rx and Tx channels, devices names and addresses, subscription status
-- Display channel volume level (on supported devices)
 - JSON output
 - Set device latency, sample rate, encoding
 - Set/reset channel names, device names
@@ -37,10 +36,15 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Usage
 
-#### Project dependencies on Arch Linux
+#### Dev dependencies on Arch Linux
 ```bash
-community/python-pipx
-community/python-poetry
+pacman -S community/python-pipx community/python-poetry
+```
+
+#### Dev dependencies on MacOS
+```bash
+brew install pipx poetry
+brew link pipx poetry
 ```
 
 To run without installing:
@@ -49,9 +53,14 @@ poetry install
 poetry run netaudio
 ```
 
-To install the package:
+To install the package from a clone:
 ```bash
 pipx install --force --include-deps .
+```
+
+To install from a package repository:
+```bash
+pipx install netaudio
 ```
 
 Then run `netaudio`
