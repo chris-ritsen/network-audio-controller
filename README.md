@@ -34,18 +34,27 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Web application UI
 - XML output (such as a Dante preset file)
 
-### Usage
+### Installation
 
-#### Dev dependencies on Arch Linux
+#### Arch Linux
+
+To install from AUR, use the package [aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio)
+For development, install the following packages:
+
 ```bash
 pacman -S community/python-pipx community/python-poetry
 ```
 
-#### Dev dependencies on MacOS
+#### MacOS
+
+For development, install the following packages:
+
 ```bash
 brew install pipx poetry
 brew link pipx poetry
 ```
+
+### Usage
 
 To run without installing:
 ```bash
@@ -58,9 +67,16 @@ To install the package from a clone:
 pipx install --force --include-deps .
 ```
 
-To install from a package repository:
+To install from PyPI:
+
 ```bash
 pipx install netaudio
+```
+
+or
+
+```bash
+pip install netaudio
 ```
 
 Then run `netaudio`
