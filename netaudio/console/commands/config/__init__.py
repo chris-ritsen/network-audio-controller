@@ -121,7 +121,7 @@ class ConfigCommand(Command):
             encoding = int(self.option("set-encoding"))
 
             if encoding in self.options_encoding:
-                self.line("Setting encoding of {device.name} {device.ipv4} to {encoding}")
+                self.line(f"Setting encoding of {device.name} {device.ipv4} to {encoding}")
                 await device.set_encoding(encoding)
             else:
                 self.line("Invalid encoding")
