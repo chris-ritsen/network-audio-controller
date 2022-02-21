@@ -18,8 +18,6 @@ from netaudio.dante.const import (
 )
 
 logger = logging.getLogger("netaudio")
-
-
 sockets = {}
 
 
@@ -28,7 +26,6 @@ class DanteDevice:
         self._dante_model = ""
         self._dante_model_id = ""
         self._error = None
-        self._initialized = False
         self._ipv4 = None
         self._latency = None
         self._mac_address = None
@@ -45,7 +42,6 @@ class DanteDevice:
         self._sockets = {}
         self._software = None
         self._subscriptions = []
-        self._tasks = set()
         self._tx_channels = {}
         self._tx_count = 0
         self._tx_count_raw = 0
@@ -588,14 +584,6 @@ class DanteDevice:
         self._model_id = model_id
 
     @property
-    def initialized(self):
-        return self._initialized
-
-    @initialized.setter
-    def initialized(self, initialized):
-        self._initialized = initialized
-
-    @property
     def latency(self):
         return self._latency
 
@@ -682,14 +670,6 @@ class DanteDevice:
     @services.setter
     def services(self, services):
         self._services = services
-
-    @property
-    def tasks(self):
-        return self._tasks
-
-    @tasks.setter
-    def tasks(self, tasks):
-        self._tasks = tasks
 
     @property
     def tx_channels(self):
@@ -879,7 +859,7 @@ class DanteDevice:
     def command_volume_stop(self, device_name, ipv4, mac, port):
         data_len = 0
         device_name_hex = device_name.encode().hex()
-        ip_hex = "00000000"
+        ip_hex = ipaddress.IPv4Address(0).packed.hex()
 
         name_len1, name_len2, name_len3 = self.get_name_lengths(device_name)
 
