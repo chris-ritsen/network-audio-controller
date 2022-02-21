@@ -53,7 +53,8 @@ pipx install --force --include-deps .
 
 #### Arch Linux
 
-To install from AUR, use the package [aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio)
+To install from AUR, build the package with
+[aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio).
 For development, install the following packages:
 
 ```bash
