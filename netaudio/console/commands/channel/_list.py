@@ -124,6 +124,7 @@ class ChannelListCommand(Command):
             for _, device in devices.items():
                 await device.get_controls()
 
+        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
         self.print_channel_list(devices)
 
     def handle(self):
