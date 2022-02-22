@@ -7,8 +7,9 @@ from netaudio.console.commands import (
     SubscriptionCommand,
 )
 
+
 def main() -> int:
-    application = Application("netaudio", "0.0.3", complete=True)
+    application = Application("netaudio", "0.0.5", complete=True)
     application.add(ChannelCommand())
     application.add(ConfigCommand())
     application.add(DeviceCommand())
