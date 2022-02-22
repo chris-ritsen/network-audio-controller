@@ -50,8 +50,8 @@ class ConfigCommand(Command):
             "device-name", None, "Specify a device to configure by name", flag=False
         ),
         option("reset-channel-name", None, "Reset a channel name", flag=True),
-        option("reset-device-name", None, "Set the device name", flag=False),
-        option("identify", None, "Identify the device by flashing an LED"),
+        option("reset-device-name", None, "Set the device name", flag=True),
+        option("identify", None, "Identify the device by flashing an LED", flag=True),
         option("set-channel-name", None, "Set a channel name", flag=False),
         option("set-device-name", None, "Set the device name", flag=False),
         option(
