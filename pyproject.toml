@@ -3,12 +3,13 @@ authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
 classifiers = ["Topic :: Multimedia :: Sound/Audio"]
 description = "Control Dante network audio devices without Dante Controller"
 documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
+include = ["LICENSE"]
 keywords = ["audinate", "audio", "cli", "dante", "network"]
 license = "Unlicense"
 name = "netaudio"
 readme = "README.md"
 repository = "https://github.com/chris-ritsen/network-audio-controller"
-version = "0.0.3"
+version = "0.0.5"
 
 [tool.poetry.dependencies]
 cleo = "^0.8.1"
