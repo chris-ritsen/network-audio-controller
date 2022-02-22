@@ -67,7 +67,7 @@ class DeviceListCommand(Command):
                 )
             else:
                 try:
-                    ipv4 = get_host_by_name(self.option("device-host"))
+                    ipv4 = get_host_by_name(host)
                 except TimeoutError:
                     pass
 

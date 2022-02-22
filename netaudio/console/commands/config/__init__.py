@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 
 from json import JSONEncoder
@@ -7,6 +8,7 @@ from cleo import Command
 from cleo.helpers import option
 
 from netaudio.dante.browser import DanteBrowser
+from netaudio.utils import get_host_by_name
 
 
 def _default(self, obj):
@@ -38,7 +40,15 @@ class ConfigCommand(Command):
             "Specify a channel for control by number {options_channel_type}",
             flag=False,
         ),
-        option("device-name", None, "Specify a device to configure", flag=False),
+        option(
+            "device-host",
+            None,
+            "Specify a device to configure by network address",
+            flag=False,
+        ),
+        option(
+            "device-name", None, "Specify a device to configure by name", flag=False
+        ),
         option("reset-channel-name", None, "Reset a channel name", flag=True),
         option("reset-device-name", None, "Set the device name", flag=False),
         option("identify", None, "Identify the device by flashing an LED"),
@@ -64,26 +74,50 @@ class ConfigCommand(Command):
         ),
     ]
 
+    def filter_devices(self, devices):
+        if self.option("device-name"):
+            devices = dict(
+                filter(
+                    lambda d: d[1].name == self.option("device-name"), devices.items()
+                )
+            )
+        elif self.option("device-host"):
+            host = self.option("device-host")
+            ipv4 = None
+
+            try:
+                ipv4 = ipaddress.ip_address(host)
+            except ValueError:
+                pass
+
+            possible_names = set([host, host + ".local.", host + "."])
+
+            if possible_names.intersection(set(devices.keys())):
+                devices = dict(
+                    filter(
+                        lambda d: d[1].server_name in possible_names, devices.items()
+                    )
+                )
+            else:
+                try:
+                    ipv4 = get_host_by_name(host)
+                except TimeoutError:
+                    pass
+
+                devices = dict(filter(lambda d: d[1].ipv4 == ipv4, devices.items()))
+
+        return devices
+
     async def device_configure(self):
         dante_browser = DanteBrowser(mdns_timeout=1.5)
         devices = await dante_browser.get_devices()
-        name = None
 
         for _, device in devices.items():
             await device.get_controls()
 
-        if self.option("device-name"):
-            name = self.option("device-name")
-        else:
-            # device_names = sorted(
-            #     list({k: v.name for k, v in devices.items()}.values())
-            # )
-            # name = self.choice("Select a device", device_names, None)
-            return self.call("help", self._config.name)
-
-        device = list(
-            dict(filter(lambda d: d[1].name == name, devices.items())).values()
-        )[0]
+        devices = self.filter_devices(devices)
+        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+        device = list(devices.values()).pop()
 
         if not device:
             self.line("Device not found")
