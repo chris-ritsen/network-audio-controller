@@ -48,8 +48,8 @@ class DeviceListCommand(Command):
             devices = dict(
                 filter(lambda d: d[1].name == self.option("name"), devices.items())
             )
-        elif self.option("device-host"):
-            host = self.option("device-host")
+        elif self.option("host"):
+            host = self.option("host")
             ipv4 = None
 
             try:
