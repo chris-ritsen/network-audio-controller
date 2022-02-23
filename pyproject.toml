@@ -1,7 +1,7 @@
 [tool.poetry]
 authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
 classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-description = "Control Dante network audio devices without Dante Controller"
+description = "List, configure, and control Dante network audio devices without Dante Controller"
 documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
 include = ["LICENSE"]
 keywords = ["audinate", "audio", "cli", "dante", "network"]
