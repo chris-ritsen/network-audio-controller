@@ -26,6 +26,7 @@ class ConfigCommand(Command):
     options_channel_type = ["rx", "tx"]
     options_encoding = [16, 24, 32]
     options_rate = [44100, 48000, 88200, 96000, 176400, 192000]
+    options_gain_level = list(range(1, 6))
 
     options = [
         option(
@@ -60,7 +61,7 @@ class ConfigCommand(Command):
         option(
             "set-gain-level",
             None,
-            f"Set the gain level on a an AVIO device. Lower numbers are higher gain. {list(range(1, 6))}",
+            f"Set the gain level on a an AVIO device. Lower numbers are higher gain. {options_gain_level}",
             flag=False,
         ),
         option(
@@ -73,6 +74,62 @@ class ConfigCommand(Command):
             flag=False,
         ),
     ]
+
+    async def set_gain_level(self, device, channel_number, gain_level):
+        device_type = None
+        label = None
+
+        if device.model_id in ["DAI1", "DAI2"]:
+            device_type = "input"
+
+            label = {
+                1: "+24 dBu",
+                2: "+4dBu",
+                3: "+0 dBu",
+                4: "0 dBV",
+                5: "-10 dBV",
+            }
+        elif device.model_id in ["DAO1", "DAO2"]:
+            device_type = "output"
+
+            label = {
+                1: "+18 dBu",
+                2: "+4 dBu",
+                3: "+0 dBu",
+                4: "0 dBV",
+                5: "-10 dBV",
+            }
+
+        try:
+            gain_level = int(gain_level)
+        except ValueError:
+            self.line("Invalid value for gain level")
+            return
+
+        try:
+            channel_number = int(channel_number)
+        except ValueError:
+            self.line("Invalid channel number")
+            return
+
+        if channel_number:
+            if (
+                device_type == "output" and channel_number not in device.rx_channels
+            ) or (device_type == "input" and channel_number not in device.tx_channels):
+                self.line("Invalid channel number")
+                return
+
+        if gain_level not in self.options_gain_level:
+            self.line("Invalid value for gain level")
+            return
+
+        if device_type:
+            self.line(
+                f"Setting gain level of {device.name} {device.ipv4} to {label[gain_level]} on channel {channel_number}"
+            )
+            await device.set_gain_level(channel_number, gain_level, device_type)
+        else:
+            self.line("This device does not support gain control")
 
     def filter_devices(self, devices):
         if self.option("device-name"):
@@ -206,42 +263,9 @@ class ConfigCommand(Command):
                 self.line("Invalid encoding")
 
         if self.option("set-gain-level"):
-            if self.option("channel-number"):
-                channel_number = int(self.option("channel-number"))
-                device_type = None
-                gain_level = int(self.option("set-gain-level"))
-                label = None
-
-                if device.model_id in ["DAI1", "DAI2"]:
-                    device_type = "input"
-
-                    label = {
-                        1: "+24 dBu",
-                        2: "+4dBu",
-                        3: "+0 dBu",
-                        4: "0 dBV",
-                        5: "-10 dBV",
-                    }
-                elif device.model_id in ["DAO1", "DAO2"]:
-                    device_type = "output"
-
-                    label = {
-                        1: "+18 dBu",
-                        2: "+4 dBu",
-                        3: "+0 dBu",
-                        4: "0 dBV",
-                        5: "-10 dBV",
-                    }
-
-                if device_type:
-                    self.line(
-                        f"Setting gain level of {device.name} {device.ipv4} to {label[gain_level]} on channel {channel_number}"
-                    )
-                    await device.set_gain_level(channel_number, gain_level, device_type)
-                else:
-                    self.line("This device does not support gain control")
-            else:
-                self.line("Must specify a channel number for gain level control")
+            await self.set_gain_level(
+                device, self.option("channel-number"), self.option("set-gain-level")
+            )
 
     def handle(self):
         asyncio.run(self.device_configure())
