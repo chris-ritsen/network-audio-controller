@@ -9,7 +9,7 @@ from netaudio.console.commands import (
 
 
 def main() -> int:
-    application = Application("netaudio", "0.0.8", complete=True)
+    application = Application("netaudio", "0.0.9", complete=True)
     application.add(ChannelCommand())
     application.add(ConfigCommand())
     application.add(DeviceCommand())

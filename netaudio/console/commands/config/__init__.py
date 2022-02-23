@@ -166,6 +166,12 @@ class ConfigCommand(Command):
         return devices
 
     async def device_configure(self):
+        option_names = list(map(lambda o: o.long_name, self.options))
+        options_given = any(list([self.option(o) for o in option_names]))
+
+        if not options_given:
+            return self.call("help", self._config.name)
+
         dante_browser = DanteBrowser(mdns_timeout=1.5)
         devices = await dante_browser.get_devices()
 
@@ -174,9 +180,10 @@ class ConfigCommand(Command):
 
         devices = self.filter_devices(devices)
         devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-        device = list(devices.values()).pop()
 
-        if not device:
+        try:
+            device = list(devices.values()).pop()
+        except IndexError:
             self.line("Device not found")
             return
 

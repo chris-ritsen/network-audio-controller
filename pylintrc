@@ -80,6 +80,7 @@ confidence=
 # --disable=W".
 disable=bad-inline-option,
         broad-except,
+        consider-using-generator,
         deprecated-pragma,
         file-ignored,
         function-redefined,
@@ -104,6 +105,7 @@ disable=bad-inline-option,
         too-many-locals,
         too-many-public-methods,
         too-many-statements,
+        unnecessary-lambda,
         unused-argument,
         use-symbolic-message-instead,
         useless-suppression
