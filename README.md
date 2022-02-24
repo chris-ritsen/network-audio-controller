@@ -5,7 +5,13 @@ This is a python program for controlling Dante network audio devices (and possib
 
 For more information, check out the [gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
 
+### Demo
+
+<p align="center"><img src="https://github.com/chris-ritsen/network-audio-controller/blob/master/demo/demo.gif?raw=true" alt="netctl usage demo" title="netctl usage demo"/></p>
+
 ### Features
+
+#### Current
 
 - AVIO input/output gain control
 - Add/remove subscriptions
@@ -16,18 +22,14 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Set/reset channel names, device names
 - mDNS device discovery
 
-### In progress
+#### Planned
 
-- Gather information from multicast traffic (make, model, lock status, subscription changes)
-
-### Planned features
-
-- AES67 device support
 - Change channel/device names without affecting existing subscriptions
 - Change/display device settings (AES67 mode)
 - Client/server modes
 - Command prompt
 - Control of Shure wireless devices ([Axient receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and [PSM transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
+- Gather information from multicast traffic (make, model, lock status, subscription changes)
 - Signal presence indicator
 - Stand-alone command API
 - TUI
@@ -61,9 +63,21 @@ For development, install the following packages:
 pacman -S community/python-pipx community/python-poetry
 ```
 
+#### WSL/Ubuntu
+```bash
+apt-get install pipx
+pipx install netaudio
+```
+
+For development, also install poetry:
+
+```bash
+pipx install poetry
+```
+
 #### MacOS
 
-For development, install the following packages:
+For development, use brew to install and link the following:
 
 ```bash
 brew install pipx poetry
@@ -72,13 +86,13 @@ brew link pipx poetry
 
 ### Usage
 
-To run without installing:
+To run without installing or for development, use poetry:
 ```bash
 poetry install
 poetry run netaudio
 ```
 
-Then run `netaudio`
+Otherwise, run `netaudio`.
 
 ### Documentation
 
