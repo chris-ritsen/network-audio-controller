@@ -63,7 +63,7 @@ For development, install the following packages:
 pacman -S community/python-pipx community/python-poetry
 ```
 
-#### WSL/Ubuntu
+#### WSL / Ubuntu
 ```bash
 apt-get install pipx
 pipx install netaudio
