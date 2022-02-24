@@ -1,3 +1,4 @@
+from signal import signal, SIGPIPE, SIG_DFL
 from cleo.application import Application
 
 from netaudio.console.commands import (
@@ -7,9 +8,11 @@ from netaudio.console.commands import (
     SubscriptionCommand,
 )
 
+signal(SIGPIPE, SIG_DFL)
+
 
 def main() -> int:
-    application = Application("netaudio", "0.0.9", complete=True)
+    application = Application("netaudio", "0.0.10", complete=True)
     application.add(ChannelCommand())
     application.add(ConfigCommand())
     application.add(DeviceCommand())
