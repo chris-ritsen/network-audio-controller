@@ -40,3 +40,5 @@ netaudio config --set-device-name='dinet-tx-1' --device-host='192.168.1.41'
 echo ''
 echo "netaudio device list | grep -i 'dinet-tx'"
 netaudio device list | grep -i 'dinet-tx'
+
+netaudio device list --json | underscore map 'value' | underscore pluck ipv4 --outfmt text | sort
