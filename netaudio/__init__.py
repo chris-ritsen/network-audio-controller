@@ -12,5 +12,5 @@ from .console.application import main
 __author__ = "Chris Ritsen"
 __maintainer__ = "Chris Ritsen <chris.ritsen@gmail.com>"
 
-if sys.version_info <= (3, 7):
-    raise ImportError("Python version > 3.7 required.")
+if sys.version_info <= (3, 9):
+    raise ImportError("Python version > 3.9 required.")
