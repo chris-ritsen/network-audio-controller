@@ -6,6 +6,7 @@ from netaudio.console.commands import (
     ChannelCommand,
     ConfigCommand,
     DeviceCommand,
+    ServerCommand,
     SubscriptionCommand,
 )
 
@@ -13,11 +14,18 @@ signal(SIGPIPE, SIG_DFL)
 
 
 def main() -> int:
+    commands = [
+        ChannelCommand,
+        ConfigCommand,
+        DeviceCommand,
+        ServerCommand,
+        SubscriptionCommand,
+    ]
+
     application = Application("netaudio", version.version, complete=True)
-    application.add(ChannelCommand())
-    application.add(ConfigCommand())
-    application.add(DeviceCommand())
-    application.add(SubscriptionCommand())
+
+    for command in commands:
+        application.add(command())
 
     return application.run()
 
