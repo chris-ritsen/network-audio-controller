@@ -1,7 +1,7 @@
 [tool.poetry]
 authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
 classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-description = "List, configure, and control Dante network audio devices without Dante Controller"
+description = "Control Audinate Dante network audio devices without Dante Controller"
 documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
 include = ["CHANGELOG.md", "LICENSE"]
 keywords = ["audinate", "audio", "cli", "dante", "network"]
@@ -14,9 +14,11 @@ version = "0.0.11"
 [tool.poetry.dependencies]
 cleo = "^0.8.1"
 netifaces = "^0.11.0"
-python = "^3.7"
+python = "^3.9"
 twisted = "^22.1.0"
 zeroconf = "^0.38.3"
+sqlitedict = "^1.7.0"
+redis = "^4.1.4"
 
 [tool.poetry.dev-dependencies]
 black = "^22.1.0"
