@@ -1,5 +1,3 @@
-from netaudio.dante import subscription_status
-
 class DanteSubscription:
     def __init__(self):
         self._error = None
@@ -8,21 +6,27 @@ class DanteSubscription:
         self._rx_device = None
         self._rx_device_name = None
         self._status_code = None
+        self._status_message = []
         self._tx_channel = None
         self._tx_channel_name = None
         self._tx_device = None
         self._tx_device_name = None
 
     def __str__(self):
-        text = f"{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}"
+        if self.tx_channel_name and self.tx_device_name:
+            text = f"{self.rx_channel_name}@{self.rx_device_name} <- {self.tx_channel_name}@{self.tx_device_name}"
+        else:
+            text = f"{self.rx_channel_name}@{self.rx_device_name}"
 
         if self.status_code:
-            text = f"{text} [{self.status_text()}]"
+            status_text = self.status_text()
+            status_text = " / ".join(status_text)
+            text = f"{text} [{status_text}]"
 
         return text
 
     def status_text(self):
-        return subscription_status.labels[self.status_code]
+        return (f"status:{self.status_code}",)
 
     def to_json(self):
         as_json = {
@@ -32,7 +36,9 @@ class DanteSubscription:
             "tx_device": self.tx_device_name,
         }
 
-        if self.status_code:
+        if self.status_message:
+            as_json["status_text"] = self.status_message
+        elif self.status_code:
             as_json["status_text"] = self.status_text()
 
         return as_json
@@ -76,6 +82,14 @@ class DanteSubscription:
     @status_code.setter
     def status_code(self, status_code):
         self._status_code = status_code
+
+    @property
+    def status_message(self):
+        return self._status_message
+
+    @status_message.setter
+    def status_message(self, status_message):
+        self._status_message = status_message
 
     @property
     def tx_device_name(self):
