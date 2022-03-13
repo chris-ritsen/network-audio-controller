@@ -5,6 +5,7 @@ import os
 import random
 import socket
 import struct
+import sys
 import time
 import traceback
 
@@ -18,12 +19,16 @@ import netifaces
 from cleo import Command
 from cleo.helpers import option
 from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlitedict import SqliteDict
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.utils import get_host_by_name
 
 from netaudio.dante.const import (
+    MESSAGE_TYPE_IFSTATS_STATUS,
+    MESSAGE_TYPE_TX_FLOW_CHANGE,
+    MESSAGE_TYPE_UNICAST_CLOCKING_STATUS,
     DEVICE_CONTROL_PORT,
     DEVICE_HEARTBEAT_PORT,
     DEVICE_INFO_PORT,
@@ -31,6 +36,7 @@ from netaudio.dante.const import (
     DEVICE_SETTINGS_PORT,
     MESSAGE_TYPES,
     MESSAGE_TYPE_AES67_STATUS,
+    MESSAGE_TYPE_AUDIO_INTERFACE_STATUS,
     MESSAGE_TYPE_CHANGE,
     MESSAGE_TYPE_CHANNEL_COUNTS_QUERY,
     MESSAGE_TYPE_CLEAR_CONFIG_STATUS,
@@ -46,6 +52,7 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_PROPERTY_CHANGE,
     MESSAGE_TYPE_QUERY,
     MESSAGE_TYPE_ROUTING_DEVICE_CHANGE,
+    MESSAGE_TYPE_ROUTING_READY,
     MESSAGE_TYPE_RX_CHANNEL_CHANGE,
     MESSAGE_TYPE_RX_CHANNEL_QUERY,
     MESSAGE_TYPE_RX_FLOW_CHANGE,
@@ -71,7 +78,7 @@ from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_NONE,
 )
 
-MULTICAST_CLIENT_PORT = 8751
+MULTICAST_METERING_PORT = 8751
 
 
 def _default(self, obj):
@@ -82,25 +89,33 @@ _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 
 sockets = {}
+redis_client = None
 
 redis_socket_path = os.environ.get("REDIS_SOCKET")
 redis_host = os.environ.get("REDIS_HOST") or "localhost"
 redis_port = os.environ.get("REDIS_PORT") or 6379
 redis_db = os.environ.get("REDIS_DB") or 0
 
-if redis_socket_path:
-    redis_client = Redis(
-        db=redis_db,
-        decode_responses=False,
-        unix_socket_path=redis_socket_path,
-    )
-elif redis_host and redis_port:
-    redis_client = Redis(
-        db=redis_db,
-        decode_responses=False,
-        host=redis_host,
-        port=redis_port,
-    )
+try:
+    if redis_socket_path:
+        redis_client = Redis(
+            db=redis_db,
+            decode_responses=False,
+            socket_timeout=0.1,
+            unix_socket_path=redis_socket_path,
+        )
+    elif os.environ.get("REDIS_PORT") or os.environ.get("REDIS_HOST"):
+        redis_client = Redis(
+            db=redis_db,
+            decode_responses=False,
+            host=redis_host,
+            socket_timeout=0.1,
+            port=redis_port,
+        )
+    if redis_client:
+        redis_client.ping()
+except RedisConnectionError:
+    redis_client = None
 
 
 def get_name_lengths(device_name):
@@ -114,7 +129,7 @@ def get_name_lengths(device_name):
     return (name_len1, name_len2, name_len3)
 
 
-def sample_rate_query(device_name, ipv4, mac, port, timeout=True):
+def volume_level_query(device_name, ipv4, mac, port, timeout=True):
     data_len = 0
     device_name_hex = device_name.encode().hex()
     ip_hex = ipv4.packed.hex()
@@ -138,7 +153,7 @@ def sample_rate_query(device_name, ipv4, mac, port, timeout=True):
 
 
 def parse_volume_level_status(message, server_name):
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
     cached_device = redis_decode(redis_client.hgetall(redis_device_key))
     volume_levels = {"rx": {}, "tx": {}}
     rx_channel_count_raw = tx_channel_count_raw = None
@@ -166,14 +181,6 @@ def parse_volume_level_status(message, server_name):
         volume_levels["tx"][index + 1] = tx_channels[index]
 
     return volume_levels
-
-
-def parse_services(queue):
-    while True:
-        message = queue.get()
-        parse_dante_service_change(message)
-        queue.task_done()
-        # print("finished queue task", queue.qsize())
 
 
 def parse_message_type_codec_status(message, server_name):
@@ -240,25 +247,41 @@ def parse_message_type_manf_versions_status(message):
     }
 
 
-def cache_volume_levels(server_name, parsed_message):
-    rx_volume_levels = parsed_message["rx"]
-    tx_volume_levels = parsed_message["tx"]
-    redis_device_key = ":".join(["device", server_name])
+def parse_message_type_audio_interface_status(dante_message):
+    return {"audio_interface_status": None}
 
+
+def parse_message_type_ifstats_status(dante_message):
+    return {"ifstats_status": None}
+
+
+def parse_message_type_routing_ready(dante_message):
+    return {"routing_ready": None}
+
+
+def parse_message_type_tx_flow_change(dante_message):
+    return {"tx_flow_change": None}
+
+
+def parse_message_type_unicast_clocking_status(dante_message):
+    return {"unicast_clocking_status": None}
+
+
+def cache_device_value(server_name, key, value):
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
     redis_client.hset(
         redis_device_key,
         key=None,
         value=None,
         mapping={
-            "rx_volume_levels": json.dumps(rx_volume_levels, indent=2),
-            "tx_volume_levels": json.dumps(tx_volume_levels, indent=2),
+            key: json.dumps(value, indent=2),
         },
     )
 
 
 def cache_aes67_status(server_name, parsed_message):
     aes67_status = parsed_message["aes67_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -272,7 +295,7 @@ def cache_aes67_status(server_name, parsed_message):
 
 def cache_codec_status(server_name, parsed_message):
     codec_status = parsed_message["codec_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -286,7 +309,7 @@ def cache_codec_status(server_name, parsed_message):
 
 def cache_lock_status(server_name, parsed_message):
     lock_status = parsed_message["lock_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -300,7 +323,7 @@ def cache_lock_status(server_name, parsed_message):
 
 def cache_versions_status(server_name, parsed_message):
     versions_status = parsed_message["versions_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -314,7 +337,7 @@ def cache_versions_status(server_name, parsed_message):
 
 def cache_versions_status(server_name, parsed_message):
     versions_status = parsed_message["versions_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -328,7 +351,7 @@ def cache_versions_status(server_name, parsed_message):
 
 def cache_upgrade_status(server_name, parsed_message):
     upgrade_status = parsed_message["upgrade_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -342,7 +365,7 @@ def cache_upgrade_status(server_name, parsed_message):
 
 def cache_switch_vlan_status(server_name, parsed_message):
     switch_vlan_status = parsed_message["switch_vlan_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -356,7 +379,7 @@ def cache_switch_vlan_status(server_name, parsed_message):
 
 def cache_encoding_status(server_name, parsed_message):
     encoding_status = parsed_message["encoding_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -370,7 +393,7 @@ def cache_encoding_status(server_name, parsed_message):
 
 def cache_clear_config_status(server_name, parsed_message):
     clear_config_status = parsed_message["clear_config_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -384,7 +407,7 @@ def cache_clear_config_status(server_name, parsed_message):
 
 def cache_sample_rate_pullup_status(server_name, parsed_message):
     sample_rate_pullup_status = parsed_message["sample_rate_pullup_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -400,7 +423,7 @@ def cache_sample_rate_pullup_status(server_name, parsed_message):
 
 def cache_interface_status(server_name, parsed_message):
     interface_status = parsed_message["interface_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -414,7 +437,7 @@ def cache_interface_status(server_name, parsed_message):
 
 def cache_clocking_status(server_name, parsed_message):
     clocking_status = parsed_message["clocking_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -428,7 +451,7 @@ def cache_clocking_status(server_name, parsed_message):
 
 def cache_sample_rate_status(server_name, parsed_message):
     sample_rate_status = parsed_message["sample_rate_status"]
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     redis_client.hset(
         redis_device_key,
@@ -463,7 +486,9 @@ def parse_dante_message(message):
 
     message_type = int.from_bytes(dante_message[26:28], "big")
 
-    cached_host = redis_decode(redis_client.hgetall(":".join(["host", src_host])))
+    cached_host = redis_decode(
+        redis_client.hgetall(":".join(["netaudio", "dante", "host", src_host]))
+    )
 
     parsed_message = {
         "message": dante_message,
@@ -490,6 +515,52 @@ def parse_dante_message(message):
         return parsed_message
 
     if (
+        message_type == MESSAGE_TYPE_AUDIO_INTERFACE_STATUS
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_audio_interface_status(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = MESSAGE_TYPE_STRINGS[message_type]
+    elif (
+        message_type == MESSAGE_TYPE_ROUTING_READY
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_routing_ready(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = MESSAGE_TYPE_STRINGS[message_type]
+    elif (
+        message_type == MESSAGE_TYPE_TX_FLOW_CHANGE
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_tx_flow_change(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = MESSAGE_TYPE_STRINGS[message_type]
+
+    elif (
+        message_type == MESSAGE_TYPE_UNICAST_CLOCKING_STATUS
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_unicast_clocking_status(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = MESSAGE_TYPE_STRINGS[message_type]
+    elif (
+        message_type == MESSAGE_TYPE_IFSTATS_STATUS
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_ifstats_status(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = MESSAGE_TYPE_STRINGS[message_type]
+    elif (
         message_type == MESSAGE_TYPE_VERSIONS_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
@@ -517,10 +588,9 @@ def parse_dante_message(message):
         pass
     elif (
         multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
-        and multicast_port == MULTICAST_CLIENT_PORT
+        and multicast_port == MULTICAST_METERING_PORT
     ):
         volume_levels = parse_volume_level_status(message, server_name)
-        print(message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = MESSAGE_TYPE_MONITORING_STRINGS[MESSAGE_TYPE_VOLUME_LEVELS]
@@ -528,7 +598,8 @@ def parse_dante_message(message):
         print(
             f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} ({MESSAGE_TYPE_MONITORING_STRINGS[MESSAGE_TYPE_VOLUME_LEVELS]}) from `{server_name}`"
         )
-        cache_volume_levels(server_name, volume_levels)
+        cache_device_value(server_name, "rx_volume_levels", volume_levels["rx"])
+        cache_device_value(server_name, "tx_volume_levels", volume_levels["tx"])
     elif (
         message_type == MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -544,7 +615,11 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(sample_rate_pullup_status)
-        cache_sample_rate_pullup_status(server_name, sample_rate_pullup_status)
+        cache_device_value(
+            server_name,
+            "sample_rate_pullup_status",
+            sample_rate_pullup_status["sample_rate_pullup_status"],
+        )
     elif (
         message_type == MESSAGE_TYPE_ENCODING_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -558,7 +633,9 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(encoding_status)
-        cache_encoding_status(server_name, encoding_status)
+        cache_device_value(
+            server_name, "encoding_status", encoding_status["encoding_status"]
+        )
     elif (
         message_type == MESSAGE_TYPE_CLEAR_CONFIG_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -574,7 +651,11 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(clear_config_status)
-        cache_clear_config_status(server_name, clear_config_status)
+        cache_device_value(
+            server_name,
+            "clear_config_status",
+            clear_config_status["clear_config_status"],
+        )
     elif (
         message_type == MESSAGE_TYPE_SAMPLE_RATE_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -590,7 +671,9 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(sample_rate_status)
-        cache_sample_rate_status(server_name, sample_rate_status)
+        cache_device_value(
+            server_name, "sample_rate_status", sample_rate_status["sample_rate_status"]
+        )
     elif (
         message_type == MESSAGE_TYPE_SWITCH_VLAN_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -606,7 +689,9 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(switch_vlan_status)
-        cache_switch_vlan_status(server_name, switch_vlan_status)
+        cache_device_value(
+            server_name, "switch_vlan_status", switch_vlan_status["switch_vlan_status"]
+        )
     elif (
         message_type == MESSAGE_TYPE_UPGRADE_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -620,7 +705,9 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(upgrade_status)
-        cache_upgrade_status(server_name, upgrade_status)
+        cache_device_value(
+            server_name, "upgrade_status", upgrade_status["upgrade_status"]
+        )
     elif (
         message_type == MESSAGE_TYPE_INTERFACE_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -636,7 +723,9 @@ def parse_dante_message(message):
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
         # print(interface_status)
-        cache_interface_status(server_name, interface_status)
+        cache_device_value(
+            server_name, "interface_status", interface_status["interface_status"]
+        )
     elif (
         message_type == MESSAGE_TYPE_CLOCKING_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -649,8 +738,9 @@ def parse_dante_message(message):
         # print(
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
-        # print(clocking_status)
-        cache_clocking_status(server_name, clocking_status)
+        cache_device_value(
+            server_name, "clocking_status", clocking_status["clocking_status"]
+        )
     elif (
         multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and src_port in [DEVICE_SETTINGS_PORT, DEVICE_INFO_SRC_PORT2]
@@ -665,7 +755,13 @@ def parse_dante_message(message):
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = MESSAGE_TYPE_STRINGS[message_type]
-        cache_rx_channels(server_name)
+        parsed_rx_channels = get_rx_channels(server_name)
+        cache_device_value(
+            server_name, "rx_channels", parsed_rx_channels["rx_channels"]
+        )
+        cache_device_value(
+            server_name, "subscriptions", parsed_rx_channels["subscriptions"]
+        )
     elif (
         message_type == MESSAGE_TYPE_LOCK_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -678,8 +774,7 @@ def parse_dante_message(message):
         # print(
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
-        # print(lock_status)
-        cache_lock_status(server_name, lock_status)
+        cache_device_value(server_name, "lock_status", lock_status["lock_status"])
     elif (
         message_type == MESSAGE_TYPE_CODEC_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -692,8 +787,7 @@ def parse_dante_message(message):
         # print(
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
-        # print(codec_status)
-        cache_codec_status(server_name, codec_status)
+        cache_device_value(server_name, "codec_status", codec_status["codec_status"])
     elif (
         message_type == MESSAGE_TYPE_AES67_STATUS
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
@@ -706,8 +800,7 @@ def parse_dante_message(message):
         # print(
         #     f"{src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
         # )
-        # print(aes67_status)
-        cache_aes67_status(server_name, aes67_status)
+        cache_device_value(server_name, "aes67_status", aes67_status["aes67_status"])
     elif (
         multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and src_port in [DEVICE_SETTINGS_PORT, DEVICE_INFO_SRC_PORT2]
@@ -722,7 +815,13 @@ def parse_dante_message(message):
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = MESSAGE_TYPE_STRINGS[message_type]
-        cache_rx_channels(server_name)
+        parsed_rx_channels = get_rx_channels(server_name)
+        cache_device_value(
+            server_name, "rx_channels", parsed_rx_channels["rx_channels"]
+        )
+        cache_device_value(
+            server_name, "subscriptions", parsed_rx_channels["subscriptions"]
+        )
     else:
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
@@ -732,7 +831,7 @@ def parse_dante_message(message):
         )
 
     if parsed_dante_message:
-        redis_device_key = ":".join(["device", server_name])
+        redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
         redis_client.hset(
             redis_device_key, key=None, value=None, mapping=parsed_dante_message
         )
@@ -752,15 +851,15 @@ def parse_dante_message(message):
             "multicast_port"
         ] = multicast_port
 
-    redis_message_key = ":".join(
-        ["device", "message", "received", src_host, str(timestamp)]
-    )
-    redis_client.hset(
-        redis_message_key,
-        key=None,
-        value=None,
-        mapping=parsed_message_redis_hash,
-    )
+    # redis_message_key = ":".join(
+    #     ["netaudio", "dante", "device", "message", "received", src_host, str(timestamp)]
+    # )
+    # redis_client.hset(
+    #     redis_message_key,
+    #     key=None,
+    #     value=None,
+    #     mapping=parsed_message_redis_hash,
+    # )
 
     # if parsed_message["parsed_message"]:
     #     print(parsed_message["parsed_message"])
@@ -1034,12 +1133,14 @@ def get_tx_channels(server_name):
     tx_channels = {}
     # tx_channels_friendly_names = {}
 
-    redis_service_key = ":".join(["service", server_name, SERVICE_ARC])
+    redis_service_key = ":".join(
+        ["netaudio", "dante", "service", server_name, SERVICE_ARC]
+    )
     cached_service = redis_decode(redis_client.hgetall(redis_service_key))
     port = int(cached_service["port"])
     sock = sockets[server_name][port]
 
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     cached_device = redis_decode(redis_client.hgetall(redis_device_key))
 
@@ -1084,12 +1185,14 @@ def get_rx_channels(server_name):
     rx_channels = {}
     subscriptions = {}
 
-    redis_service_key = ":".join(["service", server_name, SERVICE_ARC])
+    redis_service_key = ":".join(
+        ["netaudio", "dante", "service", server_name, SERVICE_ARC]
+    )
     cached_service = redis_decode(redis_client.hgetall(redis_service_key))
     port = int(cached_service["port"])
     sock = sockets[server_name][port]
 
-    redis_device_key = ":".join(["device", server_name])
+    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
 
     cached_device = redis_decode(redis_client.hgetall(redis_device_key))
 
@@ -1118,55 +1221,10 @@ def get_rx_channels(server_name):
     }
 
 
-def cache_rx_channels(server_name):
-    parsed_rx_channels = get_rx_channels(server_name)
-
-    rx_channels = parsed_rx_channels["rx_channels"]
-    subscriptions = parsed_rx_channels["subscriptions"]
-
-    parsed_tx_channels = get_tx_channels(server_name)
-
-    tx_channels = parsed_tx_channels["tx_channels"]
-    # tx_channels_friendly_names = parsed_tx_channels["tx_channels_friendly_names"]
-
-    redis_device_key = ":".join(["device", server_name])
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "rx_channels": json.dumps(rx_channels, indent=2),
-            "subscriptions": json.dumps(subscriptions, indent=2),
-            "tx_channels": json.dumps(tx_channels, indent=2),
-            # "tx_channels_friendly_names": json.dumps(
-            #     tx_channels_friendly_names, indent=2
-            # ),
-        },
-    )
-
-
-def cache_tx_channels(server_name):
-    parsed_tx_channels = get_tx_channels(server_name)
-
-    tx_channels = parsed_tx_channels["tx_channels"]
-    # tx_channels_friendly_names = parsed_tx_channels["tx_channels_friendly_names"]
-
-    redis_device_key = ":".join(["device", server_name])
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "tx_channels": json.dumps(tx_channels, indent=2),
-            # "tx_channels_friendly_names": json.dumps(
-            #     tx_channels_friendly_names, indent=2
-            # ),
-        },
-    )
-
-
 def device_initialize_arc(server_name):
-    redis_service_key = ":".join(["service", server_name, SERVICE_ARC])
+    redis_service_key = ":".join(
+        ["netaudio", "dante", "service", server_name, SERVICE_ARC]
+    )
     cached_service = redis_decode(redis_client.hgetall(redis_service_key))
     port = int(cached_service["port"])
 
@@ -1177,7 +1235,7 @@ def device_initialize_arc(server_name):
         parsed_name_query = parse_dante_arc_message(device_name_message)
         device_name = parsed_name_query["name"]
 
-        redis_device_key = ":".join(["device", server_name])
+        redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
         redis_client.hset(
             redis_device_key,
             key=None,
@@ -1203,8 +1261,18 @@ def device_initialize_arc(server_name):
             },
         )
 
-        cache_rx_channels(server_name)
-        cache_tx_channels(server_name)
+        parsed_rx_channels = get_rx_channels(server_name)
+        cache_device_value(
+            server_name, "rx_channels", parsed_rx_channels["rx_channels"]
+        )
+        cache_device_value(
+            server_name, "subscriptions", parsed_rx_channels["subscriptions"]
+        )
+
+        parsed_tx_channels = get_tx_channels(server_name)
+        cache_device_value(
+            server_name, "tx_channels", parsed_tx_channels["tx_channels"]
+        )
 
         cached_device = redis_decode(redis_client.hgetall(redis_device_key))
 
@@ -1229,7 +1297,7 @@ def device_initialize_arc(server_name):
         },
     )
 
-    redis_client.sadd("devices", device_name)
+    redis_client.sadd(":".join(["netaudio", "dante", "devices"]), device_name)
 
 
 def parse_dante_service_change(message):
@@ -1243,9 +1311,9 @@ def parse_dante_service_change(message):
     state_change = message["state_change"]
 
     if state_change["name"] == "Added":
-        redis_client.sadd("hosts", service["ipv4"])
-        redis_client.sadd("servers", server_name)
-        redis_client.sadd("services", service["name"])
+        redis_client.sadd(":".join(["netaudio", "dante", "hosts"]), service["ipv4"])
+        redis_client.sadd(":".join(["netaudio", "dante", "servers"]), server_name)
+        redis_client.sadd(":".join(["netaudio", "dante", "services"]), service["name"])
 
         for port in PORTS:
             if port in sockets[server_name]:
@@ -1257,15 +1325,15 @@ def parse_dante_service_change(message):
             sock.connect((ipv4, port))
             sockets[server_name][port] = sock
 
-        key = ":".join(["host", service["ipv4"]])
+        redis_host_key = ":".join(["netaudio", "dante", "host", service["ipv4"]])
         redis_client.hset(
-            key,
+            redis_host_key,
             key=None,
             value=None,
             mapping={"ipv4": service["ipv4"], "server_name": server_name},
         )
 
-        key = ":".join(["server", server_name])
+        key = ":".join(["netaudio", "dante", "server", server_name])
         redis_client.hset(
             key,
             key=None,
@@ -1276,7 +1344,7 @@ def parse_dante_service_change(message):
             },
         )
 
-        key = ":".join(["service", server_name, service["type"]])
+        key = ":".join(["netaudio", "dante", "service", server_name, service["type"]])
         redis_client.hset(
             key,
             key=None,
@@ -1291,7 +1359,16 @@ def parse_dante_service_change(message):
         )
 
         if service["properties"]:
-            key = ":".join(["service", "properties", server_name, service["type"]])
+            key = ":".join(
+                [
+                    "netaudio",
+                    "dante",
+                    "service",
+                    "properties",
+                    server_name,
+                    service["type"],
+                ]
+            )
             redis_client.hset(key, key=None, value=None, mapping=service["properties"])
 
         if (
@@ -1304,10 +1381,7 @@ def parse_dante_service_change(message):
             sock.connect((ipv4, service["port"]))
             sockets[server_name][service["port"]] = sock
 
-            redis_device_key = ":".join(["device", server_name])
-
-            if not redis_client.hexists(redis_device_key, "name"):
-                device_initialize_arc(server_name)
+            device_initialize_arc(server_name)
 
         # print(
         #     f"Service added:\n  {service['name']}\n  {service['ipv4']}:{service['port']}"
@@ -1325,7 +1399,7 @@ def parse_dante_service_change(message):
             f"Service removed: {service['name']}\n  {service['ipv4']}:{service['port']}"
         )
 
-    # redis_service_key = ":".join(["service", service["name"]])
+    # redis_service_key = ":".join(["netaudio", "dante", "service", service["name"]])
     # cached_service = redis_client.hgetall(redis_service_key)
     # print("cached:", cached_service)
 
@@ -1372,6 +1446,13 @@ def zeroconf_browser(queue):
     dante_browser.sync_run()
 
 
+def parse_services(queue):
+    while True:
+        message = queue.get()
+        parse_dante_service_change(message)
+        queue.task_done()
+
+
 class ServerCommand(Command):
     name = "server"
     description = "Run a daemon to monitor changes to devices"
@@ -1379,6 +1460,12 @@ class ServerCommand(Command):
     async def run_server(self):
         queue = Queue()
         threads = []
+
+        if not redis_client:
+            print(
+                "Couldn't connect to a redis server. Specify with env variables REDIS_SOCKET REDIS_HOST REDIS_PORT REDIS_DB"
+            )
+            sys.exit(0)
 
         threads.append(
             Thread(
@@ -1389,7 +1476,7 @@ class ServerCommand(Command):
         threads.append(
             Thread(
                 target=multicast,
-                args=(MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_CLIENT_PORT),
+                args=(MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_METERING_PORT),
             )
         )
         # threads.append(thread_multicast_heartbeat = Thread(
