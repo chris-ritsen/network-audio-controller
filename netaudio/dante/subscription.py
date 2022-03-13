@@ -23,10 +23,8 @@ class DanteSubscription:
         else:
             text = f"{self.rx_channel_name}@{self.rx_device_name}"
 
-        if self.status_code:
-            status_text = self.status_text()
-            status_text = " / ".join(status_text)
-            text = f"{text} [{status_text}]"
+        status_text = ", ".join(self.status_text())
+        text = f"{text} [{status_text}]"
 
         return text
 
@@ -37,14 +35,11 @@ class DanteSubscription:
         as_json = {
             "rx_channel": self.rx_channel_name,
             "rx_device": self.rx_device_name,
+            "status_code": self.status_code,
+            "status_text": self.status_text(),
             "tx_channel": self.tx_channel_name,
             "tx_device": self.tx_device_name,
         }
-
-        if self.status_message:
-            as_json["status_text"] = self.status_message
-        elif self.status_code:
-            as_json["status_text"] = self.status_text()
 
         return as_json
 
