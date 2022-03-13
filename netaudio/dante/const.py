@@ -176,9 +176,9 @@ SUBSCRIPTION_STATUS_LABELS = {
         "Flow creation in progress",
         "communicating with transmitter to create flow",
     ),
-    SUBSCRIPTION_STATUS_DYNAMIC: ("Connected (unicast)"),
-    SUBSCRIPTION_STATUS_STATIC: ("Connected (multicast)"),
-    SUBSCRIPTION_STATUS_MANUAL: ("Manually Configured"),
+    SUBSCRIPTION_STATUS_DYNAMIC: ("Connected (unicast)",),
+    SUBSCRIPTION_STATUS_STATIC: ("Connected (multicast)",),
+    SUBSCRIPTION_STATUS_MANUAL: ("Manually Configured",),
     SUBSCRIPTION_STATUS_NO_CONNECTION: (
         "No connection",
         "could not communicate with transmitter",

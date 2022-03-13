@@ -1,12 +1,16 @@
 import asyncio
 import json
+import os
 
 from json import JSONEncoder
 
 from cleo import Command
 from cleo.helpers import option
+from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
+from netaudio.dante.cache import DanteCache
 
 
 def _default(self, obj):
@@ -34,14 +38,51 @@ class SubscriptionListCommand(Command):
     #      option('tx-device-name', None, 'Filter by Tx device name', flag=False),
     #  ]
 
-    async def subscription_add(self):
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        devices = await dante_browser.get_devices()
-
+    async def subscription_list(self):
         subscriptions = []
 
-        for _, device in devices.items():
-            await device.get_controls()
+        redis_enabled = None
+
+        redis_socket_path = os.environ.get("REDIS_SOCKET")
+        redis_host = os.environ.get("REDIS_HOST") or "localhost"
+        redis_port = os.environ.get("REDIS_PORT") or 6379
+        redis_db = os.environ.get("REDIS_DB") or 0
+
+        try:
+            redis_client = None
+
+            if redis_socket_path:
+                redis_client = Redis(
+                    db=redis_db,
+                    decode_responses=False,
+                    socket_timeout=0.1,
+                    unix_socket_path=redis_socket_path,
+                )
+            elif os.environ.get("REDIS_PORT") or os.environ.get("REDIS_HOST"):
+                redis_client = Redis(
+                    db=redis_db,
+                    decode_responses=False,
+                    host=redis_host,
+                    socket_timeout=0.1,
+                    port=redis_port,
+                )
+            if redis_client:
+                redis_client.ping()
+                redis_enabled = True
+        except RedisConnectionError:
+            redis_enabled = False
+
+        if redis_enabled:
+            dante_cache = DanteCache()
+            devices = await dante_cache.get_devices()
+            devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+        else:
+            dante_browser = DanteBrowser(mdns_timeout=1.5)
+            devices = await dante_browser.get_devices()
+            devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+
+            for _, device in devices.items():
+                await device.get_controls()
 
         #  rx_channel = None
         #  rx_device = None
@@ -80,4 +121,4 @@ class SubscriptionListCommand(Command):
                 self.line(f"{subscription}")
 
     def handle(self):
-        asyncio.run(self.subscription_add())
+        asyncio.run(self.subscription_list())
