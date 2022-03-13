@@ -144,47 +144,51 @@ def parse_volume_level_status(message, server_name):
     return volume_levels
 
 
-def parse_message_type_codec_status(message, server_name):
+def parse_message_type_access_status(message):
+    return {"access_status": None}
+
+
+def parse_message_type_codec_status(message):
     return {"codec_status": None}
 
 
-def parse_message_type_upgrade_status(message, server_name):
+def parse_message_type_upgrade_status(message):
     return {"upgrade_status": None}
 
 
-def parse_message_type_switch_vlan_status(message, server_name):
+def parse_message_type_switch_vlan_status(message):
     return {"switch_vlan_status": None}
 
 
-def parse_message_type_sample_rate_pullup_status(message, server_name):
+def parse_message_type_sample_rate_pullup_status(message):
     return {"sample_rate_pullup_status": None}
 
 
-def parse_message_type_clear_config_status(message, server_name):
+def parse_message_type_clear_config_status(message):
     return {"clear_config_status": None}
 
 
-def parse_message_type_encoding_status(message, server_name):
+def parse_message_type_encoding_status(message):
     return {"encoding_status": None}
 
 
-def parse_message_type_sample_rate_status(message, server_name):
+def parse_message_type_sample_rate_status(message):
     return {"sample_rate_status": None}
 
 
-def parse_message_type_aes67_status(message, server_name):
+def parse_message_type_aes67_status(message):
     return {"aes67_status": None}
 
 
-def parse_message_type_lock_status(message, server_name):
+def parse_message_type_lock_status(message):
     return {"lock_status": None}
 
 
-def parse_message_type_clocking_status(message, server_name):
+def parse_message_type_clocking_status(message):
     return {"clocking_status": None}
 
 
-def parse_message_type_interface_status(message, server_name):
+def parse_message_type_interface_status(message):
     return {"interface_status": None}
 
 
@@ -208,23 +212,23 @@ def parse_message_type_manf_versions_status(message):
     }
 
 
-def parse_message_type_audio_interface_status(dante_message):
+def parse_message_type_audio_interface_status(message):
     return {"audio_interface_status": None}
 
 
-def parse_message_type_ifstats_status(dante_message):
+def parse_message_type_ifstats_status(message):
     return {"ifstats_status": None}
 
 
-def parse_message_type_routing_ready(dante_message):
+def parse_message_type_routing_ready(message):
     return {"routing_ready": None}
 
 
-def parse_message_type_tx_flow_change(dante_message):
+def parse_message_type_tx_flow_change(message):
     return {"tx_flow_change": None}
 
 
-def parse_message_type_unicast_clocking_status(dante_message):
+def parse_message_type_unicast_clocking_status(message):
     return {"unicast_clocking_status": None}
 
 
@@ -236,190 +240,6 @@ def cache_device_value(server_name, key, value):
         value=None,
         mapping={
             key: json.dumps(value, indent=2),
-        },
-    )
-
-
-def cache_aes67_status(server_name, parsed_message):
-    aes67_status = parsed_message["aes67_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "aes67_status": json.dumps(aes67_status, indent=2),
-        },
-    )
-
-
-def cache_codec_status(server_name, parsed_message):
-    codec_status = parsed_message["codec_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "codec_status": json.dumps(codec_status, indent=2),
-        },
-    )
-
-
-def cache_lock_status(server_name, parsed_message):
-    lock_status = parsed_message["lock_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "lock_status": json.dumps(lock_status, indent=2),
-        },
-    )
-
-
-def cache_versions_status(server_name, parsed_message):
-    versions_status = parsed_message["versions_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "versions_status": json.dumps(versions_status, indent=2),
-        },
-    )
-
-
-def cache_versions_status(server_name, parsed_message):
-    versions_status = parsed_message["versions_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "versions_status": json.dumps(versions_status, indent=2),
-        },
-    )
-
-
-def cache_upgrade_status(server_name, parsed_message):
-    upgrade_status = parsed_message["upgrade_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "upgrade_status": json.dumps(upgrade_status, indent=2),
-        },
-    )
-
-
-def cache_switch_vlan_status(server_name, parsed_message):
-    switch_vlan_status = parsed_message["switch_vlan_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "switch_vlan_status": json.dumps(switch_vlan_status, indent=2),
-        },
-    )
-
-
-def cache_encoding_status(server_name, parsed_message):
-    encoding_status = parsed_message["encoding_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "encoding_status": json.dumps(encoding_status, indent=2),
-        },
-    )
-
-
-def cache_clear_config_status(server_name, parsed_message):
-    clear_config_status = parsed_message["clear_config_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "clear_config_status": json.dumps(clear_config_status, indent=2),
-        },
-    )
-
-
-def cache_sample_rate_pullup_status(server_name, parsed_message):
-    sample_rate_pullup_status = parsed_message["sample_rate_pullup_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "sample_rate_pullup_status": json.dumps(
-                sample_rate_pullup_status, indent=2
-            ),
-        },
-    )
-
-
-def cache_interface_status(server_name, parsed_message):
-    interface_status = parsed_message["interface_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "interface_status": json.dumps(interface_status, indent=2),
-        },
-    )
-
-
-def cache_clocking_status(server_name, parsed_message):
-    clocking_status = parsed_message["clocking_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "clocking_status": json.dumps(clocking_status, indent=2),
-        },
-    )
-
-
-def cache_sample_rate_status(server_name, parsed_message):
-    sample_rate_status = parsed_message["sample_rate_status"]
-    redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
-
-    redis_client.hset(
-        redis_device_key,
-        key=None,
-        value=None,
-        mapping={
-            "sample_rate_status": json.dumps(sample_rate_status, indent=2),
         },
     )
 
@@ -481,6 +301,15 @@ def parse_dante_message(message):
         and multicast_port == DEVICE_INFO_PORT
     ):
         parsed_dante_message = parse_message_type_audio_interface_status(dante_message)
+        parsed_message_redis_hash["message_type_string"] = parsed_message[
+            "message_type_string"
+        ] = f"msg_type:{message_type}"
+    elif (
+        message_type == 176
+        and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
+        and multicast_port == DEVICE_INFO_PORT
+    ):
+        parsed_dante_message = parse_message_type_access_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -567,7 +396,7 @@ def parse_dante_message(message):
         and multicast_port == DEVICE_INFO_PORT
     ):
         sample_rate_pullup_status = parse_message_type_sample_rate_pullup_status(
-            dante_message, server_name
+            dante_message
         )
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
@@ -586,7 +415,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        encoding_status = parse_message_type_encoding_status(dante_message, server_name)
+        encoding_status = parse_message_type_encoding_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -602,9 +431,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        clear_config_status = parse_message_type_clear_config_status(
-            dante_message, server_name
-        )
+        clear_config_status = parse_message_type_clear_config_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -622,9 +449,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        sample_rate_status = parse_message_type_sample_rate_status(
-            dante_message, server_name
-        )
+        sample_rate_status = parse_message_type_sample_rate_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -640,9 +465,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        switch_vlan_status = parse_message_type_switch_vlan_status(
-            dante_message, server_name
-        )
+        switch_vlan_status = parse_message_type_switch_vlan_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -658,7 +481,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        upgrade_status = parse_message_type_upgrade_status(dante_message, server_name)
+        upgrade_status = parse_message_type_upgrade_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -674,9 +497,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        interface_status = parse_message_type_interface_status(
-            dante_message, server_name
-        )
+        interface_status = parse_message_type_interface_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -692,7 +513,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        clocking_status = parse_message_type_clocking_status(dante_message, server_name)
+        clocking_status = parse_message_type_clocking_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -728,7 +549,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        lock_status = parse_message_type_lock_status(dante_message, server_name)
+        lock_status = parse_message_type_lock_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -741,7 +562,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        codec_status = parse_message_type_codec_status(dante_message, server_name)
+        codec_status = parse_message_type_codec_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -754,7 +575,7 @@ def parse_dante_message(message):
         and multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
         and multicast_port == DEVICE_INFO_PORT
     ):
-        aes67_status = parse_message_type_aes67_status(dante_message, server_name)
+        aes67_status = parse_message_type_aes67_status(dante_message)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
             "message_type_string"
         ] = f"msg_type:{message_type}"
@@ -1270,6 +1091,7 @@ def parse_dante_service_change(message):
         sockets[server_name] = {}
 
     state_change = message["state_change"]
+    print(server_name, service["name"], state_change)
 
     if state_change["name"] == "Added":
         redis_client.sadd(":".join(["netaudio", "dante", "hosts"]), service["ipv4"])
@@ -1396,7 +1218,22 @@ def multicast(group, port):
                 "time": timestamp,
             }
 
-            parse_dante_message(message)
+            if group == MULTICAST_GROUP_HEARTBEAT and port == DEVICE_HEARTBEAT_PORT:
+                print("heartbeat from", addr[0])
+
+                cached_host = redis_decode(
+                    redis_client.hgetall(
+                        ":".join(["netaudio", "dante", "host", addr[0]])
+                    )
+                )
+
+                if "server_name" in cached_host:
+                    server_name = cached_host["server_name"]
+                    cache_device_value(
+                        server_name, "last_seen_at", {"last_seen_at": timestamp}
+                    )
+            else:
+                parse_dante_message(message)
 
         except Exception:
             traceback.print_exc()
@@ -1443,10 +1280,12 @@ class ServerCommand(Command):
                 ),
             )
         )
-        # threads.append(thread_multicast_heartbeat = Thread(
-        #     target=multicast,
-        #     args=(MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
-        # ))
+        threads.append(
+            Thread(
+                target=multicast,
+                args=(MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
+            )
+        )
         threads.append(Thread(target=parse_services, args=(queue,)))
         threads.append(Thread(target=zeroconf_browser, args=(queue,)))
 
