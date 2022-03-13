@@ -26,6 +26,7 @@ from netaudio.dante.browser import DanteBrowser
 from netaudio.utils import get_host_by_name
 
 from netaudio.dante.const import (
+    DEFAULT_MULTICAST_METERING_PORT,
     DEVICE_CONTROL_PORT,
     DEVICE_HEARTBEAT_PORT,
     DEVICE_INFO_PORT,
@@ -41,9 +42,6 @@ from netaudio.dante.const import (
     SERVICE_DBC,
     SUBSCRIPTION_STATUS_NONE,
 )
-MULTICAST_METERING_PORT = 8751
-
-
 def _default(self, obj):
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
@@ -551,7 +549,7 @@ def parse_dante_message(message):
         pass
     elif (
         multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
-        and multicast_port == MULTICAST_METERING_PORT
+        and multicast_port == DEFAULT_MULTICAST_METERING_PORT
     ):
         volume_levels = parse_volume_level_status(message, server_name)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
@@ -1439,7 +1437,10 @@ class ServerCommand(Command):
         threads.append(
             Thread(
                 target=multicast,
-                args=(MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_METERING_PORT),
+                args=(
+                    MULTICAST_GROUP_CONTROL_MONITORING,
+                    DEFAULT_MULTICAST_METERING_PORT,
+                ),
             )
         )
         # threads.append(thread_multicast_heartbeat = Thread(

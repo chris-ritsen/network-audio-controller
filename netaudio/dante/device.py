@@ -428,18 +428,17 @@ class DanteDevice:
 
                         rx_channels[channel_number] = rx_channel
 
-                        if tx_device_name:
-                            subscription.rx_channel_name = rx_channel_name
-                            subscription.rx_device_name = self.name
-                            subscription.tx_channel_name = tx_channel_name
-                            subscription.status_code = subscription_status_code
+                        subscription.rx_channel_name = rx_channel_name
+                        subscription.rx_device_name = self.name
+                        subscription.tx_channel_name = tx_channel_name
+                        subscription.status_code = subscription_status_code
 
-                            if tx_device_name == ".":
-                                subscription.tx_device_name = self.name
-                            else:
-                                subscription.tx_device_name = tx_device_name
+                        if tx_device_name == ".":
+                            subscription.tx_device_name = self.name
+                        else:
+                            subscription.tx_device_name = tx_device_name
 
-                            subscriptions.append(subscription)
+                        subscriptions.append(subscription)
         except Exception as e:
             self.error = e
             print(e)
