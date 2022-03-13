@@ -26,9 +26,7 @@ from netaudio.dante.browser import DanteBrowser
 from netaudio.utils import get_host_by_name
 
 from netaudio.dante.const import (
-    MESSAGE_TYPE_IFSTATS_STATUS,
-    MESSAGE_TYPE_TX_FLOW_CHANGE,
-    MESSAGE_TYPE_UNICAST_CLOCKING_STATUS,
+    DEFAULT_MULTICAST_METERING_PORT,
     DEVICE_CONTROL_PORT,
     DEVICE_HEARTBEAT_PORT,
     DEVICE_INFO_PORT,
@@ -44,6 +42,7 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_CODEC_STATUS,
     MESSAGE_TYPE_CONTROL,
     MESSAGE_TYPE_ENCODING_STATUS,
+    MESSAGE_TYPE_IFSTATS_STATUS,
     MESSAGE_TYPE_INTERFACE_STATUS,
     MESSAGE_TYPE_LOCK_STATUS,
     MESSAGE_TYPE_MANF_VERSIONS_STATUS,
@@ -63,6 +62,8 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_SWITCH_VLAN_STATUS,
     MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
     MESSAGE_TYPE_TX_CHANNEL_QUERY,
+    MESSAGE_TYPE_TX_FLOW_CHANGE,
+    MESSAGE_TYPE_UNICAST_CLOCKING_STATUS,
     MESSAGE_TYPE_UPGRADE_STATUS,
     MESSAGE_TYPE_VERSIONS_STATUS,
     MESSAGE_TYPE_VOLUME_LEVELS,
@@ -77,8 +78,6 @@ from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_LABELS,
     SUBSCRIPTION_STATUS_NONE,
 )
-
-MULTICAST_METERING_PORT = 8751
 
 
 def _default(self, obj):
@@ -588,7 +587,7 @@ def parse_dante_message(message):
         pass
     elif (
         multicast_group == MULTICAST_GROUP_CONTROL_MONITORING
-        and multicast_port == MULTICAST_METERING_PORT
+        and multicast_port == DEFAULT_MULTICAST_METERING_PORT
     ):
         volume_levels = parse_volume_level_status(message, server_name)
         parsed_message_redis_hash["message_type_string"] = parsed_message[
@@ -1476,7 +1475,10 @@ class ServerCommand(Command):
         threads.append(
             Thread(
                 target=multicast,
-                args=(MULTICAST_GROUP_CONTROL_MONITORING, MULTICAST_METERING_PORT),
+                args=(
+                    MULTICAST_GROUP_CONTROL_MONITORING,
+                    DEFAULT_MULTICAST_METERING_PORT,
+                ),
             )
         )
         # threads.append(thread_multicast_heartbeat = Thread(
