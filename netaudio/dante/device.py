@@ -412,8 +412,6 @@ class DanteDevice:
                             if sample_rate:
                                 self.sample_rate = sample_rate
 
-                        channel_status_text = None
-
                         subscription = DanteSubscription()
                         rx_channel = DanteChannel()
 
@@ -423,15 +421,13 @@ class DanteDevice:
                         rx_channel.number = channel_number
                         rx_channel.status_code = rx_channel_status_code
 
-                        if channel_status_text:
-                            rx_channel.status_text = channel_status_text
-
                         rx_channels[channel_number] = rx_channel
 
                         subscription.rx_channel_name = rx_channel_name
                         subscription.rx_device_name = self.name
                         subscription.tx_channel_name = tx_channel_name
                         subscription.status_code = subscription_status_code
+                        subscription.rx_channel_status_code = rx_channel_status_code
 
                         if tx_device_name == ".":
                             subscription.tx_device_name = self.name
@@ -507,7 +503,7 @@ class DanteDevice:
                             self.sample_rate = int(sample_rate_hex, 16)
 
                         channel_number = int(channel[0], 16)
-                        #  channel_status = channel[1][2:]
+                        # channel_status = channel[1][2:]
                         channel_group = channel[2]
                         channel_offset = channel[3]
 
