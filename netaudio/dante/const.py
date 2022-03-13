@@ -136,6 +136,7 @@ SUBSCRIPTION_STATUSES = [
 
 SUBSCRIPTION_STATUS_LABELS = {
     SUBSCRIPTION_STATUS_NONE: ("none", "No subscription for this channel"),
+    SUBSCRIPTION_STATUS_FLAG_NO_ADVERT: ("No audio data.",),
     SUBSCRIPTION_STATUS_UNRESOLVED: (
         "Subscription unresolved",
         "Unresolved",
