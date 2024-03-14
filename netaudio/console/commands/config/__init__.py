@@ -73,6 +73,18 @@ class ConfigCommand(Command):
             f"Set the sample rate of a device {options_rate}",
             flag=False,
         ),
+        option(
+            "aes67-enable",
+            None,
+            f"Enable AES67 mode. Reboot needed to apply. Note: You also need to add multicast channels for AES67 to work",
+            flag=True,
+        ),
+        option(
+            "aes67-disable",
+            None,
+            f"Disable AES67 mode. Reboot needed to apply",
+            flag=True,
+        ),
     ]
 
     async def set_gain_level(self, device, channel_number, gain_level):
@@ -273,6 +285,15 @@ class ConfigCommand(Command):
             await self.set_gain_level(
                 device, self.option("channel-number"), self.option("set-gain-level")
             )
+        
+        if self.option("aes67-enable"):
+            # OPT: use --enable-aes67=[True|False] instead, didn't know how
+            is_enabled = True 
+            await device.enable_aes67(is_enabled)
+
+        if self.option("aes67-disable"):
+            is_enabled = False
+            await device.enable_aes67(is_enabled)
 
     def handle(self):
         asyncio.run(self.device_configure())
