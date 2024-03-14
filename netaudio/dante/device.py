@@ -126,6 +126,12 @@ class DanteDevice:
 
         return response
 
+    async def enable_aes67(self, is_enabled: bool):
+        command_enable_aes67 = self.command_enable_aes67(is_enabled=is_enabled)
+        response = await self.dante_command(*command_enable_aes67)
+
+        return response
+
     async def set_encoding(self, encoding):
         response = await self.dante_command(*self.command_set_encoding(encoding))
 
@@ -1075,3 +1081,18 @@ class DanteDevice:
             ),
             SERVICE_ARC,
         )
+
+    def command_enable_aes67(self, is_enabled: bool):
+        data_len = "24" # == 0x24
+        enable = int(is_enabled)
+        sequence_id = 0xff
+        # 22d after sequence ID is 1da for other dev, but works still
+        command_string = (
+            f"ffff00\
+                {data_len}\
+                {sequence_id:04x}22dc525400385eba0000417564696e6174650734100600000064000100\
+                {enable:02x}"
+        )
+        # Remove whitespace in string, that comes from formatting above
+        command_string = "".join(command_string.split())
+        return (command_string, None, DEVICE_SETTINGS_PORT)
