@@ -22,6 +22,7 @@ zeroconf = "^0.38.3"
 black = "^22.1.0"
 pipx = "^1.0.0"
 pylint = "^2.12.2"
+pytest = "^7.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -29,3 +30,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 netaudio = "netaudio:main"
+
+# Recommended, see: https://docs.pytest.org/en/7.1.x/explanation/goodpractices.html#choosing-an-import-mode
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
