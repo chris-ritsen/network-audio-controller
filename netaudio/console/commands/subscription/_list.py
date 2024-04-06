@@ -10,7 +10,8 @@ from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
-from netaudio.dante.cache import DanteCache
+
+# from netaudio.dante.cache import DanteCache
 
 
 def _default(self, obj):
@@ -73,7 +74,7 @@ class SubscriptionListCommand(Command):
             redis_enabled = False
 
         if redis_enabled:
-            dante_cache = DanteCache()
+            # dante_cache = DanteCache()
             devices = await dante_cache.get_devices()
             devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
         else:
