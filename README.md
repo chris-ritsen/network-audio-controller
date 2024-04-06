@@ -114,6 +114,12 @@ poetry install
 poetry run netaudio
 ```
 
+Run tests during development:
+
+```bash
+poetry run pytest
+```
+
 Otherwise, run `netaudio`.
 
 ### Documentation
