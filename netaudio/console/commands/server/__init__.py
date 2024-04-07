@@ -9,12 +9,16 @@ import sys
 import time
 import traceback
 
+from json import JSONEncoder
+
+from cleo import Command
+from fastapi import FastAPI, HTTPException, Path, Body
+from ..device._list import DeviceListCommand
 from queue import Queue
 from threading import Thread
 
-from json import JSONEncoder
-
 import netifaces
+import uvicorn
 
 from cleo import Command
 from cleo.helpers import option
@@ -1333,66 +1337,66 @@ def parse_services(queue):
         queue.task_done()
 
 
+app = FastAPI()
+dante_browser = DanteBrowser(mdns_timeout=1.5)
+
+
+async def device_list():
+    devices = await dante_browser.get_devices()
+
+    for _, device in devices.items():
+        await device.get_controls()
+
+    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+    return devices
+
+
+@app.get("/devices")
+async def list_devices():
+    try:
+        devices = await device_list()
+        return json.loads(json.dumps(devices, indent=2))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/devices/{device_name}/configure")
+async def configure_device(device_name: str, payload: dict = Body(...)):
+    devices = await device_list()
+    device = next((d for d in devices.values() if d.name == device_name), None)
+
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    if "reset_device_name" in payload:
+        await device.reset_name()
+
+    if "device_name" in payload:
+        await device.set_name(payload["device_name"])
+
+    if "identify" in payload and payload["identify"]:
+        await device.identify()
+
+    if "sample_rate" in payload:
+        await device.set_sample_rate(payload["sample_rate"])
+
+    if "encoding" in payload:
+        await device.set_encoding(payload["encoding"])
+
+    if all(k in payload for k in ["gain_level", "channel_number", "channel_type"]):
+        await device.set_gain_level(
+            payload["channel_number"], payload["gain_level"], payload["channel_type"]
+        )
+
+    if "aes67" in payload:
+        await device.enable_aes67(payload["aes67"])
+
+    return json.loads(json.dumps(device, indent=2))
+
+
 class ServerCommand(Command):
     name = "server"
-    description = "Run a daemon to monitor changes to devices"
-
-    async def run_server(self):
-        queue = Queue()
-        threads = []
-
-        if not redis_client:
-            print(
-                "Couldn't connect to a redis server. Specify with env variables REDIS_SOCKET REDIS_HOST REDIS_PORT REDIS_DB"
-            )
-            sys.exit(0)
-
-        # servers = redis_client.smembers(":".join(["netaudio", "dante", "servers"])
-        # hosts = redis_client.smembers(":".join(["netaudio", "dante", "hosts"])
-        #
-        # for server in servers.items():
-        #     pass
-        # for hosts in hosts.items():
-        #     pass
-
-        pattern = ":".join(["netaudio", "dante", "*"])
-
-        for key in redis_client.scan_iter(match=pattern):
-            redis_client.delete(key)
-
-        threads.append(
-            Thread(
-                target=multicast,
-                args=(MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT),
-            )
-        )
-        threads.append(
-            Thread(
-                target=multicast,
-                args=(
-                    MULTICAST_GROUP_CONTROL_MONITORING,
-                    DEFAULT_MULTICAST_METERING_PORT,
-                ),
-            )
-        )
-        threads.append(
-            Thread(
-                target=multicast,
-                args=(MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
-            )
-        )
-        threads.append(Thread(target=parse_services, args=(queue,)))
-        threads.append(Thread(target=zeroconf_browser, args=(queue,)))
-
-        try:
-            for thread in threads:
-                thread.daemon = True
-                thread.start()
-
-            while True:
-                time.sleep(100)
-        except (KeyboardInterrupt, SystemExit):
-            return
+    description = "Run an HTTP server"
 
     def handle(self):
-        asyncio.run(self.run_server())
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

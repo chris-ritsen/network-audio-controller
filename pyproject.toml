@@ -19,6 +19,8 @@ twisted = "^22.1.0"
 zeroconf = "^0.38.3"
 sqlitedict = "^1.7.0"
 redis = "^4.1.4"
+fastapi = "^0.110.1"
+uvicorn = "^0.29.0"
 
 [tool.poetry.dev-dependencies]
 black = "^22.1.0"
