@@ -285,10 +285,10 @@ class ConfigCommand(Command):
             await self.set_gain_level(
                 device, self.option("channel-number"), self.option("set-gain-level")
             )
-        
+
         if self.option("aes67-enable"):
             # OPT: use --enable-aes67=[True|False] instead, didn't know how
-            is_enabled = True 
+            is_enabled = True
             await device.enable_aes67(is_enabled)
 
         if self.option("aes67-disable"):
