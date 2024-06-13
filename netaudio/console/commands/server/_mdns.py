@@ -13,7 +13,7 @@ from queue import Queue
 from threading import Thread
 from json import JSONEncoder
 
-from cleo import Command
+from cleo.commands.command import Command
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlitedict import SqliteDict
 

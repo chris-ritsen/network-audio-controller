@@ -4,7 +4,7 @@ import json
 
 from json import JSONEncoder
 
-from cleo import Command
+from cleo.commands.command import Command
 from cleo.helpers import option
 
 from netaudio.dante.browser import DanteBrowser
