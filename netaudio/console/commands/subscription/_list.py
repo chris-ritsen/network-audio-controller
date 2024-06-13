@@ -4,7 +4,7 @@ import os
 
 from json import JSONEncoder
 
-from cleo import Command
+from cleo.commands.command import Command
 from cleo.helpers import option
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError

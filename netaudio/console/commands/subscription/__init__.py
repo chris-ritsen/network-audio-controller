@@ -1,4 +1,4 @@
-from cleo import Command
+from cleo.commands.command import Command
 from cleo.helpers import option
 
 from ._add import SubscriptionAddCommand
