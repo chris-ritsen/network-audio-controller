@@ -22,7 +22,7 @@ def main() -> int:
         SubscriptionCommand,
     ]
 
-    application = Application("netaudio", version.version, complete=True)
+    application = Application("netaudio", version.version)
 
     for command in commands:
         application.add(command())
