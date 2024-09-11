@@ -6,6 +6,9 @@ from cleo import Command
 
 from fastapi import FastAPI, HTTPException, Path, Body
 from netaudio.dante.browser import DanteBrowser
+import logging
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 dante_browser = DanteBrowser(mdns_timeout=1.5)
@@ -29,6 +32,66 @@ async def list_devices():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/subcribe/{rx_device_name}/{rx_channel_name}/{tx_device_name}/{tx_channel_name}")
+async def subcribe_device(rx_device_name: str,rx_channel_name: str,tx_device_name: str,tx_channel_name: str, payload: dict = Body(...)):
+
+    logger.info(f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}",rx_device_name,rx_channel_name,tx_device_name,tx_channel_name)
+    dante_devices = await dante_browser.get_devices()
+
+    for _, device in dante_devices.items():
+        await device.get_controls()
+
+    rx_channel = None
+    rx_device = None
+    tx_channel = None
+    tx_device = None
+
+    tx_device = next(
+        filter(
+            lambda d: d[1].name == tx_device_name,
+            dante_devices.items(),
+        )
+    )[1]
+    tx_channel = next(
+        filter(
+            lambda c: tx_channel_name == c[1].friendly_name
+            or tx_channel_name == c[1].name
+            and not c[1].friendly_name,
+            tx_device.tx_channels.items(),
+        )
+    )[1]
+    rx_device = next(
+        filter(
+            lambda d: d[1].name == rx_device_name,
+            dante_devices.items(),
+        )
+    )[1]
+    rx_channel = next(
+        filter(
+            lambda c: c[1].name == rx_channel_name,
+            rx_device.rx_channels.items(),
+        )
+    )[1]
+
+    if rx_channel and rx_device and tx_channel and tx_channel:
+        await rx_device.add_subscription(rx_channel, tx_channel, tx_device)
+    else:
+        raise HTTPException(status_code=404, detail="Device or Channel not found")
+    return {}
+
+@app.post("/devices/{device_name}/rx_name/{rx_number}")
+async def name_rx_device(device_name: str,rx_number: int, payload: dict = Body(...)):
+    name = payload["name"]
+    devices = await device_list()
+    device = next((d for d in devices.values() if d.name == device_name), None)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    try:
+        await device.set_channel_name("rx",rx_number,name)
+    except:
+        raise HTTPException(status_code=500, detail="some problem")
+    return {}
 
 @app.post("/devices/{device_name}/configure")
 async def configure_device(device_name: str, payload: dict = Body(...)):
