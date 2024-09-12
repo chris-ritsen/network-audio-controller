@@ -5,10 +5,23 @@ import uvicorn
 from cleo.commands.command import Command
 
 from fastapi import FastAPI, HTTPException, Path, Body
+from fastapi.middleware.cors import CORSMiddleware
 from netaudio.dante.browser import DanteBrowser
 
 app = FastAPI()
 dante_browser = DanteBrowser(mdns_timeout=1.5)
+
+origins = [
+    "http://192.168.1.107:3002",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def device_list():
