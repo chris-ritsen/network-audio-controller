@@ -1,4 +1,3 @@
-from signal import signal, SIGPIPE, SIG_DFL
 from cleo.application import Application
 from netaudio import version
 
@@ -10,7 +9,12 @@ from netaudio.console.commands import (
     SubscriptionCommand,
 )
 
-signal(SIGPIPE, SIG_DFL)
+# Fix Windows issue, See: https://stackoverflow.com/q/58718659/
+try:
+    from signal import signal, SIGPIPE, SIG_DFL
+    signal(SIGPIPE, SIG_DFL)
+except ImportError:  # If SIGPIPE is not available (win32),
+    pass             # we don't have to do anything to ignore it. 
 
 
 def main() -> int:
