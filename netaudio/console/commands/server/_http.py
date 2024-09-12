@@ -2,7 +2,7 @@ import asyncio
 import json
 import uvicorn
 
-from cleo import Command
+from cleo.commands.command import Command
 
 from fastapi import FastAPI, HTTPException, Path, Body
 from netaudio.dante.browser import DanteBrowser
