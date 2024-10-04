@@ -8,7 +8,12 @@ from json import JSONEncoder
 from cleo.commands.command import Command
 from cleo.helpers import option
 
+from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+
 from netaudio.dante.browser import DanteBrowser
+from netaudio.dante.const import SERVICE_CMC, SERVICES
+from netaudio.dante.device import DanteDevice
 from netaudio.utils.timeout import Timeout
 
 
@@ -75,9 +80,96 @@ class DeviceListCommand(Command):
 
         return devices
 
+    def get_devices_from_redis(self):
+        redis_client = None
+        redis_host = "localhost"
+        redis_port = 6379
+        redis_db = 0
+
+        try:
+            redis_client = Redis(
+                db=redis_db,
+                decode_responses=True,
+                host=redis_host,
+                port=redis_port,
+                socket_timeout=0.1,
+            )
+            redis_client.ping()
+        except RedisConnectionError:
+            return None
+
+        if not redis_client:
+            return None
+
+        host_keys = redis_client.smembers("netaudio:dante:hosts")
+        devices = {}
+
+        for host_key in host_keys:
+            host_data = redis_client.hgetall(f"netaudio:dante:host:{host_key}")
+
+            if not host_data or "server_name" not in host_data:
+                continue
+
+            server_name = host_data["server_name"]
+
+            device = DanteDevice(server_name=server_name)
+            device.ipv4 = host_data.get("ipv4")
+
+            device_data = redis_client.hgetall(f"netaudio:dante:device:{server_name}")
+
+            if device_data:
+                device.tx_channels = json.loads(device_data.get("tx_channels", "{}"))
+                device.rx_channels = json.loads(device_data.get("rx_channels", "{}"))
+                device.rx_count = int(device_data.get("rx_channel_count"), 0)
+                device.tx_count = int(device_data.get("tx_channel_count"), 0)
+
+                device.subscriptions = json.loads(
+                    device_data.get("subscriptions", "{}")
+                )
+
+                device.name = device_data.get("device_name")
+                device.sample_rate = device_data.get("sample_rate_status")
+                device.mac_address = device_data.get("mac_address")
+                device.model_id = device_data.get("model")
+                device.software = device_data.get("software")
+                device.latency = device_data.get("latency")
+
+            service_keys = redis_client.keys(f"netaudio:dante:service:{server_name}:*")
+
+            for service_key in service_keys:
+                service_data = redis_client.hgetall(service_key)
+                service_properties_key = service_key.replace(
+                    "service", "service:properties"
+                )
+                service_properties = redis_client.hgetall(service_properties_key)
+
+                if service_data:
+                    service_name = service_key.split(":", maxsplit=4)[-1]
+                    device.services[service_name] = {
+                        "ipv4": service_data.get("ipv4"),
+                        "name": service_data.get("name"),
+                        "port": int(service_data.get("port", 0)),
+                        "properties": {
+                            k: v
+                            for k, v in service_properties.items()
+                            if k not in ["ipv4", "name", "port"]
+                        },
+                        "server_name": server_name,
+                        "type": service_data.get("type"),
+                    }
+
+            devices[server_name] = device
+
+        return devices if devices else None
+
     async def device_list(self):
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        devices = await dante_browser.get_devices()
+        cached_devices = self.get_devices_from_redis()
+
+        if cached_devices is not None:
+            devices = cached_devices
+        else:
+            dante_browser = DanteBrowser(mdns_timeout=1.5)
+            devices = await dante_browser.get_devices()
 
         if self.option("name"):
             for _, device in devices.items():
