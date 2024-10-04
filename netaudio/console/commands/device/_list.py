@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 import json
+import pprint
 import socket
 
 from json import JSONEncoder
@@ -12,8 +13,10 @@ from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
+from netaudio.dante.channel import DanteChannel
 from netaudio.dante.const import SERVICE_CMC, SERVICES
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.subscription import DanteSubscription
 from netaudio.utils.timeout import Timeout
 
 
@@ -94,6 +97,7 @@ class DeviceListCommand(Command):
                 port=redis_port,
                 socket_timeout=0.1,
             )
+
             redis_client.ping()
         except RedisConnectionError:
             return None
@@ -118,18 +122,68 @@ class DeviceListCommand(Command):
             device_data = redis_client.hgetall(f"netaudio:dante:device:{server_name}")
 
             if device_data:
-                device.tx_channels = json.loads(device_data.get("tx_channels", "{}"))
-                device.rx_channels = json.loads(device_data.get("rx_channels", "{}"))
+                rx_channels = json.loads(device_data.get("rx_channels", "{}"))
+
+                for channel_number, rx_channel_data in rx_channels.items():
+                    rx_channel = DanteChannel()
+                    rx_channel.channel_type = "rx"
+                    rx_channel.device = self
+                    rx_channel.name = rx_channel_data.get("name")
+                    rx_channel.number = channel_number
+                    rx_channel.status_code = rx_channel_data.get("status_code")
+                    device.rx_channels[channel_number] = rx_channel
+
+                tx_channels = json.loads(device_data.get("tx_channels", "{}"))
+
+                for channel_number, tx_channel_data in tx_channels.items():
+                    tx_channel = DanteChannel()
+                    tx_channel.channel_type = "tx"
+                    tx_channel.device = self
+                    tx_channel.name = tx_channel_data.get("name")
+                    tx_channel.number = channel_number
+                    tx_channel.status_code = tx_channel_data.get("status_code")
+                    device.tx_channels[channel_number] = tx_channel
+
                 device.rx_count = int(device_data.get("rx_channel_count"), 0)
                 device.tx_count = int(device_data.get("tx_channel_count"), 0)
 
-                device.subscriptions = json.loads(
-                    device_data.get("subscriptions", "{}")
-                )
+                subscriptions = json.loads(device_data.get("subscriptions", "{}"))
+
+                for (
+                    subscription_number,
+                    subscription_data,
+                ) in subscriptions.items():
+                    subscription = DanteSubscription()
+                    subscription.rx_channel_name = subscription_data.get(
+                        "rx_channel_name"
+                    )
+
+                    subscription.rx_device_name = subscription_data.get(
+                        "rx_device_name"
+                    )
+
+                    subscription.tx_channel_name = subscription_data.get(
+                        "tx_channel_name"
+                    )
+
+                    subscription.tx_device_name = subscription_data.get(
+                        "tx_device_name"
+                    )
+
+                    subscription.status_code = subscription_data.get("status_code")
+
+                    subscription.rx_channel_status_code = subscription_data.get(
+                        "rx_channel_status_code"
+                    )
+
+                    subscription.status_message = subscription_data.get(
+                        "status_message", []
+                    )
+
+                    device.subscriptions.append(subscription)
 
                 device.name = device_data.get("device_name")
                 device.sample_rate = device_data.get("sample_rate_status")
-                device.mac_address = device_data.get("mac_address")
                 device.model_id = device_data.get("model")
                 device.software = device_data.get("software")
                 device.latency = device_data.get("latency")
@@ -138,13 +192,15 @@ class DeviceListCommand(Command):
 
             for service_key in service_keys:
                 service_data = redis_client.hgetall(service_key)
+
                 service_properties_key = service_key.replace(
                     "service", "service:properties"
                 )
+
                 service_properties = redis_client.hgetall(service_properties_key)
 
                 if service_data:
-                    service_name = service_key.split(":", maxsplit=4)[-1]
+                    service_name = service_data.get("name")
                     device.services[service_name] = {
                         "ipv4": service_data.get("ipv4"),
                         "name": service_data.get("name"),
@@ -158,6 +214,13 @@ class DeviceListCommand(Command):
                         "type": service_data.get("type"),
                     }
 
+                    if (
+                        "id" in service_properties
+                        and service_data.get("type") == SERVICE_CMC
+                    ):
+                        device.mac_address = service_properties["id"]
+
+            device.services = dict(sorted(device.services.items()))
             devices[server_name] = device
 
         return devices if devices else None
