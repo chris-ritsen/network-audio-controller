@@ -274,6 +274,7 @@ class DanteBrowser:
                     if "latency_ns" in service_properties:
                         device.latency = int(service_properties["latency_ns"])
 
+                device.services = dict(sorted(device.services.items()))
             except Exception:
                 traceback.print_exc()
 

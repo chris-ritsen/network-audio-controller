@@ -1,6 +1,7 @@
 import codecs
 import ipaddress
 import logging
+import pprint
 import random
 import socket
 import traceback
@@ -302,11 +303,9 @@ class DanteDevice:
                 else:
                     logger.warning("Failed to get Dante channel counts")
 
-            # get tx channels
             if not self.tx_channels and self.tx_count:
                 await self.get_tx_channels()
 
-            # get rx channels
             if not self.rx_channels and self.rx_count:
                 await self.get_rx_channels()
 
