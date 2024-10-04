@@ -34,8 +34,8 @@ class DanteDevice:
         self._model_id = ""
         self._name = ""
         self._rx_channels = {}
-        self._rx_count = 0
-        self._rx_count_raw = 0
+        self._rx_count = None
+        self._rx_count_raw = None
         self._sample_rate = None
         self._server_name = server_name
         self._services = {}
@@ -43,8 +43,8 @@ class DanteDevice:
         self._software = None
         self._subscriptions = []
         self._tx_channels = {}
-        self._tx_count = 0
-        self._tx_count_raw = 0
+        self._tx_count = None
+        self._tx_count_raw = None
 
     def __str__(self):
         return f"{self.name}"
@@ -58,6 +58,8 @@ class DanteDevice:
         return response
 
     async def dante_send_command(self, command, service_type=None, port=None):
+        sock = None
+
         if service_type:
             service = self.get_service(service_type)
             sock = self.sockets[service["port"]]
@@ -288,7 +290,7 @@ class DanteDevice:
                     logger.warning("Failed to get Dante device name")
 
             # get reported rx/tx channel counts
-            if not self.rx_count or not self.tx_count:
+            if self._rx_count is None or self._tx_count is None:
                 channel_count = await self.dante_command(*self.command_channel_count())
                 if channel_count:
                     self.rx_count_raw = self.rx_count = int.from_bytes(
@@ -472,9 +474,9 @@ class DanteDevice:
                     )
 
                     if tx_channel_friendly_name:
-                        tx_friendly_channel_names[
-                            channel_number
-                        ] = tx_channel_friendly_name
+                        tx_friendly_channel_names[channel_number] = (
+                            tx_channel_friendly_name
+                        )
 
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
                 response = await self.dante_command(
@@ -1078,16 +1080,14 @@ class DanteDevice:
         )
 
     def command_enable_aes67(self, is_enabled: bool):
-        data_len = "24" # == 0x24
+        data_len = "24"  # == 0x24
         enable = int(is_enabled)
-        sequence_id = 0xff
+        sequence_id = 0xFF
         # 22d after sequence ID is 1da for other dev, but works still
-        command_string = (
-            f"ffff00\
+        command_string = f"ffff00\
                 {data_len}\
                 {sequence_id:04x}22dc525400385eba0000417564696e6174650734100600000064000100\
                 {enable:02x}"
-        )
         # Remove whitespace in string, that comes from formatting above
         command_string = "".join(command_string.split())
         return (command_string, None, DEVICE_SETTINGS_PORT)

@@ -41,3 +41,10 @@ netaudio = "netaudio:main"
 addopts = [
     "--import-mode=importlib",
 ]
+
+[tool.pytest.ini_options.exclude]
+patterns = [
+    "*/__pycache__/*",
+    "*.pyc",
+    "*.pyo"
+]

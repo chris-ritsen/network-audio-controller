@@ -6,12 +6,19 @@ import random
 import socket
 import struct
 import sys
+import threading
 import time
 import traceback
 
-from queue import Queue
-from threading import Thread
+import logging
+from concurrent.futures import ThreadPoolExecutor
+import signal
+
 from json import JSONEncoder
+from queue import Queue
+from threading import Thread, Event
+
+from redis import Redis
 
 from cleo.commands.command import Command
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -80,6 +87,9 @@ from netaudio.dante.const import (
 def _default(self, obj):
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 _default.default = JSONEncoder().default
 JSONEncoder.default = _default
@@ -658,12 +668,19 @@ def parse_dante_message(message):
             server_name, "subscriptions", parsed_rx_channels["subscriptions"]
         )
     else:
-        parsed_message_redis_hash["message_type_string"] = parsed_message[
-            "message_type_string"
-        ] = MESSAGE_TYPE_STRINGS[message_type]
-        print(
-            f"Message was not parsed: {src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({MESSAGE_TYPE_STRINGS[message_type]}) from `{server_name}`"
-        )
+        if message_type in MESSAGE_TYPE_STRINGS:
+            parsed_message_redis_hash["message_type_string"] = parsed_message[
+                "message_type_string"
+            ] = MESSAGE_TYPE_STRINGS[message_type]
+        else:
+            # print(f"Unknown message type: {message_type} from `{server_name}`")
+            parsed_message_redis_hash["message_type_string"] = parsed_message[
+                "message_type_string"
+            ] = "Unknown"
+
+        # print(
+        #     f"Message was not parsed: {src_host}:{src_port} -> {multicast_group}:{multicast_port} type `{message_type}` ({parsed_message['message_type_string']}) from `{server_name}`"
+        # )
 
     # if parsed_dante_message:
     #     redis_device_key = ":".join(["netaudio", "dante", "device", server_name])
@@ -1317,25 +1334,27 @@ def multicast(group, port):
             traceback.print_exc()
 
 
-def zeroconf_browser(queue):
-    dante_browser = DanteBrowser(0, queue)
-    dante_browser.sync_run()
-
-
-def parse_services(queue):
-    while True:
-        message = queue.get()
-        parse_dante_service_change(message)
-        queue.task_done()
-
-
 class ServerMdnsCommand(Command):
     name = "mdns"
     description = "Run a daemon to monitor mDNS ports for changes to devices"
 
+    def __init__(self):
+        super().__init__()
+        self.stop_event = Event()  # Stop event for signaling shutdown
+        self.threads = []  # List of threads to manage
+
+    def parse_services(self, queue):
+        while True:
+            message = queue.get()
+            parse_dante_service_change(message)
+            queue.task_done()
+
+    def zeroconf_browser(self, queue):
+        dante_browser = DanteBrowser(0, queue)
+        dante_browser.sync_run()
+
     async def server_mdns(self):
         queue = Queue()
-        threads = []
 
         if not redis_client:
             print(
@@ -1343,52 +1362,95 @@ class ServerMdnsCommand(Command):
             )
             sys.exit(0)
 
-        # servers = redis_client.smembers(":".join(["netaudio", "dante", "servers"])
-        # hosts = redis_client.smembers(":".join(["netaudio", "dante", "hosts"])
-        #
-        # for server in servers.items():
-        #     pass
-        # for hosts in hosts.items():
-        #     pass
-
         pattern = ":".join(["netaudio", "dante", "*"])
 
         for key in redis_client.scan_iter(match=pattern):
             redis_client.delete(key)
 
-        threads.append(
+        self.threads.append(
             Thread(
-                target=multicast,
+                target=self.multicast_worker,
                 args=(MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT),
+                daemon=True,
             )
         )
-        threads.append(
+
+        self.threads.append(
             Thread(
-                target=multicast,
+                target=self.multicast_worker,
                 args=(
                     MULTICAST_GROUP_CONTROL_MONITORING,
                     DEFAULT_MULTICAST_METERING_PORT,
                 ),
+                daemon=True,
             )
         )
-        threads.append(
+
+        self.threads.append(
             Thread(
-                target=multicast,
+                target=self.multicast_worker,
                 args=(MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
+                daemon=True,
             )
         )
-        threads.append(Thread(target=parse_services, args=(queue,)))
-        threads.append(Thread(target=zeroconf_browser, args=(queue,)))
+
+        self.threads.append(
+            Thread(target=self.parse_services, args=(queue,), daemon=True)
+        )
+
+        self.threads.append(
+            Thread(target=self.zeroconf_browser, args=(queue,), daemon=True)
+        )
+
+        for thread in self.threads:
+            thread.start()
 
         try:
-            for thread in threads:
-                thread.daemon = True
-                thread.start()
-
-            while True:
-                time.sleep(100)
+            while not self.stop_event.is_set():
+                time.sleep(1)
         except (KeyboardInterrupt, SystemExit):
+            print("Received stop signal, shutting down...")
+            self.stop_event.set()  # Signal all threads to stop
+
+            for thread in self.threads:
+                thread.join()
+
+    def multicast_worker(self, group, port):
+        server_address = ("", port)
+        mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        try:
+            mc_sock.bind(server_address)
+        except OSError as e:
+            print(e)
+            print(f"Failed to bind to multicast port {port}")
             return
+
+        group_bin = socket.inet_aton(group)
+        mreq = struct.pack("4sL", group_bin, socket.INADDR_ANY)
+        mc_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+        while not self.stop_event.is_set():
+            try:
+                data, addr = mc_sock.recvfrom(2048)
+                timestamp = time.time_ns()
+
+                src_host, src_port = addr
+                message = {
+                    "message_hex": data.hex(),
+                    "multicast_group": group,
+                    "multicast_port": port,
+                    "src_host": src_host,
+                    "src_port": src_port,
+                    "time": timestamp,
+                }
+
+                parse_dante_message(message)
+
+            except (socket.error, OSError):
+                if self.stop_event.is_set():
+                    break
+                traceback.print_exc()
 
     def handle(self):
         asyncio.run(self.server_mdns())

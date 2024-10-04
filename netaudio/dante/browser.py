@@ -231,6 +231,7 @@ class DanteBrowser:
 
         for service in self.services:
             service = service.result()
+            server_name = None
 
             if not service:
                 continue
