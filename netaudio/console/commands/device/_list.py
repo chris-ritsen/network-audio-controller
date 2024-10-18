@@ -226,7 +226,8 @@ class DeviceListCommand(Command):
         return devices if devices else None
 
     async def device_list(self):
-        cached_devices = self.get_devices_from_redis()
+        # cached_devices = self.get_devices_from_redis()
+        cached_devices = None
 
         if cached_devices is not None:
             devices = cached_devices
