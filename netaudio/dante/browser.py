@@ -248,39 +248,44 @@ class DanteBrowser:
             device = DanteDevice(server_name=hostname)
 
             try:
-                for service_name, service in device_services.items():
-                    device.services[service_name] = service
-
-                    service_properties = service["properties"]
-
-                    if not device.ipv4:
-                        device.ipv4 = service["ipv4"]
-
-                    if "id" in service_properties and service["type"] == SERVICE_CMC:
-                        device.mac_address = service_properties["id"]
-
-                    if "model" in service_properties:
-                        device.model_id = service_properties["model"]
-
-                    if "rate" in service_properties:
-                        device.sample_rate = int(service_properties["rate"])
-
-                    if (
-                        "router_info" in service_properties
-                        and service_properties["router_info"] == '"Dante Via"'
-                    ):
-                        device.software = "Dante Via"
-
-                    if "latency_ns" in service_properties:
-                        device.latency = int(service_properties["latency_ns"])
-
-                device.services = dict(sorted(device.services.items()))
+                self._populate_device_from_services(device, device_services)
             except Exception:
                 traceback.print_exc()
 
             self.devices[hostname] = device
 
         return self.devices
+
+    def _populate_device_from_services(
+        self, device: DanteDevice, device_services: dict
+    ) -> None:
+        for service_name, service in device_services.items():
+            device.services[service_name] = service
+
+            service_properties = service["properties"]
+
+            if not device.ipv4:
+                device.ipv4 = service["ipv4"]
+
+            if "id" in service_properties and service["type"] == SERVICE_CMC:
+                device.mac_address = service_properties["id"]
+
+            if "model" in service_properties:
+                device.model_id = service_properties["model"]
+
+            if "rate" in service_properties:
+                device.sample_rate = int(service_properties["rate"])
+
+            if (
+                "router_info" in service_properties
+                and service_properties["router_info"] == '"Dante Via"'
+            ):
+                device.software = "Dante Via"
+
+            if "latency_ns" in service_properties:
+                device.latency = int(service_properties["latency_ns"])
+
+        device.services = dict(sorted(device.services.items()))
 
     async def get_services(self) -> None:
         try:
