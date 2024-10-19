@@ -1,6 +1,4 @@
 import codecs
-import ipaddress
-import random
 import socket
 import traceback
 

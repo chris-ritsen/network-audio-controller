@@ -98,14 +98,6 @@ class DanteChannelHelper:
                 )
                 tx_friendly_names = response.hex()
 
-                if self.device.name == "avio-usb":
-                    pprint.pprint(
-                        self.device.command_builder.get_transmitters(
-                            page, friendly_names=True
-                        )
-                    )
-                    pprint.pprint(tx_friendly_names)
-
                 for index in range(0, min(self.device.tx_count, 32)):
                     str1 = tx_friendly_names[(24 + (index * 12)) : (36 + (index * 12))]
                     n = 4
