@@ -1,5 +1,6 @@
 import codecs
 import ipaddress
+import pprint
 import random
 
 from netaudio.dante.const import (
@@ -18,41 +19,49 @@ class DanteCommandBuilder:
         command=None,
         command_str=None,
         command_args="0000",
-        command_length="00",
-        sequence1="ff",
-        sequence2=0,
+        sequence1="00",
+        sequence2=None,
     ):
+        command_str = bytes.fromhex(command_str) if command_str else None
+        command_args = bytes.fromhex(command_args)
+        sequence1 = bytes.fromhex(sequence1)
+
+        if sequence2 is None:
+            sequence2 = random.randint(0, 65535)
+
+        command_length = b"\x00"
+
         if command == "get_channel_count":
-            command_length = "0a"
-            command_str = "1000"
+            command_str = b"\x10\x00"
         if command == "get_device_info":
-            command_length = "0a"
-            command_str = "1003"
+            command_str = b"\x10\x03"
         if command == "device_name":
-            command_length = "0a"
-            command_str = "1002"
+            command_str = b"\x10\x02"
         if command == "rx_channels":
-            command_length = "10"
-            command_str = "3000"
+            command_str = b"\x30\x00"
         if command == "reset_device_name":
-            command_length = "0a"
-            command_str = "1001"
-            command_args = "0000"
+            command_str = b"\x10\x01"
+            command_args = b"\x00\x00"
         if command == "set_device_name":
-            command_str = "1001"
+            command_str = b"\x10\x01"
 
-        sequence2 = random.randint(0, 65535)
-        sequence_id = f"{sequence2:04x}"
+        sequence_id = sequence2.to_bytes(2, "big")
 
-        command_hex = (
-            f"27{sequence1}00{command_length}{sequence_id}{command_str}{command_args}"
+        command_bytes = (
+            b"\x27"
+            + sequence1
+            + b"\x00"
+            + command_length
+            + sequence_id
+            + command_str
+            + command_args
         )
 
-        if command == "add_subscription":
-            command_length = f"{int(len(command_hex) / 2):02x}"
-            command_hex = f"27{sequence1}00{command_length}{sequence_id}{command_str}{command_args}"
+        command_length = len(command_bytes).to_bytes(1, "big")
+        command_bytes = bytearray(command_bytes)
+        command_bytes[3] = command_length[0]
 
-        return command_hex
+        return command_bytes.hex()
 
     def enable_aes67(self, is_enabled: bool):
         data_len = "24"  # == 0x24
@@ -77,13 +86,11 @@ class DanteCommandBuilder:
         else:
             command_str = "2000"
 
-        command_length = "10"
         command_args = self._channel_pagination(page=page)
 
         return (
             self.command_string(
                 "tx_channels",
-                command_length=command_length,
                 command_str=command_str,
                 command_args=command_args,
             ),
@@ -103,7 +110,6 @@ class DanteCommandBuilder:
         return (
             self.command_string(
                 "set_device_name",
-                command_length=args_length,
                 command_args=self._device_name(name),
             ),
             SERVICE_ARC,
@@ -167,7 +173,6 @@ class DanteCommandBuilder:
             self.command_string(
                 "set_channel_name" if new_channel_name else "reset_channel_name",
                 command_str=command_str,
-                command_length=args_length,
                 command_args=command_args,
             ),
             SERVICE_ARC,
@@ -220,7 +225,6 @@ class DanteCommandBuilder:
             self.command_string(
                 "remove_subscription",
                 command_str=command_str,
-                command_length=args_length,
                 command_args=command_args,
             ),
             SERVICE_ARC,
@@ -283,7 +287,6 @@ class DanteCommandBuilder:
 
     def set_latency(self, latency):
         command_str = "1101"
-        command_length = "28"
         latency = int(latency * 1000000)
         latency_hex = f"{latency:06x}"
 
@@ -292,7 +295,6 @@ class DanteCommandBuilder:
         return (
             self.command_string(
                 "set_latency",
-                command_length=command_length,
                 command_str=command_str,
                 command_args=command_args,
             ),
