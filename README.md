@@ -73,7 +73,8 @@ Otherwise, install with pipx.
 For development, install the following packages:
 
 ```bash
-pacman -S community/python-pipx community/python-poetry
+pacman -S extra/python-pipx
+pipx install netaudio
 ```
 
 #### WSL / Ubuntu
@@ -94,7 +95,6 @@ Install pipx with brew and then use it to install:
 
 ```bash
 brew install pipx
-brew link pipx
 pipx install netaudio
 ```
 
