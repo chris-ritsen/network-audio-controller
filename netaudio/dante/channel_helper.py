@@ -1,3 +1,4 @@
+import math
 import pprint
 import traceback
 
@@ -13,8 +14,13 @@ class DanteChannelHelper:
         rx_channels = {}
         subscriptions = []
 
+        if not self.device.rx_count:
+            return
+
         try:
-            for page in range(0, max(int(self.device.rx_count / 16), 1)):
+            pages = max(math.ceil(self.device.rx_count / 16), 1)
+
+            for page in range(pages):
                 receivers = await self.device.command.send(
                     *self.device.command_builder.get_receivers(page)
                 )
