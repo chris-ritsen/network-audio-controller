@@ -23,7 +23,7 @@ fastapi = "^0.110.1"
 uvicorn = "^0.29.0"
 clikit = "^0.6.2"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 black = "^22.1.0"
 pipx = "^1.0.0"
 pylint = "^2.12.2"
