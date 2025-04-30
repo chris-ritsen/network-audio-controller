@@ -883,9 +883,9 @@ class DanteDevice:
         command_str = "1101"
         command_length = "28"
         latency = int(latency * 1000000)
-        latency_hex = f"{latency:06x}"
+        latency_hex = f"{latency:08x}"
 
-        command_args = f"00000503820500200211001083010024821983018302830600{latency_hex}00{latency_hex}"
+        command_args = f"000005038205002002110010830100248219830183028306{latency_hex}{latency_hex}"
 
         return (
             self.command_string(
