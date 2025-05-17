@@ -1,125 +1,123 @@
 import asyncio
 import json
 import os
-
 from json import JSONEncoder
 
-from cleo.commands.command import Command
-from cleo.helpers import option
+import typer
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
+from typing_extensions import Annotated
 
+from netaudio.common.app_config import settings as app_settings
+from netaudio.common.mdns_cache import MdnsCache
 from netaudio.dante.browser import DanteBrowser
-
-# from netaudio.dante.cache import DanteCache
-
-
-def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
+from netaudio.dante.subscription import DanteSubscription
 
 
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
+def _dante_subscription_serializer(obj):
+    if isinstance(obj, DanteSubscription):
+        return obj.to_json()
+
+    raise TypeError(
+        f"Type {type(obj).__name__} not serializable and not a DanteSubscription"
+    )
 
 
-class SubscriptionListCommand(Command):
-    name = "list"
-    description = "List subscriptions"
+async def subscription_list(
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+):
+    subscriptions = []
+    redis_enabled = False
+    redis_socket_path = os.environ.get("REDIS_SOCKET")
+    redis_host = os.environ.get("REDIS_HOST") or "localhost"
+    redis_port = os.environ.get("REDIS_PORT") or 6379
+    redis_db = os.environ.get("REDIS_DB") or 0
 
-    options = [option("json", None, "Output as JSON", flag=True)]
+    try:
+        redis_client = None
 
-    #  options = [
-    #      option('rx-channel-name', None, 'Filter by Rx channel name', flag=False),
-    #      option('rx-channel-number', None, 'Filter by Rx channel number', flag=False),
-    #      option('rx-device-host', None, 'Filter by Rx device host', flag=False),
-    #      option('rx-device-name', None, 'Filter by Rx device name', flag=False),
-    #      option('tx-channel-name', None, 'Filter by Tx channel name', flag=False),
-    #      option('tx-channel-number', None, 'Filter by Tx channel number', flag=False),
-    #      option('tx-device-host', None, 'Filter by Tx device host', flag=False),
-    #      option('tx-device-name', None, 'Filter by Tx device name', flag=False),
-    #  ]
+        if redis_socket_path:
+            redis_client = Redis(
+                db=redis_db,
+                decode_responses=False,
+                socket_timeout=0.1,
+                unix_socket_path=redis_socket_path,
+            )
+        elif os.environ.get("REDIS_PORT") or os.environ.get("REDIS_HOST"):
+            redis_client = Redis(
+                db=redis_db,
+                decode_responses=False,
+                host=redis_host,
+                socket_timeout=0.1,
+                port=redis_port,
+            )
 
-    async def subscription_list(self):
-        subscriptions = []
+        if redis_client:
+            redis_client.ping()
+            redis_enabled = True
+    except RedisConnectionError:
+        print("Notice: Redis connection failed. Continuing with live discovery.")
+    except Exception as e:
+        print(
+            f"Notice: Redis initialization error ({e}). Continuing with live discovery."
+        )
 
-        redis_enabled = None
+    devices_dict = {}
+    if redis_enabled:
+        print(
+            "Notice: Redis is enabled, but integrated caching logic for 'subscription list' is not fully active. Using live discovery."
+        )
+        redis_enabled = False
 
-        redis_socket_path = os.environ.get("REDIS_SOCKET")
-        redis_host = os.environ.get("REDIS_HOST") or "localhost"
-        redis_port = os.environ.get("REDIS_PORT") or 6379
-        redis_db = os.environ.get("REDIS_DB") or 0
+    if not redis_enabled:
+        dante_browser = DanteBrowser(mdns_timeout=app_settings.mdns_timeout)
 
-        try:
-            redis_client = None
+        if app_settings.refresh:
+            mdns_cache = MdnsCache()
+            mdns_cache.clear()
+            mdns_cache.close()
 
-            if redis_socket_path:
-                redis_client = Redis(
-                    db=redis_db,
-                    decode_responses=False,
-                    socket_timeout=0.1,
-                    unix_socket_path=redis_socket_path,
-                )
-            elif os.environ.get("REDIS_PORT") or os.environ.get("REDIS_HOST"):
-                redis_client = Redis(
-                    db=redis_db,
-                    decode_responses=False,
-                    host=redis_host,
-                    socket_timeout=0.1,
-                    port=redis_port,
-                )
-            if redis_client:
-                redis_client.ping()
-                redis_enabled = True
-        except RedisConnectionError:
-            redis_enabled = False
+        raw_devices = await dante_browser.get_devices()
 
-        if redis_enabled:
-            # dante_cache = DanteCache()
-            devices = await dante_cache.get_devices()
-            devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-        else:
-            dante_browser = DanteBrowser(mdns_timeout=1.5)
-            devices = await dante_browser.get_devices()
-            devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+        if not raw_devices:
+            print("No Dante devices found on the network.")
+            raise typer.Exit()
 
-            for _, device in devices.items():
+        devices_dict = dict(sorted(raw_devices.items(), key=lambda x: x[1].name))
+
+        for _, device in devices_dict.items():
+            try:
                 await device.get_controls()
+            except Exception as e:
+                print(
+                    f"Warning: Could not get controls for device {getattr(device, 'name', 'Unknown')}: {e}"
+                )
 
-        #  rx_channel = None
-        #  rx_device = None
-        #  tx_channel = None
-        #  tx_device = None
+    if not devices_dict:
+        print("No devices found or processed. Cannot list subscriptions.")
+        raise typer.Exit()
 
-        #  if self.option('tx-device-name'):
-        #      tx_device = next(filter(lambda d: d[1].name == self.option('tx-device-name'), devices.items()))[1]
-        #  elif self.option('tx-device-host'):
-        #      tx_device = next(filter(lambda d: d[1].ipv4 == self.option('tx-device-host'), devices.items()))[1]
+    for _, device in devices_dict.items():
+        if hasattr(device, "subscriptions") and device.subscriptions:
+            for sub in device.subscriptions:
+                subscriptions.append(sub)
 
-        #  if self.option('tx-channel-name'):
-        #      tx_channel = next(filter(lambda c: c[1].name == self.option('tx-channel-name'), tx_device.tx_channels.items()))[1]
-        #  elif self.option('tx-channel-number'):
-        #      tx_channel = next(filter(lambda c: c[1].number == self.option('tx-channel-number'), tx_device.tx_channels.items()))[1]
+    if not subscriptions:
+        print("No active subscriptions found on any device.")
+        raise typer.Exit()
 
-        #  if self.option('rx-device-name'):
-        #      rx_device = next(filter(lambda d: d[1].name == self.option('rx-device-name'), devices.items()))[1]
-        #  elif self.option('rx-device-host'):
-        #      rx_device = next(filter(lambda d: d[1].ipv4 == self.option('rx-device-host'), devices.items()))[1]
-
-        #  if self.option('rx-channel-name'):
-        #      rx_channel = next(filter(lambda c: c[1].name == self.option('rx-channel-name'), rx_device.rx_channels.items()))[1]
-        #  elif self.option('rx-channel-number'):
-        #      rx_channel = next(filter(lambda c: c[1].number == self.option('rx-channel-number'), rx_device.rx_channels.items()))[1]
-
-        for _, device in devices.items():
-            for subscription in device.subscriptions:
-                subscriptions.append(subscription)
-
-        if self.option("json"):
-            json_object = json.dumps(subscriptions, indent=2)
-            self.line(f"{json_object}")
-        else:
-            for subscription in subscriptions:
-                self.line(f"{subscription}")
-
-    def handle(self):
-        asyncio.run(self.subscription_list())
+    if json_output:
+        try:
+            json_object = json.dumps(
+                subscriptions, indent=2, default=_dante_subscription_serializer
+            )
+            print(json_object)
+        except TypeError as e:
+            print(
+                f"Error serializing subscriptions to JSON: {e}. Outputting as strings instead."
+            )
+            for sub in subscriptions:
+                print(str(sub))
+    else:
+        for sub in subscriptions:
+            print(str(sub))

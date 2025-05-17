@@ -1,7 +1,8 @@
 *.pyc
 .eggs
+.hypothesis/
 .sw*
-dist/
 __pycache__
 debug.log
-.hypothesis/
+dist/
+netaudio_device_payloads/

@@ -1,1 +1,6 @@
-version = "0.0.11"
+import importlib.metadata
+
+try:
+    version = importlib.metadata.version("netaudio")
+except importlib.metadata.PackageNotFoundError:
+    version = "unknown"

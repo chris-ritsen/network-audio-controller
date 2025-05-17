@@ -1,4 +1,4 @@
-from multiprocessing import Process, Pipe
+from multiprocessing import Pipe, Process
 
 
 class Timeout:
