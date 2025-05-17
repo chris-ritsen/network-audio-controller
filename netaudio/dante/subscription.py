@@ -46,13 +46,13 @@ class DanteSubscription:
             "rx_channel_status_code": self.rx_channel_status_code,
             "rx_device": self.rx_device_name,
             "status_code": self.status_code,
-            "status_text": self.status_text(),
+            "status_text": list(self.status_text()),
             "tx_channel": self.tx_channel_name,
             "tx_device": self.tx_device_name,
         }
 
         if self.rx_channel_status_code in SUBSCRIPTION_STATUS_LABELS:
-            as_json["rx_channel_status_text"] = self.rx_channel_status_text()
+            as_json["rx_channel_status_text"] = list(self.rx_channel_status_text())
 
         return as_json
 

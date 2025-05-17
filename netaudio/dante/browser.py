@@ -1,27 +1,27 @@
 import asyncio
 import json
 import os
+import sys
 import traceback
-
-from queue import Queue
 from json import JSONEncoder
-
-from zeroconf import DNSService, DNSText
+from queue import Queue
 
 from zeroconf import (
+    DNSService,
+    DNSText,
     IPVersion,
-    ServiceStateChange,
     ServiceBrowser,
     ServiceInfo,
+    ServiceStateChange,
     Zeroconf,
 )
-
 from zeroconf.asyncio import (
     AsyncServiceBrowser,
     AsyncServiceInfo,
     AsyncZeroconf,
 )
 
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import SERVICE_CMC, SERVICES
 from netaudio.dante.device import DanteDevice
 
@@ -164,7 +164,6 @@ class DanteBrowser:
         name: str,
         state_change: ServiceStateChange,
     ) -> None:
-
         if service_type == "_netaudio-chan._udp.local.":
             return
 
@@ -191,8 +190,35 @@ class DanteBrowser:
 
         self.sync_parse_state_change(zeroconf, service_type, name, state_change)
 
+    def get_zeroconf_kwargs(self):
+        """
+        Returns the appropriate keyword arguments for Zeroconf initialization
+        based on the selected network interface.
+        """
+        kwargs = {"ip_version": IPVersion.V4Only}
+
+        if app_settings.interface_ip:
+            print(
+                f"Using interface IP {app_settings.interface_ip} for Zeroconf",
+                file=sys.stderr,
+            )
+            kwargs["interfaces"] = [app_settings.interface_ip]
+
+            if "127.0.0.1" not in app_settings.interface_ip:
+                print(
+                    f"Configuring Zeroconf with interface {app_settings.interface_ip}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"Warning: Using loopback interface {app_settings.interface_ip} for Zeroconf may not discover network devices",
+                    file=sys.stderr,
+                )
+
+        return kwargs
+
     def sync_run(self):
-        zc = Zeroconf(ip_version=IPVersion.V4Only)
+        zc = Zeroconf(**self.get_zeroconf_kwargs())
         services = SERVICES
 
         browser = ServiceBrowser(
@@ -204,7 +230,10 @@ class DanteBrowser:
         browser.run()
 
     async def async_run(self) -> None:
-        self.aio_zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+        """
+        Runs the async browser for the specified mDNS timeout, then closes.
+        """
+        self.aio_zc = AsyncZeroconf(**self.get_zeroconf_kwargs())
         services = SERVICES
 
         self.aio_browser = AsyncServiceBrowser(
@@ -245,9 +274,13 @@ class DanteBrowser:
             device_hosts[server_name][service["name"]] = service
 
         for hostname, device_services in device_hosts.items():
-            device = DanteDevice(server_name=hostname)
+            device = DanteDevice(
+                server_name=hostname, dump_payloads=app_settings.dump_payloads
+            )
 
             try:
+                device.services = device_services
+
                 for service_name, service in device_services.items():
                     device.services[service_name] = service
 

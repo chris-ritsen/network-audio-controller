@@ -1,299 +1,452 @@
 import asyncio
 import ipaddress
 import json
+import socket
+from enum import Enum
 
-from json import JSONEncoder
-
-from cleo.commands.command import Command
-from cleo.helpers import option
+import typer
+from typing_extensions import Annotated
 
 from netaudio.dante.browser import DanteBrowser
-from netaudio.utils import get_host_by_name
+from netaudio.dante.device import DanteDevice
+
+from .._utils import filter_devices_util, get_host_by_name_util
+from ..device import get_target_device
+
+app = typer.Typer(
+    name="config", help="Configure Dante device settings.", no_args_is_help=True
+)
 
 
-def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
+class ChannelTypeEnum(str, Enum):
+    rx = "rx"
+    tx = "tx"
 
 
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
-
-
-class ConfigCommand(Command):
-    name = "config"
-    description = "Configure devices"
-
-    options_channel_type = ["rx", "tx"]
-    options_encoding = [16, 24, 32]
-    options_rate = [44100, 48000, 88200, 96000, 176400, 192000]
-    options_gain_level = list(range(1, 6))
-
-    options = [
-        option(
-            "channel-number",
-            None,
-            "Specify a channel for control by number",
-            flag=False,
+@app.command("set-name", help="Set the device name or a specific channel name.")
+async def set_name(
+    new_name: Annotated[str, typer.Argument(help="The new name to set.")],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+    channel_number: Annotated[
+        int | None, typer.Option(help="Specify a channel number to rename.")
+    ] = None,
+    channel_type: Annotated[
+        ChannelTypeEnum | None,
+        typer.Option(
+            case_sensitive=False,
+            help="Specify channel type (rx/tx) if renaming a channel.",
         ),
-        option(
-            "channel-type",
-            None,
-            "Specify a channel for control by number {options_channel_type}",
-            flag=False,
-        ),
-        option(
-            "device-host",
-            None,
-            "Specify a device to configure by network address",
-            flag=False,
-        ),
-        option(
-            "device-name", None, "Specify a device to configure by name", flag=False
-        ),
-        option("reset-channel-name", None, "Reset a channel name", flag=True),
-        option("reset-device-name", None, "Set the device name", flag=True),
-        option("identify", None, "Identify the device by flashing an LED", flag=True),
-        option("set-channel-name", None, "Set a channel name", flag=False),
-        option("set-device-name", None, "Set the device name", flag=False),
-        option(
-            "set-encoding", None, f"Set the encoding. {options_encoding}", flag=False
-        ),
-        option(
-            "set-gain-level",
-            None,
-            f"Set the gain level on a an AVIO device. Lower numbers are higher gain. {options_gain_level}",
-            flag=False,
-        ),
-        option(
-            "set-latency", None, "Set the device latency in milliseconds", flag=False
-        ),
-        option(
-            "set-sample-rate",
-            None,
-            f"Set the sample rate of a device {options_rate}",
-            flag=False,
-        ),
-        option(
-            "aes67-enable",
-            None,
-            f"Enable AES67 mode. Reboot needed to apply. Note: You also need to add multicast channels for AES67 to work",
-            flag=True,
-        ),
-        option(
-            "aes67-disable",
-            None,
-            f"Disable AES67 mode. Reboot needed to apply",
-            flag=True,
-        ),
-    ]
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+    if not target_device:
+        raise typer.Exit(code=1)
 
-    async def set_gain_level(self, device, channel_number, gain_level):
-        device_type = None
-        label = None
+    if len(new_name) > 31:
+        typer.secho(
+            f"Warning: New name '{new_name}' is longer than 31 characters and will be truncated.",
+            fg=typer.colors.YELLOW,
+        )
+        new_name = new_name[:31]
 
-        if device.model_id in ["DAI1", "DAI2"]:
-            device_type = "input"
-
-            label = {
-                1: "+24 dBu",
-                2: "+4dBu",
-                3: "+0 dBu",
-                4: "0 dBV",
-                5: "-10 dBV",
-            }
-        elif device.model_id in ["DAO1", "DAO2"]:
-            device_type = "output"
-
-            label = {
-                1: "+18 dBu",
-                2: "+4 dBu",
-                3: "+0 dBu",
-                4: "0 dBV",
-                5: "-10 dBV",
-            }
-
-        try:
-            gain_level = int(gain_level)
-        except ValueError:
-            self.line("Invalid value for gain level")
-            return
-
-        try:
-            channel_number = int(channel_number)
-        except ValueError:
-            self.line("Invalid channel number")
-            return
-
-        if channel_number:
-            if (
-                device_type == "output" and channel_number not in device.rx_channels
-            ) or (device_type == "input" and channel_number not in device.tx_channels):
-                self.line("Invalid channel number")
-                return
-
-        if gain_level not in self.options_gain_level:
-            self.line("Invalid value for gain level")
-            return
-
-        if device_type:
-            self.line(
-                f"Setting gain level of {device.name} {device.ipv4} to {label[gain_level]} on channel {channel_number}"
+    if channel_number is not None and channel_type is not None:
+        typer.echo(
+            f"Setting {channel_type.value} channel {channel_number} of device '{target_device.name}' to '{new_name}'..."
+        )
+        if hasattr(target_device, "set_channel_name") and asyncio.iscoroutinefunction(
+            target_device.set_channel_name
+        ):
+            await target_device.set_channel_name(
+                channel_type.value, channel_number, new_name
             )
-            await device.set_gain_level(channel_number, gain_level, device_type)
         else:
-            self.line("This device does not support gain control")
-
-    def filter_devices(self, devices):
-        if self.option("device-name"):
-            devices = dict(
-                filter(
-                    lambda d: d[1].name == self.option("device-name"), devices.items()
-                )
+            typer.echo(
+                "Error: Device object does not support 'set_channel_name' or it's not async.",
+                err=True,
             )
-        elif self.option("device-host"):
-            host = self.option("device-host")
-            ipv4 = None
-
-            try:
-                ipv4 = ipaddress.ip_address(host)
-            except ValueError:
-                pass
-
-            possible_names = set([host, host + ".local.", host + "."])
-
-            if possible_names.intersection(set(devices.keys())):
-                devices = dict(
-                    filter(
-                        lambda d: d[1].server_name in possible_names, devices.items()
-                    )
-                )
-            else:
-                try:
-                    ipv4 = get_host_by_name(host)
-                except TimeoutError:
-                    pass
-
-                devices = dict(filter(lambda d: d[1].ipv4 == ipv4, devices.items()))
-
-        return devices
-
-    async def device_configure(self):
-        option_names = list(map(lambda o: o.long_name, self.options))
-        options_given = any(list([self.option(o) for o in option_names]))
-
-        if not options_given:
-            return self.call("help", self._config.name)
-
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        devices = await dante_browser.get_devices()
-
-        for _, device in devices.items():
-            await device.get_controls()
-
-        devices = self.filter_devices(devices)
-        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-
-        try:
-            device = list(devices.values()).pop()
-        except IndexError:
-            self.line("Device not found")
-            return
-
-        if self.option("reset-channel-name") or self.option("set-channel-name"):
-            if self.option("channel-number"):
-                channel_number = int(self.option("channel-number"))
-            else:
-                self.line("Must specify a channel number")
-
-            if (
-                self.option("channel-type")
-                and self.option("channel-type") in self.options_channel_type
-            ):
-                channel_type = self.option("channel-type")
-            elif self.option("channel-type"):
-                self.line("Invalid channel type")
-            else:
-                self.line("Must specify a channel type")
-
-            if channel_number and channel_type:
-                if self.option("reset-channel-name"):
-                    self.line(
-                        f"Resetting name of {channel_type} channel {channel_number} for {device.name} {device.ipv4}"
-                    )
-                    await device.reset_channel_name(channel_type, channel_number)
-                elif self.option("set-channel-name"):
-                    new_channel_name = self.option("set-channel-name")
-
-                    if len(new_channel_name) > 31:
-                        self.line("New channel name will be truncated")
-                        new_channel_name = new_channel_name[:31]
-
-                    self.line(
-                        f"Setting name of {channel_type} channel {channel_number} for {device.name} {device.ipv4} to {new_channel_name}"
-                    )
-                    await device.set_channel_name(
-                        channel_type, channel_number, new_channel_name
-                    )
-
-        if self.option("reset-device-name"):
-            self.line(f"Resetting device name for {device.name} {device.ipv4}")
-            await device.reset_name()
-
-        if self.option("identify"):
-            self.line(f"Identifying device {device.name} {device.ipv4}")
-            await device.identify()
-
-        if self.option("set-device-name"):
-            new_device_name = self.option("set-device-name")
-
-            if len(new_device_name) > 31:
-                self.line("New device name will be truncated")
-                new_device_name = new_device_name[:31]
-
-            self.line(
-                f"Setting device name for {device.name} {device.ipv4} to {new_device_name}"
+            raise typer.Exit(code=1)
+        typer.secho(
+            f"Successfully set {channel_type.value} channel {channel_number} name to '{new_name}'.",
+            fg=typer.colors.GREEN,
+        )
+    elif channel_number is None and channel_type is None:
+        typer.echo(
+            f"Setting device name for '{target_device.name}' ({target_device.ipv4}) to '{new_name}'..."
+        )
+        if hasattr(target_device, "set_name") and asyncio.iscoroutinefunction(
+            target_device.set_name
+        ):
+            await target_device.set_name(new_name)
+        else:
+            typer.echo(
+                "Error: Device object does not support 'set_name' or it's not async.",
+                err=True,
             )
-            await device.set_name(self.option("set-device-name"))
+            raise typer.Exit(code=1)
+        typer.secho(
+            f"Successfully set device name to '{new_name}'. Note: The device may re-advertise under the new name.",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.echo(
+            "Error: To set a channel name, both --channel-number and --channel-type are required.",
+            err=True,
+        )
+        typer.echo(
+            "To set a device name, do not use --channel-number or --channel-type.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
-        if self.option("set-latency"):
-            latency = int(self.option("set-latency"))
-            self.line(f"Setting latency of {device} to {latency:g} ms")
-            await device.set_latency(latency)
 
-        if self.option("set-sample-rate"):
-            sample_rate = int(self.option("set-sample-rate"))
-            if sample_rate in self.options_rate:
-                self.line(
-                    f"Setting sample rate of {device.name} {device.ipv4} to {sample_rate}"
-                )
-                await device.set_sample_rate(sample_rate)
-            else:
-                self.line("Invalid sample rate")
+@app.command(
+    "reset-name",
+    help="Reset the device name or a specific channel name to factory defaults.",
+)
+async def reset_name(
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+    channel_number: Annotated[
+        int | None, typer.Option(help="Specify a channel number to reset its name.")
+    ] = None,
+    channel_type: Annotated[
+        ChannelTypeEnum | None,
+        typer.Option(
+            case_sensitive=False,
+            help="Specify channel type (rx/tx) if resetting a channel name.",
+        ),
+    ] = None,
+    device: Annotated[
+        bool,
+        typer.Option(
+            help="Reset the device name (default if no channel options specified)."
+        ),
+    ] = False,
+    channel: Annotated[
+        bool,
+        typer.Option(
+            help="Reset a specific channel's name (requires --channel-number and --channel-type)."
+        ),
+    ] = False,
+):
+    target_device = await get_target_device(device_name, device_host)
+    if not target_device:
+        raise typer.Exit(code=1)
 
-        if self.option("set-encoding"):
-            encoding = int(self.option("set-encoding"))
+    is_device_reset = device or not channel
+    is_channel_reset = channel
 
-            if encoding in self.options_encoding:
-                self.line(
-                    f"Setting encoding of {device.name} {device.ipv4} to {encoding}"
-                )
-                await device.set_encoding(encoding)
-            else:
-                self.line("Invalid encoding")
+    if is_device_reset and is_channel_reset:
+        typer.echo(
+            "Error: Cannot reset both device name and channel name in a single command. Use separate commands or flags.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
-        if self.option("set-gain-level"):
-            await self.set_gain_level(
-                device, self.option("channel-number"), self.option("set-gain-level")
+    if is_channel_reset:
+        if channel_number is None or channel_type is None:
+            typer.echo(
+                "Error: For channel name reset, --channel-number and --channel-type are required along with --channel flag.",
+                err=True,
             )
+            raise typer.Exit(code=1)
 
-        if self.option("aes67-enable"):
-            # OPT: use --enable-aes67=[True|False] instead, didn't know how
-            is_enabled = True
-            await device.enable_aes67(is_enabled)
+        typer.echo(
+            f"Resetting {channel_type.value} channel {channel_number} name for device '{target_device.name}'..."
+        )
+        if hasattr(target_device, "reset_channel_name") and asyncio.iscoroutinefunction(
+            target_device.reset_channel_name
+        ):
+            await target_device.reset_channel_name(channel_type.value, channel_number)
+        else:
+            typer.echo(
+                "Error: Device object does not support 'reset_channel_name' or it's not async.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.secho(
+            f"Successfully reset {channel_type.value} channel {channel_number} name.",
+            fg=typer.colors.GREEN,
+        )
 
-        if self.option("aes67-disable"):
-            is_enabled = False
-            await device.enable_aes67(is_enabled)
+    elif is_device_reset:
+        if channel_number is not None or channel_type is not None:
+            typer.echo(
+                "Error: --channel-number and --channel-type should not be used when resetting device name. Did you mean to use --channel flag?",
+                err=True,
+            )
+            raise typer.Exit(code=1)
 
-    def handle(self):
-        asyncio.run(self.device_configure())
+        typer.echo(
+            f"Resetting device name for '{target_device.name}' ({target_device.ipv4})..."
+        )
+        if hasattr(target_device, "reset_name") and asyncio.iscoroutinefunction(
+            target_device.reset_name
+        ):
+            await target_device.reset_name()
+        else:
+            typer.echo(
+                "Error: Device object does not support 'reset_name' or it's not async.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        typer.secho(
+            f"Successfully reset device name. The device may re-advertise under its default name.",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.echo(
+            "Error: Specify whether to reset the device name (e.g. --device) or a channel name (e.g. --channel).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+class EncodingEnum(str, Enum):
+    PCM16 = "16"
+    PCM24 = "24"
+    PCM32 = "32"
+
+
+@app.command("set-encoding", help="Set the audio encoding for the device.")
+async def set_encoding(
+    encoding: Annotated[
+        EncodingEnum,
+        typer.Argument(
+            case_sensitive=False, help="Audio encoding (16, 24, or 32 bit)."
+        ),
+    ],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+    if not target_device:
+        raise typer.Exit(code=1)
+
+    encoding_value = int(encoding.value)
+
+    typer.echo(
+        f"Setting audio encoding for device '{target_device.name}' to {encoding_value}-bit PCM..."
+    )
+    if hasattr(target_device, "set_encoding") and asyncio.iscoroutinefunction(
+        target_device.set_encoding
+    ):
+        await target_device.set_encoding(encoding_value)
+    else:
+        typer.echo(
+            "Error: Device object does not support 'set_encoding' or it's not async.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.secho(
+        f"Successfully set encoding to {encoding_value}-bit PCM for '{target_device.name}'.",
+        fg=typer.colors.GREEN,
+    )
+
+
+class SampleRateEnum(str, Enum):
+    SR44100 = "44100"
+    SR48000 = "48000"
+    SR88200 = "88200"
+    SR96000 = "96000"
+    SR176400 = "176400"
+    SR192000 = "192000"
+
+
+@app.command("set-sample-rate", help="Set the sample rate for the device.")
+async def set_sample_rate(
+    sample_rate: Annotated[
+        SampleRateEnum,
+        typer.Argument(
+            case_sensitive=False, help="Sample rate (e.g., 44100, 48000, 96000)."
+        ),
+    ],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+
+    if not target_device:
+        raise typer.Exit(code=1)
+
+    rate_value = int(sample_rate.value)
+
+    typer.echo(
+        f"Setting sample rate for device '{target_device.name}' to {rate_value} Hz..."
+    )
+
+    if hasattr(target_device, "set_sample_rate") and asyncio.iscoroutinefunction(
+        target_device.set_sample_rate
+    ):
+        await target_device.set_sample_rate(rate_value)
+    else:
+        typer.echo(
+            "Error: Device object does not support 'set_sample_rate' or it's not async.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.secho(
+        f"Successfully set sample rate to {rate_value} Hz for '{target_device.name}'.",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command("set-latency", help="Set the device latency in milliseconds.")
+async def set_latency(
+    latency_ms: Annotated[
+        float,
+        typer.Argument(
+            help="Device latency in milliseconds (e.g., 0.25, 0.5, 1.0, 2.0, 4.0, 5.0)."
+        ),
+    ],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+    if not target_device:
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"Setting latency for device '{target_device.name}' to {latency_ms} ms..."
+    )
+
+    if hasattr(target_device, "set_latency") and asyncio.iscoroutinefunction(
+        target_device.set_latency
+    ):
+        await target_device.set_latency(latency_ms)
+    else:
+        typer.echo(
+            "Error: Device object does not support 'set_latency' or it's not async.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.secho(
+        f"Successfully set latency to {latency_ms} ms for '{target_device.name}'.",
+        fg=typer.colors.GREEN,
+    )
+
+
+class GainLevelEnum(str, Enum):
+    PLUS_24dBu_MINUS_10dBV = "1"
+    PLUS_4dBu = "2"
+    PLUS_0dBu = "3"
+    PLUS_0dBV = "4"
+    MINUS_10dBV_PLUS_24dBu = "5"
+
+
+@app.command(
+    "set-gain",
+    help="Set gain level for an AVIO device channel. Lower numbers = higher gain.",
+)
+async def set_gain(
+    channel_number: Annotated[
+        int, typer.Argument(help="Channel number to set gain for.")
+    ],
+    gain_level: Annotated[
+        GainLevelEnum,
+        typer.Argument(
+            help="Gain level (1-5). 1 is highest gain (+24/+18dBu), 5 is lowest (-10dBV). Consult device spec for exact values."
+        ),
+    ],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+
+    if not target_device:
+        raise typer.Exit(code=1)
+
+    gain_level_value = int(gain_level.value)
+
+    device_type_str = None
+    model_id = getattr(target_device, "model_id", None)
+
+    if model_id in ["DAI1", "DAI2"]:
+        device_type_str = "input"
+    elif model_id in ["DAO1", "DAO2"]:
+        device_type_str = "output"
+
+    if not device_type_str:
+        typer.echo(
+            f"Error: Device '{target_device.name}' (Model: {model_id}) does not appear to be a supported AVIO device for gain control or model ID is unknown.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(
+        f"Setting gain for {device_type_str} channel {channel_number} on device '{target_device.name}' to level {gain_level_value}..."
+    )
+
+    if hasattr(target_device, "set_gain_level") and asyncio.iscoroutinefunction(
+        target_device.set_gain_level
+    ):
+        await target_device.set_gain_level(
+            channel_number, gain_level_value, device_type_str
+        )
+    else:
+        typer.echo(
+            "Error: Device object does not support 'set_gain_level' or it's not async.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command("enable-aes67", help="Enable or disable AES67 mode on the device.")
+async def enable_aes67(
+    enable: Annotated[
+        bool, typer.Argument(help="Set to true to enable AES67, false to disable.")
+    ],
+    device_name: Annotated[
+        str | None, typer.Option(help="Target device by its current name.")
+    ] = None,
+    device_host: Annotated[
+        str | None, typer.Option(help="Target device by its host name or IP address.")
+    ] = None,
+):
+    target_device = await get_target_device(device_name, device_host)
+
+    if not target_device:
+        raise typer.Exit(code=1)
+
+    action = "Enabling" if enable else "Disabling"
+    typer.echo(f"{action} AES67 mode on device '{target_device.name}'...")
+
+    if hasattr(target_device, "enable_aes67") and asyncio.iscoroutinefunction(
+        target_device.enable_aes67
+    ):
+        await target_device.enable_aes67(enable)
+    else:
+        typer.echo(
+            "Error: Device object does not support 'enable_aes67' or it's not async.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    typer.secho(
+        f"Successfully {action.lower()}d AES67 mode on '{target_device.name}'.",
+        fg=typer.colors.GREEN,
+    )

@@ -1,33 +1,28 @@
 import asyncio
 import ipaddress
 import json
+import logging
 import os
 import random
+import signal
 import socket
 import struct
 import sys
 import threading
 import time
 import traceback
-
-import logging
 from concurrent.futures import ThreadPoolExecutor
-import signal
-
 from json import JSONEncoder
-from queue import Queue
-from threading import Thread, Event
+from queue import Empty, Queue
+from threading import Event, Thread
 
+import typer
 from redis import Redis
-
-from cleo.commands.command import Command
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlitedict import SqliteDict
 
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.browser import DanteBrowser
-
-# from netaudio.utils import get_host_by_name
-
 from netaudio.dante.const import (
     DEFAULT_MULTICAST_METERING_PORT,
     DEVICE_CONTROL_PORT,
@@ -35,7 +30,6 @@ from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     DEVICE_INFO_SRC_PORT2,
     DEVICE_SETTINGS_PORT,
-    MESSAGE_TYPES,
     MESSAGE_TYPE_ACCESS_STATUS,
     MESSAGE_TYPE_AES67_STATUS,
     MESSAGE_TYPE_AUDIO_INTERFACE_STATUS,
@@ -71,17 +65,19 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_UPGRADE_STATUS,
     MESSAGE_TYPE_VERSIONS_STATUS,
     MESSAGE_TYPE_VOLUME_LEVELS,
+    MESSAGE_TYPES,
     MULTICAST_GROUP_CONTROL_MONITORING,
     MULTICAST_GROUP_HEARTBEAT,
     PORTS,
-    SERVICES,
     SERVICE_ARC,
     SERVICE_CHAN,
     SERVICE_CMC,
     SERVICE_DBC,
+    SERVICES,
     SUBSCRIPTION_STATUS_LABELS,
     SUBSCRIPTION_STATUS_NONE,
 )
+from netaudio.dante.device import DanteDevice
 
 
 def _default(self, obj):
@@ -1273,14 +1269,24 @@ def parse_dante_service_change(message):
 
 
 def multicast(group, port):
-    server_address = ("", port)
+    from netaudio.common.app_config import settings as app_settings
+
+    # Get the source IP for socket binding (None means use default)
+    source_ip = app_settings.interface_ip or ""
+    server_address = (source_ip, port)
     mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
         mc_sock.bind(server_address)
+        print(
+            f"Multicast bound to {source_ip or 'default'}:{port} for group {group}",
+            file=sys.stderr,
+        )
     except OSError as e:
         print(e)
-        print(f"Failed to bind to multicast port {port}")
+        print(
+            f"Failed to bind to multicast port {port} on interface {source_ip or 'default'}"
+        )
         return
 
     group_bin = socket.inet_aton(group)
@@ -1334,123 +1340,270 @@ def multicast(group, port):
             traceback.print_exc()
 
 
-class ServerMdnsCommand(Command):
-    name = "mdns"
-    description = "Run a daemon to monitor mDNS ports for changes to devices"
-
+class ServerMdnsDaemon:
     def __init__(self):
-        super().__init__()
-        self.stop_event = Event()  # Stop event for signaling shutdown
-        self.threads = []  # List of threads to manage
+        self.stop_event = Event()
+        self.threads = []
+        # Ensure redis_client is initialized before this class is used if it's critical for constructor
+        self.redis_client = redis_client  # Using the global one for now
 
-    def parse_services(self, queue):
-        while True:
-            message = queue.get()
-            parse_dante_service_change(message)
-            queue.task_done()
+    def _parse_services_thread_target(self, queue: Queue):
+        print("MDNS Daemon: Starting service parsing thread...")
+        while not self.stop_event.is_set():
+            try:
+                message = queue.get(timeout=1)  # Timeout to allow checking stop_event
+                if message is None:  # Sentinel for shutdown
+                    break
+                parse_dante_service_change(message)  # Uses global redis_client
+                queue.task_done()
+            except Empty:
+                continue
+            except Exception as e:
+                print(f"MDNS Daemon: Error in service parsing thread: {e}")
+                traceback.print_exc()
+        print("MDNS Daemon: Service parsing thread stopped.")
 
-    def zeroconf_browser(self, queue):
-        dante_browser = DanteBrowser(0, queue)
-        dante_browser.sync_run()
+    def _zeroconf_browser_thread_target(self, queue: Queue):
+        print("MDNS Daemon: Starting Zeroconf browser thread...")
+        # DanteBrowser needs to be instantiated carefully to handle stop_event
+        # For now, assuming a conceptual DanteBrowser that can be stopped.
+        # The actual DanteBrowser(0, queue) and its sync_run() might need modification
+        # to respect self.stop_event for graceful shutdown.
+        # This is a placeholder for a more robust implementation.
+        try:
+            from netaudio.common.app_config import settings as app_settings
 
-    async def server_mdns(self):
-        queue = Queue()
+            dante_browser = DanteBrowser(
+                mdns_timeout=app_settings.mdns_timeout, queue=queue
+            )
+            # The following is a simplified loop. Real integration needs
+            # DanteBrowser to be interruptible or run in a non-blocking manner
+            # that respects stop_event. Or its zc instance closed.
+            # dante_browser.sync_run() # This is blocking and problematic for stop_event
 
-        if not redis_client:
+            # Conceptual: If DanteBrowser had start/stop or used stop_event internally:
+            # dante_browser.start_sync_browsing(self.stop_event)
+            # while not self.stop_event.is_set():
+            #     time.sleep(0.5)
+            # dante_browser.stop_sync_browsing()
+
+            # HACK/SIMPLIFICATION for now: run sync_run in a thread that we can't easily join nicely
+            # without modifying DanteBrowser or it being designed for this.
+            # This part is a known issue for graceful shutdown.
             print(
-                "Couldn't connect to a redis server. Specify with env variables REDIS_SOCKET REDIS_HOST REDIS_PORT REDIS_DB"
+                "MDNS Daemon: Zeroconf browser thread using dante_browser.sync_run() - graceful shutdown might be an issue."
             )
-            sys.exit(0)
+            # To make it somewhat daemon-like and not block startup of other things if sync_run is short:
+            # For long running, this thread won't respond to stop_event well.
+            try:
+                dante_browser.sync_run()  # This blocks if Zeroconf is run this way without external close
+            except Exception as e:
+                print(f"MDNS Daemon: Zeroconf browser thread error: {e}")
 
-        pattern = ":".join(["netaudio", "dante", "*"])
+        except Exception as e:
+            print(f"MDNS Daemon: Error initializing/running Zeroconf browser: {e}")
+        finally:
+            print("MDNS Daemon: Zeroconf browser thread finished/exited.")
 
-        for key in redis_client.scan_iter(match=pattern):
-            redis_client.delete(key)
+    def _multicast_worker_thread_target(self, group: str, port: int):
+        import sys
 
-        self.threads.append(
-            Thread(
-                target=self.multicast_worker,
-                args=(MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT),
-                daemon=True,
-            )
+        from netaudio.common.app_config import settings as app_settings
+
+        # Get the source IP for socket binding (None means use default)
+        source_ip = app_settings.interface_ip or ""
+
+        print(
+            f"MDNS Daemon: Starting multicast worker for {group}:{port} on interface {source_ip or 'default'}..."
         )
+        mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            mc_sock.bind((source_ip, port))
+            group_bin = socket.inet_aton(group)
+            mreq = struct.pack("4sL", group_bin, socket.INADDR_ANY)
+            mc_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            print(
+                f"MDNS Daemon: Successfully bound multicast socket on {source_ip or 'default'}:{port} for {group}",
+                file=sys.stderr,
+            )
+            mc_sock.settimeout(1.0)  # Timeout for recvfrom
 
-        self.threads.append(
-            Thread(
-                target=self.multicast_worker,
-                args=(
+            while not self.stop_event.is_set():
+                try:
+                    data, addr = mc_sock.recvfrom(2048)
+                    timestamp = time.time_ns()
+                    src_host, src_port = addr
+                    message = {
+                        "message_hex": data.hex(),
+                        "multicast_group": group,
+                        "multicast_port": port,
+                        "src_host": src_host,
+                        "src_port": src_port,
+                        "time": timestamp,
+                    }
+                    # Original logic for heartbeat processing
+                    if (
+                        group == MULTICAST_GROUP_HEARTBEAT
+                        and port == DEVICE_HEARTBEAT_PORT
+                        and self.redis_client
+                    ):
+                        cached_host = redis_decode(
+                            self.redis_client.hgetall(f"netaudio:dante:host:{addr[0]}")
+                        )
+                        if "server_name" in cached_host:
+                            server_name = cached_host["server_name"]
+                            cache_device_value(
+                                server_name, "last_seen_at", timestamp
+                            )  # Uses global redis_client
+                            self.redis_client.expire(
+                                f"netaudio:dante:device:{server_name}", 5
+                            )
+                            self.redis_client.expire(
+                                f"netaudio:dante:server:{server_name}", 5
+                            )
+                        self.redis_client.expire(f"netaudio:dante:host:{addr[0]}", 5)
+                    else:
+                        parse_dante_message(message)  # Uses global redis_client
+
+                except socket.timeout:
+                    continue
+                except (socket.error, OSError) as e:
+                    if self.stop_event.is_set():
+                        break
+                    print(
+                        f"MDNS Daemon: Socket error in multicast worker {group}:{port}: {e}"
+                    )
+                    time.sleep(1)  # Avoid rapid error loops
+                except Exception as e:
+                    print(f"MDNS Daemon: Error in multicast worker {group}:{port}: {e}")
+                    traceback.print_exc()
+                    time.sleep(1)
+        except OSError as e:
+            print(
+                f"MDNS Daemon: Failed to bind multicast socket for {group}:{port}: {e}"
+            )
+        finally:
+            mc_sock.close()
+            print(f"MDNS Daemon: Multicast worker for {group}:{port} stopped.")
+
+    async def run_async_logic(self):
+        print("MDNS Daemon: Initializing async logic...")
+        if not self.redis_client:
+            print(
+                "MDNS Daemon: Error - Redis client not available. Exiting mdns server logic."
+            )
+            # Consider typer.Exit(1) if this were a direct Typer command
+            return
+
+        print("MDNS Daemon: Clearing existing netaudio:dante:* keys from Redis...")
+        pattern = "netaudio:dante:*"
+        try:
+            for key in self.redis_client.scan_iter(match=pattern):
+                self.redis_client.delete(key)
+        except Exception as e:
+            print(f"MDNS Daemon: Error clearing Redis keys: {e}")
+            # Decide if this is fatal
+
+        queue = Queue()
+        thread_configs = [
+            {
+                "target": self._multicast_worker_thread_target,
+                "args": (MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT),
+            },
+            {
+                "target": self._multicast_worker_thread_target,
+                "args": (
                     MULTICAST_GROUP_CONTROL_MONITORING,
                     DEFAULT_MULTICAST_METERING_PORT,
                 ),
-                daemon=True,
-            )
-        )
+            },
+            {
+                "target": self._multicast_worker_thread_target,
+                "args": (MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
+            },
+            {"target": self._parse_services_thread_target, "args": (queue,)},
+            {"target": self._zeroconf_browser_thread_target, "args": (queue,)},
+        ]
 
-        self.threads.append(
-            Thread(
-                target=self.multicast_worker,
-                args=(MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT),
-                daemon=True,
-            )
-        )
+        for config in thread_configs:
+            thread = Thread(target=config["target"], args=config["args"], daemon=True)
+            self.threads.append(thread)
 
-        self.threads.append(
-            Thread(target=self.parse_services, args=(queue,), daemon=True)
-        )
-
-        self.threads.append(
-            Thread(target=self.zeroconf_browser, args=(queue,), daemon=True)
-        )
-
+        print(f"MDNS Daemon: Starting {len(self.threads)} worker threads...")
         for thread in self.threads:
             thread.start()
 
+        print("MDNS Daemon: All threads started. Monitoring for stop signal...")
         try:
             while not self.stop_event.is_set():
-                time.sleep(1)
+                await asyncio.sleep(1)  # Keep alive, check stop_event
         except (KeyboardInterrupt, SystemExit):
-            print("Received stop signal, shutting down...")
-            self.stop_event.set()  # Signal all threads to stop
+            print("MDNS Daemon: Stop signal received in run_async_logic.")
+        finally:
+            print("MDNS Daemon: Initiating shutdown sequence...")
+            if not self.stop_event.is_set():
+                self.stop_event.set()
 
-            for thread in self.threads:
-                thread.join()
+            # Signal queue-based worker to stop
+            if queue:
+                queue.put(None)  # Sentinel value for _parse_services_thread_target
 
-    def multicast_worker(self, group, port):
-        server_address = ("", port)
-        mc_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            print("MDNS Daemon: Joining threads...")
+            for i, thread in enumerate(self.threads):
+                if thread.is_alive():
+                    print(
+                        f"MDNS Daemon: Joining thread {i + 1}/{len(self.threads)} ({thread.name})..."
+                    )
+                    thread.join(timeout=5.0)  # Increased timeout
+                    if thread.is_alive():
+                        print(
+                            f"MDNS Daemon: Warning - Thread {thread.name} did not terminate gracefully."
+                        )
+            print(
+                "MDNS Daemon: All threads joined or timed out. Async logic shutdown complete."
+            )
 
-        try:
-            mc_sock.bind(server_address)
-        except OSError as e:
-            print(e)
-            print(f"Failed to bind to multicast port {port}")
-            return
 
-        group_bin = socket.inet_aton(group)
-        mreq = struct.pack("4sL", group_bin, socket.INADDR_ANY)
-        mc_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+# Typer command function
+def run_mdns_daemon():
+    """
+    Run a daemon to monitor mDNS and Dante device messages.
+    This daemon listens for mDNS service advertisements (like Dante devices)
+    and specific Dante multicast messages (heartbeats, control/monitoring).
+    It processes these messages, potentially updating a Redis cache.
+    """
+    print("Initializing mDNS Daemon Typer command...")
+    daemon_instance = ServerMdnsDaemon()
 
-        while not self.stop_event.is_set():
-            try:
-                data, addr = mc_sock.recvfrom(2048)
-                timestamp = time.time_ns()
+    # Setup signal handling for graceful shutdown
+    # This might be better handled by Typer/asyncio if run directly as async,
+    # but since we wrap with asyncio.run, manual setup here is an option.
+    # However, the try/except KeyboardInterrupt in run_async_logic should mostly cover it.
 
-                src_host, src_port = addr
-                message = {
-                    "message_hex": data.hex(),
-                    "multicast_group": group,
-                    "multicast_port": port,
-                    "src_host": src_host,
-                    "src_port": src_port,
-                    "time": timestamp,
-                }
+    original_sigint_handler = signal.getsignal(signal.SIGINT)
+    original_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
-                parse_dante_message(message)
+    def signal_handler(sig, frame):
+        print(
+            f"MDNS Daemon: Signal {sig} received by Typer command handler. Triggering stop event."
+        )
+        daemon_instance.stop_event.set()
+        # Restore original handlers to avoid issues if this is called multiple times
+        # or if underlying asyncio.run has its own handlers.
+        signal.signal(signal.SIGINT, original_sigint_handler)
+        signal.signal(signal.SIGTERM, original_sigterm_handler)
 
-            except (socket.error, OSError):
-                if self.stop_event.is_set():
-                    break
-                traceback.print_exc()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-    def handle(self):
-        asyncio.run(self.server_mdns())
+    try:
+        print("MDNS Daemon: Starting daemon's async logic...")
+        asyncio.run(daemon_instance.run_async_logic())
+    except Exception as e:
+        print(f"MDNS Daemon: Unhandled exception in run_mdns_daemon: {e}")
+        traceback.print_exc()
+    finally:
+        print("MDNS Daemon: Typer command run_mdns_daemon finished.")
+        # Ensure original signal handlers are restored if program continues after this command
+        signal.signal(signal.SIGINT, original_sigint_handler)
+        signal.signal(signal.SIGTERM, original_sigterm_handler)

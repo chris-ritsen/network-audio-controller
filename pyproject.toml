@@ -1,50 +1,64 @@
-[tool.poetry]
-authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
-classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-description = "Control Audinate Dante network audio devices without Dante Controller"
-documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
-include = ["CHANGELOG.md", "LICENSE"]
-keywords = ["audinate", "audio", "cli", "dante", "network"]
-license = "Unlicense"
+[project]
 name = "netaudio"
+version = "0.1.0"
+description = "Network audio control"
 readme = "README.md"
-repository = "https://github.com/chris-ritsen/network-audio-controller"
-version = "0.0.11"
+requires-python = ">=3.9"
+license = {text = "Unlicense"}
+authors = [
+  {email = "chris.ritsen@gmail.com", name = "Christopher Ritsen"},
+]
+maintainers = [
+  {name = "Christopher Ritsen", email = "chris.ritsen@gmail.com"}
+]
+keywords = ["audinate", "audio", "cli", "dante", "network"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: System :: Networking"
+]
+dependencies = [
+  "Twisted>=24.3.0",
+  "async-timeout>=4.0.0",
+  "fastapi>=0.100.0",
+  "ifaddr>=0.1.7",
+  "prompt-toolkit>=3.0,<4.0",
+  "pyroute2>=0.7.0",
+  "redis>=4.0.0",
+  "requests>=2.0.0",
+  "rich>=10.0.0",
+  "shellingham>=1.5.0",
+  "sqlitedict>=2.1.0",
+  "typer>=0.9.0",
+  "typing-extensions>=4.0.0",
+  "uvicorn[standard]>=0.22.0",
+  "zeroconf>=0.131.0"
+]
 
-[tool.poetry.dependencies]
-cleo = "^0.8.1"
-netifaces = "^0.11.0"
-python = "^3.9"
-twisted = "^22.1.0"
-zeroconf = "^0.38.3"
-sqlitedict = "^1.7.0"
-redis = "^4.1.4"
-fastapi = "^0.110.1"
-uvicorn = "^0.29.0"
-clikit = "^0.6.2"
+[project.urls]
+Documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
+Repository = "https://github.com/chris-ritsen/network-audio-controller"
 
-[tool.poetry.group.dev.dependencies]
-black = "^22.1.0"
-pipx = "^1.0.0"
-pylint = "^2.12.2"
-pytest = "^7.0.0"
+[project.optional-dependencies]
+dev = [
+    "black>=25.1.0",
+    "pylint>=3.3.7",
+    "pytest>=8.3.5"
+]
+
+[project.scripts]
+netaudio = "netaudio.console.application:main"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry.scripts]
-netaudio = "netaudio:main"
-
-# Recommended, see: https://docs.pytest.org/en/7.1.x/explanation/goodpractices.html#choosing-an-import-mode
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
-]
-
-[tool.pytest.ini_options.exclude]
-patterns = [
-    "*/__pycache__/*",
-    "*.pyc",
-    "*.pyo"
 ]

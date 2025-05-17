@@ -1,18 +1,20 @@
 import asyncio
 import json
-import uvicorn
-
-from cleo.commands.command import Command
-
-from fastapi import FastAPI, HTTPException, Path, Body
-from fastapi.middleware.cors import CORSMiddleware
-from netaudio.dante.browser import DanteBrowser
 import logging
+
+import typer
+import uvicorn
+from fastapi import Body, FastAPI, HTTPException, Path
+from fastapi.middleware.cors import CORSMiddleware
+
+from netaudio.common.app_config import settings as app_settings
+from netaudio.dante.browser import DanteBrowser
+from netaudio.dante.subscription import DanteSubscription
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-dante_browser = DanteBrowser(mdns_timeout=1.5)
+dante_browser = None
 
 origins = [
     "http://192.168.1.107:3002",
@@ -28,6 +30,10 @@ app.add_middleware(
 
 
 async def device_list():
+    global dante_browser
+    if dante_browser is None:
+        dante_browser = DanteBrowser(mdns_timeout=app_settings.mdns_timeout)
+
     devices = await dante_browser.get_devices()
 
     for _, device in devices.items():
@@ -46,10 +52,19 @@ async def list_devices():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/subscribe/{rx_device_name}/{rx_channel_name}/{tx_device_name}/{tx_channel_name}")
-async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_name: str,tx_channel_name: str, payload: dict = Body(...)):
-
-    logger.info(f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}",rx_device_name,rx_channel_name,tx_device_name,tx_channel_name)
+@app.post(
+    "/subscribe/{rx_device_name}/{rx_channel_name}/{tx_device_name}/{tx_channel_name}"
+)
+async def subscribe_device(
+    rx_device_name: str,
+    rx_channel_name: str,
+    tx_device_name: str,
+    tx_channel_name: str,
+    payload: dict = Body(...),
+):
+    logger.info(
+        f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}"
+    )
     dante_devices = await dante_browser.get_devices()
 
     for _, device in dante_devices.items():
@@ -93,18 +108,20 @@ async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_na
         raise HTTPException(status_code=404, detail="Device or Channel not found")
     return {}
 
+
 @app.post("/devices/{device_name}/rx_name/{rx_number}")
-async def name_rx_device(device_name: str,rx_number: int, payload: dict = Body(...)):
+async def name_rx_device(device_name: str, rx_number: int, payload: dict = Body(...)):
     name = payload["name"]
     devices = await device_list()
     device = next((d for d in devices.values() if d.name == device_name), None)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     try:
-        await device.set_channel_name("rx",rx_number,name)
+        await device.set_channel_name("rx", rx_number, name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {}
+
 
 @app.post("/devices/{device_name}/configure")
 async def configure_device(device_name: str, payload: dict = Body(...)):
@@ -140,9 +157,36 @@ async def configure_device(device_name: str, payload: dict = Body(...)):
     return json.loads(json.dumps(device, indent=2))
 
 
-class ServerHttpCommand(Command):
-    name = "http"
-    description = "Run an HTTP server"
+def run_http_server(
+    host: str = typer.Option(
+        "0.0.0.0", "--host", "-h", help="Host to bind the server to."
+    ),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind the server to."),
+    log_level: str = typer.Option(
+        "info",
+        "--log-level",
+        "-l",
+        help="Uvicorn log level (e.g., critical, error, warning, info, debug, trace).",
+    ),
+):
+    """
+    Run an HTTP server exposing an API for controlling network audio devices.
+    The server uses FastAPI and Uvicorn.
+    """
+    actual_log_level = log_level.lower()
 
-    def handle(self):
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    if actual_log_level not in [
+        "critical",
+        "error",
+        "warning",
+        "info",
+        "debug",
+        "trace",
+    ]:
+        print(
+            f"Warning: Invalid log level '{log_level}'. Defaulting to 'info'. Valid levels are: critical, error, warning, info, debug, trace."
+        )
+        actual_log_level = "info"
+
+    print(f"Starting HTTP server on {host}:{port} with log level {actual_log_level}...")
+    uvicorn.run(app, host=host, port=port, log_level=actual_log_level)
