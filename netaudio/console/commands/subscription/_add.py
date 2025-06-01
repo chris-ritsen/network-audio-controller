@@ -98,7 +98,7 @@ class SubscriptionAddCommand(Command):
         if rx_device and not tx_device:
             tx_device = rx_device
 
-        if rx_channel and rx_device and tx_channel and tx_channel:
+        if rx_channel and rx_device and tx_channel and tx_device:
             self.line(
                 f"{rx_channel.name}@{rx_device.name} <- {tx_channel.name}@{tx_device.name}"
             )
