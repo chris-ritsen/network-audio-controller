@@ -10,15 +10,10 @@ class DanteChannel:
         self._volume = None
 
     def __str__(self):
-        if self.friendly_name:
-            name = self.friendly_name
-        else:
-            name = self.name
-
         if self.volume and self.volume != 254:
-            text = f"{self.number}:{name} [{self.volume}]"
+            text = f"{self.number}:{self.subscription_name} [{self.volume}]"
         else:
-            text = f"{self.number}:{name}"
+            text = f"{self.number}:{self.subscription_name}"
 
         return text
 
@@ -77,6 +72,15 @@ class DanteChannel:
     @name.setter
     def name(self, name):
         self._name = name
+
+    @property
+    def subscription_name(self):
+        if self.friendly_name:
+            name = self.friendly_name
+        else:
+            name = self.name
+
+        return name
 
     @property
     def volume(self):
