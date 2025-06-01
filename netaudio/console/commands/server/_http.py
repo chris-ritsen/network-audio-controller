@@ -68,9 +68,7 @@ async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_na
     )[1]
     tx_channel = next(
         filter(
-            lambda c: tx_channel_name == c[1].friendly_name
-            or tx_channel_name == c[1].name
-            and not c[1].friendly_name,
+            lambda c: c[1].matches_name(tx_channel_name),
             tx_device.tx_channels.items(),
         )
     )[1]
@@ -82,7 +80,7 @@ async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_na
     )[1]
     rx_channel = next(
         filter(
-            lambda c: c[1].name == rx_channel_name,
+            lambda c: c[1].matches_name(rx_channel_name),
             rx_device.rx_channels.items(),
         )
     )[1]

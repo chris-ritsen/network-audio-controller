@@ -45,7 +45,7 @@ class SubscriptionRemoveCommand(Command):
         if self.option("rx-channel-name"):
             rx_channel = next(
                 filter(
-                    lambda c: c[1].name == self.option("rx-channel-name"),
+                    lambda c: c[1].matches_name(self.option("rx-channel-name")),
                     rx_device.rx_channels.items(),
                 )
             )[1]
