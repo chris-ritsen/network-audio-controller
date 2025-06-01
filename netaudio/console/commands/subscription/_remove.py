@@ -52,7 +52,7 @@ class SubscriptionRemoveCommand(Command):
         elif self.option("rx-channel-number"):
             rx_channel = next(
                 filter(
-                    lambda c: c[1].number == self.option("rx-channel-number"),
+                    lambda c: c[1].number == int(self.option("rx-channel-number")),
                     rx_device.rx_channels.items(),
                 )
             )[1]
