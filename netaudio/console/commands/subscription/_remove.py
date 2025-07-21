@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 
 from cleo.commands.command import Command
 from cleo.helpers import option
@@ -37,7 +38,7 @@ class SubscriptionRemoveCommand(Command):
         elif self.option("rx-device-host"):
             rx_device = next(
                 filter(
-                    lambda d: d[1].ipv4 == self.option("rx-device-host"),
+                    lambda d: d[1].ipv4 == ipaddress.ip_address(self.option("rx-device-host")),
                     dante_devices.items(),
                 )
             )[1]
