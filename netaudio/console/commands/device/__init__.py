@@ -14,4 +14,4 @@ class DeviceCommand(Command):
     commands = [DeviceListCommand()]
 
     def handle(self):
-        return self.call("help", self.name)
+        return self.call("help", f"help {self.name}")

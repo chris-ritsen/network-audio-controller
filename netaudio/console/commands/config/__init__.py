@@ -182,7 +182,7 @@ class ConfigCommand(Command):
         options_given = any(list([self.option(o) for o in option_names]))
 
         if not options_given:
-            return self.call("help", self.name)
+            return self.call("help", f"help {self.name}")
 
         dante_browser = DanteBrowser(mdns_timeout=1.5)
         devices = await dante_browser.get_devices()

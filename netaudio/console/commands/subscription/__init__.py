@@ -19,4 +19,4 @@ class SubscriptionCommand(Command):
         self.commands = [SubscriptionAddCommand(), SubscriptionListCommand(), SubscriptionRemoveCommand()]
 
     def handle(self):
-        return self.call("help", self.name)
+        return self.call("help", f"help {self.name}")
