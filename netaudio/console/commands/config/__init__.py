@@ -178,7 +178,7 @@ class ConfigCommand(Command):
         return devices
 
     async def device_configure(self):
-        option_names = list(map(lambda o: o.long_name, self.options))
+        option_names = list(map(lambda o: o.name, self.options))
         options_given = any(list([self.option(o) for o in option_names]))
 
         if not options_given:
