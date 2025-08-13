@@ -34,7 +34,7 @@ def get_host_by_name(host):
 
 
 class ChannelListCommand(Command):
-    name = "list"
+    name = "channel list"
     description = "List channels"
 
     options = [

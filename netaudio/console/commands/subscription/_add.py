@@ -7,7 +7,7 @@ from netaudio.dante.browser import DanteBrowser
 
 
 class SubscriptionAddCommand(Command):
-    name = "add"
+    name = "subscription add"
     description = "Add a subscription"
 
     options = [

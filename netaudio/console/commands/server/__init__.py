@@ -10,4 +10,4 @@ class ServerCommand(Command):
     commands = [ServerHttpCommand(), ServerMdnsCommand()]
 
     def handle(self):
-        return self.call("help", self._config.name)
+        return self.call("help", self.name)

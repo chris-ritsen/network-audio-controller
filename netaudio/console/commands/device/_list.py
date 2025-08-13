@@ -42,7 +42,7 @@ def get_host_by_name(host):
 
 
 class DeviceListCommand(Command):
-    name = "list"
+    name = "device list"
     description = "List devices"
 
     options = [

@@ -141,7 +141,7 @@ async def configure_device(device_name: str, payload: dict = Body(...)):
 
 
 class ServerHttpCommand(Command):
-    name = "http"
+    name = "server http"
     description = "Run an HTTP server"
 
     def handle(self):

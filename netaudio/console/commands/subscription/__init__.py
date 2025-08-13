@@ -15,5 +15,8 @@ class SubscriptionCommand(Command):
         SubscriptionRemoveCommand(),
     ]
 
+    def main(self):
+        self.commands = [SubscriptionAddCommand(), SubscriptionListCommand(), SubscriptionRemoveCommand()]
+
     def handle(self):
-        return self.call("help", self._config.name)
+        return self.call("help", self.name)

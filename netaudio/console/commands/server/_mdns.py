@@ -1335,7 +1335,7 @@ def multicast(group, port):
 
 
 class ServerMdnsCommand(Command):
-    name = "mdns"
+    name = "server mdns"
     description = "Run a daemon to monitor mDNS ports for changes to devices"
 
     def __init__(self):

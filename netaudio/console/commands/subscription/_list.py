@@ -23,7 +23,7 @@ JSONEncoder.default = _default
 
 
 class SubscriptionListCommand(Command):
-    name = "list"
+    name = "subscription list"
     description = "List subscriptions"
 
     options = [option("json", None, "Output as JSON", flag=True)]

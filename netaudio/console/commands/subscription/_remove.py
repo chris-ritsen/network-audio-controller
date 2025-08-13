@@ -7,7 +7,7 @@ from netaudio.dante.browser import DanteBrowser
 
 
 class SubscriptionRemoveCommand(Command):
-    name = "remove"
+    name = "subscription remove"
     description = "Remove a subscription"
 
     options = [

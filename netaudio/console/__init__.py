@@ -7,3 +7,15 @@ from .commands.server._mdns import ServerMdnsCommand
 from .commands.subscription import SubscriptionCommand
 from .commands.subscription._add import SubscriptionAddCommand
 from .commands.subscription._remove import SubscriptionRemoveCommand
+
+__all__ = [
+    "ChannelCommand",
+    "ConfigCommand",
+    "DeviceCommand",
+    "ServerCommand",
+    "ServerHttpCommand",
+    "ServerMdnsCommand",
+    "SubscriptionCommand",
+    "SubscriptionAddCommand",
+    "SubscriptionRemoveCommand",
+]

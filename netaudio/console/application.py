@@ -31,6 +31,9 @@ def main() -> int:
     for command in commands:
         application.add(command())
 
+        for subcommand in command.commands if command.commands else []:
+            application.add(subcommand)
+
     return application.run()
 
 
