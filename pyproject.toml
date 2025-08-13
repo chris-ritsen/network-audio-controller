@@ -13,20 +13,19 @@ version = "0.0.11"
 
 [tool.poetry.dependencies]
 cleo = "^0.8.1"
-python = "^3.9"
-twisted = "^22.1.0"
-zeroconf = "^0.38.3"
-sqlitedict = "^1.7.0"
-redis = "^4.1.4"
-fastapi = "^0.110.1"
-uvicorn = "^0.29.0"
-clikit = "^0.6.2"
+python = "^3.12"
+twisted = "^25.5.0"
+zeroconf = "^0.147.0"
+sqlitedict = "^2.1.0"
+redis = "^6.4.0"
+fastapi = "^0.116.1"
+uvicorn = "^0.35.0"
 
 [tool.poetry.group.dev.dependencies]
-black = "^22.1.0"
-pipx = "^1.0.0"
-pylint = "^2.12.2"
-pytest = "^7.0.0"
+black = "^25.1.0"
+pipx = "^1.7.1"
+pylint = "^3.3.8"
+pytest = "^8.4.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
