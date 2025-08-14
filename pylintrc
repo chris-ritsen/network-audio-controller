@@ -91,7 +91,6 @@ disable=bad-inline-option,
         logging-fstring-interpolation,
         missing-module-docstring,
         no-member,
-        no-self-use,
         protected-access,
         raw-checker-failed,
         relative-beyond-top-level,
@@ -101,7 +100,6 @@ disable=bad-inline-option,
         too-many-branches,
         too-many-instance-attributes,
         too-many-lines,
-        too-many-local-variables,
         too-many-locals,
         too-many-public-methods,
         too-many-statements,
@@ -311,10 +309,6 @@ single-line-if-stmt=no
 
 
 [LOGGING]
-
-# The type of string formatting that logging methods do. `old` means using %
-# formatting, `new` is for `{}` formatting.
-logging-format-sytle=new
 
 # Logging modules to check that the string format arguments are in logging
 # function parameter format.
@@ -583,11 +577,3 @@ known-third-party=enchant
 
 # Couples of modules and preferred modules, separated by a comma.
 preferred-modules=
-
-
-[EXCEPTIONS]
-
-# Exceptions that will emit a warning when being caught. Defaults to
-# "BaseException, Exception".
-overgeneral-exceptions=BaseException,
-                       Exception
