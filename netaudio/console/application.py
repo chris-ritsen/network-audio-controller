@@ -4,7 +4,7 @@ from importlib.metadata import version
 
 from os import name as os_name
 
-# from netaudio.console.application import Command
+PACKAGE_NAME = __package__.split('.')[0]
 
 if os_name == "nt":
     # Fix Windows issue, See: https://stackoverflow.com/q/58718659/
@@ -22,20 +22,25 @@ from netaudio.console.commands.config import device_configure
 from netaudio.console.commands.server import ServerCommands
 
 class Application(object):
-    """ 
-    A tool to control & configure DANTE network audio devices.
-    """
+    @property
+    def __doc__(self):
+        print(__package__)
+        return f"""
+Network Audio Controller
 
-    def __init__(self):
-        self.device = DeviceCommands()
-        self.channel = ChannelCommands()
-        self.subscription = SubscriptionCommands()
-        self.config = device_configure
-        self.server = ServerCommands()
+Configure Dante devices on the network
+
+Version: {version(PACKAGE_NAME)}
+"""
+    
+    device = DeviceCommands()
+    config = device_configure
+    channel = ChannelCommands()
+    subscription = SubscriptionCommands()
+    server = ServerCommands()
 
 def main():
     fire.Fire(Application)
-
 
 if __name__ == "__main__":
     main()
