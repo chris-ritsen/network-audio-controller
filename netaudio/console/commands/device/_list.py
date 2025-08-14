@@ -20,7 +20,10 @@ from netaudio.dante.subscription import DanteSubscription
 from netaudio.utils.timeout import Timeout
 
 
-def _default(self, obj):
+from typing import Any, Dict, Optional
+
+
+def _default(self: Any, obj: Any) -> Any:
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
 
@@ -28,8 +31,8 @@ _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 
 
-def get_host_by_name(host):
-    ipv4 = None
+def get_host_by_name(host: str) -> Optional[ipaddress.IPv4Address]:
+    ipv4: Optional[ipaddress.IPv4Address] = None
 
     try:
         ipv4 = ipaddress.ip_address(Timeout(socket.gethostbyname, 0.1)(host))
@@ -42,8 +45,8 @@ def get_host_by_name(host):
 
 
 class DeviceListCommand(Command):
-    name = "device list"
-    description = "List devices"
+    name: str = "device list"
+    description: str = "List devices"
 
     options = [
         option("json", None, "Output as JSON", flag=True),
@@ -51,14 +54,14 @@ class DeviceListCommand(Command):
         option("name", None, "Specify device by name", flag=False),
     ]
 
-    def filter_devices(self, devices):
+    def filter_devices(self, devices: Dict[str, Any]) -> Dict[str, Any]:
         if self.option("name"):
             devices = dict(
                 filter(lambda d: d[1].name == self.option("name"), devices.items())
             )
         elif self.option("host"):
             host = self.option("host")
-            ipv4 = None
+            ipv4: Optional[ipaddress.IPv4Address] = None
 
             try:
                 ipv4 = ipaddress.ip_address(host)
@@ -83,7 +86,7 @@ class DeviceListCommand(Command):
 
         return devices
 
-    def get_devices_from_redis(self):
+    def get_devices_from_redis(self) -> Optional[Dict[str, Any]]:
         redis_client = None
         redis_host = "localhost"
         redis_port = 6379
@@ -225,7 +228,7 @@ class DeviceListCommand(Command):
 
         return devices if devices else None
 
-    async def device_list(self):
+    async def device_list(self) -> None:
         cached_devices = self.get_devices_from_redis()
 
         if cached_devices is not None:
@@ -253,5 +256,5 @@ class DeviceListCommand(Command):
             for _, device in devices.items():
                 self.line(f"{device}")
 
-    def handle(self):
+    def handle(self) -> None:
         asyncio.run(self.device_list())

@@ -46,10 +46,24 @@ async def list_devices():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/subscribe/{rx_device_name}/{rx_channel_name}/{tx_device_name}/{tx_channel_name}")
-async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_name: str,tx_channel_name: str, payload: dict = Body(...)):
+@app.post(
+    "/subscribe/{rx_device_name}/{rx_channel_name}/{tx_device_name}/{tx_channel_name}"
+)
+async def subscribe_device(
+    rx_device_name: str,
+    rx_channel_name: str,
+    tx_device_name: str,
+    tx_channel_name: str,
+    payload: dict = Body(...),
+):
 
-    logger.info(f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}",rx_device_name,rx_channel_name,tx_device_name,tx_channel_name)
+    logger.info(
+        f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}",
+        rx_device_name,
+        rx_channel_name,
+        tx_device_name,
+        tx_channel_name,
+    )
     dante_devices = await dante_browser.get_devices()
 
     for _, device in dante_devices.items():
@@ -93,18 +107,20 @@ async def subscribe_device(rx_device_name: str,rx_channel_name: str,tx_device_na
         raise HTTPException(status_code=404, detail="Device or Channel not found")
     return {}
 
+
 @app.post("/devices/{device_name}/rx_name/{rx_number}")
-async def name_rx_device(device_name: str,rx_number: int, payload: dict = Body(...)):
+async def name_rx_device(device_name: str, rx_number: int, payload: dict = Body(...)):
     name = payload["name"]
     devices = await device_list()
     device = next((d for d in devices.values() if d.name == device_name), None)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     try:
-        await device.set_channel_name("rx",rx_number,name)
+        await device.set_channel_name("rx", rx_number, name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {}
+
 
 @app.post("/devices/{device_name}/configure")
 async def configure_device(device_name: str, payload: dict = Body(...)):

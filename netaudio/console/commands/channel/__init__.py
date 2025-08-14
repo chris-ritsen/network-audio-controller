@@ -4,10 +4,13 @@ from cleo.helpers import option
 from ._list import ChannelListCommand
 
 
-class ChannelCommand(Command):
-    name = "channel"
-    description = "Control channels"
-    commands = [ChannelListCommand()]
+from typing import Any, List
 
-    def handle(self):
+
+class ChannelCommand(Command):
+    name: str = "channel"
+    description: str = "Control channels"
+    commands: List[Any] = [ChannelListCommand()]
+
+    def handle(self) -> int:
         return self.call("help", f"help {self.name}")

@@ -473,9 +473,9 @@ class DanteDevice:
                     )
 
                     if tx_channel_friendly_name:
-                        tx_friendly_channel_names[channel_number] = (
-                            tx_channel_friendly_name
-                        )
+                        tx_friendly_channel_names[
+                            channel_number
+                        ] = tx_channel_friendly_name
 
             for page in range(0, max(1, int(self.tx_count / 16)), 2):
                 response = await self.dante_command(

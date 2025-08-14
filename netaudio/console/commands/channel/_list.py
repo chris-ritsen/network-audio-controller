@@ -12,7 +12,10 @@ from netaudio.dante.browser import DanteBrowser
 from netaudio.utils.timeout import Timeout
 
 
-def _default(self, obj):
+from typing import Any, Dict, Optional
+
+
+def _default(self: Any, obj: Any) -> Any:
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
 
@@ -20,8 +23,8 @@ _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 
 
-def get_host_by_name(host):
-    ipv4 = None
+def get_host_by_name(host: str) -> Optional[ipaddress.IPv4Address]:
+    ipv4: Optional[ipaddress.IPv4Address] = None
 
     try:
         ipv4 = ipaddress.ip_address(Timeout(socket.gethostbyname, 0.1)(host))
@@ -34,8 +37,8 @@ def get_host_by_name(host):
 
 
 class ChannelListCommand(Command):
-    name = "channel list"
-    description = "List channels"
+    name: str = "channel list"
+    description: str = "List channels"
 
     options = [
         option("json", None, "Output as JSON", flag=True),
@@ -43,9 +46,9 @@ class ChannelListCommand(Command):
         option("device-name", None, "Specify device by name", flag=False),
     ]
 
-    def print_channel_list(self, devices):
+    def print_channel_list(self, devices: Dict[str, Any]) -> None:
         if self.option("json"):
-            channels = {}
+            channels: Dict[str, Any] = {}
 
             for _, device in devices.items():
                 channels[device.name] = {
@@ -76,7 +79,7 @@ class ChannelListCommand(Command):
                 if index < len(devices) - 1:
                     self.line("")
 
-    def filter_devices(self, devices):
+    def filter_devices(self, devices: Dict[str, Any]) -> Dict[str, Any]:
         if self.option("device-name"):
             devices = dict(
                 filter(
@@ -110,7 +113,7 @@ class ChannelListCommand(Command):
 
         return devices
 
-    async def channel_list(self):
+    async def channel_list(self) -> None:
         dante_browser = DanteBrowser(mdns_timeout=1.5)
         devices = await dante_browser.get_devices()
 
@@ -127,5 +130,5 @@ class ChannelListCommand(Command):
         devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
         self.print_channel_list(devices)
 
-    def handle(self):
+    def handle(self) -> None:
         asyncio.run(self.channel_list())

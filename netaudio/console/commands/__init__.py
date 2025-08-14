@@ -1,3 +1,4 @@
+from typing import List
 from .channel import ChannelCommand
 from .config import ConfigCommand
 from .device import DeviceCommand
@@ -6,7 +7,7 @@ from .subscription import SubscriptionCommand
 from .subscription._add import SubscriptionAddCommand
 from .subscription._remove import SubscriptionRemoveCommand
 
-__all__ = [
+__all__: List[str] = [
     "ChannelCommand",
     "ConfigCommand",
     "DeviceCommand",

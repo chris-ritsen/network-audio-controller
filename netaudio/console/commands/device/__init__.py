@@ -8,10 +8,13 @@ from netaudio import DanteBrowser
 from ._list import DeviceListCommand
 
 
-class DeviceCommand(Command):
-    name = "device"
-    description = "Control devices"
-    commands = [DeviceListCommand()]
+from typing import Any, List
 
-    def handle(self):
+
+class DeviceCommand(Command):
+    name: str = "device"
+    description: str = "Control devices"
+    commands: List[Any] = [DeviceListCommand()]
+
+    def handle(self) -> int:
         return self.call("help", f"help {self.name}")

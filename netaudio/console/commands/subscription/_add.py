@@ -6,11 +6,14 @@ from cleo.helpers import option
 from netaudio.dante.browser import DanteBrowser
 
 
-class SubscriptionAddCommand(Command):
-    name = "subscription add"
-    description = "Add a subscription"
+from typing import Any, List
 
-    options = [
+
+class SubscriptionAddCommand(Command):
+    name: str = "subscription add"
+    description: str = "Add a subscription"
+
+    options: List[Any] = [
         option("rx-channel-name", None, "Specify Rx channel by name", flag=False),
         option("rx-channel-number", None, "Specify Rx channel by number", flag=False),
         option("rx-device-host", None, "Specify Tx device by host", flag=False),
@@ -21,7 +24,7 @@ class SubscriptionAddCommand(Command):
         option("tx-device-name", None, "Specify Tx device by name", flag=False),
     ]
 
-    async def subscription_add(self):
+    async def subscription_add(self) -> None:
         dante_browser = DanteBrowser(mdns_timeout=1.5)
         dante_devices = await dante_browser.get_devices()
 
@@ -104,5 +107,5 @@ class SubscriptionAddCommand(Command):
             )
             await rx_device.add_subscription(rx_channel, tx_channel, tx_device)
 
-    def handle(self):
+    def handle(self) -> None:
         asyncio.run(self.subscription_add())

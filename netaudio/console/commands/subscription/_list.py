@@ -14,7 +14,10 @@ from netaudio.dante.browser import DanteBrowser
 # from netaudio.dante.cache import DanteCache
 
 
-def _default(self, obj):
+from typing import Any, List
+
+
+def _default(self: Any, obj: Any) -> Any:
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
 
@@ -23,10 +26,10 @@ JSONEncoder.default = _default
 
 
 class SubscriptionListCommand(Command):
-    name = "subscription list"
-    description = "List subscriptions"
+    name: str = "subscription list"
+    description: str = "List subscriptions"
 
-    options = [option("json", None, "Output as JSON", flag=True)]
+    options: List[Any] = [option("json", None, "Output as JSON", flag=True)]
 
     #  options = [
     #      option('rx-channel-name', None, 'Filter by Rx channel name', flag=False),
@@ -39,7 +42,7 @@ class SubscriptionListCommand(Command):
     #      option('tx-device-name', None, 'Filter by Tx device name', flag=False),
     #  ]
 
-    async def subscription_list(self):
+    async def subscription_list(self) -> None:
         subscriptions = []
 
         redis_enabled = None
@@ -121,5 +124,5 @@ class SubscriptionListCommand(Command):
             for subscription in subscriptions:
                 self.line(f"{subscription}")
 
-    def handle(self):
+    def handle(self) -> None:
         asyncio.run(self.subscription_list())
