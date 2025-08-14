@@ -23,7 +23,6 @@ uvicorn = "^0.35.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"
-pipx = "^1.7.1"
 pylint = "^3.3.8"
 pytest = "^8.4.1"
 

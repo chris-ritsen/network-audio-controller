@@ -33,21 +33,6 @@ typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 trio = ["trio (>=0.26.1)"]
 
 [[package]]
-name = "argcomplete"
-version = "3.6.2"
-description = "Bash tab completion for argparse"
-optional = false
-python-versions = ">=3.8"
-groups = ["dev"]
-files = [
-    {file = "argcomplete-3.6.2-py3-none-any.whl", hash = "sha256:65b3133a29ad53fb42c48cf5114752c7ab66c1c38544fdf6460f450c09b42591"},
-    {file = "argcomplete-3.6.2.tar.gz", hash = "sha256:d0519b1bc867f5f4f4713c41ad0aba73a4a5f007449716b16f385f2166dc6adf"},
-]
-
-[package.extras]
-test = ["coverage", "mypy", "pexpect", "ruff", "wheel"]
-
-[[package]]
 name = "astroid"
 version = "3.3.11"
 description = "An abstract syntax tree for Python with inference support."
@@ -392,25 +377,6 @@ files = [
     {file = "pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08"},
     {file = "pathspec-0.12.1.tar.gz", hash = "sha256:a482d51503a1ab33b1c67a6c3813a26953dbdc71c31dacaef9a838c4e29f5712"},
 ]
-
-[[package]]
-name = "pipx"
-version = "1.7.1"
-description = "Install and Run Python Applications in Isolated Environments"
-optional = false
-python-versions = ">=3.8"
-groups = ["dev"]
-files = [
-    {file = "pipx-1.7.1-py3-none-any.whl", hash = "sha256:3933c43bb344e649cb28e10d357e0967ce8572f1c19caf90cf39ae95c2a0afaf"},
-    {file = "pipx-1.7.1.tar.gz", hash = "sha256:762de134e16a462be92645166d225ecef446afaef534917f5f70008d63584360"},
-]
-
-[package.dependencies]
-argcomplete = ">=1.9.4"
-colorama = {version = ">=0.4.4", markers = "sys_platform == \"win32\""}
-packaging = ">=20"
-platformdirs = ">=2.1"
-userpath = ">=1.6,<1.9 || >1.9"
 
 [[package]]
 name = "platformdirs"
@@ -905,21 +871,6 @@ files = [
 typing-extensions = ">=4.12.0"
 
 [[package]]
-name = "userpath"
-version = "1.9.2"
-description = "Cross-platform tool for adding locations to the user PATH"
-optional = false
-python-versions = ">=3.7"
-groups = ["dev"]
-files = [
-    {file = "userpath-1.9.2-py3-none-any.whl", hash = "sha256:2cbf01a23d655a1ff8fc166dfb78da1b641d1ceabf0fe5f970767d380b14e89d"},
-    {file = "userpath-1.9.2.tar.gz", hash = "sha256:6c52288dab069257cc831846d15d48133522455d4677ee69a9781f11dbefd815"},
-]
-
-[package.dependencies]
-click = "*"
-
-[[package]]
 name = "uvicorn"
 version = "0.35.0"
 description = "The lightning-fast ASGI server."
@@ -1089,4 +1040,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "edd82e3831d061d95c7e19cb463b9759e9f0caee6fe79a9196e90f5d4b720d07"
+content-hash = "f6ae23bc062379ffccb132bf2b565b46e0f9e05d63059e90415ff3ffc9cdb2cf"
