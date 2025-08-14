@@ -1,7 +1,6 @@
 import asyncio
 import ipaddress
 import json
-import pprint
 import socket
 
 from json import JSONEncoder
@@ -14,7 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.dante.channel import DanteChannel
-from netaudio.dante.const import SERVICE_CMC, SERVICES
+from netaudio.dante.const import SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.subscription import DanteSubscription
 from netaudio.utils.timeout import Timeout

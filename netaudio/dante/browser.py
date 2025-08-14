@@ -1,9 +1,7 @@
 import asyncio
 import json
-import os
 import traceback
 
-from queue import Queue
 from json import JSONEncoder
 
 from zeroconf import DNSService, DNSText
@@ -164,7 +162,6 @@ class DanteBrowser:
         name: str,
         state_change: ServiceStateChange,
     ) -> None:
-
         if service_type == "_netaudio-chan._udp.local.":
             return
 
@@ -239,7 +236,7 @@ class DanteBrowser:
             if "server_name" in service:
                 server_name = service["server_name"]
 
-            if not server_name in device_hosts:
+            if server_name not in device_hosts:
                 device_hosts[server_name] = {}
 
             device_hosts[server_name][service["name"]] = service

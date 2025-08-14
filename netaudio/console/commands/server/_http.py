@@ -1,10 +1,9 @@
-import asyncio
 import json
 import uvicorn
 
 from cleo.commands.command import Command
 
-from fastapi import FastAPI, HTTPException, Path, Body
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from netaudio.dante.browser import DanteBrowser
 import logging
@@ -56,7 +55,6 @@ async def subscribe_device(
     tx_channel_name: str,
     payload: dict = Body(...),
 ):
-
     logger.info(
         f"rx_d: {rx_device_name} {rx_channel_name} {tx_device_name} {tx_channel_name}",
         rx_device_name,

@@ -1,18 +1,14 @@
 import asyncio
-import ipaddress
 import json
 import os
 import random
 import socket
 import struct
 import sys
-import threading
 import time
 import traceback
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
-import signal
 
 from json import JSONEncoder
 from queue import Queue
@@ -22,7 +18,6 @@ from redis import Redis
 
 from cleo.commands.command import Command
 from redis.exceptions import ConnectionError as RedisConnectionError
-from sqlitedict import SqliteDict
 
 from netaudio.dante.browser import DanteBrowser
 
@@ -30,21 +25,17 @@ from netaudio.dante.browser import DanteBrowser
 
 from netaudio.dante.const import (
     DEFAULT_MULTICAST_METERING_PORT,
-    DEVICE_CONTROL_PORT,
     DEVICE_HEARTBEAT_PORT,
     DEVICE_INFO_PORT,
     DEVICE_INFO_SRC_PORT2,
     DEVICE_SETTINGS_PORT,
-    MESSAGE_TYPES,
     MESSAGE_TYPE_ACCESS_STATUS,
     MESSAGE_TYPE_AES67_STATUS,
     MESSAGE_TYPE_AUDIO_INTERFACE_STATUS,
-    MESSAGE_TYPE_CHANGE,
     MESSAGE_TYPE_CHANNEL_COUNTS_QUERY,
     MESSAGE_TYPE_CLEAR_CONFIG_STATUS,
     MESSAGE_TYPE_CLOCKING_STATUS,
     MESSAGE_TYPE_CODEC_STATUS,
-    MESSAGE_TYPE_CONTROL,
     MESSAGE_TYPE_ENCODING_STATUS,
     MESSAGE_TYPE_IFSTATS_STATUS,
     MESSAGE_TYPE_INTERFACE_STATUS,
@@ -53,7 +44,6 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_MONITORING_STRINGS,
     MESSAGE_TYPE_NAME_QUERY,
     MESSAGE_TYPE_PROPERTY_CHANGE,
-    MESSAGE_TYPE_QUERY,
     MESSAGE_TYPE_ROUTING_DEVICE_CHANGE,
     MESSAGE_TYPE_ROUTING_READY,
     MESSAGE_TYPE_RX_CHANNEL_CHANGE,
@@ -61,7 +51,6 @@ from netaudio.dante.const import (
     MESSAGE_TYPE_RX_FLOW_CHANGE,
     MESSAGE_TYPE_SAMPLE_RATE_PULLUP_STATUS,
     MESSAGE_TYPE_SAMPLE_RATE_STATUS,
-    MESSAGE_TYPE_STATUS,
     MESSAGE_TYPE_STRINGS,
     MESSAGE_TYPE_SWITCH_VLAN_STATUS,
     MESSAGE_TYPE_TX_CHANNEL_FRIENDLY_NAMES_QUERY,
@@ -74,11 +63,7 @@ from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
     MULTICAST_GROUP_HEARTBEAT,
     PORTS,
-    SERVICES,
     SERVICE_ARC,
-    SERVICE_CHAN,
-    SERVICE_CMC,
-    SERVICE_DBC,
     SUBSCRIPTION_STATUS_LABELS,
     SUBSCRIPTION_STATUS_NONE,
 )
@@ -1173,7 +1158,7 @@ def parse_dante_service_change(message):
     server_name = service["server_name"]
     ipv4 = service["ipv4"]
 
-    if not server_name in sockets:
+    if server_name not in sockets:
         sockets[server_name] = {}
 
     state_change = message["state_change"]
@@ -1240,7 +1225,7 @@ def parse_dante_service_change(message):
             redis_client.hset(key, key=None, value=None, mapping=service["properties"])
 
         if (
-            not service["port"] in sockets[server_name]
+            service["port"] not in sockets[server_name]
             and service["type"] == SERVICE_ARC
         ):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

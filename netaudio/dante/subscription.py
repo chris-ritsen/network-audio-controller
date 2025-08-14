@@ -1,5 +1,4 @@
 from netaudio.dante.const import (
-    SUBSCRIPTION_STATUS_FLAG_NO_ADVERT,
     SUBSCRIPTION_STATUS_LABELS,
 )
 

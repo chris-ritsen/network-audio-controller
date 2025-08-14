@@ -147,11 +147,6 @@ SUBSCRIPTION_STATUS_LABELS = {
         "Resolved",
         "channel found; preparing to create flow",
     ),
-    SUBSCRIPTION_STATUS_UNRESOLVED: (
-        "Unresolved: channel not present",
-        "Unresolved",
-        "this channel is not present on the network",
-    ),
     SUBSCRIPTION_STATUS_RESOLVE_FAIL: (
         "Can't resolve subscription",
         "Resolve failed",

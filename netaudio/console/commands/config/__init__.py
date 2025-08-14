@@ -1,6 +1,5 @@
 import asyncio
 import ipaddress
-import json
 
 from json import JSONEncoder
 
@@ -76,13 +75,13 @@ class ConfigCommand(Command):
         option(
             "aes67-enable",
             None,
-            f"Enable AES67 mode. Reboot needed to apply. Note: You also need to add multicast channels for AES67 to work",
+            "Enable AES67 mode. Reboot needed to apply. Note: You also need to add multicast channels for AES67 to work",
             flag=True,
         ),
         option(
             "aes67-disable",
             None,
-            f"Disable AES67 mode. Reboot needed to apply",
+            "Disable AES67 mode. Reboot needed to apply",
             flag=True,
         ),
     ]
