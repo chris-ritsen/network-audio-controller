@@ -1,67 +1,53 @@
 import asyncio
 
-from cleo.commands.command import Command
-from cleo.helpers import option
-
 from netaudio.dante.browser import DanteBrowser
 
+from typing import Optional
 
-from typing import Any, List
+async def subscription_remove(
+    rx_channel_name: Optional[str] = None,
+    rx_channel_number: Optional[int] = None,
+    rx_device_host: Optional[str] = None,
+    rx_device_name: Optional[str] = None,
+) -> None:
+    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_devices = await dante_browser.get_devices()
 
+    for _, device in dante_devices.items():
+        await device.get_controls()
 
-class SubscriptionRemoveCommand(Command):
-    name: str = "subscription remove"
-    description: str = "Remove a subscription"
+    rx_channel = None
+    rx_device = None
 
-    options: List[Any] = [
-        option("rx-channel-name", None, "Specify Rx channel by name", flag=False),
-        option("rx-channel-number", None, "Specify Rx channel by number", flag=False),
-        option("rx-device-host", None, "Specify Rx device by host", flag=False),
-        option("rx-device-name", None, "Specify Rx device by name", flag=False),
-    ]
+    if rx_device_name:
+        rx_device = next(
+            filter(
+                lambda d: d[1].name == rx_device_name,
+                dante_devices.items(),
+            )
+        )[1]
+    elif rx_device_host:
+        rx_device = next(
+            filter(
+                lambda d: d[1].ipv4 == rx_device_host,
+                dante_devices.items(),
+            )
+        )[1]
 
-    async def subscription_add(self) -> None:
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        dante_devices = await dante_browser.get_devices()
+    if rx_channel_name:
+        rx_channel = next(
+            filter(
+                lambda c: c[1].name == rx_channel_name,
+                rx_device.rx_channels.items(),
+            )
+        )[1]
+    elif rx_channel_number:
+        rx_channel = next(
+            filter(
+                lambda c: c[1].number == rx_channel_number,
+                rx_device.rx_channels.items(),
+            )
+        )[1]
 
-        for _, device in dante_devices.items():
-            await device.get_controls()
-
-        rx_channel = None
-        rx_device = None
-
-        if self.option("rx-device-name"):
-            rx_device = next(
-                filter(
-                    lambda d: d[1].name == self.option("rx-device-name"),
-                    dante_devices.items(),
-                )
-            )[1]
-        elif self.option("rx-device-host"):
-            rx_device = next(
-                filter(
-                    lambda d: d[1].ipv4 == self.option("rx-device-host"),
-                    dante_devices.items(),
-                )
-            )[1]
-
-        if self.option("rx-channel-name"):
-            rx_channel = next(
-                filter(
-                    lambda c: c[1].name == self.option("rx-channel-name"),
-                    rx_device.rx_channels.items(),
-                )
-            )[1]
-        elif self.option("rx-channel-number"):
-            rx_channel = next(
-                filter(
-                    lambda c: c[1].number == self.option("rx-channel-number"),
-                    rx_device.rx_channels.items(),
-                )
-            )[1]
-
-        if rx_channel and rx_device:
-            await rx_device.remove_subscription(rx_channel)
-
-    def handle(self) -> None:
-        asyncio.run(self.subscription_add())
+    if rx_channel and rx_device:
+        await rx_device.remove_subscription(rx_channel)

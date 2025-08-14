@@ -1,8 +1,6 @@
 import json
 import uvicorn
 
-from cleo.commands.command import Command
-
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from netaudio.dante.browser import DanteBrowser
@@ -24,7 +22,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 async def device_list():
     devices = await dante_browser.get_devices()
@@ -154,9 +151,8 @@ async def configure_device(device_name: str, payload: dict = Body(...)):
     return json.loads(json.dumps(device, indent=2))
 
 
-class ServerHttpCommand(Command):
-    name = "server http"
-    description = "Run an HTTP server"
-
-    def handle(self):
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+def run_server():
+    """
+    Run a control HTTP Server
+    """
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

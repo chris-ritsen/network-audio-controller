@@ -1,12 +1,8 @@
-import asyncio
 import ipaddress
 import json
 import socket
 
 from json import JSONEncoder
-
-from cleo.commands.command import Command
-from cleo.helpers import option
 
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -16,8 +12,8 @@ from netaudio.dante.channel import DanteChannel
 from netaudio.dante.const import SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.subscription import DanteSubscription
-from netaudio.utils.timeout import Timeout
 
+from netaudio.console.device_discovery import filter_devices
 
 from typing import Any, Dict, Optional
 
@@ -25,235 +21,175 @@ from typing import Any, Dict, Optional
 def _default(self: Any, obj: Any) -> Any:
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
-
 _default.default = JSONEncoder().default
 JSONEncoder.default = _default
 
-
-def get_host_by_name(host: str) -> Optional[ipaddress.IPv4Address]:
-    ipv4: Optional[ipaddress.IPv4Address] = None
+def _get_devices_from_redis() -> Optional[Dict[str, Any]]:
+    redis_client = None
+    redis_host = "localhost"
+    redis_port = 6379
+    redis_db = 0
 
     try:
-        ipv4 = ipaddress.ip_address(Timeout(socket.gethostbyname, 0.1)(host))
-    except socket.gaierror:
-        pass
-    except TimeoutError:
-        pass
+        redis_client = Redis(
+            db=redis_db,
+            decode_responses=True,
+            host=redis_host,
+            port=redis_port,
+            socket_timeout=0.1,
+        )
 
-    return ipv4
+        redis_client.ping()
+    except RedisConnectionError:
+        return None
 
+    if not redis_client:
+        return None
 
-class DeviceListCommand(Command):
-    name: str = "device list"
-    description: str = "List devices"
+    host_keys = redis_client.smembers("netaudio:dante:hosts")
+    devices = {}
 
-    options = [
-        option("json", None, "Output as JSON", flag=True),
-        option("host", None, "Specify device by host", flag=False),
-        option("name", None, "Specify device by name", flag=False),
-    ]
+    for host_key in host_keys:
+        host_data = redis_client.hgetall(f"netaudio:dante:host:{host_key}")
 
-    def filter_devices(self, devices: Dict[str, Any]) -> Dict[str, Any]:
-        if self.option("name"):
-            devices = dict(
-                filter(lambda d: d[1].name == self.option("name"), devices.items())
-            )
-        elif self.option("host"):
-            host = self.option("host")
-            ipv4: Optional[ipaddress.IPv4Address] = None
+        if not host_data or "server_name" not in host_data:
+            continue
 
-            try:
-                ipv4 = ipaddress.ip_address(host)
-            except ValueError:
-                pass
+        server_name = host_data["server_name"]
 
-            possible_names = set([host, host + ".local.", host + "."])
+        device = DanteDevice(server_name=server_name)
+        device.ipv4 = host_data.get("ipv4")
 
-            if possible_names.intersection(set(devices.keys())):
-                devices = dict(
-                    filter(
-                        lambda d: d[1].server_name in possible_names, devices.items()
-                    )
-                )
-            else:
-                try:
-                    ipv4 = get_host_by_name(host)
-                except TimeoutError:
-                    pass
+        device_data = redis_client.hgetall(f"netaudio:dante:device:{server_name}")
 
-                devices = dict(filter(lambda d: d[1].ipv4 == ipv4, devices.items()))
+        if device_data:
+            rx_channels = json.loads(device_data.get("rx_channels", "{}"))
 
-        return devices
+            for channel_number, rx_channel_data in rx_channels.items():
+                rx_channel = DanteChannel()
+                rx_channel.channel_type = "rx"
+                rx_channel.device = device
+                rx_channel.name = rx_channel_data.get("name")
+                rx_channel.number = channel_number
+                rx_channel.status_code = rx_channel_data.get("status_code")
+                device.rx_channels[channel_number] = rx_channel
 
-    def get_devices_from_redis(self) -> Optional[Dict[str, Any]]:
-        redis_client = None
-        redis_host = "localhost"
-        redis_port = 6379
-        redis_db = 0
+            tx_channels = json.loads(device_data.get("tx_channels", "{}"))
 
-        try:
-            redis_client = Redis(
-                db=redis_db,
-                decode_responses=True,
-                host=redis_host,
-                port=redis_port,
-                socket_timeout=0.1,
-            )
+            for channel_number, tx_channel_data in tx_channels.items():
+                tx_channel = DanteChannel()
+                tx_channel.channel_type = "tx"
+                tx_channel.device = device
+                tx_channel.name = tx_channel_data.get("name")
+                tx_channel.number = channel_number
+                tx_channel.status_code = tx_channel_data.get("status_code")
+                device.tx_channels[channel_number] = tx_channel
 
-            redis_client.ping()
-        except RedisConnectionError:
-            return None
+            device.rx_count = int(device_data.get("rx_channel_count"), 0)
+            device.tx_count = int(device_data.get("tx_channel_count"), 0)
 
-        if not redis_client:
-            return None
+            subscriptions = json.loads(device_data.get("subscriptions", "{}"))
 
-        host_keys = redis_client.smembers("netaudio:dante:hosts")
-        devices = {}
-
-        for host_key in host_keys:
-            host_data = redis_client.hgetall(f"netaudio:dante:host:{host_key}")
-
-            if not host_data or "server_name" not in host_data:
-                continue
-
-            server_name = host_data["server_name"]
-
-            device = DanteDevice(server_name=server_name)
-            device.ipv4 = host_data.get("ipv4")
-
-            device_data = redis_client.hgetall(f"netaudio:dante:device:{server_name}")
-
-            if device_data:
-                rx_channels = json.loads(device_data.get("rx_channels", "{}"))
-
-                for channel_number, rx_channel_data in rx_channels.items():
-                    rx_channel = DanteChannel()
-                    rx_channel.channel_type = "rx"
-                    rx_channel.device = self
-                    rx_channel.name = rx_channel_data.get("name")
-                    rx_channel.number = channel_number
-                    rx_channel.status_code = rx_channel_data.get("status_code")
-                    device.rx_channels[channel_number] = rx_channel
-
-                tx_channels = json.loads(device_data.get("tx_channels", "{}"))
-
-                for channel_number, tx_channel_data in tx_channels.items():
-                    tx_channel = DanteChannel()
-                    tx_channel.channel_type = "tx"
-                    tx_channel.device = self
-                    tx_channel.name = tx_channel_data.get("name")
-                    tx_channel.number = channel_number
-                    tx_channel.status_code = tx_channel_data.get("status_code")
-                    device.tx_channels[channel_number] = tx_channel
-
-                device.rx_count = int(device_data.get("rx_channel_count"), 0)
-                device.tx_count = int(device_data.get("tx_channel_count"), 0)
-
-                subscriptions = json.loads(device_data.get("subscriptions", "{}"))
-
-                for (
-                    subscription_number,
-                    subscription_data,
-                ) in subscriptions.items():
-                    subscription = DanteSubscription()
-                    subscription.rx_channel_name = subscription_data.get(
-                        "rx_channel_name"
-                    )
-
-                    subscription.rx_device_name = subscription_data.get(
-                        "rx_device_name"
-                    )
-
-                    subscription.tx_channel_name = subscription_data.get(
-                        "tx_channel_name"
-                    )
-
-                    subscription.tx_device_name = subscription_data.get(
-                        "tx_device_name"
-                    )
-
-                    subscription.status_code = subscription_data.get("status_code")
-
-                    subscription.rx_channel_status_code = subscription_data.get(
-                        "rx_channel_status_code"
-                    )
-
-                    subscription.status_message = subscription_data.get(
-                        "status_message", []
-                    )
-
-                    device.subscriptions.append(subscription)
-
-                device.name = device_data.get("device_name")
-                device.sample_rate = device_data.get("sample_rate_status")
-                device.model_id = device_data.get("model")
-                device.software = device_data.get("software")
-                device.latency = device_data.get("latency")
-
-            service_keys = redis_client.keys(f"netaudio:dante:service:{server_name}:*")
-
-            for service_key in service_keys:
-                service_data = redis_client.hgetall(service_key)
-
-                service_properties_key = service_key.replace(
-                    "service", "service:properties"
+            for (
+                subscription_number,
+                subscription_data,
+            ) in subscriptions.items():
+                subscription = DanteSubscription()
+                subscription.rx_channel_name = subscription_data.get(
+                    "rx_channel_name"
                 )
 
-                service_properties = redis_client.hgetall(service_properties_key)
+                subscription.rx_device_name = subscription_data.get(
+                    "rx_device_name"
+                )
 
-                if service_data:
-                    service_name = service_data.get("name")
-                    device.services[service_name] = {
-                        "ipv4": service_data.get("ipv4"),
-                        "name": service_data.get("name"),
-                        "port": int(service_data.get("port", 0)),
-                        "properties": {
-                            k: v
-                            for k, v in service_properties.items()
-                            if k not in ["ipv4", "name", "port"]
-                        },
-                        "server_name": server_name,
-                        "type": service_data.get("type"),
-                    }
+                subscription.tx_channel_name = subscription_data.get(
+                    "tx_channel_name"
+                )
 
-                    if (
-                        "id" in service_properties
-                        and service_data.get("type") == SERVICE_CMC
-                    ):
-                        device.mac_address = service_properties["id"]
+                subscription.tx_device_name = subscription_data.get(
+                    "tx_device_name"
+                )
 
-            device.services = dict(sorted(device.services.items()))
-            devices[server_name] = device
+                subscription.status_code = subscription_data.get("status_code")
 
-        return devices if devices else None
+                subscription.rx_channel_status_code = subscription_data.get(
+                    "rx_channel_status_code"
+                )
 
-    async def device_list(self) -> None:
-        cached_devices = self.get_devices_from_redis()
+                subscription.status_message = subscription_data.get(
+                    "status_message", []
+                )
 
-        if cached_devices is not None:
-            devices = cached_devices
-        else:
-            dante_browser = DanteBrowser(mdns_timeout=1.5)
-            devices = await dante_browser.get_devices()
+                device.subscriptions.append(subscription)
 
-        if self.option("name"):
-            for _, device in devices.items():
-                await device.get_controls()
+            device.name = device_data.get("device_name")
+            device.sample_rate = device_data.get("sample_rate_status")
+            device.model_id = device_data.get("model")
+            device.software = device_data.get("software")
+            device.latency = device_data.get("latency")
 
-        devices = self.filter_devices(devices)
+        service_keys = redis_client.keys(f"netaudio:dante:service:{server_name}:*")
 
-        if not self.option("name"):
-            for _, device in devices.items():
-                await device.get_controls()
+        for service_key in service_keys:
+            service_data = redis_client.hgetall(service_key)
 
-        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+            service_properties_key = service_key.replace(
+                "service", "service:properties"
+            )
 
-        if self.option("json"):
-            json_object = json.dumps(devices, indent=2)
-            self.line(f"{json_object}")
-        else:
-            for _, device in devices.items():
-                self.line(f"{device}")
+            service_properties = redis_client.hgetall(service_properties_key)
 
-    def handle(self) -> None:
-        asyncio.run(self.device_list())
+            if service_data:
+                service_name = service_data.get("name")
+                device.services[service_name] = {
+                    "ipv4": service_data.get("ipv4"),
+                    "name": service_data.get("name"),
+                    "port": int(service_data.get("port", 0)),
+                    "properties": {
+                        k: v
+                        for k, v in service_properties.items()
+                        if k not in ["ipv4", "name", "port"]
+                    },
+                    "server_name": server_name,
+                    "type": service_data.get("type"),
+                }
+
+                if (
+                    "id" in service_properties
+                    and service_data.get("type") == SERVICE_CMC
+                ):
+                    device.mac_address = service_properties["id"]
+
+        device.services = dict(sorted(device.services.items()))
+        devices[server_name] = device
+
+    return devices if devices else None
+
+
+async def device_list(
+    name: str | None = None,
+    host: str | None = None,
+    json: bool = False
+) -> None:
+    cached_devices = _get_devices_from_redis()
+
+    dante_browser = DanteBrowser(mdns_timeout=1.5)
+
+    devices = filter_devices(
+        cached_devices if cached_devices is not None else await dante_browser.get_devices(),
+        name,
+        host)
+
+    for _, device in devices.items():
+        await device.get_controls()
+
+    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+
+    if json:
+        json_object = json.dumps(devices, indent=2)
+        print(f"{json_object}")
+    else:
+        for _, device in devices.items():
+            print(f"{device}")
+

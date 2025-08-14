@@ -220,7 +220,7 @@ class DanteBrowser:
         await self.aio_browser.async_cancel()
         await self.aio_zc.async_close()
 
-    async def get_devices(self) -> None:
+    async def get_devices(self) -> dict[str, DanteDevice]:
         await self.get_services()
         await asyncio.gather(*self.services)
 

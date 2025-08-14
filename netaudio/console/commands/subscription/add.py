@@ -1,111 +1,98 @@
 import asyncio
 
-from cleo.commands.command import Command
-from cleo.helpers import option
-
 from netaudio.dante.browser import DanteBrowser
 
 
-from typing import Any, List
+from typing import Optional
 
+async def subscription_add(
+        rx_channel_name: Optional[str] = None,
+        rx_channel_number: Optional[int] = None,
+        rx_device_host: Optional[str] = None,
+        rx_device_name: Optional[str] = None,
+        tx_channel_name: Optional[str] = None,
+        tx_channel_number: Optional[int] = None,
+        tx_device_host: Optional[str] = None,
+        tx_device_name: Optional[str] = None
+) -> None:
+    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_devices = await dante_browser.get_devices()
 
-class SubscriptionAddCommand(Command):
-    name: str = "subscription add"
-    description: str = "Add a subscription"
+    for _, device in dante_devices.items():
+        await device.get_controls()
 
-    options: List[Any] = [
-        option("rx-channel-name", None, "Specify Rx channel by name", flag=False),
-        option("rx-channel-number", None, "Specify Rx channel by number", flag=False),
-        option("rx-device-host", None, "Specify Tx device by host", flag=False),
-        option("rx-device-name", None, "Specify Tx device by name", flag=False),
-        option("tx-channel-name", None, "Specify Tx channel by name", flag=False),
-        option("tx-channel-number", None, "Specify Tx channel by number", flag=False),
-        option("tx-device-host", None, "Specify Tx device by host", flag=False),
-        option("tx-device-name", None, "Specify Tx device by name", flag=False),
-    ]
+    rx_channel = None
+    rx_device = None
+    tx_channel = None
+    tx_device = None
 
-    async def subscription_add(self) -> None:
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        dante_devices = await dante_browser.get_devices()
-
-        for _, device in dante_devices.items():
-            await device.get_controls()
-
-        rx_channel = None
-        rx_device = None
-        tx_channel = None
-        tx_device = None
-
-        if self.option("tx-device-name"):
-            tx_device = next(
-                filter(
-                    lambda d: d[1].name == self.option("tx-device-name"),
-                    dante_devices.items(),
-                )
-            )[1]
-        elif self.option("tx-device-host"):
-            tx_device = next(
-                filter(
-                    lambda d: d[1].ipv4 == self.option("tx-device-host"),
-                    dante_devices.items(),
-                )
-            )[1]
-
-        if self.option("tx-channel-name"):
-            tx_channel = next(
-                filter(
-                    lambda c: self.option("tx-channel-name") == c[1].friendly_name
-                    or self.option("tx-channel-name") == c[1].name
-                    and not c[1].friendly_name,
-                    tx_device.tx_channels.items(),
-                )
-            )[1]
-        elif self.option("tx-channel-number"):
-            tx_channel = next(
-                filter(
-                    lambda c: c[1].number == self.option("tx-channel-number"),
-                    tx_device.tx_channels.items(),
-                )
-            )[1]
-
-        if self.option("rx-device-name"):
-            rx_device = next(
-                filter(
-                    lambda d: d[1].name == self.option("rx-device-name"),
-                    dante_devices.items(),
-                )
-            )[1]
-        elif self.option("rx-device-host"):
-            rx_device = next(
-                filter(
-                    lambda d: d[1].ipv4 == self.option("rx-device-host"),
-                    dante_devices.items(),
-                )
-            )[1]
-
-        if self.option("rx-channel-name"):
-            rx_channel = next(
-                filter(
-                    lambda c: c[1].name == self.option("rx-channel-name"),
-                    rx_device.rx_channels.items(),
-                )
-            )[1]
-        elif self.option("rx-channel-number"):
-            rx_channel = next(
-                filter(
-                    lambda c: c[1].number == self.option("rx-channel-number"),
-                    rx_device.rx_channels.items(),
-                )
-            )[1]
-
-        if rx_device and not tx_device:
-            tx_device = rx_device
-
-        if rx_channel and rx_device and tx_channel and tx_channel:
-            self.line(
-                f"{rx_channel.name}@{rx_device.name} <- {tx_channel.name}@{tx_device.name}"
+    if tx_device_name:
+        tx_device = next(
+            filter(
+                lambda d: d[1].name == tx_device_name,
+                dante_devices.items(),
             )
-            await rx_device.add_subscription(rx_channel, tx_channel, tx_device)
+        )[1]
+    elif tx_device_host:
+        tx_device = next(
+            filter(
+                lambda d: d[1].ipv4 == tx_device_host,
+                dante_devices.items(),
+            )
+        )[1]
 
-    def handle(self) -> None:
-        asyncio.run(self.subscription_add())
+    if tx_channel_name:
+        tx_channel = next(
+            filter(
+                lambda c: tx_channel_name == c[1].friendly_name
+                or tx_channel_name == c[1].name
+                and not c[1].friendly_name,
+                tx_device.tx_channels.items(),
+            )
+        )[1]
+    elif tx_channel_number:
+        tx_channel = next(
+            filter(
+                lambda c: c[1].number == tx_channel_number,
+                tx_device.tx_channels.items(),
+            )
+        )[1]
+
+    if rx_device_name:
+        rx_device = next(
+            filter(
+                lambda d: d[1].name == rx_device_name,
+                dante_devices.items(),
+            )
+        )[1]
+    elif rx_device_host:
+        rx_device = next(
+            filter(
+                lambda d: d[1].ipv4 == rx_device_host,
+                dante_devices.items(),
+            )
+        )[1]
+
+    if rx_channel_name:
+        rx_channel = next(
+            filter(
+                lambda c: c[1].name == rx_channel_name,
+                rx_device.rx_channels.items(),
+            )
+        )[1]
+    elif rx_channel_number:
+        rx_channel = next(
+            filter(
+                lambda c: c[1].number == rx_channel_number,
+                rx_device.rx_channels.items(),
+            )
+        )[1]
+
+    if rx_device and not tx_device:
+        tx_device = rx_device
+
+    if rx_channel and rx_device and tx_channel and tx_channel:
+        print(
+            f"{rx_channel.name}@{rx_device.name} <- {tx_channel.name}@{tx_device.name}"
+        )
+        await rx_device.add_subscription(rx_channel, tx_channel, tx_device)

@@ -16,12 +16,9 @@ from threading import Thread, Event
 
 from redis import Redis
 
-from cleo.commands.command import Command
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
-
-# from netaudio.utils import get_host_by_name
 
 from netaudio.dante.const import (
     DEFAULT_MULTICAST_METERING_PORT,
@@ -1319,10 +1316,7 @@ def multicast(group, port):
             traceback.print_exc()
 
 
-class ServerMdnsCommand(Command):
-    name = "server mdns"
-    description = "Run a daemon to monitor mDNS ports for changes to devices"
-
+class MDNSServer():
     def __init__(self):
         super().__init__()
         self.stop_event = Event()  # Stop event for signaling shutdown
@@ -1338,7 +1332,7 @@ class ServerMdnsCommand(Command):
         dante_browser = DanteBrowser(0, queue)
         dante_browser.sync_run()
 
-    async def server_mdns(self):
+    async def run(self):
         queue = Queue()
 
         if not redis_client:
@@ -1437,5 +1431,6 @@ class ServerMdnsCommand(Command):
                     break
                 traceback.print_exc()
 
-    def handle(self):
-        asyncio.run(self.server_mdns())
+def run_server(self):
+    server = MDNSServer()
+    asyncio.run(server.run())
