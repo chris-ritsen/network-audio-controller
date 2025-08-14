@@ -3,6 +3,17 @@ from cleo.commands.command import Command
 from netaudio import version
 
 from typing import Callable
+from os import name as os_name
+
+
+if os_name == "nt":
+    # Fix Windows issue, See: https://stackoverflow.com/q/58718659/
+    try:
+        from signal import signal, SIGPIPE, SIG_DFL
+
+        signal(SIGPIPE, SIG_DFL)
+    except ImportError:  # If SIGPIPE is not available (win32),
+        pass  # we don't have to do anything to ignore it.
 
 COMMANDS = [
     "config",
@@ -14,14 +25,6 @@ COMMANDS = [
     "subscription remove",
     "subscription list"
 ]
-
-# Fix Windows issue, See: https://stackoverflow.com/q/58718659/
-try:
-    from signal import signal, SIGPIPE, SIG_DFL
-
-    signal(SIGPIPE, SIG_DFL)
-except ImportError:  # If SIGPIPE is not available (win32),
-    pass  # we don't have to do anything to ignore it.
 
 
 def load_command(name: str) -> Callable[[], Command]:
