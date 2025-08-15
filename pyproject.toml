@@ -1,15 +1,17 @@
 [tool.poetry]
-authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
-classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-description = "Control Audinate Dante network audio devices without Dante Controller"
-documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
-include = ["CHANGELOG.md", "LICENSE"]
-keywords = ["audinate", "audio", "cli", "dante", "network"]
-license = "Unlicense"
 name = "netaudio"
-readme = "README.md"
-repository = "https://github.com/chris-ritsen/network-audio-controller"
 version = "0.1.0"
+description = "Lovely Spam! Wonderful Spam!"
+readme = "README.md"
+license = "Unlicense"
+keywords = ["audinate", "audio", "cli", "dante", "network"]
+classifiers = ["Topic :: Multimedia :: Sound/Audio"]
+documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
+repository = "https://github.com/chris-ritsen/network-audio-controller"
+authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
+maintainers = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
+include = ["CHANGELOG.md", "LICENSE"]
+
 
 [tool.poetry.dependencies]
 python = "^3.12"
