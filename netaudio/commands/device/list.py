@@ -3,7 +3,7 @@ import json
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from netaudio.console.json_encoder import dump_json_formatted
+from netaudio.commands.json_encoder import dump_json_formatted
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.dante.channel import DanteChannel

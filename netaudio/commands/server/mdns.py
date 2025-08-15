@@ -65,7 +65,7 @@ from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_NONE,
 )
 
-from netaudio.console.json_encoder import dump_json_formatted
+from netaudio.commands.json_encoder import dump_json_formatted
 
 
 logging.basicConfig(level=logging.INFO)

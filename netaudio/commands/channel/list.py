@@ -3,7 +3,7 @@ from termcolor import cprint
 from netaudio.dante.browser import DanteBrowser
 
 from typing import Any, Dict, Optional
-from netaudio.console.json_encoder import dump_json_formatted
+from netaudio.commands.json_encoder import dump_json_formatted
 
 def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False) -> None:
     if as_json:
