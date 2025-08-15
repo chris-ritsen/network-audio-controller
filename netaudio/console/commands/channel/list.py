@@ -4,7 +4,6 @@ import json
 from json import JSONEncoder
 
 from netaudio.dante.browser import DanteBrowser
-from netaudio.console.device_discovery import filter_devices
 
 from typing import Any, Dict, Optional
 
@@ -57,11 +56,15 @@ async def channel_list(name:Optional[str]=None,
 
     dante_browser = DanteBrowser(mdns_timeout=1.5)
 
-    devices = filter_devices(await dante_browser.get_devices(), name, host)
+    devices = await dante_browser.get_devices(
+        filter_name=name,
+        filter_host=host
+    )
+
+    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     for _, device in devices.items():
         await device.get_controls()
 
-    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     _print_channel_list(devices)

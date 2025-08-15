@@ -1,6 +1,7 @@
 import asyncio
 import json
 import traceback
+import ipaddress
 
 from json import JSONEncoder
 
@@ -20,8 +21,9 @@ from zeroconf.asyncio import (
     AsyncZeroconf,
 )
 
-from netaudio.dante.const import SERVICE_CMC, SERVICES
-from netaudio.dante.device import DanteDevice
+from netaudio.utils import get_host_by_name
+from .const import SERVICE_CMC, SERVICES
+from .device import DanteDevice
 
 
 def _default(self, obj):
@@ -220,7 +222,10 @@ class DanteBrowser:
         await self.aio_browser.async_cancel()
         await self.aio_zc.async_close()
 
-    async def get_devices(self) -> dict[str, DanteDevice]:
+    async def get_devices(self,
+                          filter_name: str | None = None,
+                          filter_host: str | None = None
+                          ) -> dict[str, DanteDevice]:
         await self.get_services()
         await asyncio.gather(*self.services)
 
@@ -277,7 +282,41 @@ class DanteBrowser:
 
             self.devices[hostname] = device
 
-        return self.devices
+        if filter_name:
+            return {
+                k: v for k, v in self.devices.items() if filter_name in k
+            }
+
+        elif filter_host:
+            possible_names = set([filter_host, filter_host + ".local.", filter_host + "."])
+
+            # If the 'filter_host' is a DNS hostname & it's detected as such
+            if possible_names.intersection(set(self.devices.keys())):
+                return dict(
+                    filter(
+                        lambda d: d[1].server_name in possible_names, self.devices.items()
+                    )
+                )
+            # else if it's an IP Address 
+            else:
+                ipv4: ipaddress.IPv4Address | None = None
+
+                # Check if if filter_host is an IP Address
+                try:
+                    ipv4 = ipaddress.ip_address(filter_host)
+                except ValueError:
+                    pass
+
+                    # Try to get the IPv4 address for the hostname manually
+                    try:
+                        ipv4 = get_host_by_name(filter_host)
+                    except TimeoutError:
+                        pass
+
+                return dict(filter(lambda d: d[1].ipv4 == ipv4, self.devices.items()))
+
+        else:
+            return self.devices
 
     async def get_services(self) -> None:
         try:

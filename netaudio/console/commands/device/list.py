@@ -13,8 +13,6 @@ from netaudio.dante.const import SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.subscription import DanteSubscription
 
-from netaudio.console.device_discovery import filter_devices
-
 from typing import Any, Dict, Optional
 
 
@@ -176,10 +174,10 @@ async def device_list(
 
     dante_browser = DanteBrowser(mdns_timeout=1.5)
 
-    devices = filter_devices(
-        cached_devices if cached_devices is not None else await dante_browser.get_devices(),
-        name,
-        host)
+    devices = cached_devices if cached_devices is not None else await dante_browser.get_devices(
+            filter_name=name,
+            filter_host=host
+        )
 
     for _, device in devices.items():
         await device.get_controls()

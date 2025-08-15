@@ -4,8 +4,6 @@ from json import JSONEncoder
 
 from netaudio.dante.browser import DanteBrowser
 
-from netaudio.console.device_discovery import filter_devices
-
 def _default(self, obj):
     return getattr(obj.__class__, "to_json", _default.default)(obj)
 
@@ -99,10 +97,10 @@ async def device_configure(
     """
     dante_browser = DanteBrowser(mdns_timeout=1.5)
 
-    devices = filter_devices(
-        await dante_browser.get_devices(),
-        name,
-        host)
+    devices = await dante_browser.get_devices(
+        filter_name=name,
+        filter_host=host
+    )
 
     for _, device in devices.items():
         await device.get_controls()
