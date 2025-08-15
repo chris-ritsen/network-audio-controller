@@ -18,7 +18,6 @@ if os_name == "nt":
 from netaudio.console.commands.device import DeviceCommands
 from netaudio.console.commands.channel import ChannelCommands
 from netaudio.console.commands.subscription import SubscriptionCommands
-from netaudio.console.commands.config import device_configure
 from netaudio.console.commands.server import ServerCommands
 
 class Application(object):
@@ -34,7 +33,6 @@ Version: {version(PACKAGE_NAME)}
 """
     
     device = DeviceCommands()
-    config = device_configure
     channel = ChannelCommands()
     subscription = SubscriptionCommands()
     server = ServerCommands()
