@@ -20,6 +20,7 @@ redis = "^6.4.0"
 fastapi = "^0.116.1"
 uvicorn = "^0.35.0"
 fire = "^0.7.0"
+termcolor = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"

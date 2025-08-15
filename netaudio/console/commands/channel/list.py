@@ -1,5 +1,5 @@
-import asyncio
 import json
+from termcolor import cprint
 
 from json import JSONEncoder
 
@@ -31,21 +31,21 @@ def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False
         print(f"{json_object}")
     else:
         for index, (_, device) in enumerate(devices.items()):
-            print(f"<info>{device.name}</info>")
+            cprint(device.name, attrs=["bold"])
             if device.tx_channels:
-                print("<info>tx channels</info>")
+                cprint("tx channels", "blue", attrs=["bold"])
 
             for _, channel in device.tx_channels.items():
-                print(f"{channel}")
+                print(f"\t{channel}")
 
             if device.rx_channels:
                 if device.tx_channels:
                     print("")
 
-                print("<info>rx channels</info>")
+                cprint("rx channels", "blue", attrs=["bold"])
 
             for _, channel in device.rx_channels.items():
-                print(f"{channel}")
+                print(f"\t{channel}")
 
             if index < len(devices) - 1:
                 print("")

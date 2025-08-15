@@ -29,6 +29,9 @@ Network Audio Controller
 
 Configure Dante devices on the network
 
+To get command arguments, run:
+  netaudio <command> --help
+
 Version: {version(PACKAGE_NAME)}
 """
     
