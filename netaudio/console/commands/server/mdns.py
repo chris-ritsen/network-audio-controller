@@ -65,16 +65,11 @@ from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_NONE,
 )
 
-
-def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
+from netaudio.console.json_encoder import dump_json_formatted
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
 
 sockets = {}
 redis_client = None
@@ -266,7 +261,7 @@ def cache_device_value_json(server_name, key, value):
         key=None,
         value=None,
         mapping={
-            key: json.dumps(value, indent=2),
+            key: dump_json_formatted(value),
         },
     )
 
@@ -669,7 +664,7 @@ def parse_dante_message(message):
     #     for key in parsed_dante_message.items():
     #         print(
     #             {
-    #                 key: json.dumps(parsed_dante_message, indent=2),
+    #                 key: dump_json_formatted(parsed_dante_message),
     #             }
     #         )
     #         redis_client.hset(
@@ -677,13 +672,13 @@ def parse_dante_message(message):
     #             key=None,
     #             value=None,
     #             mapping={
-    #                 key: json.dumps(parsed_dante_message[key], indent=2),
+    #                 key: dump_json_formatted(parsed_dante_message[key]),
     #             },
     #         )
 
     parsed_message["parsed_message"] = parsed_dante_message
-    parsed_message_redis_hash["parsed_message"] = json.dumps(
-        parsed_dante_message, indent=2
+    parsed_message_redis_hash["parsed_message"] = dump_json_formatted(
+        parsed_dante_message
     )
 
     if multicast_group:

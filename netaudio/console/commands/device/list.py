@@ -1,11 +1,9 @@
-import ipaddress
 import json
-import socket
-
-from json import JSONEncoder
 
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
+
+from netaudio.console.json_encoder import dump_json_formatted
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.dante.channel import DanteChannel
@@ -14,13 +12,6 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.subscription import DanteSubscription
 
 from typing import Any, Dict, Optional
-
-
-def _default(self: Any, obj: Any) -> Any:
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
 
 def _get_devices_from_redis() -> Optional[Dict[str, Any]]:
     redis_client = None
@@ -185,8 +176,7 @@ async def device_list(
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     if json:
-        json_object = json.dumps(devices, indent=2)
-        print(f"{json_object}")
+        print(dump_json_formatted(devices))
     else:
         for _, device in devices.items():
             print(f"{device}")

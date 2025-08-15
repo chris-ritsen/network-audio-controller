@@ -1,22 +1,12 @@
 import os
 
-from typing import Any
-from json import JSONEncoder
-
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
+from netaudio.console.json_encoder import dump_json_formatted
 
 # from netaudio.dante.cache import DanteCache
-
-
-def _default(self: Any, obj: Any) -> Any:
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
-
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
 
 async def subscription_list(
         json: bool = False
@@ -99,7 +89,7 @@ async def subscription_list(
             subscriptions.append(subscription)
 
     if json:
-        json_object = json.dumps(subscriptions, indent=2)
+        json_object = dump_json_formatted(subscriptions)
         print(f"{json_object}")
     else:
         for subscription in subscriptions:

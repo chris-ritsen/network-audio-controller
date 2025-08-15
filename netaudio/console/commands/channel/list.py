@@ -1,21 +1,9 @@
-import json
 from termcolor import cprint
-
-from json import JSONEncoder
 
 from netaudio.dante.browser import DanteBrowser
 
 from typing import Any, Dict, Optional
-
-
-def _default(self: Any, obj: Any) -> Any:
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
-
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
-
-
+from netaudio.console.json_encoder import dump_json_formatted
 
 def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False) -> None:
     if as_json:
@@ -27,8 +15,7 @@ def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False
                 "transmitters": device.tx_channels,
             }
 
-        json_object = json.dumps(channels, indent=2)
-        print(f"{json_object}")
+        print(dump_json_formatted(channels))
     else:
         for index, (_, device) in enumerate(devices.items()):
             cprint(device.name, attrs=["bold"])

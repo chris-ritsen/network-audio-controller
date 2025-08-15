@@ -1,9 +1,6 @@
 import asyncio
-import json
 import traceback
 import ipaddress
-
-from json import JSONEncoder
 
 from zeroconf import DNSService, DNSText
 
@@ -24,15 +21,6 @@ from zeroconf.asyncio import (
 from netaudio.utils import get_host_by_name
 from .const import SERVICE_CMC, SERVICES
 from .device import DanteDevice
-
-
-def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
-
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
-
 
 class DanteBrowser:
     def __init__(self, mdns_timeout, queue=None) -> None:
@@ -153,7 +141,8 @@ class DanteBrowser:
                     },
                 }
 
-                json_message = json.dumps(message, indent=2)
+                # TODO: this block of code doesn't make much sense
+                # json_message = dump_json_formatted(message)
             elif isinstance(record, DNSText):
                 pass
 

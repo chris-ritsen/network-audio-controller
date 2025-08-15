@@ -1,14 +1,6 @@
 from typing import Optional
 
-from json import JSONEncoder
-
 from netaudio.dante.browser import DanteBrowser
-
-def _default(self, obj):
-    return getattr(obj.__class__, "to_json", _default.default)(obj)
-
-_default.default = JSONEncoder().default
-JSONEncoder.default = _default
 
 options_channel_type = ["rx", "tx"]
 options_encoding = [16, 24, 32]
