@@ -5,8 +5,9 @@ from netaudio.dante.browser import DanteBrowser
 from typing import Any, Dict, Optional
 from netaudio.commands.json_encoder import dump_json_formatted
 from netaudio.commands.cli_utils import FireTyped
+from netaudio.dante.device import DanteDevice
 
-def _print_channel_list(devices: Dict[str, Any], as_json: bool = False) -> None:
+def _print_channel_list(devices: Dict[str, DanteDevice], as_json: bool = False) -> None:
     if as_json:
         channels: Dict[str, Any] = {}
 

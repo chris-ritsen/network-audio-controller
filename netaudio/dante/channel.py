@@ -1,13 +1,13 @@
 class DanteChannel:
     def __init__(self):
-        self._channel_type = None
-        self._device = None
-        self._friendly_name = None
-        self._name = None
-        self._number = None
-        self._status_code = None
-        self._status_text = None
-        self._volume = None
+        self._channel_type: str = None
+        # self._device: DanteDevice = None
+        self._friendly_name: str = None
+        self._name: str = None
+        self._number: int = None
+        self._status_code: int = None
+        self._status_text: str = None
+        self._volume: int = None
 
     def __str__(self):
         if self.friendly_name:
@@ -22,13 +22,13 @@ class DanteChannel:
 
         return text
 
-    @property
-    def device(self):
-        return self._device
+    # @property
+    # def device(self):
+    #     return self._device
 
-    @device.setter
-    def device(self, device):
-        self._device = device
+    # @device.setter
+    # def device(self, device):
+    #     self._device = device
 
     @property
     def number(self):

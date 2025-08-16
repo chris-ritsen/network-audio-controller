@@ -5,6 +5,8 @@ import random
 import socket
 import traceback
 
+from typing import Any, Dict, List
+
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.subscription import DanteSubscription
 
@@ -23,28 +25,28 @@ sockets = {}
 
 class DanteDevice:
     def __init__(self, server_name=""):
-        self._dante_model = ""
-        self._dante_model_id = ""
-        self._error = None
-        self._ipv4 = None
-        self._latency = None
-        self._mac_address = None
-        self._manufacturer = ""
-        self._model = ""
-        self._model_id = ""
-        self._name = ""
-        self._rx_channels = {}
-        self._rx_count = None
-        self._rx_count_raw = None
-        self._sample_rate = None
-        self._server_name = server_name
-        self._services = {}
-        self._sockets = {}
-        self._software = None
-        self._subscriptions = []
-        self._tx_channels = {}
-        self._tx_count = None
-        self._tx_count_raw = None
+        self._dante_model: str = ""
+        self._dante_model_id: str = ""
+        self._error: str = None
+        self._ipv4: ipaddress.IPv4Address = None
+        self._latency: float = None
+        self._mac_address: str = None
+        self._manufacturer: str = ""
+        self._model: str = ""
+        self._model_id: str = ""
+        self._name: str = ""
+        self._rx_channels: Dict[str, DanteChannel] = {}
+        self._rx_count: int = None
+        self._rx_count_raw: int = None
+        self._sample_rate: int = None
+        self._server_name: str = server_name
+        self._services: Dict[str, Any] = {}
+        self._sockets: Dict[int, socket.socket] = {}
+        self._software: str = None
+        self._subscriptions: List[DanteSubscription] = []
+        self._tx_channels: Dict[str, DanteChannel] = {}
+        self._tx_count: int = None
+        self._tx_count_raw: int = None
 
     def __str__(self):
         return f"{self.name}"
