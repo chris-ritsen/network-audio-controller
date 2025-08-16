@@ -1,3 +1,5 @@
+from ipaddress import IPv4Address
+
 from netaudio.dante.browser import DanteBrowser
 from netaudio.utils.cli import FireTyped
 
@@ -27,7 +29,7 @@ async def subscription_remove(
     elif rx_device_host:
         rx_device = next(
             filter(
-                lambda d: d[1].ipv4 == rx_device_host,
+                lambda d: d[1].ipv4 == IPv4Address(rx_device_host),
                 dante_devices.items(),
             )
         )[1]
