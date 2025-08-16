@@ -13,6 +13,7 @@ import logging
 # from json import JSONEncoder
 from queue import Queue
 from threading import Thread, Event
+from typing import List
 
 # from redis import Redis
 # from redis.exceptions import ConnectionError as RedisConnectionError

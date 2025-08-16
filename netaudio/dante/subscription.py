@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import List
 
 from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_LABELS,
@@ -11,7 +12,7 @@ class DanteSubscription(BaseModel):
     rx_device: str | None = None
     rx_device_name: str | None = None
     status_code: int | None = None # From rx channel
-    status_message: list[str] = []
+    status_message: List[str] = []
     tx_channel: str | None = None
     tx_channel_name: str | None = None
     tx_device: str | None = None

@@ -10,6 +10,7 @@ from zeroconf import (
     ServiceBrowser,
     ServiceInfo,
     Zeroconf,
+    InterfaceChoice
 )
 
 from zeroconf.asyncio import (
@@ -17,6 +18,7 @@ from zeroconf.asyncio import (
     AsyncServiceInfo,
     AsyncZeroconf,
 )
+from typing import List
 
 from netaudio.utils import get_host_by_name
 from .const import SERVICE_CMC, SERVICES
@@ -107,8 +109,11 @@ class DanteBrowser:
             )
         )
 
-    async def async_run(self) -> None:
-        self.aio_zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+    async def async_run(self, interfaces:List[str]) -> None:
+        self.aio_zc = AsyncZeroconf(
+            ip_version=IPVersion.V4Only,
+            interfaces=interfaces
+        )
         services = SERVICES
 
         self.aio_browser = AsyncServiceBrowser(
@@ -129,9 +134,14 @@ class DanteBrowser:
 
     async def get_devices(self,
                           filter_name: str | None = None,
-                          filter_host: str | None = None
+                          filter_host: str | None = None,
+                          interfaces: List[str] | None = None
                           ) -> dict[str, DanteDevice]:
-        await self.get_services()
+        try:
+            await self.async_run(interfaces if interfaces else InterfaceChoice.All)
+        except KeyboardInterrupt:
+            await self.async_close()
+
         await asyncio.gather(*self.services)
 
         device_hosts = {}
@@ -228,12 +238,6 @@ class DanteBrowser:
 
         else:
             return self.devices
-
-    async def get_services(self) -> None:
-        try:
-            await self.async_run()
-        except KeyboardInterrupt:
-            await self.async_close()
 
     async def async_parse_netaudio_service(
         self, zeroconf: Zeroconf, service_type: str, name: str

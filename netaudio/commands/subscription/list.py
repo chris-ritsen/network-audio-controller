@@ -1,10 +1,12 @@
 from netaudio.dante.browser import DanteBrowser
 from netaudio.utils.json_encoder import dump_json_formatted
 from netaudio.utils.cli import FireTyped
+from typing import List
 
 @FireTyped
 async def subscription_list(
-        json: bool = False
+        json: bool = False,
+        interfaces: List[str] = None
 ) -> None:
     """
     List all subscriptions.
@@ -12,7 +14,7 @@ async def subscription_list(
     subscriptions = []
 
     dante_browser = DanteBrowser(mdns_timeout=1.5)
-    devices = await dante_browser.get_devices()
+    devices = await dante_browser.get_devices(interfaces=interfaces)
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     for _, device in devices.items():

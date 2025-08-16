@@ -1,3 +1,5 @@
+from typing import List
+
 from netaudio.utils.json_encoder import dump_json_formatted
 from netaudio.utils.cli import FireTyped
 
@@ -7,6 +9,7 @@ from netaudio.dante.browser import DanteBrowser
 async def device_list(
     name: str | None = None,
     host: str | None = None,
+    interfaces: List[str] = None,
     json: bool = False
 ) -> None:
     cached_devices = None #_get_devices_from_redis()
@@ -15,7 +18,8 @@ async def device_list(
 
     devices = cached_devices if cached_devices is not None else await dante_browser.get_devices(
             filter_name=name,
-            filter_host=host
+            filter_host=host,
+            interfaces=interfaces
         )
 
     for _, device in devices.items():

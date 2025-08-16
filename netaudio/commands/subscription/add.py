@@ -1,10 +1,12 @@
 from ipaddress import IPv4Address
+from typing import List
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.utils.cli import FireTyped
 
 @FireTyped
 async def subscription_add(
+        interfaces: List[str] = None,
         rx_channel_name: str = None,
         rx_channel_number: int = None,
         rx_device_host: str = None,
@@ -16,7 +18,7 @@ async def subscription_add(
         tx_device_name: str = None
 ) -> None:
     dante_browser = DanteBrowser(mdns_timeout=1.5)
-    dante_devices = await dante_browser.get_devices()
+    dante_devices = await dante_browser.get_devices(interfaces=interfaces)
 
     for _, device in dante_devices.items():
         await device.begin()

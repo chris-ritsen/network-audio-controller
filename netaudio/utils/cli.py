@@ -4,7 +4,7 @@ from enum import Enum
 from termcolor import cprint
 from fire.decorators import SetParseFns
 # from fire.value_types import VALUE_TYPES
-from typing import Any, Type, Callable, Annotated
+from typing import Any, Type, Callable, Annotated, List, get_origin
 
 def FireTyped(func:Callable):
     """
@@ -34,9 +34,16 @@ def FireTyped(func:Callable):
                 except KeyError:
                     raise ValueError(f"Invalid Enum key name: {value}")
 
+            # If it's a list, parse as list
+            elif get_origin(annotation) is list:
+                if value[0] == "[" and value[-1] == "]":
+                    value = value[1:-1]  # Remove brackets
+                list_items = value.split(",") if isinstance(value, str) else value
+                return [parse_arg(item, type(item)) for item in list_items]
             elif isinstance(annotation, type):
                 return annotation(value)
             else:
+                print('exitig')
                 return value
 
         except ValueError as e:

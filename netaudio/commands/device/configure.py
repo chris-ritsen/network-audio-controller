@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import List
 
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.browser import DanteBrowser
@@ -72,6 +73,7 @@ async def device_configure(
         # Device filtering:
         name:str = None,
         host:str = None,
+        interfaces:List[str] = None,
 
         # Configuration options:
         channel_number: int = None,
@@ -96,7 +98,8 @@ async def device_configure(
 
     devices = await dante_browser.get_devices(
         filter_name=name,
-        filter_host=host
+        filter_host=host,
+        interfaces=interfaces
     )
 
     for _, device in devices.items():

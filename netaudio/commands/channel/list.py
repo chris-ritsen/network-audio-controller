@@ -2,7 +2,7 @@ from termcolor import cprint
 
 from netaudio.dante.browser import DanteBrowser
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 from netaudio.utils.json_encoder import dump_json_formatted
 from netaudio.utils.cli import FireTyped
 from netaudio.dante.device import DanteDevice
@@ -42,13 +42,15 @@ def _print_channel_list(devices: Dict[str, DanteDevice], as_json: bool = False) 
 @FireTyped
 async def channel_list(name:str=None,
                         host:str=None,
+                        interfaces:List[str] = None,
                         json:bool=False) -> None:
 
     dante_browser = DanteBrowser(mdns_timeout=1.5)
 
     devices = await dante_browser.get_devices(
         filter_name=name,
-        filter_host=host
+        filter_host=host,
+        interfaces=interfaces
     )
 
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
