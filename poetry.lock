@@ -427,23 +427,6 @@ pygments = ">=2.7.2"
 dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "requests", "setuptools", "xmlschema"]
 
 [[package]]
-name = "redis"
-version = "6.4.0"
-description = "Python client for Redis database and key-value store"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "redis-6.4.0-py3-none-any.whl", hash = "sha256:f0544fa9604264e9464cdf4814e7d4830f74b165d52f2a330a760a88dd248b7f"},
-    {file = "redis-6.4.0.tar.gz", hash = "sha256:b01bc7282b8444e28ec36b261df5375183bb47a07eb9c603f284e89cbc5ef010"},
-]
-
-[package.extras]
-hiredis = ["hiredis (>=3.2.0)"]
-jwt = ["pyjwt (>=2.9.0)"]
-ocsp = ["cryptography (>=36.0.1)", "pyopenssl (>=20.0.1)", "requests (>=2.31.0)"]
-
-[[package]]
 name = "ruff"
 version = "0.12.9"
 description = "An extremely fast Python linter and code formatter, written in Rust."
@@ -784,4 +767,4 @@ testing = ["coverage[toml]", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "120d24f580cec9923a8d0d1eb9fca11b92072160f91234b8cdb6b6149fbfa936"
+content-hash = "d4b6d3f1ad8d639f11915fa4f92f312cecad772b6c69526ac7fe19c549ce1e20"
