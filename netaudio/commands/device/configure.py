@@ -1,13 +1,47 @@
-from typing import Optional
+from enum import Enum
 
+from netaudio.dante.device import DanteDevice
 from netaudio.dante.browser import DanteBrowser
+from netaudio.commands.cli_utils import FireTyped
 
-options_channel_type = ["rx", "tx"]
-options_encoding = [16, 24, 32]
-options_rate = [44100, 48000, 88200, 96000, 176400, 192000]
-options_gain_level = list(range(1, 6))
+class ChannelType(str, Enum):
+    RX = "rx"
+    TX = "tx"
 
-async def set_gain_level_func(device, channel_number, gain_level):
+class Encoding(int, Enum):
+    PCM_16 = 16
+    PCM_24 = 24
+    PCM_32 = 32
+
+    # Accept initializing enum from string
+    @classmethod
+    def from_string(cls, value: str) -> "Encoding":
+        try:
+            return cls(int(value))
+        except KeyError:
+            raise ValueError(f"Invalid Encoding value: {value}")
+
+class SampleRate(int, Enum):
+    SR_44100 = 44100
+    SR_48000 = 48000
+    SR_88200 = 88200
+    SR_96000 = 96000
+    SR_176400 = 176400
+    SR_192000 = 192000
+
+class GainLevel(int, Enum):
+    LEVEL_1 = 1
+    LEVEL_2 = 2
+    LEVEL_3 = 3
+    LEVEL_4 = 4
+    LEVEL_5 = 5
+
+options_channel_type = [ChannelType.RX, ChannelType.TX]
+options_encoding = [Encoding.PCM_16, Encoding.PCM_24, Encoding.PCM_32]
+options_rate = [SampleRate.SR_44100, SampleRate.SR_48000, SampleRate.SR_88200, SampleRate.SR_96000, SampleRate.SR_176400, SampleRate.SR_192000]
+options_gain_level = [GainLevel.LEVEL_1, GainLevel.LEVEL_2, GainLevel.LEVEL_3, GainLevel.LEVEL_4, GainLevel.LEVEL_5]
+
+async def set_gain_level_func(device:DanteDevice, channel_number:str, gain_level:GainLevel):
     device_type = None
     label = None
 
@@ -51,10 +85,6 @@ async def set_gain_level_func(device, channel_number, gain_level):
             print("Invalid channel number")
             return
 
-    if gain_level not in options_gain_level:
-        print("Invalid value for gain level")
-        return
-
     if device_type:
         print(
             f"Setting gain level of {device.name} {device.ipv4} to {label[gain_level]} on channel {channel_number}"
@@ -63,26 +93,27 @@ async def set_gain_level_func(device, channel_number, gain_level):
     else:
         print("This device does not support gain control")
 
-
+@FireTyped
 async def device_configure(
         # Device filtering:
-        name:Optional[str] = None,
-        host:Optional[str] = None,
+        name:str = None,
+        host:str = None,
 
         # Configuration options:
-        channel_number: Optional[int] = None,
-        channel_type: Optional[str] = None,
-        reset_channel_name: Optional[bool] = None,
-        reset_device_name: Optional[bool] = None,
-        identify: Optional[bool] = None,
-        set_channel_name: Optional[str] = None,
-        set_device_name: Optional[str] = None,
-        set_encoding: Optional[int] = None,
-        set_gain_level: Optional[int] = None,
-        set_latency: Optional[int] = None,
-        set_sample_rate: Optional[int] = None,
-        aes67_enable: Optional[bool] = None,
-        aes67_disable: Optional[bool] = None
+        channel_number: int = None,
+        channel_type: ChannelType = None,
+        reset_channel_name: bool = None,
+        reset_device_name: bool = None,
+
+        identify: bool = None,
+        set_channel_name: str = None,
+        set_device_name: str = None,
+        set_encoding: Encoding = None,
+        set_gain_level: GainLevel = None,
+        set_latency: int = None,
+        set_sample_rate: SampleRate = None,
+        aes67_enable: bool = None,
+        aes67_disable: bool = None
 ):
     """
     Configure a device's parameters
@@ -165,24 +196,18 @@ async def device_configure(
 
     if set_sample_rate:
         sample_rate = int(set_sample_rate)
-        if sample_rate in options_rate:
-            print(
-                f"Setting sample rate of {device.name} {device.ipv4} to {sample_rate}"
-            )
-            await device.set_sample_rate(sample_rate)
-        else:
-            print("Invalid sample rate")
+        print(
+            f"Setting sample rate of {device.name} {device.ipv4} to {sample_rate}"
+        )
+        await device.set_sample_rate(sample_rate)
 
     if set_encoding:
         encoding = int(set_encoding)
 
-        if encoding in options_encoding:
-            print(
-                f"Setting encoding of {device.name} {device.ipv4} to {encoding}"
-            )
-            await device.set_encoding(encoding)
-        else:
-            print("Invalid encoding")
+        print(
+            f"Setting encoding of {device.name} {device.ipv4} to {encoding}"
+        )
+        await device.set_encoding(encoding)
 
     if set_gain_level:
         await set_gain_level_func(

@@ -66,7 +66,7 @@ from netaudio.dante.const import (
 )
 
 from netaudio.commands.json_encoder import dump_json_formatted
-
+from netaudio.commands.cli_utils import FireTyped
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1426,6 +1426,7 @@ class MDNSServer():
                     break
                 traceback.print_exc()
 
+@FireTyped
 def run_server(self):
     server = MDNSServer()
     asyncio.run(server.run())

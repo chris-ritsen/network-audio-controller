@@ -4,8 +4,9 @@ from netaudio.dante.browser import DanteBrowser
 
 from typing import Any, Dict, Optional
 from netaudio.commands.json_encoder import dump_json_formatted
+from netaudio.commands.cli_utils import FireTyped
 
-def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False) -> None:
+def _print_channel_list(devices: Dict[str, Any], as_json: bool = False) -> None:
     if as_json:
         channels: Dict[str, Any] = {}
 
@@ -37,9 +38,10 @@ def _print_channel_list(devices: Dict[str, Any], as_json: Optional[bool] = False
             if index < len(devices) - 1:
                 print("")
 
-async def channel_list(name:Optional[str]=None,
-                        host:Optional[str]=None,
-                        json:Optional[bool]=False) -> None:
+@FireTyped
+async def channel_list(name:str=None,
+                        host:str=None,
+                        json:bool=False) -> None:
 
     dante_browser = DanteBrowser(mdns_timeout=1.5)
 

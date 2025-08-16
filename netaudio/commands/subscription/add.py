@@ -1,19 +1,17 @@
-import asyncio
-
 from netaudio.dante.browser import DanteBrowser
+from netaudio.commands.cli_utils import FireTyped
 
-
-from typing import Optional
-
+@FireTyped
 async def subscription_add(
-        rx_channel_name: Optional[str] = None,
-        rx_channel_number: Optional[int] = None,
-        rx_device_host: Optional[str] = None,
-        rx_device_name: Optional[str] = None,
-        tx_channel_name: Optional[str] = None,
-        tx_channel_number: Optional[int] = None,
-        tx_device_host: Optional[str] = None,
-        tx_device_name: Optional[str] = None
+        rx_channel_name: str = None,
+        rx_channel_number: int = None,
+        rx_device_host: str = None,
+        rx_device_name: str = None,
+
+        tx_channel_name: str = None,
+        tx_channel_number: int = None,
+        tx_device_host: str = None,
+        tx_device_name: str = None
 ) -> None:
     dante_browser = DanteBrowser(mdns_timeout=1.5)
     dante_devices = await dante_browser.get_devices()

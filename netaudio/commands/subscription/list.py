@@ -5,9 +5,9 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.commands.json_encoder import dump_json_formatted
+from netaudio.commands.cli_utils import FireTyped
 
-# from netaudio.dante.cache import DanteCache
-
+@FireTyped
 async def subscription_list(
         json: bool = False
 ) -> None:

@@ -4,6 +4,7 @@ from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.commands.json_encoder import dump_json_formatted
+from netaudio.commands.cli_utils import FireTyped
 
 from netaudio.dante.browser import DanteBrowser
 from netaudio.dante.channel import DanteChannel
@@ -155,7 +156,7 @@ def _get_devices_from_redis() -> Optional[Dict[str, Any]]:
 
     return devices if devices else None
 
-
+@FireTyped
 async def device_list(
     name: str | None = None,
     host: str | None = None,

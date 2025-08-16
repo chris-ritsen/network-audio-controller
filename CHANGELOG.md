@@ -1,4 +1,4 @@
-## 0.0.10 (2022-02-24)
-### Fix
+## 0.1.0 (2025-08-15)
+### Refactor CLI
 
-- Handled PipeError, such as when piping to head, for example.
+- Move CLI to fire. Simplify command definition, mostly backend.
