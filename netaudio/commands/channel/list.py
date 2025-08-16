@@ -43,9 +43,10 @@ def _print_channel_list(devices: Dict[str, DanteDevice], as_json: bool = False) 
 async def channel_list(name:str=None,
                         host:str=None,
                         interfaces:List[str] = None,
+                        mdns_timeout:float=1.5,
                         json:bool=False) -> None:
 
-    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
 
     devices = await dante_browser.get_devices(
         filter_name=name,

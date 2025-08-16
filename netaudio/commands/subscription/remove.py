@@ -7,13 +7,14 @@ from netaudio.utils.cli import FireTyped
 @FireTyped
 async def subscription_remove(
     interfaces: List[str] = None,
+    mdns_timeout: float = 1.5,
 
     rx_channel_name: str = None,
     rx_channel_number: int = None,
     rx_device_host: str = None,
     rx_device_name: str = None,
 ) -> None:
-    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
     dante_devices = await dante_browser.get_devices(interfaces=interfaces)
 
     for _, device in dante_devices.items():

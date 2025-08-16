@@ -6,14 +6,15 @@ from typing import List
 @FireTyped
 async def subscription_list(
         json: bool = False,
-        interfaces: List[str] = None
+        interfaces: List[str] = None,
+        mdns_timeout: float = 1.5
 ) -> None:
     """
     List all subscriptions.
     """
     subscriptions = []
 
-    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
     devices = await dante_browser.get_devices(interfaces=interfaces)
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 

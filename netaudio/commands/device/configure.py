@@ -74,6 +74,7 @@ async def device_configure(
         name:str = None,
         host:str = None,
         interfaces:List[str] = None,
+        mdns_timeout:float=1.5,
 
         # Configuration options:
         channel_number: int = None,
@@ -94,7 +95,7 @@ async def device_configure(
     """
     Configure a device's parameters
     """
-    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
 
     devices = await dante_browser.get_devices(
         filter_name=name,

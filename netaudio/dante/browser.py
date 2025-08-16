@@ -25,13 +25,14 @@ from .const import SERVICE_CMC, SERVICES
 from .device import DanteDevice
 
 class DanteBrowser:
-    def __init__(self, mdns_timeout) -> None:
-        self._mdns_timeout: float = mdns_timeout
-        self.aio_browser: AsyncServiceBrowser = None
-        self.aio_zc: AsyncZeroconf = None
+    _mdns_timeout: float
+    aio_browser: AsyncServiceBrowser = None
+    aio_zc: AsyncZeroconf = None
+    devices:dict[str, DanteDevice] = {}
+    services: List[asyncio.Future] = []
 
-        self.devices:dict[str, DanteDevice] = {}
-        self.services = []
+    def __init__(self, mdns_timeout:float) -> None:
+        self._mdns_timeout = mdns_timeout
 
     @property
     def mdns_timeout(self):
