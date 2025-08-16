@@ -23,80 +23,20 @@ from .const import SERVICE_CMC, SERVICES
 from .device import DanteDevice
 
 class DanteBrowser:
-    def __init__(self, mdns_timeout, queue=None) -> None:
-        self._devices = {}
-        self.services = []
-        self.queue = queue
+    def __init__(self, mdns_timeout) -> None:
         self._mdns_timeout: float = mdns_timeout
         self.aio_browser: AsyncServiceBrowser = None
         self.aio_zc: AsyncZeroconf = None
+
+        self.devices:dict[str, DanteDevice] = {}
+        self.services = []
 
     @property
     def mdns_timeout(self):
         return self._mdns_timeout
 
-    @mdns_timeout.setter
-    def mdns_timeout(self, mdns_timeout):
-        self._mdns_timeout = mdns_timeout
-
-    @property
-    def devices(self):
-        return self._devices
-
-    @devices.setter
-    def devices(self, devices):
-        self._devices = devices
-
-    def sync_parse_state_change(self, zeroconf, service_type, name, state_change):
-        info = ServiceInfo(service_type, name)
-
-        if state_change != ServiceStateChange.Removed:
-            info_success = info.request(zeroconf, 3000)
-
-            if not info_success:
-                return
-
-        service_properties = {}
-
-        for key, value in info.properties.items():
-            key = key.decode("utf-8")
-
-            if isinstance(value, bytes):
-                value = value.decode("utf-8")
-
-            service_properties[key] = value
-
-        records = zeroconf.cache.entries_with_name(name)
-        addresses = info.parsed_addresses()
-
-        if not addresses:
-            return
-
-        for record in records:
-            if isinstance(record, DNSService):
-                ipv4 = addresses[0]
-
-                message = {
-                    "service": {
-                        "ipv4": ipv4,
-                        "name": name,
-                        "port": info.port,
-                        "properties": service_properties,
-                        "server_name": record.server,
-                        "type": service_type,
-                    },
-                    "state_change": {
-                        "name": state_change.name,
-                        "value": state_change.value,
-                    },
-                }
-
-                self.queue.put(message)
-            elif isinstance(record, DNSText):
-                pass
-
     async def async_parse_state_change(
-        self, zeroconf, service_type, name, state_change
+        self, zeroconf:Zeroconf, service_type:str, name:str, state_change:ServiceStateChange
     ):
         info = AsyncServiceInfo(service_type, name)
 
@@ -166,30 +106,6 @@ class DanteBrowser:
                 self.async_parse_netaudio_service(zeroconf, service_type, name)
             )
         )
-
-    def sync_on_service_state_change(
-        self,
-        zeroconf: Zeroconf,
-        service_type: str,
-        name: str,
-        state_change: ServiceStateChange,
-    ) -> None:
-        if service_type == "_netaudio-chan._udp.local.":
-            return
-
-        self.sync_parse_state_change(zeroconf, service_type, name, state_change)
-
-    def sync_run(self):
-        zc = Zeroconf(ip_version=IPVersion.V4Only)
-        services = SERVICES
-
-        browser = ServiceBrowser(
-            zc,
-            services,
-            handlers=[self.sync_on_service_state_change],
-        )
-
-        browser.run()
 
     async def async_run(self) -> None:
         self.aio_zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
