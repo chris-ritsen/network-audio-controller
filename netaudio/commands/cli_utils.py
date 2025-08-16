@@ -45,7 +45,7 @@ def FireTyped(func:Callable):
             cprint(e, "red")
 
             if isinstance(annotation, type) and issubclass(annotation, Enum):
-                cprint(f"Valid options:", "yellow")
+                cprint("Valid options:", "yellow")
                 for option in annotation:
                     cprint(f"  {option.name}: {option.value}", "yellow")
 

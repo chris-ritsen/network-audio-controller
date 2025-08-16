@@ -2,7 +2,7 @@ from termcolor import cprint
 
 from netaudio.dante.browser import DanteBrowser
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from netaudio.commands.json_encoder import dump_json_formatted
 from netaudio.commands.cli_utils import FireTyped
 from netaudio.dante.device import DanteDevice
