@@ -48,4 +48,7 @@ async def subscription_remove(
         )[1]
 
     if rx_channel and rx_device:
+        print(f"Removing subscription from {rx_device.name} - {rx_channel.name}")
         await rx_device.remove_subscription(rx_channel)
+    else:
+        print("No matching RX channel or device found.")
