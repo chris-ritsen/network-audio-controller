@@ -28,7 +28,7 @@ async def device_list():
     devices = await dante_browser.get_devices()
 
     for _, device in devices.items():
-        await device.get_controls()
+        await device.begin()
 
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
     return devices
@@ -63,7 +63,7 @@ async def subscribe_device(
     dante_devices = await dante_browser.get_devices()
 
     for _, device in dante_devices.items():
-        await device.get_controls()
+        await device.begin()
 
     rx_channel = None
     rx_device = None

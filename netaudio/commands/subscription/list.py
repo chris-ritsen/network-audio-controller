@@ -16,7 +16,7 @@ async def subscription_list(
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     for _, device in devices.items():
-        await device.get_controls()
+        await device.begin()
 
     #  rx_channel = None
     #  rx_device = None

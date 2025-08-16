@@ -19,12 +19,14 @@ async def device_list(
         )
 
     for _, device in devices.items():
-        await device.get_controls()
+        await device.begin()
 
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     if json:
-        print(dump_json_formatted(devices))
+        print(dump_json_formatted([
+            device.model_dump(mode='json') for device in devices.values()
+        ]))
     else:
         for _, device in devices.items():
             print(device)

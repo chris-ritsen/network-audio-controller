@@ -152,38 +152,44 @@ class DanteBrowser:
             device_hosts[server_name][service["name"]] = service
 
         for hostname, device_services in device_hosts.items():
-            device = DanteDevice(server_name=hostname)
+            for service_name, service in device_services.items():
+                # TODO: better approach of getting service IP
+                device = DanteDevice(
+                    hostname=hostname,
+                    ipv4=ipaddress.IPv4Address(service["ipv4"])
+                )
+                continue
 
-            try:
-                for service_name, service in device_services.items():
-                    device.services[service_name] = service
+            # try:
+            #     for service_name, service in device_services.items():
+            #         device.services[service_name] = service
 
-                    service_properties = service["properties"]
+            #         service_properties = service["properties"]
 
-                    if not device.ipv4:
-                        device.ipv4 = service["ipv4"]
+            #         if not device.ipv4:
+            #             device.ipv4 = service["ipv4"]
 
-                    if "id" in service_properties and service["type"] == SERVICE_CMC:
-                        device.mac_address = service_properties["id"]
+            #         if "id" in service_properties and service["type"] == SERVICE_CMC:
+            #             device.mac_address = service_properties["id"]
 
-                    if "model" in service_properties:
-                        device.model_id = service_properties["model"]
+            #         if "model" in service_properties:
+            #             device.model_id = service_properties["model"]
 
-                    if "rate" in service_properties:
-                        device.sample_rate = int(service_properties["rate"])
+            #         if "rate" in service_properties:
+            #             device.sample_rate = int(service_properties["rate"])
 
-                    if (
-                        "router_info" in service_properties
-                        and service_properties["router_info"] == '"Dante Via"'
-                    ):
-                        device.software = "Dante Via"
+            #         if (
+            #             "router_info" in service_properties
+            #             and service_properties["router_info"] == '"Dante Via"'
+            #         ):
+            #             device.software = "Dante Via"
 
-                    if "latency_ns" in service_properties:
-                        device.latency = int(service_properties["latency_ns"])
+            #         if "latency_ns" in service_properties:
+            #             device.latency = int(service_properties["latency_ns"])
 
-                device.services = dict(sorted(device.services.items()))
-            except Exception:
-                traceback.print_exc()
+            #     device.services = dict(sorted(device.services.items()))
+            # except Exception:
+            #     traceback.print_exc()
 
             self.devices[hostname] = device
 

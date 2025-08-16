@@ -14,9 +14,8 @@ import logging
 from queue import Queue
 from threading import Thread, Event
 
-from redis import Redis
-
-from redis.exceptions import ConnectionError as RedisConnectionError
+# from redis import Redis
+# from redis.exceptions import ConnectionError as RedisConnectionError
 
 from netaudio.dante.browser import DanteBrowser
 

@@ -17,7 +17,7 @@ async def subscription_add(
     dante_devices = await dante_browser.get_devices()
 
     for _, device in dante_devices.items():
-        await device.get_controls()
+        await device.begin()
 
     rx_channel = None
     rx_device = None

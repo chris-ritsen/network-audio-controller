@@ -54,7 +54,7 @@ async def channel_list(name:str=None,
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     for _, device in devices.items():
-        await device.get_controls()
+        await device.begin()
 
 
     _print_channel_list(devices)

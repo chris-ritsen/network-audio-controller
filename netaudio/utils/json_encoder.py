@@ -4,7 +4,7 @@ from typing import Any
 
 class ToJsonEncoder(JSONEncoder):
     def default(self, obj):
-        return getattr(obj.__class__, "to_json", super().default)(obj)
+        return getattr(obj.__class__, "json", super().default)(obj)
 
 def dump_json_formatted(obj: Any) -> str:
     return json.dumps(obj, indent=2, cls=ToJsonEncoder)

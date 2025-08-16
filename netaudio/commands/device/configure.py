@@ -3,31 +3,8 @@ from enum import Enum
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.browser import DanteBrowser
 from netaudio.utils.cli import FireTyped
-
-class ChannelType(str, Enum):
-    RX = "rx"
-    TX = "tx"
-
-class Encoding(int, Enum):
-    PCM_16 = 16
-    PCM_24 = 24
-    PCM_32 = 32
-
-    # Accept initializing enum from string
-    @classmethod
-    def from_string(cls, value: str) -> "Encoding":
-        try:
-            return cls(int(value))
-        except KeyError:
-            raise ValueError(f"Invalid Encoding value: {value}")
-
-class SampleRate(int, Enum):
-    SR_44100 = 44100
-    SR_48000 = 48000
-    SR_88200 = 88200
-    SR_96000 = 96000
-    SR_176400 = 176400
-    SR_192000 = 192000
+from netaudio.dante.channel import ChannelType
+from netaudio.dante.protocols import Encoding, SampleRate
 
 class GainLevel(int, Enum):
     LEVEL_1 = 1
@@ -36,12 +13,9 @@ class GainLevel(int, Enum):
     LEVEL_4 = 4
     LEVEL_5 = 5
 
-options_channel_type = [ChannelType.RX, ChannelType.TX]
-options_encoding = [Encoding.PCM_16, Encoding.PCM_24, Encoding.PCM_32]
-options_rate = [SampleRate.SR_44100, SampleRate.SR_48000, SampleRate.SR_88200, SampleRate.SR_96000, SampleRate.SR_176400, SampleRate.SR_192000]
-options_gain_level = [GainLevel.LEVEL_1, GainLevel.LEVEL_2, GainLevel.LEVEL_3, GainLevel.LEVEL_4, GainLevel.LEVEL_5]
-
 async def set_gain_level_func(device:DanteDevice, channel_number:str, gain_level:GainLevel):
+    raise NotImplementedError("This function is not ported yet")
+
     device_type = None
     label = None
 
@@ -126,12 +100,13 @@ async def device_configure(
     )
 
     for _, device in devices.items():
-        await device.get_controls()
+        await device.begin()
 
     devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
     try:
         device = list(devices.values()).pop()
+        print(f"Chose device {device.name} out of {len(devices)} devices")
     except IndexError:
         print("Device not found")
         return
@@ -141,13 +116,11 @@ async def device_configure(
             channel_number = int(channel_number)
         else:
             print("Must specify a channel number")
+            return
 
-        if channel_type and channel_type in options_channel_type:
-            pass
-        elif channel_type:
-            print("Invalid channel type")
-        else:
+        if not channel_type:
             print("Must specify a channel type")
+            return
 
         if channel_number and channel_type:
             if reset_channel_name:
@@ -156,17 +129,15 @@ async def device_configure(
                 )
                 await device.reset_channel_name(channel_type, channel_number)
             elif set_channel_name:
-                new_channel_name = set_channel_name
-
-                if len(new_channel_name) > 31:
+                if len(set_channel_name) > 31:
                     print("New channel name will be truncated")
-                    new_channel_name = new_channel_name[:31]
+                    set_channel_name = set_channel_name[:31]
 
                 print(
-                    f"Setting name of {channel_type} channel {channel_number} for {device.name} {device.ipv4} to {new_channel_name}"
+                    f"Setting name of {channel_type} channel {channel_number} for {device.name} {device.ipv4} to {set_channel_name}"
                 )
                 await device.set_channel_name(
-                    channel_type, channel_number, new_channel_name
+                    channel_type, channel_number, set_channel_name
                 )
 
     if reset_device_name:
@@ -178,46 +149,52 @@ async def device_configure(
         await device.identify()
 
     if set_device_name:
-        new_device_name = set_device_name
-
-        if len(new_device_name) > 31:
+        if len(set_device_name) > 31:
             print("New device name will be truncated")
-            new_device_name = new_device_name[:31]
+            set_device_name = set_device_name[:31]
 
         print(
-            f"Setting device name for {device.name} {device.ipv4} to {new_device_name}"
+            f"Setting device name for {device.name} {device.ipv4} to {set_device_name}"
         )
         await device.set_name(set_device_name)
 
     if set_latency:
-        latency = int(set_latency)
-        print(f"Setting latency of {device} to {latency:g} ms")
-        await device.set_latency(latency)
+        print(f"Setting latency of {device} to {set_latency:g} ms")
+        await device.set_latency(set_latency)
 
     if set_sample_rate:
-        sample_rate = int(set_sample_rate)
         print(
-            f"Setting sample rate of {device.name} {device.ipv4} to {sample_rate}"
+            f"Setting sample rate of {device.name} {device.ipv4} to {set_sample_rate}"
         )
-        await device.set_sample_rate(sample_rate)
+        await device.set_sample_rate(set_sample_rate)
 
     if set_encoding:
-        encoding = int(set_encoding)
-
         print(
-            f"Setting encoding of {device.name} {device.ipv4} to {encoding}"
+            f"Setting encoding of {device.name} {device.ipv4} to {set_encoding}"
         )
-        await device.set_encoding(encoding)
+        await device.set_encoding(set_encoding)
 
     if set_gain_level:
+        if channel_number is None:
+            print("Must specify a channel number for gain level setting")
+            return
+        print(
+            f"Setting gain level of {device.name} {device.ipv4} to {set_gain_level}"
+        )
         await set_gain_level_func(
             device, channel_number, set_gain_level
         )
 
     if aes67_enable:
         is_enabled = True
+        print(
+            f"Setting AES67 of {device.name} {device.ipv4} to {is_enabled}"
+        )
         await device.enable_aes67(is_enabled)
 
     if aes67_disable:
+        print(
+            f"Setting AES67 of {device.name} {device.ipv4} to {is_enabled}"
+        )
         is_enabled = False
         await device.enable_aes67(is_enabled)
