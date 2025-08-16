@@ -2,7 +2,7 @@ from enum import Enum
 
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.browser import DanteBrowser
-from netaudio.commands.cli_utils import FireTyped
+from netaudio.utils.cli import FireTyped
 
 class ChannelType(str, Enum):
     RX = "rx"

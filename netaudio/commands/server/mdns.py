@@ -65,8 +65,8 @@ from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_NONE,
 )
 
-from netaudio.commands.json_encoder import dump_json_formatted
-from netaudio.commands.cli_utils import FireTyped
+from netaudio.utils.json_encoder import dump_json_formatted
+from netaudio.utils.cli import FireTyped
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

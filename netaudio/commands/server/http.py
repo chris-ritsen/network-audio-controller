@@ -3,7 +3,7 @@ import uvicorn
 
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from netaudio.commands.cli_utils import FireTyped
+from netaudio.utils.cli import FireTyped
 from netaudio.dante.browser import DanteBrowser
 import logging
 

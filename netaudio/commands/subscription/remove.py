@@ -1,5 +1,5 @@
 from netaudio.dante.browser import DanteBrowser
-from netaudio.commands.cli_utils import FireTyped
+from netaudio.utils.cli import FireTyped
 
 @FireTyped
 async def subscription_remove(

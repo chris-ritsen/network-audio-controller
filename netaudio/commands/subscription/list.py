@@ -1,11 +1,6 @@
-import os
-
-from redis import Redis
-from redis.exceptions import ConnectionError as RedisConnectionError
-
 from netaudio.dante.browser import DanteBrowser
-from netaudio.commands.json_encoder import dump_json_formatted
-from netaudio.commands.cli_utils import FireTyped
+from netaudio.utils.json_encoder import dump_json_formatted
+from netaudio.utils.cli import FireTyped
 
 @FireTyped
 async def subscription_list(
@@ -16,48 +11,12 @@ async def subscription_list(
     """
     subscriptions = []
 
-    redis_enabled = None
+    dante_browser = DanteBrowser(mdns_timeout=1.5)
+    devices = await dante_browser.get_devices()
+    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
 
-    redis_socket_path = os.environ.get("REDIS_SOCKET")
-    redis_host = os.environ.get("REDIS_HOST") or "localhost"
-    redis_port = os.environ.get("REDIS_PORT") or 6379
-    redis_db = os.environ.get("REDIS_DB") or 0
-
-    try:
-        redis_client = None
-
-        if redis_socket_path:
-            redis_client = Redis(
-                db=redis_db,
-                decode_responses=False,
-                socket_timeout=0.1,
-                unix_socket_path=redis_socket_path,
-            )
-        elif os.environ.get("REDIS_PORT") or os.environ.get("REDIS_HOST"):
-            redis_client = Redis(
-                db=redis_db,
-                decode_responses=False,
-                host=redis_host,
-                socket_timeout=0.1,
-                port=redis_port,
-            )
-        if redis_client:
-            redis_client.ping()
-            redis_enabled = True
-    except RedisConnectionError:
-        redis_enabled = False
-
-    if redis_enabled:
-        # dante_cache = DanteCache()
-        devices = await dante_cache.get_devices()
-        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-    else:
-        dante_browser = DanteBrowser(mdns_timeout=1.5)
-        devices = await dante_browser.get_devices()
-        devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-
-        for _, device in devices.items():
-            await device.get_controls()
+    for _, device in devices.items():
+        await device.get_controls()
 
     #  rx_channel = None
     #  rx_device = None

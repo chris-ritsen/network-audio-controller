@@ -49,7 +49,7 @@ class DanteDevice:
         self._tx_count_raw: int = None
 
     def __str__(self):
-        return f"{self.name}"
+        return f"DanteDevice <{self.name}> ({self.rx_count}x{self.tx_count})"
 
     def dante_command_new(self, command, control):
         response = None
