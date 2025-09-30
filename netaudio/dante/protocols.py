@@ -214,7 +214,7 @@ class ServiceARC(DanteService):
             ))
 
     def _channel_pagination(self, page):
-        return f"0000000100{format(page, "x")}10000"
+        return f"0000000100{format(page, 'x')}10000"
     
     def _get_label(self, hex_str, offset):
         try:
