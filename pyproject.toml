@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "netaudio"
-version = "0.2.0"
-description = "Lovely Spam! Wonderful Spam!"
+version = "0.3.0dev0"
+description = "Control Audinate Dante network audio devices without Dante Controller"
 readme = "README.md"
 license = "Unlicense"
 keywords = ["audinate", "audio", "cli", "dante", "network"]
@@ -15,12 +15,11 @@ include = ["CHANGELOG.md", "LICENSE"]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-twisted = "^25.5.0"
 zeroconf = "^0.147.0"
-sqlitedict = "^2.1.0"
 fastapi = "^0.116.1"
 uvicorn = "^0.35.0"
 fire = "^0.7.0"
+psutil = "*"
 termcolor = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
