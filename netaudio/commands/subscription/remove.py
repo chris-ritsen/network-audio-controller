@@ -1,60 +1,49 @@
-from ipaddress import IPv4Address
-from typing import List
+# ~ from ipaddress import IPv4Address
+import time
 
-from netaudio.dante.browser import DanteBrowser
-from netaudio.utils.cli import FireTyped
+from termcolor import colored, cprint
 
-@FireTyped
-async def subscription_remove(
-    interfaces: List[str] = None,
-    mdns_timeout: float = 1.5,
+from netaudio.dante2.application import DanteApplication
+from netaudio.dante2.channel import DanteChannelType
 
-    rx_channel_name: str = None,
-    rx_channel_number: int = None,
-    rx_device_host: str = None,
-    rx_device_name: str = None,
+def subscription_remove(
+        # ~ interfaces: list[str] = None,
+
+        rx_channel_name: str = None,
+        rx_channel_number: int = None,
+        # ~ rx_device_host: str = None,
+        rx_device_name: str = None,
 ) -> None:
-    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
-    dante_devices = await dante_browser.get_devices(interfaces=interfaces)
+    """
+    Remove the subscription from a Receiving Channel.
+    """
+    # TODO: implement remaining arguments above
+    app = DanteApplication()
+    app.startup()
+    time.sleep(1)
 
-    for _, device in dante_devices.items():
-        await device.begin()
+    try:
+        rx_device = app.get_device_by_name(rx_device_name)
+        if not rx_device:
+            cprint("No matching RX Device found.", "red")
+            app.shutdown()
+            return
 
-    rx_channel = None
-    rx_device = None
+        if rx_channel_name:
+            rx_channel = rx_device.get_channel_by_name(DanteChannelType.RX, str(rx_channel_name))
+        elif rx_channel_number:
+            rx_channel = rx_device.get_channel_by_number(DanteChannelType.RX, rx_channel_number)
+        else:
+            rx_channel = None
 
-    if rx_device_name:
-        rx_device = next(
-            filter(
-                lambda d: d[1].name == rx_device_name,
-                dante_devices.items(),
-            )
-        )[1]
-    elif rx_device_host:
-        rx_device = next(
-            filter(
-                lambda d: d[1].ipv4 == IPv4Address(rx_device_host),
-                dante_devices.items(),
-            )
-        )[1]
+        if rx_channel:
+            rx_channel.unsubscribe()
+            print(f"Removing subscription from {colored(rx_channel, 'blue', attrs=['bold'])}")
+            time.sleep(1)
+        else:
+            cprint("No matching RX Channel found.", "red")
 
-    if rx_channel_name:
-        rx_channel = next(
-            filter(
-                lambda c: c[1].name == rx_channel_name,
-                rx_device.rx_channels.items(),
-            )
-        )[1]
-    elif rx_channel_number:
-        rx_channel = next(
-            filter(
-                lambda c: c[1].number == rx_channel_number,
-                rx_device.rx_channels.items(),
-            )
-        )[1]
-
-    if rx_channel and rx_device:
-        print(f"Removing subscription from {rx_device.name} - {rx_channel.name}")
-        await rx_device.remove_subscription(rx_channel)
-    else:
-        print("No matching RX channel or device found.")
+    except Exception as exception:
+        raise exception
+    finally:
+        app.shutdown()

@@ -1,58 +1,48 @@
-from netaudio.dante.browser import DanteBrowser
-from netaudio.utils.json_encoder import dump_json_formatted
-from netaudio.utils.cli import FireTyped
-from typing import List
+# ~ from ipaddress import IPv4Address
+import time
 
-@FireTyped
-async def subscription_list(
-        json: bool = False,
-        interfaces: List[str] = None,
-        mdns_timeout: float = 1.5
+from termcolor import colored, cprint
+
+from netaudio.dante2.application import DanteApplication
+from netaudio.utils.json_encoder import dump_json_formatted
+
+
+def subscription_list(
+    # ~ interfaces: list[str] = None,
+    json: bool = False,
 ) -> None:
     """
     List all subscriptions.
     """
-    subscriptions = []
+    # TODO: implement remaining argument above
+    app = DanteApplication()
+    app.startup()
+    time.sleep(1)
 
-    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
-    devices = await dante_browser.get_devices(interfaces=interfaces)
-    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
+    try:
 
-    for _, device in devices.items():
-        await device.begin()
+        if json:
+            subscriptions: list[dict] = []
+            for device in app.devices:
+                rx_channels = device.rx_channels
+                if rx_channels:
+                    subscriptions.extend([chan.subscription for chan in device.rx_channels])
+            print(dump_json_formatted(subscriptions))
 
-    #  rx_channel = None
-    #  rx_device = None
-    #  tx_channel = None
-    #  tx_device = None
+        else:
+            for device in app.devices:
+                rx_channels = device.rx_channels
+                if rx_channels:
+                    for channel in rx_channels:
+                        rx_text = colored(channel, 'blue', attrs=['bold'])
+                        if channel.subscription.tx_channel:
+                            tx_text = f" <- {colored(channel.subscription.tx_channel, 'cyan', attrs=['bold'])}"
+                        else:
+                            tx_text = ""
+                        status_text = colored(", ".join(channel.subscription.status_text), 'light_grey')
+                        print(f"{rx_text}{tx_text} [{status_text}]")
 
-    #  if self.option('tx-device-name'):
-    #      tx_device = next(filter(lambda d: d[1].name == self.option('tx-device-name'), devices.items()))[1]
-    #  elif self.option('tx-device-host'):
-    #      tx_device = next(filter(lambda d: d[1].ipv4 == self.option('tx-device-host'), devices.items()))[1]
-
-    #  if self.option('tx-channel-name'):
-    #      tx_channel = next(filter(lambda c: c[1].name == self.option('tx-channel-name'), tx_device.tx_channels.items()))[1]
-    #  elif self.option('tx-channel-number'):
-    #      tx_channel = next(filter(lambda c: c[1].number == self.option('tx-channel-number'), tx_device.tx_channels.items()))[1]
-
-    #  if self.option('rx-device-name'):
-    #      rx_device = next(filter(lambda d: d[1].name == self.option('rx-device-name'), devices.items()))[1]
-    #  elif self.option('rx-device-host'):
-    #      rx_device = next(filter(lambda d: d[1].ipv4 == self.option('rx-device-host'), devices.items()))[1]
-
-    #  if self.option('rx-channel-name'):
-    #      rx_channel = next(filter(lambda c: c[1].name == self.option('rx-channel-name'), rx_device.rx_channels.items()))[1]
-    #  elif self.option('rx-channel-number'):
-    #      rx_channel = next(filter(lambda c: c[1].number == self.option('rx-channel-number'), rx_device.rx_channels.items()))[1]
-
-    for _, device in devices.items():
-        for subscription in device.subscriptions:
-            subscriptions.append(subscription)
-
-    if json:
-        json_object = dump_json_formatted(subscriptions)
-        print(f"{json_object}")
-    else:
-        for subscription in subscriptions:
-            print(f"{subscription}")
+    except Exception as exception:
+        raise exception
+    finally:
+        app.shutdown()

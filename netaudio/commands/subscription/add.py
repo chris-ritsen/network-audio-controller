@@ -1,102 +1,66 @@
-from ipaddress import IPv4Address
-from typing import List
+# ~ from ipaddress import IPv4Address
+import time
 
-from netaudio.dante.browser import DanteBrowser
-from netaudio.utils.cli import FireTyped
+from termcolor import colored, cprint
 
-@FireTyped
-async def subscription_add(
-        interfaces: List[str] = None,
-        mdns_timeout: float = 1.5,
+from netaudio.dante2.application import DanteApplication
+from netaudio.dante2.channel import DanteChannelType
+
+
+def subscription_add(
+        # ~ interfaces: list[str] = None,
 
         rx_channel_name: str = None,
         rx_channel_number: int = None,
-        rx_device_host: str = None,
+        # ~ rx_device_host: str = None,
         rx_device_name: str = None,
 
         tx_channel_name: str = None,
         tx_channel_number: int = None,
-        tx_device_host: str = None,
-        tx_device_name: str = None
+        # ~ tx_device_host: str = None,
+        tx_device_name: str = None,
 ) -> None:
-    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
-    dante_devices = await dante_browser.get_devices(interfaces=interfaces)
+    """
+    Subscribe a Receiving channel to a Transmitting channel.
+    """
+    # TODO: implement remaining arguments above
+    app = DanteApplication()
+    app.startup()
+    time.sleep(1)
 
-    for _, device in dante_devices.items():
-        await device.begin()
+    try:
+        rx_device = app.get_device_by_name(rx_device_name)
+        if not rx_device:
+            cprint("No matching RX Device found.", "red")
+            app.shutdown()
+            return
 
-    rx_channel = None
-    rx_device = None
-    tx_channel = None
-    tx_device = None
+        tx_device = app.get_device_by_name(tx_device_name)
+        if not tx_device:
+            tx_device = rx_device
 
-    if tx_device_name:
-        tx_device = next(
-            filter(
-                lambda d: d[1].name == tx_device_name,
-                dante_devices.items(),
-            )
-        )[1]
-    elif tx_device_host:
-        tx_device = next(
-            filter(
-                lambda d: d[1].ipv4 == IPv4Address(tx_device_host),
-                dante_devices.items(),
-            )
-        )[1]
+        if rx_channel_name:
+            rx_channel = rx_device.get_channel_by_name(DanteChannelType.RX, str(rx_channel_name))
+        elif rx_channel_number:
+            rx_channel = rx_device.get_channel_by_number(DanteChannelType.RX, rx_channel_number)
+        else:
+            rx_channel = None
 
-    if tx_channel_name:
-        tx_channel = next(
-            filter(
-                lambda c: tx_channel_name == c[1].friendly_name
-                or tx_channel_name == c[1].name
-                and not c[1].friendly_name,
-                tx_device.tx_channels.items(),
-            )
-        )[1]
-    elif tx_channel_number:
-        tx_channel = next(
-            filter(
-                lambda c: c[1].number == tx_channel_number,
-                tx_device.tx_channels.items(),
-            )
-        )[1]
+        if tx_channel_name:
+            tx_channel = tx_device.get_channel_by_name(DanteChannelType.TX, str(tx_channel_name))
+        elif tx_channel_number:
+            tx_channel = tx_device.get_channel_by_number(DanteChannelType.TX, tx_channel_number)
+        else:
+            tx_channel = None
 
-    if rx_device_name:
-        rx_device = next(
-            filter(
-                lambda d: d[1].name == rx_device_name,
-                dante_devices.items(),
-            )
-        )[1]
-    elif rx_device_host:
-        rx_device = next(
-            filter(
-                lambda d: d[1].ipv4 == IPv4Address(rx_device_host),
-                dante_devices.items(),
-            )
-        )[1]
+        if rx_channel and tx_channel:
+            rx_channel.subscribe(tx_channel)
+            print(f"{colored(rx_channel, 'blue', attrs=['bold'])} <- {colored(tx_channel, 'cyan', attrs=['bold'])}")
+            time.sleep(1)
+        else:
+            cprint("No matching RX or TX channels found.", "red")
 
-    if rx_channel_name:
-        rx_channel = next(
-            filter(
-                lambda c: c[1].name == rx_channel_name,
-                rx_device.rx_channels.items(),
-            )
-        )[1]
-    elif rx_channel_number:
-        rx_channel = next(
-            filter(
-                lambda c: c[1].number == rx_channel_number,
-                rx_device.rx_channels.items(),
-            )
-        )[1]
-
-    if rx_device and not tx_device:
-        tx_device = rx_device
-
-    if rx_channel and rx_device and tx_channel and tx_channel:
-        print(
-            f"{rx_channel.name}@{rx_device.name} <- {tx_channel.name}@{tx_device.name}"
-        )
-        await rx_device.add_subscription(rx_channel, tx_channel, tx_device)
+    except Exception as exception:
+        raise exception
+    finally:
+        app.shutdown()

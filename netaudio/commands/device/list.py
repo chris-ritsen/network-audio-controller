@@ -1,37 +1,37 @@
-from typing import List
+import time
 
+from termcolor import colored, cprint
+
+from netaudio.dante2.application import DanteApplication
 from netaudio.utils.json_encoder import dump_json_formatted
-from netaudio.utils.cli import FireTyped
 
-from netaudio.dante.browser import DanteBrowser
 
-@FireTyped
-async def device_list(
-    name: str | None = None,
-    host: str | None = None,
-    interfaces: List[str] = None,
-    mdns_timeout: float = 1.5,
-    json: bool = False
+def device_list(
+    # ~ name: str = None,
+    # ~ host: str = None,
+    # ~ interfaces: list[str] = None,
+    json: bool = False,
 ) -> None:
-    cached_devices = None #_get_devices_from_redis()
+    """
+    List devices discovered on the network.
+    """
+    # TODO: implement remaining parameters above
+    app = DanteApplication()
+    app.startup()
+    time.sleep(1)
+    try:
 
-    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
+        if json:
+            print(dump_json_formatted(app.devices))
 
-    devices = cached_devices if cached_devices is not None else await dante_browser.get_devices(
-            filter_name=name,
-            filter_host=host,
-            interfaces=interfaces
-        )
+        else:
+            for device in app.devices:
+                name = colored(device.name, attrs=['bold'])
+                rx_count = colored(len(device.rx_channels), 'blue', attrs=['bold'])
+                tx_count = colored(len(device.tx_channels), 'cyan', attrs=['bold'])
+                print(f"{name} ({tx_count} x {rx_count})")
 
-    for _, device in devices.items():
-        await device.begin()
-
-    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-
-    if json:
-        print(dump_json_formatted([
-            device.model_dump(mode='json') for device in devices.values()
-        ]))
-    else:
-        for _, device in devices.items():
-            print(device)
+    except Exception as exception:
+        raise exception
+    finally:
+        app.shutdown()

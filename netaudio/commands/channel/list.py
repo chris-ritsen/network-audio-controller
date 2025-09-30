@@ -1,63 +1,55 @@
+# ~ from ipaddress import IPv4Address
+import time
+
 from termcolor import cprint
 
-from netaudio.dante.browser import DanteBrowser
-
-from typing import Any, Dict, List
+from netaudio.dante2.application import DanteApplication
 from netaudio.utils.json_encoder import dump_json_formatted
-from netaudio.utils.cli import FireTyped
-from netaudio.dante.device import DanteDevice
 
-def _print_channel_list(devices: Dict[str, DanteDevice], as_json: bool = False) -> None:
-    if as_json:
-        channels: Dict[str, Any] = {}
+def channel_list(
+    # ~ name: str = None,
+    # ~ host: str = None,
+    # ~ interfaces: list[str] = None,
+    json: bool = False,
+) -> None:
+    """
+    List channels discoverable on the network.
+    """
+    # TODO: implement remaining arguments above
+    app = DanteApplication()
+    app.startup()
+    time.sleep(1)
+    try:
 
-        for _, device in devices.items():
-            channels[device.name] = {
-                "receivers": device.rx_channels,
-                "transmitters": device.tx_channels,
-            }
+        if json:
+            channels: dict[str, list[Any]] = {}
+            for device in app.devices:
+                channels[device.name] = {
+                    "receivers": {chan.number: chan for chan in device.rx_channels},
+                    "transmitters": {chan.number: chan for chan in device.tx_channels},
+                }
+            print(dump_json_formatted(channels))
 
-        print(dump_json_formatted(channels))
-    else:
-        for index, (_, device) in enumerate(devices.items()):
-            cprint(device.name, attrs=["bold"])
-            if device.tx_channels:
-                cprint("tx channels", "blue", attrs=["bold"])
+        else:
+            for device in app.devices:
+                cprint(device.name, attrs=["bold"])
 
-            for _, channel in device.tx_channels.items():
-                print(f"\t{channel}")
+                tx_channels = device.tx_channels
+                if tx_channels:
+                    cprint("tx channels", "cyan", attrs=["bold"])
+                    for channel in tx_channels:
+                        print(f"\t{channel.number}: {channel.name}")
 
-            if device.rx_channels:
-                if device.tx_channels:
-                    print("")
+                rx_channels = device.rx_channels
+                if rx_channels:
+                    if tx_channels:
+                        print("")
+                    cprint("rx channels", "blue", attrs=["bold"])
+                    for channel in rx_channels:
+                        print(f"\t{channel.number}: {channel.name}")
+                print()
 
-                cprint("rx channels", "blue", attrs=["bold"])
-
-            for _, channel in device.rx_channels.items():
-                print(f"\t{channel}")
-
-            if index < len(devices) - 1:
-                print("")
-
-@FireTyped
-async def channel_list(name:str=None,
-                        host:str=None,
-                        interfaces:List[str] = None,
-                        mdns_timeout:float=1.5,
-                        json:bool=False) -> None:
-
-    dante_browser = DanteBrowser(mdns_timeout=mdns_timeout)
-
-    devices = await dante_browser.get_devices(
-        filter_name=name,
-        filter_host=host,
-        interfaces=interfaces
-    )
-
-    devices = dict(sorted(devices.items(), key=lambda x: x[1].name))
-
-    for _, device in devices.items():
-        await device.begin()
-
-
-    _print_channel_list(devices)
+    except Exception as exception:
+        raise exception
+    finally:
+        app.shutdown()
