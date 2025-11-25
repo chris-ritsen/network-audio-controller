@@ -91,7 +91,7 @@ class DanteChannel:
         self._volume = volume
 
     def matches_name(self, name_to_match):
-        return name_to_match == self.friendly_name or name_to_match == self.name
+        return name_to_match.lower() in [self.friendly_name.lower(), self.name.lower()]
 
     def to_json(self):
         as_json = {"name": self.name}
