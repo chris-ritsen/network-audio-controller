@@ -17,6 +17,7 @@ class DanteSubscription:
         self._rx_channel: DanteRxChannel = rx_channel
         self._tx_channel: DanteTxChannel | None = tx_channel
         self._status: DanteSubscriptionStatus = status
+        self._dirty: bool = False
 
     def __str__(self) -> str:
         if self._tx_channel:
@@ -33,6 +34,10 @@ class DanteSubscription:
             "status_code": self.status.value,
             "status_text": self.status_text,
         }
+
+    @property
+    def is_dirty(self) -> bool:
+        return self._dirty
 
     @property
     def rx_channel(self) -> DanteRxChannel:
@@ -52,6 +57,8 @@ class DanteSubscription:
     def tx_channel(self) -> DanteTxChannel:
         return self._tx_channel
 
+    def set_dirty(self, dirty: bool = True):
+        self._dirty = dirty
 
 class DanteSubscriptionStatus(enum.Enum):
     BUNDLE_FORMAT = 17
