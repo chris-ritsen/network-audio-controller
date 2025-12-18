@@ -6,6 +6,7 @@ import math
 from typing import TypeAlias, TYPE_CHECKING
 
 from .channel import DanteChannelType, DanteRxChannel, DanteTxChannel
+from .events import DanteEventType
 from .subscription import DanteSubscription, DanteSubscriptionStatus
 from .util import (
     decode_integer,
@@ -246,6 +247,8 @@ class DanteDevice:
                 self._channels[DanteChannelType.RX].append(rx_channel)
                 subscription = None
             else:
+                if rx_channel_name != rx_channel._name:
+                    self._app.events.notify(DanteEventType.CHANNEL_NAME_UPDATED, rx_channel)
                 # TODO: internal access
                 rx_channel._name = rx_channel_name
                 rx_channel._status = rx_channel_status
@@ -402,6 +405,11 @@ class DanteDevice:
                     )
                 self._channels[DanteChannelType.TX].append(channel)
             else:
+                if channel_name_friendly and channel_name_friendly != channel._name: # TODO: internal access
+                    self._app.events.notify(DanteEventType.CHANNEL_NAME_UPDATED, channel)
+                    self._app.events.notify(DanteEventType.TRANSMITTERS_CHANGED)
+                    for subscription in channel.subscriptions:
+                        self._app.events.notify(DanteEventType.SUBSCRIPTION_CHANGED, subscription)
                 channel._name = channel_name_friendly or channel_name_default # TODO: internal access
 
         if not self._sample_rate:
@@ -427,7 +435,14 @@ class DanteDevice:
                 DanteChannelType.TX,
                 decode_integer(channel_definition, 2)
             )
-            channel._name = decode_string(response, decode_integer(channel_definition, 4)) # TODO: internal access
+
+            new_name = decode_string(response, decode_integer(channel_definition, 4))
+            if new_name != channel._name: # TODO: internal access
+                self._app.events.notify(DanteEventType.CHANNEL_NAME_UPDATED, channel)
+                self._app.events.notify(DanteEventType.TRANSMITTERS_CHANGED)
+                for subscription in channel.subscriptions:
+                    self._app.events.notify(DanteEventType.SUBSCRIPTION_CHANGED, subscription)
+            channel._name = new_name # TODO: internal access
 
     def reset_name(self) -> None:
         self.set_name('')

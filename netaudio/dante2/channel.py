@@ -10,6 +10,8 @@ from .util import (
     NULL_HEXTET,
 )
 
+from .events import DanteEventType
+
 if TYPE_CHECKING:
     from .application import DanteApplication
     from .device import DanteDevice
@@ -98,7 +100,7 @@ class _DanteChannel:
 
         name_ptr = decode_integer(response, 24)
         if not name_ptr:
-            # If name is reset, then no name will be returned
+            # If name is reset, or set to its default, then no name will be returned
             if self.TYPE == DanteChannelType.TX:
                 self._device.request_tx_channels()
             else:
@@ -106,11 +108,11 @@ class _DanteChannel:
             return
 
         self._name = decode_string(response, name_ptr)
-
+        self._app.events.notify(DanteEventType.CHANNEL_NAME_UPDATED, self)
         if self.TYPE == DanteChannelType.TX:
-            while self._subscriptions:
-                subscription = self._subscriptions.pop()
-                subscription.rx_channel.subscribe(self)
+            self._app.events.notify(DanteEventType.TRANSMITTERS_CHANGED)
+            for subscription in self._subscriptions:
+                self._app.events.notify(DanteEventType.SUBSCRIPTION_CHANGED, subscription)
 
     def _validate_name(self, name: str) -> str:
         # * max. 31 chars

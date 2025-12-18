@@ -4,6 +4,7 @@ from .cmc_service import DanteCMCService
 from .dbc_service import DanteDBCService
 from .device import DanteDevice
 from .discovery import DanteDiscovery
+from .events import DanteEventDispatcher
 from .settings_service import DanteSettingsService
 from .util import LOGGER
 from .volume_service import DanteVolumeService
@@ -23,10 +24,13 @@ class DanteApplication:
         self._devices: list[DanteDevice] = []
         self._orphaned_tx_channels: dict[str, list[DanteTxChannel]] = {}
 
+        self._events: DanteEventDispatcher = DanteEventDispatcher(self)
+
     def startup(self):
         self._arc.start()
         self._cmc.start()
         # ~ self._dbc.start()
+        self._events.start()
         # ~ self._settings.start()
         self._vol.start()
         self._discovery.start()
@@ -36,6 +40,7 @@ class DanteApplication:
         self._arc.stop()
         self._cmc.stop()
         # ~ self._dbc.stop()
+        self._events.stop()
         # ~ self._settings.stop()
         self._vol.stop()
 
@@ -54,6 +59,10 @@ class DanteApplication:
     @property
     def devices(self) -> list[DanteDevice]:
         return self._devices
+
+    @property
+    def events(self) -> DanteEventDispatcher:
+        return self._events
 
     @property
     def settings_service(self) -> DanteSettingsService:
