@@ -71,7 +71,12 @@ class DanteDevice:
 
     @property
     def tx_channels(self):
-        return self._channels[DanteChannelType.TX]
+        return list(
+            filter(
+                lambda chan: chan.number > 0,
+                self._channels[DanteChannelType.TX]
+            )
+        )
 
     # ~ @property
     # ~ def settings(self):
