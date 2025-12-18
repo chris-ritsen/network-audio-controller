@@ -286,16 +286,20 @@ class DanteDevice:
                 if tx_channel:
                     tx_channel._subscriptions.append(subscription)  # TODO: internal access
             else:
-                if subscription.tx_channel and subscription.tx_channel != tx_channel:
-                    subscription.tx_channel._subscriptions.remove(subscription) # TODO: internal access
-                    subscription._tx_channel = tx_channel # TODO: internal access
-                elif tx_channel:
-                    subscription._tx_channel = tx_channel # TODO: internal access
+                if subscription.tx_channel:
+                    if not tx_channel:
+                        subscription.tx_channel._subscriptions.remove(subscription) # TODO: internal access
+                        subscription._tx_channel = None
+                    elif subscription.tx_channel != tx_channel:
+                        subscription.tx_channel._subscriptions.remove(subscription) # TODO: internal access
+                        subscription._tx_channel = tx_channel # TODO: internal access
+                        tx_channel._subscriptions.append(subscription) # TODO: internal access
+                    # else if both exist and match: do nothing
                 else:
-                    subscription._tx_channel = None # TODO: internal access
-
-                if tx_channel:
-                    tx_channel._subscriptions.append(subscription)  # TODO: internal access
+                    if tx_channel:
+                        subscription._tx_channel = tx_channel # TODO: internal access
+                        tx_channel._subscriptions.append(subscription) # TODO: internal access
+                    # else if neither exist: do nothing
 
                 subscription._status = subscription_status # TODO: internal access
 
