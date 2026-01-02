@@ -126,6 +126,8 @@ class DanteService:
                 # TODO: Write better error handling
                 logging.error("SOCK ERROR: %s", sock)
 
+        self.unbind()
+
     def send(self, message: bytes, destination: str|None = None) -> None:
         if not destination and not self.SERVICE_MCAST_GRP:
             logging.warning("Attempt to send with no destination!")
@@ -143,3 +145,7 @@ class DanteService:
             self._shutdown_requested = True
             self._thread.join()
             self._thread = None
+
+    def unbind(self) -> None:
+        if self._sock:
+            self._sock.close()
