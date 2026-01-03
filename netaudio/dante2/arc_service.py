@@ -4,7 +4,7 @@ from typing import NamedTuple, TypeAlias#, TYPE_CHECKING
 # ~ if TYPE_CHECKING:
 from zeroconf import ServiceInfo as MDNSServiceInfo
 
-from .service import DanteService, MessageType
+from .service import DanteUnicastService, MessageType
 from .util import (
     NULL_HEXTET,
     encode_integer,
@@ -26,7 +26,7 @@ class DanteARCServiceDescriptor(NamedTuple):
     protocol_version: ProtocolVersion
 
 
-class DanteARCService(DanteService):
+class DanteARCService(DanteUnicastService):
     '''
     Dante Audio Routing Channel
     '''

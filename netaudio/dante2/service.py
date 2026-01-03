@@ -28,11 +28,10 @@ class MessageType(bytes, Enum):
     RECV = b'\x00\x01'
 
 
-class DanteService:
+class _DanteService:
 
     RECV_BUFFER_SIZE: int = 1024
     SERVICE_HEADER_LENGTH: int
-    SERVICE_MCAST_GRP: str | None = None
     SERVICE_PORT: str
     SERVICE_TYPE: str | None
 
@@ -47,7 +46,6 @@ class DanteService:
         self._receive_queue: Queue = Queue()
         self._send_queue: Queue = Queue()
         self._shutdown_requested: bool = False
-        self._sock: socket.socket | None = None
 
     @property
     def port(self):
@@ -56,6 +54,41 @@ class DanteService:
     @classmethod
     def build_service_descriptor(cls, mdns_service_info: MDNSServiceInfo) -> None:
         raise NotImplementedError
+
+    def is_ignored_address(self, address):
+        return address in self._ignored_addrs
+
+    def register_ignored_address(self, adapter, address, message):
+        if address.ip in self._ignored_addrs:
+            return
+        self._ignored_addrs.append(address.ip)
+
+        if platform.system() == "Windows":
+            interface = f"'{adapter.nice_name}' (aka '{address.nice_name}')"
+        else:
+            interface = f"'{adapter.nice_name}'"
+        logging.debug(message, address.ip, interface)
+
+    def run(self) -> None:
+        raise NotImplementedError
+
+    def start(self):
+        if not self._thread:
+            self._shutdown_requested = False
+            self._thread = Thread(target=self.run)
+            self._thread.start()
+
+    def stop(self):
+        if self._thread:
+            self._shutdown_requested = True
+            self._thread.join()
+            self._thread = None
+
+class DanteUnicastService(_DanteService):
+
+    def __init__(self, application):
+        super().__init__(application)
+        self._sock: socket.socket | None = None
 
     def _receive(self, address, message):
         message_id = decode_integer(message, 4)
@@ -81,20 +114,6 @@ class DanteService:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self._sock.bind(("", self.port))
 
-    def is_ignored_address(self, address):
-        return address in self._ignored_addrs
-
-    def register_ignored_address(self, adapter, address, message):
-        if address.ip in self._ignored_addrs:
-            return
-        self._ignored_addrs.append(address.ip)
-
-        if platform.system() == "Windows":
-            interface = f"'{adapter.nice_name}' (aka '{address.nice_name}')"
-        else:
-            interface = f"'{adapter.nice_name}'"
-        logging.debug(message, address.ip, interface)
-
     def run(self):
         self.bind()
         rsocks = [self._sock]
@@ -114,8 +133,6 @@ class DanteService:
 
             for sock in write_socks:
                 address, bytestring = self._send_queue.get()
-                if not address:
-                    address = (self.SERVICE_MCAST_GRP, self.SERVICE_PORT)
                 try:
                     sock.sendto(bytestring, address)
                 except Exception as error:
@@ -128,23 +145,11 @@ class DanteService:
 
         self.unbind()
 
-    def send(self, message: bytes, destination: str|None = None) -> None:
-        if not destination and not self.SERVICE_MCAST_GRP:
+    def send(self, message: bytes, destination: str) -> None:
+        if not destination:
             logging.warning("Attempt to send with no destination!")
             return
         self._send_queue.put((destination, message))
-
-    def start(self):
-        if not self._thread:
-            self._shutdown_requested = False
-            self._thread = Thread(target=self.run)
-            self._thread.start()
-
-    def stop(self):
-        if self._thread:
-            self._shutdown_requested = True
-            self._thread.join()
-            self._thread = None
 
     def unbind(self) -> None:
         if self._sock:

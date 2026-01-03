@@ -3,14 +3,14 @@ from typing import NamedTuple #, TYPE_CHECKING
 # ~ if TYPE_CHECKING:
 from zeroconf import ServiceInfo as MDNSServiceInfo
 
-from .service import DanteService
+from .service import DanteUnicastService
 
 
 class DanteDBCServiceDescriptor(NamedTuple):
     port: int
 
 
-class DanteDBCService(DanteService):
+class DanteDBCService(DanteUnicastService):
     """
     Dante Broadcast Control Channel
     Audio Control (excluding Via)
