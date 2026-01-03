@@ -2,7 +2,7 @@
 # ~ from typing import TYPE_CHECKING
 
 from .channel import DanteChannelType
-from .service import DanteService
+from .service import DanteUnicastService
 from .util import (
     NULL_HEXTET,
     # ~ decode_integer,
@@ -25,7 +25,7 @@ class DanteSettingsServiceDescriptor:
     pass
 
 
-class DanteSettingsService(DanteService):
+class DanteSettingsService(DanteUnicastService):
     """
     Multicast Control and Monitoring
     """

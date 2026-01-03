@@ -4,7 +4,7 @@ from typing import NamedTuple#, TYPE_CHECKING
 # ~ if TYPE_CHECKING:
 from zeroconf import ServiceInfo as MDNSServiceInfo
 
-from .service import DanteService, MessageType
+from .service import DanteUnicastService, MessageType
 from .util import (
     NULL_HEXTET,
     encode_mac_address,
@@ -26,7 +26,7 @@ class DanteCMCServiceDescriptor(NamedTuple):
     protocol_version: ProtocolVersion
 
 
-class DanteCMCService(DanteService):
+class DanteCMCService(DanteUnicastService):
     """
     Dante Control Monitoring Channel
     (excluding DVS-4.0 & Via)

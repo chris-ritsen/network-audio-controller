@@ -4,7 +4,7 @@
 # ~ if TYPE_CHECKING:
 # ~ from zeroconf import ServiceInfo as MDNSServiceInfo
 
-from .service import DanteService, MessageType
+from .service import DanteUnicastService, MessageType
 # ~ from .util import (
     # ~ decode_integer,
 # ~ )
@@ -14,7 +14,7 @@ from .service import DanteService, MessageType
 # ~ from .util import ProtocolVersion
 
 
-class DanteVolumeService(DanteService):
+class DanteVolumeService(DanteUnicastService):
     """
     Receives and handles volume status messages
     (when such things are requested via CMC)
