@@ -1,5 +1,4 @@
 from enum import auto, Enum
-# ~ import logging
 from queue import Empty as QueueEmpty, SimpleQueue
 from threading import Thread
 

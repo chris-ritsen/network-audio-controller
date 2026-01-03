@@ -1,5 +1,4 @@
 from enum import Enum
-import logging
 import platform
 from queue import Queue
 import select
@@ -9,7 +8,7 @@ from threading import Thread
 # ~ if TYPE_CHECKING:
 from zeroconf import ServiceInfo as MDNSServiceInfo
 
-from .util import decode_integer
+from .util import decode_integer, LOGGER
 
 
 _PORT_MAGIC: int = 40000
@@ -67,7 +66,7 @@ class _DanteService:
             interface = f"'{adapter.nice_name}' (aka '{address.nice_name}')"
         else:
             interface = f"'{adapter.nice_name}'"
-        logging.debug(message, address.ip, interface)
+        LOGGER.debug(message, address.ip, interface)
 
     def run(self) -> None:
         raise NotImplementedError
@@ -100,7 +99,7 @@ class DanteUnicastService(_DanteService):
             return
 
         if message_id not in self._message_store:
-            logging.warning("Received a response from %s to a message not sent: %s", address, message)
+            LOGGER.warning("Received a response from %s to a message not sent: %s", address, message)
             return
 
         if 'callback' in self._message_store[message_id] and self._message_store[message_id]['callback']:
@@ -126,7 +125,7 @@ class DanteUnicastService(_DanteService):
                     response, address = sock.recvfrom(self.RECV_BUFFER_SIZE)
                 except Exception as error:
                     # TODO: Write better error handling
-                    logging.error("RX ERROR: %s\t%s", sock, error)
+                    LOGGER.error("RX ERROR: %s\t%s", sock, error)
                     continue
                 else:
                     self._receive(address, response)
@@ -137,17 +136,17 @@ class DanteUnicastService(_DanteService):
                     sock.sendto(bytestring, address)
                 except Exception as error:
                     # TODO: Write better error handling
-                    logging.error("TX ERROR IP: %s String: %s\t%s", address, bytestring, error)
+                    LOGGER.error("TX ERROR IP: %s String: %s\t%s", address, bytestring, error)
 
             for sock in error_socks:
                 # TODO: Write better error handling
-                logging.error("SOCK ERROR: %s", sock)
+                LOGGER.error("SOCK ERROR: %s", sock)
 
         self.unbind()
 
     def send(self, message: bytes, destination: str) -> None:
         if not destination:
-            logging.warning("Attempt to send with no destination!")
+            LOGGER.warning("Attempt to send with no destination!")
             return
         self._send_queue.put((destination, message))
 
