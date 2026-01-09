@@ -13,6 +13,8 @@ from .util import (
     decode_string,
     encode_integer,
     encode_string,
+    Latency,
+    LOGGER,
     NULL_HEXTET,
 )
 
@@ -37,6 +39,7 @@ class DanteDevice:
 
         self._service_descriptors = service_descriptors
 
+        self._latency: Latency | None = None
         self._name: str = ''
         self._sample_rate: int = 0
 
@@ -44,6 +47,7 @@ class DanteDevice:
         self._channels: ChannelContainer = {DanteChannelType.RX: [], DanteChannelType.TX: []}
 
         self.request_name()
+        self.request_latency()
         self.request_all_channels()
 
     @property
@@ -61,6 +65,10 @@ class DanteDevice:
     @property
     def ipv4(self):
         return self._service_descriptors['ipv4']
+
+    @property
+    def latency(self) -> Latency:
+        return self._latency
 
     @property
     def name(self):
@@ -141,6 +149,47 @@ class DanteDevice:
         # ~ model = decode_string(response, decode_integer(response, 24))
         # ~ manufacturer = decode_string(response, decode_integer(response, 16))
         # ~ debug_string = decode_string(response, decode_integer(response, 18))
+
+    def request_latency(self) -> None:
+        code = b'\x11\x00'
+        # TODO: determine what all these hextets represent below
+        body = (
+            b'\x00\x12', # or b'\x00\x13' ## number of hextets in body (after this one)?
+            b'\x02\x01',
+            b'\x82\x04',
+            b'\x82\x05',
+            b'\x02\x10',
+            b'\x02\x11',
+            b'\x82\x18',
+            b'\x82\x19',
+            b'\x83\x01',
+            b'\x83\x02',
+            b'\x83\x06',
+            b'\x03\x10',
+            b'\x03\x11',
+            b'\x03\x03',
+            b'\x80\x21',
+            b'\x00\xf0',
+            b'\x80\x60',
+            b'\x00\x22',
+            b'\x00\x63',
+                         # b'\x00\x64'
+        )
+        self._app.arc_service.command(self, code, body, callback=self.__cb_request_latency)
+
+    def __cb_request_latency(self, response: bytes) -> None:
+        new_latency = Latency.decode(
+            response,
+            decode_integer(response, 22) # (response, 42) should also work
+        )
+        if new_latency and new_latency != self._latency:
+            self._latency = new_latency
+            # TODO: latency has changed: emit event?
+
+        # RTP Multicast Prefix (used by AES67 features)
+        # TODO: find out if this is returned by devices that don't support AES67, i.e. DVS.
+        # ~ aes67_prefix_idx = decode_integer(response, 74)
+        # ~ aes67_prefix = IPv4Address(response[aes67_prefix_idx:aes67_prefix_idx + 4])
 
     def request_name(self) -> None:
         self._app.arc_service.command(self, b'\x10\x02', (), callback=self.__cb_request_name)
@@ -447,8 +496,15 @@ class DanteDevice:
     def reset_name(self) -> None:
         self.set_name('')
 
-    def set_latency(self, latency: int) -> None:
-        latency_encoded = encode_integer(latency * 1000000, 4)
+    def set_latency(self, latency: Latency|float|int) -> None:
+        if not isinstance(latency, Latency):
+            try:
+                latency = Latency(latency)
+            except ValueError:
+                LOGGER.error("Unrecognised Latency value: %f", latency)
+                return
+        latency_encoded = latency.encode()
+
         code = b'\x11\x01'
         # TODO: Work out what the other hextets signify
         body = (
@@ -469,7 +525,13 @@ class DanteDevice:
         self._app.arc_service.command(self, code, body, callback=self.__cb_set_latency)
 
     def __cb_set_latency(self, response: bytes) -> None:
-        print(response) # TODO: Process this
+        new_latency = Latency.decode(
+            response,
+            decode_integer(response, 14) # or 22
+        )
+        if new_latency and new_latency != self._latency:
+            self._latency = new_latency
+            # TODO: latency has changed: emit event?
 
     def set_name(self, new_name: str) -> None:
         # TODO: validate new name:
