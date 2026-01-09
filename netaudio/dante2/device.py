@@ -2,6 +2,7 @@
 # pylint: disable=protected-access
 
 from __future__ import annotations
+from ipaddress import IPv4Address
 import math
 from typing import TypeAlias, TYPE_CHECKING
 
@@ -66,7 +67,7 @@ class DanteDevice:
         return self._service_descriptors['dbc']
 
     @property
-    def ipv4(self):
+    def ipv4(self) -> IPv4Address:
         return self._service_descriptors['ipv4']
 
     @property
@@ -74,7 +75,7 @@ class DanteDevice:
         return self._latency
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._name
 
     @property
