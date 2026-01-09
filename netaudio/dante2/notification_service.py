@@ -6,6 +6,7 @@ from .util import (
     decode_integer,
     decode_mac_address,
     LOGGER,
+    SampleRate,
 )
 
 
@@ -155,22 +156,24 @@ class DanteNotificationService(DanteMulticastService):
 
     def handle_128(self, device: DanteDevice, payload: bytes) -> None:
         """Sample Rate
-        * Payload contains new sample rate and list of possible sample rates
+        * Payload contains new Sample Rate and list of possible Sample Rates
         """
         # 0-1: \x00\x18 (Coincidentally, the length of the payload)
         sample_rate_count = decode_integer(payload, 2)
-        new_sample_rate = decode_integer(payload, 4, 4)
+        new_sample_rate = SampleRate.decode(payload, 4)
         # 8-15: \x00\x00 \x00\x00 \x00\x02 \x00\x00
         rate_options = []
         for idx in range(sample_rate_count):
-            rate_options.append(decode_integer(payload, 16 + idx * 4, 4))
+            rate_options.append(SampleRate.decode(payload, 16 + idx * 4))
 
         LOGGER.debug(
-            "%s is reporting a possible Sample Rate change (new: %i; options: %s)",
+            "%s is reporting a possible Sample Rate change (new: %s; options: %s)",
             device.name,
             new_sample_rate,
             ", ".join([str(rate) for rate in rate_options]),
         )
+        if new_sample_rate and new_sample_rate != device.sample_rate:
+            device._sample_rate = new_sample_rate
 
     def handle_130(self, device: DanteDevice, payload: bytes) -> None:
         """ PCM Encoding
@@ -220,6 +223,13 @@ class DanteNotificationService(DanteMulticastService):
         """ Device is Restarting
         * payload appears to be two null hextets
         """
+
+    def handle_176(self, device: DanteDevice, payload: bytes) -> None:
+        """ ???
+        * Observed to appear after a Sample Rate has been set, but not immediately
+        """
+        # Observed payload, regardless of sample rate set:
+        # * \x00\x03\x00\x00
 
     def handle_192(self, device: DanteDevice, payload: bytes) -> None:
         """ ???

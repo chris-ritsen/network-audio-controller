@@ -99,6 +99,20 @@ def get_mac_addr_serving_ipv4(ipv4_address: ipaddress.IPv4Address) -> str:
     return ":".join(f"{b:02x}" for b in uuid.getnode().to_bytes(6, byteorder='big'))
 
 
+class EncodableEnum(Enum):
+    @classmethod
+    def decode(cls, bytestring: bytes, idx: int):
+        value = decode_integer(bytestring, idx, 4)
+        try:
+            return cls(value)
+        except ValueError:
+            LOGGER.error("%s is not a recognised value", encoding)
+            return None
+
+    def encode(self) -> bytes:
+        return encode_integer(self.value, 4)
+
+
 class Encoding(Enum):
     PCM_16 = 16
     PCM_24 = 24
@@ -125,10 +139,10 @@ class Latency(Enum):
         return encode_integer(int(self.value * 1_000_000), 4)
 
 
-class SampleRate(Enum):
-    SR_44100 = 44100
-    SR_48000 = 48000
-    SR_88200 = 88200
-    SR_96000 = 96000
+class SampleRate(EncodableEnum):
+    SR_44100  =  44100
+    SR_48000  =  48000
+    SR_88200  =  88200
+    SR_96000  =  96000
     SR_176400 = 176400
     SR_192000 = 192000
