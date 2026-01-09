@@ -157,16 +157,22 @@ class DanteSettingsService(DanteUnicastService):
         device: DanteDevice,
         sample_rate: SampleRate
     ):
+        # part1 = \x00\x00 ;; \x02\x9f (upstream ;; packet-captures) (\xab\xcd also works
+
+        mac_address = encode_mac_address(get_mac_addr_serving_ipv4(device.ipv4))
+        # ~ mac_address = b'\x52\x54\x00\x00\x00\x00' # (upstream)
+        # (packet capture) actual mac address of transmitting device (e.g. us)
+
         payload = (
-            b'\x07\x27',
+            b'\x07\x27', # any of: \x07\x27, \x07\x38
             b'\x00\x81',
-            b'\x00\x00', # < null
+            NULL_HEXTET,
             b'\x00\x64',
-            b'\x00\x00', # < null
+            NULL_HEXTET,
             b'\x00\x01',
-            encode_integer(sample_rate.value, 4),
+            sample_rate.encode(),
         )
-        self.command(device, payload, b'\x52\x54\x00\x00\x00\x00')
+        self.command(device, payload, mac_address)
 
     def trigger_identify(self, device: DanteDevice):
         payload = (

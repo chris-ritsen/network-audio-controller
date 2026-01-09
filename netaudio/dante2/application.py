@@ -36,7 +36,7 @@ class DanteApplication:
         # ~ self._dbc.start()
         self._events.start()
         self._notifications.start()
-        # ~ self._settings.start()
+        self._settings.start()
         self._vol.start()
         self._discovery.start()
 
@@ -47,7 +47,7 @@ class DanteApplication:
         # ~ self._dbc.stop()
         self._events.stop()
         self._notifications.stop()
-        # ~ self._settings.stop()
+        self._settings.stop()
         self._vol.stop()
 
     @property

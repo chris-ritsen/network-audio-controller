@@ -16,6 +16,7 @@ from .util import (
     Latency,
     LOGGER,
     NULL_HEXTET,
+    SampleRate,
 )
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ class DanteDevice:
 
         self._latency: Latency | None = None
         self._name: str = ''
-        self._sample_rate: int = 0
+        self._sample_rate: SampleRate | None = None
 
         self._channel_counts: ChannelCounts = {DanteChannelType.RX: 0, DanteChannelType.TX: 0}
         self._channels: ChannelContainer = {DanteChannelType.RX: [], DanteChannelType.TX: []}
@@ -77,6 +78,10 @@ class DanteDevice:
     @property
     def rx_channels(self):
         return self._channels[DanteChannelType.RX]
+
+    @property
+    def sample_rate(self) -> SampleRate:
+        return self._sample_rate
 
     @property
     def tx_channels(self):
@@ -125,7 +130,7 @@ class DanteDevice:
             ],
             "arc_version": '.'.join([str(x) for x in self.arc.protocol_version]),
             "cmc_version": '.'.join([str(x) for x in self.cmc.protocol_version]),
-            "sample_rate": self._sample_rate,
+            "sample_rate": self._sample_rate.value if self._sample_rate else None,
             # ~ "rx_channels": self.rx_channels,
             # ~ "tx_channels": self.tx_channels,
         }
@@ -355,8 +360,10 @@ class DanteDevice:
 
                 subscription._status = subscription_status # TODO: internal access
 
-        if not self._sample_rate:
-            self._sample_rate = decode_integer(common_definition, 0, 4)
+        sample_rate = SampleRate.decode(common_definition, 0)
+        if sample_rate and sample_rate != self._sample_rate:
+            # TODO: Sample Rate changed - emit event.
+            self._sample_rate = sample_rate
 
     def request_tx_channels(self, friendly_names: bool = False) -> None:
         protocol_version = self.arc.protocol_version
@@ -461,8 +468,10 @@ class DanteDevice:
                         self._app.events.notify(DanteEventType.SUBSCRIPTION_CHANGED, subscription)
                 channel._name = channel_name_friendly or channel_name_default # TODO: internal access
 
-        if not self._sample_rate:
-            self._sample_rate = decode_integer(common_definition, 0, 4)
+        sample_rate = SampleRate.decode(common_definition, 0)
+        if sample_rate and sample_rate != self._sample_rate:
+            # TODO: Sample Rate changed - emit event.
+            self._sample_rate = sample_rate
 
     def __cb_request_tx_channels_friendly(self, device: DanteDevice, response: bytes) -> None:
         protocol_version = self.arc.protocol_version
@@ -550,3 +559,15 @@ class DanteDevice:
         # New name is not contained within response, and may differ from what we wished to set,
         # particularly in the case of name reset.
         self.request_name()
+
+    def set_sample_rate(self, sample_rate: SampleRate | int) -> None:
+        """
+        There is no callback for this method, as a response is not sent.
+        """
+        if isinstance(sample_rate, int):
+            try:
+                sample_rate = SampleRate(int)
+            except ValueError:
+                LOGGER.error("Unrecognised Sample Rate value: %f", sample_rate)
+                return
+        self._app.settings_service.set_sample_rate(self, sample_rate)
