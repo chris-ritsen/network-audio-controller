@@ -6,6 +6,7 @@ from .util import (
     decode_integer,
     decode_mac_address,
     LOGGER,
+    PCMEncoding,
     SampleRate,
 )
 
@@ -179,21 +180,22 @@ class DanteNotificationService(DanteMulticastService):
         """ PCM Encoding
         * Payload contains new PCM Encoding and list of possible encodings
         """
-        # 0-3: \x00\x18 \x00\x02
-        new_pcm_encoding = decode_integer(payload, 4, 4)
-        # 8-11: \x00\x00 \x00\x00
-        pcm_encoding_count = decode_integer(payload, 12)
-        # 14-15: null hextet
+        # 0-3: \x00\x18
+        pcm_encoding_count = decode_integer(payload, 2)
+        new_pcm_encoding = PCMEncoding.decode(payload, 4)
+        # 8-15: \x00\x00 \x00\x00 \x00\x02 \x00\x00
         encoding_options = []
         for idx in range(pcm_encoding_count):
-            encoding_options.append(decode_integer(payload, 16 + idx * 4, 4))
+            encoding_options.append(PCMEncoding.decode(payload, 16 + idx * 4))
 
         LOGGER.debug(
-            "%s is reporting a possible PCM Encoding change (new: %i; options: %s)",
+            "%s is reporting a possible PCM Encoding change (new: %s; options: %s)",
             device.name,
             new_pcm_encoding,
             ", ".join([str(enc) for enc in encoding_options]),
         )
+        if new_pcm_encoding and new_pcm_encoding != device.pcm_encoding:
+            device._pcm_encoding = new_pcm_encoding
 
     def handle_132(self, device: DanteDevice, payload: bytes) -> None:
         """ Sample Rate Pull-up """
