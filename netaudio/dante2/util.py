@@ -113,12 +113,6 @@ class EncodableEnum(Enum):
         return encode_integer(self.value, 4)
 
 
-class Encoding(Enum):
-    PCM_16 = 16
-    PCM_24 = 24
-    PCM_32 = 32
-
-
 class Latency(Enum):
     MS_025 = 0.25
     MS_050 = 0.5
@@ -137,6 +131,12 @@ class Latency(Enum):
 
     def encode(self) -> bytes:
         return encode_integer(int(self.value * 1_000_000), 4)
+
+
+class PCMEncoding(EncodableEnum):
+    PCM_16 = 16
+    PCM_24 = 24
+    PCM_32 = 32
 
 
 class SampleRate(EncodableEnum):

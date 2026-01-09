@@ -16,6 +16,7 @@ from .util import (
     Latency,
     LOGGER,
     NULL_HEXTET,
+    PCMEncoding,
     SampleRate,
 )
 
@@ -42,6 +43,7 @@ class DanteDevice:
 
         self._latency: Latency | None = None
         self._name: str = ''
+        self._pcm_encoding: PCMEncoding | None = None
         self._sample_rate: SampleRate | None = None
 
         self._channel_counts: ChannelCounts = {DanteChannelType.RX: 0, DanteChannelType.TX: 0}
@@ -74,6 +76,10 @@ class DanteDevice:
     @property
     def name(self):
         return self._name
+
+    @property
+    def pcm_encoding(self) -> PCMEncoding:
+        return self._pcm_encoding
 
     @property
     def rx_channels(self):
@@ -559,6 +565,18 @@ class DanteDevice:
         # New name is not contained within response, and may differ from what we wished to set,
         # particularly in the case of name reset.
         self.request_name()
+
+    def set_pcm_encoding(self, encoding: PCMEncoding | int) -> None:
+        """
+        There is no callback for this method, as a response is not sent.
+        """
+        if isinstance(encoding, int):
+            try:
+                encoding = PCMEncoding(int)
+            except ValueError:
+                LOGGER.error("Unrecognised Encoding value: %f", encoding)
+                return
+        self._app.settings_service.set_pcm_encoding(self, encoding)
 
     def set_sample_rate(self, sample_rate: SampleRate | int) -> None:
         """

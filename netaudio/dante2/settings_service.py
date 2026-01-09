@@ -16,7 +16,7 @@ from .util import (
 # ~ if TYPE_CHECKING:
 from .device import DanteDevice
 from .util import (
-    Encoding,
+    PCMEncoding,
     SampleRate,
 )
 
@@ -105,28 +105,6 @@ class DanteSettingsService(DanteUnicastService):
         pseudo_mac_address = b'\x52\x54\x00\x38\x5e\xba'
         self.command(device, payload, pseudo_mac_address, b'\x22\xdc')
 
-    def set_encoding(
-        self,
-        device: DanteDevice,
-        encoding: Encoding,
-    ):
-        # ~ mac_address = b'\x52\x54\x00\x00\x00\x00' # (upstream)
-        # (packet capture) actual mac address of transmitting device (e.g. us)
-        mac_address = get_mac_addr_serving_ipv4(device.ipv4)
-
-        # part1 = 0000; 03e4 (upstream; pkt-capt)
-        payload = (
-            b'\x07\x27', # 0727, 0734,
-            b'\x00\x83',
-            b'\x00\x00', # < null
-            b'\x00\x64',
-            b'\x00\x00', # < null
-            b'\x00\x01',
-            b'\x00\x00', # < null
-            encode_integer(encoding.value),
-        )
-        self.command(device, payload, mac_address)
-
     def set_gain_level(
         self,
         device: DanteDevice,
@@ -151,6 +129,29 @@ class DanteSettingsService(DanteUnicastService):
             encode_integer(gain_level),
         )
         self.command(device, payload, b'\x52\x54\x00\x00\x00\x00')
+
+    def set_pcm_encoding(
+        self,
+        device: DanteDevice,
+        encoding: PCMEncoding,
+    ):
+        # part1 = \x00\x00 ;; \x03\xe4, \x02\x9f (upstream ;; packet-captures)
+
+        mac_address = encode_mac_address(get_mac_addr_serving_ipv4(device.ipv4))
+        # ~ mac_address = b'\x52\x54\x00\x00\x00\x00' # (upstream)
+        # (packet capture) actual mac address of transmitting device (e.g. us)
+
+        payload = (
+            b'\x07\x27', # any of: \x07\x27, \x07\x34, \x07\x38
+            b'\x00\x83',
+            b'\x00\x00', # < null
+            b'\x00\x64',
+            b'\x00\x00', # < null
+            b'\x00\x01',
+            b'\x00\x00', # < null
+            encoding.encode(),
+        )
+        self.command(device, payload, mac_address)
 
     def set_sample_rate(
         self,
