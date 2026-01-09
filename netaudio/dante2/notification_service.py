@@ -281,8 +281,7 @@ class DanteNotificationService(DanteMulticastService):
         """ Latency
         * No payload expected
         """
-        LOGGER.debug("%s has changed its latency", device.name)
-        # ~ device.request_latency()
+        device.request_latency()
 
     def handle_288(self, device: DanteDevice, payload: bytes) -> None:
         """ ???

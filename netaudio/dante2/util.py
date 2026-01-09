@@ -105,6 +105,26 @@ class Encoding(Enum):
     PCM_32 = 32
 
 
+class Latency(Enum):
+    MS_025 = 0.25
+    MS_050 = 0.5
+    MS_100 = 1.0
+    MS_200 = 2.0
+    MS_500 = 5.0
+
+    @classmethod
+    def decode(cls, bytestring: bytes, idx: int):
+        value = decode_integer(bytestring, idx, 4) / 1_000_000
+        try:
+            return cls(value)
+        except ValueError:
+            LOGGER.error("%s is not a recognised value", encoding)
+            return None
+
+    def encode(self) -> bytes:
+        return encode_integer(int(self.value * 1_000_000), 4)
+
+
 class SampleRate(Enum):
     SR_44100 = 44100
     SR_48000 = 48000
