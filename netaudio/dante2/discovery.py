@@ -35,6 +35,12 @@ class DanteDiscovery:
 
     def add_service(self, zc: Zeroconf, service_type: str, service_name: str) -> None:
         info = zc.get_service_info(service_type, service_name)
+        if not info:
+            LOGGER.error(
+                "Unable to get info for added service (%s, %s)",
+                service_type, service_name,
+            )
+            return
         name = info.server
         LOGGER.debug("Device %s (%s) appeared", name, service_name)
 
@@ -72,6 +78,12 @@ class DanteDiscovery:
 
     def remove_service(self, zc: Zeroconf, service_type: str, service_name: str) -> None:
         info = zc.get_service_info(service_type, service_name)
+        if not info:
+            LOGGER.error(
+                "Unable to get info for removed service (%s, %s)",
+                service_type, service_name,
+            )
+            return
         name = info.server
         LOGGER.debug("Device %s (%s) disappeared", name, service_name)
 
@@ -88,6 +100,12 @@ class DanteDiscovery:
 
     def update_service(self, zc: Zeroconf, service_type: str, service_name: str) -> None:
         info = zc.get_service_info(service_type, service_name)
+        if not info:
+            LOGGER.error(
+                "Unable to get info for updated service (%s, %s)",
+                service_type, service_name,
+            )
+            return
         name = info.server
         LOGGER.debug("Device %s (%s) updated", name, service_name)
 
