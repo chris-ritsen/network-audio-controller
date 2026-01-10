@@ -1,11 +1,11 @@
-from collections.abc import Callable
-from typing import NamedTuple, TypeAlias#, TYPE_CHECKING
+from typing import NamedTuple #, TYPE_CHECKING
 
 # ~ if TYPE_CHECKING:
 from zeroconf import ServiceInfo as MDNSServiceInfo
 
 from .service import DanteUnicastService, MessageType
 from .util import (
+    CommandCallback,
     NULL_HEXTET,
     encode_integer,
     decode_protocol_version_from_mdns,
@@ -15,10 +15,6 @@ from .util import (
 # ~ if TYPE_CHECKING:
 from .device import DanteDevice
 from .util import ProtocolVersion
-
-
-# Py312 has new syntax for this
-CommandCallback: TypeAlias = Callable[[bytes], None]
 
 
 class DanteARCServiceDescriptor(NamedTuple):

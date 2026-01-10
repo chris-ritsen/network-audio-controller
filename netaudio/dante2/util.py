@@ -1,4 +1,5 @@
 import codecs
+from collections.abc import Callable
 from enum import Enum
 import ipaddress
 import logging
@@ -8,7 +9,9 @@ import uuid
 
 import psutil
 
+CommandCallback: TypeAlias = Callable[[bytes], None] # Python < 3.12
 ProtocolVersion: TypeAlias = tuple[int, int, int] # Python < 3.12
+# ~ type CommandCallback = Callable[[bytes], None] # Python 3.12+
 # ~ type ProtocolVersion = tuple[int, int, int] # Python 3.12+
 
 LOGGER = logging.getLogger('netaudio.dante2')
