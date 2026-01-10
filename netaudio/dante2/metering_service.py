@@ -1,3 +1,5 @@
+from ipaddress import IPv4Address
+
 from .events import DanteEventType
 from .service import DanteUnicastService, MessageType
 from .util import (
@@ -15,7 +17,7 @@ class DanteMeteringService(DanteUnicastService):
     SERVICE_TYPE_MDNS: None = None
     SERVICE_TYPE_SHORT: str = 'mtr'
 
-    def _receive(self, address, message):
+    def _receive(self, address: tuple[IPv4Address, int], message: bytes) -> None:
         #  0- 1: \xff\xff
         #  2- 3: length
         #  4- 5: seq-id

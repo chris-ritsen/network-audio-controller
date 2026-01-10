@@ -96,7 +96,7 @@ class DanteMulticastService(_DanteService):
         super().__init__(application)
         self._sockets: list[socket.socket] = []
 
-    def _receive(self, address, message) -> None:
+    def _receive(self, address: tuple[IPv4Address, int], message: bytes) -> None:
         raise NotImplementedError
 
     def bind(self) -> None:
@@ -216,7 +216,7 @@ class DanteUnicastService(_DanteService):
         super().__init__(application)
         self._sock: socket.socket | None = None
 
-    def _receive(self, address, message):
+    def _receive(self, address: tuple[IPv4Address, int], message: bytes):
         message_id = decode_integer(message, 4)
         message_type = message[8:10]
 
@@ -226,7 +226,7 @@ class DanteUnicastService(_DanteService):
             return
 
         if message_id not in self._message_store:
-            LOGGER.warning("Received a response from %s to a message not sent: %s", address, message)
+            LOGGER.warning("Received a response from %s to a message not sent: %s", address.ip, message)
             return
 
         if 'callback' in self._message_store[message_id] and self._message_store[message_id]['callback']:
@@ -255,7 +255,7 @@ class DanteUnicastService(_DanteService):
                     LOGGER.error("RX ERROR: %s\t%s", sock, error)
                     continue
                 else:
-                    self._receive(address, response)
+                    self._receive((IPv4Address(address[0]), address[1]), response)
 
             for sock in write_socks:
                 address, bytestring = self._send_queue.get()
