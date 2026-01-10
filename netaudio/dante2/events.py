@@ -9,6 +9,7 @@ class DanteEventType(Enum):
     # ~ DEVICE_NAME_UPDATED = auto()
     SUBSCRIPTION_CHANGED = auto()
     TRANSMITTERS_CHANGED = auto()
+    METER_VALUES = auto()
 
 
 class DanteEventDispatcher:
@@ -19,8 +20,8 @@ class DanteEventDispatcher:
         self._thread: Thread | None = None
         self._queue: SimpleQueue | None = None
 
-    def notify(self, event_type: DanteEventType, context = None):
-        self._queue.put((event_type, context))
+    def notify(self, event_type: DanteEventType, context = None, args = None):
+        self._queue.put((event_type, context, args))
 
     def register_listener(self, callback_listener):
         if callback_listener not in self._listeners:

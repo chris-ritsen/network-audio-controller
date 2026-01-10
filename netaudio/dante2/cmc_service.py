@@ -6,6 +6,7 @@ from zeroconf import ServiceInfo as MDNSServiceInfo
 
 from .service import DanteUnicastService, MessageType
 from .util import (
+    CommandCallback,
     NULL_HEXTET,
     encode_mac_address,
     encode_integer,
@@ -48,7 +49,7 @@ class DanteCMCService(DanteUnicastService):
         device: DanteDevice,
         command_code: bytes,
         command_body: tuple,
-        # ~ callback: CommandCallback | None = None,
+        callback: CommandCallback | None = None,
     ) -> None:
         port = device.cmc.port
         ipv4 = device.ipv4
@@ -68,10 +69,8 @@ class DanteCMCService(DanteUnicastService):
             'device': device,
             'command_code': command_code,
             'command': command,
-            # ~ 'callback': callback,
+            'callback': callback,
         }
-
-        print(command)
         self._send_queue.put(((str(ipv4), port), command))
 
     def _get_lengths(self, device_name: str):
@@ -83,27 +82,28 @@ class DanteCMCService(DanteUnicastService):
             length + 6,
         )
 
-    def _command_volume_start(
+    def metering_start(
         self,
         device: DanteDevice,
         timeout: bool = True,
     ):
         ipv4 = device.ipv4
-        port = self._app.volume_service.port
+        port = self._app.metering_service.port
 
         len1, len2, len3 = self._get_lengths(device.name)
         code = b'\x30\x10'
         body = (
-            b'\x03\xe4', #NULL_HEXTET,
+            NULL_HEXTET,              # or b'\x03\xe4' -- must match the same octet in metering_stop()
             encode_mac_address(get_mac_addr_serving_ipv4(ipv4)),
             NULL_HEXTET,
             b'\x00\x04',
             encode_integer(len1),
-            b'\x00\x02',
+            b'\x00\x01',              # {$LENMOD} (see below)
             encode_integer(len2),
             b'\x00\x0a',
             encode_string(device.name),
-            b'\x00\x00\x00\x00\x01', # b'\x00' * (4 if len(device.name) % 2 else 5),  # b'\x01\x00\x16\x00\x01', # (even number of chars)
+            b'\x00' * (3 if len(device.name) % 2 else 4),  # b'\x01\x00\x16\x00\x01', # (even number of chars)
+            b'\x01',
             encode_integer(len3),
             b'\x00\x01',
             encode_integer(port),
@@ -111,93 +111,43 @@ class DanteCMCService(DanteUnicastService):
             NULL_HEXTET,
             get_ip_addr_serving_ipv4(ipv4).packed,
             encode_integer(port),
-            NULL_HEXTET * 3,
-            encode_integer(port),
+            # ~ NULL_HEXTET * 3,      # if {$LENMOD} above is == 2
+            # ~ encode_integer(port), # if {$LENMOD} above is == 2
             NULL_HEXTET,
         )
-        self.command(device, code, body)
+        self.command(device, code, body, self.__cb_null)
 
 
-    def _command_volume_stop(
+    def metering_stop(
         self,
         device: DanteDevice,
     ):
         ipv4 = device.ipv4
-        port = self._app.volume_service.port
+        port = self._app.metering_service.port
 
         len1, len2, len3 = self._get_lengths(device.name)
         code = b'\x30\x10'
         body = (
-            NULL_HEXTET,
+            NULL_HEXTET,     # or b'\x03\xe4' -- must match the same octet in metering_start()
             encode_mac_address(get_mac_addr_serving_ipv4(ipv4)),
             NULL_HEXTET,
             b'\x00\x04',
             encode_integer(len1),
-            b'\x00\x01',
+            b'\x00\x01',     # {$LENMOD}
             encode_integer(len2),
             b'\x00\x0a',
             encode_string(device.name),
-            b'\x00' * (4 if len(device.name) % 2 else 5), # b'\x01\x00\x16\x00\x01', # (even number of chars)
+            b'\x00' * (3 if len(device.name) % 2 else 4),  # b'\x01\x00\x16\x00\x01', # (even number of chars)
+            b'\x01',
             encode_integer(len3),
             b'\x00\x01',
             encode_integer(port),
-            b'\x00\x01', # timeout in volume_start command
-            NULL_HEXTET,
-            get_ip_addr_serving_ipv4(ipv4).packed,
-            NULL_HEXTET,
-            NULL_HEXTET,
+            b'\x00\x01',
+            NULL_HEXTET * 5, # if {$LENMOD} above == 2 : If == 2 then 9*NULL_HEXTETs (instead of 5) here
         )
-        self.command(device, code, body)
+        self.command(device, code, body, self.__cb_null)
 
-    # ~ def get_volume(self, device: DanteDevice):
-
-
-    # def _parse_volume(self, bytes_volume):
-    #     rx_channels = bytes_volume[-1 - self.rx_count_raw : -1]
-    #     tx_channels = bytes_volume[
-    #         -1 - self.rx_count_raw - self.tx_count_raw : -1 - self.rx_count_raw
-    #     ]
-
-    #     try:
-    #         for _, channel in self.tx_channels.items():
-    #             channel.volume = tx_channels[channel.number - 1]
-
-    #         for _, channel in self.rx_channels.items():
-    #             channel.volume = rx_channels[channel.number - 1]
-
-    #     except Exception as e:
-    #         print(e)
-    #         traceback.print_exc()
-
-
-    # async def get_volume(self, ipv4, mac, port):
-    #     try:
-    #         if self.software or (self.model_id in FEATURE_VOLUME_UNSUPPORTED):
-    #             return
-    #         if port in sockets:
-    #             sock = sockets[port]
-    #         else:
-    #             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    #             sock.settimeout(0.1)
-    #             sock.bind((str(ipv4), port))
-    #             sockets[port] = sock
-    #         volume_start = await self._send(self._command_volume_start(self.name, ipv4, mac, port))
-    #         if volume_start[15:16] == b"\xff":
-    #             logger.debug(f"Volume level command is unsupported on {self.name}")
-    #             return
-    #         while True:
-    #             try:
-    #                 data, addr = sock.recvfrom(2048)
-    #                 if addr[0] == str(self.ipv4):
-    #                     await self._send(self._command_volume_stop(self.name, ipv4, mac, port))
-    #                     self._parse_volume(data)
-    #                 break
-    #             except socket.timeout:
-    #                 break
-    #             except Exception as e:
-    #                 print(e)
-    #                 traceback.print_exc()
-    #                 break
-    #     except Exception as e:
-    #         traceback.print_exc()
-    #         print(e)
+    def __cb_null(self, response: bytes) -> None:
+        """We don't currently care for the response of the metering_* methods,
+        so this handles that to prevent it from being printed to the console line
+        (which is what happens if a callback is not set)."""
