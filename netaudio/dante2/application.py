@@ -7,10 +7,10 @@ from .dbc_service import DanteDBCService
 from .device import DanteDevice
 from .discovery import DanteDiscovery
 from .events import DanteEventDispatcher
+from .metering_service import DanteMeteringService
 from .notification_service import DanteNotificationService
 from .settings_service import DanteSettingsService
 from .util import LOGGER
-from .volume_service import DanteVolumeService
 
 
 class DanteApplication:
@@ -20,9 +20,9 @@ class DanteApplication:
         self._arc: DanteARCService = DanteARCService(self)
         self._cmc: DanteCMCService = DanteCMCService(self)
         self._dbc: DanteDBCService = DanteDBCService(self)
+        self._mtr: DanteMeteringService = DanteMeteringService(self)
         self._notifications: DanteNotificationService = DanteNotificationService(self)
         self._settings: DanteSettingsService = DanteSettingsService(self)
-        self._vol: DanteVolumeService = DanteVolumeService(self)
         self._discovery: DanteDiscovery = DanteDiscovery(self)
 
         self._devices: list[DanteDevice] = []
@@ -35,9 +35,9 @@ class DanteApplication:
         self._cmc.start()
         # ~ self._dbc.start()
         self._events.start()
+        self._mtr.start()
         self._notifications.start()
         self._settings.start()
-        self._vol.start()
         self._discovery.start()
 
     def shutdown(self):
@@ -46,9 +46,9 @@ class DanteApplication:
         self._cmc.stop()
         # ~ self._dbc.stop()
         self._events.stop()
+        self._mtr.stop()
         self._notifications.stop()
         self._settings.stop()
-        self._vol.stop()
 
     @property
     def arc_service(self) -> DanteARCService:
@@ -71,16 +71,16 @@ class DanteApplication:
         return self._events
 
     @property
+    def metering_service(self) -> DanteMeteringService:
+        return self._mtr
+
+    @property
     def notification_service(self) -> DanteNotificationService:
         return self._notifications
 
     @property
     def settings_service(self) -> DanteSettingsService:
         return self._settings
-
-    @property
-    def volume_service(self) -> DanteVolumeService:
-        return self._vol
 
     def register_device(self, device_spec):
         LOGGER.info("Discovered new Dante device at %s", device_spec['ipv4'])

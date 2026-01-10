@@ -590,3 +590,10 @@ class DanteDevice:
                 LOGGER.error("Unrecognised Sample Rate value: %f", sample_rate)
                 return
         self._app.settings_service.set_sample_rate(self, sample_rate)
+
+    def start_level_metering(self) -> None:
+        # TODO: Detect if software, or metering is otherwise not possible with this device
+        self._app.cmc_service.metering_start(self, timeout = True)
+
+    def stop_level_metering(self) -> None:
+        self._app.cmc_service.metering_stop(self)
