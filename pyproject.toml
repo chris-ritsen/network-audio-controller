@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "netaudio"
-version = "0.3.0dev0"
+version = "0.3.0dev1"
 description = "Control Audinate Dante network audio devices without Dante Controller"
 readme = "README.md"
 license = "Unlicense"
