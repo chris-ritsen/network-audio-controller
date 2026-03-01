@@ -52,9 +52,7 @@ class SubscriptionAddCommand(Command):
         if self.option("tx-channel-name"):
             tx_channel = next(
                 filter(
-                    lambda c: self.option("tx-channel-name") == c[1].friendly_name
-                    or self.option("tx-channel-name") == c[1].name
-                    and not c[1].friendly_name,
+                    lambda c: c[1].subscription_name == self.option("tx-channel-name"),
                     tx_device.tx_channels.items(),
                 )
             )[1]
@@ -101,7 +99,7 @@ class SubscriptionAddCommand(Command):
 
         if rx_channel and rx_device and tx_channel:
             self.line(
-                f"{rx_channel.name}@{rx_device.name} <- {tx_channel.name}@{tx_device.name}"
+                f"{rx_channel.name}@{rx_device.name} <- {tx_channel.subscription_name}@{tx_device.name}"
             )
             await rx_device.add_subscription(rx_channel, tx_channel, tx_device)
 
