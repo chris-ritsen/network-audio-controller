@@ -60,7 +60,7 @@ class SubscriptionAddCommand(Command):
         elif self.option("tx-channel-number"):
             tx_channel = next(
                 filter(
-                    lambda c: c[1].number == self.option("tx-channel-number"),
+                    lambda c: c[1].number == int(self.option("tx-channel-number")),
                     tx_device.tx_channels.items(),
                 )
             )[1]
@@ -90,7 +90,7 @@ class SubscriptionAddCommand(Command):
         elif self.option("rx-channel-number"):
             rx_channel = next(
                 filter(
-                    lambda c: c[1].number == self.option("rx-channel-number"),
+                    lambda c: c[1].number == int(self.option("rx-channel-number")),
                     rx_device.rx_channels.items(),
                 )
             )[1]
