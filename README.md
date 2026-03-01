@@ -49,78 +49,39 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 ### Installation
 
-To install from PyPI on most systems, use pip or pipx:
+To install from PyPI:
 
 ```bash
-pipx install netaudio
+uv tool install netaudio
 ```
+
+Or with pip/pipx:
 
 ```bash
 pip install netaudio
 ```
 
-To install the package from a clone:
+To install from a clone:
+
 ```bash
-pipx install --force --include-deps .
+uv sync
+uv run netaudio
 ```
 
 #### Arch Linux
 
 To install from AUR, build the package with
 [aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio).
-Otherwise, install with pipx.
-
-For development, install the following packages:
-
-```bash
-pacman -S community/python-pipx community/python-poetry
-```
-
-#### WSL / Ubuntu
-```bash
-apt-get install pipx
-pipx install netaudio
-```
-
-For development, also install poetry:
-
-```bash
-pipx install poetry
-```
-
-#### MacOS
-
-Install pipx with brew and then use it to install:
-
-```bash
-brew install pipx
-brew link pipx
-pipx install netaudio
-```
-
-For development, use brew to install and link poetry:
-
-```bash
-brew install poetry
-brew link poetry
-```
 
 ### Usage
 
-To run without installing or for development, use poetry:
+Run `netaudio` if installed globally, or `uv run netaudio` from a clone.
+
+Run tests:
 
 ```bash
-poetry install
-poetry run netaudio
+uv run pytest
 ```
-
-Run tests during development:
-
-```bash
-poetry run pytest
-```
-
-Otherwise, run `netaudio`.
 
 ### Documentation
 
