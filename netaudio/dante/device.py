@@ -148,7 +148,7 @@ class DanteDevice:
     async def add_subscription(self, rx_channel, tx_channel, tx_device):
         response = await self.dante_command(
             *self.command_add_subscription(
-                rx_channel.number, tx_channel.name, tx_device.name
+                rx_channel.number, tx_channel.subscription_name, tx_device.name
             )
         )
 
