@@ -1,49 +1,43 @@
-[tool.poetry]
-authors = ["Christopher Ritsen <chris.ritsen@gmail.com>"]
-classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-description = "Control Audinate Dante network audio devices without Dante Controller"
-documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
-include = ["CHANGELOG.md", "LICENSE"]
-keywords = ["audinate", "audio", "cli", "dante", "network"]
-license = "Unlicense"
+[project]
 name = "netaudio"
-readme = "README.md"
-repository = "https://github.com/chris-ritsen/network-audio-controller"
 version = "0.0.12"
+description = "Control Audinate Dante network audio devices without Dante Controller"
+readme = "README.md"
+license = "Unlicense"
+requires-python = ">=3.9"
+authors = [{ name = "Christopher Ritsen", email = "chris.ritsen@gmail.com" }]
+classifiers = ["Topic :: Multimedia :: Sound/Audio"]
+keywords = ["audinate", "audio", "cli", "dante", "network"]
+dependencies = [
+    "cleo>=0.8.1,<1",
+    "clikit>=0.6.2,<1",
+    "twisted>=22.1.0",
+    "zeroconf>=0.38.3",
+    "sqlitedict>=1.7.0",
+    "redis>=4.1.4",
+    "fastapi>=0.110.1",
+    "uvicorn>=0.29.0",
+]
 
-[tool.poetry.dependencies]
-cleo = "^0.8.1"
-python = "^3.9"
-twisted = "^22.1.0"
-zeroconf = "^0.38.3"
-sqlitedict = "^1.7.0"
-redis = "^4.1.4"
-fastapi = "^0.110.1"
-uvicorn = "^0.29.0"
-clikit = "^0.6.2"
-
-[tool.poetry.group.dev.dependencies]
-black = "^22.1.0"
-pipx = "^1.0.0"
-pylint = "^2.12.2"
-pytest = "^7.0.0"
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
+[project.scripts]
 netaudio = "netaudio:main"
 
-# Recommended, see: https://docs.pytest.org/en/7.1.x/explanation/goodpractices.html#choosing-an-import-mode
-[tool.pytest.ini_options]
-addopts = [
-    "--import-mode=importlib",
+[project.urls]
+Repository = "https://github.com/chris-ritsen/network-audio-controller"
+Documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+managed = true
+package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
 ]
 
-[tool.pytest.ini_options.exclude]
-patterns = [
-    "*/__pycache__/*",
-    "*.pyc",
-    "*.pyo"
-]
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
