@@ -1,42 +1,25 @@
 [project]
-name = "netaudio"
-version = "0.0.12"
-description = "Control Audinate Dante network audio devices without Dante Controller"
-readme = "README.md"
-license = "Unlicense"
+name = "netaudio-workspace"
+version = "0.0.0"
 requires-python = ">=3.9"
-authors = [{ name = "Christopher Ritsen", email = "chris.ritsen@gmail.com" }]
-classifiers = ["Topic :: Multimedia :: Sound/Audio"]
-keywords = ["audinate", "audio", "cli", "dante", "network"]
-dependencies = [
-    "cleo>=0.8.1,<1",
-    "clikit>=0.6.2,<1",
-    "twisted>=22.1.0",
-    "zeroconf>=0.38.3",
-    "sqlitedict>=1.7.0",
-    "redis>=4.1.4",
-    "fastapi>=0.110.1",
-    "uvicorn>=0.29.0",
-]
 
-[project.scripts]
-netaudio = "netaudio:main"
-
-[project.urls]
-Repository = "https://github.com/chris-ritsen/network-audio-controller"
-Documentation = "https://github.com/chris-ritsen/network-audio-controller/wiki"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [tool.uv]
 managed = true
-package = true
+package = false
+
+[tool.uv.sources]
+netaudio-lib = { workspace = true }
+netaudio = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "netaudio-lib",
+    "netaudio",
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
     "ruff>=0.8.0",
 ]
 
@@ -49,7 +32,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
-ignore = ["E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
+ignore = ["E402", "E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
 
 [tool.ruff.format]
 quote-style = "double"
