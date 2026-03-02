@@ -11,10 +11,6 @@ scripts.
 
 For more information, check out the [gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
 
-### Demo
-
-<p align="center"><img src="https://github.com/chris-ritsen/network-audio-controller/blob/master/demo/demo.gif?raw=true" alt="netctl usage demo" title="netctl usage demo"/></p>
-
 ### Features
 
 #### Current
@@ -28,24 +24,6 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Set device latency, sample rate, encoding
 - Set/reset channel names, device names
 - mDNS device discovery
-
-#### Planned
-
-- Change channel/device names without affecting existing subscriptions
-- Change/display device settings (AES67 mode)
-- Client/server modes
-- Command prompt
-- Control of Shure wireless devices ([Axient
-  receivers](https://pubs.shure.com/view/command-strings/AD4/en-US.pdf) and
-  [PSM
-  transmitters](https://pubs.shure.com/view/command-strings/PSM1000/en-US.pdf))
-- Gather information from multicast traffic (make, model, lock status,
-  subscription changes)
-- Signal presence indicator
-- Stand-alone command API
-- TUI
-- Web application UI
-- XML output (such as a Dante preset file)
 
 ### Installation
 
