@@ -37,7 +37,19 @@ package = true
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
+    "ruff>=0.8.0",
 ]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
+
+[tool.ruff.format]
+quote-style = "double"
