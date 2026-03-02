@@ -83,6 +83,13 @@ Run tests:
 uv run pytest
 ```
 
+Lint and format:
+
+```bash
+uv run ruff check .
+uv run ruff format .
+```
+
 ### Documentation
 
 - [Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
