@@ -535,8 +535,11 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.error(f"Client handler error: {exception}")
         finally:
-            writer.close()
-            await writer.wait_closed()
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
 
 
 async def run_daemon():
