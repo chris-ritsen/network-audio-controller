@@ -222,8 +222,12 @@ class NetaudioDaemon:
 
         asyncio.create_task(self.periodic_refresh())
 
-        async with self.server:
-            await self.server.serve_forever()
+        if hasattr(self.server, 'serve_forever'):
+            async with self.server:
+                await self.server.serve_forever()
+        else:
+            while self.running:
+                await asyncio.sleep(1)
 
     async def periodic_refresh(self):
         from netaudio_lib.dante.browser import DanteBrowser
