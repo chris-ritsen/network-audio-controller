@@ -532,6 +532,8 @@ class NetaudioDaemon:
             length = struct.pack(">I", len(data))
             writer.write(length + data)
             await writer.drain()
+        except (BrokenPipeError, ConnectionResetError, ConnectionError):
+            pass
         except Exception as exception:
             logger.error(f"Client handler error: {exception}")
         finally:
