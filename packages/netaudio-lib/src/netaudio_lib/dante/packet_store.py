@@ -5,7 +5,7 @@ import sqlite3
 import struct
 import time
 
-from netaudio_lib.dante.debug_formatter import OPCODE_NAMES, PROTOCOL_NAMES, RESULT_NAMES
+from netaudio_lib.dante.debug_formatter import PROTOCOL_NAMES, RESULT_NAMES, get_opcode_name
 
 logger = logging.getLogger("netaudio")
 
@@ -42,7 +42,7 @@ def _parse_header(data: bytes):
             "opcode": opcode,
             "result_code": result_code,
             "protocol_name": PROTOCOL_NAMES.get(protocol_id),
-            "opcode_name": OPCODE_NAMES.get(opcode),
+            "opcode_name": get_opcode_name(protocol_id, opcode),
             "result_name": RESULT_NAMES.get(result_code) if result_code is not None else None,
         }
 

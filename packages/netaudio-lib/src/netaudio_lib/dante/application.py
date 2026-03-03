@@ -3,11 +3,14 @@ import logging
 
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
-from netaudio_lib.dante.const import SERVICE_ARC, SERVICE_CMC, SERVICES
+from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, SERVICE_ARC, SERVICE_CMC, SERVICES
 from netaudio_lib.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio_lib.dante.services.arc import DanteARCService
 from netaudio_lib.dante.services.cmc import DanteCMCService
-from netaudio_lib.dante.services.notification import DanteNotificationService
+from netaudio_lib.dante.services.notification import (
+    DanteNotificationService,
+    NOTIFICATION_NAMES,
+)
 from netaudio_lib.dante.services.settings import DanteSettingsService
 
 logger = logging.getLogger("netaudio")
@@ -27,11 +30,39 @@ class DanteApplication:
         )
         self._browser = None
         self._started = False
+        self._notification_handlers: dict[int, list] = {}
+
+    def on_notification(self, notification_id: int, callback) -> None:
+        if notification_id not in self._notification_handlers:
+            self._notification_handlers[notification_id] = []
+        self._notification_handlers[notification_id].append(callback)
+
+    async def _dispatch_notification(self, event) -> None:
+        notification_id = event.data.get("notification_id")
+        if notification_id is None:
+            return
+
+        handlers = self._notification_handlers.get(notification_id)
+        if handlers:
+            for handler in handlers:
+                try:
+                    await handler(event)
+                except Exception:
+                    notification_name = NOTIFICATION_NAMES.get(
+                        notification_id, f"0x{notification_id:04X}"
+                    )
+                    logger.exception(
+                        f"Error in notification handler for {notification_name}"
+                    )
+        else:
+            notification_name = event.data.get("notification_name", f"0x{notification_id:04X}")
+            logger.debug(f"Unhandled notification: {notification_name} from {event.server_name}")
 
     async def startup(self) -> None:
         if self._started:
             return
 
+        self.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._dispatch_notification)
         await self.dispatcher.start()
         await self.notifications.start()
         await self.arc.start()
@@ -215,7 +246,6 @@ class DanteApplication:
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
 
     async def _query_settings_fields(self) -> None:
-        BLUETOOTH_MODEL_IDS = {"DIOBT"}
         host_mac = self.cmc._host_mac
 
         sent_any = False
