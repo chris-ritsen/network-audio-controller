@@ -85,7 +85,7 @@ class DanteCMCService(DanteUnicastService):
     async def _heartbeat_loop(self, get_device_ips) -> None:
         while True:
             try:
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
                 device_ips = get_device_ips()
                 if device_ips:
                     await self.register_all(device_ips)

@@ -49,29 +49,47 @@ class Colors:
 C = Colors()
 
 PROTOCOL_NAMES = {
-    0x27FF: "PROTOCOL_ID",
-    0x2809: "PROTOCOL_ID_SETTINGS",
+    0x1200: "PROTOCOL_CMC",
+    0x27FF: "PROTOCOL_ARC",
+    0x2809: "PROTOCOL_ARC_SETTINGS",
     0xFFFF: "PROTOCOL_SETTINGS",
 }
 
-OPCODE_NAMES = {
-    0x1000: "OPCODE_CHANNEL_COUNT",
-    0x1001: "OPCODE_DEVICE_NAME_SET",
-    0x1002: "OPCODE_DEVICE_NAME",
-    0x1003: "OPCODE_DEVICE_INFO",
-    0x1100: "OPCODE_DEVICE_SETTINGS",
-    0x1101: "OPCODE_DEVICE_SETTINGS_SET",
-    0x2000: "OPCODE_TX_CHANNEL_INFO",
-    0x2010: "OPCODE_TX_CHANNEL_NAMES",
-    0x2013: "OPCODE_TX_CHANNEL_NAME_SET",
-    0x3000: "OPCODE_RX_CHANNELS",
-    0x3001: "OPCODE_RX_CHANNEL_NAME_SET",
-    0x3010: "OPCODE_SUBSCRIPTION_SET",
-    0x3014: "OPCODE_SUBSCRIPTION_REMOVE",
-    0x3400: "OPCODE_RX_CHANNEL_STATUS",
-    0x3410: "OPCODE_SUBSCRIPTION_MODIFY",
-    0x3600: "OPCODE_RX_FLOW_STATUS",
+ARC_OPCODE_NAMES = {
+    0x1000: "Channel Count",
+    0x1001: "Device Name Set",
+    0x1002: "Device Name",
+    0x1003: "Device Info",
+    0x1100: "Device Settings",
+    0x1101: "Device Settings Set",
+    0x2000: "TX Channel Info",
+    0x2010: "TX Channel Names",
+    0x2013: "TX Channel Name Set",
+    0x3000: "RX Channels",
+    0x3001: "RX Channel Name Set",
+    0x3010: "Subscription Set",
+    0x3014: "Subscription Remove",
+    0x3400: "RX Channel Status",
+    0x3410: "Subscription Modify",
+    0x3600: "RX Flow Status",
 }
+
+CMC_OPCODE_NAMES = {
+    0x1001: "ConMon Heartbeat",
+}
+
+OPCODE_NAMES_BY_PROTOCOL = {
+    0x27FF: ARC_OPCODE_NAMES,
+    0x2809: ARC_OPCODE_NAMES,
+    0x1200: CMC_OPCODE_NAMES,
+}
+
+OPCODE_NAMES = ARC_OPCODE_NAMES
+
+
+def get_opcode_name(protocol, opcode):
+    table = OPCODE_NAMES_BY_PROTOCOL.get(protocol, ARC_OPCODE_NAMES)
+    return table.get(opcode, f"0x{opcode:04X}")
 
 RESULT_NAMES = {
     0x0001: "RESULT_CODE_SUCCESS",
@@ -203,7 +221,7 @@ def format_request(data: bytes, device_name: str, command_name: str):
     transaction_id = struct.unpack(">H", data[4:6])[0]
     opcode = struct.unpack(">H", data[6:8])[0]
 
-    opcode_name = OPCODE_NAMES.get(opcode, f"0x{opcode:04X}")
+    opcode_name = get_opcode_name(protocol, opcode)
 
     print(f"\n{C.CYAN}{C.BOLD}>>> REQUEST{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}", file=sys.stderr)
     print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
@@ -229,10 +247,11 @@ def format_request(data: bytes, device_name: str, command_name: str):
     print_field(2, 2, data[2:4], "length", f"{length} bytes", C.BLUE)
     print_field(4, 2, data[4:6], "transaction_id", f"0x{transaction_id:04X}", C.DIM)
 
-    if opcode in OPCODE_NAMES:
-        print_const(6, 2, data[6:8], OPCODE_NAMES[opcode])
+    resolved_opcode_name = get_opcode_name(protocol, opcode)
+    if not resolved_opcode_name.startswith("0x"):
+        print_const(6, 2, data[6:8], resolved_opcode_name)
     else:
-        print_field(6, 2, data[6:8], "opcode", f"0x{opcode:04X}", C.YELLOW)
+        print_field(6, 2, data[6:8], "opcode", resolved_opcode_name, C.YELLOW)
 
     if len(data) > 8:
         body = data[8:]
@@ -254,7 +273,7 @@ def format_response(data: bytes, device_name: str, command_name: str):
     opcode = struct.unpack(">H", data[6:8])[0]
     result = struct.unpack(">H", data[8:10])[0]
 
-    opcode_name = OPCODE_NAMES.get(opcode, f"0x{opcode:04X}")
+    opcode_name = get_opcode_name(protocol, opcode)
 
     print(f"\n{C.GREEN}{C.BOLD}<<< RESPONSE{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}", file=sys.stderr)
     print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
@@ -282,10 +301,11 @@ def format_response(data: bytes, device_name: str, command_name: str):
     print_field(2, 2, data[2:4], "length", f"{length} bytes", C.BLUE)
     print_field(4, 2, data[4:6], "transaction_id", f"0x{transaction_id:04X}", C.DIM)
 
-    if opcode in OPCODE_NAMES:
-        print_const(6, 2, data[6:8], OPCODE_NAMES[opcode])
+    resolved_opcode_name = get_opcode_name(protocol, opcode)
+    if not resolved_opcode_name.startswith("0x"):
+        print_const(6, 2, data[6:8], resolved_opcode_name)
     else:
-        print_field(6, 2, data[6:8], "opcode", f"0x{opcode:04X}", C.YELLOW)
+        print_field(6, 2, data[6:8], "opcode", resolved_opcode_name, C.YELLOW)
 
     if result in RESULT_NAMES:
         color = C.RED if result == 0x0022 else C.GREEN

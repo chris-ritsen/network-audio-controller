@@ -73,13 +73,13 @@ def _label_packet(payload: bytes):
         return ""
 
     from netaudio_lib.dante.const import MESSAGE_TYPE_STRINGS
-    from netaudio_lib.dante.debug_formatter import OPCODE_NAMES, PROTOCOL_NAMES
+    from netaudio_lib.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
 
     protocol_id = struct.unpack(">H", payload[0:2])[0]
 
     if protocol_id in PROTOCOL_NAMES and protocol_id != 0xFFFF:
         opcode = struct.unpack(">H", payload[6:8])[0]
-        return OPCODE_NAMES.get(opcode, f"0x{opcode:04X}")
+        return get_opcode_name(protocol_id, opcode)
 
     if protocol_id == 0xFFFF and len(payload) >= 28:
         message_type = struct.unpack(">H", payload[26:28])[0]
@@ -600,38 +600,3 @@ def replay(
         store.close()
 
 
-@app.command()
-def stats(
-    db: str = typer.Option(DEFAULT_DB_PATH, "--db", help="SQLite database path."),
-    limit: int = typer.Option(100, "--limit", help="Number of packets to show."),
-):
-    """Show captured packets from the database."""
-    from netaudio._common import output_table
-
-    store = PacketStore(db_path=db)
-
-    packet_stats = store.get_stats()
-    typer.echo(f"Database: {packet_stats['total']} packets, {packet_stats['correlated']} correlated", err=True)
-
-    packets = store.get_packets(limit=limit)
-
-    headers = ["ID", "Timestamp", "Source", "Destination", "Direction", "Opcode"]
-    rows = []
-    json_data = []
-
-    for packet in reversed(packets):
-        direction = packet.get("direction") or "multicast"
-        opcode_name = packet.get("opcode_name") or ""
-        rows.append([
-            str(packet["id"]),
-            packet["timestamp_iso"],
-            f"{packet['src_ip']}:{packet['src_port']}",
-            f"{packet['dst_ip']}:{packet['dst_port']}",
-            direction,
-            opcode_name,
-        ])
-        cleaned = {key: value for key, value in packet.items() if key != "payload"}
-        json_data.append(cleaned)
-
-    output_table(headers, rows, json_data=json_data)
-    store.close()
