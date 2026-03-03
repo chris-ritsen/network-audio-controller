@@ -5,7 +5,6 @@ from netaudio_lib.dante.const import (
     DEVICE_INFO_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
-from netaudio_lib.dante.device_parser import DanteDeviceParser
 from netaudio_lib.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio_lib.dante.service import DanteMulticastService
 
@@ -23,6 +22,7 @@ NOTIFICATION_TX_FLOW_CHANGE = 260
 NOTIFICATION_RX_FLOW_CHANGE = 261
 NOTIFICATION_PROPERTY_CHANGE = 262
 NOTIFICATION_LATENCY_CHANGE = 262
+NOTIFICATION_SETTINGS_CHANGE = 4110
 NOTIFICATION_AES67_STATUS = 4103
 
 NOTIFICATION_NAMES = {
@@ -37,19 +37,9 @@ NOTIFICATION_NAMES = {
     NOTIFICATION_TX_FLOW_CHANGE: "TX Flow Change",
     NOTIFICATION_RX_FLOW_CHANGE: "RX Flow Change",
     NOTIFICATION_PROPERTY_CHANGE: "Property Change",
+    NOTIFICATION_SETTINGS_CHANGE: "Settings Change",
     NOTIFICATION_AES67_STATUS: "AES67 Status",
 }
-
-NOTIFICATION_EVENT_MAP = {
-    NOTIFICATION_INTERFACE_STATUS: EventType.DEVICE_UPDATED,
-    NOTIFICATION_SAMPLE_RATE_STATUS: EventType.SAMPLE_RATE_CHANGED,
-    NOTIFICATION_ENCODING_STATUS: EventType.DEVICE_UPDATED,
-    NOTIFICATION_DEVICE_REBOOT: EventType.DEVICE_UPDATED,
-    NOTIFICATION_TX_CHANNEL_CHANGE: EventType.CHANNEL_NAME_UPDATED,
-    NOTIFICATION_RX_CHANNEL_CHANGE: EventType.CHANNEL_NAME_UPDATED,
-    NOTIFICATION_AES67_STATUS: EventType.AES67_CHANGED,
-}
-
 
 class DanteNotificationService(DanteMulticastService):
     def __init__(self, dispatcher: DanteEventDispatcher, device_lookup=None, packet_store=None):
@@ -86,10 +76,6 @@ class DanteNotificationService(DanteMulticastService):
             except Exception as exception:
                 logger.debug(f"PacketStore error (notification): {exception}")
 
-        if data[26] == 0x10 and data[27] == 0x0E:
-            self._handle_bluetooth(data, source_ip)
-            return
-
         notification_id = struct.unpack(">H", data[26:28])[0]
         notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
 
@@ -113,50 +99,6 @@ class DanteNotificationService(DanteMulticastService):
                 "raw": data,
             },
         ))
-
-        event_type = NOTIFICATION_EVENT_MAP.get(notification_id)
-        if event_type:
-            self._dispatcher.emit_nowait(DanteEvent(
-                type=event_type,
-                device_name=device_name,
-                server_name=server_name,
-                data={
-                    "notification_id": notification_id,
-                    "source_ip": source_ip,
-                },
-            ))
-
-    def _handle_bluetooth(self, data: bytes, source_ip: str) -> None:
-        device = self._lookup_device(source_ip)
-        if device is None:
-            return
-
-        if len(data) < 37 or data[36] != 0x12:
-            return
-
-        if len(data) < 50 or data[38] != 0x0a:
-            return
-
-        name = DanteDeviceParser.parse_bluetooth_status(data)
-        old_name = device.bluetooth_device
-
-        if name != old_name:
-            device.bluetooth_device = name
-            logger.info(
-                f"Bluetooth status changed for {device.server_name}: "
-                f"{old_name!r} -> {name!r}"
-            )
-            self._dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_UPDATED,
-                device_name=device.name,
-                server_name=device.server_name,
-                data={
-                    "field": "bluetooth_device",
-                    "old_value": old_name,
-                    "new_value": name,
-                    "source_ip": source_ip,
-                },
-            ))
 
     def _lookup_device(self, ip_str: str):
         if self._device_lookup:

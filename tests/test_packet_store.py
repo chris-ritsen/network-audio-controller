@@ -38,14 +38,14 @@ class TestParseHeader:
         assert h["protocol_id"] == 0x27FF
         assert h["transaction_id"] == 0x0042
         assert h["opcode"] == 0x1002
-        assert h["opcode_name"] == "OPCODE_DEVICE_NAME"
-        assert h["protocol_name"] == "PROTOCOL_ID"
+        assert h["opcode_name"] == "Device Name"
+        assert h["protocol_name"] == "PROTOCOL_ARC"
 
     def test_valid_response(self):
         data = _make_response(opcode=0x3010, result=0x0001)
         h = _parse_header(data)
         assert h["opcode"] == 0x3010
-        assert h["opcode_name"] == "OPCODE_SUBSCRIPTION_SET"
+        assert h["opcode_name"] == "Subscription Set"
         assert h["result_code"] == 0x0001
         assert h["result_name"] == "RESULT_CODE_SUCCESS"
 
@@ -56,7 +56,7 @@ class TestParseHeader:
         data = _make_packet(opcode=0x9999)
         h = _parse_header(data)
         assert h["opcode"] == 0x9999
-        assert h["opcode_name"] is None
+        assert h["opcode_name"] == "0x9999"
 
 
 class TestStorePacket:

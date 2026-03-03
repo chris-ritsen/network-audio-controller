@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-
 import typer
 
 from netaudio_lib.common.socket_path import daemon_is_accessible, open_daemon_connection
@@ -12,14 +10,8 @@ app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True)
 
 
 @app.command()
-def start(
-    log_level: str = typer.Option("info", "--log-level", help="Logging level."),
-):
+def start():
     """Start the netaudio daemon."""
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
     asyncio.run(run_daemon())
 
 

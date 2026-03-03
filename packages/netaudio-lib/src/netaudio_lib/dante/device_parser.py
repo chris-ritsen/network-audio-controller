@@ -58,18 +58,36 @@ class DanteDeviceParser:
         if field4_end > len(response):
             return None
 
-        i = field4_end - 1
-        while i >= pos and 0x20 <= response[i] < 0x7f:
-            i -= 1
+        # Search forward within field4 for the connection status marker.
+        # Connected = 08 01 followed by 12 <len> <bluetooth_device_name>
+        # Disconnected = 08 02 with no name following
+        data = response[pos:field4_end]
+        return DanteDeviceParser._find_bluetooth_name(data)
 
-        if i >= pos and i < field4_end - 1 and i >= 1 and response[i - 1] == 0x12:
-            name_start = i + 1
-            try:
-                return response[name_start:field4_end].decode('utf-8')
-            except (UnicodeDecodeError, ValueError):
-                return None
+    @staticmethod
+    def _find_bluetooth_name(data):
+        if len(data) < 5 or data[0] != 0x0a or data[2] != 0x12:
+            return False
 
-        return None
+        marker = data.find(b'\x08\x01\x12')
+        if marker == -1:
+            return None
+
+        name_len_pos = marker + 3
+        if name_len_pos >= len(data):
+            return None
+
+        name_len = data[name_len_pos]
+        name_start = name_len_pos + 1
+        name_end = name_start + name_len
+
+        if name_end > len(data):
+            return None
+
+        try:
+            return data[name_start:name_end].decode('utf-8')
+        except (UnicodeDecodeError, ValueError):
+            return None
 
     def parse_volume(
         self, bytes_volume, rx_count_raw, tx_count_raw, tx_channels, rx_channels
