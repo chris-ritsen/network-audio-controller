@@ -135,7 +135,7 @@ class TestCapturedSubscriptionHeaders:
 
         assert h["protocol_id"] == 0x2809
         assert h["opcode"] == 0x3410
-        assert h["opcode_name"] == "OPCODE_SUBSCRIPTION_MODIFY"
+        assert h["opcode_name"] == "Subscription Modify"
         assert h["result_code"] == 0x0000
 
     def test_captured_remove_response(self, load_sub_fixture):
@@ -172,13 +172,13 @@ class TestCapturedSubscriptionHeaders:
         data = load_sub_fixture("rx_channel_status_request.bin")
         h = _parse_header(data)
         assert h["opcode"] == 0x3400
-        assert h["opcode_name"] == "OPCODE_RX_CHANNEL_STATUS"
+        assert h["opcode_name"] == "RX Channel Status"
 
     def test_rx_flow_status_opcode(self, load_sub_fixture):
         data = load_sub_fixture("rx_flow_status_request.bin")
         h = _parse_header(data)
         assert h["opcode"] == 0x3600
-        assert h["opcode_name"] == "OPCODE_RX_FLOW_STATUS"
+        assert h["opcode_name"] == "RX Flow Status"
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +254,9 @@ class TestSubscriptionCorrelation:
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
 
         for name, expected_opcode_name in [
-            ("subscription_remove_request.bin", "OPCODE_SUBSCRIPTION_MODIFY"),
-            ("rx_channel_status_request.bin", "OPCODE_RX_CHANNEL_STATUS"),
-            ("rx_flow_status_request.bin", "OPCODE_RX_FLOW_STATUS"),
+            ("subscription_remove_request.bin", "Subscription Modify"),
+            ("rx_channel_status_request.bin", "RX Channel Status"),
+            ("rx_flow_status_request.bin", "RX Flow Status"),
         ]:
             data = load_sub_fixture(name)
             pid = store.store_packet(
