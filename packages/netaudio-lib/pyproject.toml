@@ -1,6 +1,6 @@
 [project]
 name = "netaudio-lib"
-version = "0.0.2"
+version = "0.0.3"
 description = "Python library for controlling Audinate Dante network audio devices"
 readme = "README.md"
 license = "Unlicense"
