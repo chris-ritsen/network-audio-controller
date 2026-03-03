@@ -3,8 +3,7 @@ import os
 import sys
 from pathlib import Path
 
-DAEMON_TCP_HOST = "127.0.0.1"
-DAEMON_TCP_PORT = 19199
+NAMED_PIPE_ADDRESS = r"\\.\pipe\netaudio"
 
 
 def is_windows():
@@ -54,7 +53,14 @@ def ensure_socket_dir() -> Path:
 
 async def start_daemon_server(handle_client):
     if is_windows():
-        return await asyncio.start_server(handle_client, DAEMON_TCP_HOST, DAEMON_TCP_PORT)
+        loop = asyncio.get_running_loop()
+
+        def protocol_factory():
+            reader = asyncio.StreamReader()
+            return asyncio.StreamReaderProtocol(reader, handle_client)
+
+        pipe_servers = await loop.start_serving_pipe(protocol_factory, NAMED_PIPE_ADDRESS)
+        return pipe_servers[0]
 
     socket_path = get_socket_path()
     if socket_path.exists():
@@ -67,19 +73,19 @@ async def start_daemon_server(handle_client):
 
 async def open_daemon_connection():
     if is_windows():
-        return await asyncio.open_connection(DAEMON_TCP_HOST, DAEMON_TCP_PORT)
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        transport, _ = await loop.create_pipe_connection(lambda: protocol, NAMED_PIPE_ADDRESS)
+        writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+        return reader, writer
 
     return await asyncio.open_unix_connection(str(get_socket_path()))
 
 
 def daemon_is_accessible() -> bool:
     if is_windows():
-        import socket
-        try:
-            with socket.create_connection((DAEMON_TCP_HOST, DAEMON_TCP_PORT), timeout=0.5):
-                return True
-        except (ConnectionRefusedError, OSError):
-            return False
+        return os.path.exists(NAMED_PIPE_ADDRESS)
 
     return get_socket_path().exists()
 
