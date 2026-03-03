@@ -11,11 +11,6 @@ class EventType(Enum):
     DEVICE_DISCOVERED = auto()
     DEVICE_REMOVED = auto()
     DEVICE_UPDATED = auto()
-    CHANNEL_NAME_UPDATED = auto()
-    SUBSCRIPTION_CHANGED = auto()
-    SAMPLE_RATE_CHANGED = auto()
-    LATENCY_CHANGED = auto()
-    AES67_CHANGED = auto()
     METER_VALUES = auto()
     NOTIFICATION_RECEIVED = auto()
 

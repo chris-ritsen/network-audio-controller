@@ -5,6 +5,7 @@ from typing import Optional
 
 import typer
 
+from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio_lib.dante.device_serializer import DanteDeviceSerializer
 
 from netaudio._common import (
@@ -37,16 +38,28 @@ def device_list():
     """List discovered Dante devices."""
 
     async def _run():
+        from netaudio.cli import state
+
         devices = await _discover()
         await _populate_controls(devices)
         devices = filter_devices(devices)
 
-        headers = ["Name", "IP Address", "MAC Address", "Model", "TX", "RX", "Server Name"]
+        sorted_devices = list(sort_devices(devices))
+
+        any_bluetooth = any(device.model_id in BLUETOOTH_MODEL_IDS for _, device in sorted_devices)
+
+        compact_headers = ["Name", "IP Address", "MAC Address", "Model", "TX", "RX", "Server Name"]
+        verbose_extras = ["Sample Rate"]
+        if any_bluetooth:
+            verbose_extras.append("Bluetooth")
+        verbose_headers = compact_headers + verbose_extras
+
+        headers = verbose_headers if state.verbose else compact_headers
         rows = []
         json_data = {}
 
-        for server_name, device in sort_devices(devices):
-            rows.append([
+        for server_name, device in sorted_devices:
+            row = [
                 device.name or "",
                 str(device.ipv4) if device.ipv4 else "",
                 _format_mac(device.mac_address),
@@ -54,8 +67,15 @@ def device_list():
                 str(device.tx_count or 0),
                 str(device.rx_count or 0),
                 server_name,
-            ])
-            json_data[server_name] = DanteDeviceSerializer.device_summary_to_json(device)
+            ]
+
+            if state.verbose:
+                row.append(str(device.sample_rate or ""))
+                if any_bluetooth:
+                    row.append(device.bluetooth_device or "")
+
+            rows.append(row)
+            json_data[server_name] = DanteDeviceSerializer.to_json(device)
 
         output_table(headers, rows, json_data=json_data, devices=devices)
 

@@ -11,9 +11,22 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 
 from netaudio_lib.common.socket_path import cleanup_daemon_socket, start_daemon_server
 from netaudio_lib.dante.application import DanteApplication
-from netaudio_lib.dante.const import SERVICE_CMC, SERVICES
+from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, SERVICE_CMC, SERVICES
 from netaudio_lib.dante.device import DanteDevice
+from netaudio_lib.dante.device_parser import DanteDeviceParser
 from netaudio_lib.dante.events import DanteEvent, EventType
+from netaudio_lib.dante.services.notification import (
+    NOTIFICATION_AES67_STATUS,
+    NOTIFICATION_DEVICE_REBOOT,
+    NOTIFICATION_ENCODING_STATUS,
+    NOTIFICATION_INTERFACE_STATUS,
+    NOTIFICATION_PROPERTY_CHANGE,
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_SAMPLE_RATE_STATUS,
+    NOTIFICATION_SETTINGS_CHANGE,
+    NOTIFICATION_TX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_LABEL_CHANGE,
+)
 
 try:
     import redis.asyncio as aioredis
@@ -22,7 +35,6 @@ except ImportError:
 
 logger = logging.getLogger("netaudio")
 
-BLUETOOTH_MODEL_IDS = {"DIOBT"}
 
 
 class NetaudioDaemon:
@@ -98,23 +110,24 @@ class NetaudioDaemon:
         self.application.dispatcher.on(
             EventType.DEVICE_REMOVED, self._on_device_removed
         )
-        self.application.dispatcher.on(
-            EventType.CHANNEL_NAME_UPDATED, self._on_channel_name_updated
-        )
-        self.application.dispatcher.on(
-            EventType.SUBSCRIPTION_CHANGED, self._on_subscription_changed
-        )
-        self.application.dispatcher.on(
-            EventType.AES67_CHANGED, self._on_aes67_changed
-        )
-        self.application.dispatcher.on(
-            EventType.SAMPLE_RATE_CHANGED, self._on_sample_rate_changed
-        )
+
+        self.application.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
+        self.application.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
+        self.application.on_notification(NOTIFICATION_TX_LABEL_CHANGE, self._on_channel_name_changed)
+        self.application.on_notification(NOTIFICATION_SAMPLE_RATE_STATUS, self._on_sample_rate_changed)
+        self.application.on_notification(NOTIFICATION_ENCODING_STATUS, self._on_encoding_status)
+        self.application.on_notification(NOTIFICATION_INTERFACE_STATUS, self._on_interface_status)
+        self.application.on_notification(NOTIFICATION_DEVICE_REBOOT, self._on_device_reboot)
+        self.application.on_notification(NOTIFICATION_AES67_STATUS, self._on_aes67_status)
+        self.application.on_notification(NOTIFICATION_PROPERTY_CHANGE, self._on_property_changed)
+        self.application.on_notification(NOTIFICATION_SETTINGS_CHANGE, self._on_settings_change)
 
     async def _on_device_discovered(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
         if device:
             logger.info(f"Device discovered (event): {event.server_name}")
+            if device.ipv4:
+                await self.application.cmc.register_device(str(device.ipv4))
             await self._publish_device_to_redis(device)
 
     async def _on_device_updated(self, event: DanteEvent):
@@ -126,7 +139,7 @@ class NetaudioDaemon:
         logger.info(f"Device removed (event): {event.server_name}")
         await self._delete_device_from_redis(event.server_name)
 
-    async def _on_channel_name_updated(self, event: DanteEvent):
+    async def _on_channel_name_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
         if not device:
@@ -146,26 +159,42 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.debug(f"Error re-fetching channels for {server_name}: {exception}")
 
-    async def _on_subscription_changed(self, event: DanteEvent):
+    async def _on_sample_rate_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
         if not device:
             return
 
-        arc_port = self.application.get_arc_port(device)
-        if not arc_port:
+        await self._refetch_device_controls(server_name)
+
+    async def _on_encoding_status(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device:
             return
 
-        logger.info(f"Re-fetching subscriptions for {server_name}")
-        try:
-            rx_channels, subscriptions = await self.application.arc.get_rx_channels(device, arc_port)
-            device.rx_channels = rx_channels
-            device.subscriptions = subscriptions
-            await self._publish_device_to_redis(device)
-        except Exception as exception:
-            logger.debug(f"Error re-fetching subscriptions for {server_name}: {exception}")
+        await self._refetch_device_controls(server_name)
 
-    async def _on_aes67_changed(self, event: DanteEvent):
+    async def _on_interface_status(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device:
+            return
+
+        await self._refetch_device_controls(server_name)
+
+    async def _on_device_reboot(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device:
+            return
+
+        logger.info(f"Device rebooted: {server_name}")
+        if device.ipv4:
+            await self.application.cmc.register_device(str(device.ipv4))
+        await self._refetch_device_controls(server_name)
+
+    async def _on_aes67_status(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
         if not device:
@@ -186,15 +215,71 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.debug(f"Error re-fetching AES67 for {server_name}: {exception}")
 
-    async def _on_sample_rate_changed(self, event: DanteEvent):
+    async def _on_property_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if device:
-            new_rate = event.data.get("sample_rate")
-            if new_rate:
-                device.sample_rate = new_rate
-                logger.info(f"Sample rate changed for {server_name}: {new_rate}")
+        if not device:
+            return
+
+        await self._refetch_device_controls(server_name)
+
+    async def _on_settings_change(self, event: DanteEvent):
+        raw = event.data.get("raw")
+        if not raw or len(raw) < 36:
+            return
+
+        source_ip = event.data.get("source_ip")
+        device = self.devices.get(event.server_name)
+        if not device:
+            return
+
+        settings_subtype = struct.unpack(">H", raw[34:36])[0]
+
+        if settings_subtype == 0x000c:
+            if not self._handle_bluetooth(raw, device):
+                logger.debug(
+                    f"Unhandled bluetooth settings packet from "
+                    f"{event.server_name}: {raw.hex()}"
+                )
+        else:
+            logger.debug(
+                f"Unhandled settings subtype 0x{settings_subtype:04X} from "
+                f"{event.server_name}: {raw.hex()}"
+            )
+
+    def _handle_bluetooth(self, data: bytes, device) -> bool:
+        name = DanteDeviceParser.parse_bluetooth_status(data)
+
+        if name is False:
+            return False
+
+        old_name = device.bluetooth_device
+
+        if name != old_name:
+            device.bluetooth_device = name
+            logger.info(
+                f"Bluetooth status changed for {device.server_name}: "
+                f"{old_name!r} -> {name!r}"
+            )
+
+        return True
+
+    async def _refetch_device_controls(self, server_name: str):
+        device = self.devices.get(server_name)
+        if not device:
+            return
+
+        arc_port = self.application.get_arc_port(device)
+        device_ip = str(device.ipv4) if device.ipv4 else None
+        if not arc_port or not device_ip:
+            return
+
+        logger.info(f"Re-fetching controls for {server_name}")
+        try:
+            await self.application.arc.get_controls(device, arc_port)
             await self._publish_device_to_redis(device)
+        except Exception as exception:
+            logger.debug(f"Error re-fetching controls for {server_name}: {exception}")
 
     async def start(self):
         self.running = True
@@ -216,9 +301,6 @@ class NetaudioDaemon:
 
         logger.info("mDNS browser started, watching for devices...")
 
-        await self.application.cmc.start_heartbeat(
-            lambda: [str(d.ipv4) for d in self.devices.values() if d.ipv4]
-        )
 
         asyncio.create_task(self.periodic_refresh())
 
@@ -249,7 +331,17 @@ class NetaudioDaemon:
                 cached_names = set(self.devices.keys())
 
                 for server_name in cached_names - scanned_names:
-                    logger.info(f"Device no longer found, removing: {server_name}")
+                    device = self.devices[server_name]
+                    device_ip = str(device.ipv4) if device.ipv4 else None
+                    arc_port = self.application.get_arc_port(device)
+
+                    if device_ip and arc_port:
+                        name = await self.application.arc.get_device_name(device_ip, arc_port)
+                        if name is not None:
+                            logger.debug(f"Device missed mDNS scan but responded to query: {server_name}")
+                            continue
+
+                    logger.info(f"Device no longer reachable, removing: {server_name}")
                     self.application.unregister_device(server_name)
                     await self._delete_device_from_redis(server_name)
 
@@ -408,8 +500,16 @@ class NetaudioDaemon:
             await self._publish_device_to_redis(device)
 
             arc_port = self.application.get_arc_port(device)
-            if arc_port and not device.tx_channels and not device.rx_channels:
-                asyncio.create_task(self._fetch_device_controls(server_name, delay=2))
+            if arc_port:
+                if not is_new:
+                    new_name = await self.application.arc.get_device_name(new_ip, arc_port)
+                    if new_name and new_name != device.name:
+                        logger.info(f"Device name changed for {server_name}: {device.name!r} -> {new_name!r}")
+                        device.name = new_name
+                        await self._publish_device_to_redis(device)
+
+                if not device.tx_channels and not device.rx_channels:
+                    asyncio.create_task(self._fetch_device_controls(server_name, delay=2))
 
         except Exception as exception:
             logger.debug(f"Service change error: {exception}")

@@ -14,11 +14,6 @@ def test_event_type_enum():
     assert EventType.DEVICE_DISCOVERED.name == "DEVICE_DISCOVERED"
     assert EventType.DEVICE_REMOVED.name == "DEVICE_REMOVED"
     assert EventType.DEVICE_UPDATED.name == "DEVICE_UPDATED"
-    assert EventType.CHANNEL_NAME_UPDATED.name == "CHANNEL_NAME_UPDATED"
-    assert EventType.SUBSCRIPTION_CHANGED.name == "SUBSCRIPTION_CHANGED"
-    assert EventType.SAMPLE_RATE_CHANGED.name == "SAMPLE_RATE_CHANGED"
-    assert EventType.LATENCY_CHANGED.name == "LATENCY_CHANGED"
-    assert EventType.AES67_CHANGED.name == "AES67_CHANGED"
     assert EventType.METER_VALUES.name == "METER_VALUES"
     assert EventType.NOTIFICATION_RECEIVED.name == "NOTIFICATION_RECEIVED"
 

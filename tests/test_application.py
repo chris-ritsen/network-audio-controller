@@ -148,3 +148,62 @@ class TestDanteApplication:
 
         not_found = application._device_by_ip("10.0.0.1")
         assert not_found is None
+
+    def test_on_notification_registers_handler(self):
+        application = DanteApplication()
+        received = []
+
+        async def handler(event):
+            received.append(event)
+
+        application.on_notification(262, handler)
+        assert 262 in application._notification_handlers
+        assert handler in application._notification_handlers[262]
+
+    def test_on_notification_multiple_handlers(self):
+        application = DanteApplication()
+
+        async def handler_a(event):
+            pass
+
+        async def handler_b(event):
+            pass
+
+        application.on_notification(262, handler_a)
+        application.on_notification(262, handler_b)
+        assert len(application._notification_handlers[262]) == 2
+
+    @pytest.mark.asyncio
+    async def test_dispatch_notification(self):
+        from netaudio_lib.dante.events import DanteEvent
+
+        application = DanteApplication()
+        received = []
+
+        async def handler(event):
+            received.append(event)
+
+        application.on_notification(262, handler)
+
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="test.local.",
+            data={"notification_id": 262, "notification_name": "Property Change"},
+        )
+        await application._dispatch_notification(event)
+
+        assert len(received) == 1
+        assert received[0].data["notification_id"] == 262
+
+    @pytest.mark.asyncio
+    async def test_dispatch_notification_unhandled(self):
+        from netaudio_lib.dante.events import DanteEvent
+
+        application = DanteApplication()
+
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="test.local.",
+            data={"notification_id": 9999, "notification_name": "Unknown"},
+        )
+        await application._dispatch_notification(event)

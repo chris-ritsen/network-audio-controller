@@ -5,6 +5,7 @@ import traceback
 import warnings
 
 from netaudio_lib.dante.const import (
+    BLUETOOTH_MODEL_IDS,
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
     FEATURE_VOLUME_UNSUPPORTED,
@@ -112,7 +113,6 @@ class DanteDeviceNetwork:
             if not self.device.rx_channels and self.device.rx_count:
                 await self.device.get_rx_channels()
 
-            BLUETOOTH_MODEL_IDS = {"DIOBT"}
             if self.device.model_id in BLUETOOTH_MODEL_IDS:
                 try:
                     await self.device.get_bluetooth_status()

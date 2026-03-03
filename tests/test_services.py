@@ -4,16 +4,10 @@ from netaudio_lib.dante.services.arc import DanteARCService
 from netaudio_lib.dante.services.cmc import DanteCMCService
 from netaudio_lib.dante.services.notification import (
     DanteNotificationService,
-    NOTIFICATION_EVENT_MAP,
     NOTIFICATION_NAMES,
-    NOTIFICATION_SAMPLE_RATE_STATUS,
-    NOTIFICATION_TX_CHANNEL_CHANGE,
-    NOTIFICATION_RX_CHANNEL_CHANGE,
-    NOTIFICATION_AES67_STATUS,
-    NOTIFICATION_INTERFACE_STATUS,
 )
 from netaudio_lib.dante.services.settings import DanteSettingsService
-from netaudio_lib.dante.events import DanteEventDispatcher, EventType
+from netaudio_lib.dante.events import DanteEventDispatcher
 
 
 class TestDanteARCService:
@@ -70,13 +64,6 @@ class TestDanteNotificationService:
         assert NOTIFICATION_NAMES[257] == "TX Channel Change"
         assert NOTIFICATION_NAMES[258] == "RX Channel Change"
         assert NOTIFICATION_NAMES[4103] == "AES67 Status"
-
-    def test_notification_event_map(self):
-        assert NOTIFICATION_EVENT_MAP[NOTIFICATION_SAMPLE_RATE_STATUS] == EventType.SAMPLE_RATE_CHANGED
-        assert NOTIFICATION_EVENT_MAP[NOTIFICATION_TX_CHANNEL_CHANGE] == EventType.CHANNEL_NAME_UPDATED
-        assert NOTIFICATION_EVENT_MAP[NOTIFICATION_RX_CHANNEL_CHANGE] == EventType.CHANNEL_NAME_UPDATED
-        assert NOTIFICATION_EVENT_MAP[NOTIFICATION_AES67_STATUS] == EventType.AES67_CHANGED
-        assert NOTIFICATION_EVENT_MAP[NOTIFICATION_INTERFACE_STATUS] == EventType.DEVICE_UPDATED
 
     def test_set_device_lookup(self):
         dispatcher = DanteEventDispatcher()

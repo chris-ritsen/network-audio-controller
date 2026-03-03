@@ -80,7 +80,8 @@ def _global_options(
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output.", envvar="NETAUDIO_NO_COLOR"),
     timeout: float = typer.Option(5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"),
     interface: Optional[str] = typer.Option(None, "--interface", help="Network interface to use.", envvar="NETAUDIO_INTERFACE"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug logging.", envvar="NETAUDIO_DEBUG"),
+    log_level: str = typer.Option("WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR).", envvar="NETAUDIO_LOG_LEVEL"),
+    debug: bool = typer.Option(False, "--debug", help="Shorthand for --log-level DEBUG.", envvar="NETAUDIO_DEBUG"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
     version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
 ):
@@ -99,85 +100,17 @@ def _global_options(
     if interface:
         settings.interface = interface
 
+    effective_level = "DEBUG" if debug else log_level.upper()
+    numeric_level = getattr(logging, effective_level, None)
+    if numeric_level is None:
+        raise typer.BadParameter(f"Invalid log level: {log_level}")
+    logging.basicConfig(level=numeric_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     if debug:
         settings.debug = True
-        logging.basicConfig(level=logging.DEBUG)
 
     if ctx.invoked_subcommand is None:
-        _overview()
-
-
-def _overview():
-    import asyncio
-
-    from netaudio_lib.dante.device_serializer import DanteDeviceSerializer
-
-    from netaudio._common import (
-        _discover,
-        _populate_controls,
-        filter_devices,
-        format_devices_xml,
-        output_table,
-        sort_devices,
-    )
-    from netaudio.commands.device import _format_mac
-
-    async def _run():
-        devices = await _discover()
-        await _populate_controls(devices)
-        devices = filter_devices(devices)
-
-        compact_headers = ["Name", "IP Address", "MAC Address", "Model", "Sample Rate", "TX", "RX", "AES67", "Server Name"]
-        verbose_headers = compact_headers + ["Latency", "Software", "Dante Model", "Bluetooth"]
-
-        headers = verbose_headers if state.verbose else compact_headers
-        rows = []
-        json_data = {}
-
-        for server_name, device in sort_devices(devices):
-            aes67 = ""
-            if device.aes67_enabled is True:
-                aes67 = "On"
-            elif device.aes67_enabled is False:
-                aes67 = "Off"
-
-            compact_row = [
-                device.name or "",
-                str(device.ipv4) if device.ipv4 else "",
-                _format_mac(device.mac_address),
-                device.model_id or "",
-                str(device.sample_rate or ""),
-                str(device.tx_count or 0),
-                str(device.rx_count or 0),
-                aes67,
-                server_name,
-            ]
-
-            if state.verbose:
-                latency_display = ""
-                if device.latency:
-                    latency_ms = device.latency / 1_000_000
-                    latency_display = f"{latency_ms:.2f}ms"
-
-                compact_row += [
-                    latency_display,
-                    device.software or "",
-                    device.dante_model or "",
-                    device.bluetooth_device or "",
-                ]
-
-            rows.append(compact_row)
-            json_data[server_name] = DanteDeviceSerializer.to_json(device)
-
-        if not devices:
-            return
-
-        if state.output_format == OutputFormat.xml:
-            typer.echo(format_devices_xml(devices))
-        else:
-            output_table(headers, rows, json_data=json_data, devices=devices)
-
-    asyncio.run(_run())
+        from netaudio.commands.device import device_list
+        device_list()
 
 
 from netaudio.commands import capture, channel, config, device, server, subscription
