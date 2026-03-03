@@ -5,7 +5,7 @@ import logging
 
 import typer
 
-from netaudio_lib.common.socket_path import get_socket_path
+from netaudio_lib.common.socket_path import daemon_is_accessible, open_daemon_connection
 from netaudio_lib.daemon.server import NetaudioDaemon, run_daemon
 
 app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True)
@@ -26,15 +26,13 @@ def start(
 @app.command()
 def status():
     """Check if the daemon is running."""
-    socket_path = get_socket_path()
-
-    if not socket_path.exists():
+    if not daemon_is_accessible():
         typer.echo("Daemon is not running.")
         raise typer.Exit(code=1)
 
     async def _run():
         try:
-            reader, writer = await asyncio.open_unix_connection(str(socket_path))
+            reader, writer = await open_daemon_connection()
             writer.write(b'\x02')
             await writer.drain()
 
@@ -59,21 +57,16 @@ def status():
 @app.command()
 def stop():
     """Stop the netaudio daemon."""
-    socket_path = get_socket_path()
-
-    if not socket_path.exists():
+    if not daemon_is_accessible():
         typer.echo("Daemon is not running.")
         return
-
-    import signal
-    import os
 
     try:
         typer.echo("Sending stop signal to daemon...")
 
         async def _run():
             try:
-                reader, writer = await asyncio.open_unix_connection(str(socket_path))
+                reader, writer = await open_daemon_connection()
                 writer.close()
                 await writer.wait_closed()
             except Exception:
