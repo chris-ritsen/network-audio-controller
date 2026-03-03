@@ -9,6 +9,14 @@ import typer
 
 from netaudio_lib.common.app_config import settings
 
+from netaudio import __version__
+
+
+def _version_callback(value: bool):
+    if value:
+        typer.echo(f"netaudio {__version__}")
+        raise typer.Exit()
+
 
 SORT_FIELDS = {"mac", "name", "ip", "model", "server-name"}
 
@@ -74,6 +82,7 @@ def _global_options(
     interface: Optional[str] = typer.Option(None, "--interface", help="Network interface to use.", envvar="NETAUDIO_INTERFACE"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging.", envvar="NETAUDIO_DEBUG"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
+    version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
 ):
     state.names = name or []
     state.hosts = host or []
