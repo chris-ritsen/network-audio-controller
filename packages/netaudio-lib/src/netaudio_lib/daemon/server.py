@@ -4,11 +4,12 @@ import logging
 import os
 import pickle
 import struct
+import sys
 
 from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-from netaudio_lib.common.socket_path import ensure_socket_dir, get_socket_path
+from netaudio_lib.common.socket_path import cleanup_daemon_socket, start_daemon_server
 from netaudio_lib.dante.application import DanteApplication
 from netaudio_lib.dante.const import SERVICE_CMC, SERVICES
 from netaudio_lib.dante.device import DanteDevice
@@ -198,21 +199,10 @@ class NetaudioDaemon:
     async def start(self):
         self.running = True
         await self._connect_redis()
-        socket_path = get_socket_path()
 
-        if socket_path.exists():
-            socket_path.unlink()
+        self.server = await start_daemon_server(self.handle_client)
 
-        ensure_socket_dir()
-
-        self.server = await asyncio.start_unix_server(
-            self.handle_client,
-            path=str(socket_path),
-        )
-
-        os.chmod(socket_path, 0o600)
-
-        logger.info(f"Daemon listening on {socket_path}")
+        logger.info("Daemon listening")
 
         await self.application.startup()
         self._register_event_listeners()
@@ -311,13 +301,7 @@ class NetaudioDaemon:
         except Exception:
             pass
 
-        socket_path = get_socket_path()
-
-        if socket_path.exists():
-            try:
-                socket_path.unlink()
-            except Exception:
-                pass
+        cleanup_daemon_socket()
 
     def on_service_state_change(
         self, zeroconf, service_type, name, state_change
@@ -562,8 +546,9 @@ async def run_daemon():
         if daemon.server:
             daemon.server.close()
 
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, handle_signal)
+    if sys.platform != "win32":
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, handle_signal)
 
     try:
         await daemon.start()
