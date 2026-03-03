@@ -3,21 +3,19 @@ import logging
 import pickle
 import struct
 
-from netaudio_lib.common.socket_path import get_socket_path
+from netaudio_lib.common.socket_path import daemon_is_accessible, open_daemon_connection
 from netaudio_lib.dante.device import DanteDevice
 
 logger = logging.getLogger("netaudio")
 
 
 async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
-    socket_path = get_socket_path()
-
-    if not socket_path.exists():
+    if not daemon_is_accessible():
         return None
 
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_unix_connection(str(socket_path)),
+            open_daemon_connection(),
             timeout=1.0,
         )
 
@@ -49,14 +47,12 @@ async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
 
 
 async def report_unresponsive_device(server_name: str) -> None:
-    socket_path = get_socket_path()
-
-    if not socket_path.exists():
+    if not daemon_is_accessible():
         return
 
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_unix_connection(str(socket_path)),
+            open_daemon_connection(),
             timeout=1.0,
         )
 

@@ -1,10 +1,17 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
 
+NAMED_PIPE_ADDRESS = r"\\.\pipe\netaudio"
+
+
+def is_windows():
+    return sys.platform == "win32"
+
 
 def get_runtime_dir() -> Path:
-    if sys.platform == "win32":
+    if is_windows():
         return Path(os.environ.get("TEMP", os.environ.get("TMP", "C:\\Temp")))
 
     xdg = os.environ.get("XDG_RUNTIME_DIR")
@@ -42,3 +49,54 @@ def ensure_socket_dir() -> Path:
     socket_dir = get_socket_dir()
     socket_dir.mkdir(parents=True, exist_ok=True)
     return socket_dir
+
+
+async def start_daemon_server(handle_client):
+    if is_windows():
+        loop = asyncio.get_running_loop()
+
+        def protocol_factory():
+            reader = asyncio.StreamReader()
+            return asyncio.StreamReaderProtocol(reader, handle_client)
+
+        pipe_servers = await loop.start_serving_pipe(protocol_factory, NAMED_PIPE_ADDRESS)
+        return pipe_servers[0]
+
+    socket_path = get_socket_path()
+    if socket_path.exists():
+        socket_path.unlink()
+    ensure_socket_dir()
+    server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
+    os.chmod(socket_path, 0o600)
+    return server
+
+
+async def open_daemon_connection():
+    if is_windows():
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        transport, _ = await loop.create_pipe_connection(lambda: protocol, NAMED_PIPE_ADDRESS)
+        writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+        return reader, writer
+
+    return await asyncio.open_unix_connection(str(get_socket_path()))
+
+
+def daemon_is_accessible() -> bool:
+    if is_windows():
+        return os.path.exists(NAMED_PIPE_ADDRESS)
+
+    return get_socket_path().exists()
+
+
+def cleanup_daemon_socket():
+    if is_windows():
+        return
+
+    socket_path = get_socket_path()
+    if socket_path.exists():
+        try:
+            socket_path.unlink()
+        except Exception:
+            pass
