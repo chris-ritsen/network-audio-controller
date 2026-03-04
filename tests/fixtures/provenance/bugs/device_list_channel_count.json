@@ -1,0 +1,33 @@
+{
+  "label": "device_list_channel_count",
+  "summary": "device list shows hardware channel capacity (64) instead of active channel count (2) for AD4D",
+  "status": "closed",
+  "tags": ["device-specific", "display"],
+  "context": {
+    "device_model": "DIOBT",
+    "device_name": "AD4D-fd4e13",
+    "affected_devices": "AD4D",
+    "platform": "all"
+  },
+  "reported_ns": 1772759148521737985,
+  "reported_iso": "2026-03-05T20:05:48.521738-05:00",
+  "updated_ns": 1772759154116790881,
+  "updated_iso": "2026-03-05T20:05:54.116791-05:00",
+  "history": [
+    {
+      "action": "reported",
+      "timestamp_ns": 1772759148521737985,
+      "timestamp_iso": "2026-03-05T20:05:48.521738-05:00",
+      "note": "device.py:185 uses device.tx_count (from 0x1000 opcode, reports board capacity) instead of len(device.tx_channels) (from 0x2000 parser, reports active channels). AD4D has a 64-channel board but only 2 TX channels are active.",
+      "session_id": 62
+    },
+    {
+      "action": "closed",
+      "timestamp_ns": 1772759154116790881,
+      "timestamp_iso": "2026-03-05T20:05:54.116791-05:00",
+      "note": "Fixed in device.py:185 \u2014 use len(device.tx_channels) instead of device.tx_count, with fallback to tx_count when channels aren't populated.",
+      "session_id": 62,
+      "marker_id": 789
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "opcode_labels": {
+    "0x1200:0x1001": "cmc_request_1001_probe",
+    "0x27FF:0x1000": "arc_query_channel_count",
+    "0x27FF:0x1002": "arc_query_device_name",
+    "0x27FF:0x2000": "arc_query_tx_channels",
+    "0x27FF:0x2010": "arc_query_tx_channel_names",
+    "0x27FF:0x3000": "arc_query_rx_channels",
+    "0x2809:0x1001": "arc_set_device_name",
+    "0x2809:0x15B0": "arc_settings_query_15b0",
+    "0x2809:0x3400": "arc_subscription_status_query_3400",
+    "0x2809:0x3410": "arc_subscription_modify_3410",
+    "0x2809:0x3600": "arc_rx_flow_status_3600"
+  },
+  "message_labels": {
+    "0x100D": "settings_request_100d",
+    "0x100E": "settings_status_100e"
+  },
+  "subscription_status_labels": {
+    "0x0000": {
+      "state": "none",
+      "label": "Subscription not configured",
+      "detail": null,
+      "labels": [
+        "Subscription not configured"
+      ]
+    },
+    "0x0001": {
+      "state": "unresolved",
+      "label": "Subscription unresolved (source unavailable)",
+      "detail": null,
+      "labels": [
+        "Subscription unresolved (source unavailable)"
+      ]
+    },
+    "0x0004": {
+      "state": "connected",
+      "label": "Subscription connected (self)",
+      "detail": null,
+      "labels": [
+        "Subscription connected (self)"
+      ]
+    },
+    "0x0009": {
+      "state": "connected",
+      "label": "Subscription connected (unicast)",
+      "detail": null,
+      "labels": [
+        "Subscription connected (unicast)"
+      ]
+    },
+    "0x000A": {
+      "state": "connected",
+      "label": "Subscription connected (multicast)",
+      "detail": null,
+      "labels": [
+        "Subscription connected (multicast)"
+      ]
+    }
+  }
+}

@@ -5,3 +5,4 @@ dist/
 __pycache__
 debug.log
 .hypothesis/
+tests/fixtures/provenance/.local/

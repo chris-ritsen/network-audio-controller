@@ -1,0 +1,29 @@
+{
+  "label": "daemon_multiple_instances",
+  "summary": "Multiple daemon instances can start simultaneously, stealing multicast packets via SO_REUSEPORT",
+  "status": "closed",
+  "tags": [
+    "infrastructure",
+    "daemon"
+  ],
+  "context": {},
+  "reported_ns": 1772764505510503058,
+  "reported_iso": "2026-03-05T21:35:05.510503-05:00",
+  "updated_ns": 1772767030161161881,
+  "updated_iso": "2026-03-05T22:17:10.161162-05:00",
+  "history": [
+    {
+      "action": "reported",
+      "timestamp_ns": 1772764505510503058,
+      "timestamp_iso": "2026-03-05T21:35:05.510503-05:00",
+      "note": "Found 3 daemon instances running on port 8702. SO_REUSEPORT causes kernel to round-robin multicast packets between them. Conmon responses from slow devices (AD4D, LX-DANTE) were delivered to wrong instance. Daemon should check for existing instances before starting.",
+      "session_id": 63
+    },
+    {
+      "action": "closed",
+      "timestamp_ns": 1772767030161161881,
+      "timestamp_iso": "2026-03-05T22:17:10.161162-05:00",
+      "note": "Socket probe before startup raises DaemonAlreadyRunningError, added CMD_SHUTDOWN protocol command, server stop works"
+    }
+  ]
+}

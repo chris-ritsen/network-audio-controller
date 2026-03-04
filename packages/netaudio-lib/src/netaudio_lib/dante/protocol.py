@@ -16,6 +16,8 @@ from netaudio_lib.dante.const import (
     RESULT_CODE_SUCCESS_EXTENDED,
     SUBSCRIPTION_STATUS_NONE,
 )
+
+
 @dataclass
 class ChannelCount:
     capability_flags: int
@@ -278,9 +280,7 @@ class DanteParser:
                 tx_channel_name=get_string_at_pointer(tx_channel_offset) or None,
                 tx_device_name=get_string_at_pointer(tx_device_offset) or None,
                 status_code=status,
-                subscription_status=subscription_status_code
-                if subscription_status_code in {1, 2, 3, 4, 5, 7, 8, 9, 10, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 64, 65, 66, 67, 68, 69, 70, 96, 97, 112, 255, 256, 512, 65536}
-                else SUBSCRIPTION_STATUS_NONE,
+                subscription_status=subscription_status_code,
                 sample_rate=sample_rate if sample_rate and sample_rate > 0 else None,
             )
 
