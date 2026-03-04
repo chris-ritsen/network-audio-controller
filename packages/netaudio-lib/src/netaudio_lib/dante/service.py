@@ -13,6 +13,15 @@ class DanteUnicastService:
         self._protocol: DanteUnicastProtocol | None = None
         self._packet_store = packet_store
         self._transaction_counter = 0
+        self._session_id: int | None = None
+
+    @property
+    def session_id(self) -> int | None:
+        return self._session_id
+
+    @session_id.setter
+    def session_id(self, value: int | None) -> None:
+        self._session_id = value
 
     def _next_transaction_id(self) -> int:
         self._transaction_counter = (self._transaction_counter + 1) & 0xFFFF
@@ -47,6 +56,10 @@ class DanteUnicastService:
 
         transaction_id = self._extract_transaction_id(packet)
 
+        local_addr = self._protocol.transport.get_extra_info("sockname") if self._protocol.transport else None
+        src_ip = local_addr[0] if local_addr else None
+        src_port = local_addr[1] if local_addr else None
+
         if self._packet_store:
             try:
                 self._packet_store.store_packet(
@@ -54,14 +67,17 @@ class DanteUnicastService:
                     source_type="netaudio_request",
                     device_name=device_name,
                     device_ip=device_ip,
+                    src_ip=src_ip,
+                    src_port=src_port,
+                    dst_ip=device_ip,
+                    dst_port=port,
                     direction="request",
+                    session_id=self._session_id,
                 )
             except Exception as exception:
                 logger.debug(f"PacketStore error (request): {exception}")
 
-        response = await self._protocol.send_and_expect(
-            packet, (device_ip, port), transaction_id, timeout=timeout
-        )
+        response = await self._protocol.send_and_expect(packet, (device_ip, port), transaction_id, timeout=timeout)
 
         if self._packet_store and response is not None:
             try:
@@ -70,7 +86,12 @@ class DanteUnicastService:
                     source_type="netaudio_response",
                     device_name=device_name,
                     device_ip=device_ip,
+                    src_ip=device_ip,
+                    src_port=port,
+                    dst_ip=src_ip,
+                    dst_port=src_port,
                     direction="response",
+                    session_id=self._session_id,
                 )
             except Exception as exception:
                 logger.debug(f"PacketStore error (response): {exception}")
@@ -96,6 +117,15 @@ class DanteMulticastService:
         self._multicast_port = multicast_port
         self._protocol: DanteMulticastProtocol | None = None
         self._packet_store = packet_store
+        self._session_id: int | None = None
+
+    @property
+    def session_id(self) -> int | None:
+        return self._session_id
+
+    @session_id.setter
+    def session_id(self, value: int | None) -> None:
+        self._session_id = value
 
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
@@ -118,9 +148,7 @@ class DanteMulticastService:
             sock=sock,
         )
         self._protocol = protocol
-        logger.info(
-            f"Multicast service started on {self._multicast_group}:{self._multicast_port}"
-        )
+        logger.info(f"Multicast service started on {self._multicast_group}:{self._multicast_port}")
 
     async def stop(self) -> None:
         if self._protocol is not None:

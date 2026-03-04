@@ -9,7 +9,11 @@ import sys
 from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-from netaudio_lib.common.socket_path import cleanup_daemon_socket, start_daemon_server
+from netaudio_lib.common.socket_path import (
+    DaemonAlreadyRunningError,
+    cleanup_daemon_socket,
+    start_daemon_server,
+)
 from netaudio_lib.daemon.metering import MeteringManager
 from netaudio_lib.daemon.protocol import (
     CMD_DEVICE_REQUEST,
@@ -17,6 +21,7 @@ from netaudio_lib.daemon.protocol import (
     CMD_METER_SNAPSHOT,
     CMD_METER_START,
     CMD_METER_STATUS,
+    CMD_SHUTDOWN,
     CMD_METER_STOP,
     CMD_REPORT_UNRESPONSIVE,
 )
@@ -58,7 +63,6 @@ except ImportError:
     aioredis = None
 
 logger = logging.getLogger("netaudio")
-
 
 
 class NetaudioDaemon:
@@ -105,15 +109,18 @@ class NetaudioDaemon:
 
         key = f"netaudio:daemon:device:{device.server_name}"
         try:
-            await self._redis.hset(key, mapping={
-                "server_name": device.server_name or "",
-                "name": device.name or "",
-                "ipv4": str(device.ipv4) if device.ipv4 else "",
-                "model_id": device.model_id or "",
-                "bluetooth_device": device.bluetooth_device or "",
-                "online": "1" if device.online else "0",
-                "last_seen": str(device.last_seen) if device.last_seen else "",
-            })
+            await self._redis.hset(
+                key,
+                mapping={
+                    "server_name": device.server_name or "",
+                    "name": device.name or "",
+                    "ipv4": str(device.ipv4) if device.ipv4 else "",
+                    "model_id": device.model_id or "",
+                    "bluetooth_device": device.bluetooth_device or "",
+                    "online": "1" if device.online else "0",
+                    "last_seen": str(device.last_seen) if device.last_seen else "",
+                },
+            )
         except Exception as exception:
             logger.debug(f"Redis publish error for {device.server_name}: {exception}")
 
@@ -128,15 +135,9 @@ class NetaudioDaemon:
             logger.debug(f"Redis delete error for {server_name}: {exception}")
 
     def _register_event_listeners(self):
-        self.application.dispatcher.on(
-            EventType.DEVICE_DISCOVERED, self._on_device_discovered
-        )
-        self.application.dispatcher.on(
-            EventType.DEVICE_UPDATED, self._on_device_updated
-        )
-        self.application.dispatcher.on(
-            EventType.DEVICE_REMOVED, self._on_device_removed
-        )
+        self.application.dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_discovered)
+        self.application.dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_updated)
+        self.application.dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
 
         self.application.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
         self.application.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
@@ -191,10 +192,7 @@ class NetaudioDaemon:
             if not device.online or device is offline_device:
                 continue
 
-            has_sub = any(
-                s.tx_device_name == offline_name
-                for s in device.subscriptions
-            )
+            has_sub = any(s.tx_device_name == offline_name for s in device.subscriptions)
             if not has_sub:
                 continue
 
@@ -319,9 +317,7 @@ class NetaudioDaemon:
 
         logger.info(f"Re-fetching AES67 status for {server_name}")
         try:
-            aes67_status = await self.application.arc.get_aes67_config(
-                str(device.ipv4), arc_port
-            )
+            aes67_status = await self.application.arc.get_aes67_config(str(device.ipv4), arc_port)
             if aes67_status is not None:
                 device.aes67_enabled = aes67_status
             await self._publish_device_to_redis(device)
@@ -349,17 +345,11 @@ class NetaudioDaemon:
 
         settings_subtype = struct.unpack(">H", raw[34:36])[0]
 
-        if settings_subtype == 0x000c:
+        if settings_subtype == 0x000C:
             if not self._handle_bluetooth(raw, device):
-                logger.debug(
-                    f"Unhandled bluetooth settings packet from "
-                    f"{event.server_name}: {raw.hex()}"
-                )
+                logger.debug(f"Unhandled bluetooth settings packet from {event.server_name}: {raw.hex()}")
         else:
-            logger.debug(
-                f"Unhandled settings subtype 0x{settings_subtype:04X} from "
-                f"{event.server_name}: {raw.hex()}"
-            )
+            logger.debug(f"Unhandled settings subtype 0x{settings_subtype:04X} from {event.server_name}: {raw.hex()}")
 
     def _handle_bluetooth(self, data: bytes, device) -> bool:
         name = DanteDeviceParser.parse_bluetooth_status(data)
@@ -371,10 +361,7 @@ class NetaudioDaemon:
 
         if name != old_name:
             device.bluetooth_device = name
-            logger.info(
-                f"Bluetooth status changed for {device.server_name}: "
-                f"{old_name!r} -> {name!r}"
-            )
+            logger.info(f"Bluetooth status changed for {device.server_name}: {old_name!r} -> {name!r}")
 
         return True
 
@@ -419,7 +406,7 @@ class NetaudioDaemon:
 
         logger.info("mDNS browser started, watching for devices...")
 
-        if hasattr(self.server, 'serve_forever'):
+        if hasattr(self.server, "serve_forever"):
             async with self.server:
                 await self.server.serve_forever()
         else:
@@ -461,17 +448,13 @@ class NetaudioDaemon:
 
         cleanup_daemon_socket()
 
-    def on_service_state_change(
-        self, zeroconf, service_type, name, state_change
-    ):
+    def on_service_state_change(self, zeroconf, service_type, name, state_change):
         if service_type == "_netaudio-chan._udp.local.":
             return
 
         logger.debug(f"mDNS event: {state_change.name} - {service_type} - {name}")
 
-        asyncio.create_task(
-            self.handle_service_change(zeroconf, service_type, name, state_change)
-        )
+        asyncio.create_task(self.handle_service_change(zeroconf, service_type, name, state_change))
 
     async def handle_service_change(self, zeroconf, service_type, name, state_change):
         try:
@@ -558,6 +541,14 @@ class NetaudioDaemon:
             if "id" in service_properties and service_type == SERVICE_CMC:
                 device.mac_address = service_properties["id"]
 
+                if device.ipv4 and device.mac_address:
+                    if not device.dante_model:
+                        self.application._send_conmon_query_for_device(device, "make_model")
+
+                    if not device.dante_model_id:
+                        self.application._send_conmon_query_for_device(device, "dante_model")
+                        asyncio.create_task(self._retry_conmon_query(server_name))
+
             if "model" in service_properties:
                 device.model_id = service_properties["model"]
 
@@ -624,9 +615,49 @@ class NetaudioDaemon:
         finally:
             self._populating.discard(server_name)
 
+    async def _retry_conmon_query(self, server_name: str) -> None:
+        delays = [3, 5, 10]
+
+        for attempt, delay in enumerate(delays, 1):
+            await asyncio.sleep(delay)
+
+            device = self.devices.get(server_name)
+
+            if not device or not device.online:
+                return
+
+            if device.dante_model_id:
+                return
+
+            if not device.ipv4 or not device.mac_address:
+                return
+
+            logger.debug(f"Conmon retry {attempt} for {server_name}")
+            self.application._send_conmon_query_for_device(device, "dante_model")
+
+        await asyncio.sleep(5)
+
+        device = self.devices.get(server_name)
+
+        if device and device.dante_model_id:
+            logger.debug(f"Conmon dante_model populated for {server_name}: {device.dante_model_id}")
+        elif device:
+            logger.debug(f"Conmon dante_model still missing for {server_name} after retries")
+
     async def handle_client(self, reader, writer):
         try:
             cmd = await reader.read(1)
+
+            if cmd == CMD_SHUTDOWN:
+                logger.info("Shutdown command received")
+                writer.close()
+                await writer.wait_closed()
+                self.running = False
+
+                if self.server:
+                    self.server.close()
+
+                return
 
             if cmd == CMD_REPORT_UNRESPONSIVE:
                 length_data = await reader.readexactly(4)
@@ -753,17 +784,23 @@ class NetaudioDaemon:
                 try:
                     if port == DEVICE_SETTINGS_PORT:
                         response = await self.application.settings.request(
-                            packet, device_ip, port,
+                            packet,
+                            device_ip,
+                            port,
                             logical_command_name="daemon_proxy",
                         )
                     elif port == DEVICE_CONTROL_PORT:
                         response = await self.application.cmc.request(
-                            packet, device_ip, port,
+                            packet,
+                            device_ip,
+                            port,
                             logical_command_name="daemon_proxy",
                         )
                     else:
                         response = await self.application.arc.request(
-                            packet, device_ip, port,
+                            packet,
+                            device_ip,
+                            port,
                             logical_command_name="daemon_proxy",
                         )
                 except Exception as exc:
@@ -771,11 +808,11 @@ class NetaudioDaemon:
                     response = None
 
                 if response is not None:
-                    writer.write(b'\x01')
+                    writer.write(b"\x01")
                     writer.write(struct.pack(">I", len(response)))
                     writer.write(response)
                 else:
-                    writer.write(b'\x00')
+                    writer.write(b"\x00")
                     writer.write(struct.pack(">I", 0))
 
                 await writer.drain()
@@ -838,6 +875,8 @@ class NetaudioDaemon:
                     client_device.clock_mac = device.clock_mac
                     client_device.min_latency = device.min_latency
                     client_device.max_latency = device.max_latency
+                    client_device.product_version = device.product_version
+                    client_device.board_name = device.board_name
                     client_device.model = device.model
                     devices_for_client[server_name] = client_device
                 data = pickle.dumps(devices_for_client)
@@ -874,6 +913,10 @@ async def run_daemon():
 
     try:
         await daemon.start()
+    except DaemonAlreadyRunningError as error:
+        logger.error(str(error))
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
     except asyncio.CancelledError:
         pass
     finally:

@@ -23,6 +23,15 @@ wheels = [
 ]
 
 [[package]]
+name = "async-timeout"
+version = "5.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/ae/136395dfbfe00dfc94da3f3e136d0b13f394cba8f4841120e34226265780/async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3", size = 9274, upload-time = "2024-11-06T16:41:39.6Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/ba/e2081de779ca30d473f21f5b30e0e737c438205440784c7dfc81efc2b029/async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c", size = 6233, upload-time = "2024-11-06T16:41:37.9Z" },
+]
+
+[[package]]
 name = "backports-asyncio-runner"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -160,6 +169,8 @@ version = "0.1.2"
 source = { editable = "packages/netaudio" }
 dependencies = [
     { name = "netaudio-lib" },
+    { name = "redis", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "redis", version = "7.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "rich" },
     { name = "typer", version = "0.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "typer", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -168,6 +179,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "netaudio-lib", editable = "packages/netaudio-lib" },
+    { name = "redis", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
@@ -317,6 +329,36 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
+name = "redis"
+version = "7.0.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.10'",
+]
+dependencies = [
+    { name = "async-timeout", marker = "python_full_version < '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/57/8f/f125feec0b958e8d22c8f0b492b30b1991d9499a4315dfde466cf4289edc/redis-7.0.1.tar.gz", hash = "sha256:c949df947dca995dc68fdf5a7863950bf6df24f8d6022394585acc98e81624f1", size = 4755322, upload-time = "2025-10-27T14:34:00.33Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/97/9f22a33c475cda519f20aba6babb340fb2f2254a02fb947816960d1e669a/redis-7.0.1-py3-none-any.whl", hash = "sha256:4977af3c7d67f8f0eb8b6fec0dafc9605db9343142f634041fb0235f67c0588a", size = 339938, upload-time = "2025-10-27T14:33:58.553Z" },
+]
+
+[[package]]
+name = "redis"
+version = "7.2.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.10'",
+]
+dependencies = [
+    { name = "async-timeout", marker = "python_full_version >= '3.10' and python_full_version < '3.11.3'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e9/31/1476f206482dd9bc53fdbbe9f6fbd5e05d153f18e54667ce839df331f2e6/redis-7.2.1.tar.gz", hash = "sha256:6163c1a47ee2d9d01221d8456bc1c75ab953cbda18cfbc15e7140e9ba16ca3a5", size = 4906735, upload-time = "2026-02-25T20:05:18.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/98/1dd1a5c060916cf21d15e67b7d6a7078e26e2605d5c37cbc9f4f5454c478/redis-7.2.1-py3-none-any.whl", hash = "sha256:49e231fbc8df2001436ae5252b3f0f3dc930430239bfeb6da4c7ee92b16e5d33", size = 396057, upload-time = "2026-02-25T20:05:16.533Z" },
 ]
 
 [[package]]
