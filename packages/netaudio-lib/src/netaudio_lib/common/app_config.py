@@ -1,6 +1,9 @@
+import os
 import sys
 
 import ifaddr
+
+from netaudio_lib.dante.const import DEFAULT_MULTICAST_METERING_PORT
 
 DEFAULT_MDNS_TIMEOUT = 5
 DEFAULT_INTERFACE = None
@@ -28,6 +31,7 @@ class AppSettings:
         self._interface_ip: str = None
         self.refresh: bool = False
         self.socket_path: str = None
+        self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
 
     @property
     def mdns_timeout(self) -> float:
