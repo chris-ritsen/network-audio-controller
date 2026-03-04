@@ -3,6 +3,7 @@ import ipaddress
 import logging
 import socket
 import struct
+import time
 import traceback
 import warnings
 
@@ -11,7 +12,7 @@ from netaudio_lib.dante.const import (
     DEVICE_CONTROL_PORT,
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
-    FEATURE_VOLUME_UNSUPPORTED,
+    FEATURE_METERING_UNSUPPORTED,
     MULTICAST_GROUP_CONTROL_MONITORING,
     PORTS,
     SERVICE_ARC,
@@ -55,6 +56,19 @@ class DanteDevice:
         self.tx_channels = {}
         self.tx_count = None
         self.tx_count_raw = None
+        self.online: bool = True
+        self.last_seen: float | None = None
+        self.tx_flow_count: int | None = None
+        self.rx_flow_count: int | None = None
+        self.num_networks: int | None = None
+        self.encoding: int | None = None
+        self.bit_depth: int | None = None
+        self.software_version: str | None = None
+        self.firmware_version: str | None = None
+        self.clock_role: str | None = None
+        self.clock_mac: str | None = None
+        self.min_latency: float | None = None
+        self.max_latency: float | None = None
 
         self._app = app
 
@@ -73,6 +87,9 @@ class DanteDevice:
     @ipv4.setter
     def ipv4(self, value):
         self._ipv4 = ipaddress.ip_address(value) if value is not None else None
+
+    def update_last_seen(self):
+        self.last_seen = time.time()
 
     def __str__(self):
         return f"{self.name}"
@@ -227,6 +244,60 @@ class DanteDevice:
         except (TimeoutError, socket.timeout):
             logger.debug(f"Timeout waiting for bluetooth status from {self.name}")
             self.bluetooth_device = None
+            return None
+
+    async def get_clocking_status(self, host_mac=None):
+        if (
+            not hasattr(self.commands, "command_clocking_status")
+            or not hasattr(self.parser, "parse_clocking_status")
+        ):
+            return None
+
+        if host_mac is None:
+            from netaudio_lib.dante.services.cmc import _get_host_mac
+            host_mac = _get_host_mac()
+        packet, _, _ = self.commands.command_clocking_status(host_mac=host_mac)
+        device_ip = str(self.ipv4)
+
+        def _query():
+            mcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            mcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                mcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            mcast_sock.bind(("", DEVICE_INFO_PORT))
+            mreq = struct.pack(
+                "4s4s",
+                socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
+                socket.inet_aton("0.0.0.0"),
+            )
+            mcast_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            mcast_sock.settimeout(2)
+
+            send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            send_sock.bind(("", DEVICE_SETTINGS_PORT))
+
+            try:
+                send_sock.sendto(packet, (device_ip, DEVICE_SETTINGS_PORT))
+                while True:
+                    data, addr = mcast_sock.recvfrom(4096)
+                    if addr[0] == device_ip:
+                        return data
+            finally:
+                send_sock.close()
+                mcast_sock.close()
+
+        try:
+            response = await asyncio.to_thread(_query)
+            result = self.parser.parse_clocking_status(response)
+            if result:
+                self.clock_role = result["clock_role"]
+                self.clock_mac = result["device_clock_mac"]
+            return result
+        except (TimeoutError, socket.timeout):
+            logger.debug(f"Timeout waiting for clocking status from {self.name}")
             return None
 
     def to_json(self):

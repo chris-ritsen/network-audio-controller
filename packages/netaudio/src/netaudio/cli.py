@@ -36,6 +36,7 @@ class State:
     names: list[str] = field(default_factory=list)
     hosts: list[str] = field(default_factory=list)
     server_names: list[str] = field(default_factory=list)
+    macs: list[str] = field(default_factory=list)
     output_format: OutputFormat = OutputFormat.plain
     sort_field: str = "mac"
     sort_reverse: bool = False
@@ -75,7 +76,9 @@ def _global_options(
     name: Optional[list[str]] = typer.Option(None, "-n", "--name", help="Filter by device name (glob).", envvar="NETAUDIO_NAME"),
     host: Optional[list[str]] = typer.Option(None, "-h", "--host", help="Filter by device IP.", envvar="NETAUDIO_HOST"),
     server_name: Optional[list[str]] = typer.Option(None, "-s", "--server-name", help="Filter by mDNS server name (glob).", envvar="NETAUDIO_SERVER_NAME"),
+    mac: Optional[list[str]] = typer.Option(None, "-m", "--mac", help="Filter by MAC address (any format).", envvar="NETAUDIO_MAC"),
     output_format: OutputFormat = typer.Option(OutputFormat.plain, "-o", "--output", help="Output format.", envvar="NETAUDIO_OUTPUT"),
+    json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
     sort: str = typer.Option("mac", "--sort", help="Sort field[:asc|desc]. Fields: mac, name, ip, model, server-name.", envvar="NETAUDIO_SORT"),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output.", envvar="NETAUDIO_NO_COLOR"),
     timeout: float = typer.Option(5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"),
@@ -88,7 +91,8 @@ def _global_options(
     state.names = name or []
     state.hosts = host or []
     state.server_names = server_name or []
-    state.output_format = output_format
+    state.macs = mac or []
+    state.output_format = OutputFormat.json if json_flag else output_format
     state.sort_field, state.sort_reverse = _parse_sort(sort)
     state.no_color = no_color
     state.timeout = timeout

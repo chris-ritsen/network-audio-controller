@@ -8,6 +8,10 @@ class DanteChannel:
         self._status_code = None
         self._status_text = None
         self._volume = None
+        self._muted = None
+        self._bit_depth = None
+        self._samples_per_frame = None
+        self._flags = None
 
     def __str__(self):
         if self.friendly_name:
@@ -85,6 +89,38 @@ class DanteChannel:
     @volume.setter
     def volume(self, volume):
         self._volume = volume
+
+    @property
+    def muted(self):
+        return self._muted
+
+    @muted.setter
+    def muted(self, muted):
+        self._muted = muted
+
+    @property
+    def bit_depth(self):
+        return self._bit_depth
+
+    @bit_depth.setter
+    def bit_depth(self, bit_depth):
+        self._bit_depth = bit_depth
+
+    @property
+    def samples_per_frame(self):
+        return self._samples_per_frame
+
+    @samples_per_frame.setter
+    def samples_per_frame(self, samples_per_frame):
+        self._samples_per_frame = samples_per_frame
+
+    @property
+    def flags(self):
+        return self._flags
+
+    @flags.setter
+    def flags(self, flags):
+        self._flags = flags
 
     def __getstate__(self):
         state = self.__dict__.copy()

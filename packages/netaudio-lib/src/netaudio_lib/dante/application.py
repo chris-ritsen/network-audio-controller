@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
@@ -22,7 +23,8 @@ class DanteApplication:
         self.dispatcher = DanteEventDispatcher()
         self.arc = DanteARCService(packet_store=packet_store)
         self.settings = DanteSettingsService(packet_store=packet_store)
-        self.cmc = DanteCMCService(packet_store=packet_store)
+        from netaudio_lib.common.app_config import settings as app_settings
+        self.cmc = DanteCMCService(packet_store=packet_store, interface_name=app_settings.interface)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
             device_lookup=self._device_by_ip,
@@ -151,6 +153,12 @@ class DanteApplication:
                     device.mac_address = service_properties["id"]
                 if "model" in service_properties:
                     device.model_id = service_properties["model"]
+                if "mf" in service_properties and not device.manufacturer:
+                    device.manufacturer = service_properties["mf"]
+                if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
+                    device.software_version = service_properties["server_vers"]
+                if "router_vers" in service_properties:
+                    device.firmware_version = service_properties["router_vers"]
                 if "rate" in service_properties:
                     device.sample_rate = int(service_properties["rate"])
                 if "latency_ns" in service_properties:
@@ -187,19 +195,29 @@ class DanteApplication:
         return self.devices
 
     def register_device(self, server_name: str, device) -> None:
-        is_new = server_name not in self.devices
-        self.devices[server_name] = device
-        device._app = self
+        existing = self.devices.get(server_name)
 
-        if is_new:
+        if existing is not None:
+            if not existing.online:
+                existing.online = True
+                existing.update_last_seen()
+                if device.ipv4:
+                    existing.ipv4 = device.ipv4
+                if device.services:
+                    existing.services = device.services
+
+            self.devices[server_name] = existing
             self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_DISCOVERED,
-                device_name=device.name,
+                type=EventType.DEVICE_UPDATED,
+                device_name=existing.name,
                 server_name=server_name,
             ))
         else:
+            device._app = self
+            device.update_last_seen()
+            self.devices[server_name] = device
             self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_UPDATED,
+                type=EventType.DEVICE_DISCOVERED,
                 device_name=device.name,
                 server_name=server_name,
             ))
@@ -207,6 +225,16 @@ class DanteApplication:
     def unregister_device(self, server_name: str) -> None:
         device = self.devices.pop(server_name, None)
         if device:
+            self.dispatcher.emit_nowait(DanteEvent(
+                type=EventType.DEVICE_REMOVED,
+                device_name=device.name,
+                server_name=server_name,
+            ))
+
+    def mark_device_offline(self, server_name: str) -> None:
+        device = self.devices.get(server_name)
+        if device and device.online:
+            device.online = False
             self.dispatcher.emit_nowait(DanteEvent(
                 type=EventType.DEVICE_REMOVED,
                 device_name=device.name,
@@ -247,19 +275,17 @@ class DanteApplication:
 
     async def _query_settings_fields(self) -> None:
         host_mac = self.cmc._host_mac
+        tasks = []
 
-        sent_any = False
         for device in self.devices.values():
-            device_ip = str(device.ipv4) if device.ipv4 else None
-            if not device_ip:
+            if not device.ipv4:
                 continue
 
             if device.model_id in BLUETOOTH_MODEL_IDS:
-                self.settings.request_bluetooth_status(device_ip, host_mac=host_mac)
-                sent_any = True
+                tasks.append(device.get_bluetooth_status(host_mac=host_mac))
 
-        if sent_any:
-            await asyncio.sleep(0.5)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _device_by_ip(self, ip_str: str):
         for device in self.devices.values():

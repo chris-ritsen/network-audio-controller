@@ -1,6 +1,22 @@
 import logging
+import re
 
 logger = logging.getLogger("netaudio")
+
+DANTE_NAME_MAX_LENGTH = 31
+DANTE_NAME_PATTERN = re.compile(r'^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$')
+
+
+def validate_dante_name(name: str) -> str | None:
+    if len(name) > DANTE_NAME_MAX_LENGTH:
+        return f"Name exceeds {DANTE_NAME_MAX_LENGTH} characters"
+
+    if not DANTE_NAME_PATTERN.match(name):
+        if name.startswith("-") or name.endswith("-"):
+            return "Name cannot begin or end with a hyphen"
+        return "Name must contain only A-Z, a-z, 0-9, and hyphens"
+
+    return None
 
 
 class DanteDeviceOperations:
@@ -17,10 +33,30 @@ class DanteDeviceOperations:
 
         return response
 
+    async def factory_reset(self):
+        if not hasattr(self.device.commands, "command_factory_reset"):
+            raise RuntimeError("factory-reset is not available in this build")
+        cmd_args = self.device.commands.command_factory_reset()
+        response = await self.device.dante_command(
+            *cmd_args, logical_command_name="factory_reset"
+        )
+
+        return response
+
     async def identify(self):
         command_identify_args = self.device.commands.command_identify()
         response = await self.device.dante_command(
             *command_identify_args, logical_command_name="identify"
+        )
+
+        return response
+
+    async def reboot(self):
+        if not hasattr(self.device.commands, "command_reboot"):
+            raise RuntimeError("reboot is not available in this build")
+        cmd_args = self.device.commands.command_reboot()
+        response = await self.device.dante_command(
+            *cmd_args, logical_command_name="reboot"
         )
 
         return response
@@ -95,6 +131,10 @@ class DanteDeviceOperations:
         return response
 
     async def set_name(self, name):
+        error = validate_dante_name(name)
+        if error:
+            raise ValueError(error)
+
         cmd_args = self.device.commands.command_set_name(name)
         response = await self.device.dante_command(
             *cmd_args, logical_command_name="set_name"
@@ -122,6 +162,10 @@ class DanteDeviceOperations:
                 self.device.latency = settings["latency"]
             if "sample_rate" in settings:
                 self.device.sample_rate = settings["sample_rate"]
+            if "min_latency_ns" in settings and settings["min_latency_ns"] is not None:
+                self.device.min_latency = settings["min_latency_ns"] / 1_000_000.0
+            if "max_latency_ns" in settings and settings["max_latency_ns"] is not None:
+                self.device.max_latency = settings["max_latency_ns"] / 1_000_000.0
             return settings
 
         return None

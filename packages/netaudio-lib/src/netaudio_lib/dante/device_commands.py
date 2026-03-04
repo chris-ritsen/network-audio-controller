@@ -293,6 +293,14 @@ class DanteDeviceCommands:
             device_name, ipaddress.IPv4Address(0), mac, 0, timeout=False
         )
 
+    def command_metering_start(self, device_name, ipv4, mac, port, timeout=True, transaction_id=0):
+        return self.command_volume_start(
+            device_name, ipv4, mac, port, timeout=timeout, transaction_id=transaction_id
+        )
+
+    def command_metering_stop(self, device_name, ipv4, mac, port):
+        return self.command_volume_stop(device_name, ipv4, mac, port)
+
     def command_bluetooth_status(self, host_mac=None):
         mac = host_mac if host_mac else b'\x00' * 6
         if isinstance(mac, str):
