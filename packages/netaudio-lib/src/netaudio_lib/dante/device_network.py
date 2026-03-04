@@ -8,7 +8,7 @@ from netaudio_lib.dante.const import (
     BLUETOOTH_MODEL_IDS,
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
-    FEATURE_VOLUME_UNSUPPORTED,
+    FEATURE_METERING_UNSUPPORTED,
     PORTS,
     SERVICE_ARC,
     SERVICE_CHAN,
@@ -128,7 +128,7 @@ class DanteDeviceNetwork:
     async def get_volume(self, ipv4, mac, port):
         try:
             if self.device.software or (
-                self.device.model_id in FEATURE_VOLUME_UNSUPPORTED
+                self.device.model_id in FEATURE_METERING_UNSUPPORTED
             ):
                 return
 
@@ -140,16 +140,16 @@ class DanteDeviceNetwork:
                 sock.bind((str(ipv4), port))
                 sockets[port] = sock
 
-            volume_start_args = self.device.commands.command_volume_start(
+            metering_start_args = self.device.commands.command_metering_start(
                 self.device.name, ipv4, mac, port
             )
-            volume_start_response = await self.device.dante_command(
-                *volume_start_args, logical_command_name="volume_start"
+            metering_start_response = await self.device.dante_command(
+                *metering_start_args, logical_command_name="metering_start"
             )
 
-            if volume_start_response[15:16] == b"\xff":
+            if metering_start_response[15:16] == b"\xff":
                 logger.debug(
-                    f"Volume level command is unsupported on {self.device.name}"
+                    f"Metering command is unsupported on {self.device.name}"
                 )
 
                 return
@@ -160,7 +160,7 @@ class DanteDeviceNetwork:
 
                     if addr[0] == str(self.device.ipv4):
                         await self.device.dante_send_command(
-                            *self.device.commands.command_volume_stop(
+                            *self.device.commands.command_metering_stop(
                                 self.device.name, ipv4, mac, port
                             )
                         )

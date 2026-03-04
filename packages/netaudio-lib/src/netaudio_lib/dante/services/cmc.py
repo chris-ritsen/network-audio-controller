@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import socket
 import struct
+import sys
 
 from netaudio_lib.dante.const import DEVICE_CONTROL_PORT
 from netaudio_lib.dante.device_commands import DanteDeviceCommands
@@ -13,37 +15,67 @@ CMC_PORT = DEVICE_CONTROL_PORT
 PROTOCOL_CMC = 0x1200
 CMC_COMMAND_REGISTER = 0x1001
 
+SIOCGIFADDR = 0x8915
+SIOCGIFHWADDR = 0x8927
 
-def _get_host_mac() -> bytes:
+
+def _get_mac_for_interface(interface_name: str) -> bytes | None:
+    if sys.platform != "linux":
+        return None
+
+    import fcntl
+
     try:
-        import subprocess
-        result = subprocess.run(
-            ["ifconfig", "en0"], capture_output=True, text=True, timeout=2
-        )
-        for line in result.stdout.split("\n"):
-            line = line.strip()
-            if line.startswith("ether "):
-                mac_str = line.split()[1]
-                return bytes.fromhex(mac_str.replace(":", ""))
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack('256s', interface_name.encode()))
+        s.close()
+        return mac_info[18:24]
+    except OSError:
+        return None
+
+
+def _get_host_mac(interface_name: str | None = None) -> bytes:
+    if interface_name:
+        mac = _get_mac_for_interface(interface_name)
+        if mac:
+            return mac
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("224.0.0.231", 1))
+        local_ip = sock.getsockname()[0]
+        sock.close()
+
+        if sys.platform == "linux":
+            import fcntl
+
+            for _, name in socket.if_nameindex():
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    addr_info = fcntl.ioctl(s.fileno(), SIOCGIFADDR, struct.pack('256s', name.encode()))
+                    ip = socket.inet_ntoa(addr_info[20:24])
+                    if ip == local_ip:
+                        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack('256s', name.encode()))
+                        s.close()
+                        return mac_info[18:24]
+                    s.close()
+                except OSError:
+                    continue
     except Exception:
         pass
 
-    try:
-        import uuid
-        mac_int = uuid.getnode()
-        return mac_int.to_bytes(6, "big")
-    except Exception:
-        return b"\x00" * 6
+    import uuid
+    return uuid.getnode().to_bytes(6, "big")
 
 
 class DanteCMCService(DanteUnicastService):
-    def __init__(self, packet_store=None):
+    def __init__(self, packet_store=None, interface_name: str | None = None):
         super().__init__(packet_store=packet_store)
         self._commands = DanteDeviceCommands()
         self._sequence_counter = 0
         self._registered_devices: set[str] = set()
         self._heartbeat_task: asyncio.Task | None = None
-        self._host_mac = _get_host_mac()
+        self._host_mac = _get_host_mac(interface_name)
 
     def _build_registration_packet(self, sequence: int) -> bytes:
         payload = struct.pack(">H", sequence)
@@ -105,26 +137,18 @@ class DanteCMCService(DanteUnicastService):
         self._registered_devices.clear()
         await super().stop()
 
-    async def start_metering(
+    def start_metering(
         self, device_ip: str, device_name: str, ipv4, mac, port: int,
-    ) -> bytes | None:
-        command_args = self._commands.command_volume_start(device_name, ipv4, mac, port)
+    ) -> None:
+        command_args = self._commands.command_metering_start(device_name, ipv4, mac, port)
         packet = command_args[0]
         target_port = command_args[2] or CMC_PORT
-        return await self.request(
-            packet, device_ip, target_port,
-            device_name=device_name,
-            logical_command_name="volume_start",
-        )
+        self.send(packet, device_ip, target_port)
 
-    async def stop_metering(
+    def stop_metering(
         self, device_ip: str, device_name: str, ipv4, mac, port: int,
-    ) -> bytes | None:
-        command_args = self._commands.command_volume_stop(device_name, ipv4, mac, port)
+    ) -> None:
+        command_args = self._commands.command_metering_stop(device_name, ipv4, mac, port)
         packet = command_args[0]
         target_port = command_args[2] or CMC_PORT
-        return await self.request(
-            packet, device_ip, target_port,
-            device_name=device_name,
-            logical_command_name="volume_stop",
-        )
+        self.send(packet, device_ip, target_port)

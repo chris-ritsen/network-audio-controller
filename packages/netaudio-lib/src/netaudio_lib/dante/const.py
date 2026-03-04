@@ -10,7 +10,7 @@ SERVICES = [SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC]
 
 BLUETOOTH_MODEL_IDS = {"DIOBT"}
 
-FEATURE_VOLUME_UNSUPPORTED = [
+FEATURE_METERING_UNSUPPORTED = [
     "DAI1",
     "DAI2",
     "DAO1",
@@ -28,7 +28,7 @@ DEVICE_INFO_PORT: int = 8702
 DEVICE_INFO_SRC_PORT1 = 1029
 DEVICE_INFO_SRC_PORT2 = 1030
 DEVICE_SETTINGS_PORT: int = 8700
-MESSAGE_TYPE_VOLUME_LEVELS = 0
+MESSAGE_TYPE_METERING_LEVELS = 0
 
 PORTS = [DEVICE_CONTROL_PORT, DEVICE_INFO_PORT, DEVICE_SETTINGS_PORT]
 
@@ -161,6 +161,59 @@ SUBSCRIPTION_STATUSES = [
     SUBSCRIPTION_STATUS_UNRESOLVED,
     SUBSCRIPTION_STATUS_UNSUPPORTED,
 ]
+
+SUBSCRIPTION_STATUS_INFO = {
+    SUBSCRIPTION_STATUS_NONE: ("none", "No subscription", None),
+    SUBSCRIPTION_STATUS_UNRESOLVED: ("unresolved", "Unresolved", "channel not present on the network"),
+    SUBSCRIPTION_STATUS_RESOLVED: ("resolved", "Resolved", "preparing to create flow"),
+    SUBSCRIPTION_STATUS_RESOLVE_FAIL: ("error", "Resolve failed", "unexpected error resolving channel"),
+    SUBSCRIPTION_STATUS_SUBSCRIBE_SELF: ("connected", "Connected (self)", None),
+    SUBSCRIPTION_STATUS_RESOLVED_NONE: ("resolved", "Resolved (none)", None),
+    SUBSCRIPTION_STATUS_IDLE: ("idle", "Idle", "insufficient information to create flow"),
+    SUBSCRIPTION_STATUS_IN_PROGRESS: ("in_progress", "In progress", "communicating with transmitter"),
+    SUBSCRIPTION_STATUS_DYNAMIC: ("connected", "Connected (unicast)", None),
+    SUBSCRIPTION_STATUS_STATIC: ("connected", "Connected (multicast)", None),
+    SUBSCRIPTION_STATUS_MANUAL: ("connected", "Manually configured", None),
+    SUBSCRIPTION_STATUS_NO_CONNECTION: ("error", "No connection", "could not communicate with transmitter"),
+    SUBSCRIPTION_STATUS_CHANNEL_FORMAT: ("error", "Channel format mismatch", "source and destination channels do not match"),
+    SUBSCRIPTION_STATUS_BUNDLE_FORMAT: ("error", "Flow format mismatch", "flow format incompatible with receiver"),
+    SUBSCRIPTION_STATUS_NO_RX: ("error", "No RX flows available", "receiver cannot support any more flows"),
+    SUBSCRIPTION_STATUS_RX_FAIL: ("error", "RX failure", "unexpected error on receiver"),
+    SUBSCRIPTION_STATUS_NO_TX: ("error", "No TX flows available", "transmitter cannot support any more flows"),
+    SUBSCRIPTION_STATUS_TX_FAIL: ("error", "TX failure", "unexpected error on transmitter"),
+    SUBSCRIPTION_STATUS_QOS_FAIL_RX: ("error", "RX bandwidth exceeded", "receiver can't support any more inbound flows"),
+    SUBSCRIPTION_STATUS_QOS_FAIL_TX: ("error", "TX bandwidth exceeded", "transmitter can't support any more outbound flows"),
+    SUBSCRIPTION_STATUS_TX_REJECTED_ADDR: ("error", "TX rejected address", "transmitter can't talk to receiver's address"),
+    SUBSCRIPTION_STATUS_INVALID_MSG: ("error", "TX rejected message", "transmitter can't understand receiver's request"),
+    SUBSCRIPTION_STATUS_CHANNEL_LATENCY: ("error", "Latency mismatch", "source demands more latency than receiver has available"),
+    SUBSCRIPTION_STATUS_CLOCK_DOMAIN: ("error", "Clock domain mismatch", "transmitter and receiver are not in the same clock domain"),
+    SUBSCRIPTION_STATUS_UNSUPPORTED: ("error", "Unsupported", "requires features not supported on this device"),
+    SUBSCRIPTION_STATUS_RX_LINK_DOWN: ("error", "RX link down", None),
+    SUBSCRIPTION_STATUS_TX_LINK_DOWN: ("error", "TX link down", None),
+    SUBSCRIPTION_STATUS_DYNAMIC_PROTOCOL: ("connected", "Dynamic protocol", None),
+    SUBSCRIPTION_STATUS_INVALID_CHANNEL: ("error", "Invalid channel", None),
+    SUBSCRIPTION_STATUS_TX_SCHEDULER_FAILURE: ("error", "TX scheduler failure", None),
+    SUBSCRIPTION_STATUS_SUBSCRIBE_SELF_POLICY: ("error", "Self-subscription denied", "device does not support local subscriptions for these channels"),
+    SUBSCRIPTION_STATUS_TX_NOT_READY: ("error", "TX not ready", None),
+    SUBSCRIPTION_STATUS_RX_NOT_READY: ("error", "RX not ready", None),
+    SUBSCRIPTION_STATUS_TX_FANOUT_LIMIT_REACHED: ("error", "TX fanout limit", None),
+    SUBSCRIPTION_STATUS_TX_CHANNEL_ENCRYPTED: ("error", "TX channel encrypted", None),
+    SUBSCRIPTION_STATUS_TX_RESPONSE_UNEXPECTED: ("error", "TX unexpected response", None),
+    SUBSCRIPTION_STATUS_TEMPLATE_MISMATCH_DEVICE: ("error", "Template mismatch (device)", None),
+    SUBSCRIPTION_STATUS_TEMPLATE_MISMATCH_FORMAT: ("error", "Template mismatch (format)", None),
+    SUBSCRIPTION_STATUS_TEMPLATE_MISSING_CHANNEL: ("error", "Template missing channel", None),
+    SUBSCRIPTION_STATUS_TEMPLATE_MISMATCH_CONFIG: ("error", "Template mismatch (config)", None),
+    SUBSCRIPTION_STATUS_TEMPLATE_FULL: ("error", "Template full", None),
+    SUBSCRIPTION_STATUS_SYSTEM_FAIL: ("error", "System failure", None),
+    SUBSCRIPTION_STATUS_RX_UNSUPPORTED_SUB_MODE: ("error", "RX unsupported mode", None),
+    SUBSCRIPTION_STATUS_TX_UNSUPPORTED_SUB_MODE: ("error", "TX unsupported mode", None),
+    SUBSCRIPTION_STATUS_HDCP_NEGOTIATION_ERROR: ("error", "HDCP negotiation error", None),
+    SUBSCRIPTION_STATUS_TX_ACCESS_CONTROL_DENIED: ("error", "TX access denied", None),
+    SUBSCRIPTION_STATUS_TX_ACCESS_CONTROL_PENDING: ("in_progress", "TX access pending", None),
+    SUBSCRIPTION_STATUS_FLAG_NO_ADVERT: ("error", "No audio data", None),
+    SUBSCRIPTION_STATUS_FLAG_NO_DBCP: ("error", "No DBCP", None),
+    SUBSCRIPTION_STATUS_NO_DATA: ("error", "No data", None),
+}
 
 SUBSCRIPTION_STATUS_LABELS = {
     SUBSCRIPTION_STATUS_NONE: ("none", "No subscription for this channel"),
@@ -487,7 +540,7 @@ MESSAGE_TYPE_CHANGE = [
     MESSAGE_TYPE_TX_LABEL_CHANGE,
 ]
 
-MESSAGE_TYPE_MONITORING_STRINGS = {MESSAGE_TYPE_VOLUME_LEVELS: "Volume Levels"}
+MESSAGE_TYPE_MONITORING_STRINGS = {MESSAGE_TYPE_METERING_LEVELS: "Metering Levels"}
 
 MESSAGE_TYPE_STRINGS = {
     MESSAGE_TYPE_ACCESS_CONTROL: "Access Control",
