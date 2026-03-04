@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import os
 import shutil
 
 from netaudio_lib.common.app_config import settings as app_settings
 from netaudio_lib.dante.const import (
+    DEVICE_ARC_PORT,
     DEVICE_CONTROL_PORT,
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
@@ -16,13 +18,15 @@ DANTE_MULTICAST_PORTS = [DEVICE_INFO_PORT]
 
 def _build_bpf_filter(device_ips=None):
     metering_port = app_settings.metering_port
-    unicast_ports = [DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, metering_port]
+    unicast_ports = [DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, metering_port]
     multicast_clauses = " or ".join(f"port {p}" for p in DANTE_MULTICAST_PORTS)
 
     if device_ips:
         host_clauses = " or ".join(f"host {ip}" for ip in device_ips)
+        src_clauses = " or ".join(f"src host {ip}" for ip in device_ips)
         bpf = (
             f"udp and (({host_clauses} and not dst net 224.0.0.0/4) or "
+            f"({src_clauses} and dst net 224.0.0.0/4 and not dst port 8708) or "
             f"({multicast_clauses}))"
         )
     else:
@@ -52,26 +56,47 @@ class TsharkCapture:
         device_ips=None,
         include_metering=False,
         packet_filter=None,
+        session_id=None,
     ):
         self._store = packet_store
         self._interface = interface
         self._device_ips = set(device_ips) if device_ips else set()
         self._include_metering = include_metering
         self._packet_filter = packet_filter
+        self._session_id = session_id
         self._process = None
 
-    @staticmethod
-    def is_available():
-        return shutil.which("tshark") is not None
+    TSHARK_SEARCH_PATHS = [
+        "/opt/homebrew/bin/tshark",
+        "/usr/local/bin/tshark",
+        "/usr/bin/tshark",
+    ]
+
+    @classmethod
+    def _find_tshark(cls):
+        found = shutil.which("tshark")
+        if found:
+            return found
+
+        for path in cls.TSHARK_SEARCH_PATHS:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+
+        return None
+
+    @classmethod
+    def is_available(cls):
+        return cls._find_tshark() is not None
 
     def _build_command(self):
+        tshark_path = self._find_tshark() or "tshark"
         bpf = _build_bpf_filter(self._device_ips or None)
         field_args = []
         for f in self.TSHARK_FIELDS:
             field_args.extend(["-e", f])
 
         return [
-            "tshark",
+            tshark_path,
             "-i", self._interface,
             "-T", "fields",
             *field_args,
@@ -111,7 +136,7 @@ class TsharkCapture:
             return None
 
         is_multicast_dst = dst_ip.startswith("224.")
-        well_known_ports = {DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT}
+        well_known_ports = {DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT}
 
         if is_multicast_dst:
             direction = None
@@ -184,6 +209,7 @@ class TsharkCapture:
             logger.error("tshark binary not found")
             return
 
+        was_cancelled = False
         try:
             async for raw_line in self._process.stdout:
                 line = raw_line.decode("utf-8", errors="replace").strip()
@@ -210,6 +236,7 @@ class TsharkCapture:
                     dst_port=fields["dst_port"],
                     device_ip=fields["device_ip"],
                     direction=fields["direction"],
+                    session_id=self._session_id,
                     timestamp_ns=fields["timestamp_ns"],
                 )
 
@@ -217,9 +244,36 @@ class TsharkCapture:
                     await on_packet(packet_id, fields)
 
         except asyncio.CancelledError:
-            pass
+            was_cancelled = True
         finally:
+            failure_message = None
+            if self._process and not was_cancelled:
+                try:
+                    await self._process.wait()
+                except Exception:
+                    pass
+
+            if self._process and not was_cancelled and self._process.returncode not in (None, 0):
+                stderr_text = ""
+                if self._process.stderr is not None:
+                    try:
+                        stderr_text = (await self._process.stderr.read()).decode("utf-8", errors="replace").strip()
+                    except Exception:
+                        stderr_text = ""
+
+                if stderr_text:
+                    stderr_lines = [line.strip() for line in stderr_text.splitlines() if line.strip()]
+                    summary = " | ".join(stderr_lines[-3:]) if stderr_lines else stderr_text
+                    logger.error(f"tshark exited with code {self._process.returncode}: {summary}")
+                    failure_message = summary
+                else:
+                    logger.error(f"tshark exited with code {self._process.returncode}")
+                    failure_message = f"exit code {self._process.returncode}"
+
             await self.stop()
+
+            if failure_message:
+                raise RuntimeError(failure_message)
 
     async def stop(self):
         if self._process and self._process.returncode is None:

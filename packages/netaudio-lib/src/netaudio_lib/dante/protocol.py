@@ -8,16 +8,13 @@ from netaudio_lib.dante.const import (
     DEVICE_SETTINGS_INFO_LATENCY,
     DEVICE_SETTINGS_INFO_SAMPLE_RATE,
     OPCODE_CHANNEL_COUNT,
-    OPCODE_DEVICE_INFO,
     OPCODE_DEVICE_NAME,
-    OPCODE_DEVICE_SETTINGS,
     OPCODE_RX_CHANNELS,
     OPCODE_TX_CHANNEL_INFO,
     PROTOCOL_ID,
     RESULT_CODE_SUCCESS,
     RESULT_CODE_SUCCESS_EXTENDED,
     SUBSCRIPTION_STATUS_NONE,
-    SUBSCRIPTION_STATUSES,
 )
 
 
@@ -283,9 +280,7 @@ class DanteParser:
                 tx_channel_name=get_string_at_pointer(tx_channel_offset) or None,
                 tx_device_name=get_string_at_pointer(tx_device_offset) or None,
                 status_code=status,
-                subscription_status=subscription_status_code
-                if subscription_status_code in SUBSCRIPTION_STATUSES
-                else SUBSCRIPTION_STATUS_NONE,
+                subscription_status=subscription_status_code,
                 sample_rate=sample_rate if sample_rate and sample_rate > 0 else None,
             )
 
@@ -411,7 +406,7 @@ class DanteClient:
         return None
 
     def get_device_info(self) -> Optional[DeviceInfo]:
-        response = self.query(OPCODE_DEVICE_INFO)
+        response = self.query(0x1003)
 
         if response and response.result_code == RESULT_CODE_SUCCESS:
             return DanteParser.parse_device_info(response)
@@ -419,7 +414,7 @@ class DanteClient:
         return None
 
     def get_device_settings(self) -> Optional[DeviceSettings]:
-        response = self.query(OPCODE_DEVICE_SETTINGS)
+        response = self.query(0x1100)
 
         if response and response.result_code == RESULT_CODE_SUCCESS:
             return DanteParser.parse_device_settings(response)

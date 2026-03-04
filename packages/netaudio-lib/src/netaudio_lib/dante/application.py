@@ -4,7 +4,13 @@ import time
 
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
-from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, SERVICE_ARC, SERVICE_CMC, SERVICES
+from netaudio_lib.dante.const import (
+    BLUETOOTH_MODEL_IDS,
+    DEVICE_SETTINGS_PORT,
+    SERVICE_ARC,
+    SERVICE_CMC,
+    SERVICES,
+)
 from netaudio_lib.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio_lib.dante.services.arc import DanteARCService
 from netaudio_lib.dante.services.cmc import DanteCMCService
@@ -24,6 +30,7 @@ class DanteApplication:
         self.arc = DanteARCService(packet_store=packet_store)
         self.settings = DanteSettingsService(packet_store=packet_store)
         from netaudio_lib.common.app_config import settings as app_settings
+
         self.cmc = DanteCMCService(packet_store=packet_store, interface_name=app_settings.interface)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
@@ -50,12 +57,8 @@ class DanteApplication:
                 try:
                     await handler(event)
                 except Exception:
-                    notification_name = NOTIFICATION_NAMES.get(
-                        notification_id, f"0x{notification_id:04X}"
-                    )
-                    logger.exception(
-                        f"Error in notification handler for {notification_name}"
-                    )
+                    notification_name = NOTIFICATION_NAMES.get(notification_id, f"0x{notification_id:04X}")
+                    logger.exception(f"Error in notification handler for {notification_name}")
         else:
             notification_name = event.data.get("notification_name", f"0x{notification_id:04X}")
             logger.debug(f"Unhandled notification: {notification_name} from {event.server_name}")
@@ -141,6 +144,7 @@ class DanteApplication:
                 device = self.devices[hostname]
             else:
                 from netaudio_lib.dante.device import DanteDevice
+
                 device = DanteDevice(server_name=hostname, app=self)
                 self.register_device(hostname, device)
 
@@ -168,9 +172,7 @@ class DanteApplication:
         await browser.aio_zc.async_close()
         self._browser = None
 
-        device_ips = [
-            str(device.ipv4) for device in self.devices.values() if device.ipv4
-        ]
+        device_ips = [str(device.ipv4) for device in self.devices.values() if device.ipv4]
         if device_ips:
             await self.cmc.register_all(device_ips)
 
@@ -178,9 +180,7 @@ class DanteApplication:
         for device in self.devices.values():
             arc_port = self.get_arc_port(device)
             if arc_port:
-                populate_tasks.append(
-                    self._populate_device_controls(device, arc_port)
-                )
+                populate_tasks.append(self._populate_device_controls(device, arc_port))
 
         if populate_tasks:
             done, pending = await asyncio.wait(
@@ -191,6 +191,8 @@ class DanteApplication:
                 task.cancel()
 
         await self._query_settings_fields()
+
+        await self._query_conmon_all()
 
         return self.devices
 
@@ -207,39 +209,49 @@ class DanteApplication:
                     existing.services = device.services
 
             self.devices[server_name] = existing
-            self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_UPDATED,
-                device_name=existing.name,
-                server_name=server_name,
-            ))
+            self.notifications.apply_pending_for_device(existing)
+            self.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_UPDATED,
+                    device_name=existing.name,
+                    server_name=server_name,
+                )
+            )
         else:
             device._app = self
             device.update_last_seen()
             self.devices[server_name] = device
-            self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_DISCOVERED,
-                device_name=device.name,
-                server_name=server_name,
-            ))
+            self.notifications.apply_pending_for_device(device)
+            self.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_DISCOVERED,
+                    device_name=device.name,
+                    server_name=server_name,
+                )
+            )
 
     def unregister_device(self, server_name: str) -> None:
         device = self.devices.pop(server_name, None)
         if device:
-            self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_REMOVED,
-                device_name=device.name,
-                server_name=server_name,
-            ))
+            self.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_REMOVED,
+                    device_name=device.name,
+                    server_name=server_name,
+                )
+            )
 
     def mark_device_offline(self, server_name: str) -> None:
         device = self.devices.get(server_name)
         if device and device.online:
             device.online = False
-            self.dispatcher.emit_nowait(DanteEvent(
-                type=EventType.DEVICE_REMOVED,
-                device_name=device.name,
-                server_name=server_name,
-            ))
+            self.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_REMOVED,
+                    device_name=device.name,
+                    server_name=server_name,
+                )
+            )
 
     def get_arc_port(self, device) -> int | None:
         if not device.services:
@@ -286,6 +298,119 @@ class DanteApplication:
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _query_conmon_all(self, timeout: float = 10.0) -> None:
+        deadline = time.monotonic() + timeout
+
+        incomplete_devices = []
+
+        for device in self.devices.values():
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                logger.debug("Conmon query timeout reached, skipping remaining devices")
+                break
+
+            device_ip = str(device.ipv4) if device.ipv4 else None
+
+            if not device_ip or not device.mac_address:
+                continue
+
+            waiter = self.notifications.register_conmon_waiter(device_ip)
+
+            try:
+                self._send_conmon_query_for_device(device, "make_model")
+                self._send_conmon_query_for_device(device, "dante_model")
+
+                per_device_timeout = min(remaining, 1.0)
+
+                try:
+                    await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
+                    logger.debug(f"Conmon responses received for {device.server_name}")
+                except asyncio.TimeoutError:
+                    logger.debug(f"Conmon query partial/timeout for {device.server_name}")
+                    received = self.notifications._conmon_received.get(device_ip, set())
+
+                    if len(received) < 2:
+                        incomplete_devices.append(device)
+            finally:
+                self.notifications.unregister_conmon_waiter(device_ip)
+
+        for retry in range(2):
+            if not incomplete_devices:
+                break
+
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                break
+
+            still_incomplete = []
+
+            for device in incomplete_devices:
+                remaining = deadline - time.monotonic()
+
+                if remaining <= 0:
+                    break
+
+                device_ip = str(device.ipv4)
+                needs_make_model = not device.dante_model
+                needs_dante_model = not device.dante_model_id
+                expected_count = int(needs_make_model) + int(needs_dante_model)
+
+                if expected_count == 0:
+                    continue
+
+                waiter = self.notifications.register_conmon_waiter(device_ip, expected_count=expected_count)
+
+                try:
+                    if needs_make_model:
+                        self._send_conmon_query_for_device(device, "make_model")
+
+                    if needs_dante_model:
+                        self._send_conmon_query_for_device(device, "dante_model")
+
+                    per_device_timeout = min(remaining, 2.0)
+
+                    try:
+                        await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
+                        logger.debug(f"Conmon retry {retry + 1} succeeded for {device.server_name}")
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Conmon retry {retry + 1} timeout for {device.server_name}")
+
+                        if not device.dante_model_id:
+                            still_incomplete.append(device)
+                finally:
+                    self.notifications.unregister_conmon_waiter(device_ip)
+
+            incomplete_devices = still_incomplete
+
+    def _send_conmon_query_for_device(self, device, opcode: str = "make_model") -> None:
+        from netaudio_lib.dante.device_commands import DanteDeviceCommands
+
+        if not device.ipv4 or not device.mac_address:
+            return
+
+        mac_hex = device.mac_address.replace(":", "").replace("-", "")
+
+        if len(mac_hex) == 16 and mac_hex[6:10].upper() == "FFFE":
+            mac_hex = mac_hex[:6] + mac_hex[10:]
+        elif len(mac_hex) == 16 and mac_hex.upper().endswith("0000"):
+            mac_hex = mac_hex[:12]
+
+        try:
+            commands = DanteDeviceCommands()
+
+            if opcode == "make_model":
+                packet = commands.command_make_model(mac_hex)
+            elif opcode == "dante_model":
+                packet = commands.command_dante_model(mac_hex)
+            else:
+                return
+
+            self.settings.send(packet, str(device.ipv4), DEVICE_SETTINGS_PORT)
+        except Exception:
+            logger.debug(f"Failed to send conmon {opcode} to {device.server_name}")
 
     def _device_by_ip(self, ip_str: str):
         for device in self.devices.values():

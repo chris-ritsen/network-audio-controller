@@ -43,6 +43,8 @@ class State:
     no_color: bool = False
     timeout: float = 5.0
     verbose: bool = False
+    capture: bool = False
+    dissect: bool = False
 
 
 state = State()
@@ -86,6 +88,8 @@ def _global_options(
     log_level: str = typer.Option("WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR).", envvar="NETAUDIO_LOG_LEVEL"),
     debug: bool = typer.Option(False, "--debug", help="Shorthand for --log-level DEBUG.", envvar="NETAUDIO_DEBUG"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
+    dissect: bool = typer.Option(False, "--dissect", help="Annotated protocol dissection for packet displays.", envvar="NETAUDIO_DISSECT"),
+    capture: bool = typer.Option(False, "--capture", help="Record all packets to capture database.", envvar="NETAUDIO_CAPTURE"),
     version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
 ):
     state.names = name or []
@@ -97,6 +101,8 @@ def _global_options(
     state.no_color = no_color
     state.timeout = timeout
     state.verbose = verbose
+    state.dissect = dissect
+    state.capture = capture
 
     settings.mdns_timeout = timeout
     settings.no_color = no_color
@@ -117,8 +123,9 @@ def _global_options(
         device_list()
 
 
-from netaudio.commands import capture, channel, config, device, server, subscription
+from netaudio.commands import bug, capture, channel, config, device, diagnose, fact, provenance, server, subscription
 
+app.add_typer(bug.app, name="bug")
 app.add_typer(device.app, name="device")
 app.add_typer(channel.app, name="channel")
 app.add_typer(subscription.app, name="subscription")
@@ -126,6 +133,9 @@ app.add_typer(subscription.app, name="sub", hidden=True)
 app.add_typer(config.app, name="config")
 app.add_typer(server.app, name="server")
 app.add_typer(capture.app, name="capture")
+app.add_typer(provenance.app, name="provenance")
+app.add_typer(fact.app, name="fact")
+app.add_typer(diagnose.app, name="diagnose")
 
 
 def main():

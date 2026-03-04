@@ -39,6 +39,8 @@ class DanteDeviceSerializer:
             ("clock_mac", device.clock_mac),
             ("min_latency", device.min_latency),
             ("max_latency", device.max_latency),
+            ("product_version", device.product_version),
+            ("board_name", device.board_name),
         ]
 
         for field_name, field_value in optional_fields:

@@ -51,6 +51,23 @@ def ensure_socket_dir() -> Path:
     return socket_dir
 
 
+class DaemonAlreadyRunningError(Exception):
+    pass
+
+
+async def _check_existing_daemon(socket_path: Path) -> bool:
+    if not socket_path.exists():
+        return False
+
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (ConnectionRefusedError, FileNotFoundError, OSError):
+        return False
+
+
 async def start_daemon_server(handle_client):
     if is_windows():
         loop = asyncio.get_running_loop()
@@ -63,8 +80,13 @@ async def start_daemon_server(handle_client):
         return pipe_servers[0]
 
     socket_path = get_socket_path()
+
+    if await _check_existing_daemon(socket_path):
+        raise DaemonAlreadyRunningError(f"Another daemon is already listening on {socket_path}")
+
     if socket_path.exists():
         socket_path.unlink()
+
     ensure_socket_dir()
     server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
     os.chmod(socket_path, 0o600)

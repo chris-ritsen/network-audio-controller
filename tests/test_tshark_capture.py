@@ -109,7 +109,7 @@ class TestBuildCommand:
         cap = TsharkCapture(packet_store=MockStore(), interface="eth0")
         cmd = cap._build_command()
 
-        assert cmd[0] == "tshark"
+        assert cmd[0].endswith("tshark")
         assert "-i" in cmd
         assert cmd[cmd.index("-i") + 1] == "eth0"
         assert "-T" in cmd
