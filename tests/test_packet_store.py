@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from netaudio_lib.dante.debug_formatter import OPCODE_NAMES, PROTOCOL_NAMES
+from netaudio_lib.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
 from netaudio_lib.dante.packet_store import PacketStore, _parse_header
 
 
@@ -38,14 +38,14 @@ class TestParseHeader:
         assert h["protocol_id"] == 0x27FF
         assert h["transaction_id"] == 0x0042
         assert h["opcode"] == 0x1002
-        assert h["opcode_name"] == "Device Name"
+        assert h["opcode_name"] == get_opcode_name(0x27FF, 0x1002)
         assert h["protocol_name"] == "PROTOCOL_ARC"
 
     def test_valid_response(self):
         data = _make_response(opcode=0x3010, result=0x0001)
         h = _parse_header(data)
         assert h["opcode"] == 0x3010
-        assert h["opcode_name"] == "Subscription Set"
+        assert h["opcode_name"] == "0x3010"
         assert h["result_code"] == 0x0001
         assert h["result_name"] == "RESULT_CODE_SUCCESS"
 

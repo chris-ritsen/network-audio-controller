@@ -89,26 +89,57 @@ def _make_app_sender(app: DanteApplication) -> Callable:
     return _send
 
 
+def _make_capture_store():
+    state = _get_state()
+    if not state.capture:
+        return None, None
+
+    from netaudio_lib.common.config_loader import load_capture_profile, resolve_db_from_config
+    from netaudio_lib.dante.packet_store import PacketStore
+
+    try:
+        profile_cfg, _ = load_capture_profile(None, None)
+        db_path = resolve_db_from_config(None, profile_cfg)
+        store = PacketStore(db_path=db_path)
+
+        active_session = store.get_latest_session(active_only=True)
+        session_id = active_session["id"] if active_session else None
+
+        return store, session_id
+    except Exception:
+        return None, None
+
+
 @asynccontextmanager
 async def _command_context():
-    """Discover devices and provide live command transport.
+    state = _get_state()
+    store, session_id = _make_capture_store()
 
-    Yields (devices, send_fn) where:
-      devices: dict[str, DanteDevice]
-      send_fn: async (packet, device_ip, port) -> bytes | None
-    """
     devices = await get_devices_from_daemon()
     if devices is not None:
+        if store and session_id:
+            typer.echo(f"Capture: recording to session #{session_id} (via daemon — request only)", err=True)
         yield devices, _send_via_daemon
+        if store:
+            store.close()
         return
 
-    app = DanteApplication()
+    app = DanteApplication(packet_store=store)
+
+    if store and session_id:
+        for service in [app.arc, app.settings, app.cmc, app.notifications]:
+            service.session_id = session_id
+
     await app.startup()
     try:
         devices = await app.discover_and_populate(timeout=settings.mdns_timeout)
+        if store and session_id:
+            typer.echo(f"Capture: recording to session #{session_id}", err=True)
         yield devices or {}, _make_app_sender(app)
     finally:
         await app.shutdown()
+        if store:
+            store.close()
 
 
 async def _populate_controls(devices: dict[str, DanteDevice]) -> None:

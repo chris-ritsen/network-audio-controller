@@ -1,7 +1,12 @@
 import struct
 import sys
+from functools import lru_cache
 
 from netaudio_lib.common.app_config import settings as app_settings
+from netaudio_lib.dante.clean_labels import (
+    load_clean_labels,
+    load_clean_subscription_status_labels,
+)
 
 
 class Colors:
@@ -55,41 +60,45 @@ PROTOCOL_NAMES = {
     0xFFFF: "PROTOCOL_SETTINGS",
 }
 
-ARC_OPCODE_NAMES = {
-    0x1000: "Channel Count",
-    0x1001: "Device Name Set",
-    0x1002: "Device Name",
-    0x1003: "Device Info",
-    0x1100: "Device Settings",
-    0x1101: "Device Settings Set",
-    0x2000: "TX Channel Info",
-    0x2010: "TX Channel Names",
-    0x2013: "TX Channel Name Set",
-    0x3000: "RX Channels",
-    0x3001: "RX Channel Name Set",
-    0x3010: "Subscription Set",
-    0x3014: "Subscription Remove",
-    0x3400: "RX Channel Status",
-    0x3410: "Subscription Modify",
-    0x3600: "RX Flow Status",
-}
+OPCODE_NAMES_BY_PROTOCOL = {}
+SETTINGS_MESSAGE_TYPE_NAMES = {}
 
-CMC_OPCODE_NAMES = {
-    0x1001: "ConMon Heartbeat",
-}
 
-OPCODE_NAMES_BY_PROTOCOL = {
-    0x27FF: ARC_OPCODE_NAMES,
-    0x2809: ARC_OPCODE_NAMES,
-    0x1200: CMC_OPCODE_NAMES,
-}
+@lru_cache(maxsize=1)
+def _external_labels():
+    return load_clean_labels()
 
-OPCODE_NAMES = ARC_OPCODE_NAMES
+
+@lru_cache(maxsize=1)
+def _external_subscription_status_labels():
+    return load_clean_subscription_status_labels()
 
 
 def get_opcode_name(protocol, opcode):
-    table = OPCODE_NAMES_BY_PROTOCOL.get(protocol, ARC_OPCODE_NAMES)
-    return table.get(opcode, f"0x{opcode:04X}")
+    opcode_labels, _ = _external_labels()
+    external_label = opcode_labels.get((protocol, opcode))
+    if external_label:
+        return external_label
+
+    if protocol == 0x27FF:
+        external_label = opcode_labels.get((0x2809, opcode))
+        if external_label:
+            return external_label
+    elif protocol == 0x2809:
+        external_label = opcode_labels.get((0x27FF, opcode))
+        if external_label:
+            return external_label
+
+    return f"0x{opcode:04X}"
+
+
+def get_settings_message_type_name(message_type):
+    _, message_labels = _external_labels()
+    external_label = message_labels.get(message_type)
+    if external_label:
+        return external_label
+
+    return f"msg:0x{message_type:04X}"
 
 RESULT_NAMES = {
     0x0001: "RESULT_CODE_SUCCESS",
@@ -97,26 +106,36 @@ RESULT_NAMES = {
     0x8112: "RESULT_CODE_SUCCESS_EXTENDED",
 }
 
-SUBSCRIPTION_STATUS_NAMES = {
-    0: "NONE",
-    1: "UNRESOLVED",
-    2: "RESOLVED",
-    3: "RESOLVE_FAIL",
-    4: "SUBSCRIBE_SELF",
-    5: "RESOLVED_NONE",
-    7: "IDLE",
-    8: "IN_PROGRESS",
-    9: "DYNAMIC",
-    10: "STATIC",
-    14: "MANUAL",
-    15: "NO_CONNECTION",
-    16: "CHANNEL_FORMAT",
-    17: "BUNDLE_FORMAT",
-    18: "NO_RX",
-    19: "RX_FAIL",
-    20: "NO_TX",
-    21: "TX_FAIL",
-}
+
+def get_subscription_status_name(status_code):
+    status_labels = _external_subscription_status_labels()
+    entry = status_labels.get(status_code)
+    if isinstance(entry, dict):
+        label = entry.get("label")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+
+        labels = entry.get("labels")
+        if isinstance(labels, list):
+            for value in labels:
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+    return f"status:{status_code}"
+
+
+def get_subscription_status_state(status_code):
+    status_labels = _external_subscription_status_labels()
+    entry = status_labels.get(status_code)
+    if isinstance(entry, dict):
+        state = entry.get("state")
+        if isinstance(state, str) and state.strip():
+            return state.strip()
+
+    if status_code == 0:
+        return "none"
+
+    return "unknown"
 
 
 def get_string_at_offset(data: bytes, offset: int) -> str:
@@ -496,9 +515,10 @@ def format_rx_channels_body(body: bytes):
         print_pointer(10 + record_start + 10, 2, record[10:12], "rx_channel_offset", rx_channel_ptr, body)
         print_field(10 + record_start + 12, 2, record[12:14], "status", f"0x{status:04X}", C.DIM)
 
-        sub_name = SUBSCRIPTION_STATUS_NAMES.get(sub_status, f"0x{sub_status:04X}")
+        sub_name = get_subscription_status_name(sub_status)
+        sub_state = get_subscription_status_state(sub_status)
 
-        if sub_status in (9, 10, 14):
+        if sub_state == "connected":
             print(f"  {C.DIM}[{10+record_start+14:3d}:{10+record_start+16:3d}]{C.RESET} {C.GREEN}{C.BOLD}{format_hex(record[14:16])}{C.RESET}  {C.GREEN}subscription_status          {C.RESET} = {sub_name}", file=sys.stderr)
         else:
             print_field(10 + record_start + 14, 2, record[14:16], "subscription_status", sub_name, C.YELLOW)

@@ -1,5 +1,4 @@
 from netaudio_lib.dante.const import (
-    SUBSCRIPTION_STATUS_FLAG_NO_ADVERT,
     SUBSCRIPTION_STATUS_LABELS,
 )
 
@@ -39,10 +38,20 @@ class DanteSubscription:
         return text
 
     def status_text(self):
-        return SUBSCRIPTION_STATUS_LABELS[self.status_code]
+        if self.status_code is None:
+            return ("status:unknown",)
+        return SUBSCRIPTION_STATUS_LABELS.get(
+            self.status_code,
+            (f"status:{self.status_code}",),
+        )
 
     def rx_channel_status_text(self):
-        return SUBSCRIPTION_STATUS_LABELS[self.rx_channel_status_code]
+        if self.rx_channel_status_code is None:
+            return ("status:unknown",)
+        return SUBSCRIPTION_STATUS_LABELS.get(
+            self.rx_channel_status_code,
+            (f"status:{self.rx_channel_status_code}",),
+        )
 
     def to_json(self):
         from netaudio_lib.dante.device_serializer import DanteDeviceSerializer

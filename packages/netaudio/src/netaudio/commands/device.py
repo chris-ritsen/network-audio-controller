@@ -164,7 +164,7 @@ def device_list():
         any_bluetooth = any(device.model_id in BLUETOOTH_MODEL_IDS for _, device in sorted_devices)
 
         compact_headers = ["Name", "IP Address", "MAC Address", "Model", "TX", "RX", "Last Seen", "Server Name"]
-        verbose_extras = ["Manufacturer", "Firmware", "Software", "Sample Rate", "Encoding", "Bit Depth", "Latency", "Flows"]
+        verbose_extras = ["Manufacturer", "Product Version", "Board", "Firmware", "Software", "Sample Rate", "Encoding", "Bit Depth", "Latency", "Flows"]
         if any_bluetooth:
             verbose_extras.append("Bluetooth")
         verbose_headers = compact_headers + verbose_extras
@@ -181,15 +181,17 @@ def device_list():
                 name_display,
                 str(device.ipv4) if device.ipv4 else "",
                 _format_mac(device.mac_address),
-                device.model_id or "",
-                str(device.tx_count or 0),
-                str(device.rx_count or 0),
+                device.dante_model or device.model_id or "",
+                str(len(device.tx_channels) if device.tx_channels else (device.tx_count or 0)),
+                str(len(device.rx_channels) if device.rx_channels else (device.rx_count or 0)),
                 _format_last_seen(last_seen),
                 server_name,
             ]
 
             if state.verbose:
                 row.append(device.manufacturer or "")
+                row.append(device.product_version or "")
+                row.append(device.board_name or device.dante_model_id or "")
                 row.append(device.firmware_version or "")
                 row.append(device.software_version or "")
                 row.append(str(device.sample_rate or ""))
@@ -529,6 +531,153 @@ def stop():
 
         for server_name in filtered:
             await meter_stop_on_daemon(server_name, "cli")
+
+    asyncio.run(_run())
+
+
+@meter_app.command(name="measure-timeout")
+def measure_timeout(
+    gap: float = typer.Option(15.0, "--gap", "-g", help="Seconds of silence before declaring stream ended."),
+    max_wait: float = typer.Option(120.0, "--max-wait", help="Maximum seconds to listen."),
+):
+    """Measure how long a device streams metering after a single start command."""
+    import socket
+    import struct
+
+    from netaudio_lib.common.app_config import settings as app_settings
+    from netaudio_lib.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
+    from netaudio_lib.dante.application import DanteApplication
+
+    async def _run():
+        application = DanteApplication()
+        await application.startup()
+
+        try:
+            devices = await application.discover_and_populate(timeout=app_settings.mdns_timeout)
+            filtered = filter_devices(devices)
+            if not filtered:
+                typer.echo("No device found.", err=True)
+                raise typer.Exit(code=1)
+
+            metering_port = app_settings.metering_port
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            sock.bind(("", metering_port))
+
+            mreq = struct.pack(
+                "4s4s",
+                socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
+                socket.inet_aton("0.0.0.0"),
+            )
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+            loop = asyncio.get_running_loop()
+            timestamps_by_ip: dict[str, list[float]] = {}
+            device_names: dict[str, str] = {}
+
+            class TimingProtocol(asyncio.DatagramProtocol):
+                def datagram_received(self, data, addr):
+                    source_ip = addr[0]
+                    now = time.monotonic()
+                    if source_ip not in timestamps_by_ip:
+                        timestamps_by_ip[source_ip] = []
+                    timestamps_by_ip[source_ip].append(now)
+
+            transport, _ = await loop.create_datagram_endpoint(
+                TimingProtocol,
+                sock=sock,
+            )
+
+            try:
+                host_ip_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    host_ip_sock.connect(("224.0.0.231", 1))
+                    host_ip = host_ip_sock.getsockname()[0]
+                finally:
+                    host_ip_sock.close()
+
+                host_mac = application.cmc._host_mac
+
+                for server_name, device in filtered.items():
+                    device_ip = str(device.ipv4)
+                    device_name = device.name or server_name
+                    device_names[device_ip] = device_name
+                    typer.echo(f"Sending single metering start to {device_name} ({device_ip})")
+                    application.cmc.start_metering(
+                        device_ip, device_name, host_ip, host_mac, metering_port,
+                    )
+
+                start_time = time.monotonic()
+                last_any_packet = start_time
+
+                while True:
+                    await asyncio.sleep(0.5)
+                    elapsed = time.monotonic() - start_time
+                    now = time.monotonic()
+
+                    all_timestamps = []
+                    for timestamps in timestamps_by_ip.values():
+                        all_timestamps.extend(timestamps)
+
+                    if all_timestamps:
+                        last_any_packet = max(all_timestamps)
+
+                    silence = now - last_any_packet
+                    total_packets = sum(len(timestamps) for timestamps in timestamps_by_ip.values())
+
+                    if all_timestamps and silence >= gap:
+                        typer.echo(f"\nNo packets for {silence:.1f}s — stream ended.")
+                        break
+
+                    if elapsed >= max_wait:
+                        if all_timestamps:
+                            typer.echo(f"\nMax wait reached ({max_wait}s) — still receiving packets.")
+                        else:
+                            typer.echo(f"\nMax wait reached ({max_wait}s) — no packets received.")
+                        break
+
+                    if int(elapsed) % 5 == 0 and elapsed > 0 and abs(elapsed - int(elapsed)) < 0.5:
+                        typer.echo(f"  {elapsed:.0f}s elapsed, {total_packets} packets, last packet {silence:.1f}s ago")
+
+                typer.echo("")
+                for source_ip, timestamps in sorted(timestamps_by_ip.items()):
+                    device_name = device_names.get(source_ip, source_ip)
+                    count = len(timestamps)
+                    if count == 0:
+                        continue
+
+                    duration = timestamps[-1] - timestamps[0]
+                    first_offset = timestamps[0] - start_time
+
+                    gaps = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps) - 1)]
+                    average_gap = sum(gaps) / len(gaps) if gaps else 0
+                    max_gap = max(gaps) if gaps else 0
+                    min_gap = min(gaps) if gaps else 0
+
+                    typer.echo(f"{device_name} ({source_ip}):")
+                    typer.echo(f"  Packets:       {count}")
+                    typer.echo(f"  First packet:  {first_offset:.2f}s after start")
+                    typer.echo(f"  Duration:      {duration:.2f}s")
+                    typer.echo(f"  Avg interval:  {average_gap*1000:.1f}ms")
+                    typer.echo(f"  Min interval:  {min_gap*1000:.1f}ms")
+                    typer.echo(f"  Max interval:  {max_gap*1000:.1f}ms")
+                    typer.echo(f"  Rate:          {count/duration:.1f} packets/sec" if duration > 0 else "")
+                    typer.echo("")
+
+                for server_name, device in filtered.items():
+                    device_ip = str(device.ipv4)
+                    device_name = device.name or server_name
+                    application.cmc.stop_metering(
+                        device_ip, device_name, host_ip, host_mac, metering_port,
+                    )
+
+            finally:
+                transport.close()
+        finally:
+            await application.shutdown()
 
     asyncio.run(_run())
 

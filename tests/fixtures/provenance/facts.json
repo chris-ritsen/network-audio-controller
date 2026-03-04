@@ -1,0 +1,529 @@
+{
+  "facts": {
+    "conmon_message:0x0081": {
+      "category": "conmon_message",
+      "key": "0x0081",
+      "name": "set_sample_rate",
+      "note": "Sets device sample rate via unicast on port 8700. Target rate as uint32_be at offset 36.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0081"
+        },
+        {
+          "name": "target_sample_rate",
+          "offset": 36,
+          "length": 4,
+          "dtype": "uint32_be"
+        }
+      ],
+      "evidence": [
+        "session_44_sample_rate_discovery:28075"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772738113367766220
+    },
+    "conmon_message:0x0080": {
+      "category": "conmon_message",
+      "key": "0x0080",
+      "name": "sample_rate_announcement",
+      "note": "Device multicasts current and all supported sample rates on 224.0.0.231:8702 after a sample rate change.",
+      "fields": [
+        {
+          "name": "current_rate",
+          "offset": 36,
+          "length": 4,
+          "dtype": "uint32_be"
+        },
+        {
+          "name": "supported_rates_start",
+          "offset": 48,
+          "length": 4,
+          "dtype": "uint32_be"
+        }
+      ],
+      "evidence": [
+        "session_44_sample_rate_discovery:28101"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772738121097513565
+    },
+    "conmon_message:0x0092": {
+      "category": "conmon_message",
+      "key": "0x0092",
+      "name": "reboot_ack",
+      "note": "Device multicast acknowledgment immediately before going offline for reboot.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0092"
+        }
+      ],
+      "evidence": [
+        "session_43_reboot_discovery:27658"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772738124803972956
+    },
+    "arc_opcode:0x2010": {
+      "category": "arc_opcode",
+      "key": "0x2010",
+      "name": "query_tx_channel_names",
+      "note": "Returns named TX channels. Only channels with custom names are returned.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2010"
+        },
+        {
+          "name": "max_per_page",
+          "offset": 10,
+          "length": 1,
+          "dtype": "uint8"
+        },
+        {
+          "name": "named_count",
+          "offset": 11,
+          "length": 1,
+          "dtype": "uint8"
+        }
+      ],
+      "evidence": [
+        "session_45_tx_channel_names_discovery:28782",
+        "session_45_tx_channel_names_discovery:28945",
+        "session_45_tx_channel_names_discovery:29006",
+        "session_45_tx_channel_names_discovery:28781"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772745319829147174,
+      "history": [
+        {
+          "replaced_ns": 1772738933327585086,
+          "previous_name": "query_tx_channel_names",
+          "previous_confidence": "verified",
+          "previous_note": "Queries TX channel names on port 4440. Protocol 0x2809. Request specifies start channel and count. Response contains channel count at offset 11, then pairs of uint16_be offsets pointing to null-terminated ASCII name strings within the payload."
+        },
+        {
+          "replaced_ns": 1772739606495629916,
+          "previous_name": "query_tx_channel_names",
+          "previous_confidence": "verified",
+          "previous_note": "Queries TX channel names on port 4440 (protocol 0x2809). Request: start_channel at offset 12, count at offset 14. Response: byte 10 = max entries per page, byte 11 = named channel count. Entry table at offset 12: 6-byte entries (channel_num:u16, unknown:u16, name_offset:u16). Names as null-terminated ASCII at referenced offsets. Unnamed channels have no entries. No pagination observed even for 64-channel devices."
+        },
+        {
+          "replaced_ns": 1772740119287425534,
+          "previous_name": "query_tx_channel_names",
+          "previous_confidence": "verified",
+          "previous_note": "Returns named TX channels. Response byte 10=max_per_page, byte 11=named_count. Entry table at offset 12 with 6-byte entries (chan_num:u16, unknown:u16, name_offset:u16). Null-terminated ASCII names follow. Only returns channels with custom names, not all channels."
+        },
+        {
+          "replaced_ns": 1772745319829153684,
+          "previous_name": "query_tx_channel_names",
+          "previous_confidence": "verified",
+          "previous_note": "Returns named TX channels. Only channels with custom names are returned."
+        }
+      ]
+    },
+    "arc_opcode:0x2000": {
+      "category": "arc_opcode",
+      "key": "0x2000",
+      "name": "query_tx_channels",
+      "note": "Returns TX channel list with default names. Paginated at 32 channels per page.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2000"
+        }
+      ],
+      "evidence": [
+        "session_45_tx_channel_names_discovery:28972",
+        "session_45_tx_channel_names_discovery:28974"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772740208561298683,
+      "history": [
+        {
+          "replaced_ns": 1772740208561304546,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated: request bytes 12-13=start_channel, response includes all channels from start. Response contains channel entries with properties (format, sample rate, etc) followed by null-terminated default names (numeric: 01, 02, etc)."
+        }
+      ]
+    },
+    "protocol_structure:arc_header": {
+      "category": "protocol_structure",
+      "key": "arc_header",
+      "name": "ARC Protocol Header",
+      "note": "Common header for all ARC (Audio Routing and Control) messages on port 4440",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "transaction_id",
+          "offset": 4,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "status",
+          "offset": 8,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "session_45_tx_channel_names_discovery:28782",
+        "session_45_tx_channel_names_discovery:29006"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772739953008814225,
+      "body": "## ARC Header Format (10 bytes minimum)\n\n| Offset | Length | Type      | Field          |\n|--------|--------|-----------|----------------|\n| 0      | 2      | uint16_be | protocol_id    |\n| 2      | 2      | uint16_be | packet_length  |\n| 4      | 2      | uint16_be | transaction_id |\n| 6      | 2      | uint16_be | opcode         |\n| 8      | 2      | uint16_be | status         |\n\n### Protocol ID\nVaries by device model. Known values:\n- 0x2729 \u2014 LX-DANTE (128ch)\n- 0x2809 \u2014 AVIO adapters (BT, USB, AES3)\n\n### Status\n- 0x0000 in requests\n- 0x0001 in successful responses (most opcodes)\n- 0x8112 in paginated responses (0x2000, 0x3000)\n\n### Transaction ID\nIncremented per request. Response echoes the same transaction_id."
+    },
+    "conmon_message:0x0090": {
+      "category": "conmon_message",
+      "key": "0x0090",
+      "name": "reboot",
+      "note": "Sends reboot command to device on port 8700. Message type at offset 26.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0090"
+        }
+      ],
+      "evidence": [
+        "session_43_reboot_discovery:27657"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772740171178596152
+    },
+    "arc_opcode:0x3010": {
+      "category": "arc_opcode",
+      "key": "0x3010",
+      "name": "set_rx_subscription",
+      "note": "Subscribe/unsubscribe RX channel on port 4440. Sent to the receiving device.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x3010"
+        },
+        {
+          "name": "rx_channel",
+          "offset": 11,
+          "length": 1,
+          "dtype": "uint8"
+        },
+        {
+          "name": "tx_name_offset",
+          "offset": 12,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "src_device_offset",
+          "offset": 14,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "session_46_subscription_discovery:29441",
+        "session_46_subscription_discovery:29606"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772741229073710745,
+      "body": "## Subscribe/Unsubscribe RX Channel\n\nOpcode 0x3010 on port 4440 (ARC protocol). Sent to the **receiving** device.\n\n### Header\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 0      | 2      | uint16_be | protocol_id        |\n| 2      | 2      | uint16_be | packet_length      |\n| 4      | 2      | uint16_be | transaction_id     |\n| 6      | 2      | uint16_be | opcode (0x3010)    |\n| 8      | 2      | uint16_be | status             |\n| 10     | 1      | uint8     | max_slots (32)     |\n| 11     | 1      | uint8     | rx_channel_number  |\n| 12     | 2      | uint16_be | tx_name_offset     |\n| 14     | 2      | uint16_be | src_device_offset  |\n\n### Subscribe (677B for single channel)\n- Bytes 12-13: offset to TX channel name string (e.g. 0x028C)\n- Bytes 14-15: offset to source device name string (e.g. 0x029B)\n- Bytes 16-651: zeros (unused slots)\n- End of packet: null-terminated ASCII strings:\n  - TX channel name (e.g. 'bluetooth:left')\n  - Source device name (e.g. 'avio-bt-1')\n\n### Unsubscribe (652B)\n- Bytes 12-15: all zeros (no source)\n- Bytes 16-651: all zeros\n\n### Response\n- 10B ACK with status 0x0001 (success)\n\n### Note\nCMC opcode 0x3010 on port 8800 is a DIFFERENT command (subscription status polling)."
+    },
+    "cmc_opcode:0x3010": {
+      "category": "cmc_opcode",
+      "key": "0x3010",
+      "name": "subscription_status_poll",
+      "note": "DC polls subscription status on port 8800 every ~3 seconds. 70B request/response. Contains receiver device name and metering port (8751). Different from ARC 0x3010 on port 4440.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x3010"
+        },
+        {
+          "name": "receiver_name",
+          "offset": 28,
+          "length": 10,
+          "dtype": "ascii"
+        }
+      ],
+      "evidence": [
+        "session_46_subscription_discovery:29162"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772741236320564964
+    },
+    "arc_opcode:0x1003": {
+      "category": "arc_opcode",
+      "key": "0x1003",
+      "name": "query_device_info",
+      "note": "Queries device identity on port 4440. Response contains current name at offset 60, factory name at offset 92.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1003"
+        },
+        {
+          "name": "current_name",
+          "offset": 60,
+          "length": 32,
+          "dtype": "ascii"
+        },
+        {
+          "name": "factory_name",
+          "offset": 92,
+          "length": 16,
+          "dtype": "ascii"
+        }
+      ],
+      "evidence": [
+        "session_42_device_rename_discovery:27358",
+        "session_42_device_rename_discovery:27359"
+      ],
+      "confidence": "disproved",
+      "added_ns": 1772742203084861563,
+      "history": [
+        {
+          "replaced_ns": 1772752047999575256,
+          "previous_confidence": "verified",
+          "previous_note": "Queries device identity on port 4440. Response contains current name at offset 60, factory name at offset 92.",
+          "action": "disproved"
+        }
+      ],
+      "disprovals": [
+        {
+          "reason": "Name offsets device-dependent: factory_name at offset 92 reads '258' on LX-DANTE (130B response) but correct on AVIO devices (135-137B). Name field boundaries shift with response size.",
+          "timestamp_ns": 1772752047999577995,
+          "device_ip": "192.168.1.108"
+        }
+      ]
+    },
+    "arc_opcode:0x1001": {
+      "category": "arc_opcode",
+      "key": "0x1001",
+      "name": "set_device_name",
+      "note": "Sets device name on port 4440. Name as null-terminated ASCII at offset 10. Max 31 bytes.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1001"
+        },
+        {
+          "name": "name",
+          "offset": 10,
+          "length": 31,
+          "dtype": "ascii"
+        }
+      ],
+      "evidence": [
+        "session_42_device_rename_discovery:27507",
+        "session_42_device_rename_discovery:27508"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772742210174506271
+    },
+    "arc_opcode:0x1100": {
+      "category": "arc_opcode",
+      "key": "0x1100",
+      "name": "query_latency_config",
+      "note": null,
+      "fields": [],
+      "evidence": [
+        "session_28_set_latency_full_provenance_step2:23376",
+        "session_28_set_latency_full_provenance_step2:23377",
+        "session_27_set_latency_full_provenance:23155",
+        "session_27_set_latency_full_provenance:23156",
+        "session_58_latency_discovery_avio:47493",
+        "session_58_latency_discovery_avio:47608",
+        "session_58_latency_discovery_avio:47490",
+        "session_58_latency_discovery_avio:47491"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772753655089245084,
+      "history": [
+        {
+          "replaced_ns": 1772752006997090120,
+          "previous_confidence": "verified",
+          "previous_note": "Reads device latency configuration on port 4440. 58B request, 140B response. Response contains default, current, max, and min latency values as uint32_be nanoseconds.",
+          "action": "disproved"
+        },
+        {
+          "replaced_ns": 1772752024515738194,
+          "previous_confidence": "disproved",
+          "previous_note": "Reads device latency configuration on port 4440. 58B request, 140B response. Response contains default, current, max, and min latency values as uint32_be nanoseconds.",
+          "action": "reinstated"
+        },
+        {
+          "replaced_ns": 1772752040441098609,
+          "previous_confidence": "verified",
+          "previous_note": "Reinstated for auto-disprove test",
+          "action": "disproved"
+        },
+        {
+          "replaced_ns": 1772753636841706893,
+          "previous_confidence": "disproved",
+          "previous_note": "Reinstated for auto-disprove test",
+          "action": "reinstated"
+        },
+        {
+          "replaced_ns": 1772753655089252933,
+          "previous_name": "query_latency_config",
+          "previous_confidence": "verified",
+          "previous_note": "Reinstated after session 58 (latency_discovery_avio). Field offsets 104/108/112/116/120 are IDENTICAL on both LX-DANTE (140B) and all 5 AVIO devices (148B). The 8-byte size difference is in the header/TLV structure, not the latency payload fields. Previous disprovals were based on response size difference, not actual field value mismatch. Tested: AVIOBT-5279b6 (set 5ms/1ms, observed offset 108 change), AVIOAES3, 3x AVIOUSB \u2014 all confirmed."
+        }
+      ]
+    },
+    "arc_opcode:0x1101": {
+      "category": "arc_opcode",
+      "key": "0x1101",
+      "name": "set_latency",
+      "note": "Sets device latency on port 4440. 40B request, 36B response. Status 0x0001 on success. Proved via read-set-read cycle: sessions 27 (1ms->250us) and 28 (250us->1ms), user confirmed both.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1101"
+        },
+        {
+          "name": "status",
+          "offset": 8,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "session_28_set_latency_full_provenance_step2:18240",
+        "session_28_set_latency_full_provenance_step2:18241",
+        "session_27_set_latency_full_provenance:23157",
+        "session_27_set_latency_full_provenance:23158"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772742252847928893
+    },
+    "protocol_structure:conmon_header": {
+      "category": "protocol_structure",
+      "key": "conmon_header",
+      "name": "Conmon Protocol Header",
+      "note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFF"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "sequence",
+          "offset": 4,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "unknown_6",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "source_mac",
+          "offset": 8,
+          "length": 8,
+          "dtype": "hex"
+        },
+        {
+          "name": "magic",
+          "offset": 16,
+          "length": 8,
+          "dtype": "ascii",
+          "value": "Audinate"
+        },
+        {
+          "name": "version",
+          "offset": 24,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "session_43_reboot_discovery:27657",
+        "session_43_reboot_discovery:27658",
+        "session_44_sample_rate_discovery:28075",
+        "session_44_sample_rate_discovery:28101"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772745659992165039,
+      "history": [
+        {
+          "replaced_ns": 1772745659992173256,
+          "previous_name": "Conmon Protocol Header",
+          "previous_confidence": "verified",
+          "previous_note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements."
+        }
+      ]
+    }
+  },
+  "meta": {
+    "created_ns": 1772738113367763473,
+    "updated_ns": 1772753655089260831
+  }
+}
