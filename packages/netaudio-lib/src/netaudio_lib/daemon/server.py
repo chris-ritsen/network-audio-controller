@@ -10,22 +10,46 @@ from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 from netaudio_lib.common.socket_path import cleanup_daemon_socket, start_daemon_server
+from netaudio_lib.daemon.metering import MeteringManager
+from netaudio_lib.daemon.protocol import (
+    CMD_DEVICE_REQUEST,
+    CMD_GET_DEVICES_JSON,
+    CMD_METER_SNAPSHOT,
+    CMD_METER_START,
+    CMD_METER_STATUS,
+    CMD_METER_STOP,
+    CMD_REPORT_UNRESPONSIVE,
+)
 from netaudio_lib.dante.application import DanteApplication
-from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, SERVICE_CMC, SERVICES
+from netaudio_lib.dante.const import (
+    BLUETOOTH_MODEL_IDS,
+    DEVICE_CONTROL_PORT,
+    DEVICE_SETTINGS_PORT,
+    SERVICE_CMC,
+    SERVICES,
+)
 from netaudio_lib.dante.device import DanteDevice
 from netaudio_lib.dante.device_parser import DanteDeviceParser
 from netaudio_lib.dante.events import DanteEvent, EventType
 from netaudio_lib.dante.services.notification import (
     NOTIFICATION_AES67_STATUS,
+    NOTIFICATION_CLEAR_CONFIG_STATUS,
+    NOTIFICATION_CLOCKING_STATUS,
     NOTIFICATION_DEVICE_REBOOT,
     NOTIFICATION_ENCODING_STATUS,
     NOTIFICATION_INTERFACE_STATUS,
+    NOTIFICATION_MANF_VERSIONS_STATUS,
     NOTIFICATION_PROPERTY_CHANGE,
+    NOTIFICATION_ROUTING_DEVICE_CHANGE,
+    NOTIFICATION_ROUTING_READY,
     NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_RX_FLOW_CHANGE,
     NOTIFICATION_SAMPLE_RATE_STATUS,
     NOTIFICATION_SETTINGS_CHANGE,
     NOTIFICATION_TX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_FLOW_CHANGE,
     NOTIFICATION_TX_LABEL_CHANGE,
+    NOTIFICATION_VERSIONS_STATUS,
 )
 
 try:
@@ -46,6 +70,7 @@ class NetaudioDaemon:
         self.running = False
         self._redis = None
         self._populating: set[str] = set()
+        self.metering: MeteringManager | None = None
 
     @property
     def devices(self) -> dict:
@@ -86,6 +111,8 @@ class NetaudioDaemon:
                 "ipv4": str(device.ipv4) if device.ipv4 else "",
                 "model_id": device.model_id or "",
                 "bluetooth_device": device.bluetooth_device or "",
+                "online": "1" if device.online else "0",
+                "last_seen": str(device.last_seen) if device.last_seen else "",
             })
         except Exception as exception:
             logger.debug(f"Redis publish error for {device.server_name}: {exception}")
@@ -119,12 +146,21 @@ class NetaudioDaemon:
         self.application.on_notification(NOTIFICATION_INTERFACE_STATUS, self._on_interface_status)
         self.application.on_notification(NOTIFICATION_DEVICE_REBOOT, self._on_device_reboot)
         self.application.on_notification(NOTIFICATION_AES67_STATUS, self._on_aes67_status)
+        self.application.on_notification(NOTIFICATION_TX_FLOW_CHANGE, self._on_flow_changed)
+        self.application.on_notification(NOTIFICATION_RX_FLOW_CHANGE, self._on_flow_changed)
         self.application.on_notification(NOTIFICATION_PROPERTY_CHANGE, self._on_property_changed)
         self.application.on_notification(NOTIFICATION_SETTINGS_CHANGE, self._on_settings_change)
+        self.application.on_notification(NOTIFICATION_CLOCKING_STATUS, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_VERSIONS_STATUS, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_MANF_VERSIONS_STATUS, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_CLEAR_CONFIG_STATUS, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_ROUTING_READY, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_ROUTING_DEVICE_CHANGE, self._on_device_state_changed)
 
     async def _on_device_discovered(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
         if device:
+            device.update_last_seen()
             logger.info(f"Device discovered (event): {event.server_name}")
             if device.ipv4:
                 await self.application.cmc.register_device(str(device.ipv4))
@@ -137,14 +173,51 @@ class NetaudioDaemon:
 
     async def _on_device_removed(self, event: DanteEvent):
         logger.info(f"Device removed (event): {event.server_name}")
-        await self._delete_device_from_redis(event.server_name)
+        if self.metering:
+            self.metering.cleanup_device(event.server_name)
+        device = self.devices.get(event.server_name)
+        if device:
+            await self._publish_device_to_redis(device)
+            await self._refresh_affected_subscriptions(device)
+        else:
+            await self._delete_device_from_redis(event.server_name)
+
+    async def _refresh_affected_subscriptions(self, offline_device):
+        offline_name = offline_device.name
+        if not offline_name:
+            return
+
+        for server_name, device in self.devices.items():
+            if not device.online or device is offline_device:
+                continue
+
+            has_sub = any(
+                s.tx_device_name == offline_name
+                for s in device.subscriptions
+            )
+            if not has_sub:
+                continue
+
+            arc_port = self.application.get_arc_port(device)
+            if not arc_port:
+                continue
+
+            logger.info(f"Re-fetching subscriptions for {server_name} (TX device {offline_name} went offline)")
+            try:
+                rx_channels, subscriptions = await self.application.arc.get_rx_channels(device, arc_port)
+                device.rx_channels = rx_channels
+                device.subscriptions = subscriptions
+                await self._publish_device_to_redis(device)
+            except Exception as e:
+                logger.debug(f"Error re-fetching subscriptions for {server_name}: {e}")
 
     async def _on_channel_name_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         arc_port = self.application.get_arc_port(device)
         if not arc_port:
             return
@@ -159,36 +232,74 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.debug(f"Error re-fetching channels for {server_name}: {exception}")
 
+    async def _on_flow_changed(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device or not device.online:
+            return
+
+        device.update_last_seen()
+        arc_port = self.application.get_arc_port(device)
+        if not arc_port:
+            return
+
+        logger.info(f"Re-fetching flow counts for {server_name} (flow changed)")
+        try:
+            counts = await self.application.arc.get_channel_count(str(device.ipv4), arc_port)
+            if "tx_flow_count" in counts:
+                device.tx_flow_count = counts["tx_flow_count"]
+            if "rx_flow_count" in counts:
+                device.rx_flow_count = counts["rx_flow_count"]
+            rx_channels, subscriptions = await self.application.arc.get_rx_channels(device, arc_port)
+            device.rx_channels = rx_channels
+            device.subscriptions = subscriptions
+            await self._publish_device_to_redis(device)
+        except Exception as exception:
+            logger.debug(f"Error re-fetching flows for {server_name}: {exception}")
+
+    async def _on_device_state_changed(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device or not device.online:
+            return
+
+        device.update_last_seen()
+        await self._fetch_device_controls(server_name)
+
     async def _on_sample_rate_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         await self._refetch_device_controls(server_name)
 
     async def _on_encoding_status(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         await self._refetch_device_controls(server_name)
 
     async def _on_interface_status(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         await self._refetch_device_controls(server_name)
 
     async def _on_device_reboot(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         logger.info(f"Device rebooted: {server_name}")
         if device.ipv4:
             await self.application.cmc.register_device(str(device.ipv4))
@@ -197,8 +308,10 @@ class NetaudioDaemon:
     async def _on_aes67_status(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
+
+        device.update_last_seen()
 
         arc_port = self.application.get_arc_port(device)
         if not arc_port:
@@ -218,9 +331,10 @@ class NetaudioDaemon:
     async def _on_property_changed(self, event: DanteEvent):
         server_name = event.server_name
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
+        device.update_last_seen()
         await self._refetch_device_controls(server_name)
 
     async def _on_settings_change(self, event: DanteEvent):
@@ -266,7 +380,7 @@ class NetaudioDaemon:
 
     async def _refetch_device_controls(self, server_name: str):
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
         arc_port = self.application.get_arc_port(device)
@@ -290,6 +404,10 @@ class NetaudioDaemon:
         logger.info("Daemon listening")
 
         await self.application.startup()
+
+        self.metering = MeteringManager(self.application)
+        await self.metering.start()
+
         self._register_event_listeners()
 
         self.zeroconf = AsyncZeroconf()
@@ -301,9 +419,6 @@ class NetaudioDaemon:
 
         logger.info("mDNS browser started, watching for devices...")
 
-
-        asyncio.create_task(self.periodic_refresh())
-
         if hasattr(self.server, 'serve_forever'):
             async with self.server:
                 await self.server.serve_forever()
@@ -311,64 +426,11 @@ class NetaudioDaemon:
             while self.running:
                 await asyncio.sleep(1)
 
-    async def periodic_refresh(self):
-        from netaudio_lib.dante.browser import DanteBrowser
-
-        while self.running:
-            await asyncio.sleep(15)
-
-            if not self.running:
-                break
-
-            try:
-                browser = DanteBrowser(mdns_timeout=5)
-                scanned_devices = await browser.get_devices()
-
-                if scanned_devices is None:
-                    scanned_devices = {}
-
-                scanned_names = set(scanned_devices.keys())
-                cached_names = set(self.devices.keys())
-
-                for server_name in cached_names - scanned_names:
-                    device = self.devices[server_name]
-                    device_ip = str(device.ipv4) if device.ipv4 else None
-                    arc_port = self.application.get_arc_port(device)
-
-                    if device_ip and arc_port:
-                        name = await self.application.arc.get_device_name(device_ip, arc_port)
-                        if name is not None:
-                            logger.debug(f"Device missed mDNS scan but responded to query: {server_name}")
-                            continue
-
-                    logger.info(f"Device no longer reachable, removing: {server_name}")
-                    self.application.unregister_device(server_name)
-                    await self._delete_device_from_redis(server_name)
-
-                for server_name, device in scanned_devices.items():
-                    if server_name not in self.devices:
-                        logger.info(f"Device discovered (scan): {server_name}")
-                        self.application.register_device(server_name, device)
-                    else:
-                        if device.ipv4:
-                            self.devices[server_name].ipv4 = device.ipv4
-                        if device.services:
-                            self.devices[server_name].services = device.services
-
-                logger.debug(f"Scan complete: {len(self.devices)} devices")
-
-                for server_name, device in self.devices.items():
-                    if not device.tx_channels and not device.rx_channels:
-                        await self._fetch_device_controls(server_name)
-
-                for device in self.devices.values():
-                    await self._publish_device_to_redis(device)
-
-            except Exception as exception:
-                logger.debug(f"Periodic scan error: {exception}")
-
     async def stop(self):
         self.running = False
+
+        if self.metering:
+            await self.metering.stop()
 
         if self._redis:
             try:
@@ -418,9 +480,8 @@ class NetaudioDaemon:
             if state_change == ServiceStateChange.Removed:
                 for server_name in list(self.devices.keys()):
                     if name.startswith(server_name.replace(".local.", "")):
-                        logger.info(f"Device removed: {server_name}")
-                        self.application.unregister_device(server_name)
-                        await self._delete_device_from_redis(server_name)
+                        logger.info(f"Device offline (mDNS removed): {server_name}")
+                        self.application.mark_device_offline(server_name)
 
                 return
 
@@ -461,16 +522,25 @@ class NetaudioDaemon:
                 "type": service_type,
             }
 
-            is_new = server_name not in self.devices
+            existing = self.devices.get(server_name)
+            was_offline = existing is not None and not existing.online
+            is_new = existing is None
 
-            if is_new:
-                device = DanteDevice(server_name=server_name)
-                self.application.register_device(server_name, device)
-                logger.info(f"Device discovered: {server_name}")
+            if is_new or was_offline:
+                new_device = DanteDevice(server_name=server_name)
+                new_device.ipv4 = addresses[0]
+                self.application.register_device(server_name, new_device)
+                if is_new:
+                    logger.info(f"Device discovered: {server_name}")
+                else:
+                    logger.info(f"Device back online: {server_name}")
                 if addresses[0]:
                     await self.application.cmc.register_device(addresses[0])
+                if was_offline and self.metering:
+                    self.metering.reactivate_device(server_name)
 
             device = self.devices[server_name]
+            device.update_last_seen()
 
             old_ip = str(device.ipv4) if device.ipv4 else None
             new_ip = addresses[0]
@@ -490,6 +560,15 @@ class NetaudioDaemon:
 
             if "model" in service_properties:
                 device.model_id = service_properties["model"]
+
+            if "mf" in service_properties and not device.manufacturer:
+                device.manufacturer = service_properties["mf"]
+
+            if "server_vers" in service_properties and service_type == SERVICE_CMC:
+                device.software_version = service_properties["server_vers"]
+
+            if "router_vers" in service_properties:
+                device.firmware_version = service_properties["router_vers"]
 
             if "rate" in service_properties:
                 device.sample_rate = int(service_properties["rate"])
@@ -519,7 +598,7 @@ class NetaudioDaemon:
             return
 
         device = self.devices.get(server_name)
-        if not device:
+        if not device or not device.online:
             return
 
         arc_port = self.application.get_arc_port(device)
@@ -532,33 +611,10 @@ class NetaudioDaemon:
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            device_ip = str(device.ipv4)
-
-            if not device.name:
-                name = await self.application.arc.get_device_name(device_ip, arc_port)
-                if name:
-                    device.name = name
-
-            if device.tx_count is None or device.rx_count is None:
-                counts = await self.application.arc.get_channel_count(device_ip, arc_port)
-                if counts:
-                    device.tx_count = device.tx_count_raw = counts[0]
-                    device.rx_count = device.rx_count_raw = counts[1]
-
-            if device.aes67_enabled is None:
-                aes67_status = await self.application.arc.get_aes67_config(device_ip, arc_port)
-                if aes67_status is not None:
-                    device.aes67_enabled = aes67_status
-
-            if not device.tx_channels and device.tx_count:
-                device.tx_channels = await self.application.arc.get_tx_channels(device, arc_port)
-
-            if not device.rx_channels and device.rx_count:
-                rx_channels, subscriptions = await self.application.arc.get_rx_channels(device, arc_port)
-                device.rx_channels = rx_channels
-                device.subscriptions = subscriptions
+            await self.application.arc.get_controls(device, arc_port)
 
             if device.bluetooth_device is None and device.model_id in BLUETOOTH_MODEL_IDS:
+                device_ip = str(device.ipv4)
                 self.application.settings.request_bluetooth_status(device_ip)
 
             logger.info(f"Fetched controls for {server_name}")
@@ -572,21 +628,162 @@ class NetaudioDaemon:
         try:
             cmd = await reader.read(1)
 
-            if cmd == b'\x01':
+            if cmd == CMD_REPORT_UNRESPONSIVE:
                 length_data = await reader.readexactly(4)
                 length = struct.unpack(">I", length_data)[0]
                 server_name = (await reader.readexactly(length)).decode("utf-8")
 
-                if server_name in self.devices:
-                    logger.info(f"Device unresponsive, removing: {server_name}")
-                    self.application.unregister_device(server_name)
-                    await self._delete_device_from_redis(server_name)
+                device = self.devices.get(server_name)
+                if device and device.online:
+                    logger.info(f"Device unresponsive, marking offline: {server_name}")
+                    self.application.mark_device_offline(server_name)
 
                 writer.close()
                 await writer.wait_closed()
                 return
 
-            if cmd == b'\x02':
+            if cmd == CMD_METER_SNAPSHOT:
+                length_data = await reader.readexactly(4)
+                length = struct.unpack(">I", length_data)[0]
+                server_name = (await reader.readexactly(length)).decode("utf-8")
+
+                device = self.devices.get(server_name)
+                if not device or not device.ipv4:
+                    result = json.dumps({"error": "device not found"})
+                elif not self.metering:
+                    result = json.dumps({"error": "metering not available"})
+                else:
+                    levels = self.metering.get_cached_levels(server_name)
+                    if levels is None:
+                        result = json.dumps({"error": "no metering data"})
+                    else:
+                        tx_names = {}
+                        if device.tx_channels:
+                            for ch in device.tx_channels.values():
+                                tx_names[ch.number] = ch.friendly_name or ch.name
+                        rx_names = {}
+                        if device.rx_channels:
+                            for ch in device.rx_channels.values():
+                                rx_names[ch.number] = ch.friendly_name or ch.name
+
+                        response = {
+                            "tx": {},
+                            "rx": {},
+                            "wall_time": levels.get("wall_time"),
+                            "source_ip": levels.get("source_ip"),
+                        }
+                        for ch_num, level in levels.get("tx", {}).items():
+                            response["tx"][ch_num] = {
+                                "name": tx_names.get(ch_num, ""),
+                                "level": level,
+                            }
+                        for ch_num, level in levels.get("rx", {}).items():
+                            response["rx"][ch_num] = {
+                                "name": rx_names.get(ch_num, ""),
+                                "level": level,
+                            }
+                        result = json.dumps(response)
+
+                data = result.encode()
+                length = struct.pack(">I", len(data))
+                writer.write(length + data)
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            if cmd == CMD_METER_START:
+                length_data = await reader.readexactly(4)
+                length = struct.unpack(">I", length_data)[0]
+                server_name = (await reader.readexactly(length)).decode("utf-8")
+                length_data = await reader.readexactly(4)
+                length = struct.unpack(">I", length_data)[0]
+                client_id = (await reader.readexactly(length)).decode("utf-8")
+
+                device = self.devices.get(server_name)
+                if device and self.metering:
+                    self.metering.add_persistent(server_name, client_id)
+
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            if cmd == CMD_METER_STOP:
+                length_data = await reader.readexactly(4)
+                length = struct.unpack(">I", length_data)[0]
+                server_name = (await reader.readexactly(length)).decode("utf-8")
+                length_data = await reader.readexactly(4)
+                length = struct.unpack(">I", length_data)[0]
+                client_id = (await reader.readexactly(length)).decode("utf-8")
+
+                device = self.devices.get(server_name)
+                if device and self.metering:
+                    self.metering.remove_persistent(server_name, client_id)
+
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            if cmd == CMD_METER_STATUS:
+                if self.metering:
+                    status = self.metering.get_status()
+                else:
+                    status = {}
+
+                data = json.dumps(status).encode()
+                length = struct.pack(">I", len(data))
+                writer.write(length + data)
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            if cmd == CMD_DEVICE_REQUEST:
+                ip_len_data = await reader.readexactly(4)
+                ip_len = struct.unpack(">I", ip_len_data)[0]
+                device_ip = (await reader.readexactly(ip_len)).decode("utf-8")
+
+                port_data = await reader.readexactly(2)
+                port = struct.unpack(">H", port_data)[0]
+
+                pkt_len_data = await reader.readexactly(4)
+                pkt_len = struct.unpack(">I", pkt_len_data)[0]
+                packet = await reader.readexactly(pkt_len)
+
+                try:
+                    if port == DEVICE_SETTINGS_PORT:
+                        response = await self.application.settings.request(
+                            packet, device_ip, port,
+                            logical_command_name="daemon_proxy",
+                        )
+                    elif port == DEVICE_CONTROL_PORT:
+                        response = await self.application.cmc.request(
+                            packet, device_ip, port,
+                            logical_command_name="daemon_proxy",
+                        )
+                    else:
+                        response = await self.application.arc.request(
+                            packet, device_ip, port,
+                            logical_command_name="daemon_proxy",
+                        )
+                except Exception as exc:
+                    logger.debug(f"Device request proxy error: {exc}")
+                    response = None
+
+                if response is not None:
+                    writer.write(b'\x01')
+                    writer.write(struct.pack(">I", len(response)))
+                    writer.write(response)
+                else:
+                    writer.write(b'\x00')
+                    writer.write(struct.pack(">I", 0))
+
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+            if cmd == CMD_GET_DEVICES_JSON:
                 devices_json = {}
                 for server_name, device in self.devices.items():
                     devices_json[server_name] = {
@@ -595,6 +792,8 @@ class NetaudioDaemon:
                         "ipv4": str(device.ipv4) if device.ipv4 else None,
                         "model_id": device.model_id,
                         "bluetooth_device": device.bluetooth_device,
+                        "online": device.online,
+                        "last_seen": device.last_seen,
                     }
                 data = json.dumps(devices_json).encode()
             else:
@@ -626,6 +825,20 @@ class NetaudioDaemon:
                     client_device.error = str(device.error) if device.error else None
                     client_device.dante_model = device.dante_model
                     client_device.dante_model_id = device.dante_model_id
+                    client_device.online = device.online
+                    client_device.last_seen = device.last_seen
+                    client_device.tx_flow_count = device.tx_flow_count
+                    client_device.rx_flow_count = device.rx_flow_count
+                    client_device.num_networks = device.num_networks
+                    client_device.encoding = device.encoding
+                    client_device.bit_depth = device.bit_depth
+                    client_device.software_version = device.software_version
+                    client_device.firmware_version = device.firmware_version
+                    client_device.clock_role = device.clock_role
+                    client_device.clock_mac = device.clock_mac
+                    client_device.min_latency = device.min_latency
+                    client_device.max_latency = device.max_latency
+                    client_device.model = device.model
                     devices_for_client[server_name] = client_device
                 data = pickle.dumps(devices_for_client)
 
