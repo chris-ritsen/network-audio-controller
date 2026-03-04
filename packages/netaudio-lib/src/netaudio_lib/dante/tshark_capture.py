@@ -2,15 +2,21 @@ import asyncio
 import logging
 import shutil
 
+from netaudio_lib.common.app_config import settings as app_settings
+from netaudio_lib.dante.const import (
+    DEVICE_CONTROL_PORT,
+    DEVICE_INFO_PORT,
+    DEVICE_SETTINGS_PORT,
+)
+
 logger = logging.getLogger("netaudio")
 
-DANTE_MULTICAST_PORTS = [8702]
-DANTE_METERING_PORT = 8751
-
-DANTE_UNICAST_PORTS = [8800, 8700]
+DANTE_MULTICAST_PORTS = [DEVICE_INFO_PORT]
 
 
 def _build_bpf_filter(device_ips=None):
+    metering_port = app_settings.metering_port
+    unicast_ports = [DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, metering_port]
     multicast_clauses = " or ".join(f"port {p}" for p in DANTE_MULTICAST_PORTS)
 
     if device_ips:
@@ -20,7 +26,7 @@ def _build_bpf_filter(device_ips=None):
             f"({multicast_clauses}))"
         )
     else:
-        unicast_clauses = " or ".join(f"port {p}" for p in DANTE_UNICAST_PORTS)
+        unicast_clauses = " or ".join(f"port {p}" for p in unicast_ports)
         bpf = (
             f"udp and (({multicast_clauses}) or "
             f"(({unicast_clauses}) and not dst net 224.0.0.0/4))"
@@ -39,11 +45,19 @@ class TsharkCapture:
         "data.data",
     ]
 
-    def __init__(self, packet_store, interface="en0", device_ips=None, include_metering=False):
+    def __init__(
+        self,
+        packet_store,
+        interface="en0",
+        device_ips=None,
+        include_metering=False,
+        packet_filter=None,
+    ):
         self._store = packet_store
         self._interface = interface
         self._device_ips = set(device_ips) if device_ips else set()
         self._include_metering = include_metering
+        self._packet_filter = packet_filter
         self._process = None
 
     @staticmethod
@@ -78,7 +92,7 @@ class TsharkCapture:
             return None
 
         if not self._include_metering:
-            if src_port_str == str(DANTE_METERING_PORT) or dst_port_str == str(DANTE_METERING_PORT):
+            if src_port_str == str(app_settings.metering_port) or dst_port_str == str(app_settings.metering_port):
                 return None
 
         try:
@@ -97,7 +111,7 @@ class TsharkCapture:
             return None
 
         is_multicast_dst = dst_ip.startswith("224.")
-        well_known_ports = {8800, 8700}
+        well_known_ports = {DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT}
 
         if is_multicast_dst:
             direction = None
@@ -178,6 +192,8 @@ class TsharkCapture:
 
                 fields = self._parse_line(line)
                 if not fields:
+                    continue
+                if self._packet_filter and not self._packet_filter(fields["payload"]):
                     continue
 
                 if fields["direction"] is None:

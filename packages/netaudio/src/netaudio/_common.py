@@ -5,15 +5,17 @@ import csv
 import io
 import json as json_module
 import xml.etree.ElementTree as ET
+from contextlib import asynccontextmanager
 from fnmatch import fnmatch
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import typer
 
 from netaudio_lib import DanteBrowser, DanteDevice
 from netaudio_lib.common.app_config import settings
-from netaudio_lib.daemon.client import get_devices_from_daemon
+from netaudio_lib.daemon.client import device_request_via_daemon, get_devices_from_daemon
 from netaudio_lib.dante.application import DanteApplication
+from netaudio_lib.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC
 
 from netaudio._exit_codes import ExitCode
 
@@ -41,6 +43,74 @@ def discover() -> dict[str, DanteDevice]:
     return asyncio.run(_discover())
 
 
+def _get_arc_port(device: DanteDevice) -> int:
+    if device.services:
+        for service_data in device.services.values():
+            if service_data.get("type") == SERVICE_ARC:
+                return service_data.get("port", 4440)
+    return 4440
+
+
+def _resolve_one(devices: dict[str, DanteDevice]) -> tuple[str, DanteDevice]:
+    if len(devices) == 0:
+        typer.echo("Error: device not found.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    if len(devices) > 1:
+        names = ", ".join(d.name or sn for sn, d in devices.items())
+        typer.echo(f"Error: multiple devices matched: {names}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    return next(iter(devices.items()))
+
+
+async def _send_via_daemon(packet: bytes, device_ip, port: int) -> bytes | None:
+    return await device_request_via_daemon(packet, str(device_ip), port)
+
+
+def _make_app_sender(app: DanteApplication) -> Callable:
+    async def _send(packet: bytes, device_ip, port: int) -> bytes | None:
+        ip = str(device_ip)
+        if port == DEVICE_SETTINGS_PORT:
+            return await app.settings.request(
+                packet, ip, port,
+                logical_command_name="cli_command",
+            )
+        elif port == DEVICE_CONTROL_PORT:
+            return await app.cmc.request(
+                packet, ip, port,
+                logical_command_name="cli_command",
+            )
+        else:
+            return await app.arc.request(
+                packet, ip, port,
+                logical_command_name="cli_command",
+            )
+    return _send
+
+
+@asynccontextmanager
+async def _command_context():
+    """Discover devices and provide live command transport.
+
+    Yields (devices, send_fn) where:
+      devices: dict[str, DanteDevice]
+      send_fn: async (packet, device_ip, port) -> bytes | None
+    """
+    devices = await get_devices_from_daemon()
+    if devices is not None:
+        yield devices, _send_via_daemon
+        return
+
+    app = DanteApplication()
+    await app.startup()
+    try:
+        devices = await app.discover_and_populate(timeout=settings.mdns_timeout)
+        yield devices or {}, _make_app_sender(app)
+    finally:
+        await app.shutdown()
+
+
 async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
     unpopulated = {
         server_name: device
@@ -66,10 +136,33 @@ async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
         await application.shutdown()
 
 
+def _normalize_mac(mac: str) -> str:
+    raw = mac.replace(":", "").replace("-", "").replace(".", "").lower()
+    if len(raw) == 16 and raw[6:10] == "fffe":
+        raw = raw[:6] + raw[10:]
+    elif len(raw) == 16 and raw.endswith("0000"):
+        raw = raw[:12]
+    return raw
+
+
+def _strip_separators(mac: str) -> str:
+    return mac.replace(":", "").replace("-", "").replace(".", "").lower()
+
+
+def _mac_matches(device_mac: str, pattern: str) -> bool:
+    raw_device = _strip_separators(device_mac)
+    raw_pattern = _strip_separators(pattern)
+
+    if raw_device == raw_pattern:
+        return True
+
+    return _normalize_mac(device_mac) == _normalize_mac(pattern)
+
+
 def filter_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
     state = _get_state()
 
-    if not state.names and not state.hosts and not state.server_names:
+    if not state.names and not state.hosts and not state.server_names and not state.macs:
         return devices
 
     filtered = {}
@@ -82,6 +175,9 @@ def filter_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
             continue
 
         if state.server_names and not any(fnmatch(server_name, pat) for pat in state.server_names):
+            continue
+
+        if state.macs and not any(_mac_matches(device.mac_address or "", pat) for pat in state.macs):
             continue
 
         filtered[server_name] = device
@@ -102,26 +198,6 @@ def sort_devices(devices: dict[str, DanteDevice]) -> list[tuple[str, DanteDevice
 
     return sorted(devices.items(), key=sort_keys[state.sort_field], reverse=state.sort_reverse)
 
-
-async def _resolve_device() -> DanteDevice:
-    devices = await _discover()
-    await _populate_controls(devices)
-    devices = filter_devices(devices)
-
-    if len(devices) == 0:
-        typer.echo("Error: device not found.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    if len(devices) > 1:
-        names = ", ".join(device.name or server_name for server_name, device in devices.items())
-        typer.echo(f"Error: multiple devices matched: {names}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    return next(iter(devices.values()))
-
-
-def resolve_device() -> DanteDevice:
-    return asyncio.run(_resolve_device())
 
 
 def set_device_filter(device_arg: str) -> None:
@@ -233,6 +309,7 @@ def _format_yaml(data: Any) -> str:
 def _format_table(headers: list[str], rows: list[list[str]], title: Optional[str] = None) -> str:
     from rich.console import Console
     from rich.table import Table
+    from rich.text import Text
 
     state = _get_state()
     table = Table(title=title)
@@ -241,7 +318,7 @@ def _format_table(headers: list[str], rows: list[list[str]], title: Optional[str
         table.add_column(header)
 
     for row in rows:
-        table.add_row(*[str(value) for value in row])
+        table.add_row(*[Text.from_ansi(str(value)) for value in row])
 
     console = Console(no_color=state.no_color)
     with console.capture() as capture:

@@ -14,7 +14,7 @@ class DanteDeviceSerializer:
             "name": device.name,
             "server_name": device.server_name,
             "services": device.services,
-            "subscriptions": device.subscriptions,
+            "subscriptions": [DanteDeviceSerializer.subscription_to_json(s) for s in device.subscriptions],
         }
 
         optional_fields = [
@@ -28,6 +28,17 @@ class DanteDeviceSerializer:
             ("model_id", device.model_id),
             ("sample_rate", device.sample_rate),
             ("aes67_enabled", device.aes67_enabled),
+            ("tx_flow_count", device.tx_flow_count),
+            ("rx_flow_count", device.rx_flow_count),
+            ("num_networks", device.num_networks),
+            ("encoding", device.encoding),
+            ("bit_depth", device.bit_depth),
+            ("software_version", device.software_version),
+            ("firmware_version", device.firmware_version),
+            ("clock_role", device.clock_role),
+            ("clock_mac", device.clock_mac),
+            ("min_latency", device.min_latency),
+            ("max_latency", device.max_latency),
         ]
 
         for field_name, field_value in optional_fields:
@@ -48,6 +59,9 @@ class DanteDeviceSerializer:
             ("friendly_name", channel.friendly_name),
             ("status_text", channel.status_text),
             ("volume", channel.volume),
+            ("muted", channel.muted),
+            ("bit_depth", channel.bit_depth),
+            ("samples_per_frame", channel.samples_per_frame),
         ]
 
         for field_name, field_value in optional_fields:
@@ -57,23 +71,31 @@ class DanteDeviceSerializer:
         return {key: as_json[key] for key in sorted(as_json.keys())}
 
     @staticmethod
-    def subscription_to_json(subscription):
-        from netaudio_lib.dante.const import SUBSCRIPTION_STATUS_LABELS
+    def _status_to_json(code):
+        from netaudio_lib.dante.const import SUBSCRIPTION_STATUS_INFO
 
+        if code is None:
+            return None
+
+        info = SUBSCRIPTION_STATUS_INFO.get(code)
+        if info is None:
+            return {"code": code, "state": "unknown", "label": f"Unknown ({code})", "detail": None}
+
+        state, label, detail = info
+        return {"code": code, "state": state, "label": label, "detail": detail}
+
+    @staticmethod
+    def subscription_to_json(subscription):
         as_json = {
             "rx_channel": subscription.rx_channel_name,
-            "rx_channel_status_code": subscription.rx_channel_status_code,
             "rx_device": subscription.rx_device_name,
-            "status_code": subscription.status_code,
-            "status_text": list(subscription.status_text()),
             "tx_channel": subscription.tx_channel_name,
             "tx_device": subscription.tx_device_name,
+            "status": DanteDeviceSerializer._status_to_json(subscription.status_code),
         }
 
-        if subscription.rx_channel_status_code in SUBSCRIPTION_STATUS_LABELS:
-            as_json["rx_channel_status_text"] = list(
-                subscription.rx_channel_status_text()
-            )
+        if subscription.rx_channel_status_code is not None and subscription.rx_channel_status_code != subscription.status_code:
+            as_json["rx_channel_status"] = DanteDeviceSerializer._status_to_json(subscription.rx_channel_status_code)
 
         return as_json
 
