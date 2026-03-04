@@ -1,0 +1,29 @@
+{
+  "label": "conmon_query_batch_architecture",
+  "summary": "Conmon queries should be event-driven per-device, not batched",
+  "status": "closed",
+  "tags": [
+    "architecture",
+    "conmon"
+  ],
+  "context": {},
+  "reported_ns": 1772765233830740276,
+  "reported_iso": "2026-03-05T21:47:13.830740-05:00",
+  "updated_ns": 1772767029572462687,
+  "updated_iso": "2026-03-05T22:17:09.572463-05:00",
+  "history": [
+    {
+      "action": "reported",
+      "timestamp_ns": 1772765233830740276,
+      "timestamp_iso": "2026-03-05T21:47:13.830740-05:00",
+      "note": "discover_and_populate sends 0x00C1 and 0x0061 to all devices simultaneously. AD4D and LX-DANTE don't respond to 0x0061 when queried alongside other devices (but respond fine when queried individually). Fix: send conmon queries per-device as they're discovered, not in batch. Single top-level timeout as cutoff.",
+      "session_id": 63
+    },
+    {
+      "action": "closed",
+      "timestamp_ns": 1772767029572462687,
+      "timestamp_iso": "2026-03-05T22:17:09.572463-05:00",
+      "note": "Per-device sequential queries with response waiters, retry for slow devices, daemon retry task at 3s/5s/10s"
+    }
+  ]
+}

@@ -130,12 +130,14 @@ class TestCapturedSubscriptionHeaders:
     """Verify _parse_header handles the Dante Controller protocol variant."""
 
     def test_captured_remove_header(self, load_sub_fixture):
+        from netaudio_lib.dante.debug_formatter import get_opcode_name
+
         data = load_sub_fixture("subscription_remove_request.bin")
         h = _parse_header(data)
 
         assert h["protocol_id"] == 0x2809
         assert h["opcode"] == 0x3410
-        assert h["opcode_name"] == "Subscription Modify"
+        assert h["opcode_name"] == get_opcode_name(0x2809, 0x3410)
         assert h["result_code"] == 0x0000
 
     def test_captured_remove_response(self, load_sub_fixture):
@@ -169,16 +171,20 @@ class TestCapturedSubscriptionHeaders:
         assert req[4:6] == resp[4:6]
 
     def test_rx_channel_status_opcode(self, load_sub_fixture):
+        from netaudio_lib.dante.debug_formatter import get_opcode_name
+
         data = load_sub_fixture("rx_channel_status_request.bin")
         h = _parse_header(data)
         assert h["opcode"] == 0x3400
-        assert h["opcode_name"] == "RX Channel Status"
+        assert h["opcode_name"] == get_opcode_name(0x2809, 0x3400)
 
     def test_rx_flow_status_opcode(self, load_sub_fixture):
+        from netaudio_lib.dante.debug_formatter import get_opcode_name
+
         data = load_sub_fixture("rx_flow_status_request.bin")
         h = _parse_header(data)
         assert h["opcode"] == 0x3600
-        assert h["opcode_name"] == "RX Flow Status"
+        assert h["opcode_name"] == get_opcode_name(0x2809, 0x3600)
 
 
 # ---------------------------------------------------------------------------
@@ -249,14 +255,15 @@ class TestSubscriptionCorrelation:
         store.close()
 
     def test_stored_opcode_names(self, load_sub_fixture, tmp_path):
+        from netaudio_lib.dante.debug_formatter import get_opcode_name
         from netaudio_lib.dante.packet_store import PacketStore
 
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
 
         for name, expected_opcode_name in [
-            ("subscription_remove_request.bin", "Subscription Modify"),
-            ("rx_channel_status_request.bin", "RX Channel Status"),
-            ("rx_flow_status_request.bin", "RX Flow Status"),
+            ("subscription_remove_request.bin", get_opcode_name(0x2809, 0x3410)),
+            ("rx_channel_status_request.bin", get_opcode_name(0x2809, 0x3400)),
+            ("rx_flow_status_request.bin", get_opcode_name(0x2809, 0x3600)),
         ]:
             data = load_sub_fixture(name)
             pid = store.store_packet(

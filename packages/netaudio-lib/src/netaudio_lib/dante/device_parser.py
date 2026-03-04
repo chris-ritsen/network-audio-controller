@@ -113,7 +113,7 @@ class DanteDeviceParser:
         subscriptions = []
 
         try:
-            for page in range(0, max(int(device.rx_count / 16), 1)):
+            for page in range(0, max(int((device.rx_count or 0) / 16), 1)):
                 receivers_args = device.commands.command_receivers(page)
                 response = await dante_command_func(
                     *receivers_args, logical_command_name="get_receivers"
@@ -127,7 +127,7 @@ class DanteDeviceParser:
                 body = response[RESPONSE_HEADER_SIZE:]
                 channels_this_page = 0
 
-                for index in range(0, min(device.rx_count, 16)):
+                for index in range(0, min(device.rx_count or 0, 16)):
                     record_offset = BODY_HEADER_SIZE + (index * RX_RECORD_SIZE)
                     if record_offset + RX_RECORD_SIZE > len(body):
                         break
@@ -200,7 +200,7 @@ class DanteDeviceParser:
         tx_friendly_channel_names = {}
 
         try:
-            num_pages = max(1, (device.tx_count + 31) // 32)
+            num_pages = max(1, ((device.tx_count or 0) + 31) // 32)
             for page in range(0, num_pages):
                 transmitters_friendly_args = device.commands.command_transmitters(
                     page, friendly_names=True
@@ -218,7 +218,7 @@ class DanteDeviceParser:
                 body = response_friendly[RESPONSE_HEADER_SIZE:]
                 channels_this_page = 0
 
-                for index in range(0, min(device.tx_count, 32)):
+                for index in range(0, min(device.tx_count or 0, 32)):
                     record_offset = BODY_HEADER_SIZE + (index * TX_FRIENDLY_RECORD_SIZE)
                     if record_offset + TX_FRIENDLY_RECORD_SIZE > len(body):
                         break
@@ -258,7 +258,7 @@ class DanteDeviceParser:
                 first_channel_group = None
                 channels_this_page = 0
 
-                for index in range(0, min(device.tx_count, 32)):
+                for index in range(0, min(device.tx_count or 0, 32)):
                     record_offset = BODY_HEADER_SIZE + (index * TX_RECORD_SIZE)
                     if record_offset + TX_RECORD_SIZE > len(body):
                         break

@@ -4,7 +4,8 @@ import asyncio
 import typer
 
 from netaudio_lib.common.socket_path import daemon_is_accessible, open_daemon_connection
-from netaudio_lib.daemon.server import NetaudioDaemon, run_daemon
+from netaudio_lib.daemon.protocol import CMD_SHUTDOWN
+from netaudio_lib.daemon.server import run_daemon
 
 app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True)
 
@@ -25,15 +26,17 @@ def status():
     async def _run():
         try:
             reader, writer = await open_daemon_connection()
-            writer.write(b'\x02')
+            writer.write(b"\x02")
             await writer.drain()
 
             import struct
+
             length_data = await asyncio.wait_for(reader.readexactly(4), timeout=2.0)
             length = struct.unpack(">I", length_data)[0]
             data = await asyncio.wait_for(reader.readexactly(length), timeout=2.0)
 
             import json
+
             devices = json.loads(data.decode("utf-8"))
             typer.echo(f"Daemon is running. {len(devices)} device(s) cached.")
 
@@ -54,18 +57,18 @@ def stop():
         return
 
     try:
-        typer.echo("Sending stop signal to daemon...")
 
         async def _run():
             try:
                 reader, writer = await open_daemon_connection()
+                writer.write(CMD_SHUTDOWN)
+                await writer.drain()
                 writer.close()
                 await writer.wait_closed()
             except Exception:
                 pass
 
         asyncio.run(_run())
-        typer.echo("Stop signal sent. The daemon will shut down shortly.")
     except Exception as e:
         typer.echo(f"Error stopping daemon: {e}", err=True)
         raise typer.Exit(code=1)
