@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.1.3"
+version = "0.1.4"
 description = "CLI for controlling Audinate Dante network audio devices"
 readme = "README.md"
 license = "Unlicense"

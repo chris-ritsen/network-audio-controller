@@ -260,7 +260,7 @@ wheels = [
 
 [[package]]
 name = "netaudio"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/netaudio" }
 dependencies = [
     { name = "netaudio-lib" },
@@ -281,7 +281,7 @@ requires-dist = [
 
 [[package]]
 name = "netaudio-lib"
-version = "0.0.4"
+version = "0.0.5"
 source = { editable = "packages/netaudio-lib" }
 dependencies = [
     { name = "ifaddr" },
