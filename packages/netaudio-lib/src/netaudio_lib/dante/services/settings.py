@@ -10,18 +10,15 @@ SETTINGS_PORT = DEVICE_SETTINGS_PORT
 
 
 class DanteSettingsService(DanteUnicastService):
-    def __init__(self, packet_store=None):
-        super().__init__(packet_store=packet_store)
+    def __init__(self, packet_store=None, dissect=False):
+        super().__init__(packet_store=packet_store, dissect=dissect)
         self._commands = DanteDeviceCommands()
 
-    async def identify(self, device_ip: str) -> bytes | None:
+    def identify(self, device_ip: str) -> None:
         command_args = self._commands.command_identify()
         packet = command_args[0]
         port = command_args[2] or SETTINGS_PORT
-        return await self.request(
-            packet, device_ip, port,
-            logical_command_name="identify",
-        )
+        self.send(packet, device_ip, port)
 
     async def set_gain_level(
         self, device_ip: str, channel_number: int, gain_level: int, device_type: str,

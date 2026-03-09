@@ -20,6 +20,7 @@ from netaudio._common import (
     sort_devices,
 )
 from netaudio._exit_codes import ExitCode
+from netaudio.icons import icon
 
 app = typer.Typer(help="Manage device channels.", no_args_is_help=True)
 
@@ -103,11 +104,11 @@ def name(
             if new_name == "":
                 packet, _ = commands.command_reset_channel_name(channel_type, found_channel.number)
                 await send(packet, device.ipv4, arc_port)
-                typer.echo(f"Reset channel name: {found_channel.name}")
+                typer.echo(f"{icon('name')}Reset channel name: {found_channel.name}")
             else:
                 packet, _ = commands.command_set_channel_name(channel_type, found_channel.number, new_name)
                 await send(packet, device.ipv4, arc_port)
-                typer.echo(f"Set channel name: {new_name}")
+                typer.echo(f"{icon('name')}Set channel name: {new_name}")
 
     asyncio.run(_run())
 
@@ -143,6 +144,6 @@ def gain(
             device_type = "input" if channel_type == "tx" else "output"
             packet, _, port = commands.command_set_gain_level(found_channel.number, int(level), device_type)
             await send(packet, device.ipv4, port)
-            typer.echo(f"Set gain level: {level}")
+            typer.echo(f"{icon('gain')}Set gain level: {level}")
 
     asyncio.run(_run())
