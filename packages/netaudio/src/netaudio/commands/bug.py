@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from netaudio._common import output_table, output_single
+from netaudio.icons import icon, icon_only
 
 
 app = typer.Typer(help="Bug tracker — document and track known defects.", no_args_is_help=True)
@@ -54,6 +55,9 @@ def _short_iso(iso: str) -> str:
 
 
 def _status_icon(status: str) -> str:
+    nerd = icon_only({"open": "open", "closed": "closed", "reopened": "reopened"}.get(status, ""))
+    if nerd:
+        return nerd
     return {"open": "○", "closed": "✓", "reopened": "◎"}.get(status, "?")
 
 
@@ -188,7 +192,7 @@ def bug_report(
         print(str(err), file=sys.stderr)
         raise typer.Exit(1)
 
-    _print_bug_detail(bug, f"Bug: {bug['label']} -> reported")
+    _print_bug_detail(bug, f"{icon('bug')}Bug: {bug['label']} -> reported")
 
 
 @app.command("close")
@@ -214,7 +218,7 @@ def bug_close(
         print(str(err), file=sys.stderr)
         raise typer.Exit(1)
 
-    _print_bug_detail(bug, f"Bug: {bug['label']} -> closed")
+    _print_bug_detail(bug, f"{icon('bug')}Bug: {bug['label']} -> closed")
 
 
 @app.command("reopen")
@@ -240,7 +244,7 @@ def bug_reopen(
         print(str(err), file=sys.stderr)
         raise typer.Exit(1)
 
-    _print_bug_detail(bug, f"Bug: {bug['label']} -> reopened")
+    _print_bug_detail(bug, f"{icon('bug')}Bug: {bug['label']} -> reopened")
 
 
 def _parse_date_to_ns(value: str) -> int:

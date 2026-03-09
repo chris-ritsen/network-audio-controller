@@ -23,7 +23,7 @@ def export_session_bundle(store: PacketStore, session_id: int, output_dir: str |
 
     session = store.get_session(session_id)
     session_name = session["name"] if session else f"session_{session_id}"
-    bundle_name = f"session_{session_id}_{_safe_name(session_name)}"
+    bundle_name = _safe_name(session_name)
 
     markers = store.get_markers(session_id)
 

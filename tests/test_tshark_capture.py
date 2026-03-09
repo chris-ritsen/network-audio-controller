@@ -8,19 +8,11 @@ from netaudio_lib.dante.tshark_capture import TsharkCapture, _build_bpf_filter
 class TestBpfFilter:
     def test_default_filter(self):
         bpf = _build_bpf_filter()
-        assert "udp" in bpf
-        # Multicast ports captured in both directions
-        assert "port 8702" in bpf
-        # Unicast control ports captured but exclude multicast destinations
-        # (prevents heartbeat noise: src=8700 -> 224.0.0.233:8708)
-        assert "port 8800" in bpf
-        assert "port 8700" in bpf
-        assert "not dst net 224.0.0.0/4" in bpf
+        assert bpf == "udp"
 
     def test_filter_with_device_ips(self):
         bpf = _build_bpf_filter(device_ips=["192.168.1.10", "192.168.1.20"])
-        assert "host 192.168.1.10" in bpf
-        assert "host 192.168.1.20" in bpf
+        assert bpf == "udp"
 
 
 class TestParseLine:

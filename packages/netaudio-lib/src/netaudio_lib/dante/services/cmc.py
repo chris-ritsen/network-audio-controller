@@ -61,6 +61,29 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
                     s.close()
                 except OSError:
                     continue
+
+        if sys.platform == "darwin":
+            import subprocess
+            for interface in ["en0", "en1", "en2", "en3", "en4"]:
+                try:
+                    result = subprocess.run(
+                        ["ifconfig", interface],
+                        capture_output=True, text=True, timeout=2,
+                    )
+                    if result.returncode != 0:
+                        continue
+                    has_ip = False
+                    mac_addr = None
+                    for line in result.stdout.splitlines():
+                        line = line.strip()
+                        if line.startswith("inet ") and local_ip in line:
+                            has_ip = True
+                        if line.startswith("ether "):
+                            mac_addr = line.split()[1]
+                    if has_ip and mac_addr:
+                        return bytes.fromhex(mac_addr.replace(":", ""))
+                except Exception:
+                    continue
     except Exception:
         pass
 
@@ -69,8 +92,8 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
 
 
 class DanteCMCService(DanteUnicastService):
-    def __init__(self, packet_store=None, interface_name: str | None = None):
-        super().__init__(packet_store=packet_store)
+    def __init__(self, packet_store=None, interface_name: str | None = None, dissect=False):
+        super().__init__(packet_store=packet_store, dissect=dissect)
         self._commands = DanteDeviceCommands()
         self._sequence_counter = 0
         self._registered_devices: set[str] = set()

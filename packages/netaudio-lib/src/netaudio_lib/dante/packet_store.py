@@ -36,22 +36,6 @@ def _parse_header(data: bytes):
     protocol_id = struct.unpack(">H", data[0:2])[0]
     length = struct.unpack(">H", data[2:4])[0]
 
-    if protocol_id in PROTOCOL_NAMES and protocol_id != 0xFFFF:
-        transaction_id = struct.unpack(">H", data[4:6])[0]
-        opcode = struct.unpack(">H", data[6:8])[0]
-        result_code = struct.unpack(">H", data[8:10])[0] if len(data) >= 10 else None
-
-        return {
-            "protocol_id": protocol_id,
-            "length": length,
-            "transaction_id": transaction_id,
-            "opcode": opcode,
-            "result_code": result_code,
-            "protocol_name": PROTOCOL_NAMES.get(protocol_id),
-            "opcode_name": get_opcode_name(protocol_id, opcode),
-            "result_name": RESULT_NAMES.get(result_code) if result_code is not None else None,
-        }
-
     if protocol_id == 0xFFFF and len(data) >= 28:
         message_type = struct.unpack(">H", data[26:28])[0]
         message_type_name = get_settings_message_type_name(message_type)
@@ -67,15 +51,35 @@ def _parse_header(data: bytes):
             "result_name": None,
         }
 
+    if protocol_id == 0x0008 and len(data) >= 12:
+        direction_field = struct.unpack(">H", data[6:8])[0]
+        opcode = struct.unpack(">H", data[10:12])[0]
+        sequence = struct.unpack(">H", data[16:18])[0] if len(data) >= 18 else None
+
+        return {
+            "protocol_id": protocol_id,
+            "length": length,
+            "transaction_id": sequence,
+            "opcode": opcode,
+            "result_code": direction_field,
+            "protocol_name": "DDP_LOCK",
+            "opcode_name": get_opcode_name(protocol_id, opcode) if opcode is not None else None,
+            "result_name": None,
+        }
+
+    transaction_id = struct.unpack(">H", data[4:6])[0] if len(data) >= 6 else None
+    opcode = struct.unpack(">H", data[6:8])[0] if len(data) >= 8 else None
+    result_code = struct.unpack(">H", data[8:10])[0] if len(data) >= 10 else None
+
     return {
         "protocol_id": protocol_id,
         "length": length,
-        "transaction_id": struct.unpack(">H", data[4:6])[0] if len(data) >= 6 else None,
-        "opcode": struct.unpack(">H", data[6:8])[0] if len(data) >= 8 else None,
-        "result_code": None,
-        "protocol_name": None,
-        "opcode_name": None,
-        "result_name": None,
+        "transaction_id": transaction_id,
+        "opcode": opcode,
+        "result_code": result_code,
+        "protocol_name": PROTOCOL_NAMES.get(protocol_id),
+        "opcode_name": get_opcode_name(protocol_id, opcode) if opcode is not None else None,
+        "result_name": RESULT_NAMES.get(result_code) if result_code is not None else None,
     }
 
 
@@ -141,7 +145,8 @@ class PacketStore:
                 multicast_group TEXT,
                 multicast_port INTEGER,
                 session_id INTEGER REFERENCES capture_sessions(id),
-                source_host TEXT
+                source_host TEXT,
+                interface TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_packets_transaction
@@ -181,6 +186,10 @@ class PacketStore:
         if "source_host" not in columns:
             self._conn.execute(
                 "ALTER TABLE packets ADD COLUMN source_host TEXT"
+            )
+        if "interface" not in columns:
+            self._conn.execute(
+                "ALTER TABLE packets ADD COLUMN interface TEXT"
             )
         marker_columns = {
             row["name"]
@@ -252,6 +261,34 @@ class PacketStore:
                    WHERE id = ?""",
                 (ended_ns, ended_iso, session_id),
             )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def update_session(
+        self,
+        session_id: int,
+        name: str | None = None,
+        description: str | None = None,
+        category: str | None = None,
+    ) -> bool:
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if category is not None:
+            updates.append("category = ?")
+            params.append(category)
+        if not updates:
+            return False
+        params.append(session_id)
+        cursor = self._conn.execute(
+            f"UPDATE capture_sessions SET {', '.join(updates)} WHERE id = ?",
+            params,
+        )
         self._conn.commit()
         return cursor.rowcount > 0
 
@@ -444,6 +481,7 @@ class PacketStore:
         session_id: int = None,
         timestamp_ns: int = None,
         source_host: str = None,
+        interface: str = None,
     ) -> int | None:
         if timestamp_ns is None:
             timestamp_ns = time.time_ns()
@@ -473,8 +511,8 @@ class PacketStore:
                     source_type, direction, device_name, device_ip,
                     protocol_id, protocol_name, transaction_id, opcode, opcode_name,
                     result_code, result_name, payload, payload_hex,
-                    multicast_group, multicast_port, session_id, source_host
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    multicast_group, multicast_port, session_id, source_host, interface
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     timestamp_ns,
                     timestamp_iso,
@@ -499,6 +537,7 @@ class PacketStore:
                     multicast_port,
                     session_id,
                     source_host,
+                    interface,
                 ),
             )
             self._conn.commit()
@@ -651,15 +690,36 @@ class PacketStore:
         query: str,
         params: list,
         device_ip: str | None = None,
+        device_name: str | None = None,
         start_ns: int | None = None,
         end_ns: int | None = None,
         opcode: int | None = None,
         protocol_id: int | None = None,
         direction: str | None = None,
+        payload_contains: str | None = None,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        port: int | None = None,
     ) -> tuple[str, list]:
         if device_ip:
             query += " AND (src_ip = ? OR dst_ip = ?)"
             params.extend([device_ip, device_ip])
+
+        if src_ip:
+            query += " AND src_ip = ?"
+            params.append(src_ip)
+
+        if dst_ip:
+            query += " AND dst_ip = ?"
+            params.append(dst_ip)
+
+        if port is not None:
+            query += " AND (src_port = ? OR dst_port = ?)"
+            params.extend([port, port])
+
+        if device_name:
+            query += " AND device_name = ?"
+            params.append(device_name)
 
         if start_ns is not None:
             query += " AND timestamp_ns >= ?"
@@ -684,28 +744,43 @@ class PacketStore:
                 query += " AND direction = ?"
                 params.append(direction)
 
+        if payload_contains is not None:
+            search_hex = payload_contains.encode().hex()
+            query += " AND payload_hex LIKE ?"
+            params.append(f"%{search_hex}%")
+
         return query, params
 
     def get_session_packet_count_filtered(
         self,
         session_id: int,
         device_ip: str | None = None,
+        device_name: str | None = None,
         start_ns: int | None = None,
         end_ns: int | None = None,
         opcode: int | None = None,
         protocol_id: int | None = None,
         direction: str | None = None,
+        payload_contains: str | None = None,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        port: int | None = None,
     ) -> int:
         query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
         params: list = [session_id]
         query, params = self._apply_packet_filters(
             query, params,
             device_ip=device_ip,
+            device_name=device_name,
             start_ns=start_ns,
             end_ns=end_ns,
             opcode=opcode,
             protocol_id=protocol_id,
             direction=direction,
+            payload_contains=payload_contains,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            port=port,
         )
         row = self._conn.execute(query, params).fetchone()
         return int(row["count"]) if row else 0
@@ -714,11 +789,16 @@ class PacketStore:
         self,
         session_id: int,
         device_ip: str | None = None,
+        device_name: str | None = None,
         start_ns: int | None = None,
         end_ns: int | None = None,
         opcode: int | None = None,
         protocol_id: int | None = None,
         direction: str | None = None,
+        payload_contains: str | None = None,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        port: int | None = None,
         limit: int = 200,
         offset: int = 0,
         ascending: bool = True,
@@ -728,11 +808,16 @@ class PacketStore:
         query, params = self._apply_packet_filters(
             query, params,
             device_ip=device_ip,
+            device_name=device_name,
             start_ns=start_ns,
             end_ns=end_ns,
             opcode=opcode,
             protocol_id=protocol_id,
             direction=direction,
+            payload_contains=payload_contains,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            port=port,
         )
         order = "ASC" if ascending else "DESC"
         query += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
@@ -740,6 +825,89 @@ class PacketStore:
 
         rows = self._conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def search_packets(
+        self,
+        session_id: int | None = None,
+        device_ip: str | None = None,
+        device_name: str | None = None,
+        start_ns: int | None = None,
+        end_ns: int | None = None,
+        opcode: int | None = None,
+        protocol_id: int | None = None,
+        direction: str | None = None,
+        payload_contains: str | None = None,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        port: int | None = None,
+        limit: int = 200,
+        offset: int = 0,
+        ascending: bool = True,
+    ) -> list[dict]:
+        if session_id is not None:
+            query = "SELECT * FROM packets WHERE session_id = ?"
+            params: list = [session_id]
+        else:
+            query = "SELECT * FROM packets WHERE 1=1"
+            params = []
+        query, params = self._apply_packet_filters(
+            query, params,
+            device_ip=device_ip,
+            device_name=device_name,
+            start_ns=start_ns,
+            end_ns=end_ns,
+            opcode=opcode,
+            protocol_id=protocol_id,
+            direction=direction,
+            payload_contains=payload_contains,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            port=port,
+        )
+        order = "ASC" if ascending else "DESC"
+        query += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        rows = self._conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def search_packets_count(
+        self,
+        session_id: int | None = None,
+        device_ip: str | None = None,
+        device_name: str | None = None,
+        start_ns: int | None = None,
+        end_ns: int | None = None,
+        opcode: int | None = None,
+        protocol_id: int | None = None,
+        direction: str | None = None,
+        payload_contains: str | None = None,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        port: int | None = None,
+    ) -> int:
+        if session_id is not None:
+            query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
+            params: list = [session_id]
+        else:
+            query = "SELECT COUNT(*) AS count FROM packets WHERE 1=1"
+            params = []
+        query, params = self._apply_packet_filters(
+            query, params,
+            device_ip=device_ip,
+            device_name=device_name,
+            start_ns=start_ns,
+            end_ns=end_ns,
+            opcode=opcode,
+            protocol_id=protocol_id,
+            direction=direction,
+            payload_contains=payload_contains,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            port=port,
+        )
+        row = self._conn.execute(query, params).fetchone()
+        return int(row["count"]) if row else 0
 
     def get_marker_timestamp(
         self,

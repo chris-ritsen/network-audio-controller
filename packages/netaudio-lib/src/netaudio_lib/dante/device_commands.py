@@ -35,7 +35,7 @@ class DanteDeviceCommands:
     @staticmethod
     def _build_control_packet(opcode: int, payload: bytes = b'\x00\x00', transaction_id: int = 0) -> bytes:
         length = 8 + len(payload)
-        header = struct.pack(">HBB", Protocol.CONTROL, 0x00, length)
+        header = struct.pack(">HH", Protocol.CONTROL, length)
         header += struct.pack(">HH", transaction_id, opcode)
         return header + payload
 
@@ -99,24 +99,60 @@ class DanteDeviceCommands:
             return (self._build_control_packet(Opcode.TX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
 
     def command_add_subscription(self, rx_channel_number, tx_channel_name, tx_device_name):
-        tx_channel_bytes = tx_channel_name.encode('utf-8')
-        tx_device_bytes = tx_device_name.encode('utf-8')
+        packet, service = self.command_add_subscriptions([
+            (rx_channel_number, tx_channel_name, tx_device_name),
+        ])
+        return (packet, service)
 
-        base_offset = 52
-        tx_channel_offset = base_offset
-        tx_device_offset = base_offset + len(tx_channel_bytes) + 1
+    def command_add_subscriptions(self, subscriptions):
+        count = len(subscriptions)
+        if count < 1 or count > 16:
+            raise ValueError(f"Bulk subscription count must be 1-16, got {count}")
 
-        payload = struct.pack(">HBBBB", 0, 2, 1, 0, rx_channel_number)
-        payload += struct.pack(">BB", 0, tx_channel_offset)
-        payload += struct.pack(">BB", 0, tx_device_offset)
-        payload += b'\x00' * 34
-        payload += tx_channel_bytes + b'\x00'
-        payload += tx_device_bytes + b'\x00'
+        packet_header_size = 8
+        first_record_size = 10
+        additional_record_size = 6
+        records_total = first_record_size + additional_record_size * (count - 1)
+        padding_size = max(0, 44 - records_total)
+        string_table_offset = packet_header_size + records_total + padding_size
+
+        string_table = bytearray()
+        records = []
+
+        for rx_channel_number, tx_channel_name, tx_device_name in subscriptions:
+            tx_channel_bytes = tx_channel_name.encode('utf-8')
+            tx_device_bytes = tx_device_name.encode('utf-8')
+
+            tx_channel_absolute = string_table_offset + len(string_table)
+            string_table += tx_channel_bytes + b'\x00'
+
+            tx_device_absolute = string_table_offset + len(string_table)
+            string_table += tx_device_bytes + b'\x00'
+
+            records.append((rx_channel_number, tx_channel_absolute, tx_device_absolute))
+
+        payload = struct.pack(">HBBBB", 0, 2, count, 0, records[0][0])
+        payload += struct.pack(">BB", records[0][1] >> 8, records[0][1] & 0xFF)
+        payload += struct.pack(">BB", records[0][2] >> 8, records[0][2] & 0xFF)
+        for rx_channel_number, tx_offset, dev_offset in records[1:]:
+            payload += struct.pack(">BBHH", 0, rx_channel_number, tx_offset, dev_offset)
+        payload += b'\x00' * padding_size
+        payload += bytes(string_table)
 
         return (self._build_control_packet(Opcode.SUBSCRIPTION_ADD, payload), SERVICE_ARC)
 
     def command_remove_subscription(self, rx_channel):
-        payload = struct.pack(">II", 1, rx_channel)
+        return self.command_remove_subscriptions([rx_channel])
+
+    def command_remove_subscriptions(self, rx_channels):
+        count = len(rx_channels)
+        if count < 1:
+            raise ValueError("Must specify at least one channel to unsubscribe")
+
+        payload = struct.pack(">I", count)
+        for rx_channel in rx_channels:
+            payload += struct.pack(">I", rx_channel)
+
         return (self._build_control_packet(Opcode.SUBSCRIPTION_REMOVE, payload), SERVICE_ARC)
 
     def command_set_latency(self, latency):
@@ -255,35 +291,43 @@ class DanteDeviceCommands:
         if isinstance(mac, str):
             mac = bytes.fromhex(mac)
 
-        name_bytes = device_name.encode('utf-8')
-        if len(name_bytes) % 2 == 0:
+        name_bytes = device_name.encode('utf-8') + b'\x00'
+        padded_name_len = len(name_bytes)
+        if padded_name_len % 2 != 0:
             name_bytes += b'\x00'
+            padded_name_len += 1
 
-        name_len = len(name_bytes)
-        name_len1 = name_len + (10 - (name_len % 2) if name_len % 2 else 8)
-        name_len2 = name_len1 + 2
-        name_len3 = name_len2 + 4
+        offset_field_1 = 0x0A + padded_name_len
+        offset_field_2 = 0x0C + padded_name_len
+        tail_offset = offset_field_2 + 4
 
-        payload = struct.pack(">HH", Protocol.SETTINGS, 0x3010)
-        payload += struct.pack(">H", 0)
-        payload += mac
-        payload += struct.pack(">HBB", 0, 4, 0)
-        payload += struct.pack(">BBB", name_len1, 0, 1)
-        payload += struct.pack(">BBB", 0, name_len2, 0)
-        payload += struct.pack(">B", 0x0A)
-        payload += name_bytes
-        payload += struct.pack(">BBBB", 0x16, 0x00, 0x01, 0x00)
-        payload += struct.pack(">BBB", 1, 0, name_len3)
-        payload += struct.pack(">HH", 1, port)
-        payload += struct.pack(">H", 1 if timeout else 0)
-        payload += struct.pack(">H", 0)
-        payload += ipv4.packed
-        payload += struct.pack(">HH", port, 0)
+        body = struct.pack(">H", 0x3010)
+        body += struct.pack(">H", 0)
+        body += struct.pack(">H", 0)
+        body += mac
+        body += struct.pack(">H", 0)
+        body += struct.pack(">H", 4)
+        body += struct.pack(">H", offset_field_1)
+        body += struct.pack(">H", 2)
+        body += struct.pack(">H", offset_field_2)
+        body += struct.pack(">H", 0x000A)
+        body += name_bytes
+        body += struct.pack(">H", 0)
+        body += struct.pack(">H", 1)
+        body += struct.pack(">H", tail_offset)
+        body += struct.pack(">H", 1)
+        body += struct.pack(">H", port)
+        body += struct.pack(">H", 1 if timeout else 0)
+        body += struct.pack(">H", 0)
+        body += (ipv4.packed if ipv4 else b'\x00\x00\x00\x00')
+        body += struct.pack(">H", port)
+        body += b'\x00' * 10
 
-        data_len = len(payload) + 2
-        packet = struct.pack(">HBB", Protocol.CMC, 0, data_len)
+        total_length = 4 + 2 + len(body)
+        packet = struct.pack(">H", Protocol.CMC)
+        packet += struct.pack(">H", total_length)
         packet += struct.pack(">H", transaction_id)
-        packet += payload
+        packet += body
 
         return (packet, None, DEVICE_CONTROL_PORT)
 

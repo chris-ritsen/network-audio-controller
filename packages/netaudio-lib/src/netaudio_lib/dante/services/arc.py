@@ -8,8 +8,8 @@ logger = logging.getLogger("netaudio")
 
 
 class DanteARCService(DanteUnicastService):
-    def __init__(self, packet_store=None):
-        super().__init__(packet_store=packet_store)
+    def __init__(self, packet_store=None, dissect=False):
+        super().__init__(packet_store=packet_store, dissect=dissect)
         self._commands = DanteDeviceCommands()
         self._parser = DanteDeviceParser()
 
@@ -92,13 +92,10 @@ class DanteARCService(DanteUnicastService):
                 else:
                     logger.debug(f"Failed to get device name for {device.server_name}")
 
-            if device.rx_count is None or device.tx_count is None:
-                counts = await self.get_channel_count(device_ip, arc_port)
-                if counts:
-                    device.tx_count = device.tx_count_raw = counts[0]
-                    device.rx_count = device.rx_count_raw = counts[1]
-                else:
-                    logger.debug(f"Failed to get channel counts for {device.server_name}")
+            counts = await self.get_channel_count(device_ip, arc_port)
+            if counts:
+                device.tx_count = device.tx_count_raw = counts[0]
+                device.rx_count = device.rx_count_raw = counts[1]
 
             if device.aes67_enabled is None:
                 try:
@@ -108,14 +105,16 @@ class DanteARCService(DanteUnicastService):
                 except Exception as exception:
                     logger.debug(f"Error getting AES67 config: {exception}")
 
-            if not device.tx_channels and device.tx_count:
+            if device.tx_count:
                 tx_channels = await self.get_tx_channels(device, arc_port)
-                device.tx_channels = tx_channels
+                if tx_channels:
+                    device.tx_channels = tx_channels
 
-            if not device.rx_channels and device.rx_count:
+            if device.rx_count:
                 rx_channels, subscriptions = await self.get_rx_channels(device, arc_port)
-                device.rx_channels = rx_channels
-                device.subscriptions = subscriptions
+                if rx_channels:
+                    device.rx_channels = rx_channels
+                    device.subscriptions = subscriptions
 
             device.error = None
         except Exception as exception:

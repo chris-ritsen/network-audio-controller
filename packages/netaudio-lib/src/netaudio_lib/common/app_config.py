@@ -32,6 +32,18 @@ class AppSettings:
         self.refresh: bool = False
         self.socket_path: str = None
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
+        self._device_lock_key: bytes | None = None
+        lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
+        if lock_key_value:
+            self._device_lock_key = lock_key_value.encode("ascii")
+
+    @property
+    def device_lock_key(self) -> bytes | None:
+        return self._device_lock_key
+
+    @device_lock_key.setter
+    def device_lock_key(self, value: bytes | None) -> None:
+        self._device_lock_key = value
 
     @property
     def mdns_timeout(self) -> float:
