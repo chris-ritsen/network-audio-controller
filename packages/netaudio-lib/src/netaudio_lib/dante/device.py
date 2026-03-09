@@ -12,7 +12,6 @@ from netaudio_lib.dante.const import (
     DEVICE_CONTROL_PORT,
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
-    FEATURE_METERING_UNSUPPORTED,
     MULTICAST_GROUP_CONTROL_MONITORING,
     PORTS,
     SERVICE_ARC,
@@ -33,6 +32,7 @@ sockets = {}
 class DanteDevice:
     def __init__(self, server_name="", dump_payloads=False, debug=False, app=None):
         self.bluetooth_device = None
+        self.is_locked = None
         self.dante_model = ""
         self.dante_model_id = ""
         self.error = None
@@ -40,6 +40,7 @@ class DanteDevice:
         self.latency = None
         self.mac_address = None
         self.manufacturer = ""
+        self.manufacturer_mdns = ""
         self.model = ""
         self.model_id = ""
         self.name = ""

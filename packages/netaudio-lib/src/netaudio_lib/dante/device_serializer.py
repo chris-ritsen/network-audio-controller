@@ -1,12 +1,14 @@
 class DanteDeviceSerializer:
     @staticmethod
     def to_json(device):
-        rx_channels = dict(
-            sorted(device.rx_channels.items(), key=lambda x: x[1].number)
-        )
-        tx_channels = dict(
-            sorted(device.tx_channels.items(), key=lambda x: x[1].number)
-        )
+        rx_channels = {
+            k: DanteDeviceSerializer.channel_to_json(v)
+            for k, v in sorted(device.rx_channels.items(), key=lambda x: x[1].number)
+        }
+        tx_channels = {
+            k: DanteDeviceSerializer.channel_to_json(v)
+            for k, v in sorted(device.tx_channels.items(), key=lambda x: x[1].number)
+        }
 
         as_json = {
             "channels": {"receivers": rx_channels, "transmitters": tx_channels},
@@ -19,6 +21,7 @@ class DanteDeviceSerializer:
 
         optional_fields = [
             ("bluetooth_device", device.bluetooth_device),
+            ("is_locked", device.is_locked),
             ("dante_model", device.dante_model),
             ("dante_model_id", device.dante_model_id),
             ("latency", device.latency),

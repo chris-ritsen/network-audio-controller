@@ -5,6 +5,8 @@ from typing import Optional
 
 import typer
 
+from netaudio.icons import icon
+
 
 app = typer.Typer(help="Device diagnostics.", no_args_is_help=True)
 
@@ -80,7 +82,7 @@ async def _run_diagnose(
             note=f"Device diagnostic: {device_ip}",
         )
 
-        print(f"Diagnosing {device_ip}")
+        print(f"{icon('diagnostic')}Diagnosing {device_ip}")
         print()
 
         success = 0
@@ -95,7 +97,7 @@ async def _run_diagnose(
             )
 
             if response is None:
-                print(f"  [{label:30s}]  TIMEOUT")
+                print(f"  {icon('timeout')}[{label:30s}]  TIMEOUT")
                 failed += 1
             else:
                 opcode_hex = ""
@@ -103,11 +105,11 @@ async def _run_diagnose(
                     import struct
                     opcode = struct.unpack(">H", response[6:8])[0]
                     opcode_hex = f"0x{opcode:04X}"
-                print(f"  [{label:30s}]  {len(response):>5d}B  {opcode_hex}")
+                print(f"  {icon('success')}[{label:30s}]  {len(response):>5d}B  {opcode_hex}")
                 success += 1
 
         print()
-        print(f"Diagnostic complete: {success} responses, {failed} timeouts")
+        print(f"{icon('diagnostic')}Diagnostic complete: {success} responses, {failed} timeouts")
 
         verifier.marker(
             "diagnose_finished",

@@ -47,7 +47,24 @@ except ImportError:
     RedisConnectionError = None
 
 
+from netaudio.icons import icon
+
 _LAST_REDIS_ERROR: str | None = None
+
+
+_redis_client_cache: dict[str, "Redis"] = {}
+
+
+def _resolve_host_ipv4(hostname: str) -> str:
+    import socket as _socket
+
+    try:
+        results = _socket.getaddrinfo(hostname, None, _socket.AF_INET, _socket.SOCK_STREAM)
+        if results:
+            return results[0][4][0]
+    except _socket.gaierror:
+        pass
+    return hostname
 
 
 def _get_redis_client(
@@ -68,23 +85,33 @@ def _get_redis_client(
         resolved_db = db if db is not None else int(os.environ.get("REDIS_DB") or 0)
         resolved_password = password or os.environ.get("REDIS_PASSWORD")
 
+        cache_key = f"{resolved_socket or resolved_host}:{resolved_port}:{resolved_db}"
+        if cache_key in _redis_client_cache:
+            cached = _redis_client_cache[cache_key]
+            try:
+                cached.ping()
+                return cached
+            except Exception:
+                del _redis_client_cache[cache_key]
+
         if resolved_socket:
             client = Redis(
                 unix_socket_path=resolved_socket, db=resolved_db, password=resolved_password,
                 decode_responses=True, socket_timeout=5, socket_connect_timeout=5,
             )
         else:
+            resolved_ip = _resolve_host_ipv4(resolved_host)
             client = Redis(
-                host=resolved_host,
+                host=resolved_ip,
                 port=resolved_port,
                 db=resolved_db,
                 password=resolved_password,
                 decode_responses=True,
-                socket_timeout=5,
-                socket_connect_timeout=5,
+                socket_timeout=5, socket_connect_timeout=5,
             )
         client.ping()
         _LAST_REDIS_ERROR = None
+        _redis_client_cache[cache_key] = client
         return client
     except Exception as exception:
         _LAST_REDIS_ERROR = f"{type(exception).__name__}: {exception}"
@@ -296,19 +323,58 @@ def _packet_fingerprint(
     return digest.hexdigest()
 
 
-def _default_interface() -> str:
+def _default_interface() -> tuple[str, str]:
     if app_settings.interface:
-        return app_settings.interface
+        return app_settings.interface, "config"
+
+    if sys.platform == "darwin":
+        interface, service_name = _default_interface_macos()
+        if interface:
+            return interface, service_name
 
     interfaces = get_available_interfaces()
     for name, ip, _ in interfaces:
         if ip != "127.0.0.1":
-            return name
+            return name, "first available"
 
     if interfaces:
-        return interfaces[0][0]
+        return interfaces[0][0], "first available"
 
-    return "any"
+    return "any", "fallback"
+
+
+def _default_interface_macos() -> tuple[str | None, str | None]:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["networksetup", "-listnetworkserviceorder"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None, None
+
+    if result.returncode != 0:
+        return None, None
+
+    available_ips = {
+        name: ip
+        for name, ip, _ in get_available_interfaces()
+        if ip != "127.0.0.1"
+    }
+
+    import re
+    for match in re.finditer(
+        r"^\(\d+\)\s+(.+)\n\(Hardware Port: .+, Device: (\S+)\)",
+        result.stdout,
+        re.MULTILINE,
+    ):
+        service_name = match.group(1)
+        device = match.group(2)
+        if device in available_ips:
+            return device, service_name
+
+    return None, None
 
 
 def _as_dict(value) -> dict:
@@ -534,6 +600,7 @@ class CaptureDaemon:
         export_dir: str = None,
         live: bool = True,
         dump: bool = False,
+        dissect: bool = False,
         metering: bool = False,
         session_id: int | None = None,
         session_name: str | None = None,
@@ -548,10 +615,12 @@ class CaptureDaemon:
         self.store = PacketStore(db_path=db_path)
         self.interface = interface
         self.dump = dump
+        self.dissect = dissect
         self.metering = metering
         self.use_tshark = use_tshark
         self.use_multicast = use_multicast
         self.device_filter = device_filter or []
+        self._explicit_device_filter = bool(device_filter)
         self.opcode_filter = opcode_filter or []
         self.export_dir = export_dir
         self.live = live
@@ -661,6 +730,7 @@ class CaptureDaemon:
             dump=self.dump,
             source_endpoint=self._label_endpoint(fields.get("src_ip"), fields.get("src_port")),
             destination_endpoint=self._label_endpoint(fields.get("dst_ip"), fields.get("dst_port")),
+            dissect_mode=self.dissect,
         )
 
     def _multicast_worker(self, group: str, port: int):
@@ -687,9 +757,6 @@ class CaptureDaemon:
                     timestamp_ns = time.time_ns()
                     source_host, source_port = addr
 
-                    if self.device_filter and source_host not in self.device_filter:
-                        continue
-
                     device_name = self._ip_to_name.get(source_host)
 
                     packet_id = self.store.store_packet(
@@ -705,6 +772,7 @@ class CaptureDaemon:
                         multicast_port=port,
                         session_id=self.session_id,
                         timestamp_ns=timestamp_ns,
+                        interface=self.interface,
                     )
 
                     if packet_id and self.live:
@@ -755,11 +823,12 @@ class CaptureDaemon:
             multicast_socket.close()
 
     async def _run_tshark(self):
-        device_ips = self.device_filter or None
+        tshark_filter_ips = self.device_filter if self._explicit_device_filter else None
         capture = TsharkCapture(
             packet_store=self.store,
             interface=self.interface,
-            device_ips=device_ips,
+            device_ips=tshark_filter_ips,
+            known_device_ips=set(self.device_filter) if self.device_filter else None,
             include_metering=self.metering,
             session_id=self.session_id,
         )
@@ -825,7 +894,7 @@ class CaptureDaemon:
     def _print_stats(self):
         stats = self.store.get_stats()
         print(f"\n{'=' * 60}")
-        print(f"Capture Statistics")
+        print(f"{icon('capture')}Capture Statistics")
         print(f"{'=' * 60}")
         print(f"  Total packets:    {stats['total']}")
         print(f"  Correlated:       {stats['correlated']}")
@@ -893,7 +962,7 @@ class CaptureDaemon:
         self._ip_to_name = {v: k for k, v in name_to_ip.items()}
 
     async def run(self):
-        print(f"Capture: Database at {self.store._db_path}")
+        print(f"{icon('capture')}Capture: Database at {self.store._db_path}")
 
         if self.relay_stream:
             self._relay_redis = _get_redis_client(
@@ -946,8 +1015,10 @@ class CaptureDaemon:
 
         self._resolve_device_filter()
 
-        if self.device_filter:
+        if self.device_filter and self._explicit_device_filter:
             print(f"Capture: Filtering to IPs: {', '.join(sorted(self.device_filter))}")
+        elif self.device_filter:
+            print(f"Capture: Known device IPs: {', '.join(sorted(self.device_filter))}")
 
         if self.live:
             print("\nPackets")
@@ -957,6 +1028,7 @@ class CaptureDaemon:
         tshark_running = False
         if self.use_tshark:
             if TsharkCapture.is_available():
+                print("Capture: Starting tshark...", flush=True)
                 tshark_task = asyncio.create_task(self._run_tshark())
                 await asyncio.sleep(0.2)
                 if tshark_task.done():
@@ -1040,10 +1112,10 @@ class CaptureDaemon:
 
             if self._auto_session and self.session_id is not None:
                 self.store.end_session(self.session_id)
-                print(f"Capture: Ended session #{self.session_id}")
+                print(f"{icon('session')}Capture: Ended session #{self.session_id}")
 
             self.store.close()
-            print("\nCapture stopped.")
+            print(f"\n{icon('capture')}Capture stopped.")
 
 
 async def _replay_packet(
@@ -1072,7 +1144,7 @@ async def _replay_packet(
         )
         raise typer.Exit(1)
 
-    print(f"Replaying packet #{packet_id}")
+    print(f"{icon('packet')}Replaying packet #{packet_id}")
     print(f"  Target:  {destination_ip}:{destination_port}")
     print(f"  Size:    {len(payload)} bytes")
     info = _label_packet(payload)
@@ -1228,21 +1300,21 @@ def _print_packet_line(
 
     arrow = "->" if direction == "request" else "<-" if direction == "response" else "**"
     direction_label = direction or "multicast"
+    direction_icon = icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
     source = source_endpoint or _format_endpoint(source_ip, source_port)
     destination = destination_endpoint or _format_endpoint(destination_ip, destination_port)
 
     print(
-        f"  {packet_id:<6d}  {timestamp_str:12s}  "
+        f"  {direction_icon}{packet_id:<6d}  {timestamp_str:12s}  "
         f"{source:>{PACKET_ENDPOINT_WIDTH}s} {arrow} {destination:<{PACKET_ENDPOINT_WIDTH}s}  "
         f"{direction_label:>10s}  {size:5d}B  {info_str}"
     )
 
-    if dump:
-        if dissect_mode:
-            from netaudio_lib.dante.packet_dissector import dissect_and_render
-            print(dissect_and_render(payload))
-        else:
-            print(_hexdump(payload))
+    if dissect_mode:
+        from netaudio_lib.dante.packet_dissector import dissect_and_render
+        print(dissect_and_render(payload))
+    elif dump:
+        print(_hexdump(payload))
 
 
 def _resolve_redis_for_capture(
@@ -1307,6 +1379,8 @@ def live(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
+    from netaudio.cli import state as cli_state
+
     _require_positive_session_id(session_id, "--session-id")
 
     profile_cfg, _ = _load_capture_profile(config, profile)
@@ -1326,7 +1400,35 @@ def live(
         redis_password=redis_password,
         redis_socket=redis_socket,
     )
-    resolved_interface = interface or capture_cfg.get("interface") or _default_interface()
+    if interface:
+        resolved_interface = interface
+        interface_source = "--interface flag"
+    elif app_settings.interface:
+        resolved_interface = app_settings.interface
+        interface_source = "NETAUDIO_INTERFACE" if os.environ.get("NETAUDIO_INTERFACE") else "--interface flag"
+    elif capture_cfg.get("interface"):
+        resolved_interface = capture_cfg["interface"]
+        interface_source = "capture config"
+    else:
+        resolved_interface, interface_source = _default_interface()
+
+    available = get_available_interfaces()
+    interface_ip = None
+    for iface_name, iface_ip, _ in available:
+        if iface_name == resolved_interface:
+            interface_ip = iface_ip
+            break
+
+    if not interface_ip and resolved_interface != "any":
+        available_names = sorted({name for name, _, _ in available})
+        print(
+            f"Error: Interface '{resolved_interface}' not found or has no IP address.\n"
+            f"  Available: {', '.join(available_names)}",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
+    print(f"{icon('capture')}Capture: Interface {resolved_interface} ({interface_ip}) — {interface_source}")
     resolved_relay_stream = _coalesce(relay_stream, capture_cfg.get("ingress_stream"))
 
     daemon = CaptureDaemon(
@@ -1339,6 +1441,7 @@ def live(
         export_dir=export_dir,
         live=show,
         dump=dump,
+        dissect=cli_state.dissect,
         metering=metering,
         session_id=session_id,
         session_name=session_name,
@@ -1419,7 +1522,7 @@ def session_start(
             label=_normalize_marker_label("session_started"),
             source_host=resolved_host,
         )
-        print(f"Capture: Started session #{session_id} ({resolved_name})")
+        print(f"{icon('session')}Capture: Started session #{session_id} ({resolved_name})")
     finally:
         store.close()
 
@@ -1461,16 +1564,143 @@ def session_stop(
         if not ok:
             print(f"Capture: Session #{resolved_session_id} not found.", file=sys.stderr)
             raise typer.Exit(1)
-        print(f"Capture: Ended session #{resolved_session_id}")
+        print(f"{icon('session')}Capture: Ended session #{resolved_session_id}")
 
         from netaudio_lib.dante.protocol_verifier import export_session_bundle
 
         session_row = store.get_session(resolved_session_id)
         session_name = session_row["name"] if session_row else f"session_{resolved_session_id}"
         bundle_path = export_session_bundle(store, resolved_session_id)
-        print(f"Capture: Exported bundle: {bundle_path}")
+        print(f"{icon('packet')}Capture: Exported bundle: {bundle_path}")
     finally:
         store.close()
+
+
+@session_app.command("end", hidden=True)
+def session_end(
+    id: Optional[int] = typer.Option(None, "--id", help="Session ID."),
+    session: Optional[str] = typer.Option(
+        None,
+        "--session",
+        help="Session reference (ID, exact name, latest, or active). Defaults to active.",
+    ),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    description: Optional[str] = typer.Option(None, "--description", help="Optional stop summary."),
+    source_host: Optional[str] = typer.Option(None, "--source-host", help="Host recording stop marker."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Alias for stop."""
+    session_stop(
+        id=id,
+        session=session,
+        db=db,
+        description=description,
+        source_host=source_host,
+        config=config,
+        profile=profile,
+    )
+
+
+@session_app.command("rename")
+def session_rename(
+    name: str = typer.Argument(..., help="New session name."),
+    id: Optional[int] = typer.Option(None, "--id", help="Session ID."),
+    session: Optional[str] = typer.Option(
+        None,
+        "--session",
+        help="Session reference (ID, exact name, latest, or active). Defaults to active.",
+    ),
+    description: Optional[str] = typer.Option(None, "--description", help="Update description."),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Rename a capture session."""
+    _require_positive_session_id(id, "--id")
+    profile_cfg, _ = _load_capture_profile(config, profile)
+    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    store = PacketStore(db_path=resolved_db)
+    try:
+        resolved_session_id, _ = _resolve_session_reference(
+            store,
+            session_id=id,
+            session=session,
+            default_selector="active",
+        )
+        ok = store.update_session(
+            resolved_session_id,
+            name=name,
+            description=description,
+        )
+        if not ok:
+            print(f"Capture: Session #{resolved_session_id} not found.", file=sys.stderr)
+            raise typer.Exit(1)
+        print(f"{icon('name')}Capture: Session #{resolved_session_id} renamed to '{name}'")
+    finally:
+        store.close()
+
+
+def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bool, no_evidence: bool):
+    from netaudio_lib.dante.packet_dissector import dissect_and_render
+
+    for session in sessions:
+        session_id = int(session["id"])
+        evidence_count = store.get_session_evidence_count(session_id)
+        session_name = session.get("name") or f"session_{session_id}"
+
+        if has_evidence and evidence_count == 0:
+            continue
+        if no_evidence and evidence_count > 0:
+            continue
+        if evidence_count == 0:
+            continue
+
+        markers = store.get_markers(session_id, marker_types=["evidence"])
+
+        print(f"\n{icon('session')}Session #{session_id} ({session_name}) — {evidence_count} evidence packet(s)")
+        print("─" * 80)
+
+        for marker in markers:
+            marker_data = marker.get("data")
+            if not marker_data:
+                continue
+
+            marker_label = marker.get("label") or ""
+            marker_summary = marker.get("summary") or ""
+            display_label = marker_summary or marker_label
+            if display_label:
+                print(f"\n  {icon('marker')}{display_label}")
+
+            packet_ids = marker_data.get("packet_ids") or []
+            if not packet_ids and marker_data.get("packet_id"):
+                packet_ids = [marker_data["packet_id"]]
+
+            for packet_id in packet_ids:
+                packet = store.get_packet(packet_id)
+                if not packet:
+                    continue
+
+                payload = packet.get("payload", b"")
+                direction = packet.get("direction") or "multicast"
+                source_ip = packet.get("src_ip") or "?"
+                source_port = packet.get("src_port") or "?"
+                destination_ip = packet.get("dst_ip") or "?"
+                destination_port = packet.get("dst_port") or "?"
+
+                opcode_hex = ""
+                if len(payload) >= 8:
+                    opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
+
+                direction_icon = icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
+                arrow = "->" if direction == "request" else "<-" if direction == "response" else "**"
+
+                print(
+                    f"\n    {direction_icon}#{packet_id} {direction:8s} {opcode_hex}"
+                    f"{source_ip}:{source_port} {arrow} {destination_ip}:{destination_port} "
+                    f"{len(payload)}B"
+                )
+                print(dissect_and_render(payload, indent="    "))
 
 
 @session_app.command("list")
@@ -1524,6 +1754,10 @@ def session_list(
                 "description": session.get("description") or "",
             })
         output_table(headers, rows, json_data=json_data, title="Sessions")
+
+        from netaudio.cli import state as cli_state
+        if cli_state.dissect:
+            _print_session_evidence(store, sessions, has_evidence, no_evidence)
     finally:
         store.close()
 
@@ -1551,13 +1785,24 @@ def _print_marker_row(
 
     summary_text = marker.get("summary") or ""
     label_text = marker.get("label") or ""
+    marker_type_str = _normalize_marker_type(str(marker.get("marker_type") or "observation"), strict=False)
+
+    _MARKER_TYPE_ICONS = {
+        "hypothesis": "info",
+        "observation": "info",
+        "evidence": "marker",
+        "code_change": "config",
+        "action": "success",
+        "system": "server",
+    }
+    marker_type_icon = icon(_MARKER_TYPE_ICONS.get(marker_type_str, "marker"))
 
     if brief:
         display_text = summary_text if summary_text else label_text
         print(
             f"{marker_id:8d}  "
             f"{(marker.get('timestamp_iso') or ''):26s}  "
-            f"{_normalize_marker_type(str(marker.get('marker_type') or 'observation'), strict=False):12s}  "
+            f"{marker_type_icon}{marker_type_str:12s}  "
             f"{display_text}"
         )
         return
@@ -1565,7 +1810,7 @@ def _print_marker_row(
     print(
         f"{marker_id:8d}  "
         f"{(marker.get('timestamp_iso') or ''):26s}  "
-        f"{_normalize_marker_type(str(marker.get('marker_type') or 'observation'), strict=False):12s}  "
+        f"{marker_type_icon}{marker_type_str:12s}  "
         f"{label_text:34s}  "
         f"{window_packets:10d}"
     )
@@ -1582,8 +1827,10 @@ def _print_marker_row(
         return
 
     marker_data = marker.get("data")
-    if marker_data and marker.get("marker_type") == "evidence" and marker_data.get("packet_ids"):
-        packet_ids = marker_data["packet_ids"]
+    if marker_data and marker.get("marker_type") == "evidence":
+        packet_ids = marker_data.get("packet_ids") or []
+        if not packet_ids and marker_data.get("packet_id"):
+            packet_ids = [marker_data["packet_id"]]
         filters = marker_data.get("filters", {})
 
         if filters:
@@ -1602,10 +1849,11 @@ def _print_marker_row(
                 opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
 
             pkt_dir = pkt.get("direction") or "multicast"
+            pkt_dir_icon = icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
             src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
             dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
             evidence_indent = f"{'':8s}  {'':26s}  {'':12s}  "
-            print(f"{evidence_indent}  #{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
+            print(f"{evidence_indent}  {pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
 
             if use_dissect:
                 from netaudio_lib.dante.packet_dissector import dissect_and_render
@@ -1813,9 +2061,6 @@ def session_packets(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     from netaudio.cli import state as cli_state
-
-    if cli_state.dissect:
-        dump = True
 
     _require_positive_session_id(id, "--id")
     profile_cfg, _ = _load_capture_profile(config, profile)
@@ -2512,6 +2757,176 @@ def follow(
     print(f"Capture: Followed {total_packets} packet(s), {total_markers} marker(s).")
 
 
+@packet_app.command("list")
+def packet_list(
+    session: Optional[str] = typer.Option(
+        None, "--session",
+        help="Session reference (ID, name, latest, active). Omit to search all packets.",
+    ),
+    device_ip: Optional[str] = typer.Option(
+        None, "--device-ip", help="Filter by device IP (src or dst)."
+    ),
+    source_ip: Optional[str] = typer.Option(
+        None, "--src", help="Filter by source IP."
+    ),
+    destination_ip: Optional[str] = typer.Option(
+        None, "--dst", help="Filter by destination IP."
+    ),
+    port: Optional[int] = typer.Option(
+        None, "--port", help="Filter by port (src or dst)."
+    ),
+    device_name: Optional[str] = typer.Option(
+        None, "--device", help="Filter by device name."
+    ),
+    opcode: Optional[str] = typer.Option(
+        None, "--opcode", help="Filter by opcode (hex like 0x2000 or decimal)."
+    ),
+    protocol: Optional[str] = typer.Option(
+        None, "--protocol", help="Filter by protocol ID (hex like 0x27FF or decimal)."
+    ),
+    direction: Optional[str] = typer.Option(
+        None, "--direction", help="Filter by direction: request, response, or multicast."
+    ),
+    after: Optional[str] = typer.Option(
+        None, "--after", help="Show packets after this time (HH:MM:SS or ISO timestamp)."
+    ),
+    before: Optional[str] = typer.Option(
+        None, "--before", help="Show packets before this time (HH:MM:SS or ISO timestamp)."
+    ),
+    grep: Optional[str] = typer.Option(
+        None, "--grep", help="Filter packets containing this string in their payload."
+    ),
+    tail: Optional[int] = typer.Option(
+        None, "--tail", help="Show the N most recent packets (shorthand for --descending --limit N)."
+    ),
+    limit: int = typer.Option(200, "--limit", min=1, max=10000, help="Max packets to show."),
+    offset: int = typer.Option(0, "--offset", min=0, help="Skip first N results."),
+    descending: bool = typer.Option(False, "--descending", help="Show newest packets first."),
+    dump: bool = typer.Option(False, "--dump", help="Dump packet payloads as hex + ASCII."),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Search and filter captured packets."""
+    from netaudio.cli import state as cli_state
+
+    if tail is not None:
+        descending = True
+        limit = tail
+
+    profile_cfg, _ = _load_capture_profile(config, profile)
+    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    resolved_opcode = _parse_int_option(opcode, "--opcode")
+    resolved_protocol = _parse_int_option(protocol, "--protocol")
+
+    resolved_direction = direction
+    if resolved_direction == "multicast":
+        resolved_direction = "__null__"
+
+    store = PacketStore(db_path=resolved_db)
+    try:
+        session_id = None
+        session_row = None
+        if session is not None:
+            session_id, session_row = _resolve_session_reference(
+                store, session_id=None, session=session, default_selector="latest",
+            )
+
+        start_ns = None
+        end_ns = None
+        if session_row:
+            start_ns = session_row.get("started_ns")
+            ended_ns = session_row.get("ended_ns")
+            if ended_ns:
+                end_ns = ended_ns
+        if after and session_id is not None:
+            start_ns = _parse_time_filter(after, store, session_id)
+        if before and session_id is not None:
+            end_ns = _parse_time_filter(before, store, session_id)
+
+        total = store.search_packets_count(
+            session_id=None,
+            device_ip=device_ip,
+            device_name=device_name,
+            start_ns=start_ns,
+            end_ns=end_ns,
+            opcode=resolved_opcode,
+            protocol_id=resolved_protocol,
+            direction=resolved_direction,
+            payload_contains=grep,
+            src_ip=source_ip,
+            dst_ip=destination_ip,
+            port=port,
+        )
+        rows = store.search_packets(
+            session_id=None,
+            device_ip=device_ip,
+            device_name=device_name,
+            start_ns=start_ns,
+            end_ns=end_ns,
+            opcode=resolved_opcode,
+            protocol_id=resolved_protocol,
+            direction=resolved_direction,
+            payload_contains=grep,
+            src_ip=source_ip,
+            dst_ip=destination_ip,
+            port=port,
+            limit=limit,
+            offset=offset,
+            ascending=not descending,
+        )
+
+        scope = f"session #{session_id}" if session_id else "all packets"
+        print(f"Capture: {scope} — {total} matched, showing {len(rows)} (limit={limit} offset={offset})")
+
+        filters = []
+        if device_ip:
+            filters.append(f"device_ip={device_ip}")
+        if source_ip:
+            filters.append(f"src={source_ip}")
+        if destination_ip:
+            filters.append(f"dst={destination_ip}")
+        if port is not None:
+            filters.append(f"port={port}")
+        if device_name:
+            filters.append(f"device={device_name}")
+        if resolved_opcode is not None:
+            filters.append(f"opcode=0x{resolved_opcode:04X}")
+        if resolved_protocol is not None:
+            filters.append(f"protocol=0x{resolved_protocol:04X}")
+        if direction:
+            filters.append(f"direction={direction}")
+        if grep:
+            filters.append(f"grep={grep}")
+        if after:
+            filters.append(f"after={after}")
+        if before:
+            filters.append(f"before={before}")
+        if filters:
+            print(f"Capture: Filters: {', '.join(filters)}")
+
+        _print_packet_table_header()
+
+        for row in rows:
+            payload = row.get("payload") or b""
+            if isinstance(payload, str):
+                payload = bytes.fromhex(payload)
+            _print_packet_line(
+                packet_id=int(row["id"]),
+                timestamp_ns=int(row["timestamp_ns"]),
+                source_ip=row.get("src_ip"),
+                source_port=row.get("src_port"),
+                destination_ip=row.get("dst_ip"),
+                destination_port=row.get("dst_port"),
+                direction=row.get("direction"),
+                payload=payload,
+                dump=dump,
+                dissect_mode=cli_state.dissect,
+            )
+    finally:
+        store.close()
+
+
 @packet_app.command("show")
 def packet_show(
     packet_id: list[int] = typer.Argument(..., help="Packet ID(s) to display."),
@@ -2550,12 +2965,16 @@ def packet_show(
 
             info_str = _label_packet(payload)
 
+            packet_interface = pkt.get("interface") or ""
+
             print(f"Packet #{pid}")
             print(f"  Time:      {timestamp_str}")
             print(f"  Source:    {src_ip}:{src_port}")
             print(f"  Dest:      {dst_ip}:{dst_port}")
             print(f"  Direction: {direction}")
             print(f"  Device:    {device_ip}")
+            if packet_interface:
+                print(f"  Interface: {packet_interface}")
             print(f"  Session:   {session_id_val}")
             print(f"  Type:      {source_type}")
             print(f"  Size:      {len(payload)}B")

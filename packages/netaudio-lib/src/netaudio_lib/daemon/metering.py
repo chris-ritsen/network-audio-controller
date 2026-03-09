@@ -10,12 +10,14 @@ from netaudio_lib.common.app_config import settings as app_settings
 from netaudio_lib.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
+from netaudio_lib.dante.events import DanteEvent, EventType
 from netaudio_lib.dante.metering import parse_metering_levels
 
 logger = logging.getLogger("netaudio")
 
 CACHE_MAX_AGE = 2.0
 HISTORY_MAX_SAMPLES = 3600
+BROADCAST_INTERVAL = 0.05
 
 
 class MeteringManager:
@@ -30,7 +32,10 @@ class MeteringManager:
         self._host_ip = None
         self._host_mac = None
         self._keepalive_task = None
+        self._broadcast_task = None
         self._active_port: int | None = None
+        self._dirty_devices: set[str] = set()
+        self._last_broadcast: dict[str, float] = {}
 
     @staticmethod
     def _probe_port(port: int) -> bool:
@@ -107,9 +112,6 @@ class MeteringManager:
             self._active_port = fallback_port
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         sock.bind(("", self._active_port))
 
         mreq = struct.pack(
@@ -127,6 +129,7 @@ class MeteringManager:
         logger.info("MeteringManager: UDP listener started on port %d", self._active_port)
 
         self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        self._broadcast_task = asyncio.create_task(self._broadcast_loop())
 
     async def _keepalive_loop(self):
         while True:
@@ -135,7 +138,33 @@ class MeteringManager:
                 if self._persistent_refs.get(server_name):
                     self._send_start(server_name)
 
+    async def _broadcast_loop(self):
+        while True:
+            await asyncio.sleep(BROADCAST_INTERVAL)
+            if not self._dirty_devices:
+                continue
+            devices_to_broadcast = list(self._dirty_devices)
+            self._dirty_devices.clear()
+            for server_name in devices_to_broadcast:
+                cached = self._latest_levels.get(server_name)
+                if not cached:
+                    continue
+                self._application.dispatcher.emit_nowait(DanteEvent(
+                    type=EventType.METER_VALUES,
+                    server_name=server_name,
+                    data={
+                        "tx": cached["tx"],
+                        "rx": cached["rx"],
+                        "wall_time": cached.get("wall_time"),
+                        "source_ip": cached.get("source_ip"),
+                    },
+                ))
+
     async def stop(self):
+        if self._broadcast_task:
+            self._broadcast_task.cancel()
+            self._broadcast_task = None
+
         if self._keepalive_task:
             self._keepalive_task.cancel()
             self._keepalive_task = None
@@ -297,6 +326,9 @@ class MeteringManager:
         if server_name not in self._history:
             self._history[server_name] = collections.deque(maxlen=HISTORY_MAX_SAMPLES)
         self._history[server_name].append(sample)
+
+        if self._persistent_refs.get(server_name):
+            self._dirty_devices.add(server_name)
 
         event = self._events.get(server_name)
         if event:

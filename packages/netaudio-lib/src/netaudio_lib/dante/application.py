@@ -24,18 +24,20 @@ logger = logging.getLogger("netaudio")
 
 
 class DanteApplication:
-    def __init__(self, packet_store=None):
+    def __init__(self, packet_store=None, dissect=False):
         self.devices: dict = {}
         self.dispatcher = DanteEventDispatcher()
-        self.arc = DanteARCService(packet_store=packet_store)
-        self.settings = DanteSettingsService(packet_store=packet_store)
+        self.arc = DanteARCService(packet_store=packet_store, dissect=dissect)
+        self.settings = DanteSettingsService(packet_store=packet_store, dissect=dissect)
         from netaudio_lib.common.app_config import settings as app_settings
 
-        self.cmc = DanteCMCService(packet_store=packet_store, interface_name=app_settings.interface)
+        self.cmc = DanteCMCService(packet_store=packet_store, interface_name=app_settings.interface, dissect=dissect)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
             device_lookup=self._device_by_ip,
             packet_store=packet_store,
+            interface_ip=app_settings.interface_ip,
+            dissect=dissect,
         )
         self._browser = None
         self._started = False
@@ -157,8 +159,10 @@ class DanteApplication:
                     device.mac_address = service_properties["id"]
                 if "model" in service_properties:
                     device.model_id = service_properties["model"]
-                if "mf" in service_properties and not device.manufacturer:
-                    device.manufacturer = service_properties["mf"]
+                if "mf" in service_properties:
+                    device.manufacturer_mdns = service_properties["mf"]
+                    if not device.manufacturer:
+                        device.manufacturer = service_properties["mf"]
                 if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
                     device.software_version = service_properties["server_vers"]
                 if "router_vers" in service_properties:

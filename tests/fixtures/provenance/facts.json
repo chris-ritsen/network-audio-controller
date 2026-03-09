@@ -4,7 +4,7 @@
       "category": "conmon_message",
       "key": "0x0081",
       "name": "set_sample_rate",
-      "note": "Sets device sample rate via unicast on port 8700. Target rate as uint32_be at offset 36.",
+      "note": "Sets device sample rate. Unicast request to device port 8700. Fire-and-forget \u2014 no unicast reply. Confirmation arrives via multicast notification burst: 0x0100 (+47ms), 0x0086 transition marker (+810ms), sample_rate_announcement 0x0080 with new rate (+1.3s), 0x0082 (+1.6s), 0x0100 (+2s), 0x0120 (+2.7s), 0x0102 (+2.8s).",
       "fields": [
         {
           "name": "message_type",
@@ -21,16 +21,35 @@
         }
       ],
       "evidence": [
-        "session_44_sample_rate_discovery:28075"
+        "sample_rate_discovery:28075",
+        "fact_catalog_expansion:708982",
+        "fact_catalog_expansion:705653"
       ],
       "confidence": "verified",
-      "added_ns": 1772738113367766220
+      "added_ns": 1773025341611162000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1772938764534887000,
+          "previous_name": "set_sample_rate",
+          "previous_confidence": "verified",
+          "previous_note": "Sets device sample rate via unicast on port 8700. Target rate as uint32_be at offset 36."
+        },
+        {
+          "replaced_ns": 1773025341611165000,
+          "previous_name": "set_sample_rate",
+          "previous_confidence": "verified",
+          "previous_note": "Sets device sample rate. Unicast request to device port 8700. Fire-and-forget \u2014 no unicast reply. Confirmation arrives via multicast notification burst: 0x0100 (+47ms), 0x0086 transition marker (+810ms), sample_rate_announcement 0x0080 with new rate (+1.3s), 0x0082 (+1.6s), 0x0100 (+2s), 0x0120 (+2.7s), 0x0102 (+2.8s). Dante Controller sends from port 8700 (src=dst=8700). netaudio sends from ephemeral port."
+        }
+      ]
     },
     "conmon_message:0x0080": {
       "category": "conmon_message",
       "key": "0x0080",
       "name": "sample_rate_announcement",
-      "note": "Device multicasts current and all supported sample rates on 224.0.0.231:8702 after a sample rate change.",
+      "note": "Periodic multicast heartbeat (~7.5s interval) on 224.0.0.231:8702 from device port 1027. Contains current_rate at offset 36 and supported rates list starting at offset 48. NOT triggered by sample rate changes \u2014 just reflects current state each cycle. After a set_sample_rate (0x0081), the next heartbeat shows the new rate.",
       "fields": [
         {
           "name": "current_rate",
@@ -46,10 +65,23 @@
         }
       ],
       "evidence": [
-        "session_44_sample_rate_discovery:28101"
+        "sample_rate_discovery:28101",
+        "fact_catalog_expansion:709014",
+        "fact_catalog_expansion:678575"
       ],
       "confidence": "verified",
-      "added_ns": 1772738121097513565
+      "added_ns": 1772938752234833000,
+      "history": [
+        {
+          "replaced_ns": 1772938752234836000,
+          "previous_name": "sample_rate_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Device multicasts current and all supported sample rates on 224.0.0.231:8702 after a sample rate change."
+        }
+      ],
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
     },
     "conmon_message:0x0092": {
       "category": "conmon_message",
@@ -66,10 +98,13 @@
         }
       ],
       "evidence": [
-        "session_43_reboot_discovery:27658"
+        "reboot_discovery:27658"
       ],
       "confidence": "verified",
-      "added_ns": 1772738124803972956
+      "added_ns": 1772738124803972956,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
     },
     "arc_opcode:0x2010": {
       "category": "arc_opcode",
@@ -98,10 +133,10 @@
         }
       ],
       "evidence": [
-        "session_45_tx_channel_names_discovery:28782",
-        "session_45_tx_channel_names_discovery:28945",
-        "session_45_tx_channel_names_discovery:29006",
-        "session_45_tx_channel_names_discovery:28781"
+        "tx_channel_names_discovery:28782",
+        "tx_channel_names_discovery:28945",
+        "tx_channel_names_discovery:29006",
+        "tx_channel_names_discovery:28781"
       ],
       "confidence": "verified",
       "added_ns": 1772745319829147174,
@@ -130,36 +165,78 @@
           "previous_confidence": "verified",
           "previous_note": "Returns named TX channels. Only channels with custom names are returned."
         }
-      ]
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "arc_opcode:0x2000": {
       "category": "arc_opcode",
       "key": "0x2000",
       "name": "query_tx_channels",
-      "note": "Returns TX channel list with default names. Paginated at 32 channels per page.",
-      "fields": [
-        {
-          "name": "opcode",
-          "offset": 6,
-          "length": 2,
-          "dtype": "uint16_be",
-          "value": "0x2000"
-        }
-      ],
+      "note": "Returns TX channel list. Paginated \u2014 max_per_page=32. Channel count is rate-dependent: 64 at 1x (48k/44.1k, 2 pages), 32 at 2x (88.2k/96k, 1 page), 16 at 4x (176.4k/192k, 1 page). Paginated responses (status 0x8112) include one lookahead string from the next page. 8-byte records: channel_number(u16), unknown(u16, 0x0107), metadata_ptr(u16), name_ptr(u16). metadata_ptr = 0x0C + channel_count*8, points to 16-byte metadata block with sample_rate(u32) and device-constant fields.",
+      "fields": [],
       "evidence": [
-        "session_45_tx_channel_names_discovery:28972",
-        "session_45_tx_channel_names_discovery:28974"
+        "tx_channel_names_discovery:28972",
+        "tx_channel_names_discovery:28974",
+        "fact_catalog_expansion:607162",
+        "fact_catalog_expansion:592966",
+        "fact_catalog_expansion:634185",
+        "fact_catalog_expansion:643827",
+        "fact_catalog_expansion:643833"
       ],
       "confidence": "verified",
-      "added_ns": 1772740208561298683,
+      "added_ns": 1772935742607457000,
+      "body": "## TX Channel Records (opcode 0x2000)\n\n### Body Header (2 bytes)\n| Offset | Length | Type  | Field         |\n|--------|--------|-------|---------------|\n| 10     | 1      | uint8 | max_per_page  |\n| 11     | 1      | uint8 | channel_count |\n\n### Channel Records (8 bytes each, starting at offset 12)\n| Offset | Length | Type      | Field        | Notes                              |\n|--------|--------|-----------|--------------|------------------------------------|\n| 0      | 2      | uint16_be | channel_num  | 1-based channel number             |\n| 2      | 2      | uint16_be | unknown      | All channels share same value      |\n| 4      | 2      | uint16_be | metadata_ptr | Pointer to 16-byte metadata block  |\n| 6      | 2      | uint16_be | name_ptr     | Pointer to null-terminated ASCII   |\n\n### Metadata Block (16 bytes, at metadata_ptr offset)\n| Offset | Length | Type      | Field       | Notes              |\n|--------|--------|-----------|-------------|--------------------||\n| 0      | 4      | uint32_be | sample_rate | e.g. 48000         |\n| 4      | 2      | uint16_be | unknown_04  |                    |\n| 6      | 2      | uint16_be | unknown_06  | 24 (bit depth?)    |\n| 8      | 2      | uint16_be | unknown_08  |                    |\n| 10     | 2      | uint16_be | unknown_0A  |                    |\n| 12     | 2      | uint16_be | unknown_0C  |                    |\n| 14     | 2      | uint16_be | unknown_0E  | 4 (flow count?)    |\n\n### String Area\nNull-terminated ASCII channel names follow the metadata block.",
       "history": [
         {
           "replaced_ns": 1772740208561304546,
           "previous_name": "query_tx_channels",
           "previous_confidence": "verified",
           "previous_note": "Returns TX channel list with default names. Paginated: request bytes 12-13=start_channel, response includes all channels from start. Response contains channel entries with properties (format, sample rate, etc) followed by null-terminated default names (numeric: 01, 02, etc)."
+        },
+        {
+          "replaced_ns": 1772960000000000000,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated at 32 channels per page."
+        },
+        {
+          "replaced_ns": 1772934051382538000,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated at 32 channels per page. Body header: byte 10=max_per_page, byte 11=channel_count. 8-byte records at offset 12: channel_number(u16), unknown(u16), metadata_ptr(u16), name_ptr(u16). metadata_ptr points to a 16-byte metadata block after all records containing sample_rate(u32) and other fields. name_ptr points to null-terminated ASCII channel name in string area after metadata block."
+        },
+        {
+          "replaced_ns": 1772934347270433000,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated at 32 channels per page. Body header: byte 10=max_per_page, byte 11=channel_count. 8-byte records at offset 12: channel_number(u16), unknown(u16), metadata_ptr(u16), name_ptr(u16). metadata_ptr points to a 16-byte metadata block after all records containing sample_rate(u32) and other fields. name_ptr points to null-terminated ASCII channel name in string area after metadata block."
+        },
+        {
+          "replaced_ns": 1772935225555078000,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated at 32 channels per page. 8-byte records: channel_number(u16), unknown(u16), metadata_ptr(u16), name_ptr(u16). metadata_ptr points to 16-byte metadata block containing sample_rate(u32) and other fields."
+        },
+        {
+          "replaced_ns": 1772935742607460000,
+          "previous_name": "query_tx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Returns TX channel list with default names. Paginated \u2014 max_per_page varies by sample rate (32 at 48k/44.1k, 16 at 192k). 8-byte records: channel_number(u16), unknown(u16, always 0x0107), metadata_ptr(u16), name_ptr(u16). metadata_ptr points to 16-byte metadata block containing sample_rate(u32) and device-constant fields."
         }
-      ]
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "protocol_structure:arc_header": {
       "category": "protocol_structure",
@@ -199,12 +276,17 @@
         }
       ],
       "evidence": [
-        "session_45_tx_channel_names_discovery:28782",
-        "session_45_tx_channel_names_discovery:29006"
+        "tx_channel_names_discovery:28782",
+        "tx_channel_names_discovery:29006"
       ],
       "confidence": "verified",
       "added_ns": 1772739953008814225,
-      "body": "## ARC Header Format (10 bytes minimum)\n\n| Offset | Length | Type      | Field          |\n|--------|--------|-----------|----------------|\n| 0      | 2      | uint16_be | protocol_id    |\n| 2      | 2      | uint16_be | packet_length  |\n| 4      | 2      | uint16_be | transaction_id |\n| 6      | 2      | uint16_be | opcode         |\n| 8      | 2      | uint16_be | status         |\n\n### Protocol ID\nVaries by device model. Known values:\n- 0x2729 \u2014 LX-DANTE (128ch)\n- 0x2809 \u2014 AVIO adapters (BT, USB, AES3)\n\n### Status\n- 0x0000 in requests\n- 0x0001 in successful responses (most opcodes)\n- 0x8112 in paginated responses (0x2000, 0x3000)\n\n### Transaction ID\nIncremented per request. Response echoes the same transaction_id."
+      "body": "## ARC Header Format (10 bytes minimum)\n\n| Offset | Length | Type      | Field          |\n|--------|--------|-----------|----------------|\n| 0      | 2      | uint16_be | protocol_id    |\n| 2      | 2      | uint16_be | packet_length  |\n| 4      | 2      | uint16_be | transaction_id |\n| 6      | 2      | uint16_be | opcode         |\n| 8      | 2      | uint16_be | status         |\n\n### Protocol ID\nVaries by device model. Known values:\n- 0x2729 \u2014 LX-DANTE (128ch)\n- 0x2809 \u2014 AVIO adapters (BT, USB, AES3)\n\n### Status\n- 0x0000 in requests\n- 0x0001 in successful responses (most opcodes)\n- 0x8112 in paginated responses (0x2000, 0x3000)\n\n### Transaction ID\nIncremented per request. Response echoes the same transaction_id.",
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ]
     },
     "conmon_message:0x0090": {
       "category": "conmon_message",
@@ -221,16 +303,19 @@
         }
       ],
       "evidence": [
-        "session_43_reboot_discovery:27657"
+        "reboot_discovery:27657"
       ],
       "confidence": "verified",
-      "added_ns": 1772740171178596152
+      "added_ns": 1772740171178596152,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
     },
     "arc_opcode:0x3010": {
       "category": "arc_opcode",
       "key": "0x3010",
       "name": "set_rx_subscription",
-      "note": "Subscribe/unsubscribe RX channel on port 4440. Sent to the receiving device.",
+      "note": "Subscribe/unsubscribe RX channels on port 4440. Supports bulk operations up to 16 channels per packet.",
       "fields": [
         {
           "name": "opcode",
@@ -240,37 +325,43 @@
           "value": "0x3010"
         },
         {
-          "name": "rx_channel",
-          "offset": 11,
+          "name": "count",
+          "offset": 12,
           "length": 1,
           "dtype": "uint8"
-        },
-        {
-          "name": "tx_name_offset",
-          "offset": 12,
-          "length": 2,
-          "dtype": "uint16_be"
-        },
-        {
-          "name": "src_device_offset",
-          "offset": 14,
-          "length": 2,
-          "dtype": "uint16_be"
         }
       ],
       "evidence": [
-        "session_46_subscription_discovery:29441",
-        "session_46_subscription_discovery:29606"
+        "subscription_discovery:29441",
+        "subscription_discovery:29606",
+        "dc_preset_load:1010209",
+        "dc_preset_load:993276",
+        "dc_preset_load:993288"
       ],
       "confidence": "verified",
-      "added_ns": 1772741229073710745,
-      "body": "## Subscribe/Unsubscribe RX Channel\n\nOpcode 0x3010 on port 4440 (ARC protocol). Sent to the **receiving** device.\n\n### Header\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 0      | 2      | uint16_be | protocol_id        |\n| 2      | 2      | uint16_be | packet_length      |\n| 4      | 2      | uint16_be | transaction_id     |\n| 6      | 2      | uint16_be | opcode (0x3010)    |\n| 8      | 2      | uint16_be | status             |\n| 10     | 1      | uint8     | max_slots (32)     |\n| 11     | 1      | uint8     | rx_channel_number  |\n| 12     | 2      | uint16_be | tx_name_offset     |\n| 14     | 2      | uint16_be | src_device_offset  |\n\n### Subscribe (677B for single channel)\n- Bytes 12-13: offset to TX channel name string (e.g. 0x028C)\n- Bytes 14-15: offset to source device name string (e.g. 0x029B)\n- Bytes 16-651: zeros (unused slots)\n- End of packet: null-terminated ASCII strings:\n  - TX channel name (e.g. 'bluetooth:left')\n  - Source device name (e.g. 'avio-bt-1')\n\n### Unsubscribe (652B)\n- Bytes 12-15: all zeros (no source)\n- Bytes 16-651: all zeros\n\n### Response\n- 10B ACK with status 0x0001 (success)\n\n### Note\nCMC opcode 0x3010 on port 8800 is a DIFFERENT command (subscription status polling)."
+      "added_ns": 1772947147741029000,
+      "body": "## Bulk Subscribe/Unsubscribe RX Channels\n\nOpcode 0x3010 on port 4440 (ARC protocol). Sent to the **receiving** device.\n\n### Header (10 bytes)\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 0      | 2      | uint16_be | protocol_id        |\n| 2      | 2      | uint16_be | packet_length      |\n| 4      | 2      | uint16_be | transaction_id     |\n| 6      | 2      | uint16_be | opcode (0x3010)    |\n| 8      | 2      | uint16_be | status             |\n\n### Payload Prefix (4 bytes)\n| Offset | Length | Type  | Field |\n|--------|--------|-------|-------|\n| 10     | 2      | uint16_be | reserved (0x0002) |\n| 12     | 1      | uint8 | count (1-16) |\n\n### Per-Channel Records (6 bytes each)\nFirst record starts at offset 13:\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| +0     | 1      | uint8     | padding (0x00)     |\n| +1     | 1      | uint8     | rx_channel_number  |\n| +2     | 2      | uint16_be | tx_name_offset     |\n| +4     | 2      | uint16_be | src_device_offset  |\n\nZero-padding follows records to minimum 44 bytes payload.\n\n### String Table\nAbsolute offsets (from packet start) point to null-terminated ASCII strings:\n- TX channel name (e.g. \"mic-mix-high\")\n- Source device name (e.g. \"lx-dante\")\n\n### Subscribe\nNon-zero tx_name_offset and src_device_offset point to string table entries.\n\n### Unsubscribe\nZero tx_name_offset and src_device_offset = clear subscription for that channel.\n\n### Bulk Limits\nMaximum 16 channels per packet (string table size constraint). For more channels, send multiple packets.\n\n### Response\n10B ACK with status 0x0001 (success).\n\n### Note\nCMC opcode 0x3010 on port 8800 is a DIFFERENT command (subscription status polling).",
+      "history": [
+        {
+          "replaced_ns": 1772947147741032000,
+          "previous_name": "set_rx_subscription",
+          "previous_confidence": "verified",
+          "previous_note": "Subscribe/unsubscribe RX channel on port 4440. Sent to the receiving device."
+        }
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "cmc_opcode:0x3010": {
       "category": "cmc_opcode",
       "key": "0x3010",
       "name": "subscription_status_poll",
-      "note": "DC polls subscription status on port 8800 every ~3 seconds. 70B request/response. Contains receiver device name and metering port (8751). Different from ARC 0x3010 on port 4440.",
+      "note": "Subscription status polling on port 8800, sent every ~3 seconds. 70B request/response. Contains receiver device name and metering port (8751). Different from ARC 0x3010 on port 4440.",
       "fields": [
         {
           "name": "opcode",
@@ -287,10 +378,21 @@
         }
       ],
       "evidence": [
-        "session_46_subscription_discovery:29162"
+        "subscription_discovery:29162"
       ],
       "confidence": "verified",
-      "added_ns": 1772741236320564964
+      "added_ns": 1773025348026648000,
+      "protocol_id": 4608,
+      "match_offset": 6,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773025348026651000,
+          "previous_name": "subscription_status_poll",
+          "previous_confidence": "verified",
+          "previous_note": "DC polls subscription status on port 8800 every ~3 seconds. 70B request/response. Contains receiver device name and metering port (8751). Different from ARC 0x3010 on port 4440."
+        }
+      ]
     },
     "arc_opcode:0x1003": {
       "category": "arc_opcode",
@@ -319,8 +421,8 @@
         }
       ],
       "evidence": [
-        "session_42_device_rename_discovery:27358",
-        "session_42_device_rename_discovery:27359"
+        "device_rename_discovery:27358",
+        "device_rename_discovery:27359"
       ],
       "confidence": "disproved",
       "added_ns": 1772742203084861563,
@@ -338,7 +440,14 @@
           "timestamp_ns": 1772752047999577995,
           "device_ip": "192.168.1.108"
         }
-      ]
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "arc_opcode:0x1001": {
       "category": "arc_opcode",
@@ -361,11 +470,18 @@
         }
       ],
       "evidence": [
-        "session_42_device_rename_discovery:27507",
-        "session_42_device_rename_discovery:27508"
+        "device_rename_discovery:27507",
+        "device_rename_discovery:27508"
       ],
       "confidence": "verified",
-      "added_ns": 1772742210174506271
+      "added_ns": 1772742210174506271,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "arc_opcode:0x1100": {
       "category": "arc_opcode",
@@ -374,14 +490,14 @@
       "note": null,
       "fields": [],
       "evidence": [
-        "session_28_set_latency_full_provenance_step2:23376",
-        "session_28_set_latency_full_provenance_step2:23377",
-        "session_27_set_latency_full_provenance:23155",
-        "session_27_set_latency_full_provenance:23156",
-        "session_58_latency_discovery_avio:47493",
-        "session_58_latency_discovery_avio:47608",
-        "session_58_latency_discovery_avio:47490",
-        "session_58_latency_discovery_avio:47491"
+        "set_latency_full_provenance_step2:23376",
+        "set_latency_full_provenance_step2:23377",
+        "set_latency_full_provenance:23155",
+        "set_latency_full_provenance:23156",
+        "latency_discovery_avio:47493",
+        "latency_discovery_avio:47608",
+        "latency_discovery_avio:47490",
+        "latency_discovery_avio:47491"
       ],
       "confidence": "verified",
       "added_ns": 1772753655089245084,
@@ -416,7 +532,14 @@
           "previous_confidence": "verified",
           "previous_note": "Reinstated after session 58 (latency_discovery_avio). Field offsets 104/108/112/116/120 are IDENTICAL on both LX-DANTE (140B) and all 5 AVIO devices (148B). The 8-byte size difference is in the header/TLV structure, not the latency payload fields. Previous disprovals were based on response size difference, not actual field value mismatch. Tested: AVIOBT-5279b6 (set 5ms/1ms, observed offset 108 change), AVIOAES3, 3x AVIOUSB \u2014 all confirmed."
         }
-      ]
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "arc_opcode:0x1101": {
       "category": "arc_opcode",
@@ -439,13 +562,20 @@
         }
       ],
       "evidence": [
-        "session_28_set_latency_full_provenance_step2:18240",
-        "session_28_set_latency_full_provenance_step2:18241",
-        "session_27_set_latency_full_provenance:23157",
-        "session_27_set_latency_full_provenance:23158"
+        "set_latency_full_provenance_step2:18240",
+        "set_latency_full_provenance_step2:18241",
+        "set_latency_full_provenance:23157",
+        "set_latency_full_provenance:23158"
       ],
       "confidence": "verified",
-      "added_ns": 1772742252847928893
+      "added_ns": 1772742252847928893,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
     },
     "protocol_structure:conmon_header": {
       "category": "protocol_structure",
@@ -505,10 +635,10 @@
         }
       ],
       "evidence": [
-        "session_43_reboot_discovery:27657",
-        "session_43_reboot_discovery:27658",
-        "session_44_sample_rate_discovery:28075",
-        "session_44_sample_rate_discovery:28101"
+        "reboot_discovery:27657",
+        "reboot_discovery:27658",
+        "sample_rate_discovery:28075",
+        "sample_rate_discovery:28101"
       ],
       "confidence": "verified",
       "added_ns": 1772745659992165039,
@@ -519,11 +649,1367 @@
           "previous_confidence": "verified",
           "previous_note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements."
         }
+      ],
+      "protocol_id": 65535
+    },
+    "arc_opcode:0x1000": {
+      "category": "arc_opcode",
+      "key": "0x1000",
+      "name": "query_channel_count",
+      "note": "Queries TX/RX channel counts and flow capabilities.",
+      "fields": [
+        {
+          "name": "tx_count",
+          "offset": 12,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "rx_count",
+          "offset": 14,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916040396087000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x1002": {
+      "category": "arc_opcode",
+      "key": "0x1002",
+      "name": "query_device_name",
+      "note": "Queries the device friendly name. Response body is null-terminated ASCII at offset 10.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916043743968000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x3000": {
+      "category": "arc_opcode",
+      "key": "0x3000",
+      "name": "query_rx_channels",
+      "note": "Queries RX channel list with subscription status. Paginated response. 20-byte records: channel_number(u16), flags(u16), sample_rate_ptr(u16), tx_channel_ptr(u16), tx_device_ptr(u16), rx_channel_ptr(u16), status(u16), subscription_status(u16), padding(u32). sample_rate_ptr points to 16-byte metadata block (same structure as TX 0x2000) containing sample_rate(u32) and unknown fields.",
+      "fields": [],
+      "evidence": [
+        "fact_catalog_expansion:607218"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772934054494412000,
+      "history": [
+        {
+          "replaced_ns": 1772934054494415000,
+          "previous_name": "query_rx_channels",
+          "previous_confidence": "verified",
+          "previous_note": "Queries RX channel list with subscription status. Paginated response."
+        }
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x2013": {
+      "category": "arc_opcode",
+      "key": "0x2013",
+      "name": "set_tx_channel_name",
+      "note": "Renames a TX channel. Name is null-terminated ASCII in body.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916050171168000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x3001": {
+      "category": "arc_opcode",
+      "key": "0x3001",
+      "name": "set_rx_channel_name",
+      "note": "Renames an RX channel. Name is null-terminated ASCII in body.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916050301622000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x3014": {
+      "category": "arc_opcode",
+      "key": "0x3014",
+      "name": "remove_rx_subscription",
+      "note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 17 channels (80B) and 128 channels (524B), both confirmed success.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x3014"
+        },
+        {
+          "name": "count",
+          "offset": 10,
+          "length": 4,
+          "dtype": "uint32_be"
+        },
+        {
+          "name": "rx_channel_number",
+          "offset": 14,
+          "length": 4,
+          "dtype": "uint32_be"
+        }
+      ],
+      "evidence": [
+        "dc_preset_load:1010499",
+        "dc_preset_load:1010513",
+        "dc_preset_load:1017601",
+        "dc_preset_load:1017617"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772948279083913000,
+      "body": "## Bulk Remove RX Subscriptions\n\nOpcode 0x3014 on port 4440 (ARC protocol). Sent to the **receiving** device.\n\n### Header (10 bytes)\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 0      | 2      | uint16_be | protocol_id        |\n| 2      | 2      | uint16_be | packet_length      |\n| 4      | 2      | uint16_be | transaction_id     |\n| 6      | 2      | uint16_be | opcode (0x3014)    |\n| 8      | 2      | uint16_be | status             |\n\n### Payload\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 10     | 4      | uint32_be | count              |\n| 14     | 4*N    | uint32_be | rx_channel_number (repeated N times) |\n\n### Bulk Limits\nNo channel count limit \u2014 payload is just a count followed by channel numbers (4 bytes each). Tested with 17 channels in a single 80-byte packet.\n\n### Response\n10B ACK with status 0x0001 (success).",
+      "history": [
+        {
+          "replaced_ns": 1772947159783825000,
+          "previous_name": "remove_rx_subscription",
+          "previous_confidence": "verified",
+          "previous_note": "Removes an RX channel subscription."
+        },
+        {
+          "replaced_ns": 1772947366426668000,
+          "previous_name": "remove_rx_subscription",
+          "previous_confidence": "verified",
+          "previous_note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit."
+        },
+        {
+          "replaced_ns": 1772948279083915000,
+          "previous_name": "remove_rx_subscription",
+          "previous_confidence": "verified",
+          "previous_note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 128 channels in a single 524-byte packet."
+        }
+      ],
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "conmon_message:0x0060": {
+      "category": "conmon_message",
+      "key": "0x0060",
+      "name": "dante_model_response",
+      "note": "Response containing board codename and board name for device identification.",
+      "fields": [
+        {
+          "name": "board_codename",
+          "offset": 44,
+          "length": 44,
+          "dtype": "ascii"
+        },
+        {
+          "name": "board_name",
+          "offset": 88,
+          "length": 64,
+          "dtype": "ascii"
+        }
+      ],
+      "evidence": [
+        "dante_model_discovery"
+      ],
+      "confidence": "verified",
+      "added_ns": 1772916056383973000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x00C0": {
+      "category": "conmon_message",
+      "key": "0x00C0",
+      "name": "make_model_response",
+      "note": "Response containing manufacturer, product name, and version. Manufacturer at offset 76 (128 bytes, null-terminated ASCII). Product name at offset 204 (128 bytes). Some devices prepend a 0x01 byte before the manufacturer string \u2014 skip non-printable prefix bytes when parsing.",
+      "fields": [],
+      "evidence": [
+        "dante_model_discovery",
+        "fact_catalog_expansion:607135"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773025350685101000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1772934057276256000,
+          "previous_name": "make_model_response",
+          "previous_confidence": "verified",
+          "previous_note": "Response containing manufacturer, product name, and version."
+        },
+        {
+          "replaced_ns": 1773025350685104000,
+          "previous_name": "make_model_response",
+          "previous_confidence": "verified",
+          "previous_note": "Response containing manufacturer, product name, and version. Manufacturer at offset 76 (128 bytes, null-terminated ASCII). Product name at offset 204 (128 bytes). Some devices (e.g. Ferrofish) prepend a 0x01 byte before the manufacturer string \u2014 must use _extract_null_terminated_string to skip non-printable prefix bytes."
+        }
       ]
+    },
+    "cmc_opcode:0x1001": {
+      "category": "cmc_opcode",
+      "key": "0x1001",
+      "name": "cmc_register",
+      "note": "Registration handshake with CMC service on port 8800. Includes host MAC address.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916060355287000,
+      "protocol_id": 4608,
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "conmon_message:0x0BC8": {
+      "category": "conmon_message",
+      "key": "0x0BC8",
+      "name": "identify",
+      "note": "Causes the device to blink its LEDs. Fire-and-forget unicast to port 8700.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1772916090678736000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x03D7": {
+      "category": "conmon_message",
+      "key": "0x03D7",
+      "name": "set_encoding",
+      "note": "Sets device encoding (PCM16/PCM24/PCM32). Unicast to port 8700.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "inferred",
+      "added_ns": 1772916090811227000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0344": {
+      "category": "conmon_message",
+      "key": "0x0344",
+      "name": "set_input_gain",
+      "note": "Sets input channel gain level. Unicast to port 8700.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "inferred",
+      "added_ns": 1772916090941680000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0326": {
+      "category": "conmon_message",
+      "key": "0x0326",
+      "name": "set_output_gain",
+      "note": "Sets output channel gain level. Unicast to port 8700.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "inferred",
+      "added_ns": 1772916091081355000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x22DC": {
+      "category": "conmon_message",
+      "key": "0x22DC",
+      "name": "set_aes67",
+      "note": "Enables or disables AES67 mode. Unicast to port 8700.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "inferred",
+      "added_ns": 1772916091214252000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0086": {
+      "category": "conmon_message",
+      "key": "0x0086",
+      "name": "config_change_transition",
+      "note": "Multicast notification sent during device configuration changes (e.g. sample rate). Appears ~800ms after set_sample_rate. 40 bytes. Not part of regular heartbeat cycle. Body contains 8 bytes after header: appears to include a timestamp or counter.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0086"
+        }
+      ],
+      "evidence": [
+        "fact_catalog_expansion:709003",
+        "fact_catalog_expansion:679172"
+      ],
+      "confidence": "observed",
+      "added_ns": 1772938771826537000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0082": {
+      "category": "conmon_message",
+      "key": "0x0082",
+      "name": "config_change_complete",
+      "note": "Multicast notification sent ~1.6s after set_sample_rate. 60 bytes. Only appears during configuration changes, not in regular heartbeat. May signal that the device has finished applying the new configuration.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0082"
+        }
+      ],
+      "evidence": [
+        "fact_catalog_expansion:709022",
+        "fact_catalog_expansion:679196"
+      ],
+      "confidence": "observed",
+      "added_ns": 1772938773671395000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "arc_opcode:0x1102": {
+      "category": "arc_opcode",
+      "key": "0x1102",
+      "name": "unknown_1102",
+      "note": "Protocol 0x2809 on port 4440. 10B request, 136B response. Polled frequently alongside 0x1100. Possibly extended device settings or latency info.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988408733638000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x2002": {
+      "category": "arc_opcode",
+      "key": "0x2002",
+      "name": "unknown_2002",
+      "note": "Protocol 0x2809 on port 4440. 16B request, 136-156B response. Near 0x2000 (query_tx_channels). Possibly TX channel extended info.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988408870935000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x2320": {
+      "category": "arc_opcode",
+      "key": "0x2320",
+      "name": "unknown_2320",
+      "note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988409007448000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x2400": {
+      "category": "arc_opcode",
+      "key": "0x2400",
+      "name": "unknown_2400",
+      "note": "Protocol 0x2809 on port 4440. 34B request, 156-180B response. Polled regularly.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1773025352550342000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773025352550345000,
+          "previous_name": "unknown_2400",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 34B request, 156-180B response. Queried regularly by DC."
+        }
+      ]
+    },
+    "arc_opcode:0x2600": {
+      "category": "arc_opcode",
+      "key": "0x2600",
+      "name": "unknown_2600",
+      "note": "Protocol 0x2809 on port 4440. 34B request, 22-230B variable response. Possibly flow or routing info.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988409287538000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x2601": {
+      "category": "arc_opcode",
+      "key": "0x2601",
+      "name": "unknown_2601",
+      "note": "Protocol 0x2809 on port 4440. 106B request, 120B response. Rare (3 occurrences). Near 0x2600 \u2014 possibly a set/modify variant.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988409426635000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x3300": {
+      "category": "arc_opcode",
+      "key": "0x3300",
+      "name": "unknown_3300",
+      "note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988409562784000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x3401": {
+      "category": "arc_opcode",
+      "key": "0x3401",
+      "name": "unknown_3401",
+      "note": "Protocol 0x2809 on port 4440. 38-52B request, 38-52B response. Near 0x3400 (subscription status). Possibly subscription modify via DC protocol.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988409701931000,
+      "protocol_id": [
+        10025,
+        10249,
+        10239
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "conmon_message:0x0011": {
+      "category": "conmon_message",
+      "key": "0x0011",
+      "name": "unknown_0011",
+      "note": "Multicast on 8702. 96-148B variable. High frequency (3165 packets). Possibly device status announcement.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988416775300000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0013": {
+      "category": "conmon_message",
+      "key": "0x0013",
+      "name": "unknown_0013",
+      "note": "Unicast to 8700. 32-68B. Paired with multicast 0x0014 (344B).",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988416914006000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0014": {
+      "category": "conmon_message",
+      "key": "0x0014",
+      "name": "unknown_0014",
+      "note": "Multicast on 8702. 344B fixed. Rare. Possibly response/announcement paired with 0x0013.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417053635000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0015": {
+      "category": "conmon_message",
+      "key": "0x0015",
+      "name": "unknown_0015",
+      "note": "Unicast to 8700. 36B fixed. Rare.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417191032000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0020": {
+      "category": "conmon_message",
+      "key": "0x0020",
+      "name": "unknown_0020",
+      "note": "Multicast on 8702. 168-240B. High frequency (3157 packets). Possibly device capability or config announcement.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417328306000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0021": {
+      "category": "conmon_message",
+      "key": "0x0021",
+      "name": "unknown_0021",
+      "note": "Unicast to 8700. 92B fixed. Likely request paired with multicast 0x0020.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417470062000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0061": {
+      "category": "conmon_message",
+      "key": "0x0061",
+      "name": "unknown_0061",
+      "note": "Unicast to 8700. 32B fixed. Near 0x0060 (dante_model_response). Likely query that triggers 0x0060.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417616124000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0070": {
+      "category": "conmon_message",
+      "key": "0x0070",
+      "name": "unknown_0070",
+      "note": "Multicast on 8702. 68-92B variable. Rare.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417761917000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0075": {
+      "category": "conmon_message",
+      "key": "0x0075",
+      "name": "unknown_0075",
+      "note": "Unicast to 8700. 72B fixed. Rare.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988417902865000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0077": {
+      "category": "conmon_message",
+      "key": "0x0077",
+      "name": "unknown_0077",
+      "note": "Unicast to 8700. 36B fixed. Paired with multicast 0x0078.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988418041583000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0078": {
+      "category": "conmon_message",
+      "key": "0x0078",
+      "name": "unknown_0078",
+      "note": "Multicast on 8702. 40B fixed. Likely response/announcement paired with unicast 0x0077.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988418180941000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0083": {
+      "category": "conmon_message",
+      "key": "0x0083",
+      "name": "unknown_0083",
+      "note": "Unicast to 8700. 40B fixed. Near 0x0082 (config_change_complete). Possibly config query.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988423962461000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0084": {
+      "category": "conmon_message",
+      "key": "0x0084",
+      "name": "unknown_0084",
+      "note": "Multicast on 8702. 92B fixed. Near 0x0082/0x0083. Config-related announcement.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424100653000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0085": {
+      "category": "conmon_message",
+      "key": "0x0085",
+      "name": "unknown_0085",
+      "note": "Unicast to 8700. 56B fixed. Near 0x0082-0x0084 cluster.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424243305000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x00C1": {
+      "category": "conmon_message",
+      "key": "0x00C1",
+      "name": "unknown_00C1",
+      "note": "Unicast to 8700. 32B fixed. Near 0x00C0 (make_model_response). Likely query that triggers 0x00C0.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424386759000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0100": {
+      "category": "conmon_message",
+      "key": "0x0100",
+      "name": "unknown_0100",
+      "note": "Multicast on 8702. 40B fixed. Appears during config changes (seen after set_sample_rate).",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424528739000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0102": {
+      "category": "conmon_message",
+      "key": "0x0102",
+      "name": "unknown_0102",
+      "note": "Multicast on 8702. 34-50B variable. Appears during config changes.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424671591000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0103": {
+      "category": "conmon_message",
+      "key": "0x0103",
+      "name": "unknown_0103",
+      "note": "Multicast on 8702. 35-37B. Very rare (3 packets).",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424812383000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0104": {
+      "category": "conmon_message",
+      "key": "0x0104",
+      "name": "unknown_0104",
+      "note": "Multicast on 8702. 35B fixed.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988424954570000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0105": {
+      "category": "conmon_message",
+      "key": "0x0105",
+      "name": "unknown_0105",
+      "note": "Multicast on 8702. 35B fixed.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988425093155000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0106": {
+      "category": "conmon_message",
+      "key": "0x0106",
+      "name": "unknown_0106",
+      "note": "Multicast on 8702. 32B fixed.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988425231822000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x0120": {
+      "category": "conmon_message",
+      "key": "0x0120",
+      "name": "unknown_0120",
+      "note": "Multicast on 8702. 32B fixed. Appears during config changes (seen after set_sample_rate).",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988425368138000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x01FE": {
+      "category": "conmon_message",
+      "key": "0x01FE",
+      "name": "metering_data",
+      "note": "Metering level data. Unicast to a port specified in the metering start command. Default port is 8751 (configurable). 93B fixed payload. High frequency. Triggered by a metering start command that includes the requester's MAC address and desired callback port in the payload. A corresponding stop command exists.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1773025355582891000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1772988677357019000,
+          "previous_name": "unknown_01FE",
+          "previous_confidence": "observed",
+          "previous_note": "Port 8751 (metering). 93B fixed. High frequency (7277 packets). Likely metering data."
+        },
+        {
+          "replaced_ns": 1773025355582893000,
+          "previous_name": "metering_data",
+          "previous_confidence": "verified",
+          "previous_note": "Metering level data. Unicast to a port specified in the metering start command. Port 8751 is the default used by Dante Controller (configurable \u2014 DC complains at startup if the port is unavailable). 93B fixed payload. High frequency. Triggered by a metering start command that includes the requester's MAC address and desired callback port in the payload. A corresponding stop command exists."
+        }
+      ]
+    },
+    "conmon_message:0x1006": {
+      "category": "conmon_message",
+      "key": "0x1006",
+      "name": "unknown_1006",
+      "note": "Unicast to 8700. 36B fixed. Near 0x1007/0x1008/0x1009 cluster.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988428725096000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x1007": {
+      "category": "conmon_message",
+      "key": "0x1007",
+      "name": "unknown_1007",
+      "note": "Multicast on 8702. 36B fixed. Very high frequency (5407 packets). Possibly heartbeat or status beacon.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988428865789000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x1008": {
+      "category": "conmon_message",
+      "key": "0x1008",
+      "name": "unknown_1008",
+      "note": "Unicast to 8700. 32B fixed. Near 0x1007. Likely query for 0x1007/0x1009.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988429005651000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x1009": {
+      "category": "conmon_message",
+      "key": "0x1009",
+      "name": "unknown_1009",
+      "note": "Multicast on 8702. 48-80B variable. Near 0x1007/0x1008.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988429145551000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x3135": {
+      "category": "conmon_message",
+      "key": "0x3135",
+      "name": "unknown_3135",
+      "note": "Port 62976 (non-standard). 317B fixed. Unusual port suggests metering or streaming metadata.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "observed",
+      "added_ns": 1772988429283986000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
+    },
+    "conmon_message:0x40FE": {
+      "category": "conmon_message",
+      "key": "0x40FE",
+      "name": "metering_data_extended",
+      "note": "Metering level data (extended format). Same delivery mechanism as 0x01FE \u2014 unicast to port specified in metering start command. Default port is 8751. 156B fixed payload. Very high frequency.",
+      "fields": [],
+      "evidence": [],
+      "confidence": "verified",
+      "added_ns": 1773025357101855000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1772988677498230000,
+          "previous_name": "unknown_40FE",
+          "previous_confidence": "observed",
+          "previous_note": "Port 8751 (metering). 156B fixed. Very high frequency (8105 packets). Likely metering level data."
+        },
+        {
+          "replaced_ns": 1773025357101858000,
+          "previous_name": "metering_data_extended",
+          "previous_confidence": "verified",
+          "previous_note": "Metering level data (extended format). Same delivery mechanism as 0x01FE \u2014 unicast to port specified in metering start command. Port 8751 is the default used by Dante Controller. 156B fixed payload. Very high frequency."
+        }
+      ]
+    },
+    "lock_status:0x0000": {
+      "category": "lock_status",
+      "key": "0x0000",
+      "name": "success",
+      "note": "Lock/unlock operation completed successfully",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586890",
+        "device_lock_reverse_engineering:2589222"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015018359252000
+    },
+    "lock_status:0x1102": {
+      "category": "lock_status",
+      "key": "0x1102",
+      "name": "already_in_state",
+      "note": "Device already in the requested lock state",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2849501",
+        "device_lock_reverse_engineering:2858987"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015018746001000
+    },
+    "lock_operation:0x0001": {
+      "category": "lock_operation",
+      "key": "0x0001",
+      "name": "lock_device",
+      "note": "Lock device with PIN. Response lock_state=0x0001 on success.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2589222",
+        "device_lock_reverse_engineering:2640527"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015023079331000
+    },
+    "lock_operation:0x0002": {
+      "category": "lock_operation",
+      "key": "0x0002",
+      "name": "unlock_device",
+      "note": "Unlock device with current PIN. Response lock_state=0x0000 on success.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586890",
+        "device_lock_reverse_engineering:2640320"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015024298203000
+    },
+    "lock_opcode:0x2ffe": {
+      "category": "lock_opcode",
+      "key": "0x2ffe",
+      "name": "challenge",
+      "note": null,
+      "fields": [
+        {
+          "name": "ddp_length",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0008"
+        },
+        {
+          "name": "ddp_version",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0001"
+        },
+        {
+          "name": "ddp_identifier",
+          "offset": 4,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1000"
+        },
+        {
+          "name": "ddp_direction",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "message_length",
+          "offset": 8,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "opcode",
+          "offset": 10,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2FFE"
+        },
+        {
+          "name": "sequence",
+          "offset": 16,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "nonce_offset",
+          "offset": 20,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "nonce_length",
+          "offset": 22,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "nonce",
+          "offset": 24,
+          "length": 24,
+          "dtype": "hex"
+        }
+      ],
+      "evidence": [
+        "device_lock_reverse_engineering:2586600",
+        "device_lock_reverse_engineering:2589060"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773018597458795000,
+      "protocol_id": 8,
+      "match_offset": 10,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773018597458799000,
+          "previous_name": "challenge",
+          "previous_confidence": "verified",
+          "previous_note": "Challenge request/response. Request is 12-byte message, response is 40-byte message containing 24-byte nonce at offset 0x0010 from message start."
+        }
+      ]
+    },
+    "lock_opcode:0x2fff": {
+      "category": "lock_opcode",
+      "key": "0x2fff",
+      "name": "authenticate",
+      "note": null,
+      "fields": [
+        {
+          "name": "ddp_length",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0008"
+        },
+        {
+          "name": "ddp_version",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0001"
+        },
+        {
+          "name": "ddp_identifier",
+          "offset": 4,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1000"
+        },
+        {
+          "name": "ddp_direction",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "message_length",
+          "offset": 8,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "opcode",
+          "offset": 10,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2FFF"
+        },
+        {
+          "name": "sequence",
+          "offset": 16,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "status",
+          "offset": 18,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "lock_state",
+          "offset": 20,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "device_lock_reverse_engineering:2586601",
+        "device_lock_reverse_engineering:2586890"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773018616660272000,
+      "protocol_id": 8,
+      "match_offset": 10,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773018616660275000,
+          "previous_name": "authenticate",
+          "previous_confidence": "verified",
+          "previous_note": "Auth request/response. Request contains operation code at +C and 20-byte crypto_secretbox token at +14. Response contains status at +A and lock_state at +C."
+        }
+      ]
+    },
+    "lock_protocol:port": {
+      "category": "lock_protocol",
+      "key": "port",
+      "name": "udp_port_8002",
+      "note": "Device lock protocol operates on UDP port 8002. Uses DDP packet framing with 8-byte header, separate from ARC/Settings/CMC services.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586595",
+        "device_lock_reverse_engineering:2586600"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015094288478000
+    },
+    "lock_protocol:ddp_header": {
+      "category": "lock_protocol",
+      "key": "ddp_header",
+      "name": "ddp_lock_header",
+      "note": "8-byte DDP header: [0:2] total_length=0x0008, [2:4] version=0x0001, [4:6] identifier=0x1000, [6:8] direction (0x0200=request, 0x0300=response).",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586595",
+        "device_lock_reverse_engineering:2586600"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015096595900000
+    },
+    "lock_protocol:handshake": {
+      "category": "lock_protocol",
+      "key": "handshake",
+      "name": "challenge_response_handshake",
+      "note": "4-step handshake: (1) Client sends 0x2FFE challenge request with sequence number. (2) Device responds with 0x2FFE containing 24-byte nonce. (3) Client computes auth token from PIN + nonce using NaCl crypto_secretbox. (4) Client sends 0x2FFF with operation code and 20-byte token. Device responds with 0x2FFF containing status and lock_state.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586595",
+        "device_lock_reverse_engineering:2586600",
+        "device_lock_reverse_engineering:2586601",
+        "device_lock_reverse_engineering:2586890"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015104155423000
+    },
+    "lock_protocol:crypto": {
+      "category": "lock_protocol",
+      "key": "crypto",
+      "name": "xsalsa20_poly1305_auth",
+      "note": "Authentication uses NaCl crypto_secretbox (XSalsa20-Poly1305). Inputs: 32-byte key (ASCII, not hex-decoded), 24-byte nonce from challenge response, 4-byte ASCII PIN as plaintext. Output: 20 bytes (16-byte Poly1305 MAC + 4-byte encrypted PIN).",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586601",
+        "device_lock_reverse_engineering:2589061"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015109974849000
+    },
+    "lock_protocol:challenge_request": {
+      "category": "lock_protocol",
+      "key": "challenge_request",
+      "name": "challenge_request_format",
+      "note": "0x2FFE request: 12-byte message appended to DDP header. [+0:+2] msg_len=0x000C, [+2:+4] opcode=0x2FFE, [+4:+6] 0x0004, [+6:+8] 0x0000, [+8:+A] sequence number, [+A:+C] 0x0000. Total packet is 20 bytes.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586595",
+        "device_lock_reverse_engineering:2589059"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015116309298000
+    },
+    "lock_protocol:challenge_response": {
+      "category": "lock_protocol",
+      "key": "challenge_response",
+      "name": "challenge_response_format",
+      "note": "0x2FFE response: 40-byte message. [+0:+2] msg_len=0x0028, [+2:+4] opcode=0x2FFE, [+4:+6] 0x0004, [+6:+8] 0x0004, [+8:+A] sequence (echoed), [+A:+C] status, [+C:+E] nonce_offset=0x0010 (relative to msg start), [+E:+10] nonce_length=0x0018 (24), [+10:+28] 24-byte nonce.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586600",
+        "device_lock_reverse_engineering:2589060",
+        "device_lock_reverse_engineering:2640273",
+        "device_lock_reverse_engineering:2640487"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015119555974000
+    },
+    "lock_protocol:auth_request": {
+      "category": "lock_protocol",
+      "key": "auth_request",
+      "name": "auth_request_format",
+      "note": "0x2FFF request: 40-byte message. [+0:+2] msg_len=0x0028, [+2:+4] opcode=0x2FFF, [+4:+6] 0x0004, [+6:+8] 0x0008, [+8:+A] sequence (same as challenge), [+A:+C] 0x0000, [+C:+E] operation code, [+E:+10] token_len=0x0014, [+10:+12] token_len=0x0014 (repeated), [+12:+14] 0x0000, [+14:+28] 20-byte auth token.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586601",
+        "device_lock_reverse_engineering:2589061",
+        "device_lock_reverse_engineering:2640274",
+        "device_lock_reverse_engineering:2640488"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015125851376000
+    },
+    "lock_protocol:auth_response": {
+      "category": "lock_protocol",
+      "key": "auth_response",
+      "name": "auth_response_format",
+      "note": "0x2FFF response: 16-byte message. [+0:+2] msg_len=0x0010, [+2:+4] opcode=0x2FFF, [+4:+6] 0x0004, [+6:+8] 0x0004, [+8:+A] sequence (echoed), [+A:+C] status code (0x0000=success, 0x1102=already in state), [+C:+E] lock_state (0x0000=unlocked, 0x0001=locked), [+E:+10] unknown.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586890",
+        "device_lock_reverse_engineering:2849501",
+        "device_lock_reverse_engineering:2858987"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015128509419000
+    },
+    "lock_protocol:pin_rules": {
+      "category": "lock_protocol",
+      "key": "pin_rules",
+      "name": "pin_format",
+      "note": "PIN is exactly 4 ASCII digits (0-9). Sent as plaintext to crypto_secretbox. For lock operation, PIN sets the new lock code. For unlock, PIN must match the current lock code.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586601"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015134018515000
+    },
+    "lock_protocol:sequence": {
+      "category": "lock_protocol",
+      "key": "sequence",
+      "name": "sequence_number",
+      "note": "Sequence number at challenge message +8. Client picks a sequence in the 0x2FFE request. Device echoes it in the 0x2FFE response. Client must reuse the same sequence in the 0x2FFF auth request. Device echoes it again in the 0x2FFF response.",
+      "fields": [],
+      "evidence": [
+        "device_lock_reverse_engineering:2586595",
+        "device_lock_reverse_engineering:2586600",
+        "device_lock_reverse_engineering:2586601",
+        "device_lock_reverse_engineering:2586890"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773015137695975000
+    },
+    "settings_announcement:0x8002": {
+      "category": "settings_announcement",
+      "key": "0x8002",
+      "name": "lock_status_subblock",
+      "note": "0x8002 sub-block in 0xFFFE settings announcement (224.0.0.233:8708) carries device lock state. Offset 16 within sub-block: 0x0001=locked, 0x0002=unlocked. Devices that don't support lock omit this sub-block entirely.",
+      "fields": [
+        {
+          "name": "sub_opcode",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x8002"
+        },
+        {
+          "name": "lock_state",
+          "offset": 16,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "lock_state_query:2992405",
+        "lock_state_query:2992432"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773017100600433000
+    },
+    "lock_state:0x0001": {
+      "category": "lock_state",
+      "key": "0x0001",
+      "name": "locked",
+      "note": "Lock state value 0x0001 in 0x8002 settings announcement sub-block means device is locked",
+      "fields": [],
+      "evidence": [
+        "lock_state_query:2992405"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773017104028564000
+    },
+    "lock_state:0x0002": {
+      "category": "lock_state",
+      "key": "0x0002",
+      "name": "unlocked",
+      "note": "Lock state value 0x0002 in 0x8002 settings announcement sub-block means device is unlocked (lock supported but not active)",
+      "fields": [],
+      "evidence": [
+        "lock_state_query:2992432"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773017105374086000
+    },
+    "settings_announcement:0xFFFE": {
+      "category": "settings_announcement",
+      "key": "0xFFFE",
+      "name": "settings_announcement_protocol",
+      "note": "Protocol 0xFFFE on 224.0.0.233:8708. Periodic broadcast (~1/sec). Header: 2B proto, 2B length, 4B sequence, 8B EUI-64, 8B magic 'Audinate', 4B version/flags, 4B padding. Body: variable sub-blocks, each with 2B size, 2B sub-opcode (0x8000-0x8004), payload. Sub-opcodes: 0x8000/0x8001 (clock/identity), 0x8002 (lock state), 0x8003/0x8004 (channel config).",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFE"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "eui64",
+          "offset": 8,
+          "length": 8,
+          "dtype": "bytes"
+        },
+        {
+          "name": "magic",
+          "offset": 16,
+          "length": 8,
+          "dtype": "ascii"
+        }
+      ],
+      "evidence": [
+        "lock_state_query:2992405"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773017114112191000
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1772753655089260831
+    "updated_ns": 1773025357101858000
   }
 }

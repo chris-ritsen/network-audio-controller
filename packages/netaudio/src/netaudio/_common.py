@@ -18,6 +18,58 @@ from netaudio_lib.dante.application import DanteApplication
 from netaudio_lib.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC
 
 from netaudio._exit_codes import ExitCode
+from netaudio.icons import icon
+
+HEADER_ICONS = {
+    "Name": "name",
+    "IP Address": "ip",
+    "IP": "ip",
+    "MAC Address": "mac",
+    "Clock MAC": "mac",
+    "Model": "model",
+    "TX": "tx",
+    "RX": "rx",
+    "Last Seen": "last_seen",
+    "Server Name": "server",
+    "Manufacturer": "manufacturer",
+    "Product Version": "version",
+    "Board": "board",
+    "Firmware": "firmware",
+    "Software": "software",
+    "Sample Rate": "sample_rate",
+    "Encoding": "encoding",
+    "Bit Depth": "bit_depth",
+    "Latency": "latency",
+    "Flows": "flow",
+    "Bluetooth": "bluetooth",
+    "Status": "status",
+    "Label": "label",
+    "Summary": "summary",
+    "Reported": "reported",
+    "Updated": "updated",
+    "Sessions": "session",
+    "Tags": "tag",
+    "Context": "context",
+    "RX Channel": "rx",
+    "RX Device": "device",
+    "TX Channel": "tx",
+    "TX Device": "device",
+    "#": "number",
+    "Friendly Name": "friendly_name",
+    "Role": "role",
+    "Grandmaster": "grandmaster",
+    "Direction": "direction",
+    "Channel": "channel",
+    "Channel Name": "channel",
+    "Level": "level",
+    "Timestamp": "wall_time",
+    "Online": "online",
+    "Receiving": "receiving",
+}
+
+
+def _iconize_headers(headers: list[str]) -> list[str]:
+    return [f"{icon(HEADER_ICONS[header])}{header}" if header in HEADER_ICONS else header for header in headers]
 
 
 def _get_state():
@@ -371,12 +423,14 @@ def output_table(
     if json_data is None:
         json_data = [dict(zip(headers, row)) for row in rows]
 
+    display_headers = _iconize_headers(headers)
+
     if output_format == OutputFormat.plain:
-        typer.echo(_format_text(headers, rows))
+        typer.echo(_format_text(display_headers, rows))
     elif output_format == OutputFormat.table:
-        typer.echo(_format_text(headers, rows))
+        typer.echo(_format_text(display_headers, rows))
     elif output_format == OutputFormat.pretty:
-        typer.echo(_format_table(headers, rows, title=title))
+        typer.echo(_format_table(display_headers, rows, title=title))
     elif output_format == OutputFormat.json:
         typer.echo(_format_json(json_data))
     elif output_format == OutputFormat.xml:

@@ -2,16 +2,16 @@ import asyncio
 import logging
 import socket
 import struct
-
 from netaudio_lib.dante.transport import DanteMulticastProtocol, DanteUnicastProtocol
 
 logger = logging.getLogger("netaudio")
 
 
 class DanteUnicastService:
-    def __init__(self, packet_store=None):
+    def __init__(self, packet_store=None, dissect=False):
         self._protocol: DanteUnicastProtocol | None = None
         self._packet_store = packet_store
+        self._dissect = dissect
         self._transaction_counter = 0
         self._session_id: int | None = None
 
@@ -77,7 +77,16 @@ class DanteUnicastService:
             except Exception as exception:
                 logger.debug(f"PacketStore error (request): {exception}")
 
-        response = await self._protocol.send_and_expect(packet, (device_ip, port), transaction_id, timeout=timeout)
+        if self._dissect:
+            self._log_dissected(packet, device_ip, port, direction="request", command_name=logical_command_name)
+
+        response = await self._protocol.send_and_expect(
+            packet, (device_ip, port), transaction_id,
+            timeout=timeout, logical_command_name=logical_command_name,
+        )
+
+        if self._dissect and response is not None:
+            self._log_dissected(response, device_ip, port, direction="response", command_name=logical_command_name)
 
         if self._packet_store and response is not None:
             try:
@@ -102,7 +111,20 @@ class DanteUnicastService:
         if self._protocol is None:
             logger.debug("Service not started, cannot send")
             return
+        if self._dissect:
+            self._log_dissected(packet, device_ip, port, direction="send")
         self._protocol.send_fire_and_forget(packet, (device_ip, port))
+
+    def _log_dissected(self, payload: bytes, device_ip: str, port: int, direction: str = "", command_name: str = "") -> None:
+        try:
+            from netaudio_lib.common.app_config import settings as app_settings
+            from netaudio_lib.dante.packet_dissector import dissect_and_render, format_dissect_label
+            color = not app_settings.no_color
+            label = format_dissect_label(direction, f"{device_ip}:{port}", command_name=command_name, color=color)
+            rendered = dissect_and_render(payload, indent="  ", color=color)
+            logger.debug(f"Dissect [{label}] {len(payload)}B:\n{rendered}")
+        except Exception as exception:
+            logger.debug(f"Dissect error: {exception}")
 
     @staticmethod
     def _extract_transaction_id(packet: bytes) -> int:
@@ -112,12 +134,14 @@ class DanteUnicastService:
 
 
 class DanteMulticastService:
-    def __init__(self, multicast_group: str, multicast_port: int, packet_store=None):
+    def __init__(self, multicast_group: str, multicast_port: int, packet_store=None, interface_ip: str | None = None, dissect: bool = False):
         self._multicast_group = multicast_group
         self._multicast_port = multicast_port
         self._protocol: DanteMulticastProtocol | None = None
         self._packet_store = packet_store
+        self._dissect = dissect
         self._session_id: int | None = None
+        self._interface_ip = interface_ip
 
     @property
     def session_id(self) -> int | None:
@@ -130,6 +154,8 @@ class DanteMulticastService:
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
 
+        local_ip = self._interface_ip or self._detect_interface_ip()
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
@@ -139,7 +165,7 @@ class DanteMulticastService:
         membership_request = struct.pack(
             "4s4s",
             socket.inet_aton(self._multicast_group),
-            socket.inet_aton("0.0.0.0"),
+            socket.inet_aton(local_ip),
         )
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership_request)
 
@@ -148,7 +174,17 @@ class DanteMulticastService:
             sock=sock,
         )
         self._protocol = protocol
-        logger.info(f"Multicast service started on {self._multicast_group}:{self._multicast_port}")
+        logger.info(f"Multicast service started on {self._multicast_group}:{self._multicast_port} (interface {local_ip})")
+
+    def _detect_interface_ip(self) -> str:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect((self._multicast_group, 1))
+            local_ip = sock.getsockname()[0]
+            sock.close()
+            return local_ip
+        except Exception:
+            return "0.0.0.0"
 
     async def stop(self) -> None:
         if self._protocol is not None:

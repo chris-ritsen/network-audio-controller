@@ -19,17 +19,21 @@ def parse_metering_levels(data: bytes, tx_count: int, rx_count: int) -> dict:
         return levels
 
     total = tx_count + rx_count
-    if len(data) < total + 1:
+    if len(data) < total:
         return levels
 
-    rx_channels = data[-1 - rx_count : -1]
-    tx_channels = data[-1 - rx_count - tx_count : -1 - rx_count]
+    if rx_count > 0:
+        rx_bytes = data[-rx_count:]
+        tx_bytes = data[-rx_count - tx_count : -rx_count]
+    else:
+        rx_bytes = b""
+        tx_bytes = data[-tx_count:]
 
-    for i in range(min(tx_count, len(tx_channels))):
-        levels["tx"][i + 1] = tx_channels[i]
+    for i in range(min(tx_count, len(tx_bytes))):
+        levels["tx"][i + 1] = tx_bytes[i]
 
-    for i in range(min(rx_count, len(rx_channels))):
-        levels["rx"][i + 1] = rx_channels[i]
+    for i in range(min(rx_count, len(rx_bytes))):
+        levels["rx"][i + 1] = rx_bytes[i]
 
     return levels
 
