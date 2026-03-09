@@ -37,6 +37,9 @@ def add_fact(
     evidence: list[str] | None = None,
     confidence: str = "verified",
     supersedes: str | None = None,
+    protocol_id: int | list[int] | None = None,
+    match_offset: int | None = None,
+    match_size: int | None = None,
 ) -> dict:
     data = _load_facts(path)
     fk = _fact_key(category, key)
@@ -53,6 +56,21 @@ def add_fact(
         "confidence": confidence,
         "added_ns": time.time_ns(),
     }
+
+    if protocol_id is not None:
+        fact["protocol_id"] = protocol_id
+    elif existing and "protocol_id" in existing:
+        fact["protocol_id"] = existing["protocol_id"]
+
+    if match_offset is not None:
+        fact["match_offset"] = match_offset
+    elif existing and "match_offset" in existing:
+        fact["match_offset"] = existing["match_offset"]
+
+    if match_size is not None:
+        fact["match_size"] = match_size
+    elif existing and "match_size" in existing:
+        fact["match_size"] = existing["match_size"]
 
     if body is not None:
         fact["body"] = body

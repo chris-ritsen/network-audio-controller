@@ -8,7 +8,6 @@ from netaudio_lib.dante.const import (
     BLUETOOTH_MODEL_IDS,
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
-    FEATURE_METERING_UNSUPPORTED,
     PORTS,
     SERVICE_ARC,
     SERVICE_CHAN,
@@ -127,9 +126,7 @@ class DanteDeviceNetwork:
 
     async def get_volume(self, ipv4, mac, port):
         try:
-            if self.device.software or (
-                self.device.model_id in FEATURE_METERING_UNSUPPORTED
-            ):
+            if self.device.software:
                 return
 
             if port in sockets:

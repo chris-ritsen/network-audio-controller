@@ -21,6 +21,33 @@ def _version_callback(value: bool):
 SORT_FIELDS = {"mac", "name", "ip", "model", "server-name"}
 
 
+class ColoredLogFormatter(logging.Formatter):
+    RESET = "\033[0m"
+    LEVEL_COLORS = {
+        logging.DEBUG: "\033[90m",
+        logging.INFO: "\033[1;36m",
+        logging.WARNING: "\033[1;33m",
+        logging.ERROR: "\033[1;31m",
+        logging.CRITICAL: "\033[1;41m",
+    }
+    MESSAGE_COLORS = {
+        logging.DEBUG: "\033[37m",
+        logging.INFO: "",
+        logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m",
+        logging.CRITICAL: "\033[1;31m",
+    }
+
+    def format(self, record):
+        level_color = self.LEVEL_COLORS.get(record.levelno, self.RESET)
+        message_color = self.MESSAGE_COLORS.get(record.levelno, "")
+        timestamp = self.formatTime(record, self.default_time_format)
+        level = record.levelname
+        message = record.getMessage()
+        colored_message = f"{message_color}{message}{self.RESET}" if message_color else message
+        return f"\033[90m{timestamp}\033[0m {level_color}{level:<8}{self.RESET} {colored_message}"
+
+
 class OutputFormat(str, Enum):
     plain = "plain"
     table = "table"
@@ -45,6 +72,7 @@ class State:
     verbose: bool = False
     capture: bool = False
     dissect: bool = False
+    icons: bool = False
 
 
 state = State()
@@ -62,6 +90,31 @@ def _parse_sort(value: str) -> tuple[str, bool]:
         elif parts[1] != "asc":
             raise typer.BadParameter(f"Sort direction must be 'asc' or 'desc', got: {parts[1]}")
     return sort_field, reverse
+
+
+def _load_icons_from_config() -> bool:
+    try:
+        from netaudio_lib.common.config_loader import default_config_path
+
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                return False
+
+        config_path = default_config_path()
+        if not config_path.exists():
+            return False
+
+        data = tomllib.loads(config_path.read_text())
+        ui_section = data.get("ui", {})
+        if isinstance(ui_section, dict):
+            return bool(ui_section.get("icons", False))
+    except Exception:
+        pass
+    return False
 
 
 app = typer.Typer(
@@ -90,6 +143,7 @@ def _global_options(
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
     dissect: bool = typer.Option(False, "--dissect", help="Annotated protocol dissection for packet displays.", envvar="NETAUDIO_DISSECT"),
     capture: bool = typer.Option(False, "--capture", help="Record all packets to capture database.", envvar="NETAUDIO_CAPTURE"),
+    icons: bool = typer.Option(False, "--icons", help="Use Nerd Font icons in output.", envvar="NETAUDIO_ICONS"),
     version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
 ):
     state.names = name or []
@@ -104,6 +158,10 @@ def _global_options(
     state.dissect = dissect
     state.capture = capture
 
+    if not icons:
+        icons = _load_icons_from_config()
+    state.icons = icons
+
     settings.mdns_timeout = timeout
     settings.no_color = no_color
 
@@ -114,7 +172,13 @@ def _global_options(
     numeric_level = getattr(logging, effective_level, None)
     if numeric_level is None:
         raise typer.BadParameter(f"Invalid log level: {log_level}")
-    logging.basicConfig(level=numeric_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
+    if no_color:
+        logging.basicConfig(level=numeric_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(ColoredLogFormatter())
+        logging.basicConfig(level=numeric_level, handlers=[handler])
     if debug:
         settings.debug = True
 
@@ -123,18 +187,19 @@ def _global_options(
         device_list()
 
 
-from netaudio.commands import bug, capture, channel, config, device, diagnose, fact, provenance, server, subscription
+from netaudio.commands import bug, capture, channel, config, device, diagnose, fact, key, provenance, server, subscription
 
 app.add_typer(bug.app, name="bug")
 app.add_typer(device.app, name="device")
 app.add_typer(channel.app, name="channel")
 app.add_typer(subscription.app, name="subscription")
 app.add_typer(subscription.app, name="sub", hidden=True)
-app.add_typer(config.app, name="config")
+app.add_typer(config.top_app, name="config")
 app.add_typer(server.app, name="server")
 app.add_typer(capture.app, name="capture")
 app.add_typer(provenance.app, name="provenance")
 app.add_typer(fact.app, name="fact")
+app.add_typer(key.app, name="key")
 app.add_typer(diagnose.app, name="diagnose")
 
 

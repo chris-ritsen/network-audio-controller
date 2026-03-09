@@ -71,11 +71,13 @@ PROTOCOL_CONTROL = 0x27FF
 
 
 class DanteNotificationService(DanteMulticastService):
-    def __init__(self, dispatcher: DanteEventDispatcher, device_lookup=None, packet_store=None):
+    def __init__(self, dispatcher: DanteEventDispatcher, device_lookup=None, packet_store=None, interface_ip: str | None = None, dissect: bool = False):
         super().__init__(
             multicast_group=MULTICAST_GROUP_CONTROL_MONITORING,
             multicast_port=DEVICE_INFO_PORT,
             packet_store=packet_store,
+            interface_ip=interface_ip,
+            dissect=dissect,
         )
         self._dispatcher = dispatcher
         self._device_lookup = device_lookup
@@ -115,6 +117,17 @@ class DanteNotificationService(DanteMulticastService):
 
         source_ip = addr[0]
 
+        if self._dissect:
+            try:
+                from netaudio_lib.common.app_config import settings as app_settings
+                from netaudio_lib.dante.packet_dissector import dissect_and_render, format_dissect_label
+                color = not app_settings.no_color
+                label = format_dissect_label("multicast", f"{source_ip}:{addr[1]}", color=color)
+                rendered = dissect_and_render(data, indent="  ", color=color)
+                logger.debug(f"Dissect [{label}] {len(data)}B:\n{rendered}")
+            except Exception as exception:
+                logger.debug(f"Dissect error: {exception}")
+
         if self._packet_store:
             device = self._lookup_device(source_ip)
             try:
@@ -135,18 +148,24 @@ class DanteNotificationService(DanteMulticastService):
         protocol_id = struct.unpack(">H", data[0:2])[0]
 
         if protocol_id == PROTOCOL_SETTINGS:
-            self._handle_conmon_response(data, source_ip)
+            if self._handle_conmon_response(data, source_ip):
+                return
+            self._handle_settings_notification(data, source_ip)
             return
-
-        if len(data) < 28:
-            return
-
-        notification_id = struct.unpack(">H", data[26:28])[0]
-        notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
 
         device = self._lookup_device(source_ip)
         device_name = device.name if device else ""
         server_name = device.server_name if device else ""
+
+        if len(data) < 28:
+            logger.debug(
+                f"Short multicast packet from {source_ip} ({device_name}), "
+                f"{len(data)} bytes, protocol=0x{protocol_id:04X}, hex={data.hex()}"
+            )
+            return
+
+        notification_id = struct.unpack(">H", data[26:28])[0]
+        notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
 
         logger.debug(f"Notification from {source_ip} ({device_name}): {notification_name} (id={notification_id})")
 
@@ -164,18 +183,53 @@ class DanteNotificationService(DanteMulticastService):
             )
         )
 
-    def _handle_conmon_response(self, data: bytes, source_ip: str) -> None:
+    def _handle_settings_notification(self, data: bytes, source_ip: str) -> None:
+        device = self._lookup_device(source_ip)
+        device_name = device.name if device else ""
+        server_name = device.server_name if device else ""
+
+        if len(data) >= 28:
+            notification_id = struct.unpack(">H", data[26:28])[0]
+        else:
+            notification_id = None
+
+        logger.debug(
+            f"Settings notification from {source_ip} ({device_name}), "
+            f"{len(data)} bytes, notification_id={notification_id}, hex={data.hex()}"
+        )
+
+        if notification_id is not None:
+            notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
+            self._dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.NOTIFICATION_RECEIVED,
+                    device_name=device_name,
+                    server_name=server_name,
+                    data={
+                        "notification_id": notification_id,
+                        "notification_name": notification_name,
+                        "source_ip": source_ip,
+                        "raw": data,
+                    },
+                )
+            )
+
+    def _handle_conmon_response(self, data: bytes, source_ip: str) -> bool:
         opcode = self._extract_conmon_opcode(data)
 
         if opcode is None:
-            return
+            return False
 
         if opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
             self._handle_make_model_response(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
+            return True
         elif opcode == CONMON_OPCODE_DANTE_MODEL_RESPONSE:
             self._handle_dante_model_response(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
+            return True
+
+        return False
 
     def _handle_make_model_response(self, data: bytes, source_ip: str) -> None:
         product_name, product_version, manufacturer = self.parse_make_model_response(data)
@@ -239,7 +293,9 @@ class DanteNotificationService(DanteMulticastService):
     @staticmethod
     def _apply_conmon_data(device, parsed: dict) -> None:
         for field, value in parsed.items():
-            if not getattr(device, field, None):
+            if field == "manufacturer":
+                setattr(device, field, value)
+            elif not getattr(device, field, None):
                 setattr(device, field, value)
 
     def apply_pending_for_device(self, device) -> None:
@@ -284,6 +340,15 @@ class DanteNotificationService(DanteMulticastService):
 
             if null_pos >= 0:
                 raw = raw[:null_pos]
+
+            first_printable = 0
+            while first_printable < len(raw) and raw[first_printable] < 0x20:
+                first_printable += 1
+
+            raw = raw[first_printable:]
+
+            if not raw:
+                return ""
 
             text = raw.decode("utf-8", errors="replace").strip()
 

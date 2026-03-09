@@ -45,6 +45,7 @@ class DanteUnicastProtocol(asyncio.DatagramProtocol):
         remote_addr: tuple[str, int],
         transaction_id: int,
         timeout: float = 0.5,
+        logical_command_name: str = "",
     ) -> bytes | None:
         if self.transport is None:
             return None
@@ -58,8 +59,9 @@ class DanteUnicastProtocol(asyncio.DatagramProtocol):
             self.transport.sendto(data, remote_addr)
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
+            command_label = f" ({logical_command_name})" if logical_command_name else ""
             logger.debug(
-                f"Timeout waiting for response from {remote_addr[0]}:{remote_addr[1]}, "
+                f"Timeout waiting for response from {remote_addr[0]}:{remote_addr[1]}{command_label}, "
                 f"transaction_id=0x{transaction_id:04X}"
             )
             return None
@@ -92,8 +94,10 @@ class DanteMulticastProtocol(asyncio.DatagramProtocol):
 
     def connection_made(self, transport: asyncio.DatagramTransport) -> None:
         self.transport = transport
+        logger.debug("Multicast protocol connection established")
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        logger.log(5, f"Multicast datagram from {addr[0]}:{addr[1]}, {len(data)} bytes")
         try:
             self._callback(data, addr)
         except Exception:

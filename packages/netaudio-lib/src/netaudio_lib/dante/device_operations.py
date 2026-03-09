@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+import struct
 
 logger = logging.getLogger("netaudio")
 
@@ -45,11 +47,15 @@ class DanteDeviceOperations:
 
     async def identify(self):
         command_identify_args = self.device.commands.command_identify()
-        response = await self.device.dante_command(
-            *command_identify_args, logical_command_name="identify"
-        )
+        packet = command_identify_args[0]
+        port = command_identify_args[2]
 
-        return response
+        if self.device._app is not None:
+            device_ip = str(self.device.ipv4) if self.device.ipv4 else None
+            if device_ip:
+                self.device._app.settings.send(packet, device_ip, port)
+        else:
+            await self.device.dante_send_command(packet, port=port)
 
     async def reboot(self):
         if not hasattr(self.device.commands, "command_reboot"):
@@ -150,6 +156,12 @@ class DanteDeviceOperations:
 
         return response
 
+    async def lock_device(self, pin: str, key: bytes) -> dict:
+        return await _device_lock_operation(str(self.device.ipv4), pin, key, operation=1)
+
+    async def unlock_device(self, pin: str, key: bytes) -> dict:
+        return await _device_lock_operation(str(self.device.ipv4), pin, key, operation=2)
+
     async def get_device_settings(self):
         cmd_args = self.device.commands.command_device_settings()
         response = await self.device.dante_command(
@@ -169,3 +181,99 @@ class DanteDeviceOperations:
             return settings
 
         return None
+
+
+LOCK_DDP_HEADER = struct.pack(">HHHH", 8, 0x0001, 0x1000, 0x0200)
+
+LOCK_OPERATION_LOCK = 1
+LOCK_OPERATION_UNLOCK = 2
+
+LOCK_STATUS_SUCCESS = 0x0000
+LOCK_STATUS_ALREADY = 0x1102
+
+LOCK_STATE_UNLOCKED = 0x0000
+LOCK_STATE_LOCKED = 0x0001
+
+LOCK_TIMEOUT = 5.0
+LOCK_MAX_RETRIES = 4
+
+
+def validate_pin(pin: str) -> str | None:
+    if len(pin) != 4:
+        return "PIN must be exactly 4 digits"
+    if not pin.isdigit():
+        return "PIN must contain only digits"
+    return None
+
+
+async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation: int) -> dict:
+    import nacl.bindings
+    from netaudio_lib.dante.const import DEVICE_LOCK_PORT
+
+    loop = asyncio.get_running_loop()
+    sock = await loop.run_in_executor(None, _create_lock_socket)
+
+    try:
+        address = (device_ip, DEVICE_LOCK_PORT)
+        sequence = 1
+
+        for attempt in range(LOCK_MAX_RETRIES):
+            challenge_request = LOCK_DDP_HEADER + struct.pack(
+                ">HHHHHH", 0x000C, 0x2FFE, 0x0004, 0x0000, sequence, 0x0000
+            )
+            sock.sendto(challenge_request, address)
+
+            try:
+                data, _ = sock.recvfrom(1024)
+            except TimeoutError:
+                logger.warning(f"Lock challenge timeout (attempt {attempt + 1}/{LOCK_MAX_RETRIES})")
+                continue
+
+            message = data[8:]
+            nonce_offset = struct.unpack(">H", message[12:14])[0]
+            nonce_length = struct.unpack(">H", message[14:16])[0]
+            nonce = message[nonce_offset:nonce_offset + nonce_length]
+
+            if len(nonce) != 24:
+                logger.warning(f"Invalid nonce length: {len(nonce)}")
+                continue
+
+            token = nacl.bindings.crypto_secretbox(pin.encode("ascii"), nonce, key)
+
+            auth_header = struct.pack(
+                ">HHHHHHHHH",
+                0x0028, 0x2FFF, 0x0004, 0x0008,
+                sequence, 0x0000,
+                operation,
+                0x0014, 0x0014,
+            )
+            auth_message = LOCK_DDP_HEADER + auth_header + struct.pack(">H", 0x0000) + token
+            sock.sendto(auth_message, address)
+
+            try:
+                response_data, _ = sock.recvfrom(1024)
+            except TimeoutError:
+                logger.warning(f"Lock auth timeout (attempt {attempt + 1}/{LOCK_MAX_RETRIES})")
+                continue
+
+            response_message = response_data[8:]
+            status = struct.unpack(">H", response_message[10:12])[0]
+            lock_state = struct.unpack(">H", response_message[12:14])[0]
+
+            return {
+                "status": status,
+                "lock_state": lock_state,
+                "success": status in (LOCK_STATUS_SUCCESS, LOCK_STATUS_ALREADY),
+                "already": status == LOCK_STATUS_ALREADY,
+            }
+
+        raise TimeoutError(f"Lock operation failed after {LOCK_MAX_RETRIES} attempts")
+    finally:
+        sock.close()
+
+
+def _create_lock_socket():
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(LOCK_TIMEOUT)
+    return sock

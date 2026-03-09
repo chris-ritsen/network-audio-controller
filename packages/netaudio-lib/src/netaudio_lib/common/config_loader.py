@@ -24,27 +24,49 @@ def _coalesce(*values):
     return None
 
 
-def default_config_path() -> Path:
+def config_search_paths() -> list[Path]:
+    paths = []
+
     env_path = os.environ.get("NETAUDIO_CONFIG")
     if env_path:
-        return Path(env_path).expanduser().resolve()
+        return [Path(env_path).expanduser().resolve()]
 
-    if sys.platform == "win32":
+    home = Path.home()
+
+    paths.append(home / ".netaudio" / "config.toml")
+
+    xdg_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_home:
+        paths.append(Path(xdg_home).expanduser() / "netaudio" / "config.toml")
+    paths.append(home / ".config" / "netaudio" / "config.toml")
+
+    if sys.platform == "darwin":
+        paths.append(home / "Library" / "Application Support" / "netaudio" / "config.toml")
+    elif sys.platform == "win32":
         base = os.environ.get("APPDATA")
         if base:
-            root = Path(base)
+            paths.append(Path(base) / "netaudio" / "config.toml")
         else:
-            root = Path.home() / "AppData" / "Roaming"
-    elif sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support"
-    else:
-        xdg_home = os.environ.get("XDG_CONFIG_HOME")
-        if xdg_home:
-            root = Path(xdg_home).expanduser()
-        else:
-            root = Path.home() / ".config"
+            paths.append(home / "AppData" / "Roaming" / "netaudio" / "config.toml")
 
-    return (root / "netaudio" / "config.toml").resolve()
+    seen = set()
+    deduplicated = []
+    for path in paths:
+        resolved = path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            deduplicated.append(resolved)
+
+    return deduplicated
+
+
+def default_config_path() -> Path:
+    for path in config_search_paths():
+        if path.exists():
+            return path
+
+    candidates = config_search_paths()
+    return candidates[0]
 
 
 def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict, Path]:
@@ -97,6 +119,72 @@ def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict,
         return data, config_path
 
     return {}, config_path
+
+
+def set_config_value(key: str, value: str | None) -> Path:
+    config_path = default_config_path()
+
+    if not config_path.exists():
+        if value is None:
+            return config_path
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(f'{key} = "{value}"\n')
+        return config_path
+
+    lines = config_path.read_text().splitlines(keepends=True)
+
+    if tomllib is not None:
+        data = tomllib.loads(config_path.read_text())
+        active_profile = data.get("active_profile")
+        if active_profile:
+            section_header = f"[profiles.{active_profile}]"
+        else:
+            section_header = None
+    else:
+        section_header = None
+
+    target_section_found = section_header is None
+    key_pattern = f"{key} ="
+    key_replaced = False
+    result_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if section_header and stripped == section_header:
+            target_section_found = True
+            result_lines.append(line)
+            continue
+
+        if target_section_found and not key_replaced and stripped.startswith(key_pattern):
+            if value is not None:
+                result_lines.append(f'{key} = "{value}"\n')
+            key_replaced = True
+            continue
+
+        if target_section_found and not key_replaced and stripped.startswith("[") and stripped != section_header:
+            if value is not None:
+                result_lines.append(f'{key} = "{value}"\n')
+                key_replaced = True
+
+        result_lines.append(line)
+
+    if not key_replaced and value is not None:
+        if not result_lines or not result_lines[-1].endswith("\n"):
+            result_lines.append("\n")
+        result_lines.append(f'{key} = "{value}"\n')
+
+    config_path.write_text("".join(result_lines))
+    return config_path
+
+
+def get_config_value(key: str) -> tuple[str | None, Path]:
+    config_path = default_config_path()
+    if not config_path.exists():
+        return None, config_path
+
+    profile_cfg, _ = load_capture_profile(None, None)
+    return profile_cfg.get(key), config_path
 
 
 def resolve_db_from_config(db: str | None, profile_cfg: dict) -> str:

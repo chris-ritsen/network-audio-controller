@@ -15,6 +15,8 @@ from netaudio_lib.common.socket_path import (
     start_daemon_server,
 )
 from netaudio_lib.daemon.metering import MeteringManager
+from netaudio_lib.daemon.relay import RelayServer
+from netaudio_lib.dante.services.heartbeat import DanteHeartbeatService
 from netaudio_lib.daemon.protocol import (
     CMD_DEVICE_REQUEST,
     CMD_GET_DEVICES_JSON,
@@ -66,8 +68,45 @@ logger = logging.getLogger("netaudio")
 
 
 class NetaudioDaemon:
-    def __init__(self):
-        self.application = DanteApplication()
+    def __init__(self, dissect=False, capture=False):
+        self._capture = capture
+        self._packet_store = None
+        self._session_id = None
+
+        from netaudio_lib.common.config_loader import load_capture_profile, resolve_db_from_config
+
+        profile_cfg, _ = load_capture_profile(None, None)
+
+        from netaudio_lib.common.app_config import settings as app_settings
+        lock_key_value = profile_cfg.get("device_lock_key")
+        if lock_key_value:
+            app_settings.device_lock_key = lock_key_value.encode("ascii")
+        else:
+            from netaudio_lib.common.key_extract import extract_lock_key
+            extracted_key = extract_lock_key()
+            if extracted_key:
+                app_settings.device_lock_key = extracted_key
+                logger.info("Extracted device lock key from Dante Controller")
+
+        if capture:
+            from netaudio_lib.dante.packet_store import PacketStore
+
+            db_path = resolve_db_from_config(None, profile_cfg)
+            self._packet_store = PacketStore(db_path=db_path)
+
+            active_session = self._packet_store.get_latest_session(active_only=True)
+            if active_session:
+                self._session_id = active_session["id"]
+                logger.info(f"Capture: recording to session #{self._session_id}")
+            else:
+                logger.info("Capture: enabled but no active session")
+
+        self.application = DanteApplication(packet_store=self._packet_store, dissect=dissect)
+
+        if self._packet_store and self._session_id:
+            for service in [self.application.arc, self.application.settings, self.application.cmc, self.application.notifications]:
+                service.session_id = self._session_id
+
         self.server = None
         self.zeroconf = None
         self.browser = None
@@ -75,6 +114,8 @@ class NetaudioDaemon:
         self._redis = None
         self._populating: set[str] = set()
         self.metering: MeteringManager | None = None
+        self.relay: RelayServer | None = None
+        self.heartbeat: DanteHeartbeatService | None = None
 
     @property
     def devices(self) -> dict:
@@ -156,7 +197,7 @@ class NetaudioDaemon:
         self.application.on_notification(NOTIFICATION_MANF_VERSIONS_STATUS, self._on_device_state_changed)
         self.application.on_notification(NOTIFICATION_CLEAR_CONFIG_STATUS, self._on_device_state_changed)
         self.application.on_notification(NOTIFICATION_ROUTING_READY, self._on_device_state_changed)
-        self.application.on_notification(NOTIFICATION_ROUTING_DEVICE_CHANGE, self._on_device_state_changed)
+        self.application.on_notification(NOTIFICATION_ROUTING_DEVICE_CHANGE, self._on_routing_changed)
 
     async def _on_device_discovered(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
@@ -263,6 +304,26 @@ class NetaudioDaemon:
 
         device.update_last_seen()
         await self._fetch_device_controls(server_name)
+
+    async def _on_routing_changed(self, event: DanteEvent):
+        server_name = event.server_name
+        device = self.devices.get(server_name)
+        if not device or not device.online:
+            return
+
+        device.update_last_seen()
+        arc_port = self.application.get_arc_port(device)
+        if not arc_port:
+            return
+
+        logger.info(f"Re-fetching subscriptions for {server_name} (routing changed)")
+        try:
+            rx_channels, subscriptions = await self.application.arc.get_rx_channels(device, arc_port)
+            device.rx_channels = rx_channels
+            device.subscriptions = subscriptions
+            await self._publish_device_to_redis(device)
+        except Exception as exception:
+            logger.debug(f"Error re-fetching subscriptions for {server_name}: {exception}")
 
     async def _on_sample_rate_changed(self, event: DanteEvent):
         server_name = event.server_name
@@ -395,6 +456,18 @@ class NetaudioDaemon:
         self.metering = MeteringManager(self.application)
         await self.metering.start()
 
+        self.relay = RelayServer(self)
+        await self.relay.start()
+
+        from netaudio_lib.common.app_config import settings as app_settings
+        self.heartbeat = DanteHeartbeatService(
+            device_by_ip=self.application._device_by_ip,
+            get_devices=lambda: self.application.devices,
+            mark_offline=self.application.mark_device_offline,
+            interface_ip=app_settings.interface_ip,
+        )
+        await self.heartbeat.start()
+
         self._register_event_listeners()
 
         self.zeroconf = AsyncZeroconf()
@@ -416,6 +489,12 @@ class NetaudioDaemon:
     async def stop(self):
         self.running = False
 
+        if self.heartbeat:
+            await self.heartbeat.stop()
+
+        if self.relay:
+            await self.relay.stop()
+
         if self.metering:
             await self.metering.stop()
 
@@ -426,6 +505,12 @@ class NetaudioDaemon:
                 pass
 
         await self.application.shutdown()
+
+        if self._packet_store:
+            try:
+                self._packet_store.close()
+            except Exception:
+                pass
 
         if self.server:
             self.server.close()
@@ -552,8 +637,10 @@ class NetaudioDaemon:
             if "model" in service_properties:
                 device.model_id = service_properties["model"]
 
-            if "mf" in service_properties and not device.manufacturer:
-                device.manufacturer = service_properties["mf"]
+            if "mf" in service_properties:
+                device.manufacturer_mdns = service_properties["mf"]
+                if not device.manufacturer:
+                    device.manufacturer = service_properties["mf"]
 
             if "server_vers" in service_properties and service_type == SERVICE_CMC:
                 device.software_version = service_properties["server_vers"]
@@ -584,6 +671,18 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.debug(f"Service change error: {exception}")
 
+    async def refresh_device(self, server_name: str) -> None:
+        self._populating.discard(server_name)
+        await self._fetch_device_controls(server_name)
+
+    async def refresh_all_devices(self) -> None:
+        tasks = []
+        for server_name, device in self.devices.items():
+            if device.online:
+                self._populating.discard(server_name)
+                tasks.append(self._fetch_device_controls(server_name))
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _fetch_device_controls(self, server_name: str, delay: float = 0) -> None:
         if server_name in self._populating:
             return
@@ -602,7 +701,16 @@ class NetaudioDaemon:
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            await self.application.arc.get_controls(device, arc_port)
+            retries = 3
+            for attempt in range(retries):
+                await self.application.arc.get_controls(device, arc_port)
+
+                if device.name and device.tx_count is not None:
+                    break
+
+                if attempt < retries - 1:
+                    logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
+                    await asyncio.sleep(2)
 
             if device.bluetooth_device is None and device.model_id in BLUETOOTH_MODEL_IDS:
                 device_ip = str(device.ipv4)
@@ -610,10 +718,21 @@ class NetaudioDaemon:
 
             logger.info(f"Fetched controls for {server_name}")
             await self._publish_device_to_redis(device)
+            self.application.dispatcher.emit_nowait(
+                DanteEvent(type=EventType.DEVICE_UPDATED, server_name=server_name)
+            )
         except Exception as exception:
             logger.debug(f"Error fetching controls for {server_name}: {exception}")
         finally:
             self._populating.discard(server_name)
+
+    @staticmethod
+    def _is_identify_packet(packet: bytes) -> bool:
+        if len(packet) < 6:
+            return False
+        protocol_id = struct.unpack(">H", packet[0:2])[0]
+        command_id = struct.unpack(">H", packet[4:6])[0]
+        return protocol_id == 0xFFFF and command_id == 0x0BC8
 
     async def _retry_conmon_query(self, server_name: str) -> None:
         delays = [3, 5, 10]
@@ -684,7 +803,7 @@ class NetaudioDaemon:
                 elif not self.metering:
                     result = json.dumps({"error": "metering not available"})
                 else:
-                    levels = self.metering.get_cached_levels(server_name)
+                    levels = await self.metering.snapshot(server_name, timeout=3.0)
                     if levels is None:
                         result = json.dumps({"error": "no metering data"})
                     else:
@@ -782,7 +901,10 @@ class NetaudioDaemon:
                 packet = await reader.readexactly(pkt_len)
 
                 try:
-                    if port == DEVICE_SETTINGS_PORT:
+                    if port == DEVICE_SETTINGS_PORT and self._is_identify_packet(packet):
+                        self.application.settings.send(packet, device_ip, port)
+                        response = None
+                    elif port == DEVICE_SETTINGS_PORT:
                         response = await self.application.settings.request(
                             packet,
                             device_ip,
@@ -896,10 +1018,10 @@ class NetaudioDaemon:
                 pass
 
 
-async def run_daemon():
+async def run_daemon(dissect=False, capture=False):
     import signal
 
-    daemon = NetaudioDaemon()
+    daemon = NetaudioDaemon(dissect=dissect, capture=capture)
     loop = asyncio.get_running_loop()
 
     def handle_signal():

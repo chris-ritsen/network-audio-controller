@@ -15,7 +15,96 @@ from netaudio.commands.capture_helpers import (
 )
 
 
+from netaudio.icons import icon
+
 app = typer.Typer(help="Protocol fact registry — what we know and how we proved it.", no_args_is_help=True)
+
+SESSION_SELECTORS = {"active", "latest"}
+
+
+def _resolve_evidence_sessions(evidence_refs: list[str]) -> list[str]:
+    from netaudio_lib.common.config_loader import load_capture_profile, resolve_db_from_config
+    from netaudio_lib.dante.packet_store import PacketStore
+
+    try:
+        profile_config, _ = load_capture_profile(None, None)
+        db_path = resolve_db_from_config(None, profile_config)
+        store = PacketStore(db_path=db_path)
+    except Exception:
+        return evidence_refs
+
+    resolved = []
+    for ref in evidence_refs:
+        parts = ref.split(":")
+        if len(parts) != 2:
+            resolved.append(ref)
+            continue
+
+        session_selector, packet_id_str = parts
+        if session_selector not in SESSION_SELECTORS:
+            resolved.append(ref)
+            continue
+
+        if session_selector == "active":
+            session = store.get_latest_session(active_only=True)
+        else:
+            session = store.get_latest_session(active_only=False)
+
+        if session and session.get("name"):
+            resolved.append(f"{session['name']}:{packet_id_str}")
+            print(f"  Resolved {session_selector} -> {session['name']}")
+        else:
+            print(f"  Warning: no {session_selector} session found, keeping '{ref}'", file=sys.stderr)
+            resolved.append(ref)
+
+    store.close()
+    return resolved
+
+
+def _create_evidence_markers(evidence_refs: list[str], category: str, key: str, name: str):
+    from netaudio_lib.common.config_loader import load_capture_profile, resolve_db_from_config
+    from netaudio_lib.dante.packet_store import PacketStore
+
+    try:
+        profile_config, _ = load_capture_profile(None, None)
+        db_path = resolve_db_from_config(None, profile_config)
+        store = PacketStore(db_path=db_path)
+    except Exception:
+        return
+
+    for ref in evidence_refs:
+        parts = ref.split(":")
+        if len(parts) != 2:
+            continue
+
+        session_name, packet_id_str = parts
+        try:
+            packet_id = int(packet_id_str)
+        except ValueError:
+            continue
+
+        session = store.find_session_by_name(session_name, active_only=False)
+        if not session:
+            continue
+
+        session_id = session["id"]
+        packet = store.get_packet(packet_id)
+        if not packet:
+            continue
+
+        label = f"evidence_{category}_{key}_{packet_id}"
+        summary = f"{category}:{key} ({name}) — packet #{packet_id}"
+
+        store.add_marker(
+            session_id=session_id,
+            label=label,
+            marker_type="evidence",
+            summary=summary,
+            data={"packet_id": packet_id, "fact": f"{category}:{key}"},
+        )
+        print(f"  Marker: #{session_id} {label}")
+
+    store.close()
 
 
 @app.command("add")
@@ -39,11 +128,16 @@ def fact_add(
     ),
     confidence: str = typer.Option("verified", "--confidence", help="Confidence level: verified, inferred, uncertain."),
     supersedes: Optional[str] = typer.Option(None, "--supersedes", help="Fact key this replaces (category:key)."),
+    protocol: Optional[str] = typer.Option(None, "--protocol", help="Protocol ID this fact applies to (e.g. 0xFFFF, 0x2729). Enables auto-dissection."),
+    match: Optional[str] = typer.Option(None, "--match", help="Payload offset:size where the key value is found (e.g. 6:2). Enables auto-dissection."),
 ):
     from netaudio_lib.dante.fact_store import add_fact
 
     facts_path = _resolve_facts_path()
     fields_parsed = [_parse_field_spec(f) for f in field] if field else []
+
+    if evidence:
+        evidence = _resolve_evidence_sessions(evidence)
 
     resolved_body = body
     if body_file:
@@ -56,6 +150,21 @@ def fact_add(
                 raise typer.Exit(1)
             resolved_body = body_path.read_text()
 
+    parsed_protocol_id = None
+    if protocol:
+        parts = [p.strip() for p in protocol.split(",")]
+        if len(parts) == 1:
+            parsed_protocol_id = int(parts[0], 0)
+        else:
+            parsed_protocol_id = [int(p, 0) for p in parts]
+
+    parsed_match_offset = None
+    parsed_match_size = None
+    if match:
+        match_parts = match.split(":")
+        parsed_match_offset = int(match_parts[0])
+        parsed_match_size = int(match_parts[1]) if len(match_parts) > 1 else 2
+
     fact = add_fact(
         path=facts_path,
         category=category,
@@ -67,9 +176,12 @@ def fact_add(
         evidence=evidence or [],
         confidence=confidence,
         supersedes=supersedes,
+        protocol_id=parsed_protocol_id,
+        match_offset=parsed_match_offset,
+        match_size=parsed_match_size,
     )
 
-    print(f"Fact: {category}:{key} = {name}")
+    print(f"{icon('info')}Fact: {category}:{key} = {name}")
     print(f"  Confidence: {confidence}")
     if note:
         print(f"  Note: {note}")
@@ -87,6 +199,7 @@ def fact_add(
     if evidence:
         for ref in evidence:
             print(f"  Evidence: {ref}")
+        _create_evidence_markers(evidence, category, key, name)
     if "history" in fact:
         print(f"  (updated existing fact, {len(fact['history'])} previous version(s))")
 
@@ -169,7 +282,7 @@ def fact_show(
         print(f"Fact not found: {category}:{key}", file=sys.stderr)
         raise typer.Exit(1)
 
-    print(f"Fact: {fact['category']}:{fact['key']}")
+    print(f"{icon('info')}Fact: {fact['category']}:{fact['key']}")
     print(f"  Name:       {fact['name']}")
     print(f"  Confidence: {fact.get('confidence', 'unknown')}")
     if fact.get("note"):
@@ -313,18 +426,21 @@ def fact_check(
 
         if not errors and verified:
             status = "PASS"
+            status_icon = icon("success")
             passed += 1
         elif not errors and not verified:
             status = "WARN"
+            status_icon = icon("warning")
             warned += 1
         else:
             status = "FAIL"
+            status_icon = icon("fail")
             failed += 1
 
         confidence_marker = {"verified": "+", "inferred": "~", "uncertain": "?"}.get(
             result.get("confidence", ""), " "
         )
-        print(f"  [{status}] {confidence_marker} {result['fact_key']:30s} {result['name']}")
+        print(f"  {status_icon}[{status}] {confidence_marker} {result['fact_key']:30s} {result['name']}")
 
         for v in verified:
             if v.get("expected") is not None:
@@ -602,7 +718,7 @@ async def _run_fact_verify(
             response = await verifier.send(packet, port=port, timeout=timeout, label=label)
 
             if response is None:
-                print(f"  [TIMEOUT] {fk:30s} {fact['name']}")
+                print(f"  {icon('timeout')}[TIMEOUT] {fk:30s} {fact['name']}")
                 timed_out += 1
                 verifier.observation(
                     f"{label}_timeout",
@@ -727,15 +843,58 @@ def _format_field_table(fields: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _format_evidence_list(evidence: list[str]) -> str:
+def _spec_overview() -> list[str]:
+    """Generate the Overview section with transport fundamentals and constants."""
     lines = []
-    for ref in evidence:
-        parts = ref.split(":")
-        if len(parts) == 2:
-            lines.append(f"- `{parts[0]}` packet #{parts[1]}")
-        else:
-            lines.append(f"- `{ref}`")
-    return "\n".join(lines)
+    lines.append("## Overview")
+    lines.append("")
+    lines.append("This documents the Dante **control protocol** — device discovery, configuration, "
+                 "routing, and monitoring. It does not cover the audio transport (RTP/AES67). "
+                 "All control traffic is **UDP** with **big-endian** (network byte order) encoding. "
+                 "Strings are **null-terminated ASCII**.")
+    lines.append("")
+    lines.append("### Discovery")
+    lines.append("")
+    lines.append("Devices are discovered via mDNS (Bonjour). Browse these service types:")
+    lines.append("")
+    lines.append("| Service | Type |")
+    lines.append("|---------|------|")
+    lines.append("| ARC (Audio Routing & Control) | `_netaudio-arc._udp.local.` |")
+    lines.append("| Channel | `_netaudio-chan._udp.local.` |")
+    lines.append("| CMC (Control & Monitoring) | `_netaudio-cmc._udp.local.` |")
+    lines.append("| DBC (Device Browsing) | `_netaudio-dbc._udp.local.` |")
+    lines.append("")
+    lines.append("The mDNS TXT record for `_netaudio-arc` contains the device's ARC port "
+                 "(usually 4440 but can vary). The resolved IP address is the device's control address.")
+    lines.append("")
+    lines.append("### Ports")
+    lines.append("")
+    lines.append("| Port | Protocol | Direction | Description |")
+    lines.append("|------|----------|-----------|-------------|")
+    lines.append("| 4440 | ARC | Unicast | Audio routing, channel queries, subscriptions, device naming, latency |")
+    lines.append("| 8700 | Conmon | Unicast | Device settings: sample rate, reboot, identify, gain, encoding |")
+    lines.append("| 8702 | Conmon | Multicast | Notifications: device announcements, sample rate, config changes |")
+    lines.append("| 8708 | Heartbeat | Multicast | Device heartbeat / presence (not used for control) |")
+    lines.append("| 8800 | CMC | Unicast | Control & monitoring: registration, subscription status polling |")
+    lines.append("| 8751 | Metering | Multicast | Audio level metering (device-configurable port) |")
+    lines.append("")
+    lines.append("### Multicast Groups")
+    lines.append("")
+    lines.append("| Address | Usage |")
+    lines.append("|---------|-------|")
+    lines.append("| 224.0.0.231 | Control/monitoring notifications (port 8702) |")
+    lines.append("| 224.0.0.233 | Device heartbeat (port 8708) |")
+    lines.append("")
+    lines.append("### Request/Response Pattern")
+    lines.append("")
+    lines.append("Most ARC and CMC commands follow a request/response pattern over unicast UDP. "
+                 "The response echoes the request's `transaction_id`. Some Conmon commands "
+                 "(set_sample_rate, reboot, identify) are **fire-and-forget** — confirmation "
+                 "arrives as a multicast notification burst on 224.0.0.231:8702.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    return lines
 
 
 @app.command("spec")
@@ -761,51 +920,57 @@ def fact_spec(
 
     categories = sorted(categories, key=_category_sort_key)
 
-    lines = []
-    lines.append("# Dante Protocol Reference")
-    lines.append("")
-    lines.append("Derived from observed wire traffic. Every fact is backed by captured packet evidence.")
-    lines.append("")
-
     all_facts = list_facts(facts_path)
-    all_sessions = set()
-    for fact in all_facts:
-        for ref in fact.get("evidence", []):
-            session_ref = ref.split(":")[0]
-            all_sessions.add(session_ref)
 
-    confidence_counts = {"verified": 0, "inferred": 0, "uncertain": 0}
-    for fact in all_facts:
+    # Filter out disproved facts
+    publishable_facts = [f for f in all_facts if f.get("confidence") != "disproved"]
+
+    confidence_counts = {"verified": 0, "observed": 0, "inferred": 0, "uncertain": 0}
+    for fact in publishable_facts:
         conf = fact.get("confidence", "unknown")
         if conf in confidence_counts:
             confidence_counts[conf] += 1
 
-    lines.append(f"**{len(all_facts)} facts** across {len(categories)} categories, "
-                 f"backed by {len(all_sessions)} capture sessions.")
-    lines.append(f"Verified: {confidence_counts['verified']} | "
-                 f"Inferred: {confidence_counts['inferred']} | "
-                 f"Uncertain: {confidence_counts['uncertain']}")
+    lines = []
+    lines.append("# Dante Control Protocol Reference")
+    lines.append("")
+
+    total_count = sum(confidence_counts.values())
+    summary_parts = []
+    for level in ("verified", "observed", "inferred", "uncertain"):
+        count = confidence_counts[level]
+        if count:
+            summary_parts.append(f"{level}: {count}")
+    lines.append(f"**{total_count} documented protocol elements** across {len(categories)} categories.")
+    if summary_parts:
+        lines.append(" | ".join(summary_parts))
     lines.append("")
     lines.append("---")
     lines.append("")
 
+    # Overview section
+    lines.extend(_spec_overview())
+
     for cat in categories:
-        facts = list_facts(facts_path, category=cat)
-        if not facts:
+        category_facts = [
+            f for f in publishable_facts if f["category"] == cat
+        ]
+        if not category_facts:
             continue
 
         title = _CATEGORY_TITLES.get(cat, cat.replace("_", " ").title())
         lines.append(f"## {title}")
         lines.append("")
 
-        for fact in facts:
+        for fact in category_facts:
             confidence = fact.get("confidence", "unknown")
-            confidence_badge = {"verified": "[verified]", "inferred": "[inferred]", "uncertain": "[uncertain]"}.get(
-                confidence, f"[{confidence}]"
-            )
 
-            lines.append(f"### {fact['key']} — {fact['name']} {confidence_badge}")
+            lines.append(f"### {fact['key']} — {fact['name']}")
             lines.append("")
+
+            if confidence in ("inferred", "observed", "uncertain"):
+                lines.append(f"*Status: {confidence}*")
+                lines.append("")
 
             if fact.get("note"):
                 lines.append(fact["note"])
@@ -823,13 +988,6 @@ def fact_spec(
                 lines.append("#### Fields")
                 lines.append("")
                 lines.append(_format_field_table(fields))
-                lines.append("")
-
-            evidence_refs = fact.get("evidence", [])
-            if evidence_refs:
-                lines.append("#### Evidence")
-                lines.append("")
-                lines.append(_format_evidence_list(evidence_refs))
                 lines.append("")
 
     text = "\n".join(lines)
@@ -855,7 +1013,7 @@ def fact_remove(
     removed = remove_fact(facts_path, category, key)
 
     if removed:
-        print(f"Removed: {category}:{key}")
+        print(f"{icon('remove')}Removed: {category}:{key}")
     else:
         print(f"Fact not found: {category}:{key}", file=sys.stderr)
         raise typer.Exit(1)
@@ -880,7 +1038,7 @@ def fact_disprove(
     )
 
     if result:
-        print(f"Disproved: {category}:{key}")
+        print(f"{icon('fail')}Disproved: {category}:{key}")
         print(f"  Reason: {reason}")
         if device_ip:
             print(f"  Device: {device_ip}")
@@ -908,7 +1066,7 @@ def fact_reinstate(
     )
 
     if result:
-        print(f"Reinstated: {category}:{key} (confidence={confidence})")
+        print(f"{icon('success')}Reinstated: {category}:{key} (confidence={confidence})")
     else:
         print(f"Fact not found: {category}:{key}", file=sys.stderr)
         raise typer.Exit(1)

@@ -13,30 +13,8 @@ from netaudio_lib.dante.const import (
 
 logger = logging.getLogger("netaudio")
 
-DANTE_MULTICAST_PORTS = [DEVICE_INFO_PORT]
-
-
-def _build_bpf_filter(device_ips=None):
-    metering_port = app_settings.metering_port
-    unicast_ports = [DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, metering_port]
-    multicast_clauses = " or ".join(f"port {p}" for p in DANTE_MULTICAST_PORTS)
-
-    if device_ips:
-        host_clauses = " or ".join(f"host {ip}" for ip in device_ips)
-        src_clauses = " or ".join(f"src host {ip}" for ip in device_ips)
-        bpf = (
-            f"udp and (({host_clauses} and not dst net 224.0.0.0/4) or "
-            f"({src_clauses} and dst net 224.0.0.0/4 and not dst port 8708) or "
-            f"({multicast_clauses}))"
-        )
-    else:
-        unicast_clauses = " or ".join(f"port {p}" for p in unicast_ports)
-        bpf = (
-            f"udp and (({multicast_clauses}) or "
-            f"(({unicast_clauses}) and not dst net 224.0.0.0/4))"
-        )
-
-    return bpf
+def _build_bpf_filter(device_ips=None, known_device_ips=None):
+    return "udp"
 
 
 class TsharkCapture:
@@ -54,6 +32,7 @@ class TsharkCapture:
         packet_store,
         interface="en0",
         device_ips=None,
+        known_device_ips=None,
         include_metering=False,
         packet_filter=None,
         session_id=None,
@@ -61,6 +40,7 @@ class TsharkCapture:
         self._store = packet_store
         self._interface = interface
         self._device_ips = set(device_ips) if device_ips else set()
+        self._known_device_ips = known_device_ips or self._device_ips
         self._include_metering = include_metering
         self._packet_filter = packet_filter
         self._session_id = session_id
@@ -90,7 +70,7 @@ class TsharkCapture:
 
     def _build_command(self):
         tshark_path = self._find_tshark() or "tshark"
-        bpf = _build_bpf_filter(self._device_ips or None)
+        bpf = _build_bpf_filter(self._device_ips or None, self._known_device_ips or None)
         field_args = []
         for f in self.TSHARK_FIELDS:
             field_args.extend(["-e", f])
@@ -116,10 +96,6 @@ class TsharkCapture:
         except (ValueError, OverflowError):
             return None
 
-        if not self._include_metering:
-            if src_port_str == str(app_settings.metering_port) or dst_port_str == str(app_settings.metering_port):
-                return None
-
         try:
             src_port = int(src_port_str)
             dst_port = int(dst_port_str)
@@ -136,14 +112,28 @@ class TsharkCapture:
             return None
 
         is_multicast_dst = dst_ip.startswith("224.")
+        dante_ports = {DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_INFO_PORT, DEVICE_SETTINGS_PORT}
         well_known_ports = {DEVICE_ARC_PORT, DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT}
+
+        if not is_multicast_dst:
+            is_device_traffic = (
+                src_ip in self._known_device_ips
+                or dst_ip in self._known_device_ips
+                or src_port in dante_ports
+                or dst_port in dante_ports
+            ) if self._known_device_ips else (
+                src_port in dante_ports
+                or dst_port in dante_ports
+            )
+            if not is_device_traffic:
+                return None
 
         if is_multicast_dst:
             direction = None
             device_ip = src_ip
-        elif self._device_ips:
-            dst_is_device = dst_ip in self._device_ips
-            src_is_device = src_ip in self._device_ips
+        elif self._known_device_ips:
+            dst_is_device = dst_ip in self._known_device_ips
+            src_is_device = src_ip in self._known_device_ips
             if dst_is_device and not src_is_device:
                 direction = "request"
                 device_ip = dst_ip
@@ -219,9 +209,6 @@ class TsharkCapture:
                 fields = self._parse_line(line)
                 if not fields:
                     continue
-                if self._packet_filter and not self._packet_filter(fields["payload"]):
-                    continue
-
                 if fields["direction"] is None:
                     source_type = "multicast"
                 else:
@@ -238,6 +225,7 @@ class TsharkCapture:
                     direction=fields["direction"],
                     session_id=self._session_id,
                     timestamp_ns=fields["timestamp_ns"],
+                    interface=self._interface,
                 )
 
                 if packet_id and on_packet:
