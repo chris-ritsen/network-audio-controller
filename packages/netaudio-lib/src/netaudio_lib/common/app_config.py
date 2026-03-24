@@ -4,9 +4,9 @@ import sys
 import ifaddr
 
 from netaudio_lib.dante.const import DEFAULT_MULTICAST_METERING_PORT
-from netaudio_lib.daemon.relay import DEFAULT_RELAY_PORT
 
 DEFAULT_MDNS_TIMEOUT = 5
+DEFAULT_RELAY_PORT = 9000
 DEFAULT_INTERFACE = None
 
 
