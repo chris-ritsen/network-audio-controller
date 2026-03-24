@@ -1,0 +1,14 @@
+[Unit]
+Description=netaudio daemon for Dante network audio device control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/netaudio --capture server run
+ExecStop=/usr/bin/netaudio server stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
