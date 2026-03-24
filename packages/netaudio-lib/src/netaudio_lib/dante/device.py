@@ -61,6 +61,7 @@ class DanteDevice:
         self.last_seen: float | None = None
         self.tx_flow_count: int | None = None
         self.rx_flow_count: int | None = None
+        self.flow_protocol_id: int | None = None
         self.num_networks: int | None = None
         self.encoding: int | None = None
         self.bit_depth: int | None = None
