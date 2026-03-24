@@ -29,8 +29,8 @@ async def _detect_flow_protocol(application, device, arc_port):
 
 
 async def _get_device_and_app(device_name: str):
-    from netaudio_lib.dante.application import DanteApplication
-    from netaudio_lib.common.app_config import settings
+    from netaudio.dante.application import DanteApplication
+    from netaudio.common.app_config import settings
 
     application = DanteApplication()
     await application.startup()

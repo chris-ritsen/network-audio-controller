@@ -6,13 +6,6 @@ resolution-markers = [
     "python_full_version < '3.10'",
 ]
 
-[manifest]
-members = [
-    "netaudio",
-    "netaudio-lib",
-    "netaudio-workspace",
-]
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -354,14 +347,17 @@ wheels = [
 
 [[package]]
 name = "netaudio"
-version = "0.1.7"
-source = { editable = "packages/netaudio" }
+version = "0.2.0"
+source = { editable = "." }
 dependencies = [
-    { name = "netaudio-lib" },
+    { name = "ifaddr" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "sqlitedict" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typer", version = "0.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "typer", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "zeroconf" },
 ]
 
 [package.optional-dependencies]
@@ -369,29 +365,6 @@ capture = [
     { name = "redis", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "redis", version = "7.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "netaudio-lib", editable = "packages/netaudio-lib" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "typer", specifier = ">=0.15.0" },
-]
-provides-extras = ["capture"]
-
-[[package]]
-name = "netaudio-lib"
-version = "0.0.7"
-source = { editable = "packages/netaudio-lib" }
-dependencies = [
-    { name = "ifaddr" },
-    { name = "sqlitedict" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
-    { name = "zeroconf" },
-]
-
-[package.optional-dependencies]
 dbus = [
     { name = "dbus-fast", version = "2.45.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "dbus-fast", version = "4.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -400,26 +373,8 @@ lock = [
     { name = "pynacl" },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
-    { name = "ifaddr", specifier = ">=0.2.0" },
-    { name = "pynacl", marker = "extra == 'lock'", specifier = ">=1.5.0" },
-    { name = "sqlitedict", specifier = ">=1.7.0" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.0.0" },
-    { name = "zeroconf", specifier = ">=0.38.3" },
-]
-provides-extras = ["lock", "dbus"]
-
-[[package]]
-name = "netaudio-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-
 [package.dev-dependencies]
 dev = [
-    { name = "netaudio" },
-    { name = "netaudio-lib" },
     { name = "pynacl" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -429,11 +384,22 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [
+    { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
+    { name = "ifaddr", specifier = ">=0.2.0" },
+    { name = "pynacl", marker = "extra == 'lock'", specifier = ">=1.5.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "sqlitedict", specifier = ">=1.7.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.0.0" },
+    { name = "typer", specifier = ">=0.15.0" },
+    { name = "zeroconf", specifier = ">=0.38.3" },
+]
+provides-extras = ["capture", "lock", "dbus"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "netaudio", editable = "packages/netaudio" },
-    { name = "netaudio-lib", editable = "packages/netaudio-lib" },
     { name = "pynacl", specifier = ">=1.6.2" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },

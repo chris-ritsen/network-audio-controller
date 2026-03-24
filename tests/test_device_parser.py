@@ -3,8 +3,8 @@ from typing import Any, Dict, List
 from unittest.mock import Mock
 
 import pytest
-from netaudio_lib.dante.device import DanteDevice
-from netaudio_lib.dante.device_parser import DanteDeviceParser
+from netaudio.dante.device import DanteDevice
+from netaudio.dante.device_parser import DanteDeviceParser
 
 
 TX_RAW_4CH_48K = bytes.fromhex(

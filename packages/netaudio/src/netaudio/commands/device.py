@@ -10,10 +10,10 @@ import typer
 
 logger = logging.getLogger("netaudio")
 
-from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS
-from netaudio_lib.dante.device_commands import DanteDeviceCommands
-from netaudio_lib.dante.device_operations import _device_lock_operation, LOCK_OPERATION_LOCK, LOCK_OPERATION_UNLOCK, validate_dante_name, validate_pin
-from netaudio_lib.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.const import BLUETOOTH_MODEL_IDS, HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS
+from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.device_operations import _device_lock_operation, LOCK_OPERATION_LOCK, LOCK_OPERATION_UNLOCK, validate_dante_name, validate_pin
+from netaudio.dante.device_serializer import DanteDeviceSerializer
 
 from netaudio._common import (
     _command_context,
@@ -83,12 +83,12 @@ def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -
 
 
 def _get_lock_key() -> bytes:
-    from netaudio_lib.common.app_config import settings as app_settings
+    from netaudio.common.app_config import settings as app_settings
 
     if app_settings.device_lock_key:
         return app_settings.device_lock_key
 
-    from netaudio_lib.common.config_loader import config_search_paths, load_capture_profile
+    from netaudio.common.config_loader import config_search_paths, load_capture_profile
     profile_cfg, _ = load_capture_profile(None, None)
     lock_key_value = profile_cfg.get("device_lock_key")
     if lock_key_value:
@@ -96,7 +96,7 @@ def _get_lock_key() -> bytes:
         app_settings.device_lock_key = key
         return key
 
-    from netaudio_lib.common.key_extract import extract_lock_key, find_dante_controller_binary
+    from netaudio.common.key_extract import extract_lock_key, find_dante_controller_binary
     binary_path = find_dante_controller_binary()
     if binary_path:
         typer.echo(f"Dante Controller found: {binary_path}", err=True)
@@ -352,13 +352,13 @@ def lock_status():
     """Show device lock status."""
 
     async def _run():
-        from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+        from netaudio.dante.services.heartbeat import _parse_lock_state
         import socket
         import struct
         import time
 
-        from netaudio_lib.common.app_config import settings as app_settings
-        from netaudio_lib.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
+        from netaudio.common.app_config import settings as app_settings
+        from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
 
         devices = await _discover()
         filtered = filter_devices(devices)
@@ -437,8 +437,8 @@ def _collect_lock_state(devices: dict) -> None:
     import socket
     import struct
     import time
-    from netaudio_lib.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
-    from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+    from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
+    from netaudio.dante.services.heartbeat import _parse_lock_state
 
     device_ips = {}
     for server_name, device in devices.items():
@@ -461,7 +461,7 @@ def _collect_lock_state(devices: dict) -> None:
     multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
     multicast_socket.settimeout(0.5)
 
-    from netaudio_lib.common.app_config import settings as app_settings
+    from netaudio.common.app_config import settings as app_settings
     deadline = time.monotonic() + app_settings.lock_state_timeout
     seen = set()
     try:
@@ -713,7 +713,7 @@ def meter_callback(
     no_color = cli_state.no_color
 
     async def _run():
-        from netaudio_lib.daemon.client import (
+        from netaudio.daemon.client import (
             get_devices_from_daemon,
             meter_snapshot_from_daemon,
             meter_start_on_daemon,
@@ -810,7 +810,7 @@ def meter_callback(
 @meter_app.command()
 def start():
     """Start persistent metering (requires daemon)."""
-    from netaudio_lib.daemon.client import meter_start_on_daemon
+    from netaudio.daemon.client import meter_start_on_daemon
 
     async def _run():
         devices = await _discover()
@@ -828,7 +828,7 @@ def start():
 @meter_app.command()
 def stop():
     """Stop persistent metering (requires daemon)."""
-    from netaudio_lib.daemon.client import meter_stop_on_daemon
+    from netaudio.daemon.client import meter_stop_on_daemon
 
     async def _run():
         devices = await _discover()
@@ -852,9 +852,9 @@ def measure_timeout(
     import socket
     import struct
 
-    from netaudio_lib.common.app_config import settings as app_settings
-    from netaudio_lib.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
-    from netaudio_lib.dante.application import DanteApplication
+    from netaudio.common.app_config import settings as app_settings
+    from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
+    from netaudio.dante.application import DanteApplication
 
     async def _run():
         application = DanteApplication()
@@ -993,7 +993,7 @@ def measure_timeout(
 @meter_app.command()
 def status():
     """Show which devices have persistent metering active."""
-    from netaudio_lib.daemon.client import meter_status_from_daemon
+    from netaudio.daemon.client import meter_status_from_daemon
 
     async def _run():
         result = await meter_status_from_daemon()

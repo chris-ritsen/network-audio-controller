@@ -7,7 +7,7 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.common.app_config import settings
+from netaudio.common.app_config import settings
 
 from netaudio import __version__
 
@@ -94,7 +94,7 @@ def _parse_sort(value: str) -> tuple[str, bool]:
 
 def _load_icons_from_config() -> bool:
     try:
-        from netaudio_lib.common.config_loader import default_config_path
+        from netaudio.common.config_loader import default_config_path
 
         try:
             import tomllib

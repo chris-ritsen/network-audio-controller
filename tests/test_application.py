@@ -3,9 +3,9 @@ import warnings
 
 import pytest
 
-from netaudio_lib.dante.application import DanteApplication
-from netaudio_lib.dante.device import DanteDevice
-from netaudio_lib.dante.events import EventType
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.device import DanteDevice
+from netaudio.dante.events import EventType
 
 
 class TestDanteApplication:
@@ -175,7 +175,7 @@ class TestDanteApplication:
 
     @pytest.mark.asyncio
     async def test_dispatch_notification(self):
-        from netaudio_lib.dante.events import DanteEvent
+        from netaudio.dante.events import DanteEvent
 
         application = DanteApplication()
         received = []
@@ -197,7 +197,7 @@ class TestDanteApplication:
 
     @pytest.mark.asyncio
     async def test_dispatch_notification_unhandled(self):
-        from netaudio_lib.dante.events import DanteEvent
+        from netaudio.dante.events import DanteEvent
 
         application = DanteApplication()
 

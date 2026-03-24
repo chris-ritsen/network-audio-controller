@@ -3,7 +3,7 @@ import struct
 
 import pytest
 
-from netaudio_lib.dante.transport import DanteMulticastProtocol, DanteUnicastProtocol
+from netaudio.dante.transport import DanteMulticastProtocol, DanteUnicastProtocol
 
 
 class TestUnicastProtocol:

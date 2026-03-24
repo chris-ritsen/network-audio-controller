@@ -7,9 +7,9 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.common.socket_path import daemon_is_accessible, open_daemon_connection
-from netaudio_lib.daemon.protocol import CMD_SHUTDOWN
-from netaudio_lib.daemon.server import run_daemon
+from netaudio.common.socket_path import daemon_is_accessible, open_daemon_connection
+from netaudio.daemon.protocol import CMD_SHUTDOWN
+from netaudio.daemon.server import run_daemon
 
 from netaudio.icons import icon
 
@@ -49,7 +49,7 @@ def start(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
     """Start the netaudio daemon."""
-    from netaudio_lib.common.app_config import settings as app_settings
+    from netaudio.common.app_config import settings as app_settings
     from netaudio.cli import state
 
     effective_port = relay_port or app_settings.relay_port
@@ -77,7 +77,7 @@ def restart(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
     """Restart the netaudio daemon."""
-    from netaudio_lib.common.app_config import settings as app_settings
+    from netaudio.common.app_config import settings as app_settings
 
     effective_port = relay_port or app_settings.relay_port
 

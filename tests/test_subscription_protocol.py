@@ -12,9 +12,9 @@ import struct
 
 import pytest
 
-from netaudio_lib.dante.const import SERVICE_ARC
-from netaudio_lib.dante.device_commands import DanteDeviceCommands, Opcode, Protocol
-from netaudio_lib.dante.packet_store import _parse_header
+from netaudio.dante.const import SERVICE_ARC
+from netaudio.dante.device_commands import DanteDeviceCommands, Opcode, Protocol
+from netaudio.dante.packet_store import _parse_header
 
 
 FIXTURES_DIR = "subscription"
@@ -130,7 +130,7 @@ class TestCapturedSubscriptionHeaders:
     """Verify _parse_header handles the Dante Controller protocol variant."""
 
     def test_captured_remove_header(self, load_sub_fixture):
-        from netaudio_lib.dante.debug_formatter import get_opcode_name
+        from netaudio.dante.debug_formatter import get_opcode_name
 
         data = load_sub_fixture("subscription_remove_request.bin")
         h = _parse_header(data)
@@ -171,7 +171,7 @@ class TestCapturedSubscriptionHeaders:
         assert req[4:6] == resp[4:6]
 
     def test_rx_channel_status_opcode(self, load_sub_fixture):
-        from netaudio_lib.dante.debug_formatter import get_opcode_name
+        from netaudio.dante.debug_formatter import get_opcode_name
 
         data = load_sub_fixture("rx_channel_status_request.bin")
         h = _parse_header(data)
@@ -179,7 +179,7 @@ class TestCapturedSubscriptionHeaders:
         assert h["opcode_name"] == get_opcode_name(0x2809, 0x3400)
 
     def test_rx_flow_status_opcode(self, load_sub_fixture):
-        from netaudio_lib.dante.debug_formatter import get_opcode_name
+        from netaudio.dante.debug_formatter import get_opcode_name
 
         data = load_sub_fixture("rx_flow_status_request.bin")
         h = _parse_header(data)
@@ -196,7 +196,7 @@ class TestSubscriptionCorrelation:
     request/response correlation by transaction_id."""
 
     def test_remove_request_response_correlated(self, load_sub_fixture, tmp_path):
-        from netaudio_lib.dante.packet_store import PacketStore
+        from netaudio.dante.packet_store import PacketStore
 
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
 
@@ -226,7 +226,7 @@ class TestSubscriptionCorrelation:
         store.close()
 
     def test_multicast_temporally_correlated_to_request(self, load_sub_fixture, tmp_path):
-        from netaudio_lib.dante.packet_store import PacketStore
+        from netaudio.dante.packet_store import PacketStore
 
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
 
@@ -255,8 +255,8 @@ class TestSubscriptionCorrelation:
         store.close()
 
     def test_stored_opcode_names(self, load_sub_fixture, tmp_path):
-        from netaudio_lib.dante.debug_formatter import get_opcode_name
-        from netaudio_lib.dante.packet_store import PacketStore
+        from netaudio.dante.debug_formatter import get_opcode_name
+        from netaudio.dante.packet_store import PacketStore
 
         store = PacketStore(db_path=str(tmp_path / "test.sqlite"))
 
