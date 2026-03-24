@@ -1013,8 +1013,10 @@
       "name": "unknown_1102",
       "note": "Protocol 0x2809 on port 4440. 10B request, 136B response. Polled frequently alongside 0x1100. Possibly extended device settings or latency info.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:548323",
+        "lock_status_inaccurate:374864"
+      ],
       "added_ns": 1772988408733638000,
       "protocol_id": [
         10025,
@@ -1022,7 +1024,22 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988408733638000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773116899970559000,
+          "previous_name": "unknown_1102",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 136B response. Polled frequently alongside 0x1100. Possibly extended device settings or latency info.",
+          "action": "updated"
+        }
+      ]
     },
     "arc_opcode:0x2002": {
       "category": "arc_opcode",
@@ -1030,8 +1047,10 @@
       "name": "unknown_2002",
       "note": "Protocol 0x2809 on port 4440. 16B request, 136-156B response. Near 0x2000 (query_tx_channels). Possibly TX channel extended info.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:562839",
+        "lock_status_inaccurate:562840"
+      ],
       "added_ns": 1772988408870935000,
       "protocol_id": [
         10025,
@@ -1039,7 +1058,22 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988408870935000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773116902298262000,
+          "previous_name": "unknown_2002",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 16B request, 136-156B response. Near 0x2000 (query_tx_channels). Possibly TX channel extended info.",
+          "action": "updated"
+        }
+      ]
     },
     "arc_opcode:0x2320": {
       "category": "arc_opcode",
@@ -1047,8 +1081,10 @@
       "name": "unknown_2320",
       "note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:565817",
+        "lock_status_inaccurate:375094"
+      ],
       "added_ns": 1772988409007448000,
       "protocol_id": [
         10025,
@@ -1056,7 +1092,22 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988409007448000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773116904931338000,
+          "previous_name": "unknown_2320",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive.",
+          "action": "updated"
+        }
+      ]
     },
     "arc_opcode:0x2400": {
       "category": "arc_opcode",
@@ -1064,8 +1115,10 @@
       "name": "unknown_2400",
       "note": "Protocol 0x2809 on port 4440. 34B request, 156-180B response. Polled regularly.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:374914",
+        "lock_status_inaccurate:374965"
+      ],
       "added_ns": 1773025352550342000,
       "protocol_id": [
         10025,
@@ -1080,42 +1133,76 @@
           "previous_name": "unknown_2400",
           "previous_confidence": "observed",
           "previous_note": "Protocol 0x2809 on port 4440. 34B request, 156-180B response. Queried regularly by DC."
+        },
+        {
+          "replaced_ns": 1773116905223069000,
+          "previous_name": "unknown_2400",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 34B request, 156-180B response. Polled regularly.",
+          "action": "updated"
+        }
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773025352550342000
         }
       ]
     },
     "arc_opcode:0x2600": {
       "category": "arc_opcode",
       "key": "0x2600",
-      "name": "unknown_2600",
-      "note": "Protocol 0x2809 on port 4440. 34B request, 22-230B variable response. Possibly flow or routing info.",
+      "name": "query_tx_flows_2809",
+      "note": "AVIO equivalent of 0x2200 query_tx_flows, used on proto 0x2809. Same semantics but different record format.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
-      "added_ns": 1772988409287538000,
+      "evidence": [
+        "identify_flow_types:49101"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106638293352000,
       "protocol_id": [
         10025,
         10249,
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773106638293354000,
+          "previous_name": "unknown_2600",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 34B request, 22-230B variable response. Possibly flow or routing info."
+        }
+      ]
     },
     "arc_opcode:0x2601": {
       "category": "arc_opcode",
       "key": "0x2601",
-      "name": "unknown_2601",
-      "note": "Protocol 0x2809 on port 4440. 106B request, 120B response. Rare (3 occurrences). Near 0x2600 \u2014 possibly a set/modify variant.",
+      "name": "create_tx_flow_2809",
+      "note": "AVIO equivalent of 0x2201 create_tx_flow, used on proto 0x2809. ~96-104 byte body, response echoes full flow config. Format significantly different from 0x2201.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
-      "added_ns": 1772988409426635000,
+      "evidence": [
+        "identify_flow_types:48825",
+        "identify_flow_types:49075"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106640086812000,
       "protocol_id": [
         10025,
         10249,
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1773106640086816000,
+          "previous_name": "unknown_2601",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 106B request, 120B response. Rare (3 occurrences). Near 0x2600 \u2014 possibly a set/modify variant."
+        }
+      ]
     },
     "arc_opcode:0x3300": {
       "category": "arc_opcode",
@@ -1123,8 +1210,10 @@
       "name": "unknown_3300",
       "note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:375067",
+        "lock_status_inaccurate:375077"
+      ],
       "added_ns": 1772988409562784000,
       "protocol_id": [
         10025,
@@ -1132,7 +1221,22 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988409562784000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773116906998546000,
+          "previous_name": "unknown_3300",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count.",
+          "action": "updated"
+        }
+      ]
     },
     "arc_opcode:0x3401": {
       "category": "arc_opcode",
@@ -1140,8 +1244,10 @@
       "name": "unknown_3401",
       "note": "Protocol 0x2809 on port 4440. 38-52B request, 38-52B response. Near 0x3400 (subscription status). Possibly subscription modify via DC protocol.",
       "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "evidence": [
+        "lock_status_inaccurate:606251",
+        "lock_status_inaccurate:606252"
+      ],
       "added_ns": 1772988409701931000,
       "protocol_id": [
         10025,
@@ -1149,7 +1255,22 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988409701931000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773116984934995000,
+          "previous_name": "unknown_3401",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 38-52B request, 38-52B response. Near 0x3400 (subscription status). Possibly subscription modify via DC protocol.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0011": {
       "category": "conmon_message",
@@ -2006,10 +2127,1260 @@
       ],
       "confidence": "verified",
       "added_ns": 1773017114112191000
+    },
+    "arc_opcode:0x2200": {
+      "category": "arc_opcode",
+      "key": "0x2200",
+      "name": "query_tx_flows",
+      "note": "Returns all TX flows (unicast + multicast combined), paged at max 16 per response. Header: body[0]=max_flow_slots, body[1]=active_count, followed by pointer table. Record format varies by flow type (unicast=68B, multicast=64-80B). Used on proto 0x2729 and 0x2801.",
+      "fields": [],
+      "evidence": [
+        "identify_flow_types:25459",
+        "identify_flow_types:26421"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106626242607000
+    },
+    "arc_opcode:0x2201": {
+      "category": "arc_opcode",
+      "key": "0x2201",
+      "name": "create_tx_flow",
+      "note": "Creates a multicast TX flow. Body: [0:2]=0x0101, [2:4]=0x0010, [4:6]=replace_slot(0=new), [6:8]=flow_slot, [8:10]=flow_type(0x0002=multicast), [20:22]=channel_count, [22+]=channel_numbers(u16 array). Response: success + assigned slot number. Used on proto 0x2729 and 0x2801.",
+      "fields": [],
+      "evidence": [
+        "identify_flow_types:46889",
+        "identify_flow_types:49257",
+        "identify_flow_types:50180"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106629846380000
+    },
+    "arc_opcode:0x2202": {
+      "category": "arc_opcode",
+      "key": "0x2202",
+      "name": "delete_tx_flow",
+      "note": "Deletes a TX flow by slot number. Body: 00 01 00 00 + u16 flow_slot. Response: empty body on success. Used on proto 0x2729 and 0x2801.",
+      "fields": [],
+      "evidence": [
+        "identify_flow_types:48193",
+        "identify_flow_types:49295"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106631438173000
+    },
+    "arc_opcode:0x2602": {
+      "category": "arc_opcode",
+      "key": "0x2602",
+      "name": "delete_tx_flow_2809",
+      "note": "AVIO equivalent of 0x2202 delete_tx_flow, used on proto 0x2809. 24-byte body, different format from 0x2202.",
+      "fields": [],
+      "evidence": [
+        "identify_flow_types:48696",
+        "identify_flow_types:49088"
+      ],
+      "confidence": "verified",
+      "added_ns": 1773106641456690000
+    },
+    "arc_status:0x0600": {
+      "category": "arc_status",
+      "key": "0x0600",
+      "name": "lock_rejection",
+      "note": "ARC response status indicating write was rejected because device is locked. Observed on set_tx_channel_name (0x2013) responses from both avio-bt-1 and avio-usb-1 when device-locked.",
+      "fields": [],
+      "evidence": [
+        "identify_flow_types:386385",
+        "identify_flow_types:386343"
+      ],
+      "added_ns": 1773112798225057000,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773112798225057000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1773113011008226000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1773113014621785000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1773113011008225000,
+          "previous_name": "lock_rejection",
+          "previous_confidence": "observed",
+          "previous_note": "ARC response status indicating write was rejected because device is locked. Observed on set_tx_channel_name (0x2013) responses from both avio-bt-1 and avio-usb-1 when device-locked.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1773113014621783000,
+          "previous_name": "lock_rejection",
+          "previous_confidence": "verified",
+          "previous_note": "ARC response status indicating write was rejected because device is locked. Observed on set_tx_channel_name (0x2013) responses from both avio-bt-1 and avio-usb-1 when device-locked.",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x0000": {
+      "category": "arc_opcode",
+      "key": "0x0000",
+      "name": "unknown_0000",
+      "note": "Returns 10-byte empty response",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606154",
+        "lock_status_inaccurate:606155"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115169280344000
+        }
+      ],
+      "added_ns": 1773115169280344000,
+      "history": [
+        {
+          "replaced_ns": 1773116981499523000,
+          "previous_name": "unknown_0000",
+          "previous_confidence": "observed",
+          "previous_note": "Returns 10-byte empty response",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1601": {
+      "category": "arc_opcode",
+      "key": "0x1601",
+      "name": "unknown_1601",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:552981",
+        "lock_status_inaccurate:552982"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115169579210000
+        }
+      ],
+      "added_ns": 1773115169579210000,
+      "history": [
+        {
+          "replaced_ns": 1773116900266763000,
+          "previous_name": "unknown_1601",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1602": {
+      "category": "arc_opcode",
+      "key": "0x1602",
+      "name": "unknown_1602",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:552984",
+        "lock_status_inaccurate:552985"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115169730094000
+        }
+      ],
+      "added_ns": 1773115169730094000,
+      "history": [
+        {
+          "replaced_ns": 1773116900552655000,
+          "previous_name": "unknown_1602",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1E01": {
+      "category": "arc_opcode",
+      "key": "0x1E01",
+      "name": "unknown_1E01",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:560905",
+        "lock_status_inaccurate:560906"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115172068033000
+        }
+      ],
+      "added_ns": 1773115172068034000,
+      "history": [
+        {
+          "replaced_ns": 1773116900843945000,
+          "previous_name": "unknown_1E01",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1F00": {
+      "category": "arc_opcode",
+      "key": "0x1F00",
+      "name": "unknown_1F00",
+      "note": "Read opcode, returns data",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:561888",
+        "lock_status_inaccurate:561889"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115174309193000
+        }
+      ],
+      "added_ns": 1773115174309193000,
+      "history": [
+        {
+          "replaced_ns": 1773116901136998000,
+          "previous_name": "unknown_1F00",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, returns data",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1F01": {
+      "category": "arc_opcode",
+      "key": "0x1F01",
+      "name": "unknown_1F01",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:561890",
+        "lock_status_inaccurate:561891"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115174454729000
+        }
+      ],
+      "added_ns": 1773115174454729000,
+      "history": [
+        {
+          "replaced_ns": 1773116901417553000,
+          "previous_name": "unknown_1F01",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1F02": {
+      "category": "arc_opcode",
+      "key": "0x1F02",
+      "name": "unknown_1F02",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:561893",
+        "lock_status_inaccurate:561894"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115174595414000
+        }
+      ],
+      "added_ns": 1773115174595414000,
+      "history": [
+        {
+          "replaced_ns": 1773116901700427000,
+          "previous_name": "unknown_1F02",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x1F03": {
+      "category": "arc_opcode",
+      "key": "0x1F03",
+      "name": "unknown_1F03",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:561897",
+        "lock_status_inaccurate:561899"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115174746294000
+        }
+      ],
+      "added_ns": 1773115174746294000,
+      "history": [
+        {
+          "replaced_ns": 1773116901993613000,
+          "previous_name": "unknown_1F03",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2008": {
+      "category": "arc_opcode",
+      "key": "0x2008",
+      "name": "unknown_2008",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:562862",
+        "lock_status_inaccurate:562864"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115176955205000
+        }
+      ],
+      "added_ns": 1773115176955206000,
+      "history": [
+        {
+          "replaced_ns": 1773116902595136000,
+          "previous_name": "unknown_2008",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2011": {
+      "category": "arc_opcode",
+      "key": "0x2011",
+      "name": "unknown_2011",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:562891",
+        "lock_status_inaccurate:562892"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115177108105000
+        }
+      ],
+      "added_ns": 1773115177108105000,
+      "history": [
+        {
+          "replaced_ns": 1773116902892050000,
+          "previous_name": "unknown_2011",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2012": {
+      "category": "arc_opcode",
+      "key": "0x2012",
+      "name": "unknown_2012",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:562893",
+        "lock_status_inaccurate:562896"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115177260702000
+        }
+      ],
+      "added_ns": 1773115177260702000,
+      "history": [
+        {
+          "replaced_ns": 1773116903188221000,
+          "previous_name": "unknown_2012",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2032": {
+      "category": "arc_opcode",
+      "key": "0x2032",
+      "name": "unknown_2032",
+      "note": "Read opcode, 12-byte response",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:562992",
+        "lock_status_inaccurate:562993"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115177408669000
+        }
+      ],
+      "added_ns": 1773115177408669000,
+      "history": [
+        {
+          "replaced_ns": 1773116903484258000,
+          "previous_name": "unknown_2032",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, 12-byte response",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2101": {
+      "category": "arc_opcode",
+      "key": "0x2101",
+      "name": "unknown_2101",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:563799",
+        "lock_status_inaccurate:563800"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115177556692000
+        }
+      ],
+      "added_ns": 1773115177556693000,
+      "history": [
+        {
+          "replaced_ns": 1773116903776911000,
+          "previous_name": "unknown_2101",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2204": {
+      "category": "arc_opcode",
+      "key": "0x2204",
+      "name": "unknown_2204",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:564755",
+        "lock_status_inaccurate:564756"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115177984095000
+        }
+      ],
+      "added_ns": 1773115177984095000,
+      "history": [
+        {
+          "replaced_ns": 1773116904072204000,
+          "previous_name": "unknown_2204",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x2208": {
+      "category": "arc_opcode",
+      "key": "0x2208",
+      "name": "unknown_2208",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:564772",
+        "lock_status_inaccurate:564773"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115178280520000
+        }
+      ],
+      "added_ns": 1773115178280520000,
+      "history": [
+        {
+          "replaced_ns": 1773116904359692000,
+          "previous_name": "unknown_2208",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x220B": {
+      "category": "arc_opcode",
+      "key": "0x220B",
+      "name": "unknown_220B",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:564778",
+        "lock_status_inaccurate:564779"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115178714193000
+        }
+      ],
+      "added_ns": 1773115178714193000,
+      "history": [
+        {
+          "replaced_ns": 1773116904644883000,
+          "previous_name": "unknown_220B",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3004": {
+      "category": "arc_opcode",
+      "key": "0x3004",
+      "name": "unknown_3004",
+      "note": "Read opcode, 32-byte response",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606159",
+        "lock_status_inaccurate:606160"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115179764216000
+        }
+      ],
+      "added_ns": 1773115179764216000,
+      "history": [
+        {
+          "replaced_ns": 1773116981817201000,
+          "previous_name": "unknown_3004",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, 32-byte response",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3008": {
+      "category": "arc_opcode",
+      "key": "0x3008",
+      "name": "unknown_3008",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606162",
+        "lock_status_inaccurate:606163"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115179918347000
+        }
+      ],
+      "added_ns": 1773115179918347000,
+      "history": [
+        {
+          "replaced_ns": 1773116982131544000,
+          "previous_name": "unknown_3008",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3020": {
+      "category": "arc_opcode",
+      "key": "0x3020",
+      "name": "unknown_3020",
+      "note": "Read opcode, 24-byte response",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606172",
+        "lock_status_inaccurate:606173"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115180363169000
+        }
+      ],
+      "added_ns": 1773115180363169000,
+      "history": [
+        {
+          "replaced_ns": 1773116982438874000,
+          "previous_name": "unknown_3020",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, 24-byte response",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3101": {
+      "category": "arc_opcode",
+      "key": "0x3101",
+      "name": "unknown_3101",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606179",
+        "lock_status_inaccurate:606180"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115180515382000
+        }
+      ],
+      "added_ns": 1773115180515382000,
+      "history": [
+        {
+          "replaced_ns": 1773116982751840000,
+          "previous_name": "unknown_3101",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3200": {
+      "category": "arc_opcode",
+      "key": "0x3200",
+      "name": "unknown_3200",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606184",
+        "lock_status_inaccurate:606186"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115181237457000
+        }
+      ],
+      "added_ns": 1773115181237457000,
+      "history": [
+        {
+          "replaced_ns": 1773116983058468000,
+          "previous_name": "unknown_3200",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3201": {
+      "category": "arc_opcode",
+      "key": "0x3201",
+      "name": "unknown_3201",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606190",
+        "lock_status_inaccurate:606191"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115181377968000
+        }
+      ],
+      "added_ns": 1773115181377968000,
+      "history": [
+        {
+          "replaced_ns": 1773116983364561000,
+          "previous_name": "unknown_3201",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3208": {
+      "category": "arc_opcode",
+      "key": "0x3208",
+      "name": "unknown_3208",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606205",
+        "lock_status_inaccurate:606208"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115181527391000
+        }
+      ],
+      "added_ns": 1773115181527391000,
+      "history": [
+        {
+          "replaced_ns": 1773116983680416000,
+          "previous_name": "unknown_3208",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3210": {
+      "category": "arc_opcode",
+      "key": "0x3210",
+      "name": "unknown_3210",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606218",
+        "lock_status_inaccurate:606220"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115181821150000
+        }
+      ],
+      "added_ns": 1773115181821151000,
+      "history": [
+        {
+          "replaced_ns": 1773116983986256000,
+          "previous_name": "unknown_3210",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3211": {
+      "category": "arc_opcode",
+      "key": "0x3211",
+      "name": "unknown_3211",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606226",
+        "lock_status_inaccurate:606227"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115181971557000
+        }
+      ],
+      "added_ns": 1773115181971557000,
+      "history": [
+        {
+          "replaced_ns": 1773116984298635000,
+          "previous_name": "unknown_3211",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3240": {
+      "category": "arc_opcode",
+      "key": "0x3240",
+      "name": "unknown_3240",
+      "note": "Read opcode, requires request body",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606229",
+        "lock_status_inaccurate:606230"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115182267050000
+        }
+      ],
+      "added_ns": 1773115182267050000,
+      "history": [
+        {
+          "replaced_ns": 1773116984618404000,
+          "previous_name": "unknown_3240",
+          "previous_confidence": "observed",
+          "previous_note": "Read opcode, requires request body",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3410": {
+      "category": "arc_opcode",
+      "key": "0x3410",
+      "name": "unknown_3410",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606256",
+        "lock_status_inaccurate:606257"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115182558345000
+        }
+      ],
+      "added_ns": 1773115182558345000,
+      "history": [
+        {
+          "replaced_ns": 1773116985242207000,
+          "previous_name": "unknown_3410",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3414": {
+      "category": "arc_opcode",
+      "key": "0x3414",
+      "name": "unknown_3414",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606260",
+        "lock_status_inaccurate:606261"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115182845972000
+        }
+      ],
+      "added_ns": 1773115182845972000,
+      "history": [
+        {
+          "replaced_ns": 1773116985547862000,
+          "previous_name": "unknown_3414",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3610": {
+      "category": "arc_opcode",
+      "key": "0x3610",
+      "name": "unknown_3610",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606266",
+        "lock_status_inaccurate:606268"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115183277965000
+        }
+      ],
+      "added_ns": 1773115183277965000,
+      "history": [
+        {
+          "replaced_ns": 1773116985842828000,
+          "previous_name": "unknown_3610",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "arc_opcode:0x3611": {
+      "category": "arc_opcode",
+      "key": "0x3611",
+      "name": "unknown_3611",
+      "note": "Write opcode, blocked by device lock (0x0600)",
+      "fields": [],
+      "evidence": [
+        "lock_status_inaccurate:606273",
+        "lock_status_inaccurate:606274"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115183417125000
+        }
+      ],
+      "added_ns": 1773115183417125000,
+      "history": [
+        {
+          "replaced_ns": 1773116986153887000,
+          "previous_name": "unknown_3611",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)",
+          "action": "updated"
+        }
+      ]
+    },
+    "cmc_protocol:magic_number": {
+      "category": "cmc_protocol",
+      "key": "magic_number",
+      "name": "cmc_magic_0x1200",
+      "note": "CMC port 8800 uses magic 0x1200, not ARC magic 0x2700. ARC-framed packets get uniform 0x0020 error response.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773115973023878000
+        }
+      ],
+      "added_ns": 1773115973023879000
+    },
+    "lock_detection:heartbeat_unreliable": {
+      "category": "lock_detection",
+      "key": "heartbeat_unreliable",
+      "name": "heartbeat_lock_state_unreliable",
+      "note": "Heartbeat multicast (224.0.0.233:8708) does NOT reliably indicate lock state. avio-bt-1 shows zero byte differences between locked and unlocked heartbeats. avio-usb-1 reports 0x02 (unlocked) when actually locked. Only avio-aes3-1 may be reliable. Dante Controller uses a different mechanism.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773118811430529000
+        }
+      ],
+      "added_ns": 1773118811430529000
+    },
+    "lock_detection:arc_1000_offset_35": {
+      "category": "lock_detection",
+      "key": "arc_1000_offset_35",
+      "name": "query_channel_count_lock_field",
+      "note": "ARC opcode 0x1000 response byte 35 (offset 0x23): 0x00=unlocked, 0x04=locked. Works on avio-aes3-1 but NOT on avio-bt-1 (always 0x00 regardless of lock state). Device-dependent \u2014 not universal.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773118814553284000
+        }
+      ],
+      "added_ns": 1773118814553284000
+    },
+    "lock_detection:latency_probe": {
+      "category": "lock_detection",
+      "key": "latency_probe",
+      "name": "set_latency_lock_probe",
+      "note": "ARC opcode 0x1101 with empty 10-byte header: locked devices return 0x0600, unlocked return 0x0001. Works on avio-aes3-1 but NOT on avio-bt-1 (returns 0x0001 even when locked, silently rejects). Device-dependent \u2014 not universal.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773118816701978000
+        }
+      ],
+      "added_ns": 1773118816701978000
+    },
+    "lock_detection:write_readback": {
+      "category": "lock_detection",
+      "key": "write_readback",
+      "name": "write_and_readback_lock_detection",
+      "note": "Only universal lock detection: attempt a write (e.g. set_latency 0x1101), then read back (0x1100) to verify the value changed. If unchanged, device is locked. Works on ALL tested devices including avio-bt-1. Dante devices silently reject writes when locked.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773118819423778000
+        }
+      ],
+      "added_ns": 1773118819423779000
+    },
+    "lock_detection:dante_controller_method": {
+      "category": "lock_detection",
+      "key": "dante_controller_method",
+      "name": "dante_controller_lock_detection_unknown",
+      "note": "Dante Controller reliably detects lock state on all devices including avio-bt-1 where heartbeat and ARC probes fail. The mechanism is unknown \u2014 no non-daemon unicast traffic observed to bt-1. Likely uses DDP protocol (port 8700, magic 0xFFFF) or a field we haven't identified yet.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "hypothesis",
+          "timestamp_ns": 1773118822162307000
+        }
+      ],
+      "added_ns": 1773118822162307000
+    },
+    "ddp_notification:0x0102": {
+      "category": "ddp_notification",
+      "key": "0x0102",
+      "name": "notification_0x0102",
+      "note": "Most frequent DDP notification from bt-1. 280 instances observed. 35B packets.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121484332673000
+        }
+      ],
+      "added_ns": 1773121484332673000
+    },
+    "ddp_notification:0x0060": {
+      "category": "ddp_notification",
+      "key": "0x0060",
+      "name": "notification_query_names",
+      "note": "DDP notification opcode 0x0060. 201 instances observed from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121484482504000
+        }
+      ],
+      "added_ns": 1773121484482505000
+    },
+    "ddp_notification:0x00C0": {
+      "category": "ddp_notification",
+      "key": "0x00C0",
+      "name": "notification_make_model",
+      "note": "DDP notification containing make/model info. 171 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121484633837000
+        }
+      ],
+      "added_ns": 1773121484633837000
+    },
+    "ddp_notification:0x1009": {
+      "category": "ddp_notification",
+      "key": "0x1009",
+      "name": "notification_1009",
+      "note": "DDP notification opcode 0x1009. 83 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121484784078000
+        }
+      ],
+      "added_ns": 1773121484784079000
+    },
+    "ddp_notification:0x0020": {
+      "category": "ddp_notification",
+      "key": "0x0020",
+      "name": "notification_0020",
+      "note": "DDP notification opcode 0x0020. 83 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121484937574000
+        }
+      ],
+      "added_ns": 1773121484937575000
+    },
+    "ddp_notification:0x100E": {
+      "category": "ddp_notification",
+      "key": "0x100E",
+      "name": "notification_settings_status",
+      "note": "DDP settings status notification. 69 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121485096513000
+        }
+      ],
+      "added_ns": 1773121485096513000
+    },
+    "ddp_notification:0x0080": {
+      "category": "ddp_notification",
+      "key": "0x0080",
+      "name": "notification_0080",
+      "note": "DDP notification opcode 0x0080. 56 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121485244021000
+        }
+      ],
+      "added_ns": 1773121485244021000
+    },
+    "ddp_notification:0x0011": {
+      "category": "ddp_notification",
+      "key": "0x0011",
+      "name": "notification_0011",
+      "note": "DDP notification opcode 0x0011. 56 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121485385010000
+        }
+      ],
+      "added_ns": 1773121485385010000
+    },
+    "ddp_notification:0x1007": {
+      "category": "ddp_notification",
+      "key": "0x1007",
+      "name": "notification_1007",
+      "note": "DDP notification opcode 0x1007. 51 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121485527164000
+        }
+      ],
+      "added_ns": 1773121485527164000
+    },
+    "ddp_notification:0x0078": {
+      "category": "ddp_notification",
+      "key": "0x0078",
+      "name": "notification_0078",
+      "note": "DDP notification opcode 0x0078. 51 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121485677488000
+        }
+      ],
+      "added_ns": 1773121485677488000
+    },
+    "ddp_notification:0x0105": {
+      "category": "ddp_notification",
+      "key": "0x0105",
+      "name": "notification_0105",
+      "note": "DDP notification 35B. Body ends 00 01 01. 40 instances from bt-1. Possibly lock-state related change notification.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121486929101000
+        }
+      ],
+      "added_ns": 1773121486929101000
+    },
+    "ddp_notification:0x0084": {
+      "category": "ddp_notification",
+      "key": "0x0084",
+      "name": "notification_0084",
+      "note": "DDP notification opcode 0x0084. 30 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121487078613000
+        }
+      ],
+      "added_ns": 1773121487078613000
+    },
+    "ddp_notification:0x0104": {
+      "category": "ddp_notification",
+      "key": "0x0104",
+      "name": "notification_0104",
+      "note": "DDP notification 35B. Body ends 00 01 02. 28 instances from bt-1. Possibly lock-state related change notification.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121487226063000
+        }
+      ],
+      "added_ns": 1773121487226063000
+    },
+    "ddp_notification:0x0082": {
+      "category": "ddp_notification",
+      "key": "0x0082",
+      "name": "notification_config_change_complete",
+      "note": "DDP config change complete notification. 52B. 28 instances from bt-1. Body contains structured data.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121487369969000
+        }
+      ],
+      "added_ns": 1773121487369969000
+    },
+    "ddp_notification:0x010D": {
+      "category": "ddp_notification",
+      "key": "0x010D",
+      "name": "notification_010D",
+      "note": "DDP notification 35B. Body ends 00 01 02. Only 4 instances from bt-1, all at 21:44:15 during lock/unlock. Rare \u2014 likely lock state change notification.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "hypothesis",
+          "timestamp_ns": 1773121487521679000
+        }
+      ],
+      "added_ns": 1773121487521680000
+    },
+    "ddp_notification:0x010C": {
+      "category": "ddp_notification",
+      "key": "0x010C",
+      "name": "notification_010C",
+      "note": "DDP notification 35B. Body ends 00 01 03. Only 4 instances from bt-1, all at 21:44:15 during lock/unlock. Rare \u2014 likely lock state change notification.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "hypothesis",
+          "timestamp_ns": 1773121487679340000
+        }
+      ],
+      "added_ns": 1773121487679340000
+    },
+    "ddp_notification:0x0070": {
+      "category": "ddp_notification",
+      "key": "0x0070",
+      "name": "notification_board_type",
+      "note": "DDP notification 68B. Contains board identifier string 'AudinateDIOBT' at offset 0x30. Only 2 instances from bt-1.",
+      "fields": [],
+      "evidence": [],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1773121487824987000
+        }
+      ],
+      "added_ns": 1773121487824987000
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1773025357101858000
+    "updated_ns": 1773121487824988000
   }
 }
