@@ -4,6 +4,7 @@ import sys
 import ifaddr
 
 from netaudio_lib.dante.const import DEFAULT_MULTICAST_METERING_PORT
+from netaudio_lib.daemon.relay import DEFAULT_RELAY_PORT
 
 DEFAULT_MDNS_TIMEOUT = 5
 DEFAULT_INTERFACE = None
@@ -32,6 +33,7 @@ class AppSettings:
         self.refresh: bool = False
         self.socket_path: str = None
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
+        self.relay_port: int = int(os.environ.get("NETAUDIO_RELAY_PORT", DEFAULT_RELAY_PORT))
         self._device_lock_key: bytes | None = None
         lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
         if lock_key_value:

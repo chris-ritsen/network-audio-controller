@@ -68,8 +68,9 @@ logger = logging.getLogger("netaudio")
 
 
 class NetaudioDaemon:
-    def __init__(self, dissect=False, capture=False):
+    def __init__(self, dissect=False, capture=False, relay_port=None):
         self._capture = capture
+        self._relay_port = relay_port
         self._packet_store = None
         self._session_id = None
 
@@ -456,7 +457,7 @@ class NetaudioDaemon:
         self.metering = MeteringManager(self.application)
         await self.metering.start()
 
-        self.relay = RelayServer(self)
+        self.relay = RelayServer(self, port=self._relay_port)
         await self.relay.start()
 
         from netaudio_lib.common.app_config import settings as app_settings
@@ -1018,10 +1019,10 @@ class NetaudioDaemon:
                 pass
 
 
-async def run_daemon(dissect=False, capture=False):
+async def run_daemon(dissect=False, capture=False, relay_port=None):
     import signal
 
-    daemon = NetaudioDaemon(dissect=dissect, capture=capture)
+    daemon = NetaudioDaemon(dissect=dissect, capture=capture, relay_port=relay_port)
     loop = asyncio.get_running_loop()
 
     def handle_signal():
