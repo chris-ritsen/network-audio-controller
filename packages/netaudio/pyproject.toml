@@ -1,7 +1,7 @@
 [project]
 name = "netaudio"
 version = "0.1.4"
-description = "CLI for controlling Audinate Dante network audio devices"
+description = "CLI for managing network audio devices"
 readme = "README.md"
 license = "Unlicense"
 requires-python = ">=3.9"
@@ -11,8 +11,11 @@ dependencies = [
     "netaudio-lib",
     "typer>=0.15.0",
     "rich>=13.0.0",
-    "redis>=5.0.0",
+    "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+capture = ["redis>=5.0.0"]
 
 [project.scripts]
 netaudio = "netaudio.cli:main"
