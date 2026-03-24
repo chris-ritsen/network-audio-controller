@@ -602,6 +602,7 @@ class CaptureDaemon:
         dump: bool = False,
         dissect: bool = False,
         metering: bool = False,
+        tcp: bool = False,
         session_id: int | None = None,
         session_name: str | None = None,
         redis_host: str | None = None,
@@ -617,6 +618,7 @@ class CaptureDaemon:
         self.dump = dump
         self.dissect = dissect
         self.metering = metering
+        self.tcp = tcp
         self.use_tshark = use_tshark
         self.use_multicast = use_multicast
         self.device_filter = device_filter or []
@@ -830,6 +832,7 @@ class CaptureDaemon:
             device_ips=tshark_filter_ips,
             known_device_ips=set(self.device_filter) if self.device_filter else None,
             include_metering=self.metering,
+            include_tcp=self.tcp,
             session_id=self.session_id,
         )
 
@@ -1358,6 +1361,7 @@ def live(
     show: bool = typer.Option(True, "--live/--no-live", help="Show live packet feed."),
     dump: bool = typer.Option(False, "--dump", help="Dump packet payloads as hex + ASCII."),
     metering: bool = typer.Option(False, "--metering", help="Include metering traffic (port 8751)."),
+    tcp: bool = typer.Option(False, "--tcp", help="Include TCP traffic to/from devices."),
     session_id: Optional[int] = typer.Option(
         None, "--session-id", help="Attach packets to an existing capture session ID."
     ),
@@ -1443,6 +1447,7 @@ def live(
         dump=dump,
         dissect=cli_state.dissect,
         metering=metering,
+        tcp=tcp,
         session_id=session_id,
         session_name=session_name,
         redis_host=resolved_redis_host,
@@ -3003,3 +3008,22 @@ def packet_show(
             print()
     finally:
         store.close()
+
+
+@app.command("clear")
+def clear(
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Delete the capture database."""
+    profile_cfg, _ = _load_capture_profile(config, profile)
+    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    db_path = Path(resolved_db)
+
+    for suffix in ("", "-shm", "-wal"):
+        target = Path(str(db_path) + suffix)
+        if target.exists():
+            target.unlink()
+
+    print(f"Deleted {db_path}", file=sys.stderr)
