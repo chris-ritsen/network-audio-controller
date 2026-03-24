@@ -3377,10 +3377,89 @@
         }
       ],
       "added_ns": 1773121487824987000
+    },
+    "settings_opcode:0x0090": {
+      "category": "settings_opcode",
+      "key": "0x0090",
+      "name": "reboot",
+      "note": "Reboots the device. Fire-and-forget command sent to port 8700. Device sends multicast ack (0x0092) to 224.0.0.231:8702 before rebooting. Trailer is fixed: 00 00 00 64 00 01 00 00.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFF"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "36"
+        },
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0090"
+        }
+      ],
+      "evidence": [
+        "reboot_command:3616161",
+        "reboot_command:3662033"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774377302612051000
+        }
+      ],
+      "added_ns": 1774377302612051000
+    },
+    "settings_opcode:0x0092": {
+      "category": "settings_opcode",
+      "key": "0x0092",
+      "name": "reboot_ack",
+      "note": "Multicast acknowledgement sent by device before rebooting. Sent to 224.0.0.231:8702 in response to reboot command (0x0090). Trailer is all zeros.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFF"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "36"
+        },
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0092"
+        }
+      ],
+      "evidence": [
+        "reboot_command:3662049"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774377313755924000
+        }
+      ],
+      "added_ns": 1774377313755924000
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1773121487824988000
+    "updated_ns": 1774377313755925000
   }
 }
