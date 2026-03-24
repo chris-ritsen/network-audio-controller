@@ -167,6 +167,25 @@ class DanteDeviceCommands:
         payload += struct.pack(">I", latency_us)[1:]
         return (self._build_control_packet(Opcode.DEVICE_SETTINGS_SET, payload), SERVICE_ARC)
 
+    def command_reboot(self, host_mac=None):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+
+        payload = struct.pack(">HH", 0x0000, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += bytes([0x00, 0x90, 0x00, 0x00, 0x00, 0x64])
+        payload += bytes([0x00, 0x01, 0x00, 0x00])
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
     def command_identify(self):
         mac = b'\x00' * 6
         magic = b'Audinate\x07\x31'

@@ -257,12 +257,11 @@ def reboot():
         devices = await _discover()
         await _populate_controls(devices)
         filtered = filter_devices(devices)
-        _, device = _resolve_one(filtered)
-        if not hasattr(device.commands, "command_reboot"):
-            typer.echo("Error: reboot is not available in this build.", err=True)
+        if not filtered:
+            typer.echo("Error: no devices matched.", err=True)
             raise typer.Exit(code=1)
-        await device.operations.reboot()
-        typer.echo(f"{icon('reboot')}Rebooting: {device.name}")
+        for server_name, device in filtered.items():
+            await device.operations.reboot()
 
     asyncio.run(_run())
 
