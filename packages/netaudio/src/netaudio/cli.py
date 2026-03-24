@@ -143,6 +143,7 @@ def _global_options(
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
     dissect: bool = typer.Option(False, "--dissect", help="Annotated protocol dissection for packet displays.", envvar="NETAUDIO_DISSECT"),
     capture: bool = typer.Option(False, "--capture", help="Record all packets to capture database.", envvar="NETAUDIO_CAPTURE"),
+    lock_state_timeout: float = typer.Option(4.0, "--lock-state-timeout", help="Lock state collection timeout in seconds.", envvar="NETAUDIO_LOCK_STATE_TIMEOUT"),
     icons: bool = typer.Option(False, "--icons", help="Use Nerd Font icons in output.", envvar="NETAUDIO_ICONS"),
     version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
 ):
@@ -162,6 +163,7 @@ def _global_options(
         icons = _load_icons_from_config()
     state.icons = icons
 
+    settings.lock_state_timeout = lock_state_timeout
     settings.mdns_timeout = timeout
     settings.no_color = no_color
 
