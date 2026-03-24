@@ -1,6 +1,6 @@
 # Maintainer: Christopher Ritsen <chris.ritsen@gmail.com>
 pkgname='netaudio-git'
-pkgver=0.1.6
+pkgver=0.1.7
 pkgrel=1
 pkgdesc="CLI for controlling Audinate Dante network audio devices (git version)"
 arch=(any)

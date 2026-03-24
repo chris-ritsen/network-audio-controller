@@ -11,7 +11,7 @@ depends=('python' 'python-zeroconf' 'python-ifaddr' 'python-sqlitedict')
 optdepends=('python-pynacl: device lock/unlock')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-hatchling')
 source=("https://files.pythonhosted.org/packages/source/${_name::1}/${_name//-/_}/${_name//-/_}-${pkgver}.tar.gz")
-sha256sums=('353a4102168047f5330fd4f961b3ba95da409961bfa6354d1ad37e65873407fd')
+sha256sums=('eaa3e3d7688e0c44384b82334e3ff1cf7f463b100853654c3c6df1013013b3d6')
 
 build() {
     cd "${_name//-/_}-${pkgver}"
