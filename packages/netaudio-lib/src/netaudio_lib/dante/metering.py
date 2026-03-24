@@ -22,18 +22,17 @@ def parse_metering_levels(data: bytes, tx_count: int, rx_count: int) -> dict:
     if len(data) < total:
         return levels
 
-    if rx_count > 0:
-        rx_bytes = data[-rx_count:]
-        tx_bytes = data[-rx_count - tx_count : -rx_count]
-    else:
-        rx_bytes = b""
-        tx_bytes = data[-tx_count:]
+    offset = len(data) - total
+    if offset >= 27 and data[25] == tx_count and data[26] == rx_count:
+        offset = 27
+    tx_bytes = data[offset : offset + tx_count]
+    rx_bytes = data[offset + tx_count : offset + tx_count + rx_count]
 
-    for i in range(min(tx_count, len(tx_bytes))):
-        levels["tx"][i + 1] = tx_bytes[i]
+    for index in range(min(tx_count, len(tx_bytes))):
+        levels["tx"][index + 1] = tx_bytes[index]
 
-    for i in range(min(rx_count, len(rx_bytes))):
-        levels["rx"][i + 1] = rx_bytes[i]
+    for index in range(min(rx_count, len(rx_bytes))):
+        levels["rx"][index + 1] = rx_bytes[index]
 
     return levels
 
