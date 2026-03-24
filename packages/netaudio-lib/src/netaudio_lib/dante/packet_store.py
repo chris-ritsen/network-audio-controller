@@ -5,6 +5,7 @@ import os
 import sqlite3
 import struct
 import time
+import zlib
 
 from netaudio_lib.dante.debug_formatter import (
     PROTOCOL_NAMES,
@@ -23,6 +24,19 @@ def _default_db_path():
 DEFAULT_DB_PATH = _default_db_path()
 
 TEMPORAL_CORRELATION_WINDOW = 0.1
+
+KNOWN_PROTOCOL_IDS = frozenset(PROTOCOL_NAMES.keys()) | {0x0008, 0x2729}
+
+
+def _decompress_payload(data):
+    if not data:
+        return b""
+    if isinstance(data, str):
+        return bytes.fromhex(data)
+    try:
+        return zlib.decompress(data)
+    except zlib.error:
+        return data
 
 
 def _safe_name(name):
@@ -90,7 +104,21 @@ class PacketStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.create_function("decompress_hex", 1, self._decompress_hex_func)
         self._create_tables()
+        self._has_payload_hex = "payload_hex" in {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()
+        }
+
+    @staticmethod
+    def _decompress_hex_func(data):
+        if not data:
+            return ""
+        try:
+            return zlib.decompress(data).hex()
+        except zlib.error:
+            return data.hex() if isinstance(data, bytes) else ""
 
     def _create_tables(self):
         self._conn.executescript("""
@@ -140,7 +168,6 @@ class PacketStore:
                 result_code INTEGER,
                 result_name TEXT,
                 payload BLOB NOT NULL,
-                payload_hex TEXT NOT NULL,
                 correlated_packet_id INTEGER REFERENCES packets(id),
                 multicast_group TEXT,
                 multicast_port INTEGER,
@@ -490,56 +517,92 @@ class PacketStore:
 
         header = _parse_header(payload)
 
-        payload_hex = payload.hex()
+        compressed_payload = zlib.compress(payload)
 
         if session_id is not None:
             dedup_window_ns = 1_000_000_000
             existing = self._conn.execute(
                 """SELECT id FROM packets
-                WHERE payload_hex = ? AND src_ip IS ? AND dst_ip IS ?
+                WHERE payload = ? AND src_ip IS ? AND dst_ip IS ?
                 AND session_id = ? AND ABS(timestamp_ns - ?) < ?
                 LIMIT 1""",
-                (payload_hex, src_ip, dst_ip, session_id, timestamp_ns, dedup_window_ns),
+                (compressed_payload, src_ip, dst_ip, session_id, timestamp_ns, dedup_window_ns),
             ).fetchone()
             if existing:
                 return existing["id"]
 
         try:
-            cursor = self._conn.execute(
-                """INSERT INTO packets (
-                    timestamp_ns, timestamp_iso, src_ip, src_port, dst_ip, dst_port,
-                    source_type, direction, device_name, device_ip,
-                    protocol_id, protocol_name, transaction_id, opcode, opcode_name,
-                    result_code, result_name, payload, payload_hex,
-                    multicast_group, multicast_port, session_id, source_host, interface
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    timestamp_ns,
-                    timestamp_iso,
-                    src_ip,
-                    src_port,
-                    dst_ip,
-                    dst_port,
-                    source_type,
-                    direction,
-                    device_name,
-                    device_ip,
-                    header["protocol_id"] if header else None,
-                    header["protocol_name"] if header else None,
-                    header["transaction_id"] if header else None,
-                    header["opcode"] if header else None,
-                    header["opcode_name"] if header else None,
-                    header["result_code"] if header else None,
-                    header["result_name"] if header else None,
-                    payload,
-                    payload_hex,
-                    multicast_group,
-                    multicast_port,
-                    session_id,
-                    source_host,
-                    interface,
-                ),
-            )
+            if self._has_payload_hex:
+                cursor = self._conn.execute(
+                    """INSERT INTO packets (
+                        timestamp_ns, timestamp_iso, src_ip, src_port, dst_ip, dst_port,
+                        source_type, direction, device_name, device_ip,
+                        protocol_id, protocol_name, transaction_id, opcode, opcode_name,
+                        result_code, result_name, payload, payload_hex,
+                        multicast_group, multicast_port, session_id, source_host, interface
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        timestamp_ns,
+                        timestamp_iso,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        source_type,
+                        direction,
+                        device_name,
+                        device_ip,
+                        header["protocol_id"] if header else None,
+                        header["protocol_name"] if header else None,
+                        header["transaction_id"] if header else None,
+                        header["opcode"] if header else None,
+                        header["opcode_name"] if header else None,
+                        header["result_code"] if header else None,
+                        header["result_name"] if header else None,
+                        compressed_payload,
+                        "",
+                        multicast_group,
+                        multicast_port,
+                        session_id,
+                        source_host,
+                        interface,
+                    ),
+                )
+            else:
+                cursor = self._conn.execute(
+                    """INSERT INTO packets (
+                        timestamp_ns, timestamp_iso, src_ip, src_port, dst_ip, dst_port,
+                        source_type, direction, device_name, device_ip,
+                        protocol_id, protocol_name, transaction_id, opcode, opcode_name,
+                        result_code, result_name, payload,
+                        multicast_group, multicast_port, session_id, source_host, interface
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        timestamp_ns,
+                        timestamp_iso,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        source_type,
+                        direction,
+                        device_name,
+                        device_ip,
+                        header["protocol_id"] if header else None,
+                        header["protocol_name"] if header else None,
+                        header["transaction_id"] if header else None,
+                        header["opcode"] if header else None,
+                        header["opcode_name"] if header else None,
+                        header["result_code"] if header else None,
+                        header["result_name"] if header else None,
+                        compressed_payload,
+                        multicast_group,
+                        multicast_port,
+                        session_id,
+                        source_host,
+                        interface,
+                    ),
+                )
             self._conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Failed to store packet: {e}")
@@ -606,11 +669,21 @@ class PacketStore:
             )
             self._conn.commit()
 
+    def _decode_packet_row(self, row):
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = _decompress_payload(result.get("payload"))
+        return result
+
+    def _decode_packet_rows(self, rows):
+        return [self._decode_packet_row(row) for row in rows]
+
     def get_packet(self, packet_id):
         row = self._conn.execute(
             "SELECT * FROM packets WHERE id = ?", (packet_id,)
         ).fetchone()
-        return dict(row) if row else None
+        return self._decode_packet_row(row)
 
     def get_correlated_pairs(self, opcode=None):
         query = """
@@ -630,12 +703,12 @@ class PacketStore:
 
         pairs = []
         for row in self._conn.execute(query, params).fetchall():
-            request = dict(row)
+            request = self._decode_packet_row(row)
             resp_row = self._conn.execute(
                 "SELECT * FROM packets WHERE id = ?", (request["resp_id"],)
             ).fetchone()
             if resp_row:
-                pairs.append((request, dict(resp_row)))
+                pairs.append((request, self._decode_packet_row(resp_row)))
 
         return pairs
 
@@ -644,7 +717,7 @@ class PacketStore:
             "SELECT * FROM packets WHERE opcode = ? ORDER BY timestamp_ns",
             (opcode,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return self._decode_packet_rows(rows)
 
     def get_packets(self, limit=100, source_type=None, device_name=None):
         query = "SELECT * FROM packets WHERE 1=1"
@@ -661,7 +734,7 @@ class PacketStore:
         params.append(limit)
 
         rows = self._conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        return self._decode_packet_rows(rows)
 
     def get_session_packet_count(self, session_id: int, start_ns: int | None = None, end_ns: int | None = None) -> int:
         query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
@@ -746,7 +819,7 @@ class PacketStore:
 
         if payload_contains is not None:
             search_hex = payload_contains.encode().hex()
-            query += " AND payload_hex LIKE ?"
+            query += " AND decompress_hex(payload) LIKE ?"
             params.append(f"%{search_hex}%")
 
         return query, params
@@ -824,7 +897,7 @@ class PacketStore:
         params.extend([limit, offset])
 
         rows = self._conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        return self._decode_packet_rows(rows)
 
     def search_packets(
         self,
@@ -869,7 +942,7 @@ class PacketStore:
         params.extend([limit, offset])
 
         rows = self._conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        return self._decode_packet_rows(rows)
 
     def search_packets_count(
         self,
@@ -935,7 +1008,7 @@ class PacketStore:
         if not row:
             return None
 
-        row = dict(row)
+        row = self._decode_packet_row(row)
         os.makedirs(output_dir, exist_ok=True)
 
         ts = datetime.datetime.fromtimestamp(row["timestamp_ns"] / 1e9)
@@ -1030,7 +1103,7 @@ class PacketStore:
             params.append(end_ns)
 
         if payload_hex_contains:
-            query += " AND payload_hex LIKE ?"
+            query += " AND decompress_hex(payload) LIKE ?"
             params.append(f"%{payload_hex_contains.lower()}%")
 
         if min_length is not None:
@@ -1046,7 +1119,7 @@ class PacketStore:
         params.extend([limit, offset])
 
         rows = self._conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        return self._decode_packet_rows(rows)
 
     def get_stats(self):
         stats = {}
