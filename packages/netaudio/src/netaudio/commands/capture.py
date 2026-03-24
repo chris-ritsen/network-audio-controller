@@ -19,14 +19,14 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.common.app_config import settings as app_settings
-from netaudio_lib.common.app_config import get_available_interfaces
-from netaudio_lib.dante.const import (
+from netaudio.common.app_config import settings as app_settings
+from netaudio.common.app_config import get_available_interfaces
+from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
-from netaudio_lib.dante.packet_store import DEFAULT_DB_PATH, PacketStore
-from netaudio_lib.dante.tshark_capture import TsharkCapture
+from netaudio.dante.packet_store import DEFAULT_DB_PATH, PacketStore
+from netaudio.dante.tshark_capture import TsharkCapture
 
 try:
     import tomllib
@@ -158,7 +158,7 @@ def _load_fact_labels() -> dict[str, str]:
 
     _FACT_LABEL_CACHE = {}
     try:
-        from netaudio_lib.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
+        from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
         if DEFAULT_FACTS_PATH.exists():
             for fact in list_facts(DEFAULT_FACTS_PATH):
                 category = fact["category"]
@@ -180,7 +180,7 @@ def _label_packet(payload: bytes):
     if len(payload) < 8:
         return ""
 
-    from netaudio_lib.dante.debug_formatter import (
+    from netaudio.dante.debug_formatter import (
         PROTOCOL_NAMES,
         get_opcode_name,
         get_settings_message_type_name,
@@ -414,13 +414,13 @@ def _parse_config_bool(value, field_name: str) -> bool | None:
 
 
 def _default_capture_config_path() -> Path:
-    from netaudio_lib.common.config_loader import default_config_path
+    from netaudio.common.config_loader import default_config_path
 
     return default_config_path()
 
 
 def _load_capture_profile(config: str | None, profile: str | None) -> tuple[dict, Path]:
-    from netaudio_lib.common.config_loader import load_capture_profile
+    from netaudio.common.config_loader import load_capture_profile
 
     try:
         return load_capture_profile(config, profile)
@@ -429,7 +429,7 @@ def _load_capture_profile(config: str | None, profile: str | None) -> tuple[dict
 
 
 def _resolve_db_from_config(db: str | None, profile_cfg: dict) -> str:
-    from netaudio_lib.common.config_loader import resolve_db_from_config
+    from netaudio.common.config_loader import resolve_db_from_config
 
     return resolve_db_from_config(db, profile_cfg)
 
@@ -1314,7 +1314,7 @@ def _print_packet_line(
     )
 
     if dissect_mode:
-        from netaudio_lib.dante.packet_dissector import dissect_and_render
+        from netaudio.dante.packet_dissector import dissect_and_render
         print(dissect_and_render(payload))
     elif dump:
         print(_hexdump(payload))
@@ -1571,7 +1571,7 @@ def session_stop(
             raise typer.Exit(1)
         print(f"{icon('session')}Capture: Ended session #{resolved_session_id}")
 
-        from netaudio_lib.dante.protocol_verifier import export_session_bundle
+        from netaudio.dante.protocol_verifier import export_session_bundle
 
         session_row = store.get_session(resolved_session_id)
         session_name = session_row["name"] if session_row else f"session_{resolved_session_id}"
@@ -1647,7 +1647,7 @@ def session_rename(
 
 
 def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bool, no_evidence: bool):
-    from netaudio_lib.dante.packet_dissector import dissect_and_render
+    from netaudio.dante.packet_dissector import dissect_and_render
 
     for session in sessions:
         session_id = int(session["id"])
@@ -1861,7 +1861,7 @@ def _print_marker_row(
             print(f"{evidence_indent}  {pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
 
             if use_dissect:
-                from netaudio_lib.dante.packet_dissector import dissect_and_render
+                from netaudio.dante.packet_dissector import dissect_and_render
                 print(dissect_and_render(payload, indent=evidence_indent + "  "))
             else:
                 print(_hexdump(payload, indent=evidence_indent + "  "))
@@ -3002,7 +3002,7 @@ def packet_show(
                 print(f"  Payload:")
                 print(_hexdump(payload, indent="    "))
             else:
-                from netaudio_lib.dante.packet_dissector import dissect_and_render
+                from netaudio.dante.packet_dissector import dissect_and_render
                 print(dissect_and_render(payload, indent="  "))
 
             print()

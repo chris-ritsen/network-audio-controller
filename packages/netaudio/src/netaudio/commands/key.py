@@ -12,7 +12,7 @@ app = typer.Typer(help="Lock key management.", no_args_is_help=True)
 @app.command("get")
 def key_get():
     """Show the current device lock key."""
-    from netaudio_lib.common.config_loader import get_config_value
+    from netaudio.common.config_loader import get_config_value
 
     value, config_path = get_config_value("device_lock_key")
     if value:
@@ -31,7 +31,7 @@ def key_set(
         typer.echo("Error: key must be a 32-character hex string.", err=True)
         raise typer.Exit(code=1)
 
-    from netaudio_lib.common.config_loader import set_config_value
+    from netaudio.common.config_loader import set_config_value
 
     set_config_value("device_lock_key", value.lower())
 
@@ -39,7 +39,7 @@ def key_set(
 @app.command("clear")
 def key_clear():
     """Remove the device lock key from config."""
-    from netaudio_lib.common.config_loader import set_config_value
+    from netaudio.common.config_loader import set_config_value
 
     set_config_value("device_lock_key", None)
 
@@ -60,7 +60,7 @@ def key_extract(
     ),
 ):
     """Extract the device lock key from a Dante Controller installation."""
-    from netaudio_lib.common.key_extract import extract_key_from_binary, find_dante_controller_binary
+    from netaudio.common.key_extract import extract_key_from_binary, find_dante_controller_binary
 
     if path is None:
         path = find_dante_controller_binary()
@@ -79,7 +79,7 @@ def key_extract(
     typer.echo(key_string)
 
     if save:
-        from netaudio_lib.common.config_loader import set_config_value
+        from netaudio.common.config_loader import set_config_value
 
         config_path = set_config_value("device_lock_key", key_string)
         typer.echo(f"Saved to {config_path}", err=True)

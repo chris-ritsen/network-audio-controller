@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from netaudio_lib.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
-from netaudio_lib.dante.device_commands import DanteDeviceCommands
-from netaudio_lib.dante.protocol_verifier import ProtocolVerifier
+from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
+from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.protocol_verifier import ProtocolVerifier
 
 
 @pytest.fixture
@@ -31,8 +31,8 @@ def _fake_response(opcode=0x1001, status=0x0001):
 
 @pytest.mark.asyncio
 async def test_session_lifecycle(temp_db, output_dir):
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -51,7 +51,7 @@ async def test_session_lifecycle(temp_db, output_dir):
                 session_id = verifier.session_id
                 packet_store_ref = verifier.packet_store
 
-    from netaudio_lib.dante.packet_store import PacketStore
+    from netaudio.dante.packet_store import PacketStore
 
     store = PacketStore(db_path=temp_db)
     session = store.get_session(session_id)
@@ -61,8 +61,8 @@ async def test_session_lifecycle(temp_db, output_dir):
 
 @pytest.mark.asyncio
 async def test_markers_stored(temp_db, output_dir):
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -94,8 +94,8 @@ async def test_markers_stored(temp_db, output_dir):
 async def test_bundle_export(temp_db, output_dir):
     fake_response = _fake_response()
 
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -146,8 +146,8 @@ async def test_send_command_unwraps_tuple(temp_db, output_dir):
 
     fake_response = _fake_response(opcode=0x1002)
 
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -173,8 +173,8 @@ async def test_send_command_unwraps_tuple(temp_db, output_dir):
 async def test_send_with_labels_creates_markers(temp_db, output_dir):
     fake_response = _fake_response()
 
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -202,8 +202,8 @@ async def test_include_evidence_from_ambient(temp_db, output_dir):
     ambient_packet += struct.pack(">H", 0x0001)
     ambient_packet += b"\x00" * 30
 
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -269,8 +269,8 @@ async def test_include_evidence_by_payload_hex(temp_db, output_dir):
     packet_without += struct.pack(">H", 0x0001)
     packet_without += b"\x00" * 30
 
-    with patch("netaudio_lib.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
-        with patch("netaudio_lib.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
+    with patch("netaudio.dante.protocol_verifier.load_capture_profile", return_value=({}, Path("/fake"))):
+        with patch("netaudio.dante.protocol_verifier.resolve_db_from_config", return_value=temp_db):
             async with ProtocolVerifier(
                 device_ip="192.168.1.100",
                 device_name="test-device",
@@ -301,7 +301,7 @@ async def test_include_evidence_by_payload_hex(temp_db, output_dir):
 
 @pytest.mark.asyncio
 async def test_query_packets_filters(tmp_path):
-    from netaudio_lib.dante.packet_store import PacketStore
+    from netaudio.dante.packet_store import PacketStore
 
     db_path = str(tmp_path / "query_test.sqlite")
     store = PacketStore(db_path=db_path)

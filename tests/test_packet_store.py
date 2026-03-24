@@ -4,8 +4,8 @@ import tempfile
 
 import pytest
 
-from netaudio_lib.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
-from netaudio_lib.dante.packet_store import PacketStore, _parse_header
+from netaudio.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
+from netaudio.dante.packet_store import PacketStore, _parse_header
 
 
 def _make_packet(protocol=0x27FF, opcode=0x1002, transaction_id=0x0042, body=b""):

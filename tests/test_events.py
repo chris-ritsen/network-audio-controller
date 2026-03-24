@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from netaudio_lib.dante.events import DanteEvent, DanteEventDispatcher, EventType
+from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.device_commands import DanteDeviceCommands
 
 from netaudio._common import (
     _command_context,

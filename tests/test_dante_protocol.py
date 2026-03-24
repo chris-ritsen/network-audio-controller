@@ -3,9 +3,9 @@ import struct
 
 import pytest
 
-from netaudio_lib.dante.const import SERVICE_ARC
-from netaudio_lib.dante.device_commands import DanteDeviceCommands, Protocol, Opcode
-from netaudio_lib.dante.device_parser import DanteDeviceParser
+from netaudio.dante.const import SERVICE_ARC
+from netaudio.dante.device_commands import DanteDeviceCommands, Protocol, Opcode
+from netaudio.dante.device_parser import DanteDeviceParser
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 

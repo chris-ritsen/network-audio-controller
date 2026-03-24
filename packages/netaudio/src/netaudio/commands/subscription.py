@@ -5,7 +5,7 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.device_commands import DanteDeviceCommands
 
 from netaudio._common import (
     _command_context,
@@ -30,8 +30,8 @@ def subscription_list():
     """List all active subscriptions."""
 
     async def _run():
-        from netaudio_lib.dante.const import SUBSCRIPTION_STATUS_INFO
-        from netaudio_lib.dante.device_serializer import DanteDeviceSerializer
+        from netaudio.dante.const import SUBSCRIPTION_STATUS_INFO
+        from netaudio.dante.device_serializer import DanteDeviceSerializer
 
         devices = await _discover()
         await _populate_controls(devices)
