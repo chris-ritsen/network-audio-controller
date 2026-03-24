@@ -10,9 +10,9 @@ class TestBpfFilter:
         bpf = _build_bpf_filter()
         assert bpf == "udp"
 
-    def test_filter_with_device_ips(self):
-        bpf = _build_bpf_filter(device_ips=["192.168.1.10", "192.168.1.20"])
-        assert bpf == "udp"
+    def test_filter_with_tcp(self):
+        bpf = _build_bpf_filter(include_tcp=True)
+        assert bpf == "udp or tcp"
 
 
 class TestParseLine:

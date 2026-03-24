@@ -75,11 +75,11 @@ class TestStorePacket:
         assert packets[0]["device_ip"] == "192.168.1.10"
         assert packets[0]["opcode"] == 0x1002
 
-    def test_stores_hex(self, store):
+    def test_stores_and_decompresses_payload(self, store):
         pkt = _make_packet(body=b"\xDE\xAD")
         store.store_packet(payload=pkt, source_type="tshark")
         packets = store.get_packets()
-        assert packets[0]["payload_hex"] == pkt.hex()
+        assert packets[0]["payload"] == pkt
 
 
 class TestCorrelation:

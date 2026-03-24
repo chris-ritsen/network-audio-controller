@@ -13,18 +13,29 @@ from netaudio_lib.dante.const import (
 
 logger = logging.getLogger("netaudio")
 
-def _build_bpf_filter(device_ips=None, known_device_ips=None):
+def _build_bpf_filter(include_tcp=False):
+    if include_tcp:
+        return "udp or tcp"
     return "udp"
 
 
 class TsharkCapture:
-    TSHARK_FIELDS = [
+    UDP_FIELDS = [
         "frame.time_epoch",
         "ip.src",
         "udp.srcport",
         "ip.dst",
         "udp.dstport",
         "data.data",
+    ]
+
+    TCP_FIELDS = [
+        "frame.time_epoch",
+        "ip.src",
+        "tcp.srcport",
+        "ip.dst",
+        "tcp.dstport",
+        "tcp.payload",
     ]
 
     def __init__(
@@ -34,6 +45,7 @@ class TsharkCapture:
         device_ips=None,
         known_device_ips=None,
         include_metering=False,
+        include_tcp=False,
         packet_filter=None,
         session_id=None,
     ):
@@ -42,6 +54,7 @@ class TsharkCapture:
         self._device_ips = set(device_ips) if device_ips else set()
         self._known_device_ips = known_device_ips or self._device_ips
         self._include_metering = include_metering
+        self._include_tcp = include_tcp
         self._packet_filter = packet_filter
         self._session_id = session_id
         self._process = None
@@ -70,10 +83,17 @@ class TsharkCapture:
 
     def _build_command(self):
         tshark_path = self._find_tshark() or "tshark"
-        bpf = _build_bpf_filter(self._device_ips or None, self._known_device_ips or None)
+        bpf = _build_bpf_filter(include_tcp=self._include_tcp)
+
+        fields = list(self.UDP_FIELDS)
+        if self._include_tcp:
+            for field in self.TCP_FIELDS:
+                if field not in fields:
+                    fields.append(field)
+
         field_args = []
-        for f in self.TSHARK_FIELDS:
-            field_args.extend(["-e", f])
+        for field in fields:
+            field_args.extend(["-e", field])
 
         return [
             tshark_path,
@@ -89,7 +109,34 @@ class TsharkCapture:
         if len(parts) < 6:
             return None
 
-        epoch_str, src_ip, src_port_str, dst_ip, dst_port_str, hex_data = parts[:6]
+        epoch_str = parts[0]
+        udp_src_ip = parts[1]
+        udp_src_port_str = parts[2]
+        udp_dst_ip = parts[3]
+        udp_dst_port_str = parts[4]
+        udp_hex_data = parts[5]
+
+        tcp_src_port_str = parts[6] if len(parts) > 6 else ""
+        tcp_dst_ip = parts[7] if len(parts) > 7 else ""
+        tcp_dst_port_str = parts[8] if len(parts) > 8 else ""
+        tcp_hex_data = parts[9] if len(parts) > 9 else ""
+
+        is_tcp = False
+        if udp_src_port_str and udp_hex_data:
+            src_ip = udp_src_ip
+            src_port_str = udp_src_port_str
+            dst_ip = udp_dst_ip
+            dst_port_str = udp_dst_port_str
+            hex_data = udp_hex_data
+        elif tcp_src_port_str and tcp_hex_data:
+            src_ip = udp_src_ip
+            src_port_str = tcp_src_port_str
+            dst_ip = tcp_dst_ip
+            dst_port_str = tcp_dst_port_str
+            hex_data = tcp_hex_data
+            is_tcp = True
+        else:
+            return None
 
         try:
             timestamp_ns = int(float(epoch_str) * 1e9)
@@ -168,6 +215,7 @@ class TsharkCapture:
             "dst_port": dst_port,
             "direction": direction,
             "device_ip": device_ip,
+            "transport": "tcp" if is_tcp else "udp",
         }
 
     async def start(self, on_packet=None):
@@ -209,7 +257,9 @@ class TsharkCapture:
                 fields = self._parse_line(line)
                 if not fields:
                     continue
-                if fields["direction"] is None:
+                if fields["transport"] == "tcp":
+                    source_type = "tshark_tcp"
+                elif fields["direction"] is None:
                     source_type = "multicast"
                 else:
                     source_type = "tshark"
