@@ -57,15 +57,29 @@ class DanteDeviceOperations:
         else:
             await self.device.dante_send_command(packet, port=port)
 
-    async def reboot(self):
-        if not hasattr(self.device.commands, "command_reboot"):
-            raise RuntimeError("reboot is not available in this build")
-        cmd_args = self.device.commands.command_reboot()
-        response = await self.device.dante_command(
-            *cmd_args, logical_command_name="reboot"
-        )
+    async def reboot(self, host_mac=None, retries=3, retry_delay=0.1):
+        import asyncio
+        import socket as socket_module
+        if host_mac is None:
+            from netaudio.dante.services.cmc import _get_host_mac
+            host_mac = _get_host_mac()
+        packet, _, port = self.device.commands.command_reboot(host_mac=host_mac)
+        device_ip = str(self.device.ipv4)
 
-        return response
+        if self.device._app is not None:
+            for attempt in range(retries):
+                self.device._app.settings.send(packet, device_ip, port)
+                if attempt < retries - 1:
+                    await asyncio.sleep(retry_delay)
+        else:
+            sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_DGRAM)
+            try:
+                for attempt in range(retries):
+                    sock.sendto(packet, (device_ip, port))
+                    if attempt < retries - 1:
+                        await asyncio.sleep(retry_delay)
+            finally:
+                sock.close()
 
     async def set_latency(self, latency):
         cmd_args = self.device.commands.command_set_latency(latency)
