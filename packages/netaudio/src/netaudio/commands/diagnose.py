@@ -61,8 +61,8 @@ async def _run_diagnose(
     profile: str | None,
     db_override: str | None,
 ):
-    from netaudio_lib.dante.device_commands import DanteDeviceCommands
-    from netaudio_lib.dante.protocol_verifier import ProtocolVerifier
+    from netaudio.dante.device_commands import DanteDeviceCommands
+    from netaudio.dante.protocol_verifier import ProtocolVerifier
 
     commands = DanteDeviceCommands()
 

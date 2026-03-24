@@ -11,7 +11,7 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketStore
 
 
 PORT_LABELS = {
@@ -57,7 +57,7 @@ def _load_fact_labels() -> dict[str, str]:
 
     _FACT_LABEL_CACHE = {}
     try:
-        from netaudio_lib.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
+        from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
         if DEFAULT_FACTS_PATH.exists():
             for fact in list_facts(DEFAULT_FACTS_PATH):
                 category = fact["category"]
@@ -79,7 +79,7 @@ def _label_packet(payload: bytes):
     if len(payload) < 8:
         return ""
 
-    from netaudio_lib.dante.debug_formatter import (
+    from netaudio.dante.debug_formatter import (
         PROTOCOL_NAMES,
         get_opcode_name,
         get_settings_message_type_name,
@@ -326,7 +326,7 @@ def _print_packet_line(
 
     if dump:
         if dissect_mode:
-            from netaudio_lib.dante.packet_dissector import dissect_and_render
+            from netaudio.dante.packet_dissector import dissect_and_render
             print(dissect_and_render(payload))
         else:
             print(_hexdump(payload))
@@ -392,13 +392,13 @@ def _parse_config_bool(value, field_name: str) -> bool | None:
 
 
 def _default_capture_config_path() -> Path:
-    from netaudio_lib.common.config_loader import default_config_path
+    from netaudio.common.config_loader import default_config_path
 
     return default_config_path()
 
 
 def _load_capture_profile(config: str | None, profile: str | None) -> tuple[dict, Path]:
-    from netaudio_lib.common.config_loader import load_capture_profile
+    from netaudio.common.config_loader import load_capture_profile
 
     try:
         return load_capture_profile(config, profile)
@@ -407,7 +407,7 @@ def _load_capture_profile(config: str | None, profile: str | None) -> tuple[dict
 
 
 def _resolve_db_from_config(db: str | None, profile_cfg: dict) -> str:
-    from netaudio_lib.common.config_loader import resolve_db_from_config
+    from netaudio.common.config_loader import resolve_db_from_config
 
     return resolve_db_from_config(db, profile_cfg)
 
@@ -576,5 +576,5 @@ def _parse_optional_int(value):
 
 
 def _resolve_facts_path() -> Path:
-    from netaudio_lib.dante.fact_store import DEFAULT_FACTS_PATH
+    from netaudio.dante.fact_store import DEFAULT_FACTS_PATH
     return DEFAULT_FACTS_PATH

@@ -1,23 +1,42 @@
 [project]
-name = "netaudio-workspace"
-version = "0.0.0"
+name = "netaudio"
+version = "0.2.0"
+description = "CLI for managing network audio devices"
+readme = "README.md"
+license = "Unlicense"
 requires-python = ">=3.9"
+authors = [{ name = "Christopher Ritsen", email = "chris.ritsen@gmail.com" }]
+keywords = ["audinate", "audio", "cli", "dante", "network"]
+dependencies = [
+    "zeroconf>=0.38.3",
+    "ifaddr>=0.2.0",
+    "sqlitedict>=1.7.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "tomli>=1.0.0; python_version < '3.11'",
+]
 
-[tool.uv.workspace]
-members = ["packages/*"]
+[project.optional-dependencies]
+capture = ["redis>=5.0.0"]
+lock = ["pynacl>=1.5.0"]
+dbus = ["dbus-fast>=2.0.0"]
 
-[tool.uv]
-managed = true
-package = false
+[project.scripts]
+netaudio = "netaudio.cli:main"
 
-[tool.uv.sources]
-netaudio-lib = { workspace = true }
-netaudio = { workspace = true }
+[project.urls]
+Repository = "https://github.com/chris-ritsen/network-audio-controller"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["packages/netaudio/src/netaudio"]
 
 [dependency-groups]
 dev = [
-    "netaudio-lib",
-    "netaudio",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.8.0",

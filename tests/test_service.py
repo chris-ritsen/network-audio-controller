@@ -3,7 +3,7 @@ import struct
 
 import pytest
 
-from netaudio_lib.dante.service import DanteMulticastService, DanteUnicastService
+from netaudio.dante.service import DanteMulticastService, DanteUnicastService
 
 
 class TestUnicastService:

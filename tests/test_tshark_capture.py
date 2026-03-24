@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from netaudio_lib.dante.tshark_capture import TsharkCapture, _build_bpf_filter
+from netaudio.dante.tshark_capture import TsharkCapture, _build_bpf_filter
 
 
 class TestBpfFilter:
