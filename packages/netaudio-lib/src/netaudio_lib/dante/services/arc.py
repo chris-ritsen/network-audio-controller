@@ -1,5 +1,19 @@
 import logging
+import struct
 
+from netaudio_lib.dante.const import (
+    FLOW_PROTOCOL_IDS,
+    FLOW_TYPE_MULTICAST,
+    HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS,
+    OPCODE_CREATE_TX_FLOW,
+    OPCODE_CREATE_TX_FLOW_2809,
+    OPCODE_DELETE_TX_FLOW,
+    OPCODE_DELETE_TX_FLOW_2809,
+    OPCODE_QUERY_TX_FLOWS,
+    OPCODE_QUERY_TX_FLOWS_2809,
+    RESULT_CODE_LOCK_REJECTION,
+    RESULT_CODE_SUCCESS,
+)
 from netaudio_lib.dante.device_commands import DanteDeviceCommands
 from netaudio_lib.dante.device_parser import DanteDeviceParser
 from netaudio_lib.dante.service import DanteUnicastService
@@ -116,6 +130,11 @@ class DanteARCService(DanteUnicastService):
                     device.rx_channels = rx_channels
                     device.subscriptions = subscriptions
 
+            # if getattr(device, "model_id", None) in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
+            #     lock_state = await self.probe_lock_state(device_ip, arc_port)
+            #     if lock_state is not None:
+            #         device.is_locked = lock_state
+
             device.error = None
         except Exception as exception:
             device.error = exception
@@ -167,6 +186,20 @@ class DanteARCService(DanteUnicastService):
             logical_command_name="set_latency",
         )
 
+    async def probe_lock_state(self, device_ip: str, arc_port: int) -> bool | None:
+        command_args = self._commands.command_set_latency(1.0)
+        response = await self.request(
+            command_args[0], device_ip, arc_port,
+            logical_command_name="probe_lock_state",
+        )
+        if response and len(response) >= 10:
+            result_code = struct.unpack(">H", response[8:10])[0]
+            if result_code == RESULT_CODE_LOCK_REJECTION:
+                return True
+            if result_code == RESULT_CODE_SUCCESS:
+                return False
+        return None
+
     async def set_name(self, device_ip: str, arc_port: int, name: str) -> bytes | None:
         command_args = self._commands.command_set_name(name)
         return await self.request(
@@ -179,4 +212,173 @@ class DanteARCService(DanteUnicastService):
         return await self.request(
             command_args[0], device_ip, arc_port,
             logical_command_name="reset_name",
+        )
+
+    def _flow_opcodes(self, flow_protocol_id: int) -> tuple[int, int, int]:
+        if flow_protocol_id == 0x2809:
+            return (OPCODE_QUERY_TX_FLOWS_2809, OPCODE_CREATE_TX_FLOW_2809, OPCODE_DELETE_TX_FLOW_2809)
+        return (OPCODE_QUERY_TX_FLOWS, OPCODE_CREATE_TX_FLOW, OPCODE_DELETE_TX_FLOW)
+
+    def _build_flow_packet(self, protocol_id: int, opcode: int, body: bytes) -> bytes:
+        transaction_id = self._next_transaction_id()
+        length = 10 + len(body)
+        header = struct.pack(">HHHHH", protocol_id, length, transaction_id, opcode, 0x0000)
+        return header + body
+
+    async def detect_flow_protocol(self, device_ip: str, arc_port: int) -> int | None:
+        for protocol_id in FLOW_PROTOCOL_IDS:
+            query_opcode = OPCODE_QUERY_TX_FLOWS_2809 if protocol_id == 0x2809 else OPCODE_QUERY_TX_FLOWS
+            packet = self._build_flow_packet(protocol_id, query_opcode, b"\x00\x00")
+            response = await self.request(
+                packet, device_ip, arc_port,
+                timeout=0.5,
+                logical_command_name="detect_flow_protocol",
+            )
+            if response and len(response) >= 10:
+                result_code = struct.unpack(">H", response[8:10])[0]
+                if result_code == RESULT_CODE_SUCCESS:
+                    return protocol_id
+        return None
+
+    async def query_tx_flows(self, device_ip: str, arc_port: int, flow_protocol_id: int) -> list[dict] | None:
+        query_opcode, _, _ = self._flow_opcodes(flow_protocol_id)
+        packet = self._build_flow_packet(flow_protocol_id, query_opcode, b"\x00\x00")
+        response = await self.request(
+            packet, device_ip, arc_port,
+            timeout=1.0,
+            logical_command_name="query_tx_flows",
+        )
+        if not response or len(response) < 12:
+            return None
+
+        result_code = struct.unpack(">H", response[8:10])[0]
+        if result_code != RESULT_CODE_SUCCESS:
+            return None
+
+        body = response[10:]
+        if len(body) < 2:
+            return []
+
+        max_flow_slots = body[0]
+        active_count = body[1]
+
+        flows = []
+        offset = 2
+        record_index = 0
+
+        while record_index < active_count and offset + 4 <= len(body):
+            flow_number = struct.unpack(">H", body[offset:offset + 2])[0]
+            record_pointer = struct.unpack(">H", body[offset + 2:offset + 4])[0]
+
+            record_body_offset = record_pointer - 10
+            if 0 <= record_body_offset < len(body):
+                flow_record = self._parse_flow_record(body, record_body_offset, flow_number, response)
+                if flow_record:
+                    flows.append(flow_record)
+
+            offset += 4
+            record_index += 1
+
+        return flows
+
+    def _parse_flow_record(self, body: bytes, offset: int, flow_number: int, full_response: bytes) -> dict | None:
+        if offset + 20 > len(body):
+            return None
+
+        flow_type = struct.unpack(">H", body[offset + 2:offset + 4])[0]
+        sample_rate = struct.unpack(">I", body[offset + 4:offset + 8])[0]
+        encoding = struct.unpack(">H", body[offset + 8:offset + 10])[0]
+        fpp = struct.unpack(">H", body[offset + 10:offset + 12])[0]
+
+        channel_count = 0
+        channels = []
+
+        if flow_type == FLOW_TYPE_MULTICAST:
+            if offset + 24 <= len(body):
+                channel_count = struct.unpack(">H", body[offset + 22:offset + 24])[0]
+                channel_offset = offset + 24
+                for channel_index in range(channel_count):
+                    if channel_offset + 2 <= len(body):
+                        channel_number = struct.unpack(">H", body[channel_offset:channel_offset + 2])[0]
+                        channels.append(channel_number)
+                        channel_offset += 2
+
+        return {
+            "flow_number": flow_number,
+            "flow_type": "multicast" if flow_type == FLOW_TYPE_MULTICAST else f"0x{flow_type:04X}",
+            "sample_rate": sample_rate,
+            "encoding": encoding,
+            "fpp": fpp,
+            "channel_count": channel_count,
+            "channels": channels,
+        }
+
+    async def create_tx_flow(
+        self,
+        device_ip: str,
+        arc_port: int,
+        flow_protocol_id: int,
+        flow_slot: int,
+        channels: list[int],
+    ) -> bytes | None:
+        _, create_opcode, _ = self._flow_opcodes(flow_protocol_id)
+
+        if flow_protocol_id == 0x2809:
+            body = self._build_create_flow_body_2809(flow_slot, channels)
+        else:
+            body = self._build_create_flow_body(flow_slot, channels)
+
+        packet = self._build_flow_packet(flow_protocol_id, create_opcode, body)
+        return await self.request(
+            packet, device_ip, arc_port,
+            timeout=2.0,
+            logical_command_name="create_tx_flow",
+        )
+
+    def _build_create_flow_body(self, flow_slot: int, channels: list[int]) -> bytes:
+        body = struct.pack(">HH", 0x0101, 0x0010)
+        body += struct.pack(">HH", 0x0000, flow_slot)
+        body += struct.pack(">H", FLOW_TYPE_MULTICAST)
+        body += b"\x00" * 10
+        body += struct.pack(">H", len(channels))
+        for channel_number in channels:
+            body += struct.pack(">H", channel_number)
+        pointer = 10 + len(body) + 2 + 2
+        body += struct.pack(">H", pointer)
+        body += b"\x00\x02"
+        body += b"\x0a\x00"
+        body += b"\x00" * 14
+        body += b"\x00\x01\x00\x00"
+        return body
+
+    def _build_create_flow_body_2809(self, flow_slot: int, channels: list[int]) -> bytes:
+        body = struct.pack(">HH", 0x0101, 0x0001)
+        body += struct.pack(">HH", 0x0000, flow_slot)
+        body += struct.pack(">H", FLOW_TYPE_MULTICAST)
+        body += b"\x00" * 10
+        body += struct.pack(">H", len(channels))
+        for channel_number in channels:
+            body += struct.pack(">H", channel_number)
+        pointer = 10 + len(body) + 2 + 2
+        body += struct.pack(">H", pointer)
+        body += b"\x00\x02"
+        body += b"\x0a\x00"
+        body += b"\x00" * 14
+        body += b"\x00\x01\x00\x00"
+        return body
+
+    async def delete_tx_flow(
+        self,
+        device_ip: str,
+        arc_port: int,
+        flow_protocol_id: int,
+        flow_slot: int,
+    ) -> bytes | None:
+        _, _, delete_opcode = self._flow_opcodes(flow_protocol_id)
+        body = struct.pack(">HHH", 0x0001, 0x0000, flow_slot)
+        packet = self._build_flow_packet(flow_protocol_id, delete_opcode, body)
+        return await self.request(
+            packet, device_ip, arc_port,
+            timeout=2.0,
+            logical_command_name="delete_tx_flow",
         )

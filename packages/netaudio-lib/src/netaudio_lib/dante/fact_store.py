@@ -26,6 +26,29 @@ def _fact_key(category: str, key: str) -> str:
     return f"{category}:{key}"
 
 
+def get_confidence(fact: dict) -> str:
+    confidence_log = fact.get("confidence_log")
+    if confidence_log:
+        return confidence_log[-1]["level"]
+    return fact.get("confidence", "unknown")
+
+
+def _append_confidence(fact: dict, level: str):
+    fact.setdefault("confidence_log", []).append({
+        "level": level,
+        "timestamp_ns": time.time_ns(),
+    })
+    fact.pop("confidence", None)
+
+
+def _migrate_confidence(fact: dict):
+    if "confidence" in fact and "confidence_log" not in fact:
+        fact["confidence_log"] = [{
+            "level": fact.pop("confidence"),
+            "timestamp_ns": fact.get("added_ns", time.time_ns()),
+        }]
+
+
 def add_fact(
     path: Path,
     category: str,
@@ -53,7 +76,7 @@ def add_fact(
         "note": note,
         "fields": fields or [],
         "evidence": evidence or [],
-        "confidence": confidence,
+        "confidence_log": [{"level": confidence, "timestamp_ns": time.time_ns()}],
         "added_ns": time.time_ns(),
     }
 
@@ -82,11 +105,15 @@ def add_fact(
 
     if existing:
         fact["evidence"] = _merge_evidence(existing.get("evidence", []), evidence or [])
+        _migrate_confidence(existing)
+        existing_confidence_log = existing.get("confidence_log", [])
+        if existing_confidence_log:
+            fact["confidence_log"] = existing_confidence_log + fact["confidence_log"]
         fact["history"] = existing.get("history", [])
         fact["history"].append({
             "replaced_ns": time.time_ns(),
             "previous_name": existing.get("name"),
-            "previous_confidence": existing.get("confidence"),
+            "previous_confidence": get_confidence(existing),
             "previous_note": existing.get("note"),
         })
 
@@ -103,6 +130,64 @@ def _merge_evidence(existing: list[str], new: list[str]) -> list[str]:
             merged.append(item)
             seen.add(item)
     return merged
+
+
+def update_fact(
+    path: Path,
+    category: str,
+    key: str,
+    name: str | None = None,
+    note: str | None = None,
+    body: str | None = None,
+    fields: list[dict] | None = None,
+    evidence: list[str] | None = None,
+    confidence: str | None = None,
+    supersedes: str | None = None,
+    protocol_id: int | list[int] | None = None,
+    match_offset: int | None = None,
+    match_size: int | None = None,
+) -> dict | None:
+    data = _load_facts(path)
+    fk = _fact_key(category, key)
+    fact = data["facts"].get(fk)
+
+    if fact is None:
+        return None
+
+    _migrate_confidence(fact)
+
+    fact.setdefault("history", []).append({
+        "replaced_ns": time.time_ns(),
+        "previous_name": fact.get("name"),
+        "previous_confidence": get_confidence(fact),
+        "previous_note": fact.get("note"),
+        "action": "updated",
+    })
+
+    if name is not None:
+        fact["name"] = name
+    if note is not None:
+        fact["note"] = note
+    if body is not None:
+        fact["body"] = body
+    if fields is not None:
+        fact["fields"] = fields
+    if confidence is not None:
+        _append_confidence(fact, confidence)
+    if supersedes is not None:
+        fact["supersedes"] = supersedes
+    if protocol_id is not None:
+        fact["protocol_id"] = protocol_id
+    if match_offset is not None:
+        fact["match_offset"] = match_offset
+    if match_size is not None:
+        fact["match_size"] = match_size
+    if evidence:
+        fact["evidence"] = _merge_evidence(fact.get("evidence", []), evidence)
+
+    data["facts"][fk] = fact
+    _save_facts(data, path)
+    return fact
 
 
 def get_fact(path: Path, category: str, key: str) -> dict | None:
@@ -153,14 +238,16 @@ def disprove_fact(
     if fact is None:
         return None
 
+    _migrate_confidence(fact)
+
     fact.setdefault("history", []).append({
         "replaced_ns": time.time_ns(),
-        "previous_confidence": fact.get("confidence"),
+        "previous_confidence": get_confidence(fact),
         "previous_note": fact.get("note"),
         "action": "disproved",
     })
 
-    fact["confidence"] = "disproved"
+    _append_confidence(fact, "disproved")
 
     disproval = {
         "reason": reason,
@@ -194,14 +281,16 @@ def reinstate_fact(
     if fact is None:
         return None
 
+    _migrate_confidence(fact)
+
     fact.setdefault("history", []).append({
         "replaced_ns": time.time_ns(),
-        "previous_confidence": fact.get("confidence"),
+        "previous_confidence": get_confidence(fact),
         "previous_note": fact.get("note"),
         "action": "reinstated",
     })
 
-    fact["confidence"] = confidence
+    _append_confidence(fact, confidence)
     if note is not None:
         fact["note"] = note
 
@@ -223,7 +312,7 @@ def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
             "name": fact["name"],
             "category": fact["category"],
             "key": fact["key"],
-            "confidence": fact.get("confidence", "unknown"),
+            "confidence": get_confidence(fact),
             "evidence_count": len(fact.get("evidence", [])),
             "errors": [],
             "verified_fields": [],
