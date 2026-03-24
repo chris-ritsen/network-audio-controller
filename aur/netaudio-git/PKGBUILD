@@ -1,6 +1,6 @@
 # Maintainer: Christopher Ritsen <chris.ritsen@gmail.com>
 pkgname='netaudio-git'
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="CLI for managing network audio devices (git version)"
 arch=(any)

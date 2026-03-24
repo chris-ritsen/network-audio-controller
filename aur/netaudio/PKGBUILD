@@ -1,7 +1,7 @@
 # Maintainer: Christopher Ritsen <chris.ritsen@gmail.com>
 _name='netaudio'
 pkgname='netaudio'
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc="CLI for managing network audio devices"
 arch=(any)
@@ -14,7 +14,7 @@ optdepends=('python-pynacl: device lock/unlock'
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-hatchling')
 source=("https://files.pythonhosted.org/packages/source/${_name::1}/${_name}/${_name}-${pkgver}.tar.gz"
         "netaudio.service::https://raw.githubusercontent.com/chris-ritsen/network-audio-controller/master/systemd/netaudio.service")
-sha256sums=('SKIP'
+sha256sums=('3d444a4c81da8aee6ef7f3539ccf3aef64ad03335a0909eb3abca440d3031e6a'
             'SKIP')
 
 build() {
