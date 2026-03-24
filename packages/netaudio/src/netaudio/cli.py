@@ -187,9 +187,7 @@ def _global_options(
         device_list()
 
 
-from netaudio.commands import bug, capture, channel, config, device, diagnose, fact, key, provenance, server, subscription
-
-app.add_typer(bug.app, name="bug")
+from netaudio.commands import capture, channel, config, device, diagnose, fact, key, provenance, server, subscription
 app.add_typer(device.app, name="device")
 app.add_typer(channel.app, name="channel")
 app.add_typer(subscription.app, name="subscription")
