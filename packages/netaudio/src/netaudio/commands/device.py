@@ -126,11 +126,15 @@ def _get_lock_key() -> bytes:
 
 
 @app.command("list")
-def device_list():
+def device_list(
+    json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
+):
     """List discovered Dante devices."""
 
     async def _run():
-        from netaudio.cli import state
+        from netaudio.cli import OutputFormat, state
+        if json_flag:
+            state.output_format = OutputFormat.json
 
         devices = await _discover()
         await _populate_controls(devices)
@@ -351,7 +355,9 @@ def lock_status():
         from netaudio_lib.dante.services.heartbeat import _parse_lock_state
         import socket
         import struct
+        import time
 
+        from netaudio_lib.common.app_config import settings as app_settings
         from netaudio_lib.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
 
         devices = await _discover()
@@ -363,7 +369,8 @@ def lock_status():
 
         device_ips = {}
         for server_name, device in filtered.items():
-            device_ips[str(device.ipv4)] = (server_name, device)
+            if device.ipv4 and device.online:
+                device_ips[str(device.ipv4)] = (server_name, device)
 
         multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -376,11 +383,12 @@ def lock_status():
             socket.inet_aton("0.0.0.0"),
         )
         multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-        multicast_socket.settimeout(3)
+        multicast_socket.settimeout(0.5)
 
+        deadline = time.monotonic() + app_settings.lock_state_timeout
         seen = set()
         try:
-            while len(seen) < len(device_ips):
+            while len(seen) < len(device_ips) and time.monotonic() < deadline:
                 try:
                     data, addr = multicast_socket.recvfrom(4096)
                 except TimeoutError:
@@ -428,12 +436,13 @@ def lock_status():
 def _collect_lock_state(devices: dict) -> None:
     import socket
     import struct
+    import time
     from netaudio_lib.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
     from netaudio_lib.dante.services.heartbeat import _parse_lock_state
 
     device_ips = {}
     for server_name, device in devices.items():
-        if device.ipv4:
+        if device.ipv4 and device.online:
             device_ips[str(device.ipv4)] = device
 
     if not device_ips:
@@ -450,11 +459,13 @@ def _collect_lock_state(devices: dict) -> None:
         socket.inet_aton("0.0.0.0"),
     )
     multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-    multicast_socket.settimeout(2)
+    multicast_socket.settimeout(0.5)
 
+    from netaudio_lib.common.app_config import settings as app_settings
+    deadline = time.monotonic() + app_settings.lock_state_timeout
     seen = set()
     try:
-        while len(seen) < len(device_ips):
+        while len(seen) < len(device_ips) and time.monotonic() < deadline:
             try:
                 data, addr = multicast_socket.recvfrom(4096)
             except TimeoutError:
