@@ -5,6 +5,7 @@ import time
 
 from netaudio_lib.dante.const import (
     DEVICE_HEARTBEAT_PORT,
+    HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS,
     MULTICAST_GROUP_HEARTBEAT,
 )
 from netaudio_lib.dante.service import DanteMulticastService
@@ -75,6 +76,8 @@ class DanteHeartbeatService(DanteMulticastService):
         device = self._device_by_ip(source_ip)
         if device:
             device.update_last_seen()
+            if getattr(device, "model_id", None) in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
+                return
             lock_state = _parse_lock_state(data)
             if lock_state is not None:
                 device.is_locked = lock_state

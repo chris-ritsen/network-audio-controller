@@ -10,7 +10,7 @@ import typer
 
 logger = logging.getLogger("netaudio")
 
-from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS
+from netaudio_lib.dante.const import BLUETOOTH_MODEL_IDS, HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS
 from netaudio_lib.dante.device_commands import DanteDeviceCommands
 from netaudio_lib.dante.device_operations import _device_lock_operation, LOCK_OPERATION_LOCK, LOCK_OPERATION_UNLOCK, validate_dante_name, validate_pin
 from netaudio_lib.dante.device_serializer import DanteDeviceSerializer
@@ -389,8 +389,9 @@ def lock_status():
                 if source_ip in device_ips and source_ip not in seen:
                     seen.add(source_ip)
                     server_name, device = device_ips[source_ip]
-                    lock_state = _parse_lock_state(data)
-                    device.is_locked = lock_state if lock_state is not None else False
+                    if getattr(device, "model_id", None) not in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
+                        lock_state = _parse_lock_state(data)
+                        device.is_locked = lock_state if lock_state is not None else False
         finally:
             multicast_socket.close()
 
@@ -462,6 +463,8 @@ def _collect_lock_state(devices: dict) -> None:
             if source_ip in device_ips and source_ip not in seen:
                 seen.add(source_ip)
                 device = device_ips[source_ip]
+                if getattr(device, "model_id", None) in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
+                    continue
                 lock_state = _parse_lock_state(data)
                 if lock_state is not None:
                     device.is_locked = lock_state
@@ -585,6 +588,9 @@ def clock():
 
     asyncio.run(_run())
 
+
+from netaudio.commands.flow import app as flow_app
+app.add_typer(flow_app, name="flow")
 
 meter_app = typer.Typer(help="Device metering.", no_args_is_help=False, invoke_without_command=True)
 app.add_typer(meter_app, name="meter")
