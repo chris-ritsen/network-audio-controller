@@ -12,17 +12,17 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.dante.clean_labels import (
+from netaudio.dante.clean_labels import (
     load_clean_labels,
     load_clean_subscription_status_labels,
     resolve_clean_labels_path,
     save_clean_labels,
 )
-from netaudio_lib.dante.debug_formatter import (
+from netaudio.dante.debug_formatter import (
     OPCODE_NAMES_BY_PROTOCOL,
     SETTINGS_MESSAGE_TYPE_NAMES,
 )
-from netaudio_lib.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketStore
 
 from netaudio.commands.capture_helpers import (
     ARC_PROTOCOLS,
@@ -1521,7 +1521,7 @@ def provenance_export(
     profile_cfg, _ = _load_capture_profile(config, profile)
     resolved_db = _resolve_db_from_config(db, profile_cfg)
 
-    from netaudio_lib.dante.protocol_verifier import export_session_bundle
+    from netaudio.dante.protocol_verifier import export_session_bundle
 
     store = PacketStore(db_path=resolved_db)
     try:
@@ -1704,7 +1704,7 @@ def provenance_analyze(
     bundle: str = typer.Argument(..., help="Path to provenance bundle (.tar.gz or directory)."),
     raw: bool = typer.Option(False, "--raw", help="Show raw hexdump for each packet."),
 ):
-    from netaudio_lib.dante.fact_store import _load_bundle as lib_load_bundle, list_facts, _verify_field
+    from netaudio.dante.fact_store import _load_bundle as lib_load_bundle, list_facts, _verify_field
 
     bundle_path = Path(bundle)
     if not bundle_path.exists():
@@ -1963,7 +1963,7 @@ def provenance_replay(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio_lib.dante.fact_store import _load_bundle as lib_load_bundle
+    from netaudio.dante.fact_store import _load_bundle as lib_load_bundle
 
     bundle_path = Path(bundle)
     if not bundle_path.exists():
@@ -2074,7 +2074,7 @@ async def _run_replay(
     db_override: str | None,
 ):
     import struct
-    from netaudio_lib.dante.protocol_verifier import ProtocolVerifier
+    from netaudio.dante.protocol_verifier import ProtocolVerifier
 
     async with ProtocolVerifier(
         device_ip=target_ip,

@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from netaudio_lib.common.mdns_cache import CACHE_FILENAME, DEFAULT_CACHE_TTL, MdnsCache
+from netaudio.common.mdns_cache import CACHE_FILENAME, DEFAULT_CACHE_TTL, MdnsCache
 
 
 class TestMdnsCache(unittest.TestCase):

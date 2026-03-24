@@ -11,11 +11,11 @@ from typing import Any, Callable, Optional
 
 import typer
 
-from netaudio_lib import DanteBrowser, DanteDevice
-from netaudio_lib.common.app_config import settings
-from netaudio_lib.daemon.client import device_request_via_daemon, get_devices_from_daemon
-from netaudio_lib.dante.application import DanteApplication
-from netaudio_lib.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC
+from netaudio import DanteBrowser, DanteDevice
+from netaudio.common.app_config import settings
+from netaudio.daemon.client import device_request_via_daemon, get_devices_from_daemon
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC
 
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
@@ -146,8 +146,8 @@ def _make_capture_store():
     if not state.capture:
         return None, None
 
-    from netaudio_lib.common.config_loader import load_capture_profile, resolve_db_from_config
-    from netaudio_lib.dante.packet_store import PacketStore
+    from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
+    from netaudio.dante.packet_store import PacketStore
 
     try:
         profile_cfg, _ = load_capture_profile(None, None)

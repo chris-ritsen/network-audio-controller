@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from netaudio_lib.dante.const import SERVICE_ARC
-from netaudio_lib.dante.device import DanteDevice
+from netaudio.dante.const import SERVICE_ARC
+from netaudio.dante.device import DanteDevice
 from tests.conftest import check_generated_command_payload
 
 DEVICE_NAME_RESPONSE_PAYLOAD_START_OFFSET = 10

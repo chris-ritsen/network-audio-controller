@@ -1,13 +1,13 @@
 import pytest
 
-from netaudio_lib.dante.services.arc import DanteARCService
-from netaudio_lib.dante.services.cmc import DanteCMCService
-from netaudio_lib.dante.services.notification import (
+from netaudio.dante.services.arc import DanteARCService
+from netaudio.dante.services.cmc import DanteCMCService
+from netaudio.dante.services.notification import (
     DanteNotificationService,
     NOTIFICATION_NAMES,
 )
-from netaudio_lib.dante.services.settings import DanteSettingsService
-from netaudio_lib.dante.events import DanteEventDispatcher
+from netaudio.dante.services.settings import DanteSettingsService
+from netaudio.dante.events import DanteEventDispatcher
 
 
 class TestDanteARCService:
@@ -81,7 +81,7 @@ class TestDanteNotificationService:
 
 class TestHeartbeatLockStateParsing:
     def test_locked_device(self):
-        from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+        from netaudio.dante.services.heartbeat import _parse_lock_state
         payload = bytes.fromhex(
             "fffe00b82d8c0000001dc1fffe5279b6"
             "4175646963617465000800011000000000"
@@ -105,7 +105,7 @@ class TestHeartbeatLockStateParsing:
         assert result is True
 
     def test_unlocked_device(self):
-        from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+        from netaudio.dante.services.heartbeat import _parse_lock_state
         unlocked_block = bytes.fromhex(
             "001c800200040010"
             "1b6d0000"
@@ -119,7 +119,7 @@ class TestHeartbeatLockStateParsing:
         assert result is False
 
     def test_no_lock_block(self):
-        from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+        from netaudio.dante.services.heartbeat import _parse_lock_state
         other_block = bytes.fromhex(
             "0010800100040004"
             "28360000"
@@ -130,30 +130,30 @@ class TestHeartbeatLockStateParsing:
         assert result is None
 
     def test_short_packet(self):
-        from netaudio_lib.dante.services.heartbeat import _parse_lock_state
+        from netaudio.dante.services.heartbeat import _parse_lock_state
         result = _parse_lock_state(b'\x00' * 10)
         assert result is None
 
 
 class TestKeyExtraction:
     def test_table_pattern_sequential(self):
-        from netaudio_lib.common.key_extract import _is_table_pattern
+        from netaudio.common.key_extract import _is_table_pattern
         sequential = bytes(range(32))
         assert _is_table_pattern(sequential) is True
 
     def test_table_pattern_stride2(self):
-        from netaudio_lib.common.key_extract import _is_table_pattern
+        from netaudio.common.key_extract import _is_table_pattern
         stride2 = bytes([i for i in range(0, 64, 2)])
         assert _is_table_pattern(stride2) is True
 
     def test_high_entropy_not_table(self):
-        from netaudio_lib.common.key_extract import _is_table_pattern
+        from netaudio.common.key_extract import _is_table_pattern
         import os
         random_key = os.urandom(32)
         assert _is_table_pattern(random_key) is False
 
     def test_extract_from_nonexistent(self):
         from pathlib import Path
-        from netaudio_lib.common.key_extract import extract_key_from_binary
+        from netaudio.common.key_extract import extract_key_from_binary
         result = extract_key_from_binary(Path("/nonexistent/file"))
         assert result is None

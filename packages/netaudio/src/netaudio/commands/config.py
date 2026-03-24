@@ -8,7 +8,7 @@ from typing import Optional
 
 import typer
 
-from netaudio_lib.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.device_commands import DanteDeviceCommands
 
 from netaudio._common import (
     _command_context,
@@ -44,7 +44,7 @@ for _name in MOVED_COMMANDS:
 @top_app.command("edit")
 def config_edit():
     """Open config.toml in $EDITOR."""
-    from netaudio_lib.common.config_loader import default_config_path
+    from netaudio.common.config_loader import default_config_path
 
     config_path = default_config_path()
 
@@ -74,7 +74,7 @@ def config_edit():
 @top_app.command("path")
 def config_path():
     """Show the config file path."""
-    from netaudio_lib.common.config_loader import default_config_path
+    from netaudio.common.config_loader import default_config_path
 
     typer.echo(str(default_config_path()))
 
