@@ -1,7 +1,7 @@
 # Maintainer: Christopher Ritsen <chris.ritsen@gmail.com>
 _name='netaudio'
 pkgname='netaudio'
-pkgver=0.1.6
+pkgver=0.1.7
 pkgrel=1
 pkgdesc="CLI for controlling Audinate Dante network audio devices"
 arch=(any)
@@ -13,7 +13,7 @@ optdepends=('python-redis: packet capture features'
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-hatchling')
 source=("https://files.pythonhosted.org/packages/source/${_name::1}/${_name}/${_name}-${pkgver}.tar.gz"
         "netaudio.service::https://raw.githubusercontent.com/chris-ritsen/network-audio-controller/master/systemd/netaudio.service")
-sha256sums=('a4d35200127c3d2a681918ce24934518be352cbad1dd2f09c0be45bef3d1adb1'
+sha256sums=('cfc5fa35b94e3948525a44067e2584d9667117b35ac6e1ffb76b1f5f9e7a57bd'
             'SKIP')
 
 build() {
