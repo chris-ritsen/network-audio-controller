@@ -204,6 +204,14 @@ class RelayServer:
             await self._handle_unlock(writer, body)
         elif method == "POST" and path == "/refresh":
             await self._handle_refresh(writer, body)
+        elif method == "POST" and path == "/set-sample-rate":
+            await self._handle_set_sample_rate(writer, body)
+        elif method == "POST" and path == "/set-encoding":
+            await self._handle_set_encoding(writer, body)
+        elif method == "POST" and path == "/set-gain":
+            await self._handle_set_gain(writer, body)
+        elif method == "POST" and path == "/set-aes67":
+            await self._handle_set_aes67(writer, body)
         elif method == "POST" and path == "/metering/start":
             await self._handle_metering_start(writer, body)
         elif method == "POST" and path == "/metering/stop":
@@ -575,6 +583,76 @@ class RelayServer:
             client_id = params.get("client_id", "relay_http")
             if self.daemon.metering:
                 self.daemon.metering.remove_persistent(device.server_name, client_id)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_set_sample_rate(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        sample_rate = params.get("sample_rate")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            await device.operations.set_sample_rate(sample_rate)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_set_encoding(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        encoding = params.get("encoding")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            await device.operations.set_encoding(encoding)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_set_gain(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        channel_number = params.get("channel_number")
+        gain_level = params.get("gain_level")
+        device_type = params.get("device_type", "")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            await device.operations.set_gain_level(channel_number, gain_level, device_type)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_set_aes67(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        enabled = params.get("enabled")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            await device.operations.enable_aes67(enabled)
             await self._send_json(writer, {"success": True})
         except Exception as exception:
             await self._send_json(writer, {"error": str(exception)}, 500)
