@@ -48,7 +48,6 @@ def _wait_for_shutdown(relay_port, timeout=10):
 def start(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
-    """Start the netaudio daemon."""
     from netaudio.common.app_config import settings as app_settings
     from netaudio.cli import state
 
@@ -60,7 +59,6 @@ def start(
 
 @app.command()
 def stop():
-    """Stop the netaudio daemon."""
     if not daemon_is_accessible():
         typer.echo(f"{icon('offline')}Daemon is not running.")
         return
@@ -76,7 +74,6 @@ def stop():
 def restart(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
-    """Restart the netaudio daemon."""
     from netaudio.common.app_config import settings as app_settings
 
     effective_port = relay_port or app_settings.relay_port
@@ -95,7 +92,6 @@ def restart(
 
 @app.command()
 def status():
-    """Check if the daemon is running."""
     if not daemon_is_accessible():
         typer.echo(f"{icon('offline')}Daemon is not running.")
         raise typer.Exit(code=1)

@@ -82,6 +82,44 @@ def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -
 
 
 
+async def _lock_via_relay(pin: str, action: str) -> dict | None:
+    from netaudio.common.app_config import settings as app_settings
+    relay_port = getattr(app_settings, "relay_port", 9000) or 9000
+
+    import json
+    from netaudio.cli import state
+    device_name = None
+    if state.names:
+        device_name = state.names[0]
+    elif state.hosts:
+        device_name = state.hosts[0]
+
+    if not device_name:
+        devices = await _discover()
+        filtered = filter_devices(devices)
+        _, device = _resolve_one(filtered)
+        device_name = device.name or device.server_name
+
+    body = json.dumps({"device": device_name, "pin": pin}).encode()
+    path = f"/{action}"
+
+    try:
+        reader, writer = await asyncio.open_connection("127.0.0.1", relay_port)
+        request = f"POST {path} HTTP/1.0\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+        writer.write(request)
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+        writer.close()
+        await writer.wait_closed()
+        response_str = response.decode("utf-8", errors="replace")
+        body_start = response_str.find("\r\n\r\n")
+        if body_start >= 0:
+            return json.loads(response_str[body_start + 4:])
+    except (ConnectionRefusedError, OSError):
+        pass
+    return None
+
+
 def _get_lock_key() -> bytes:
     from netaudio.common.app_config import settings as app_settings
 
@@ -296,9 +334,16 @@ app.add_typer(lock_app, name="lock")
 def lock_set(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to lock the device with."),
 ):
-    """Lock a device with a PIN."""
-
     async def _run():
+        result = await _lock_via_relay(pin, "lock")
+        if result is not None:
+            if result.get("already"):
+                typer.echo("already locked", err=True)
+            elif not result.get("success"):
+                typer.echo(f"Error: lock failed: {result.get('error', 'unknown')}", err=True)
+                raise typer.Exit(code=1)
+            return
+
         lock_key = _get_lock_key()
 
         error = validate_pin(pin)
@@ -323,9 +368,16 @@ def lock_set(
 def lock_clear(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to unlock the device."),
 ):
-    """Unlock a device with its PIN."""
-
     async def _run():
+        result = await _lock_via_relay(pin, "unlock")
+        if result is not None:
+            if result.get("already"):
+                typer.echo("already unlocked", err=True)
+            elif not result.get("success"):
+                typer.echo(f"Error: unlock failed: {result.get('error', 'unknown')}", err=True)
+                raise typer.Exit(code=1)
+            return
+
         lock_key = _get_lock_key()
 
         error = validate_pin(pin)
