@@ -1,71 +1,64 @@
 import struct
-from enum import IntEnum
 
 from netaudio.dante.const import (
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
+    OPCODE_CHANNEL_COUNT,
+    OPCODE_DEVICE_INFO,
+    OPCODE_DEVICE_NAME,
+    OPCODE_DEVICE_NAME_SET,
+    OPCODE_DEVICE_SETTINGS,
+    OPCODE_DEVICE_SETTINGS_SET,
+    OPCODE_RX_CHANNEL_NAME_SET,
+    OPCODE_RX_CHANNELS,
+    OPCODE_SUBSCRIPTION_ADD,
+    OPCODE_SUBSCRIPTION_REMOVE,
+    OPCODE_TX_CHANNEL_INFO,
+    OPCODE_TX_CHANNEL_NAME_SET,
+    OPCODE_TX_CHANNEL_NAMES,
+    PROTOCOL_AES67_CONFIG,
+    PROTOCOL_CMC,
+    PROTOCOL_ID,
+    PROTOCOL_SETTINGS,
     SERVICE_ARC,
 )
-
-
-class Protocol(IntEnum):
-    CONTROL = 0x27FF
-    SETTINGS = 0xFFFF
-    CMC = 0x1200
-    AES67_CONFIG = 0x2809
-
-
-class Opcode(IntEnum):
-    CHANNEL_COUNT = 0x1000
-    DEVICE_NAME_SET = 0x1001
-    DEVICE_NAME = 0x1002
-    DEVICE_INFO = 0x1003
-    DEVICE_SETTINGS = 0x1100
-    DEVICE_SETTINGS_SET = 0x1101
-    TX_CHANNELS = 0x2000
-    TX_CHANNEL_NAMES = 0x2010
-    TX_CHANNEL_NAME_SET = 0x2013
-    RX_CHANNELS = 0x3000
-    RX_CHANNEL_NAME_SET = 0x3001
-    SUBSCRIPTION_ADD = 0x3010
-    SUBSCRIPTION_REMOVE = 0x3014
 
 
 class DanteDeviceCommands:
     @staticmethod
     def _build_control_packet(opcode: int, payload: bytes = b'\x00\x00', transaction_id: int = 0) -> bytes:
         length = 8 + len(payload)
-        header = struct.pack(">HH", Protocol.CONTROL, length)
+        header = struct.pack(">HH", PROTOCOL_ID, length)
         header += struct.pack(">HH", transaction_id, opcode)
         return header + payload
 
     def command_device_info(self):
-        return (self._build_control_packet(Opcode.DEVICE_INFO), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_INFO), SERVICE_ARC)
 
     def command_device_name(self, transaction_id=0):
-        return (self._build_control_packet(Opcode.DEVICE_NAME, transaction_id=transaction_id), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_NAME, transaction_id=transaction_id), SERVICE_ARC)
 
     def command_channel_count(self, transaction_id=0):
-        return (self._build_control_packet(Opcode.CHANNEL_COUNT, transaction_id=transaction_id), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_CHANNEL_COUNT, transaction_id=transaction_id), SERVICE_ARC)
 
     def command_device_settings(self):
-        return (self._build_control_packet(Opcode.DEVICE_SETTINGS), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_SETTINGS), SERVICE_ARC)
 
     def command_set_name(self, name):
         name_bytes = name.encode('utf-8')
         payload = struct.pack(">H", 0) + name_bytes + b'\x00'
-        return (self._build_control_packet(Opcode.DEVICE_NAME_SET, payload), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_NAME_SET, payload), SERVICE_ARC)
 
     def command_reset_name(self):
-        return (self._build_control_packet(Opcode.DEVICE_NAME_SET), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_NAME_SET), SERVICE_ARC)
 
     def command_receivers(self, page=0, transaction_id=0):
         starting_channel = page * 16 + 1
         payload = struct.pack(">HBBHH", 0, 0, 1, starting_channel, 0)
-        return (self._build_control_packet(Opcode.RX_CHANNELS, payload, transaction_id=transaction_id), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_RX_CHANNELS, payload, transaction_id=transaction_id), SERVICE_ARC)
 
     def command_transmitters(self, page=0, friendly_names=False):
-        opcode = Opcode.TX_CHANNEL_NAMES if friendly_names else Opcode.TX_CHANNELS
+        opcode = OPCODE_TX_CHANNEL_NAMES if friendly_names else OPCODE_TX_CHANNEL_INFO
         starting_channel = page * 32 + 1
         payload = struct.pack(">HBBHH", 0, 0, 1, starting_channel, 0)
         return (self._build_control_packet(opcode, payload), SERVICE_ARC)
@@ -75,12 +68,12 @@ class DanteDeviceCommands:
             payload = struct.pack(">HBBBB", 0, 2, 1, 0, channel_number)
             payload += struct.pack(">H", 0x14)
             payload += b'\x00\x00\x00\x00'
-            return (self._build_control_packet(Opcode.RX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
+            return (self._build_control_packet(OPCODE_RX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
         else:
             payload = struct.pack(">HBBBBBB", 0, 2, 1, 0, 0, 0, channel_number)
             payload += struct.pack(">H", 0x18)
             payload += b'\x00\x00\x00\x00\x00\x00'
-            return (self._build_control_packet(Opcode.TX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
+            return (self._build_control_packet(OPCODE_TX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
 
     def command_set_channel_name(self, channel_type, channel_number, new_channel_name):
         name_bytes = new_channel_name.encode('utf-8')
@@ -90,13 +83,13 @@ class DanteDeviceCommands:
             payload += struct.pack(">H", 0x14)
             payload += b'\x00\x00\x00\x00'
             payload += name_bytes + b'\x00'
-            return (self._build_control_packet(Opcode.RX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
+            return (self._build_control_packet(OPCODE_RX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
         else:
             payload = struct.pack(">HBBBBBB", 0, 2, 1, 0, 0, 0, channel_number)
             payload += struct.pack(">H", 0x18)
             payload += b'\x00\x00\x00\x00\x00\x00'
             payload += name_bytes + b'\x00'
-            return (self._build_control_packet(Opcode.TX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
+            return (self._build_control_packet(OPCODE_TX_CHANNEL_NAME_SET, payload), SERVICE_ARC)
 
     def command_add_subscription(self, rx_channel_number, tx_channel_name, tx_device_name):
         packet, service = self.command_add_subscriptions([
@@ -139,7 +132,7 @@ class DanteDeviceCommands:
         payload += b'\x00' * padding_size
         payload += bytes(string_table)
 
-        return (self._build_control_packet(Opcode.SUBSCRIPTION_ADD, payload), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_SUBSCRIPTION_ADD, payload), SERVICE_ARC)
 
     def command_remove_subscription(self, rx_channel):
         return self.command_remove_subscriptions([rx_channel])
@@ -153,7 +146,7 @@ class DanteDeviceCommands:
         for rx_channel in rx_channels:
             payload += struct.pack(">I", rx_channel)
 
-        return (self._build_control_packet(Opcode.SUBSCRIPTION_REMOVE, payload), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_SUBSCRIPTION_REMOVE, payload), SERVICE_ARC)
 
     def command_set_latency(self, latency):
         latency_us = int(latency * 1000000)
@@ -165,7 +158,7 @@ class DanteDeviceCommands:
         payload += struct.pack(">I", latency_us)[1:]
         payload += b'\x00'
         payload += struct.pack(">I", latency_us)[1:]
-        return (self._build_control_packet(Opcode.DEVICE_SETTINGS_SET, payload), SERVICE_ARC)
+        return (self._build_control_packet(OPCODE_DEVICE_SETTINGS_SET, payload), SERVICE_ARC)
 
     def command_reboot(self, host_mac=None):
         mac = host_mac if host_mac else b'\x00' * 6
@@ -197,7 +190,7 @@ class DanteDeviceCommands:
         payload += bytes([0x00, 0x63, 0x00, 0x00, 0x00, 0x64])
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -215,7 +208,7 @@ class DanteDeviceCommands:
         payload += struct.pack(">B", encoding)
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -233,7 +226,7 @@ class DanteDeviceCommands:
         payload += struct.pack(">I", sample_rate)[1:]
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -263,7 +256,7 @@ class DanteDeviceCommands:
         payload += struct.pack(">B", gain_level)
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -284,7 +277,7 @@ class DanteDeviceCommands:
         payload += struct.pack(">B", enable_byte)
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -300,7 +293,7 @@ class DanteDeviceCommands:
         payload += bytes([0x60, 0x00, 0x22, 0x00, 0x63, 0x00, 0x64])
 
         length = len(payload) + 4
-        packet = struct.pack(">HH", Protocol.AES67_CONFIG, length)
+        packet = struct.pack(">HH", PROTOCOL_AES67_CONFIG, length)
         packet += struct.pack(">H", transaction_id)
         packet += payload
 
@@ -343,7 +336,7 @@ class DanteDeviceCommands:
         body += b'\x00' * 10
 
         total_length = 4 + 2 + len(body)
-        packet = struct.pack(">H", Protocol.CMC)
+        packet = struct.pack(">H", PROTOCOL_CMC)
         packet += struct.pack(">H", total_length)
         packet += struct.pack(">H", transaction_id)
         packet += body
@@ -380,7 +373,7 @@ class DanteDeviceCommands:
         payload += bytes([0x0a, 0x02, 0x08, 0x01])
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -398,7 +391,7 @@ class DanteDeviceCommands:
         payload += bytes([0x00, 0xC1, 0x00, 0x00, 0x00, 0x00])
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return packet
@@ -416,7 +409,7 @@ class DanteDeviceCommands:
         payload += bytes([0x00, 0x61, 0x00, 0x00, 0x00, 0x00])
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return packet

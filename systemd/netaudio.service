@@ -4,8 +4,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
-ExecStart=/usr/bin/netaudio --capture server run
+Type=notify
+ExecStart=/usr/bin/netaudio server start
 ExecStop=/usr/bin/netaudio server stop
 Restart=on-failure
 RestartSec=5

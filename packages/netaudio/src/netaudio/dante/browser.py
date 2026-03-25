@@ -78,6 +78,9 @@ class DanteBrowser:
         for key, value in info.properties.items():
             key = key.decode("utf-8")
 
+            if not key:
+                continue
+
             if isinstance(value, bytes):
                 value = value.decode("utf-8")
 
@@ -127,6 +130,9 @@ class DanteBrowser:
 
         for key, value in info.properties.items():
             key = key.decode("utf-8")
+
+            if not key:
+                continue
 
             if isinstance(value, bytes):
                 value = value.decode("utf-8")
