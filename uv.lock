@@ -351,6 +351,7 @@ version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "ifaddr" },
+    { name = "pynacl" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "sqlitedict" },
@@ -369,9 +370,6 @@ dbus = [
     { name = "dbus-fast", version = "2.45.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "dbus-fast", version = "4.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
-lock = [
-    { name = "pynacl" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -387,7 +385,7 @@ dev = [
 requires-dist = [
     { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
     { name = "ifaddr", specifier = ">=0.2.0" },
-    { name = "pynacl", marker = "extra == 'lock'", specifier = ">=1.5.0" },
+    { name = "pynacl", specifier = ">=1.5.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -396,7 +394,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15.0" },
     { name = "zeroconf", specifier = ">=0.38.3" },
 ]
-provides-extras = ["capture", "lock", "dbus"]
+provides-extras = ["capture", "dbus"]
 
 [package.metadata.requires-dev]
 dev = [

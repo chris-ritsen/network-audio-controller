@@ -3,8 +3,16 @@ import struct
 
 import pytest
 
-from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device_commands import DanteDeviceCommands, Protocol, Opcode
+from netaudio.dante.const import (
+    OPCODE_CHANNEL_COUNT,
+    OPCODE_DEVICE_NAME,
+    OPCODE_RX_CHANNELS,
+    OPCODE_TX_CHANNEL_INFO,
+    OPCODE_TX_CHANNEL_NAMES,
+    PROTOCOL_ID,
+    SERVICE_ARC,
+)
+from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_parser import DanteDeviceParser
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
@@ -54,9 +62,9 @@ class TestCommandDeviceName:
 
         assert service_type == SERVICE_ARC
         assert len(packet) == len(expected)
-        assert packet[0:2] == struct.pack(">H", Protocol.CONTROL)
+        assert packet[0:2] == struct.pack(">H", PROTOCOL_ID)
         assert packet[3] == 10
-        assert packet[6:8] == struct.pack(">H", Opcode.DEVICE_NAME)
+        assert packet[6:8] == struct.pack(">H", OPCODE_DEVICE_NAME)
         assert packet[8:] == expected[8:]
 
     @pytest.mark.parametrize("fixture_base,expected_name", DEVICE_NAME_FIXTURES)
@@ -75,7 +83,7 @@ class TestCommandChannelCount:
 
         assert service_type == SERVICE_ARC
         assert len(packet) == len(expected)
-        assert packet[6:8] == struct.pack(">H", Opcode.CHANNEL_COUNT)
+        assert packet[6:8] == struct.pack(">H", OPCODE_CHANNEL_COUNT)
         assert packet[8:] == expected[8:]
 
 
@@ -88,7 +96,7 @@ class TestCommandReceivers:
 
         assert service_type == SERVICE_ARC
         assert len(packet) == len(expected)
-        assert packet[6:8] == struct.pack(">H", Opcode.RX_CHANNELS)
+        assert packet[6:8] == struct.pack(">H", OPCODE_RX_CHANNELS)
         assert packet[8:] == expected[8:]
 
     def test_page_1_generates_correct_starting_channel(self):
@@ -137,14 +145,14 @@ class TestCommandTransmitters:
         packet, service_type = commands.command_transmitters(page=0, friendly_names=True)
 
         assert service_type == SERVICE_ARC
-        assert packet[6:8] == struct.pack(">H", Opcode.TX_CHANNEL_NAMES)
+        assert packet[6:8] == struct.pack(">H", OPCODE_TX_CHANNEL_NAMES)
 
     def test_raw_generates_correct_opcode(self):
         commands = DanteDeviceCommands()
         packet, service_type = commands.command_transmitters(page=0, friendly_names=False)
 
         assert service_type == SERVICE_ARC
-        assert packet[6:8] == struct.pack(">H", Opcode.TX_CHANNELS)
+        assert packet[6:8] == struct.pack(">H", OPCODE_TX_CHANNEL_INFO)
 
     def test_page_1_generates_correct_starting_channel(self):
         commands = DanteDeviceCommands()

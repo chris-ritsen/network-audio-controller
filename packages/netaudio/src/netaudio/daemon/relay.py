@@ -56,6 +56,10 @@ class RelayServer:
         dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
         dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._on_notification)
         dispatcher.on(EventType.METER_VALUES, self._on_meter_values)
+        dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_event)
+        dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
+        dispatcher.on(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
+        dispatcher.on(EventType.SHURE_METER_VALUES, self._on_shure_meter)
 
     async def _on_device_event(self, event: DanteEvent):
         device = self.daemon.devices.get(event.server_name)
@@ -85,6 +89,33 @@ class RelayServer:
             "server_name": event.server_name,
             "tx": event.data.get("tx", {}),
             "rx": event.data.get("rx", {}),
+        })
+
+    async def _on_shure_event(self, event: DanteEvent):
+        if not self.daemon.shure:
+            return
+        device = self.daemon.shure.devices.get(event.device_name)
+        if not device:
+            return
+        await self._broadcast_sse({
+            "event": event.type.name.lower(),
+            "mac": event.device_name,
+            "device": device.to_json(),
+        })
+
+    async def _on_shure_removed(self, event: DanteEvent):
+        await self._broadcast_sse({
+            "event": "shure_device_removed",
+            "mac": event.device_name,
+        })
+
+    async def _on_shure_meter(self, event: DanteEvent):
+        await self._broadcast_sse({
+            "event": "shure_meter_values",
+            "mac": event.device_name,
+            "channel": event.data.get("channel"),
+            "key": event.data.get("key"),
+            "value": event.data.get("value"),
         })
 
     async def _on_notification(self, event: DanteEvent):
@@ -181,7 +212,12 @@ class RelayServer:
         if method == "GET" and path == "/events":
             await self._handle_sse(writer, reader)
             return
-        if method == "GET" and path == "/devices":
+        if method == "GET" and path == "/shure/devices":
+            await self._handle_get_shure_devices(writer)
+        elif method == "GET" and path.startswith("/shure/devices/"):
+            mac = path[len("/shure/devices/"):]
+            await self._handle_get_shure_device(writer, mac)
+        elif method == "GET" and path == "/devices":
             await self._handle_get_devices(writer)
         elif method == "GET" and path.startswith("/devices/"):
             server_name = path[len("/devices/"):]
@@ -245,7 +281,12 @@ class RelayServer:
             device_json["rx_count"] = device.rx_count
             full_state[server_name] = device_json
 
-        initial = f"data: {json.dumps({'event': 'snapshot', 'devices': full_state}, default=str)}\n\n".encode()
+        shure_state = {}
+        if self.daemon.shure:
+            for mac, device in self.daemon.shure.devices.items():
+                shure_state[mac] = device.to_json()
+
+        initial = f"data: {json.dumps({'event': 'snapshot', 'devices': full_state, 'shure_devices': shure_state}, default=str)}\n\n".encode()
         writer.write(initial)
         await writer.drain()
 
@@ -262,6 +303,33 @@ class RelayServer:
         finally:
             if writer in self.sse_clients:
                 self.sse_clients.remove(writer)
+
+    async def _handle_get_shure_devices(self, writer):
+        if not self.daemon.shure:
+            await self._send_json(writer, {})
+            return
+        result = {}
+        for mac, device in self.daemon.shure.devices.items():
+            result[mac] = device.to_json()
+        await self._send_json(writer, result)
+
+    async def _handle_get_shure_device(self, writer, mac):
+        if not self.daemon.shure:
+            await self._send_json(writer, {"error": "shure not available"}, 404)
+            return
+        device = self.daemon.shure.devices.get(mac)
+        if not device:
+            for m, d in self.daemon.shure.devices.items():
+                if d.name and d.name.lower() == mac.lower():
+                    device = d
+                    break
+                if d.ip == mac:
+                    device = d
+                    break
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        await self._send_json(writer, device.to_json())
 
     async def _handle_get_devices(self, writer):
         devices_json = {}
@@ -665,6 +733,8 @@ class RelayServer:
             return device
         for server_name, candidate in self.daemon.devices.items():
             if candidate.name and candidate.name.lower() == name.lower():
+                return candidate
+            if candidate.ipv4 and str(candidate.ipv4) == name:
                 return candidate
         return None
 

@@ -6,3 +6,4 @@ __pycache__
 debug.log
 .hypothesis/
 tests/fixtures/provenance/.local/
+packages/netaudio/man/
