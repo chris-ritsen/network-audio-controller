@@ -13,6 +13,10 @@ class EventType(Enum):
     DEVICE_UPDATED = auto()
     METER_VALUES = auto()
     NOTIFICATION_RECEIVED = auto()
+    SHURE_DEVICE_DISCOVERED = auto()
+    SHURE_DEVICE_REMOVED = auto()
+    SHURE_DEVICE_UPDATED = auto()
+    SHURE_METER_VALUES = auto()
 
 
 @dataclass

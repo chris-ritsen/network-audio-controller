@@ -14,12 +14,12 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",
+    "pynacl>=1.5.0",
     "tomli>=1.0.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
 capture = ["redis>=5.0.0"]
-lock = ["pynacl>=1.5.0"]
 dbus = ["dbus-fast>=2.0.0"]
 
 [project.scripts]

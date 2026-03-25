@@ -14,8 +14,10 @@ from netaudio.common.socket_path import (
     cleanup_daemon_socket,
     start_daemon_server,
 )
+from netaudio.daemon.enforcement import EnforcementManager
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.relay import RelayServer
+from netaudio.shure.manager import ShureManager
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.daemon.protocol import (
     CMD_DEVICE_REQUEST,
@@ -64,7 +66,26 @@ try:
 except ImportError:
     aioredis = None
 
+try:
+    from netaudio.daemon.dbus_service import DBusService as _DBusService
+except ImportError:
+    _DBusService = None
+
 logger = logging.getLogger("netaudio")
+
+
+def _sd_notify(state):
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    import socket as _socket
+    sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_DGRAM)
+    try:
+        if addr[0] == "@":
+            addr = "\0" + addr[1:]
+        sock.sendto(state.encode(), addr)
+    finally:
+        sock.close()
 
 
 class NetaudioDaemon:
@@ -117,6 +138,8 @@ class NetaudioDaemon:
         self.metering: MeteringManager | None = None
         self.relay: RelayServer | None = None
         self.heartbeat: DanteHeartbeatService | None = None
+        self.shure: ShureManager | None = None
+        self._dbus = None
 
     @property
     def devices(self) -> dict:
@@ -176,10 +199,136 @@ class NetaudioDaemon:
         except Exception as exception:
             logger.debug(f"Redis delete error for {server_name}: {exception}")
 
+    def _load_shure_correlations(self):
+        try:
+            from netaudio.common.config_loader import default_config_path
+            path = default_config_path()
+            if not path.exists():
+                return {}
+            import tomllib
+            data = tomllib.loads(path.read_text())
+            return data.get("shure", {}).get("correlations", {})
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _normalize_mac(mac):
+        return mac.lower().replace(":", "").replace("-", "")[:12]
+
+    def _find_dante_for_shure(self, shure_device):
+        from netaudio.shure.device import ShureDeviceType
+        if shure_device.device_type != ShureDeviceType.ad4d:
+            return None
+
+        correlations = self._load_shure_correlations()
+        dante_mac = correlations.get(shure_device.mac)
+        if not dante_mac:
+            return None
+
+        normalized_target = self._normalize_mac(dante_mac)
+        for device in self.application.devices.values():
+            if device.mac_address and self._normalize_mac(device.mac_address) == normalized_target:
+                return device
+
+        return None
+
+    def _dante_device_to_dict(self, device):
+        result = {
+            "server_name": device.server_name or "",
+            "name": device.name or "",
+            "ip": str(device.ipv4) if device.ipv4 else "",
+            "mac": device.mac_address or "",
+            "sample_rate": device.sample_rate,
+            "encoding": device.encoding,
+            "latency": device.latency,
+        }
+
+        if device.tx_channels:
+            result["tx_channels"] = {
+                str(num): {"name": ch.name or "", "friendly_name": ch.friendly_name or ""}
+                for num, ch in sorted(device.tx_channels.items())
+                if ch.name
+            }
+
+        if device.rx_channels:
+            result["rx_channels"] = {
+                str(num): {"name": ch.name or "", "friendly_name": ch.friendly_name or ""}
+                for num, ch in sorted(device.rx_channels.items())
+                if ch.name
+            }
+
+        if device.subscriptions:
+            subs = []
+            for sub in device.subscriptions:
+                subs.append({
+                    "rx_channel_name": sub.rx_channel_name or "",
+                    "tx_device_name": sub.tx_device_name or "",
+                    "tx_channel_name": sub.tx_channel_name or "",
+                    "status": ", ".join(sub.status_text()) if sub.status_code is not None else "",
+                })
+            result["subscriptions"] = subs
+
+        return result
+
+    async def _publish_shure_to_redis(self, mac):
+        if not self._redis:
+            return
+
+        device = self.shure.devices.get(mac)
+        if not device:
+            return
+
+        data = device.to_json()
+
+        dante = self._find_dante_for_shure(device)
+        if dante:
+            data["dante"] = self._dante_device_to_dict(dante)
+
+        try:
+            await self._redis.set(f"netaudio:shure:{mac}", json.dumps(data))
+        except Exception as exception:
+            logger.debug(f"Redis publish error for Shure {mac}: {exception}")
+
+    async def _publish_shure_meters_to_redis(self, mac, data):
+        if not self._redis:
+            return
+
+        try:
+            await self._redis.set(f"netaudio:shure:meters:{mac}", json.dumps(data))
+        except Exception as exception:
+            logger.debug(f"Redis meter publish error for Shure {mac}: {exception}")
+
+    async def _delete_shure_from_redis(self, mac):
+        if not self._redis:
+            return
+
+        try:
+            await self._redis.delete(f"netaudio:shure:{mac}", f"netaudio:shure:meters:{mac}")
+        except Exception as exception:
+            logger.debug(f"Redis delete error for Shure {mac}: {exception}")
+
+    async def _on_shure_discovered(self, event: DanteEvent):
+        logger.info(f"Shure device discovered: {event.device_name}")
+        await self._publish_shure_to_redis(event.device_name)
+
+    async def _on_shure_updated(self, event: DanteEvent):
+        await self._publish_shure_to_redis(event.device_name)
+
+    async def _on_shure_removed(self, event: DanteEvent):
+        logger.info(f"Shure device removed: {event.device_name}")
+        await self._delete_shure_from_redis(event.device_name)
+
+    async def _on_shure_meters(self, event: DanteEvent):
+        await self._publish_shure_meters_to_redis(event.device_name, event.data)
+
     def _register_event_listeners(self):
         self.application.dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_discovered)
         self.application.dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_updated)
         self.application.dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
+        self.application.dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_discovered)
+        self.application.dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_updated)
+        self.application.dispatcher.on(EventType.SHURE_DEVICE_REMOVED, self._on_shure_removed)
+        self.application.dispatcher.on(EventType.SHURE_METER_VALUES, self._on_shure_meters)
 
         self.application.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
         self.application.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
@@ -200,6 +349,18 @@ class NetaudioDaemon:
         self.application.on_notification(NOTIFICATION_ROUTING_READY, self._on_device_state_changed)
         self.application.on_notification(NOTIFICATION_ROUTING_DEVICE_CHANGE, self._on_routing_changed)
 
+    async def _republish_correlated_shure(self, dante_device):
+        if not self.shure:
+            return
+        correlations = self._load_shure_correlations()
+        dante_mac = dante_device.mac_address or ""
+        if not dante_mac:
+            return
+        normalized_dante = self._normalize_mac(dante_mac)
+        for shure_mac, corr_dante_mac in correlations.items():
+            if self._normalize_mac(corr_dante_mac) == normalized_dante:
+                await self._publish_shure_to_redis(shure_mac)
+
     async def _on_device_discovered(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
         if device:
@@ -208,11 +369,13 @@ class NetaudioDaemon:
             if device.ipv4:
                 await self.application.cmc.register_device(str(device.ipv4))
             await self._publish_device_to_redis(device)
+            await self._republish_correlated_shure(device)
 
     async def _on_device_updated(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
         if device:
             await self._publish_device_to_redis(device)
+            await self._republish_correlated_shure(device)
 
     async def _on_device_removed(self, event: DanteEvent):
         logger.info(f"Device removed (event): {event.server_name}")
@@ -446,16 +609,22 @@ class NetaudioDaemon:
 
     async def start(self):
         self.running = True
+
+        _sd_notify("STATUS=Connecting to Redis...")
         await self._connect_redis()
 
         self.server = await start_daemon_server(self.handle_client)
 
         logger.info("Daemon listening")
 
+        _sd_notify("STATUS=Starting application...")
         await self.application.startup()
 
         self.metering = MeteringManager(self.application)
         await self.metering.start()
+
+        self.shure = ShureManager(self.application.dispatcher)
+        await self.shure.start()
 
         self.relay = RelayServer(self, port=self._relay_port)
         await self.relay.start()
@@ -469,8 +638,24 @@ class NetaudioDaemon:
         )
         await self.heartbeat.start()
 
+        self.enforcement = EnforcementManager(self)
+        await self.enforcement.start()
+
         self._register_event_listeners()
 
+        if _DBusService:
+            try:
+                self._dbus = _DBusService(self)
+                await self._dbus.start()
+            except Exception as e:
+                logger.info(f"D-Bus not available, continuing without it: {e}")
+                self._dbus = None
+
+        if self.shure:
+            for mac in self.shure.devices:
+                await self._publish_shure_to_redis(mac)
+
+        _sd_notify("STATUS=Starting mDNS browser...")
         self.zeroconf = AsyncZeroconf()
         self.browser = AsyncServiceBrowser(
             self.zeroconf.zeroconf,
@@ -479,6 +664,8 @@ class NetaudioDaemon:
         )
 
         logger.info("mDNS browser started, watching for devices...")
+
+        _sd_notify("READY=1\nSTATUS=Discovering devices...")
 
         if hasattr(self.server, "serve_forever"):
             async with self.server:
@@ -490,8 +677,21 @@ class NetaudioDaemon:
     async def stop(self):
         self.running = False
 
+        if self._dbus:
+            try:
+                await self._dbus.stop()
+            except Exception:
+                pass
+            self._dbus = None
+
         if self.heartbeat:
             await self.heartbeat.stop()
+
+        if hasattr(self, "enforcement") and self.enforcement:
+            await self.enforcement.stop()
+
+        if self.shure:
+            await self.shure.stop()
 
         if self.relay:
             await self.relay.stop()
@@ -551,6 +751,8 @@ class NetaudioDaemon:
                     if name.startswith(server_name.replace(".local.", "")):
                         logger.info(f"Device offline (mDNS removed): {server_name}")
                         self.application.mark_device_offline(server_name)
+                        online = sum(1 for d in self.devices.values() if d.online)
+                        _sd_notify(f"STATUS={online} device(s) online")
 
                 return
 
@@ -576,6 +778,9 @@ class NetaudioDaemon:
 
             for key, value in info.properties.items():
                 key = key.decode("utf-8") if isinstance(key, bytes) else key
+
+                if not key:
+                    continue
 
                 if isinstance(value, bytes):
                     value = value.decode("utf-8")
@@ -603,6 +808,8 @@ class NetaudioDaemon:
                     logger.info(f"Device discovered: {server_name}")
                 else:
                     logger.info(f"Device back online: {server_name}")
+                online = sum(1 for d in self.devices.values() if d.online)
+                _sd_notify(f"STATUS={online} device(s) online")
                 if addresses[0]:
                     await self.application.cmc.register_device(addresses[0])
                 if was_offline and self.metering:
@@ -1001,6 +1208,7 @@ class NetaudioDaemon:
                     client_device.product_version = device.product_version
                     client_device.board_name = device.board_name
                     client_device.model = device.model
+                    client_device.is_locked = device.is_locked
                     devices_for_client[server_name] = client_device
                 data = pickle.dumps(devices_for_client)
 

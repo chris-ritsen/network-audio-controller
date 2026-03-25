@@ -40,7 +40,7 @@ class DanteARCService(DanteUnicastService):
             return response[10:-1].decode("ascii")
         return None
 
-    async def get_channel_count(self, device_ip: str, arc_port: int) -> tuple[int, int] | None:
+    async def get_channel_count(self, device_ip: str, arc_port: int) -> tuple[int, int, bool | None] | None:
         command_args = self._commands.command_channel_count(
             transaction_id=self._next_transaction_id()
         )
@@ -52,7 +52,11 @@ class DanteARCService(DanteUnicastService):
         if response and len(response) >= 16:
             tx_count = int.from_bytes(response[13:14], "big")
             rx_count = int.from_bytes(response[15:16], "big")
-            return tx_count, rx_count
+            lock_status = None
+            if len(response) >= 36:
+                lock_field = int.from_bytes(response[34:36], "big")
+                lock_status = lock_field != 0
+            return tx_count, rx_count, lock_status
         return None
 
     async def get_aes67_config(self, device_ip: str, arc_port: int) -> bool | None:
@@ -110,6 +114,8 @@ class DanteARCService(DanteUnicastService):
             if counts:
                 device.tx_count = device.tx_count_raw = counts[0]
                 device.rx_count = device.rx_count_raw = counts[1]
+                if counts[2] is not None:
+                    device.is_locked = counts[2]
 
             if device.aes67_enabled is None:
                 try:
