@@ -416,6 +416,30 @@ class DanteApplication:
         except Exception:
             logger.debug(f"Failed to send conmon {opcode} to {device.server_name}")
 
+    async def probe_preferred_leader_state(self, device_ip: str, timeout: float = 2.0) -> bool | None:
+        waiter = self.notifications.register_preferred_leader_waiter(device_ip)
+        try:
+            self.settings.probe_preferred_leader(device_ip)
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            return self.notifications.get_preferred_leader_result(device_ip)
+        except asyncio.TimeoutError:
+            logger.debug(f"Preferred leader probe timeout for {device_ip}")
+            return self.notifications.get_preferred_leader_result(device_ip)
+        finally:
+            self.notifications.unregister_preferred_leader_waiter(device_ip)
+
+    async def probe_aes67_state(self, device_ip: str, timeout: float = 2.0) -> tuple[bool | None, bool | None] | None:
+        waiter = self.notifications.register_aes67_waiter(device_ip)
+        try:
+            self.settings.probe_aes67(device_ip)
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            return self.notifications.get_aes67_result(device_ip)
+        except asyncio.TimeoutError:
+            logger.debug(f"AES67 probe timeout for {device_ip}")
+            return self.notifications.get_aes67_result(device_ip)
+        finally:
+            self.notifications.unregister_aes67_waiter(device_ip)
+
     def _device_by_ip(self, ip_str: str):
         for device in self.devices.values():
             if device.ipv4 and str(device.ipv4) == ip_str:

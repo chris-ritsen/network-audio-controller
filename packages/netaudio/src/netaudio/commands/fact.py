@@ -998,31 +998,18 @@ def _spec_overview() -> list[str]:
     return lines
 
 
-@app.command("spec")
-def fact_spec(
-    category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Write to file instead of stdout."),
-):
+def _build_spec_data(
+    facts_path: Path,
+    category_filter: Optional[str] = None,
+) -> dict:
     from netaudio.dante.fact_store import list_facts, get_categories, get_confidence
 
-    facts_path = _resolve_facts_path()
-
-    if not facts_path.exists():
-        print("No facts registered yet.", file=sys.stderr)
-        raise typer.Exit(1)
-
     categories = get_categories(facts_path)
-    if not categories:
-        print("No facts registered yet.", file=sys.stderr)
-        raise typer.Exit(1)
-
-    if category:
-        categories = [category]
-
+    if category_filter:
+        categories = [category_filter]
     categories = sorted(categories, key=_category_sort_key)
 
     all_facts = list_facts(facts_path)
-
     publishable_facts = [f for f in all_facts if get_confidence(f) != "disproved"]
 
     confidence_counts = {"verified": 0, "observed": 0, "inferred": 0, "uncertain": 0}
@@ -1031,45 +1018,89 @@ def fact_spec(
         if conf in confidence_counts:
             confidence_counts[conf] += 1
 
+    seen_message_types: set[str] = set()
+
+    spec_categories = []
+    for cat in categories:
+        category_facts = [f for f in publishable_facts if f["category"] == cat]
+        if not category_facts:
+            continue
+
+        title = _CATEGORY_TITLES.get(cat, cat.replace("_", " ").title())
+        entries = []
+        for fact in category_facts:
+            dedup_key = f"{fact['name']}:{fact['key']}"
+            if dedup_key in seen_message_types:
+                continue
+            seen_message_types.add(dedup_key)
+
+            confidence = get_confidence(fact)
+            entry = {
+                "key": fact["key"],
+                "name": fact["name"],
+                "category": cat,
+                "confidence": confidence,
+            }
+            if fact.get("note"):
+                entry["note"] = fact["note"]
+            if fact.get("body"):
+                entry["body"] = fact["body"]
+            fields = fact.get("fields", [])
+            if fields:
+                entry["fields"] = [
+                    {
+                        "offset": field["offset"],
+                        "length": field["length"],
+                        "dtype": field["dtype"],
+                        "name": field["name"],
+                        "value": field.get("value", ""),
+                    }
+                    for field in sorted(fields, key=lambda f: f.get("offset", 0))
+                ]
+            entries.append(entry)
+
+        spec_categories.append({
+            "category": cat,
+            "title": title,
+            "facts": entries,
+        })
+
+    return {
+        "title": "Dante Control Protocol Reference",
+        "total": sum(confidence_counts.values()),
+        "confidence": {k: v for k, v in confidence_counts.items() if v},
+        "categories": spec_categories,
+    }
+
+
+def _spec_to_markdown(spec_data: dict) -> str:
     lines = []
     lines.append("# Dante Control Protocol Reference")
     lines.append("")
 
-    total_count = sum(confidence_counts.values())
-    summary_parts = []
-    for level in ("verified", "observed", "inferred", "uncertain"):
-        count = confidence_counts[level]
-        if count:
-            summary_parts.append(f"{level}: {count}")
-    lines.append(f"**{total_count} documented protocol elements** across {len(categories)} categories.")
+    total = spec_data["total"]
+    confidence = spec_data["confidence"]
+    num_categories = len(spec_data["categories"])
+    summary_parts = [f"{level}: {count}" for level, count in confidence.items()]
+    lines.append(f"**{total} documented protocol elements** across {num_categories} categories.")
     if summary_parts:
         lines.append(" | ".join(summary_parts))
     lines.append("")
     lines.append("---")
     lines.append("")
 
-    # Overview section
     lines.extend(_spec_overview())
 
-    for cat in categories:
-        category_facts = [
-            f for f in publishable_facts if f["category"] == cat
-        ]
-        if not category_facts:
-            continue
-
-        title = _CATEGORY_TITLES.get(cat, cat.replace("_", " ").title())
-        lines.append(f"## {title}")
+    for cat_data in spec_data["categories"]:
+        lines.append(f"## {cat_data['title']}")
         lines.append("")
 
-        for fact in category_facts:
-            confidence = get_confidence(fact)
-
+        for fact in cat_data["facts"]:
             lines.append(f"### {fact['key']} — {fact['name']}")
             lines.append("")
 
-            if confidence in ("inferred", "observed", "uncertain"):
-                lines.append(f"*Status: {confidence}*")
+            if fact["confidence"] in ("inferred", "observed", "uncertain"):
+                lines.append(f"*Status: {fact['confidence']}*")
                 lines.append("")
 
             if fact.get("note"):
@@ -1090,14 +1121,133 @@ def fact_spec(
                 lines.append(_format_field_table(fields))
                 lines.append("")
 
-    text = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
+    import shutil
+    import textwrap
+
+    terminal_width = shutil.get_terminal_size((120, 24)).columns
+
+    lines = []
+    lines.append("\033[1mDante Control Protocol Reference\033[0m")
+    lines.append("")
+
+    total = spec_data["total"]
+    confidence = spec_data["confidence"]
+    summary_parts = [f"\033[1m{count}\033[0m {level}" for level, count in confidence.items()]
+    lines.append(f"{total} documented protocol elements across {len(spec_data['categories'])} categories")
+    lines.append("  " + "  ".join(summary_parts))
+    lines.append("")
+
+    _CONFIDENCE_COLORS = {
+        "verified": "\033[32m",
+        "observed": "\033[33m",
+        "inferred": "\033[90m",
+        "uncertain": "\033[91m",
+    }
+
+    for cat_index, cat_data in enumerate(spec_data["categories"]):
+        if cat_index > 0:
+            lines.append("")
+        lines.append(f"\033[1;4m{cat_data['title']}\033[0m")
+        lines.append("")
+
+        for fact_index, fact in enumerate(cat_data["facts"]):
+            if fact_index > 0:
+                lines.append("")
+
+            confidence_val = fact["confidence"]
+            confidence_color = _CONFIDENCE_COLORS.get(confidence_val, "")
+            confidence_tag = ""
+            if confidence_val in ("inferred", "observed", "uncertain"):
+                confidence_tag = f"  {confidence_color}{confidence_val}\033[0m"
+
+            lines.append(f"  \033[1m{fact['key']}\033[0m  {fact['name']}{confidence_tag}")
+
+            if fact.get("note"):
+                lines.append("")
+                note_wrapped = textwrap.fill(
+                    fact["note"],
+                    width=terminal_width,
+                    initial_indent="    ",
+                    subsequent_indent="    ",
+                )
+                lines.append(f"\033[90m{note_wrapped}\033[0m")
+
+            fields = fact.get("fields", [])
+            if fields and not fact.get("body"):
+                lines.append("")
+                max_name_len = max(len(field["name"]) for field in fields)
+                max_type_len = max(len(field["dtype"]) for field in fields)
+                for field in fields:
+                    value_str = f"  \033[36m{field['value']}\033[0m" if field.get("value") else ""
+                    lines.append(
+                        f"    \033[90m{field['offset']:3d}:{field['offset'] + field['length']:<3d}\033[0m"
+                        f"  {field['dtype']:<{max_type_len}s}"
+                        f"  {field['name']:<{max_name_len}s}"
+                        f"{value_str}"
+                    )
+
+            if fact.get("body"):
+                lines.append("")
+                body_lines = fact["body"].splitlines()
+                for body_line in body_lines:
+                    if body_line.startswith("#") or body_line.startswith("|"):
+                        continue
+                    stripped = body_line.strip()
+                    if stripped:
+                        wrapped = textwrap.fill(
+                            stripped,
+                            width=terminal_width,
+                            initial_indent="    ",
+                            subsequent_indent="    ",
+                        )
+                        lines.append(f"\033[90m{wrapped}\033[0m")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@app.command("spec")
+def fact_spec(
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
+    output: Optional[str] = typer.Option(None, "--output", help="Write to file instead of stdout."),
+    markdown: bool = typer.Option(False, "--markdown", "--md", help="Force markdown output."),
+):
+    from netaudio._common import output_single
+    from netaudio.cli import OutputFormat, state as cli_state
+
+    facts_path = _resolve_facts_path()
+
+    if not facts_path.exists():
+        print("No facts registered yet.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    from netaudio.dante.fact_store import get_categories
+    categories = get_categories(facts_path)
+    if not categories:
+        print("No facts registered yet.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    spec_data = _build_spec_data(facts_path, category_filter=category)
+
+    if markdown or (output and output.endswith(".md")):
+        text = _spec_to_markdown(spec_data)
+    elif cli_state.output_format in (OutputFormat.json, OutputFormat.yaml):
+        output_single(spec_data)
+        return
+    else:
+        text = _spec_to_plain(spec_data)
 
     if output:
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             f.write(text)
-        print(f"Wrote spec to {output_path}")
+        print(f"Wrote spec to {output_path}", file=sys.stderr)
     else:
         print(text)
 

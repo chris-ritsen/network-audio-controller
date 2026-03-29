@@ -69,7 +69,7 @@ DISSECT_FIELD_ICONS = {
     "transaction_id": "\U000f03a0",    # nf-md-numeric
     "opcode": "\U000f0169",            # nf-md-code_braces
     "status": "\U000f02fc",            # nf-md-information
-    "source_mac": "\U000f0237",        # nf-md-fingerprint
+    "source_eui64": "\U000f0237",       # nf-md-fingerprint
     "magic": "\uebcf",                 # nf-cod-wand
     "version": "\uf02b",               # nf-fa-tag
     "message_type": "\U000f0315",      # nf-md-label

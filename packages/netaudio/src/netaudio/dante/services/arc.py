@@ -59,19 +59,20 @@ class DanteARCService(DanteUnicastService):
             return tx_count, rx_count, lock_status
         return None
 
-    async def get_aes67_config(self, device_ip: str, arc_port: int) -> bool | None:
-        command_args = self._commands.command_get_aes67_config(
+    async def get_aes67_configured(self, device_ip: str, arc_port: int) -> bool | None:
+        command_args = self._commands.command_query_latency_config(
             transaction_id=self._next_transaction_id()
         )
         packet = command_args[0]
         response = await self.request(
             packet, device_ip, arc_port,
-            logical_command_name="get_aes67_config",
+            logical_command_name="query_latency_config",
         )
-        if response:
-            if b'\x63\x00\x03' in response:
+        if response and len(response) > 0x53:
+            aes67_byte = response[0x53]
+            if aes67_byte == 0x03:
                 return True
-            elif b'\x63\x00\x01' in response:
+            elif aes67_byte == 0x01:
                 return False
         return None
 
@@ -117,11 +118,11 @@ class DanteARCService(DanteUnicastService):
                 if counts[2] is not None:
                     device.is_locked = counts[2]
 
-            if device.aes67_enabled is None:
+            if device.aes67_configured is None:
                 try:
-                    aes67_status = await self.get_aes67_config(device_ip, arc_port)
-                    if aes67_status is not None:
-                        device.aes67_enabled = aes67_status
+                    aes67_configured = await self.get_aes67_configured(device_ip, arc_port)
+                    if aes67_configured is not None:
+                        device.aes67_configured = aes67_configured
                 except Exception as exception:
                     logger.debug(f"Error getting AES67 config: {exception}")
 

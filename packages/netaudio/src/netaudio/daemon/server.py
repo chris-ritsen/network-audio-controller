@@ -14,10 +14,9 @@ from netaudio.common.socket_path import (
     cleanup_daemon_socket,
     start_daemon_server,
 )
-from netaudio.daemon.enforcement import EnforcementManager
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.relay import RelayServer
-from netaudio.shure.manager import ShureManager
+ShureManager = None
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.daemon.protocol import (
     CMD_DEVICE_REQUEST,
@@ -216,7 +215,10 @@ class NetaudioDaemon:
         return mac.lower().replace(":", "").replace("-", "")[:12]
 
     def _find_dante_for_shure(self, shure_device):
-        from netaudio.shure.device import ShureDeviceType
+        try:
+            from netaudio.shure.device import ShureDeviceType
+        except ImportError:
+            return None
         if shure_device.device_type != ShureDeviceType.ad4d:
             return None
 
@@ -541,10 +543,15 @@ class NetaudioDaemon:
             return
 
         logger.info(f"Re-fetching AES67 status for {server_name}")
+        device_ip = str(device.ipv4)
         try:
-            aes67_status = await self.application.arc.get_aes67_config(str(device.ipv4), arc_port)
-            if aes67_status is not None:
-                device.aes67_enabled = aes67_status
+            result = await self.application.probe_aes67_state(device_ip)
+            if result:
+                aes67_current, aes67_configured = result
+                if aes67_current is not None:
+                    device.aes67_current = aes67_current
+                if aes67_configured is not None:
+                    device.aes67_configured = aes67_configured
             await self._publish_device_to_redis(device)
         except Exception as exception:
             logger.debug(f"Error re-fetching AES67 for {server_name}: {exception}")
@@ -623,8 +630,9 @@ class NetaudioDaemon:
         self.metering = MeteringManager(self.application)
         await self.metering.start()
 
-        self.shure = ShureManager(self.application.dispatcher)
-        await self.shure.start()
+        if ShureManager:
+            self.shure = ShureManager(self.application.dispatcher)
+            await self.shure.start()
 
         self.relay = RelayServer(self, port=self._relay_port)
         await self.relay.start()
@@ -637,9 +645,6 @@ class NetaudioDaemon:
             interface_ip=app_settings.interface_ip,
         )
         await self.heartbeat.start()
-
-        self.enforcement = EnforcementManager(self)
-        await self.enforcement.start()
 
         self._register_event_listeners()
 
@@ -686,9 +691,6 @@ class NetaudioDaemon:
 
         if self.heartbeat:
             await self.heartbeat.stop()
-
-        if hasattr(self, "enforcement") and self.enforcement:
-            await self.enforcement.stop()
 
         if self.shure:
             await self.shure.stop()
@@ -923,6 +925,26 @@ class NetaudioDaemon:
             if device.bluetooth_device is None and device.model_id in BLUETOOTH_MODEL_IDS:
                 device_ip = str(device.ipv4)
                 self.application.settings.request_bluetooth_status(device_ip)
+
+            try:
+                device_ip = str(device.ipv4)
+                result = await self.application.probe_aes67_state(device_ip)
+                if result:
+                    aes67_current, aes67_configured = result
+                    if aes67_current is not None:
+                        device.aes67_current = aes67_current
+                    if aes67_configured is not None:
+                        device.aes67_configured = aes67_configured
+            except Exception as exception:
+                logger.debug(f"Error probing AES67 for {server_name}: {exception}")
+
+            try:
+                device_ip = str(device.ipv4)
+                preferred_leader = await self.application.probe_preferred_leader_state(device_ip)
+                if preferred_leader is not None:
+                    device.preferred_leader = preferred_leader
+            except Exception as exception:
+                logger.debug(f"Error probing preferred leader for {server_name}: {exception}")
 
             logger.info(f"Fetched controls for {server_name}")
             await self._publish_device_to_redis(device)
@@ -1188,7 +1210,10 @@ class NetaudioDaemon:
                     client_device.rx_count = device.rx_count
                     client_device.tx_count_raw = device.tx_count_raw
                     client_device.rx_count_raw = device.rx_count_raw
-                    client_device.aes67_enabled = device.aes67_enabled
+                    client_device.aes67_configured = device.aes67_configured
+                    client_device.aes67_current = device.aes67_current
+                    client_device.preferred_leader = device.preferred_leader
+                    client_device.ptp_v1_role = device.ptp_v1_role
                     client_device.error = str(device.error) if device.error else None
                     client_device.dante_model = device.dante_model
                     client_device.dante_model_id = device.dante_model_id
