@@ -48,7 +48,10 @@ class DanteDevice:
         self.rx_count = None
         self.rx_count_raw = None
         self.sample_rate = None
-        self.aes67_enabled = None
+        self.aes67_configured = None
+        self.aes67_current = None
+        self.preferred_leader = None
+        self.ptp_v1_role = None
         self.server_name = server_name
         self.services = {}
         self.sockets = {}

@@ -190,22 +190,28 @@ def _label_packet(payload: bytes):
 
     if protocol_id in PROTOCOL_NAMES and protocol_id != 0xFFFF:
         opcode = struct.unpack(">H", payload[6:8])[0]
+        opcode_str = f"0x{opcode:04X}"
         fact_labels = _load_fact_labels()
         if protocol_id in ARC_PROTOCOLS:
-            fact_name = fact_labels.get(f"arc:0x{opcode:04X}")
+            fact_name = fact_labels.get(f"arc:{opcode_str}")
             if fact_name:
-                return fact_name
-
-        return get_opcode_name(protocol_id, opcode)
+                return f"{opcode_str} {fact_name}"
+        name = get_opcode_name(protocol_id, opcode)
+        if name and name != opcode_str:
+            return f"{opcode_str} {name}"
+        return opcode_str
 
     if protocol_id == 0xFFFF and len(payload) >= 28:
         message_type = struct.unpack(">H", payload[26:28])[0]
+        msg_str = f"0x{message_type:04X}"
         fact_labels = _load_fact_labels()
-        fact_name = fact_labels.get(f"conmon:0x{message_type:04X}") or fact_labels.get(f"multicast:0x{message_type:04X}")
+        fact_name = fact_labels.get(f"conmon:{msg_str}") or fact_labels.get(f"multicast:{msg_str}")
         if fact_name:
-            return fact_name
-
-        return get_settings_message_type_name(message_type)
+            return f"{msg_str} {fact_name}"
+        name = get_settings_message_type_name(message_type)
+        if name and name != msg_str:
+            return f"{msg_str} {name}"
+        return msg_str
 
     return f"proto:0x{protocol_id:04X}"
 
@@ -1070,7 +1076,7 @@ class CaptureDaemon:
                         raise RuntimeError(f"tshark failed and multicast is disabled: {exception}")
                     raise RuntimeError("tshark exited and multicast is disabled")
 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:
@@ -1767,9 +1773,32 @@ def session_list(
         store.close()
 
 
-def _print_timeline_header():
-    print(f"{'MarkerID':>8s}  {'Timestamp':26s}  {'Type':12s}  {'Label':34s}  {'WindowPkts':>10s}")
-    print("-" * 104)
+def _print_timeline_header(show_window_packets: bool = False):
+    pass
+
+
+def _format_marker_time(iso_timestamp: str | None) -> str:
+    if not iso_timestamp:
+        return ""
+    try:
+        parsed = datetime.datetime.fromisoformat(iso_timestamp)
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return iso_timestamp[:8] if iso_timestamp else ""
+
+
+def _print_wrapped(text: str, indent: str = "  "):
+    import shutil
+    import textwrap
+
+    terminal_width = shutil.get_terminal_size((120, 24)).columns
+    wrapped = textwrap.fill(
+        text,
+        width=terminal_width,
+        initial_indent=indent,
+        subsequent_indent=indent,
+    )
+    print(wrapped)
 
 
 def _print_marker_row(
@@ -1780,16 +1809,20 @@ def _print_marker_row(
     use_dissect: bool = False,
     show_notes: bool = True,
     show_packets: bool = True,
+    show_window_packets: bool = False,
     brief: bool = False,
 ):
     marker_id = int(marker["id"])
     marker_time = int(marker["timestamp_ns"])
-    window_packets = store.get_session_packet_count(
-        session_id, start_ns=marker_time, end_ns=next_ts
-    )
+    window_packets = None
+    if show_window_packets:
+        window_packets = store.get_session_packet_count(
+            session_id, start_ns=marker_time, end_ns=next_ts
+        )
 
     summary_text = marker.get("summary") or ""
     label_text = marker.get("label") or ""
+    note_text = marker.get("note") or ""
     marker_type_str = _normalize_marker_type(str(marker.get("marker_type") or "observation"), strict=False)
 
     _MARKER_TYPE_ICONS = {
@@ -1801,47 +1834,57 @@ def _print_marker_row(
         "system": "server",
     }
     marker_type_icon = icon(_MARKER_TYPE_ICONS.get(marker_type_str, "marker"))
+    time_str = _format_marker_time(marker.get("timestamp_iso"))
 
     if brief:
         display_text = summary_text if summary_text else label_text
-        print(
-            f"{marker_id:8d}  "
-            f"{(marker.get('timestamp_iso') or ''):26s}  "
-            f"{marker_type_icon}{marker_type_str:12s}  "
-            f"{display_text}"
-        )
+        print(f"  {time_str}  {marker_type_icon}{marker_type_str:12s}  {display_text}")
         return
 
-    print(
-        f"{marker_id:8d}  "
-        f"{(marker.get('timestamp_iso') or ''):26s}  "
-        f"{marker_type_icon}{marker_type_str:12s}  "
-        f"{label_text:34s}  "
-        f"{window_packets:10d}"
-    )
+    print()
+    header = f"\033[1m{marker_type_icon}{marker_type_str}\033[0m  {label_text}"
+    if window_packets is not None:
+        header += f"  ({window_packets} packets)"
+
+    marker_data = marker.get("data")
+    evidence_packet_ids = []
+    if marker_data and marker.get("marker_type") == "evidence":
+        evidence_packet_ids = marker_data.get("packet_ids") or []
+        if not evidence_packet_ids and marker_data.get("packet_id"):
+            evidence_packet_ids = [marker_data["packet_id"]]
+
+    if evidence_packet_ids:
+        evidence_sizes = []
+        for pid in evidence_packet_ids[:20]:
+            pkt = store.get_packet(pid)
+            if pkt:
+                payload = pkt.get("payload", b"")
+                evidence_sizes.append(f"#{pid} {len(payload)}B")
+        if evidence_sizes:
+            header += f"  \033[90m[{', '.join(evidence_sizes)}]\033[0m"
+
+    print(f"  {time_str}  {header}  \033[90m#{marker_id}\033[0m")
 
     if summary_text and show_notes:
-        print(f"{'':8s}  {'':26s}  {'':12s}  summary: {summary_text}")
+        _print_wrapped(summary_text)
 
-    if show_notes and marker.get("note"):
-        print(f"{'':8s}  {'':26s}  {'':12s}  note: {marker['note']}")
+    if show_notes and note_text:
+        _print_wrapped(f"\033[90m{note_text}\033[0m")
     elif not show_notes and summary_text:
-        print(f"{'':8s}  {'':26s}  {'':12s}  {summary_text}")
+        _print_wrapped(summary_text)
 
     if not show_packets:
         return
 
-    marker_data = marker.get("data")
     if marker_data and marker.get("marker_type") == "evidence":
-        packet_ids = marker_data.get("packet_ids") or []
-        if not packet_ids and marker_data.get("packet_id"):
-            packet_ids = [marker_data["packet_id"]]
+        packet_ids = evidence_packet_ids
         filters = marker_data.get("filters", {})
 
         if filters:
             filter_parts = [f"{k}={v}" for k, v in filters.items()]
-            print(f"{'':8s}  {'':26s}  {'':12s}  filters: {', '.join(filter_parts)}")
+            print(f"    filters: {', '.join(filter_parts)}")
 
+        evidence_indent = "      "
         for pid in packet_ids[:20]:
             pkt = store.get_packet(pid)
             if not pkt:
@@ -1857,8 +1900,7 @@ def _print_marker_row(
             pkt_dir_icon = icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
             src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
             dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
-            evidence_indent = f"{'':8s}  {'':26s}  {'':12s}  "
-            print(f"{evidence_indent}  {pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
+            print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
 
             if use_dissect:
                 from netaudio.dante.packet_dissector import dissect_and_render
@@ -1886,7 +1928,7 @@ def session_show(
     grep: Optional[str] = typer.Option(None, "--grep", help="Filter markers matching string in label, summary, or note."),
     brief: bool = typer.Option(False, "--brief", help="One-line per marker: summary or label only."),
     no_notes: bool = typer.Option(False, "--no-notes", help="Hide full notes (show summary if available)."),
-    no_packets: bool = typer.Option(False, "--no-packets", help="Hide packet hexdumps from evidence markers."),
+    packets: bool = typer.Option(False, "--packets", help="Show evidence packet dumps and per-marker packet counts."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Maximum number of markers to show."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
@@ -1924,7 +1966,7 @@ def session_show(
         total_packets = store.get_session_packet_count(resolved_session_id)
 
         show_notes = not brief and not no_notes
-        show_packets = not brief and not no_packets
+        show_packets = not brief and packets
 
         if cli_state.output_format in (OutputFormat.json, OutputFormat.yaml):
             marker_list = []
@@ -1965,7 +2007,7 @@ def session_show(
 
         if markers or follow_mode:
             print("\nTimeline:")
-            _print_timeline_header()
+            _print_timeline_header(show_window_packets=packets)
             next_times = [m["timestamp_ns"] for m in markers[1:]] + [None]
             for m, next_ts in zip(markers, next_times):
                 _print_marker_row(
@@ -1973,6 +2015,7 @@ def session_show(
                     use_dissect=cli_state.dissect,
                     show_notes=show_notes,
                     show_packets=show_packets,
+                    show_window_packets=packets,
                     brief=brief,
                 )
 
@@ -1984,6 +2027,7 @@ def session_show(
                 use_dissect=cli_state.dissect,
                 show_notes=show_notes,
                 show_packets=show_packets,
+                show_window_packets=packets,
                 brief=brief,
             )
     finally:
@@ -1998,6 +2042,7 @@ def _follow_session_timeline(
     use_dissect: bool,
     show_notes: bool = True,
     show_packets: bool = True,
+    show_window_packets: bool = True,
     brief: bool = False,
 ):
     import time
@@ -2030,6 +2075,7 @@ def _follow_session_timeline(
                     use_dissect=use_dissect,
                     show_notes=show_notes,
                     show_packets=show_packets,
+                    show_window_packets=show_window_packets,
                     brief=brief,
                 )
                 seen_id = int(marker["id"])
@@ -3006,6 +3052,477 @@ def packet_show(
                 print(dissect_and_render(payload, indent="  "))
 
             print()
+    finally:
+        store.close()
+
+
+@packet_app.command("diff")
+def packet_diff(
+    packet_ids: list[int] = typer.Argument(..., help="Two or more packet IDs to compare."),
+    full: bool = typer.Option(False, "--full", help="Show full hex dump with diffs highlighted, not just changed bytes."),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Byte-level diff of two or more packets."""
+    if len(packet_ids) < 2:
+        print("Need at least 2 packet IDs to diff.", file=sys.stderr)
+        raise typer.Exit(1)
+
+    profile_cfg, _ = _load_capture_profile(config, profile)
+    resolved_db = _resolve_db_from_config(db, profile_cfg)
+
+    store = PacketStore(db_path=resolved_db)
+    try:
+        packets = []
+        for pid in packet_ids:
+            pkt = store.get_packet(pid)
+            if not pkt:
+                print(f"Packet #{pid}: not found", file=sys.stderr)
+                raise typer.Exit(1)
+            payload = pkt.get("payload") or b""
+            if isinstance(payload, str):
+                payload = bytes.fromhex(payload)
+            packets.append((pid, pkt, payload))
+
+        for pid, pkt, payload in packets:
+            timestamp_ns = int(pkt.get("timestamp_ns") or 0)
+            timestamp = datetime.datetime.fromtimestamp(timestamp_ns / 1e9)
+            timestamp_str = timestamp.strftime("%H:%M:%S.%f")[:-3]
+            src = _format_endpoint(pkt.get("src_ip"), pkt.get("src_port"))
+            dst = _format_endpoint(pkt.get("dst_ip"), pkt.get("dst_port"))
+            direction = pkt.get("direction") or "multicast"
+            label = _label_packet(payload)
+            print(f"  #{pid}  {timestamp_str}  {src} -> {dst}  {direction}  {len(payload)}B  {label}")
+
+        max_length = max(len(payload) for _, _, payload in packets)
+        reference_payload = packets[0][2]
+
+        differing_offsets = set()
+        for _, _, payload in packets[1:]:
+            for offset in range(max_length):
+                reference_byte = reference_payload[offset] if offset < len(reference_payload) else None
+                compare_byte = payload[offset] if offset < len(payload) else None
+                if reference_byte != compare_byte:
+                    differing_offsets.add(offset)
+
+        if not differing_offsets:
+            print("\n  Payloads are identical.")
+            return
+
+        print(f"\n  {len(differing_offsets)} bytes differ (of {max_length} total)")
+
+        if full:
+            _print_diff_full(packets, differing_offsets, max_length)
+        else:
+            _print_diff_compact(packets, differing_offsets, max_length)
+
+    finally:
+        store.close()
+
+
+def _print_diff_compact(packets, differing_offsets, max_length):
+    header_parts = ["  offset"]
+    for pid, _, _ in packets:
+        header_parts.append(f"  #{pid:<8d}")
+    header_parts.append("  ascii")
+    print("".join(header_parts))
+    print("  " + "─" * (8 + 12 * len(packets) + 8))
+
+    for offset in sorted(differing_offsets):
+        parts = [f"  {offset:04x}   "]
+        ascii_parts = []
+        for _, _, payload in packets:
+            if offset < len(payload):
+                byte_val = payload[offset]
+                parts.append(f"  0x{byte_val:02x}      ")
+                ascii_parts.append(chr(byte_val) if 32 <= byte_val < 127 else ".")
+            else:
+                parts.append("  --        ")
+                ascii_parts.append(" ")
+        parts.append("  " + " ".join(ascii_parts))
+        print("".join(parts))
+
+
+def _print_diff_full(packets, differing_offsets, max_length):
+    reference_payload = packets[0][2]
+    reference_pid = packets[0][0]
+
+    for compare_pid, _, compare_payload in packets[1:]:
+        print(f"\n  #{reference_pid} vs #{compare_pid}")
+        print("  " + "─" * 80)
+
+        for row_offset in range(0, max_length, 16):
+            ref_chunk = reference_payload[row_offset:row_offset + 16] if row_offset < len(reference_payload) else b""
+            cmp_chunk = compare_payload[row_offset:row_offset + 16] if row_offset < len(compare_payload) else b""
+
+            row_has_diff = any(
+                offset in differing_offsets
+                for offset in range(row_offset, min(row_offset + 16, max_length))
+            )
+            if not row_has_diff:
+                continue
+
+            ref_hex_parts = []
+            cmp_hex_parts = []
+            for byte_index in range(16):
+                absolute_offset = row_offset + byte_index
+                ref_byte = ref_chunk[byte_index] if byte_index < len(ref_chunk) else None
+                cmp_byte = cmp_chunk[byte_index] if byte_index < len(cmp_chunk) else None
+                is_diff = absolute_offset in differing_offsets
+
+                if ref_byte is not None:
+                    ref_str = f"{ref_byte:02x}"
+                else:
+                    ref_str = "--"
+                if cmp_byte is not None:
+                    cmp_str = f"{cmp_byte:02x}"
+                else:
+                    cmp_str = "--"
+
+                if is_diff:
+                    ref_hex_parts.append(f"\033[91m{ref_str}\033[0m")
+                    cmp_hex_parts.append(f"\033[92m{cmp_str}\033[0m")
+                else:
+                    ref_hex_parts.append(ref_str)
+                    cmp_hex_parts.append(cmp_str)
+
+            ref_ascii = "".join(
+                chr(b) if 32 <= b < 127 else "." for b in ref_chunk
+            ).ljust(16)
+            cmp_ascii = "".join(
+                chr(b) if 32 <= b < 127 else "." for b in cmp_chunk
+            ).ljust(16)
+
+            ref_hex = " ".join(ref_hex_parts[:8]) + "  " + " ".join(ref_hex_parts[8:])
+            cmp_hex = " ".join(cmp_hex_parts[:8]) + "  " + " ".join(cmp_hex_parts[8:])
+
+            print(f"  {row_offset:04x}  {ref_hex}  |{ref_ascii}|")
+            print(f"  {row_offset:04x}  {cmp_hex}  |{cmp_ascii}|")
+            print()
+
+
+ARC_VOLATILE_OFFSETS = {4, 5}
+CONMON_VOLATILE_OFFSETS = {4, 5}
+
+
+def _classify_protocol(payload: bytes) -> str:
+    if len(payload) < 2:
+        return "unknown"
+    protocol_id = struct.unpack(">H", payload[0:2])[0]
+    if protocol_id in (0x27FF, 0x2809, 0x2729):
+        return "arc"
+    if protocol_id == 0xFFFF:
+        return "conmon"
+    return "unknown"
+
+
+def _get_volatile_offsets(protocol_type: str) -> set[int]:
+    if protocol_type == "arc":
+        return ARC_VOLATILE_OFFSETS
+    if protocol_type == "conmon":
+        return CONMON_VOLATILE_OFFSETS
+    return set()
+
+
+def _detect_jitter_offsets(payloads: list[bytes]) -> set[int]:
+    if len(payloads) < 2:
+        return set()
+
+    jitter_offsets = set()
+    max_length = max(len(payload) for payload in payloads)
+    for offset in range(max_length):
+        values = set()
+        for payload in payloads:
+            if offset < len(payload):
+                values.add(payload[offset])
+            else:
+                values.add(None)
+        if len(values) > 1:
+            jitter_offsets.add(offset)
+    return jitter_offsets
+
+
+def _opcode_key(payload: bytes) -> str | None:
+    if len(payload) < 8:
+        return None
+    protocol_id = struct.unpack(">H", payload[0:2])[0]
+    if protocol_id in (0x27FF, 0x2809, 0x2729):
+        opcode = struct.unpack(">H", payload[6:8])[0]
+        return f"arc:0x{opcode:04X}"
+    if protocol_id == 0xFFFF and len(payload) >= 28:
+        message_type = struct.unpack(">H", payload[26:28])[0]
+        return f"conmon:0x{message_type:04X}"
+    return f"proto:0x{protocol_id:04X}"
+
+
+def _parse_time_to_ns(value: str) -> int | None:
+    parts = value.split(":")
+    if len(parts) < 2:
+        return None
+
+    try:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = 0
+        microseconds = 0
+
+        if len(parts) >= 3:
+            sec_parts = parts[2].split(".")
+            seconds = int(sec_parts[0])
+
+            if len(sec_parts) > 1:
+                frac = sec_parts[1].ljust(6, "0")[:6]
+                microseconds = int(frac)
+
+        today = datetime.date.today()
+        target = datetime.datetime(
+            today.year, today.month, today.day,
+            hours, minutes, seconds, microseconds,
+        )
+        return int(target.timestamp() * 1e9)
+    except (ValueError, IndexError):
+        return None
+
+
+def _state_diff_print_opcode_diff(
+    opcode_label: str,
+    before_payloads: list[tuple[int, bytes]],
+    after_payloads: list[tuple[int, bytes]],
+    volatile_offsets: set[int],
+    jitter_offsets: set[int],
+    full: bool,
+):
+    ignored_offsets = volatile_offsets | jitter_offsets
+
+    before_representative_id, before_representative = before_payloads[-1]
+    after_representative_id, after_representative = after_payloads[-1]
+
+    max_length = max(len(before_representative), len(after_representative))
+    stable_diff_offsets = set()
+
+    for offset in range(max_length):
+        if offset in ignored_offsets:
+            continue
+        before_byte = before_representative[offset] if offset < len(before_representative) else None
+        after_byte = after_representative[offset] if offset < len(after_representative) else None
+        if before_byte != after_byte:
+            stable_diff_offsets.add(offset)
+
+    if not stable_diff_offsets:
+        return False
+
+    fact_labels = _load_fact_labels()
+    human_name = fact_labels.get(opcode_label, opcode_label)
+
+    print(f"\n  \033[1m{opcode_label}\033[0m  {human_name}")
+    print(f"  before: #{before_representative_id} ({len(before_representative)}B)    after: #{after_representative_id} ({len(after_representative)}B)")
+    if jitter_offsets:
+        print(f"  \033[90m({len(jitter_offsets)} jitter bytes excluded, {len(volatile_offsets)} volatile header bytes excluded)\033[0m")
+    elif volatile_offsets:
+        print(f"  \033[90m({len(volatile_offsets)} volatile header bytes excluded)\033[0m")
+    print(f"  {len(stable_diff_offsets)} stable bytes differ")
+
+    if full:
+        for row_offset in range(0, max_length, 16):
+            before_chunk = before_representative[row_offset:row_offset + 16] if row_offset < len(before_representative) else b""
+            after_chunk = after_representative[row_offset:row_offset + 16] if row_offset < len(after_representative) else b""
+
+            row_has_diff = any(
+                offset in stable_diff_offsets
+                for offset in range(row_offset, min(row_offset + 16, max_length))
+            )
+            if not row_has_diff:
+                continue
+
+            before_hex_parts = []
+            after_hex_parts = []
+            for byte_index in range(16):
+                absolute_offset = row_offset + byte_index
+                before_byte = before_chunk[byte_index] if byte_index < len(before_chunk) else None
+                after_byte = after_chunk[byte_index] if byte_index < len(after_chunk) else None
+                is_diff = absolute_offset in stable_diff_offsets
+                is_jitter = absolute_offset in ignored_offsets
+
+                before_str = f"{before_byte:02x}" if before_byte is not None else "--"
+                after_str = f"{after_byte:02x}" if after_byte is not None else "--"
+
+                if is_jitter:
+                    before_hex_parts.append(f"\033[90m{before_str}\033[0m")
+                    after_hex_parts.append(f"\033[90m{after_str}\033[0m")
+                elif is_diff:
+                    before_hex_parts.append(f"\033[91m{before_str}\033[0m")
+                    after_hex_parts.append(f"\033[92m{after_str}\033[0m")
+                else:
+                    before_hex_parts.append(before_str)
+                    after_hex_parts.append(after_str)
+
+            before_hex = " ".join(before_hex_parts[:8]) + "  " + " ".join(before_hex_parts[8:])
+            after_hex = " ".join(after_hex_parts[:8]) + "  " + " ".join(after_hex_parts[8:])
+
+            before_ascii = "".join(
+                chr(byte) if 32 <= byte < 127 else "." for byte in before_chunk
+            ).ljust(16)
+            after_ascii = "".join(
+                chr(byte) if 32 <= byte < 127 else "." for byte in after_chunk
+            ).ljust(16)
+
+            print(f"  {row_offset:04x}  {before_hex}  |{before_ascii}|")
+            print(f"  {row_offset:04x}  {after_hex}  |{after_ascii}|")
+            print()
+    else:
+        header_parts = ["  offset", "  before   ", "  after    ", "  ascii"]
+        print("".join(header_parts))
+        print("  " + "─" * 50)
+        for offset in sorted(stable_diff_offsets):
+            before_byte = before_representative[offset] if offset < len(before_representative) else None
+            after_byte = after_representative[offset] if offset < len(after_representative) else None
+            before_str = f"0x{before_byte:02x}" if before_byte is not None else "--  "
+            after_str = f"0x{after_byte:02x}" if after_byte is not None else "--  "
+            before_char = chr(before_byte) if before_byte is not None and 32 <= before_byte < 127 else "."
+            after_char = chr(after_byte) if after_byte is not None and 32 <= after_byte < 127 else "."
+            print(f"  {offset:04x}    {before_str}       {after_str}       {before_char} → {after_char}")
+
+    return True
+
+
+@packet_app.command("state-diff")
+def packet_state_diff(
+    device_ip: str = typer.Option(..., "--device-ip", help="Device IP address."),
+    before_time: str = typer.Option(..., "--before", help="Time before state change (HH:MM:SS). Packets before this time."),
+    after_time: str = typer.Option(..., "--after", help="Time after state change (HH:MM:SS). Packets after this time."),
+    ignore_volatile: bool = typer.Option(True, "--ignore-volatile/--no-ignore-volatile", help="Exclude known volatile header bytes (transaction_id, sequence)."),
+    ignore_jitter: bool = typer.Option(True, "--ignore-jitter/--no-ignore-jitter", help="Exclude bytes that vary within the same time window (counters/timestamps)."),
+    direction: Optional[str] = typer.Option("response", "--direction", help="Packet direction filter (default: response)."),
+    opcode: Optional[str] = typer.Option(None, "--opcode", help="Filter to specific opcode (hex like 0x2000)."),
+    full: bool = typer.Option(False, "--full", help="Show full hex dump with diffs highlighted."),
+    session: Optional[str] = typer.Option(None, "--session", help="Session reference (ID, name, latest, active)."),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
+):
+    """Diff device state between two time windows, grouped by opcode.
+
+    Finds all response packets from a device in both time windows, groups them
+    by opcode, and shows only the stable byte differences — filtering out known
+    volatile bytes (transaction IDs, sequence counters) and bytes that jitter
+    between consecutive same-state packets.
+    """
+    before_ns = _parse_time_to_ns(before_time)
+    after_ns = _parse_time_to_ns(after_time)
+
+    if before_ns is None:
+        print(f"Invalid --before time format: {before_time} (use HH:MM:SS)", file=sys.stderr)
+        raise typer.Exit(1)
+    if after_ns is None:
+        print(f"Invalid --after time format: {after_time} (use HH:MM:SS)", file=sys.stderr)
+        raise typer.Exit(1)
+    if before_ns >= after_ns:
+        print("--before must be earlier than --after", file=sys.stderr)
+        raise typer.Exit(1)
+
+    profile_cfg, _ = _load_capture_profile(config, profile)
+    resolved_db = _resolve_db_from_config(db, profile_cfg)
+    resolved_opcode = _parse_int_option(opcode, "--opcode")
+
+    resolved_direction = direction
+    if resolved_direction == "multicast":
+        resolved_direction = "__null__"
+
+    store = PacketStore(db_path=resolved_db)
+    try:
+        session_id = None
+        if session is not None:
+            session_id, _ = _resolve_session_reference(
+                store, session_id=None, session=session, default_selector="latest",
+            )
+
+        before_rows = store.search_packets(
+            session_id=session_id,
+            device_ip=device_ip,
+            end_ns=before_ns,
+            opcode=resolved_opcode,
+            direction=resolved_direction,
+            limit=10000,
+            ascending=True,
+        )
+        after_rows = store.search_packets(
+            session_id=session_id,
+            device_ip=device_ip,
+            start_ns=after_ns,
+            opcode=resolved_opcode,
+            direction=resolved_direction,
+            limit=10000,
+            ascending=True,
+        )
+
+        before_by_opcode: dict[str, list[tuple[int, bytes]]] = {}
+        after_by_opcode: dict[str, list[tuple[int, bytes]]] = {}
+
+        for row in before_rows:
+            payload = row.get("payload") or b""
+            if isinstance(payload, str):
+                payload = bytes.fromhex(payload)
+            key = _opcode_key(payload)
+            if key is None:
+                continue
+            before_by_opcode.setdefault(key, []).append((int(row["id"]), payload))
+
+        for row in after_rows:
+            payload = row.get("payload") or b""
+            if isinstance(payload, str):
+                payload = bytes.fromhex(payload)
+            key = _opcode_key(payload)
+            if key is None:
+                continue
+            after_by_opcode.setdefault(key, []).append((int(row["id"]), payload))
+
+        common_opcodes = sorted(set(before_by_opcode.keys()) & set(after_by_opcode.keys()))
+
+        before_ts = datetime.datetime.fromtimestamp(before_ns / 1e9).strftime("%H:%M:%S")
+        after_ts = datetime.datetime.fromtimestamp(after_ns / 1e9).strftime("%H:%M:%S")
+
+        print(f"State diff for {device_ip}")
+        print(f"  before window: ≤ {before_ts} ({sum(len(v) for v in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)")
+        print(f"  after  window: ≥ {after_ts} ({sum(len(v) for v in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)")
+        print(f"  common opcodes: {len(common_opcodes)}")
+
+        before_only = sorted(set(before_by_opcode.keys()) - set(after_by_opcode.keys()))
+        after_only = sorted(set(after_by_opcode.keys()) - set(before_by_opcode.keys()))
+        if before_only:
+            print(f"  before-only opcodes: {', '.join(before_only)}")
+        if after_only:
+            print(f"  after-only opcodes: {', '.join(after_only)}")
+
+        diff_count = 0
+        identical_count = 0
+
+        for opcode_label in common_opcodes:
+            before_payloads = before_by_opcode[opcode_label]
+            after_payloads = after_by_opcode[opcode_label]
+
+            sample_payload = before_payloads[0][1]
+            protocol_type = _classify_protocol(sample_payload)
+            volatile_offsets = _get_volatile_offsets(protocol_type) if ignore_volatile else set()
+
+            before_only_payloads = [payload for _, payload in before_payloads]
+            after_only_payloads = [payload for _, payload in after_payloads]
+
+            before_jitter = _detect_jitter_offsets(before_only_payloads) if ignore_jitter and len(before_only_payloads) > 1 else set()
+            after_jitter = _detect_jitter_offsets(after_only_payloads) if ignore_jitter and len(after_only_payloads) > 1 else set()
+            jitter_offsets = before_jitter | after_jitter
+
+            had_diff = _state_diff_print_opcode_diff(
+                opcode_label, before_payloads, after_payloads,
+                volatile_offsets, jitter_offsets, full,
+            )
+            if had_diff:
+                diff_count += 1
+            else:
+                identical_count += 1
+
+        print(f"\n  {diff_count} opcodes with stable differences, {identical_count} identical")
+
     finally:
         store.close()
 

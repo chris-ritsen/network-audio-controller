@@ -487,8 +487,29 @@
       "category": "arc_opcode",
       "key": "0x1100",
       "name": "query_latency_config",
-      "note": null,
-      "fields": [],
+      "note": "Queries latency/config on proto 0x2809. On Dante AVIO-USB devices, response byte at offset 0x53 reports the Dante Controller New/configured AES67 state: 0x01=disabled, 0x03=enabled. This does not report the current applied AES67 state.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2809"
+        },
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1100"
+        },
+        {
+          "name": "aes67_mode",
+          "offset": 83,
+          "length": 1,
+          "dtype": "uint8"
+        }
+      ],
       "evidence": [
         "set_latency_full_provenance_step2:23376",
         "set_latency_full_provenance_step2:23377",
@@ -497,9 +518,19 @@
         "latency_discovery_avio:47493",
         "latency_discovery_avio:47608",
         "latency_discovery_avio:47490",
-        "latency_discovery_avio:47491"
+        "latency_discovery_avio:47491",
+        "aes67_toggle:4078090",
+        "aes67_toggle:4082007",
+        "aes67_toggle:4085879",
+        "aes67_toggle:4078014",
+        "aes67_toggle:4086891",
+        "aes67_toggle:4077944",
+        "aes67_toggle:4081335",
+        "aes67_toggle:4086958",
+        "aes67_toggle:4115821",
+        "aes67_toggle:4114833",
+        "aes67_toggle:4115822"
       ],
-      "confidence": "verified",
       "added_ns": 1772753655089245084,
       "history": [
         {
@@ -531,6 +562,20 @@
           "previous_name": "query_latency_config",
           "previous_confidence": "verified",
           "previous_note": "Reinstated after session 58 (latency_discovery_avio). Field offsets 104/108/112/116/120 are IDENTICAL on both LX-DANTE (140B) and all 5 AVIO devices (148B). The 8-byte size difference is in the header/TLV structure, not the latency payload fields. Previous disprovals were based on response size difference, not actual field value mismatch. Tested: AVIOBT-5279b6 (set 5ms/1ms, observed offset 108 change), AVIOAES3, 3x AVIOUSB \u2014 all confirmed."
+        },
+        {
+          "replaced_ns": 1774719693668947000,
+          "previous_name": "query_latency_config",
+          "previous_confidence": "verified",
+          "previous_note": null,
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774723064133665000,
+          "previous_name": "query_latency_config",
+          "previous_confidence": "verified",
+          "previous_note": "Queries latency/config on proto 0x2809. On Dante AVIO-USB devices, response byte at offset 0x53 reports AES67 mode: 0x01=disabled, 0x03=enabled. Verified in session aes67_toggle via same-device OFF->ON and ON->OFF transitions on avio-usb-1 and avio-usb-3, plus OFF->ON on avio-usb-2.",
+          "action": "updated"
         }
       ],
       "protocol_id": [
@@ -539,7 +584,13 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1772753655089245084
+        }
+      ]
     },
     "arc_opcode:0x1101": {
       "category": "arc_opcode",
@@ -581,7 +632,7 @@
       "category": "protocol_structure",
       "key": "conmon_header",
       "name": "Conmon Protocol Header",
-      "note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements.",
+      "note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate, AES67 reconciliation) and multicast announcements. Independent review confirmed this layout, with the 8-byte field at offsets 8-15 treated as an EUI-64 source identifier rather than a 6-byte MAC address.",
       "fields": [
         {
           "name": "protocol_id",
@@ -609,10 +660,10 @@
           "dtype": "uint16_be"
         },
         {
-          "name": "source_mac",
+          "name": "source_eui64",
           "offset": 8,
           "length": 8,
-          "dtype": "hex"
+          "dtype": "eui64"
         },
         {
           "name": "magic",
@@ -640,7 +691,6 @@
         "sample_rate_discovery:28075",
         "sample_rate_discovery:28101"
       ],
-      "confidence": "verified",
       "added_ns": 1772745659992165039,
       "history": [
         {
@@ -648,9 +698,26 @@
           "previous_name": "Conmon Protocol Header",
           "previous_confidence": "verified",
           "previous_note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements."
+        },
+        {
+          "replaced_ns": 1774735093366292000,
+          "previous_name": "Conmon Protocol Header",
+          "previous_confidence": "verified",
+          "previous_note": "Header format for conmon/settings messages on ports 8700/8702. Used for device control (reboot, sample rate) and multicast announcements.",
+          "action": "updated"
         }
       ],
-      "protocol_id": 65535
+      "protocol_id": 65535,
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1772745659992165039
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774735093366293000
+        }
+      ]
     },
     "arc_opcode:0x1000": {
       "category": "arc_opcode",
@@ -953,11 +1020,34 @@
       "note": "Enables or disables AES67 mode. Unicast to port 8700.",
       "fields": [],
       "evidence": [],
-      "confidence": "inferred",
       "added_ns": 1772916091214252000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "inferred",
+          "timestamp_ns": 1772916091214252000
+        },
+        {
+          "level": "disproved",
+          "timestamp_ns": 1774717197111408000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1774717197111407000,
+          "previous_confidence": "inferred",
+          "previous_note": "Enables or disables AES67 mode. Unicast to port 8700.",
+          "action": "disproved"
+        }
+      ],
+      "disprovals": [
+        {
+          "reason": "0x22DC is the sequence field not the message type. Correct message type is 0x1006. See conmon_message:0x1006.",
+          "timestamp_ns": 1774717197111409000
+        }
+      ]
     },
     "conmon_message:0x0086": {
       "category": "conmon_message",
@@ -1152,14 +1242,50 @@
     "arc_opcode:0x2600": {
       "category": "arc_opcode",
       "key": "0x2600",
-      "name": "query_tx_flows_2809",
-      "note": "AVIO equivalent of 0x2200 query_tx_flows, used on proto 0x2809. Same semantics but different record format.",
-      "fields": [],
-      "evidence": [
-        "identify_flow_types:49101"
+      "name": "query_aes67_status",
+      "note": "Queries AES67 configuration via protocol 0x2809 on ARC port 4440. Response is 131 bytes. AES67 status at byte offset 115: 0x01=enabled, 0x07=disabled. Query packet is 34 bytes fixed.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2809"
+        },
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2600"
+        },
+        {
+          "name": "aes67_status",
+          "offset": 115,
+          "length": 1,
+          "dtype": "uint8"
+        }
       ],
-      "confidence": "verified",
-      "added_ns": 1773106638293352000,
+      "evidence": [
+        "identify_flow_types:49101",
+        "aes67_toggle:4038496",
+        "aes67_toggle:4037772"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773106638293352000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774717180338313000
+        },
+        {
+          "level": "disproved",
+          "timestamp_ns": 1774719568346906000
+        }
+      ],
+      "added_ns": 1774717180338313000,
       "protocol_id": [
         10025,
         10249,
@@ -1173,6 +1299,25 @@
           "previous_name": "unknown_2600",
           "previous_confidence": "observed",
           "previous_note": "Protocol 0x2809 on port 4440. 34B request, 22-230B variable response. Possibly flow or routing info."
+        },
+        {
+          "replaced_ns": 1774717180338317000,
+          "previous_name": "query_tx_flows_2809",
+          "previous_confidence": "verified",
+          "previous_note": "AVIO equivalent of 0x2200 query_tx_flows, used on proto 0x2809. Same semantics but different record format."
+        },
+        {
+          "replaced_ns": 1774719568346905000,
+          "previous_confidence": "verified",
+          "previous_note": "Queries AES67 configuration via protocol 0x2809 on ARC port 4440. Response is 131 bytes. AES67 status at byte offset 115: 0x01=enabled, 0x07=disabled. Query packet is 34 bytes fixed.",
+          "action": "disproved"
+        }
+      ],
+      "disprovals": [
+        {
+          "reason": "Session 4 contradicts the verified claim that ARC 0x2600 reports AES67 state. Same-device comparisons show non-transaction bytes changing on usb-1 and usb-3 across toggles, but the current user-confirmed enabled device (avio-usb-2) produces the same later value as the disabled devices. The 131B response does not cleanly encode AES67 enabled/disabled.",
+          "timestamp_ns": 1774719568346906000,
+          "device_ip": "192.168.1.36"
         }
       ]
     },
@@ -1327,28 +1472,119 @@
     "conmon_message:0x0020": {
       "category": "conmon_message",
       "key": "0x0020",
-      "name": "unknown_0020",
-      "note": "Multicast on 8702. 168-240B. High frequency (3157 packets). Possibly device capability or config announcement.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "ptp_clock_status_announcement",
+      "note": "Multicast on 224.0.0.231:8702. PTP clock status announcement paired with 0x0021 config changes. Canonical runtime PTP v1 role field is wire 0x48:0x49 uint16_be with 0x0006=MASTER and 0x0009=SLAVE on devices where v2 is disabled. Wire 0x88:0x89 mirrors the same value on those devices. v2 role detection remains unsupported.",
+      "fields": [
+        {
+          "name": "ptp_v1_port_state",
+          "offset": 72,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "ptp_v1_port_state_mirror",
+          "offset": 136,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "clock_master_control:4318084",
+        "clock_master_control:4321091",
+        "clock_master_control:4321288",
+        "clock_master_control:4341311",
+        "clock_master_control:4434038",
+        "clock_master_control:4352371",
+        "clock_master_control:4441348"
+      ],
       "added_ns": 1772988417328306000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988417328306000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1774743864157291000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774746131571186000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1774743864157290000,
+          "previous_name": "unknown_0020",
+          "previous_confidence": "observed",
+          "previous_note": "Multicast on 8702. 168-240B. High frequency (3157 packets). Possibly device capability or config announcement.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774746131571184000,
+          "previous_name": "ptp_clock_status_announcement",
+          "previous_confidence": "observed",
+          "previous_note": "Multicast on 224.0.0.231:8702. Paired announcement for PTP clock state/config changes, including preferred-leader-related changes. Runtime Primary v1/v2 role fields remain unresolved; do not treat any single byte as the full leader/follower state yet.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0021": {
       "category": "conmon_message",
       "key": "0x0021",
-      "name": "unknown_0021",
-      "note": "Unicast to 8700. 92B fixed. Likely request paired with multicast 0x0020.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "ptp_clock_config",
+      "note": "Unicast to 8700. PTP clock/preferred-leader config request. Inner payload +0x00:+0x01 is a presence bitmask, +0x02:+0x03 is clock source (uint16_be), and +0x04 / wire 0x24 is preferred leader boolean (0x01=on, 0x00=off). Proven from same-device A32 toggles.",
+      "fields": [
+        {
+          "name": "presence_bitmask",
+          "offset": 32,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "clock_source",
+          "offset": 34,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "preferred_leader",
+          "offset": 36,
+          "length": 1,
+          "dtype": "uint8"
+        }
+      ],
+      "evidence": [
+        "clock_master_control:4318076",
+        "clock_master_control:4327746",
+        "clock_master_control:4329817"
+      ],
       "added_ns": 1772988417470062000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988417470062000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774743864154185000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1774743864154183000,
+          "previous_name": "unknown_0021",
+          "previous_confidence": "observed",
+          "previous_note": "Unicast to 8700. 92B fixed. Likely request paired with multicast 0x0020.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0061": {
       "category": "conmon_message",
@@ -1588,28 +1824,174 @@
     "conmon_message:0x1006": {
       "category": "conmon_message",
       "key": "0x1006",
-      "name": "unknown_1006",
-      "note": "Unicast to 8700. 36B fixed. Near 0x1007/0x1008/0x1009 cluster.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
-      "added_ns": 1772988428725096000,
+      "name": "set_aes67",
+      "note": "Conmon AES67 control message sent as fire-and-forget unicast to UDP port 8700. Explicit AVIO-USB writes were observed with trailing words 0x0001 0x0001 (enable) and 0x0001 0x0000 (disable). On LX-DANTE, replaying the observed 0x1006 packet with trailing words 0x0000 0x0000 elicited a fresh 0x1007 Current/New state announcement and appeared to behave as a no-op reconciliation/probe rather than a mutating write. Non-zero sequence number required; sequence 0x0000 was silently rejected.",
+      "fields": [
+        {
+          "name": "protocol_id",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFF"
+        },
+        {
+          "name": "packet_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "36"
+        },
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1006"
+        },
+        {
+          "name": "trailer_constant",
+          "offset": 28,
+          "length": 4,
+          "dtype": "uint32_be",
+          "value": "0x00000064"
+        },
+        {
+          "name": "presence_flags",
+          "offset": 32,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "aes67_enable_flags",
+          "offset": 34,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "aes67_toggle:4070692",
+        "aes67_toggle:4108754",
+        "aes67_toggle:4109543",
+        "lx_dante_aes67_on_to_off_pending:4171693"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988428725096000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774717171698562000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774733392538879000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774735100121164000
+        }
+      ],
+      "added_ns": 1774717171698562000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1774717171698566000,
+          "previous_name": "unknown_1006",
+          "previous_confidence": "observed",
+          "previous_note": "Unicast to 8700. 36B fixed. Near 0x1007/0x1008/0x1009 cluster."
+        },
+        {
+          "replaced_ns": 1774733392538878000,
+          "previous_name": "set_aes67",
+          "previous_confidence": "verified",
+          "previous_note": "Enables or disables AES67 mode. Fire-and-forget unicast to port 8700. Requires reboot to take effect. Trailer: 00 00 00 64 00 01 00 <enable_byte> where enable_byte 0x01=enable, 0x00=disable. Non-zero sequence number required (0x0000 silently rejected). Old fact 0x22DC was wrong \u2014 0x22DC is the sequence field, not the message type.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774735100121162000,
+          "previous_name": "set_aes67",
+          "previous_confidence": "verified",
+          "previous_note": "Conmon AES67 control message sent as fire-and-forget unicast to UDP port 8700. Observed trailer bytes after message_type are 00 00 00 64 00 01 00 <enable_byte> for explicit AVIO-USB writes, where enable_byte 0x01=enable and 0x00=disable. On LX-DANTE, replaying the observed 0x1006 packet with trailer 00 00 00 64 00 00 00 00 elicited a fresh 0x1007 Current/New state announcement and appeared to behave as a no-op reconciliation/probe rather than a mutating write. Non-zero sequence number required; sequence 0x0000 was silently rejected.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x1007": {
       "category": "conmon_message",
       "key": "0x1007",
-      "name": "unknown_1007",
-      "note": "Multicast on 8702. 36B fixed. Very high frequency (5407 packets). Possibly heartbeat or status beacon.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "aes67_current_new_state",
+      "note": "Conmon multicast message on 224.0.0.231:8702 whose byte at offset 0x21 encodes combined Dante Controller Current/New AES67 state. Verified values: 0x00=current disabled/new disabled, 0x01=current enabled/new disabled, 0x02=current disabled/new enabled, 0x03=current enabled/new enabled. Verified on AVIO-USB devices for 0x00/0x02/0x03 and on LX-DANTE for 0x01. Fresh 0x1007 announcements can be elicited by sending the observed 0x1006 AES67 reconciliation/control packet to device port 8700.",
+      "fields": [
+        {
+          "name": "aes67_current_new_code",
+          "offset": 33,
+          "length": 1,
+          "dtype": "uint8"
+        }
+      ],
+      "evidence": [
+        "aes67_toggle:4115406",
+        "aes67_toggle:4115389",
+        "aes67_toggle:4115408",
+        "aes67_toggle:4116796",
+        "lx_dante_aes67_on_to_off_pending:4139701",
+        "lx_dante_aes67_on_to_off_pending:4171835"
+      ],
       "added_ns": 1772988428865789000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988428865789000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774723064138872000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774725583469380000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774733401851814000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1774723064138871000,
+          "previous_name": "unknown_1007",
+          "previous_confidence": "observed",
+          "previous_note": "Multicast on 8702. 36B fixed. Very high frequency (5407 packets). Possibly heartbeat or status beacon.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774723359781076000,
+          "previous_name": "aes67_current_new_state",
+          "previous_confidence": "verified",
+          "previous_note": "Conmon multicast message whose byte at offset 0x21 encodes combined Dante Controller Current/New AES67 state on AVIO-USB devices. Verified values so far: 0x00=current disabled/new disabled, 0x02=current disabled/new enabled, 0x03=current enabled/new enabled. The fourth state current enabled/new disabled is not yet captured.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774725583469379000,
+          "previous_name": "aes67_current_new_state",
+          "previous_confidence": "verified",
+          "previous_note": "Conmon multicast message whose byte at offset 0x21 encodes combined Dante Controller Current/New AES67 state on AVIO-USB devices. Verified values: 0x00=current disabled/new disabled, 0x02=current disabled/new enabled, 0x03=current enabled/new enabled. The enabled/disabled state is not expected during normal operation because on->off applies immediately on these devices.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774733401851812000,
+          "previous_name": "aes67_current_new_state",
+          "previous_confidence": "verified",
+          "previous_note": "Conmon multicast message whose byte at offset 0x21 encodes combined Dante Controller Current/New AES67 state. Verified values: 0x00=current disabled/new disabled, 0x01=current enabled/new disabled, 0x02=current disabled/new enabled, 0x03=current enabled/new enabled. Verified on AVIO-USB devices for 0x00/0x02/0x03 and on LX-DANTE for 0x01.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x1008": {
       "category": "conmon_message",
@@ -3456,10 +3838,64 @@
         }
       ],
       "added_ns": 1774377313755924000
+    },
+    "settings_opcode:aes67_apply_semantics": {
+      "category": "settings_opcode",
+      "key": "aes67_apply_semantics",
+      "name": "aes67_apply_semantics",
+      "note": "On Dante AVIO-USB devices, AES67 enable and disable have asymmetric apply behavior. off->on sets New/configured enabled but leaves Current disabled until reboot; on->off applies immediately with Current and New both disabled and no reboot prompt.",
+      "fields": [],
+      "evidence": [
+        "aes67_toggle:4114833",
+        "aes67_toggle:4116796"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774723359783180000
+        }
+      ],
+      "added_ns": 1774723359783181000,
+      "body": "Confirmed by Dante Controller ground truth during session aes67_toggle. usb-2 showed Current disabled / New enabled after set on without reboot. usb-3 showed disabled / disabled immediately after set off, and the user confirmed Dante Controller does not request a reboot when turning AES67 off. This implies the enabled/disabled pending state is not expected during normal on->off transitions on these devices."
+    },
+    "settings_opcode:aes67_current_new_read_path": {
+      "category": "settings_opcode",
+      "key": "aes67_current_new_read_path",
+      "name": "aes67_current_new_read_path",
+      "note": "Active read path for AES67 Current/New state: send the observed conmon 0x1006 AES67 reconciliation/control packet to the target device on UDP port 8700, then consume the device multicast 0x1007 announcement on 224.0.0.231:8702 and decode byte 0x21.",
+      "fields": [],
+      "evidence": [
+        "lx_dante_aes67_on_to_off_pending:4171693",
+        "lx_dante_aes67_on_to_off_pending:4171835"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774733412298711000
+        }
+      ],
+      "added_ns": 1774733412298712000
+    },
+    "settings_opcode:ptp_v2_role_detection": {
+      "category": "settings_opcode",
+      "key": "ptp_v2_role_detection",
+      "name": "ptp_v2_role_detection",
+      "note": "Not supported. Session clock_master_control proved preferred-leader config and canonical v1 runtime MASTER/SLAVE read path, but did not isolate a reliable v2 runtime role field.",
+      "fields": [],
+      "evidence": [
+        "clock_master_control:4341311"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1774746131574636000
+        }
+      ],
+      "added_ns": 1774746131574636000
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1774377313755925000
+    "updated_ns": 1774746131574637000
   }
 }

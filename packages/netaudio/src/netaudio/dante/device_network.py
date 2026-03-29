@@ -86,25 +86,22 @@ class DanteDeviceNetwork:
                 else:
                     logger.debug("Failed to get Dante channel counts")
 
-            if self.device.aes67_enabled is None:
+            if self.device.aes67_configured is None:
                 try:
-                    aes67_config_args = self.device.commands.command_get_aes67_config()
+                    aes67_config_args = self.device.commands.command_query_latency_config()
                     aes67_config_response = await self.device.dante_command(
-                        *aes67_config_args, logical_command_name="get_aes67_config"
+                        *aes67_config_args, logical_command_name="query_latency_config"
                     )
-                    if aes67_config_response:
-                        if b'\x63\x00\x03' in aes67_config_response:
-                            self.device.aes67_enabled = True
-                        elif b'\x63\x00\x01' in aes67_config_response:
-                            self.device.aes67_enabled = False
-                        else:
-                            logger.debug(
-                                f"Unknown AES67 status pattern in response"
-                            )
+                    if aes67_config_response and len(aes67_config_response) > 0x53:
+                        aes67_byte = aes67_config_response[0x53]
+                        if aes67_byte == 0x03:
+                            self.device.aes67_configured = True
+                        elif aes67_byte == 0x01:
+                            self.device.aes67_configured = False
                     else:
                         logger.debug("Failed to get AES67 configuration")
-                except Exception as e:
-                    logger.debug(f"Error getting AES67 configuration: {e}")
+                except Exception as exception:
+                    logger.debug(f"Error getting AES67 configuration: {exception}")
 
             if not self.device.tx_channels and self.device.tx_count:
                 await self.device.get_tx_channels()

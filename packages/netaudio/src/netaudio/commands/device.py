@@ -184,7 +184,7 @@ def device_list(
         any_bluetooth = any(device.model_id in BLUETOOTH_MODEL_IDS for _, device in sorted_devices)
 
         compact_headers = ["Name", "IP Address", "MAC Address", "Model", "Lock", "TX", "RX", "Last Seen", "Server Name"]
-        verbose_extras = ["Manufacturer", "Product Version", "Board", "Firmware", "Software", "Sample Rate", "Encoding", "Bit Depth", "Latency", "Flows"]
+        verbose_extras = ["Manufacturer", "Product Version", "Board", "Firmware", "Software", "Sample Rate", "Encoding", "Bit Depth", "Latency", "Flows", "AES67", "Preferred Leader", "PTP Role"]
         if any_bluetooth:
             verbose_extras.append("Bluetooth")
         verbose_headers = compact_headers + verbose_extras
@@ -239,6 +239,28 @@ def device_list(
                     row.append(f"{tx_flows or 0}/{rx_flows or 0}")
                 else:
                     row.append("")
+
+                aes67_configured = getattr(device, "aes67_configured", None)
+                aes67_current = getattr(device, "aes67_current", None)
+                if aes67_current is not None and aes67_configured is not None and aes67_current != aes67_configured:
+                    current_label = "on" if aes67_current else "off"
+                    configured_label = "on" if aes67_configured else "off"
+                    row.append(f"{current_label}->{configured_label} (reboot required)")
+                elif aes67_configured is not None:
+                    row.append("on" if aes67_configured else "off")
+                elif aes67_current is not None:
+                    row.append("on" if aes67_current else "off")
+                else:
+                    row.append("")
+
+                preferred_leader = getattr(device, "preferred_leader", None)
+                if preferred_leader is not None:
+                    row.append("on" if preferred_leader else "off")
+                else:
+                    row.append("")
+
+                ptp_v1_role = getattr(device, "ptp_v1_role", None)
+                row.append(ptp_v1_role or "")
 
                 if any_bluetooth:
                     row.append(device.bluetooth_device or "")

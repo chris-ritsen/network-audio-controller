@@ -189,7 +189,7 @@ def _global_options(
         device_list()
 
 
-from netaudio.commands import capture, channel, config, device, diagnose, fact, firmware, key, provenance, server, shure, subscription, virtual
+from netaudio.commands import capture, channel, config, device, diagnose, fact, key, provenance, server, subscription
 app.add_typer(device.app, name="device")
 app.add_typer(channel.app, name="channel")
 app.add_typer(subscription.app, name="subscription")
@@ -201,9 +201,6 @@ app.add_typer(provenance.app, name="provenance")
 app.add_typer(fact.app, name="fact")
 app.add_typer(key.app, name="key")
 app.add_typer(diagnose.app, name="diagnose")
-app.add_typer(firmware.app, name="firmware", help="Analyze Dante firmware (.dnt) files.")
-app.add_typer(shure.app, name="shure")
-app.add_typer(virtual.app, name="virtual")
 
 
 def main():

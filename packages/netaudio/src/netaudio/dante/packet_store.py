@@ -190,6 +190,14 @@ class PacketStore:
                 ON capture_markers(session_id, timestamp_ns);
             CREATE INDEX IF NOT EXISTS idx_capture_sessions_started
                 ON capture_sessions(started_ns);
+
+            CREATE TABLE IF NOT EXISTS packet_sessions (
+                packet_id INTEGER NOT NULL REFERENCES packets(id),
+                session_id INTEGER NOT NULL REFERENCES capture_sessions(id),
+                PRIMARY KEY (packet_id, session_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_packet_sessions_session
+                ON packet_sessions(session_id, packet_id);
         """)
         columns = {
             row["name"]
@@ -386,6 +394,22 @@ class PacketStore:
         else:
             result["metadata"] = None
         return result
+
+    def get_active_sessions(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM capture_sessions WHERE ended_ns IS NULL ORDER BY started_ns DESC"
+        ).fetchall()
+        return [self._decode_session_row(row) for row in rows if row]
+
+    def link_packet_to_session(self, packet_id: int, session_id: int) -> None:
+        try:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO packet_sessions (packet_id, session_id) VALUES (?, ?)",
+                (packet_id, session_id),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
 
     def get_latest_session(self, active_only: bool = False) -> dict | None:
         query = "SELECT * FROM capture_sessions"
@@ -609,6 +633,16 @@ class PacketStore:
             return None
 
         packet_id = cursor.lastrowid
+
+        if session_id is not None:
+            try:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO packet_sessions (packet_id, session_id) VALUES (?, ?)",
+                    (packet_id, session_id),
+                )
+                self._conn.commit()
+            except sqlite3.Error:
+                pass
 
         if header and header["transaction_id"] is not None:
             self._correlate_by_transaction_id(packet_id, header, device_ip, direction)
@@ -1091,7 +1125,8 @@ class PacketStore:
             params.append(source_type)
 
         if session_id is not None:
-            query += " AND session_id = ?"
+            query += " AND (session_id = ? OR id IN (SELECT packet_id FROM packet_sessions WHERE session_id = ?))"
+            params.append(session_id)
             params.append(session_id)
 
         if start_ns is not None:
