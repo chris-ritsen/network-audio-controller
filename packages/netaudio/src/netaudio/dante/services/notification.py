@@ -56,6 +56,18 @@ NOTIFICATION_NAMES = {
 
 CONMON_OPCODE_MAKE_MODEL_RESPONSE = 0x00C0
 CONMON_OPCODE_DANTE_MODEL_RESPONSE = 0x0060
+CONMON_OPCODE_AES67_CURRENT_NEW = 0x1007
+CONMON_AES67_CURRENT_NEW_OFFSET = 0x21
+CONMON_OPCODE_PTP_CLOCK_STATUS = 0x0020
+CONMON_PREFERRED_LEADER_OFFSET = 0x26
+CONMON_PTP_V1_ROLE_OFFSET = 0x48
+PTP_V1_ROLE_MASTER = 0x0006
+PTP_V1_ROLE_SLAVE = 0x0009
+
+PTP_V1_ROLE_MAP = {
+    PTP_V1_ROLE_MASTER: "Leader",
+    PTP_V1_ROLE_SLAVE: "Follower",
+}
 CONMON_MANUFACTURER_OFFSET = 0x4C
 CONMON_MANUFACTURER_END = 0xCC
 CONMON_PRODUCT_NAME_OFFSET = 0xCC
@@ -68,6 +80,20 @@ CONMON_BOARD_NAME_OFFSET = 0x58
 CONMON_BOARD_NAME_END = 0x98
 PROTOCOL_SETTINGS = 0xFFFF
 PROTOCOL_CONTROL = 0x27FF
+
+AES67_CURRENT_NEW_MAP = {
+    0x00: (False, False),
+    0x01: (True, False),
+    0x02: (False, True),
+    0x03: (True, True),
+}
+
+
+def parse_aes67_current_new_byte(state_byte: int) -> tuple[bool | None, bool | None]:
+    result = AES67_CURRENT_NEW_MAP.get(state_byte)
+    if result is not None:
+        return result
+    return (None, None)
 
 
 class DanteNotificationService(DanteMulticastService):
@@ -85,6 +111,10 @@ class DanteNotificationService(DanteMulticastService):
         self._conmon_waiters: dict[str, asyncio.Event] = {}
         self._conmon_received: dict[str, set[int]] = {}
         self._conmon_expected_count: dict[str, int] = {}
+        self._aes67_waiters: dict[str, asyncio.Event] = {}
+        self._aes67_results: dict[str, tuple[bool | None, bool | None]] = {}
+        self._preferred_leader_waiters: dict[str, asyncio.Event] = {}
+        self._preferred_leader_results: dict[str, bool | None] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -100,6 +130,40 @@ class DanteNotificationService(DanteMulticastService):
         self._conmon_waiters.pop(device_ip, None)
         self._conmon_received.pop(device_ip, None)
         self._conmon_expected_count.pop(device_ip, None)
+
+    def register_aes67_waiter(self, device_ip: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._aes67_waiters[device_ip] = event
+        self._aes67_results.pop(device_ip, None)
+        return event
+
+    def unregister_aes67_waiter(self, device_ip: str) -> None:
+        self._aes67_waiters.pop(device_ip, None)
+
+    def get_aes67_result(self, device_ip: str) -> tuple[bool | None, bool | None] | None:
+        return self._aes67_results.pop(device_ip, None)
+
+    def _notify_aes67_waiter(self, source_ip: str, current: bool | None, configured: bool | None) -> None:
+        if source_ip in self._aes67_waiters:
+            self._aes67_results[source_ip] = (current, configured)
+            self._aes67_waiters[source_ip].set()
+
+    def register_preferred_leader_waiter(self, device_ip: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._preferred_leader_waiters[device_ip] = event
+        self._preferred_leader_results.pop(device_ip, None)
+        return event
+
+    def unregister_preferred_leader_waiter(self, device_ip: str) -> None:
+        self._preferred_leader_waiters.pop(device_ip, None)
+
+    def get_preferred_leader_result(self, device_ip: str) -> bool | None:
+        return self._preferred_leader_results.pop(device_ip, None)
+
+    def _notify_preferred_leader_waiter(self, source_ip: str, preferred_leader: bool | None) -> None:
+        if source_ip in self._preferred_leader_waiters:
+            self._preferred_leader_results[source_ip] = preferred_leader
+            self._preferred_leader_waiters[source_ip].set()
 
     def _notify_conmon_waiter(self, source_ip: str, opcode: int) -> None:
         if source_ip not in self._conmon_waiters:
@@ -228,6 +292,14 @@ class DanteNotificationService(DanteMulticastService):
             self._handle_dante_model_response(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
             return True
+        elif opcode == CONMON_OPCODE_AES67_CURRENT_NEW:
+            self._handle_aes67_current_new(data, source_ip)
+            self._notify_conmon_waiter(source_ip, opcode)
+            return True
+        elif opcode == CONMON_OPCODE_PTP_CLOCK_STATUS:
+            self._handle_ptp_clock_status(data, source_ip)
+            self._notify_conmon_waiter(source_ip, opcode)
+            return True
 
         return False
 
@@ -284,6 +356,69 @@ class DanteNotificationService(DanteMulticastService):
             return
 
         self._apply_conmon_data(device, parsed)
+
+    def _handle_aes67_current_new(self, data: bytes, source_ip: str) -> None:
+        if len(data) <= CONMON_AES67_CURRENT_NEW_OFFSET:
+            return
+
+        state_byte = data[CONMON_AES67_CURRENT_NEW_OFFSET]
+        aes67_current, aes67_configured = parse_aes67_current_new_byte(state_byte)
+
+        logger.debug(
+            f"Conmon aes67_current_new from {source_ip} ({len(data)}B): "
+            f"byte=0x{state_byte:02X} current={aes67_current} configured={aes67_configured}"
+        )
+
+        device = self._lookup_device(source_ip)
+
+        if device is None:
+            parsed = {}
+            if aes67_current is not None:
+                parsed["aes67_current"] = aes67_current
+            if aes67_configured is not None:
+                parsed["aes67_configured"] = aes67_configured
+            if parsed:
+                self._cache_pending(source_ip, parsed)
+        else:
+            if aes67_current is not None:
+                device.aes67_current = aes67_current
+            if aes67_configured is not None:
+                device.aes67_configured = aes67_configured
+
+        self._notify_aes67_waiter(source_ip, aes67_current, aes67_configured)
+
+    def _handle_ptp_clock_status(self, data: bytes, source_ip: str) -> None:
+        if len(data) <= CONMON_PREFERRED_LEADER_OFFSET:
+            return
+
+        preferred_leader_byte = data[CONMON_PREFERRED_LEADER_OFFSET]
+        preferred_leader = preferred_leader_byte == 0x01
+
+        ptp_v1_role = None
+        if len(data) >= CONMON_PTP_V1_ROLE_OFFSET + 2:
+            role_value = struct.unpack(">H", data[CONMON_PTP_V1_ROLE_OFFSET:CONMON_PTP_V1_ROLE_OFFSET + 2])[0]
+            ptp_v1_role = PTP_V1_ROLE_MAP.get(role_value)
+
+        logger.debug(
+            f"Conmon ptp_clock_status from {source_ip} ({len(data)}B): "
+            f"preferred_leader=0x{preferred_leader_byte:02X} ({preferred_leader}) "
+            f"ptp_v1_role={ptp_v1_role}"
+        )
+
+        device = self._lookup_device(source_ip)
+
+        parsed = {"preferred_leader": preferred_leader}
+        if ptp_v1_role is not None:
+            parsed["ptp_v1_role"] = ptp_v1_role
+
+        if device is None:
+            self._cache_pending(source_ip, parsed)
+        else:
+            device.preferred_leader = preferred_leader
+            if ptp_v1_role is not None:
+                device.ptp_v1_role = ptp_v1_role
+
+        self._notify_preferred_leader_waiter(source_ip, preferred_leader)
 
     def _cache_pending(self, source_ip: str, parsed: dict) -> None:
         if source_ip not in self._pending_conmon:

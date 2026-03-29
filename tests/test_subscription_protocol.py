@@ -12,8 +12,8 @@ import struct
 
 import pytest
 
-from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device_commands import DanteDeviceCommands, Opcode, Protocol
+from netaudio.dante.const import OPCODE_SUBSCRIPTION_ADD, OPCODE_SUBSCRIPTION_REMOVE, PROTOCOL_ID, SERVICE_ARC
+from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.packet_store import _parse_header
 
 
@@ -41,8 +41,8 @@ class TestAddSubscriptionCommand:
         pkt, svc = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
         h = _parse_header(pkt)
 
-        assert h["protocol_id"] == Protocol.CONTROL
-        assert h["opcode"] == Opcode.SUBSCRIPTION_ADD
+        assert h["protocol_id"] == PROTOCOL_ID
+        assert h["opcode"] == OPCODE_SUBSCRIPTION_ADD
 
     def test_routes_to_arc_service(self, cmds):
         _, svc = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
@@ -99,8 +99,8 @@ class TestRemoveSubscriptionCommand:
         pkt, svc = cmds.command_remove_subscription(1)
         h = _parse_header(pkt)
 
-        assert h["protocol_id"] == Protocol.CONTROL
-        assert h["opcode"] == Opcode.SUBSCRIPTION_REMOVE
+        assert h["protocol_id"] == PROTOCOL_ID
+        assert h["opcode"] == OPCODE_SUBSCRIPTION_REMOVE
 
     def test_routes_to_arc_service(self, cmds):
         _, svc = cmds.command_remove_subscription(1)

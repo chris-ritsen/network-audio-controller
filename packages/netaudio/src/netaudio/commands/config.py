@@ -201,6 +201,18 @@ def latency(
     asyncio.run(_run())
 
 
+def _aes67_state_label(value):
+    if value is None:
+        return "N/A"
+    return "on" if value else "off"
+
+
+def _aes67_reboot_required(device):
+    if device.aes67_current is not None and device.aes67_configured is not None:
+        return device.aes67_current != device.aes67_configured
+    return False
+
+
 @app.command()
 def aes67(
     enabled: Optional[str] = typer.Argument(None, help="on or off"),
@@ -217,20 +229,32 @@ def aes67(
 
             if enabled is None:
                 if all_devices:
-                    def _aes67_display(device):
-                        if device.aes67_enabled is None:
-                            return "N/A"
-                        return "on" if device.aes67_enabled else "off"
-                    output_table(
-                        ["Name", "AES67"],
-                        [[device.name or server_name, _aes67_display(device)] for server_name, device in targets],
-                    )
+                    headers = ["Name", "Current", "Configured", "Reboot Required"]
+                    rows = []
+                    for server_name, device in targets:
+                        rows.append([
+                            device.name or server_name,
+                            _aes67_state_label(device.aes67_current),
+                            _aes67_state_label(device.aes67_configured),
+                            "yes" if _aes67_reboot_required(device) else "no",
+                        ])
+                    output_table(headers, rows)
                 else:
                     device = targets[0][1]
-                    if device.aes67_enabled is None:
+                    current_label = _aes67_state_label(device.aes67_current)
+                    configured_label = _aes67_state_label(device.aes67_configured)
+                    reboot = _aes67_reboot_required(device)
+                    if device.aes67_current is None and device.aes67_configured is not None:
+                        output_single(configured_label)
+                    elif device.aes67_current is not None and device.aes67_current == device.aes67_configured:
+                        output_single(current_label)
+                    elif device.aes67_current is None and device.aes67_configured is None:
                         output_single("N/A")
                     else:
-                        output_single("on" if device.aes67_enabled else "off")
+                        typer.echo(f"current: {current_label}", err=False)
+                        typer.echo(f"configured: {configured_label}", err=False)
+                        if reboot:
+                            typer.echo("reboot required", err=True)
                 return
 
             if enabled.lower() not in ("on", "off"):
@@ -241,5 +265,52 @@ def aes67(
             packet, _, port = commands.command_enable_aes67(is_enabled)
             for server_name, device in targets:
                 await send(packet, device.ipv4, port)
+
+    asyncio.run(_run())
+
+
+@app.command("preferred-leader")
+def preferred_leader(
+    enabled: Optional[str] = typer.Argument(None, help="on or off"),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+):
+    """Get or set preferred leader mode."""
+
+    commands = DanteDeviceCommands()
+
+    async def _run():
+        async with _command_context() as (devices, send):
+            filtered = filter_devices(devices)
+            targets = _resolve_targets(filtered, all_devices)
+
+            if enabled is None:
+                if all_devices:
+                    def _pref_display(device):
+                        if device.preferred_leader is None:
+                            return "N/A"
+                        return "on" if device.preferred_leader else "off"
+                    output_table(
+                        ["Name", "Preferred Leader"],
+                        [[device.name or server_name, _pref_display(device)] for server_name, device in targets],
+                    )
+                else:
+                    device = targets[0][1]
+                    if device.preferred_leader is None:
+                        output_single("N/A")
+                    else:
+                        output_single("on" if device.preferred_leader else "off")
+                return
+
+            if enabled.lower() not in ("on", "off"):
+                typer.echo("Error: expected 'on' or 'off'.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+
+            is_preferred = enabled.lower() == "on"
+            packet, _, port = commands.command_set_preferred_leader(is_preferred)
+            for server_name, device in targets:
+                for attempt in range(3):
+                    await send(packet, device.ipv4, port)
+                    if attempt < 2:
+                        await asyncio.sleep(0.5)
 
     asyncio.run(_run())

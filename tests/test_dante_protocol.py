@@ -206,8 +206,10 @@ class TestSettingsCommandPacketFormat:
         assert len(packet_disable) == 36
         self._check_header(packet_enable, 0x10, 0x06)
         assert packet_enable[8:14] == host_mac
-        assert packet_enable[-1] == 0x01
-        assert packet_disable[-1] == 0x00
+        assert packet_enable[32:34] == b'\x00\x01'
+        assert packet_enable[34:36] == b'\x00\x01'
+        assert packet_disable[32:34] == b'\x00\x01'
+        assert packet_disable[34:36] == b'\x00\x00'
 
     def test_set_encoding_packet_format(self):
         commands = DanteDeviceCommands()

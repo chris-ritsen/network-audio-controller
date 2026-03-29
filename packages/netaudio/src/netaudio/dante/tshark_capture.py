@@ -58,6 +58,8 @@ class TsharkCapture:
         self._packet_filter = packet_filter
         self._session_id = session_id
         self._process = None
+        self._cached_active_session_ids = []
+        self._session_check_counter = 0
 
     TSHARK_SEARCH_PATHS = [
         "/opt/homebrew/bin/tshark",
@@ -264,6 +266,17 @@ class TsharkCapture:
                 else:
                     source_type = "tshark"
 
+                if self._session_id is not None:
+                    active_session_ids = [self._session_id]
+                else:
+                    self._session_check_counter += 1
+                    if self._session_check_counter % 50 == 1:
+                        active_sessions = self._store.get_active_sessions()
+                        self._cached_active_session_ids = [int(session["id"]) for session in active_sessions]
+                    active_session_ids = self._cached_active_session_ids
+
+                primary_session_id = active_session_ids[0] if active_session_ids else None
+
                 packet_id = self._store.store_packet(
                     payload=fields["payload"],
                     source_type=source_type,
@@ -273,10 +286,14 @@ class TsharkCapture:
                     dst_port=fields["dst_port"],
                     device_ip=fields["device_ip"],
                     direction=fields["direction"],
-                    session_id=self._session_id,
+                    session_id=primary_session_id,
                     timestamp_ns=fields["timestamp_ns"],
                     interface=self._interface,
                 )
+
+                if packet_id:
+                    for session_id in active_session_ids:
+                        self._store.link_packet_to_session(packet_id, session_id)
 
                 if packet_id and on_packet:
                     await on_packet(packet_id, fields)
