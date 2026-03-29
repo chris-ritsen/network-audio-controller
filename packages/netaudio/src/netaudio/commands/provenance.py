@@ -1539,6 +1539,7 @@ def provenance_export(
 
 @app.command("evidence")
 def provenance_evidence(
+    packet_ids_positional: Optional[list[int]] = typer.Argument(None, help="Packet IDs to tag as evidence."),
     label: str = typer.Option(..., "--label", help="Evidence label for this marker."),
     note: Optional[str] = typer.Option(None, "--note", help="Descriptive note about this evidence."),
     packet_id: Optional[list[int]] = typer.Option(None, "--packet-id", help="Specific packet IDs to tag (repeatable)."),
@@ -1568,8 +1569,9 @@ def provenance_evidence(
 
         resolved_packet_ids = []
 
-        if packet_id:
-            for pid in packet_id:
+        all_explicit_ids = list(packet_ids_positional or []) + list(packet_id or [])
+        for pid in all_explicit_ids:
+            if pid not in resolved_packet_ids:
                 pkt = store.get_packet(pid)
                 if not pkt:
                     print(f"Capture: Packet #{pid} not found.", file=sys.stderr)

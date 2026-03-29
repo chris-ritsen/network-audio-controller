@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.2.1"
+version = "0.2.3"
 description = "CLI for managing network audio devices"
 readme = "README.md"
 license = "Unlicense"
@@ -41,6 +41,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "ruff>=0.8.0",
     "pynacl>=1.6.2",
+    "redis>=5.0.0",
 ]
 
 [tool.pytest.ini_options]

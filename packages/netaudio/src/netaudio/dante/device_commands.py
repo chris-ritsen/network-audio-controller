@@ -174,7 +174,7 @@ class DanteDeviceCommands:
         payload += bytes([0x00, 0x01, 0x00, 0x00])
 
         length = len(payload) + 4
-        packet = struct.pack(">HBB", Protocol.SETTINGS, 0x00, length)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
         return (packet, None, DEVICE_SETTINGS_PORT)
@@ -266,15 +266,15 @@ class DanteDeviceCommands:
         if isinstance(mac, str):
             mac = bytes.fromhex(mac.replace(":", ""))
         magic = b'Audinate\x07\x34'
-        enable_byte = 0x01 if is_enabled else 0x00
+        presence_flags = 0x0001
+        aes67_enable_flags = 0x0001 if is_enabled else 0x0000
 
         payload = struct.pack(">HH", 0x22DC, 0)
         payload += mac
         payload += struct.pack(">H", 0)
         payload += magic
         payload += bytes([0x10, 0x06, 0x00, 0x00, 0x00, 0x64])
-        payload += bytes([0x00, 0x01, 0x00])
-        payload += struct.pack(">B", enable_byte)
+        payload += struct.pack(">HH", presence_flags, aes67_enable_flags)
 
         length = len(payload) + 4
         packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
@@ -282,22 +282,84 @@ class DanteDeviceCommands:
 
         return (packet, None, DEVICE_SETTINGS_PORT)
 
-    def command_get_aes67_config(self, transaction_id=0):
-        payload = struct.pack(">H", 0x15B0)
-        payload += struct.pack(">H", 0x1100)
-        payload += b'\x00\x00\x00\x00'
-        payload += bytes([0x13, 0x02, 0x01, 0x82, 0x04, 0x82, 0x05, 0x02])
-        payload += bytes([0x10, 0x02, 0x11, 0x82, 0x18, 0x82, 0x19, 0x83])
-        payload += bytes([0x01, 0x83, 0x02, 0x83, 0x06, 0x03, 0x10, 0x03])
-        payload += bytes([0x11, 0x03, 0x03, 0x80, 0x21, 0x00, 0xF0, 0x80])
-        payload += bytes([0x60, 0x00, 0x22, 0x00, 0x63, 0x00, 0x64])
+    def command_probe_aes67(self, host_mac=None, sequence=0x1007):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+        presence_flags = 0x0000
+        aes67_enable_flags = 0x0000
+
+        payload = struct.pack(">HH", sequence, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += bytes([0x10, 0x06, 0x00, 0x00, 0x00, 0x64])
+        payload += struct.pack(">HH", presence_flags, aes67_enable_flags)
 
         length = len(payload) + 4
-        packet = struct.pack(">HH", PROTOCOL_AES67_CONFIG, length)
-        packet += struct.pack(">H", transaction_id)
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
         packet += payload
 
-        return (packet, SERVICE_ARC, None)
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
+    def command_set_preferred_leader(self, is_preferred: bool, clock_source: int = 0, host_mac=None, sequence=0x0021):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+        presence_bitmask = 0x0002
+        preferred_leader = 0x01 if is_preferred else 0x00
+
+        payload = struct.pack(">HH", sequence, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += bytes([0x00, 0x21, 0x00, 0x00, 0x00, 0x64])
+        payload += struct.pack(">HH", presence_bitmask, clock_source)
+        payload += struct.pack(">B", preferred_leader)
+        payload += b'\x00' * 55
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
+    def command_probe_preferred_leader(self, clock_source: int = 0, host_mac=None, sequence=0x0021):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+        presence_bitmask = 0x0000
+
+        payload = struct.pack(">HH", sequence, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += bytes([0x00, 0x21, 0x00, 0x00, 0x00, 0x64])
+        payload += struct.pack(">HH", presence_bitmask, clock_source)
+        payload += struct.pack(">B", 0x00)
+        payload += b'\x00' * 55
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
+    def command_query_latency_config(self, transaction_id=0):
+        body = bytes([
+            0x00, 0x17, 0x02, 0x01, 0x82, 0x04, 0x82, 0x05,
+            0x02, 0x10, 0x02, 0x11, 0x82, 0x18, 0x82, 0x19,
+            0x83, 0x01, 0x83, 0x02, 0x83, 0x06, 0x03, 0x10,
+            0x03, 0x11, 0x03, 0x03, 0x80, 0x21, 0x00, 0xF0,
+            0x80, 0x60, 0x00, 0x22, 0x00, 0x63, 0x00, 0x64,
+            0x00, 0x65, 0x02, 0x22, 0x02, 0x12, 0x83, 0x21,
+        ])
+        length = 10 + len(body)
+        header = struct.pack(">HHHHH", PROTOCOL_AES67_CONFIG, length, transaction_id, 0x1100, 0x0000)
+        return (header + body, SERVICE_ARC, None)
 
     def command_volume_start(self, device_name, ipv4, mac, port, timeout=True, transaction_id=0):
         if isinstance(mac, str):

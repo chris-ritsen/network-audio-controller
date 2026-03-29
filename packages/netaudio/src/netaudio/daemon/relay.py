@@ -248,6 +248,10 @@ class RelayServer:
             await self._handle_set_gain(writer, body)
         elif method == "POST" and path == "/set-aes67":
             await self._handle_set_aes67(writer, body)
+        elif method == "POST" and path == "/set-preferred-leader":
+            await self._handle_set_preferred_leader(writer, body)
+        elif method == "POST" and path == "/reboot":
+            await self._handle_reboot(writer, body)
         elif method == "POST" and path == "/metering/start":
             await self._handle_metering_start(writer, body)
         elif method == "POST" and path == "/metering/stop":
@@ -708,6 +712,24 @@ class RelayServer:
         except Exception as exception:
             await self._send_json(writer, {"error": str(exception)}, 500)
 
+    async def _handle_set_preferred_leader(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        preferred = params.get("preferred")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            device_ip = str(device.ipv4)
+            await self.daemon.application.settings.set_preferred_leader(device_ip, preferred)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
     async def _handle_set_aes67(self, writer, body):
         if not body:
             await self._send_json(writer, {"error": "missing body"}, 400)
@@ -721,6 +743,22 @@ class RelayServer:
             return
         try:
             await device.operations.enable_aes67(enabled)
+            await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_reboot(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        try:
+            await device.operations.reboot()
             await self._send_json(writer, {"success": True})
         except Exception as exception:
             await self._send_json(writer, {"error": str(exception)}, 500)
