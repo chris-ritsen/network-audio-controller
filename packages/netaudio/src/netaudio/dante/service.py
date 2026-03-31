@@ -183,7 +183,8 @@ class DanteMulticastService:
             local_ip = sock.getsockname()[0]
             sock.close()
             return local_ip
-        except Exception:
+        except Exception as exception:
+            logger.debug(f"Failed to determine local IP: {exception}")
             return "0.0.0.0"
 
     async def stop(self) -> None:

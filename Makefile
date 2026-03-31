@@ -1,4 +1,12 @@
-.PHONY: test check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: test install restart deploy check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+
+install:
+	uv tool install netaudio --from . --force --no-cache
+
+restart:
+	launchctl kickstart -k gui/$$(id -u)/com.netaudio.daemon
+
+deploy: install restart
 
 test:
 	uv run pytest -q

@@ -252,6 +252,8 @@ class RelayServer:
             await self._handle_set_preferred_leader(writer, body)
         elif method == "POST" and path == "/reboot":
             await self._handle_reboot(writer, body)
+        elif method == "POST" and path == "/interface":
+            await self._handle_set_interface(writer, body)
         elif method == "POST" and path == "/metering/start":
             await self._handle_metering_start(writer, body)
         elif method == "POST" and path == "/metering/stop":
@@ -405,6 +407,7 @@ class RelayServer:
 
         params = json.loads(body)
         rx_device_name = params.get("rx_device")
+        rx_channel_numbers = params.get("rx_channels")
         rx_channel_number = params.get("rx_channel")
 
         device = self._find_device(rx_device_name)
@@ -412,16 +415,31 @@ class RelayServer:
             await self._send_json(writer, {"error": "rx device not found"}, 404)
             return
 
-        rx_channel = device.rx_channels.get(rx_channel_number)
-        if not rx_channel:
-            await self._send_json(writer, {"error": "rx channel not found"}, 404)
-            return
+        if rx_channel_numbers:
+            rx_channels = []
+            for number in rx_channel_numbers:
+                channel = device.rx_channels.get(number)
+                if not channel:
+                    await self._send_json(writer, {"error": f"rx channel {number} not found"}, 404)
+                    return
+                rx_channels.append(channel)
 
-        try:
-            await device.operations.remove_subscription(rx_channel)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+            try:
+                await device.operations.remove_subscriptions(rx_channels)
+                await self._send_json(writer, {"success": True, "count": len(rx_channels)})
+            except Exception as exception:
+                await self._send_json(writer, {"error": str(exception)}, 500)
+        else:
+            rx_channel = device.rx_channels.get(rx_channel_number)
+            if not rx_channel:
+                await self._send_json(writer, {"error": "rx channel not found"}, 404)
+                return
+
+            try:
+                await device.operations.remove_subscription(rx_channel)
+                await self._send_json(writer, {"success": True})
+            except Exception as exception:
+                await self._send_json(writer, {"error": str(exception)}, 500)
 
     async def _handle_identify(self, writer, body):
         if not body:
@@ -760,6 +778,39 @@ class RelayServer:
         try:
             await device.operations.reboot()
             await self._send_json(writer, {"success": True})
+        except Exception as exception:
+            await self._send_json(writer, {"error": str(exception)}, 500)
+
+    async def _handle_set_interface(self, writer, body):
+        if not body:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+        params = json.loads(body)
+        device_name = params.get("device")
+        mode = params.get("mode", "").lower()
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        if mode not in ("dhcp", "static"):
+            await self._send_json(writer, {"error": "mode must be 'dhcp' or 'static'"}, 400)
+            return
+        try:
+            device_ip = str(device.ipv4)
+            if mode == "dhcp":
+                result = await self.daemon.application.set_interface_dhcp(device_ip)
+            else:
+                ip_address = params.get("ip")
+                netmask = params.get("netmask")
+                dns_server = params.get("dns")
+                gateway = params.get("gateway")
+                if not all([ip_address, netmask]):
+                    await self._send_json(writer, {"error": "static mode requires ip, netmask"}, 400)
+                    return
+                result = await self.daemon.application.set_interface_static(
+                    device_ip, ip_address, netmask, dns_server or "", gateway or ""
+                )
+            await self._send_json(writer, {"success": True, "reboot_required": True, "interfaces": result})
         except Exception as exception:
             await self._send_json(writer, {"error": str(exception)}, 500)
 

@@ -282,6 +282,83 @@ class DanteDeviceCommands:
 
         return (packet, None, DEVICE_SETTINGS_PORT)
 
+    def command_probe_interface_status(self, host_mac=None):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+
+        payload = struct.pack(">HH", 0x0000, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += struct.pack(">H", 0x0013)
+        payload += struct.pack(">I", 0x64)
+        payload += b'\x00' * 8
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
+    def command_set_interface_dhcp(self, host_mac=None):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+
+        payload = struct.pack(">HH", 0x0000, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += struct.pack(">H", 0x0013)
+        payload += struct.pack(">I", 0x64)
+        payload += bytes([0x01, 0x1c, 0x00, 0x10])
+        payload += b'\x00' * 16
+        payload += bytes([0x00, 0x02, 0x00, 0x00])
+        payload += b'\x00' * 4
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
+    def command_set_interface_static(self, ip_address, netmask, dns_server, gateway, host_mac=None):
+        mac = host_mac if host_mac else b'\x00' * 6
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(":", ""))
+        magic = b'Audinate\x07\x3a'
+
+        import socket as _socket
+        ip_bytes = _socket.inet_aton(ip_address)
+        mask_bytes = _socket.inet_aton(netmask)
+        dns_bytes = _socket.inet_aton(dns_server)
+        gw_bytes = _socket.inet_aton(gateway)
+
+        payload = struct.pack(">HH", 0x0000, 0)
+        payload += mac
+        payload += struct.pack(">H", 0)
+        payload += magic
+        payload += struct.pack(">H", 0x0013)
+        payload += struct.pack(">I", 0x64)
+        payload += bytes([0x01, 0x1c, 0x0f, 0x10])
+        payload += b'\x00' * 4
+        payload += struct.pack(">I", 0x02)
+        payload += ip_bytes
+        payload += mask_bytes
+        payload += dns_bytes
+        payload += gw_bytes
+        payload += bytes([0x00, 0x02, 0x00, 0x00])
+        payload += b'\x00' * 4
+
+        length = len(payload) + 4
+        packet = struct.pack(">HBB", PROTOCOL_SETTINGS, 0x00, length)
+        packet += payload
+
+        return (packet, None, DEVICE_SETTINGS_PORT)
+
     def command_probe_aes67(self, host_mac=None, sequence=0x1007):
         mac = host_mac if host_mac else b'\x00' * 6
         if isinstance(mac, str):

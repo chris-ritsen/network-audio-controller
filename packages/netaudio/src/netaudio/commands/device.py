@@ -115,8 +115,8 @@ async def _lock_via_relay(pin: str, action: str) -> dict | None:
         body_start = response_str.find("\r\n\r\n")
         if body_start >= 0:
             return json.loads(response_str[body_start + 4:])
-    except (ConnectionRefusedError, OSError):
-        pass
+    except (ConnectionRefusedError, OSError) as exception:
+        logger.debug(f"Failed to get lock status: {exception}")
     return None
 
 
@@ -681,27 +681,24 @@ app.add_typer(meter_app, name="meter")
 
 
 def _render_meter_bar(level: int, bar_width: int = 32, no_color: bool = False) -> str:
+    from netaudio._common import ansi
+
     if level >= 254:
-        if no_color:
-            return "░" * bar_width + "  --"
-        return f"\033[90m{'░' * bar_width}  --\033[0m"
+        return ansi("90", "░" * bar_width + "  --")
 
     amplitude = 254 - level
     filled = round(amplitude / 254 * bar_width)
     filled = max(0, min(bar_width, filled))
     empty = bar_width - filled
 
-    if no_color:
-        return "█" * filled + "░" * empty + f" {level:>3}"
-
     if amplitude > 220:
-        bar_color = "\033[31m"
+        color_code = "31"
     elif amplitude > 180:
-        bar_color = "\033[33m"
+        color_code = "33"
     else:
-        bar_color = "\033[32m"
+        color_code = "32"
 
-    return f"{bar_color}{'█' * filled}\033[90m{'░' * empty}\033[0m {level:>3}"
+    return f"{ansi(color_code, '█' * filled)}{ansi('90', '░' * empty)} {level:>3}"
 
 
 def _render_meter_display(
@@ -711,6 +708,8 @@ def _render_meter_display(
     channel_patterns: list[str] | None,
     no_color: bool,
 ) -> str:
+    from netaudio._common import ansi
+
     lines = []
     bar_width = 32
 
@@ -730,12 +729,9 @@ def _render_meter_display(
                 max_name_width = max(max_name_width, len(display_name))
 
     for device_name, source_ip, levels in device_levels:
-        if no_color:
-            lines.append(f"{device_name} ({source_ip})")
-        else:
-            lines.append(f"\033[1m{device_name}\033[0m \033[90m({source_ip})\033[0m")
+        lines.append(f"{ansi('1', device_name)} {ansi('90', f'({source_ip})')}")
 
-        for direction, key, label_color in [("TX", "tx", "\033[36m"), ("RX", "rx", "\033[35m")]:
+        for direction, key, color_code in [("TX", "tx", "36"), ("RX", "rx", "35")]:
             if key == "tx" and not show_tx:
                 continue
             if key == "rx" and not show_rx:
@@ -758,10 +754,7 @@ def _render_meter_display(
                 bar = _render_meter_bar(level, bar_width, no_color)
                 display_name = channel_name or f"Ch {channel_number}"
 
-                if no_color:
-                    lines.append(f"  {direction} {channel_number:>3} {display_name:<{max_name_width}} {bar}")
-                else:
-                    lines.append(f"  {label_color}{direction}\033[0m {channel_number:>3} \033[90m{display_name:<{max_name_width}}\033[0m {bar}")
+                lines.append(f"  {ansi(color_code, direction)} {channel_number:>3} {ansi('90', f'{display_name:<{max_name_width}}')} {bar}")
 
     return "\n".join(lines)
 
