@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import socket
+
+logger = logging.getLogger("netaudio")
 import sqlite3
 import struct
 import sys
@@ -12,6 +15,7 @@ from typing import Optional
 
 import typer
 
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.clean_labels import (
     load_clean_labels,
     load_clean_subscription_status_labels,
@@ -408,8 +412,8 @@ def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int
                         f = tar.extractfile(member)
                         if f:
                             _process_payload(f.read())
-        except Exception:
-            pass
+        except Exception as exception:
+            logger.debug(f"Failed to process archive {archive}: {exception}")
 
     return observed_opcodes, observed_messages, observed_subscription_statuses
 
@@ -892,9 +896,9 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
         "system": "SYSTEM",
     }
 
-    print(f"\n{'─' * 72}")
+    print(f"\n{("-" if app_settings.no_color else "─") * 72}")
     print("TIMELINE")
-    print(f"{'─' * 72}")
+    print(f"{("-" if app_settings.no_color else "─") * 72}")
 
     all_events = []
 
@@ -983,7 +987,8 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
 
             src_dst = ""
             if sample.get("src_ip") and sample.get("dst_ip"):
-                src_dst = f" {sample['src_ip']}:{sample.get('src_port', '?')} → {sample['dst_ip']}:{sample.get('dst_port', '?')}"
+                arrow = "->" if app_settings.no_color else "\u2192"
+                src_dst = f" {sample['src_ip']}:{sample.get('src_port', '?')} {arrow} {sample['dst_ip']}:{sample.get('dst_port', '?')}"
 
             print(f"\n  [{ts_iso}] {source_label} [{direction}]{src_dst}{source_session}")
 
@@ -991,9 +996,9 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
             if payload:
                 print(_format_audit_packet(payload))
 
-    print(f"\n{'─' * 72}")
+    print(f"\n{("-" if app_settings.no_color else "─") * 72}")
     print("VERIFICATION SUMMARY")
-    print(f"{'─' * 72}")
+    print(f"{("-" if app_settings.no_color else "─") * 72}")
 
     hypotheses = [m for m in markers if m.get("marker_type") == "hypothesis"]
     observations = [m for m in markers if m.get("marker_type") == "observation"]

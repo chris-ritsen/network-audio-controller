@@ -47,16 +47,16 @@ def subscription_list():
             typer.echo("No active subscriptions.")
             return
 
-        from netaudio.cli import state
+        from netaudio._common import ansi
 
-        _STATE_COLORS = {
-            "connected": "\033[32m",
-            "in_progress": "\033[33m",
-            "resolved": "\033[33m",
-            "idle": "\033[33m",
-            "unresolved": "\033[31m",
-            "error": "\033[31m",
-            "none": "\033[90m",
+        _STATE_ANSI = {
+            "connected": "32",
+            "in_progress": "33",
+            "resolved": "33",
+            "idle": "33",
+            "unresolved": "31",
+            "error": "31",
+            "none": "90",
         }
 
         _STATE_ICONS = {
@@ -75,12 +75,10 @@ def subscription_list():
                 return ""
             status_state, label, _ = info
             status_icon = icon(_STATE_ICONS.get(status_state, ""))
-            if state.no_color:
+            ansi_code = _STATE_ANSI.get(status_state, "")
+            if not ansi_code:
                 return f"{status_icon}{label}"
-            color = _STATE_COLORS.get(status_state, "")
-            if not color:
-                return f"{status_icon}{label}"
-            return f"{color}{status_icon}{label}\033[0m"
+            return ansi(ansi_code, f"{status_icon}{label}")
 
         headers = ["RX Channel", "RX Device", "TX Channel", "TX Device", "Status"]
         rows = []
@@ -217,9 +215,10 @@ def add(
 
 @app.command()
 def remove(
-    rx: str = typer.Option(..., "--rx", help="RX channel as channel@device."),
+    rx: Optional[list[str]] = typer.Option(None, "--rx", help="RX channel@device (repeatable), or just device name to remove all."),
+    all_channels: bool = typer.Option(False, "--all", help="Remove all subscriptions on the matched device(s)."),
 ):
-    """Remove a subscription from an RX channel."""
+    """Remove subscriptions from RX channels. Supports bulk removal."""
 
     commands = DanteDeviceCommands()
 
@@ -228,22 +227,72 @@ def remove(
             typer.echo("Error: --rx required.", err=True)
             raise typer.Exit(code=ExitCode.ERROR)
 
-        rx_channel_id, rx_device_id = parse_qualified_name(rx)
+        def get_subscribed_channels(device):
+            subscribed_rx_names = set()
+            for subscription in device.subscriptions:
+                if subscription.tx_channel_name and subscription.tx_device_name:
+                    subscribed_rx_names.add(subscription.rx_channel_name)
+
+            subscribed_channels = []
+            for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number):
+                channel_name = channel.friendly_name or channel.name
+                if channel_name in subscribed_rx_names or channel.name in subscribed_rx_names:
+                    subscribed_channels.append(channel)
+
+            return subscribed_channels
 
         async with _command_context() as (devices, send):
-            rx_device = find_device(devices, rx_device_id)
-            if rx_device is None:
-                typer.echo(f"Error: RX device '{rx_device_id}' not found.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
+            device_removals: dict[str, list] = {}
 
-            rx_channel = find_channel(rx_device, rx_channel_id, "rx")
-            if rx_channel is None:
-                typer.echo(f"Error: RX channel '{rx_channel_id}' not found on {rx_device.name}.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
+            for rx_spec in rx:
+                if "@" in rx_spec:
+                    rx_channel_id, rx_device_id = parse_qualified_name(rx_spec)
+                    rx_device = find_device(devices, rx_device_id)
+                    if rx_device is None:
+                        typer.echo(f"Error: RX device '{rx_device_id}' not found.", err=True)
+                        raise typer.Exit(code=ExitCode.ERROR)
 
-            packet, _ = commands.command_remove_subscription(rx_channel.number)
-            arc_port = _get_arc_port(rx_device)
-            await send(packet, rx_device.ipv4, arc_port)
-            typer.echo(f"{icon('remove')}Removed: {rx_channel_id}@{rx_device.name}")
+                    rx_channel = find_channel(rx_device, rx_channel_id, "rx")
+                    if rx_channel is None:
+                        typer.echo(f"Error: RX channel '{rx_channel_id}' not found on {rx_device.name}.", err=True)
+                        raise typer.Exit(code=ExitCode.ERROR)
+
+                    device_key = rx_device.name
+                    if device_key not in device_removals:
+                        device_removals[device_key] = {"device": rx_device, "channels": []}
+                    device_removals[device_key]["channels"].append(rx_channel)
+                else:
+                    rx_device = find_device(devices, rx_spec)
+                    if rx_device is None:
+                        typer.echo(f"Error: device '{rx_spec}' not found.", err=True)
+                        raise typer.Exit(code=ExitCode.ERROR)
+
+                    subscribed_channels = get_subscribed_channels(rx_device)
+
+                    if not subscribed_channels:
+                        typer.echo(f"No active subscriptions on {rx_device.name}.", err=True)
+                        return
+
+                    device_key = rx_device.name
+                    device_removals[device_key] = {"device": rx_device, "channels": subscribed_channels}
+
+            if all_channels:
+                for device_key, entry in device_removals.items():
+                    entry["channels"] = get_subscribed_channels(entry["device"])
+
+            for device_key, entry in device_removals.items():
+                rx_device = entry["device"]
+                channels = entry["channels"]
+                if not channels:
+                    continue
+
+                channel_numbers = [channel.number for channel in channels]
+                packet, _ = commands.command_remove_subscriptions(channel_numbers)
+                arc_port = _get_arc_port(rx_device)
+                await send(packet, rx_device.ipv4, arc_port)
+
+                for channel in channels:
+                    channel_name = channel.friendly_name or channel.name
+                    typer.echo(f"{icon('remove')}Removed: {channel_name}@{rx_device.name}")
 
     asyncio.run(_run())

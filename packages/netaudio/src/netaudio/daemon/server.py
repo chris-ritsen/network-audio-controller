@@ -928,23 +928,40 @@ class NetaudioDaemon:
 
             try:
                 device_ip = str(device.ipv4)
-                result = await self.application.probe_aes67_state(device_ip)
-                if result:
-                    aes67_current, aes67_configured = result
-                    if aes67_current is not None:
-                        device.aes67_current = aes67_current
-                    if aes67_configured is not None:
-                        device.aes67_configured = aes67_configured
+                for probe_attempt in range(3):
+                    result = await self.application.probe_aes67_state(device_ip)
+                    if result:
+                        aes67_current, aes67_configured = result
+                        if aes67_current is not None:
+                            device.aes67_current = aes67_current
+                        if aes67_configured is not None:
+                            device.aes67_configured = aes67_configured
+                        break
+                    if probe_attempt < 2:
+                        await asyncio.sleep(1)
             except Exception as exception:
                 logger.debug(f"Error probing AES67 for {server_name}: {exception}")
 
             try:
                 device_ip = str(device.ipv4)
-                preferred_leader = await self.application.probe_preferred_leader_state(device_ip)
-                if preferred_leader is not None:
-                    device.preferred_leader = preferred_leader
+                for probe_attempt in range(3):
+                    preferred_leader = await self.application.probe_preferred_leader_state(device_ip)
+                    if preferred_leader is not None:
+                        device.preferred_leader = preferred_leader
+                        break
+                    if probe_attempt < 2:
+                        await asyncio.sleep(1)
             except Exception as exception:
                 logger.debug(f"Error probing preferred leader for {server_name}: {exception}")
+
+            if device.interfaces is None:
+                try:
+                    device_ip = str(device.ipv4)
+                    interfaces = await self.application.probe_interface_status(device_ip)
+                    if interfaces is not None:
+                        device.interfaces = interfaces
+                except Exception as exception:
+                    logger.debug(f"Error probing interface status for {server_name}: {exception}")
 
             logger.info(f"Fetched controls for {server_name}")
             await self._publish_device_to_redis(device)
@@ -955,6 +972,26 @@ class NetaudioDaemon:
             logger.debug(f"Error fetching controls for {server_name}: {exception}")
         finally:
             self._populating.discard(server_name)
+
+    FIRE_AND_FORGET_SETTINGS_OPCODES = {
+        0x0013, 0x0021, 0x0077, 0x0081, 0x0083, 0x1006, 0x1008,
+    }
+
+    @staticmethod
+    def _is_fire_and_forget_settings(packet: bytes) -> bool:
+        if len(packet) < 0x1c:
+            return False
+        protocol_id = struct.unpack(">H", packet[0:2])[0]
+        if protocol_id != 0xFFFF:
+            return False
+        magic_offset = packet.find(b"Audinate", 4)
+        if magic_offset < 0:
+            return False
+        opcode_offset = magic_offset + 10
+        if opcode_offset + 2 > len(packet):
+            return False
+        opcode = struct.unpack(">H", packet[opcode_offset:opcode_offset + 2])[0]
+        return opcode in NetaudioDaemon.FIRE_AND_FORGET_SETTINGS_OPCODES
 
     @staticmethod
     def _is_identify_packet(packet: bytes) -> bool:
@@ -1134,6 +1171,9 @@ class NetaudioDaemon:
                     if port == DEVICE_SETTINGS_PORT and self._is_identify_packet(packet):
                         self.application.settings.send(packet, device_ip, port)
                         response = None
+                    elif port == DEVICE_SETTINGS_PORT and self._is_fire_and_forget_settings(packet):
+                        self.application.settings.send(packet, device_ip, port)
+                        response = None
                     elif port == DEVICE_SETTINGS_PORT:
                         response = await self.application.settings.request(
                             packet,
@@ -1234,6 +1274,9 @@ class NetaudioDaemon:
                     client_device.board_name = device.board_name
                     client_device.model = device.model
                     client_device.is_locked = device.is_locked
+                    client_device.interfaces = device.interfaces
+                    client_device.interface_reboot_required = device.interface_reboot_required
+                    client_device.interface_pending_config = device.interface_pending_config
                     devices_for_client[server_name] = client_device
                 data = pickle.dumps(devices_for_client)
 

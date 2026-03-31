@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("netaudio")
 from enum import Enum
 from typing import Optional
 
@@ -112,8 +114,8 @@ def _load_icons_from_config() -> bool:
         ui_section = data.get("ui", {})
         if isinstance(ui_section, dict):
             return bool(ui_section.get("icons", False))
-    except Exception:
-        pass
+    except Exception as exception:
+        logger.debug(f"Failed to read config for icons setting: {exception}")
     return False
 
 
