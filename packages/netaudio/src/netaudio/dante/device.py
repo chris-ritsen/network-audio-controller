@@ -76,6 +76,9 @@ class DanteDevice:
         self.max_latency: float | None = None
         self.product_version: str | None = None
         self.board_name: str | None = None
+        self.interfaces: list[dict] | None = None
+        self.interface_reboot_required: bool = False
+        self.interface_pending_config: dict | None = None
 
         self._app = app
 

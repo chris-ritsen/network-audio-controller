@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger("netaudio")
 
 ENV_LABELS_PATH = "NETAUDIO_LABELS_PATH"
 
@@ -47,7 +50,8 @@ def load_clean_labels(
 
     try:
         data = json.loads(resolved.read_text())
-    except Exception:
+    except Exception as exception:
+        logger.debug(f"Failed to load clean labels from {resolved}: {exception}")
         return {}, {}
 
     opcode_labels: dict[tuple[int, int], str] = {}
@@ -124,7 +128,8 @@ def load_clean_subscription_status_labels(
 
     try:
         data = json.loads(resolved.read_text())
-    except Exception:
+    except Exception as exception:
+        logger.debug(f"Failed to load subscription status labels from {resolved}: {exception}")
         return {}
 
     status_section = data.get("subscription_status_labels", {})

@@ -1127,31 +1127,32 @@ def _spec_to_markdown(spec_data: dict) -> str:
 def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
     import shutil
     import textwrap
+    from netaudio._common import ansi
 
     terminal_width = shutil.get_terminal_size((120, 24)).columns
 
     lines = []
-    lines.append("\033[1mDante Control Protocol Reference\033[0m")
+    lines.append(ansi("1", "Dante Control Protocol Reference"))
     lines.append("")
 
     total = spec_data["total"]
     confidence = spec_data["confidence"]
-    summary_parts = [f"\033[1m{count}\033[0m {level}" for level, count in confidence.items()]
+    summary_parts = [f"{ansi('1', str(count))} {level}" for level, count in confidence.items()]
     lines.append(f"{total} documented protocol elements across {len(spec_data['categories'])} categories")
     lines.append("  " + "  ".join(summary_parts))
     lines.append("")
 
     _CONFIDENCE_COLORS = {
-        "verified": "\033[32m",
-        "observed": "\033[33m",
-        "inferred": "\033[90m",
-        "uncertain": "\033[91m",
+        "verified": "32",
+        "observed": "33",
+        "inferred": "90",
+        "uncertain": "91",
     }
 
     for cat_index, cat_data in enumerate(spec_data["categories"]):
         if cat_index > 0:
             lines.append("")
-        lines.append(f"\033[1;4m{cat_data['title']}\033[0m")
+        lines.append(ansi("1;4", cat_data["title"]))
         lines.append("")
 
         for fact_index, fact in enumerate(cat_data["facts"]):
@@ -1162,9 +1163,9 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
             confidence_color = _CONFIDENCE_COLORS.get(confidence_val, "")
             confidence_tag = ""
             if confidence_val in ("inferred", "observed", "uncertain"):
-                confidence_tag = f"  {confidence_color}{confidence_val}\033[0m"
+                confidence_tag = f"  {ansi(confidence_color, confidence_val)}"
 
-            lines.append(f"  \033[1m{fact['key']}\033[0m  {fact['name']}{confidence_tag}")
+            lines.append(f"  {ansi('1', fact['key'])}  {fact['name']}{confidence_tag}")
 
             if fact.get("note"):
                 lines.append("")
@@ -1174,7 +1175,7 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
                     initial_indent="    ",
                     subsequent_indent="    ",
                 )
-                lines.append(f"\033[90m{note_wrapped}\033[0m")
+                lines.append(ansi("90", note_wrapped))
 
             fields = fact.get("fields", [])
             if fields and not fact.get("body"):
@@ -1182,9 +1183,10 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
                 max_name_len = max(len(field["name"]) for field in fields)
                 max_type_len = max(len(field["dtype"]) for field in fields)
                 for field in fields:
-                    value_str = f"  \033[36m{field['value']}\033[0m" if field.get("value") else ""
+                    value_str = f"  {ansi('36', field['value'])}" if field.get("value") else ""
+                    offset_str = f"{field['offset']:3d}:{field['offset'] + field['length']:<3d}"
                     lines.append(
-                        f"    \033[90m{field['offset']:3d}:{field['offset'] + field['length']:<3d}\033[0m"
+                        f"    {ansi('90', offset_str)}"
                         f"  {field['dtype']:<{max_type_len}s}"
                         f"  {field['name']:<{max_name_len}s}"
                         f"{value_str}"
@@ -1204,7 +1206,7 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
                             initial_indent="    ",
                             subsequent_indent="    ",
                         )
-                        lines.append(f"\033[90m{wrapped}\033[0m")
+                        lines.append(ansi("90", wrapped))
 
         lines.append("")
 

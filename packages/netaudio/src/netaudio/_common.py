@@ -20,6 +20,12 @@ from netaudio.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERV
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
 
+
+def ansi(code: str, text: str) -> str:
+    if settings.no_color:
+        return str(text)
+    return f"\033[{code}m{text}\033[0m"
+
 HEADER_ICONS = {
     "Name": "name",
     "IP Address": "ip",

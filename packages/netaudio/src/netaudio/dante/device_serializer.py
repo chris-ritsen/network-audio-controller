@@ -47,6 +47,9 @@ class DanteDeviceSerializer:
             ("max_latency", device.max_latency),
             ("product_version", device.product_version),
             ("board_name", device.board_name),
+            ("interfaces", device.interfaces),
+            ("interface_reboot_required", device.interface_reboot_required if device.interface_reboot_required else None),
+            ("interface_pending_config", device.interface_pending_config),
         ]
 
         for field_name, field_value in optional_fields:

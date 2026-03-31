@@ -831,7 +831,7 @@
       "category": "arc_opcode",
       "key": "0x3014",
       "name": "remove_rx_subscription",
-      "note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 17 channels (80B) and 128 channels (524B), both confirmed success.",
+      "note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 17 channels (80B) and 128 channels (524B), both confirmed success. NOTE: DC does not use this opcode for bulk unsubscribe during preset load \u2014 it uses 0x3010 with zeroed string offsets instead. 0x3014 may be an alternative removal path.",
       "fields": [
         {
           "name": "opcode",
@@ -859,7 +859,6 @@
         "dc_preset_load:1017601",
         "dc_preset_load:1017617"
       ],
-      "confidence": "verified",
       "added_ns": 1772948279083913000,
       "body": "## Bulk Remove RX Subscriptions\n\nOpcode 0x3014 on port 4440 (ARC protocol). Sent to the **receiving** device.\n\n### Header (10 bytes)\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 0      | 2      | uint16_be | protocol_id        |\n| 2      | 2      | uint16_be | packet_length      |\n| 4      | 2      | uint16_be | transaction_id     |\n| 6      | 2      | uint16_be | opcode (0x3014)    |\n| 8      | 2      | uint16_be | status             |\n\n### Payload\n| Offset | Length | Type      | Field              |\n|--------|--------|-----------|--------------------|\n| 10     | 4      | uint32_be | count              |\n| 14     | 4*N    | uint32_be | rx_channel_number (repeated N times) |\n\n### Bulk Limits\nNo channel count limit \u2014 payload is just a count followed by channel numbers (4 bytes each). Tested with 17 channels in a single 80-byte packet.\n\n### Response\n10B ACK with status 0x0001 (success).",
       "history": [
@@ -880,6 +879,13 @@
           "previous_name": "remove_rx_subscription",
           "previous_confidence": "verified",
           "previous_note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 128 channels in a single 524-byte packet."
+        },
+        {
+          "replaced_ns": 1774897978844845000,
+          "previous_name": "remove_rx_subscription",
+          "previous_confidence": "verified",
+          "previous_note": "Bulk remove RX channel subscriptions on port 4440. No channel count limit \u2014 tested with 17 channels (80B) and 128 channels (524B), both confirmed success.",
+          "action": "updated"
         }
       ],
       "protocol_id": [
@@ -888,7 +894,17 @@
         10239
       ],
       "match_offset": 6,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1772948279083913000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774897978844846000
+        }
+      ]
     },
     "conmon_message:0x0060": {
       "category": "conmon_message",
@@ -1168,14 +1184,33 @@
     "arc_opcode:0x2320": {
       "category": "arc_opcode",
       "key": "0x2320",
-      "name": "unknown_2320",
-      "note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive.",
-      "fields": [],
+      "name": "set_tx_channel_labels",
+      "note": "Sent during 'Set Tx Labels' phase of DC preset load. Sets TX channel friendly names on port 4440.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x2320"
+        }
+      ],
       "evidence": [
         "lock_status_inaccurate:565817",
-        "lock_status_inaccurate:375094"
+        "lock_status_inaccurate:375094",
+        "dc_preset_save_load:4498491"
       ],
-      "added_ns": 1772988409007448000,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988409007448000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1774897958819341000
+        }
+      ],
+      "added_ns": 1774897958819342000,
       "protocol_id": [
         10025,
         10249,
@@ -1183,12 +1218,6 @@
       ],
       "match_offset": 6,
       "match_size": 2,
-      "confidence_log": [
-        {
-          "level": "observed",
-          "timestamp_ns": 1772988409007448000
-        }
-      ],
       "history": [
         {
           "replaced_ns": 1773116904931338000,
@@ -1196,6 +1225,12 @@
           "previous_confidence": "observed",
           "previous_note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive.",
           "action": "updated"
+        },
+        {
+          "replaced_ns": 1774897958819346000,
+          "previous_name": "unknown_2320",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 10B response. Minimal payload \u2014 possibly a status check or keepalive."
         }
       ]
     },
@@ -1352,14 +1387,33 @@
     "arc_opcode:0x3300": {
       "category": "arc_opcode",
       "key": "0x3300",
-      "name": "unknown_3300",
-      "note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count.",
-      "fields": [],
+      "name": "set_rx_channel_labels",
+      "note": "Sent during 'Set Rx Labels' phase of DC preset load. Sets RX channel friendly names on port 4440.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x3300"
+        }
+      ],
       "evidence": [
         "lock_status_inaccurate:375067",
-        "lock_status_inaccurate:375077"
+        "lock_status_inaccurate:375077",
+        "dc_preset_save_load:4498489"
       ],
-      "added_ns": 1772988409562784000,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988409562784000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1774897967111788000
+        }
+      ],
+      "added_ns": 1774897967111788000,
       "protocol_id": [
         10025,
         10249,
@@ -1367,12 +1421,6 @@
       ],
       "match_offset": 6,
       "match_size": 2,
-      "confidence_log": [
-        {
-          "level": "observed",
-          "timestamp_ns": 1772988409562784000
-        }
-      ],
       "history": [
         {
           "replaced_ns": 1773116906998546000,
@@ -1380,6 +1428,12 @@
           "previous_confidence": "observed",
           "previous_note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count.",
           "action": "updated"
+        },
+        {
+          "replaced_ns": 1774897967111792000,
+          "previous_name": "unknown_3300",
+          "previous_confidence": "observed",
+          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 18B response. Near 0x3000 (query_rx_channels). Possibly RX summary or count."
         }
       ]
     },
@@ -3310,20 +3364,37 @@
     "arc_opcode:0x3410": {
       "category": "arc_opcode",
       "key": "0x3410",
-      "name": "unknown_3410",
-      "note": "Write opcode, blocked by device lock (0x0600)",
-      "fields": [],
+      "name": "subscription_clear_prep",
+      "note": "Sent to AVIO devices at start of 'Delete Rx Subscriptions' phase during preset load. 28-36B packets. Sent before 0x3010 bulk unsubscribe. Purpose: possibly clears subscription state or prepares device for bulk unsubscribe.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x3410"
+        }
+      ],
       "evidence": [
         "lock_status_inaccurate:606256",
-        "lock_status_inaccurate:606257"
+        "lock_status_inaccurate:606257",
+        "dc_preset_save_load:4495387",
+        "dc_preset_save_load:4495389",
+        "dc_preset_save_load:4495391",
+        "dc_preset_save_load:4495393",
+        "dc_preset_save_load:4495398"
       ],
       "confidence_log": [
         {
           "level": "observed",
           "timestamp_ns": 1773115182558345000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1774897949740130000
         }
       ],
-      "added_ns": 1773115182558345000,
+      "added_ns": 1774897949740131000,
       "history": [
         {
           "replaced_ns": 1773116985242207000,
@@ -3331,6 +3402,12 @@
           "previous_confidence": "observed",
           "previous_note": "Write opcode, blocked by device lock (0x0600)",
           "action": "updated"
+        },
+        {
+          "replaced_ns": 1774897949740136000,
+          "previous_name": "unknown_3410",
+          "previous_confidence": "observed",
+          "previous_note": "Write opcode, blocked by device lock (0x0600)"
         }
       ]
     },
@@ -3892,10 +3969,138 @@
         }
       ],
       "added_ns": 1774746131574636000
+    },
+    "conmon_opcode:0x0083": {
+      "category": "conmon_opcode",
+      "key": "0x0083",
+      "name": "set_encoding",
+      "note": "Set audio encoding (bit depth) on port 8700. Body: [0x1c:0x20]=presence (0x00000064), [0x20:0x24]=set_flag (0x00000001), [0x24:0x28]=encoding_bits (0x00000018=24-bit). Observed during DC preset load 'Set Audio Encoding' phase.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0083"
+        }
+      ],
+      "evidence": [
+        "dc_preset_save_load:4498278",
+        "dc_preset_save_load:4498279",
+        "dc_preset_save_load:4498280",
+        "dc_preset_save_load:4498281",
+        "dc_preset_save_load:4498282"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774897929780735000
+        }
+      ],
+      "added_ns": 1774897929780736000
+    },
+    "conmon_opcode:0x0013": {
+      "category": "conmon_opcode",
+      "key": "0x0013",
+      "name": "set_interface_address",
+      "note": "Set interface IP config on port 8700. Read counterpart is 0x0011 (multicast announcement). Dynamic mode (40B): body is [0x1c:0x20]=presence (0x00000064), [0x20:0x28]=all zeros (DHCP, no IP fields). Static mode (68B): [0x1c:0x20]=presence (0x00000064), [0x20:0x24]=mode_flags (011c0f10 for static), [0x24:0x28]=padding, [0x28:0x2c]=interface_index (0x00000002), [0x2c:0x30]=ipv4_address, [0x30:0x34]=netmask, [0x34:0x38]=dns_server, [0x38:0x3c]=gateway, [0x3c:0x40]=unknown (0x00020000), [0x40:0x44]=padding. All IP fields match preset XML exactly (verified against dc_preset_experiment_2026_03_30.xml).",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0013"
+        }
+      ],
+      "evidence": [
+        "dc_preset_save_load:4497536",
+        "dc_preset_save_load:4497537",
+        "dc_preset_save_load:4497538",
+        "dc_preset_save_load:4497539",
+        "dc_preset_save_load:4497540"
+      ],
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1774897939550087000
+        },
+        {
+          "level": "observed",
+          "timestamp_ns": 1774898086638433000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1774898356248698000
+        }
+      ],
+      "added_ns": 1774897939550088000,
+      "history": [
+        {
+          "replaced_ns": 1774898086638432000,
+          "previous_name": "set_interface_address",
+          "previous_confidence": "observed",
+          "previous_note": "Set interface IP addresses on port 8700. 40B for single-NIC devices, 68B for dual-NIC. Observed during DC preset load 'Set Interface Addresses' phase. Sent twice during a preset load (once at start, once near end).",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1774898356248696000,
+          "previous_name": "set_interface_address",
+          "previous_confidence": "observed",
+          "previous_note": "Set interface IP addresses on port 8700. 40B for single-NIC devices (dynamic DHCP), 68B for dual-NIC or static-IP devices. Observed during DC preset load 'Set Interface Addresses' phase. Sent twice during a preset load. The preset XML confirms avio-usb-2 (68B packet) has static IP config while others are dynamic \u2014 explaining the size difference. Preset file: tests/fixtures/provenance/dc_preset_experiment_2026_03_30.xml",
+          "action": "updated"
+        }
+      ]
+    },
+    "preset_operation:load_order": {
+      "category": "preset_operation",
+      "key": "load_order",
+      "name": "preset_load_operation_order",
+      "note": "DC applies a preset in this fixed order with ~5s gaps: 1) Delete Rx Subscriptions (0x3410+0x3010 zeroed), 2) Clear Preferred Clock Leader (0x0021), 3) Set Interface Addresses (0x0013), 4) Set Preferred Clock Leader (0x0021), 5) Set Sample Rate (0x0081), 6) Set Audio Encoding (0x0083), 7) Set Latency (0x1101), 8) Set Rx/Tx Labels (0x3300+0x2320+0x3010 re-subscribe), 9) Reconciliation (0x3400/0x3401/0x2400). ~46s for 6 devices, ~3000 packets.",
+      "fields": [],
+      "evidence": [
+        "dc_preset_save_load:4495387"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774897988267206000
+        }
+      ],
+      "added_ns": 1774897988267206000
+    },
+    "conmon_opcode:0x0011": {
+      "category": "conmon_opcode",
+      "key": "0x0011",
+      "name": "interface_status_announcement",
+      "note": "Multicast announcement on 224.0.0.231:8702 containing full interface configuration. Broadcast periodically by all devices. Body layout (after 28-byte conmon header): [0x20:0x22]=interface_count (uint16, 1=single NIC, 2=dual NIC), [0x24:0x28]=presence_flags, [0x28:0x2a]=mode (uint16, 0x0001=dynamic/DHCP, 0x0003=static), [0x2a:0x30]=mac_address (6 bytes), [0x30:0x34]=ipv4_address, [0x34:0x38]=netmask, [0x38:0x3c]=dns_or_gateway, [0x3c:0x40]=gateway_or_dns. For dual-NIC devices (lx-dante), secondary interface follows at 0x44 with same layout. Dynamic devices append DHCP domain name as null-terminated string. Packet sizes: 96B (static single-NIC), 108B (dynamic single-NIC with domain), 148B (dynamic dual-NIC).",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0011"
+        }
+      ],
+      "evidence": [
+        "interface_config_analysis:4525321",
+        "interface_config_analysis:4525446",
+        "interface_config_analysis:4525427",
+        "interface_config_analysis:4525314",
+        "interface_config_analysis:4525429"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1774898342200219000
+        }
+      ],
+      "added_ns": 1774898342200220000
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1774746131574637000
+    "updated_ns": 1774898356248700000
   }
 }

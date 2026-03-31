@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import socket
 import struct
 
 from netaudio.dante.const import (
@@ -54,6 +55,7 @@ NOTIFICATION_NAMES = {
     NOTIFICATION_AES67_STATUS: "AES67 Status",
 }
 
+CONMON_OPCODE_INTERFACE_STATUS = 0x0011
 CONMON_OPCODE_MAKE_MODEL_RESPONSE = 0x00C0
 CONMON_OPCODE_DANTE_MODEL_RESPONSE = 0x0060
 CONMON_OPCODE_AES67_CURRENT_NEW = 0x1007
@@ -80,6 +82,14 @@ CONMON_BOARD_NAME_OFFSET = 0x58
 CONMON_BOARD_NAME_END = 0x98
 PROTOCOL_SETTINGS = 0xFFFF
 PROTOCOL_CONTROL = 0x27FF
+
+INTERFACE_MODE_DYNAMIC = 0x0001
+INTERFACE_MODE_STATIC = 0x0003
+
+INTERFACE_MODE_NAMES = {
+    INTERFACE_MODE_DYNAMIC: "dynamic",
+    INTERFACE_MODE_STATIC: "static",
+}
 
 AES67_CURRENT_NEW_MAP = {
     0x00: (False, False),
@@ -115,6 +125,8 @@ class DanteNotificationService(DanteMulticastService):
         self._aes67_results: dict[str, tuple[bool | None, bool | None]] = {}
         self._preferred_leader_waiters: dict[str, asyncio.Event] = {}
         self._preferred_leader_results: dict[str, bool | None] = {}
+        self._interface_waiters: dict[str, asyncio.Event] = {}
+        self._interface_results: dict[str, list[dict]] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -164,6 +176,23 @@ class DanteNotificationService(DanteMulticastService):
         if source_ip in self._preferred_leader_waiters:
             self._preferred_leader_results[source_ip] = preferred_leader
             self._preferred_leader_waiters[source_ip].set()
+
+    def register_interface_waiter(self, device_ip: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._interface_waiters[device_ip] = event
+        self._interface_results.pop(device_ip, None)
+        return event
+
+    def unregister_interface_waiter(self, device_ip: str) -> None:
+        self._interface_waiters.pop(device_ip, None)
+
+    def get_interface_result(self, device_ip: str) -> list[dict] | None:
+        return self._interface_results.pop(device_ip, None)
+
+    def _notify_interface_waiter(self, source_ip: str, interfaces: list[dict]) -> None:
+        if source_ip in self._interface_waiters:
+            self._interface_results[source_ip] = interfaces
+            self._interface_waiters[source_ip].set()
 
     def _notify_conmon_waiter(self, source_ip: str, opcode: int) -> None:
         if source_ip not in self._conmon_waiters:
@@ -284,7 +313,11 @@ class DanteNotificationService(DanteMulticastService):
         if opcode is None:
             return False
 
-        if opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
+        if opcode == CONMON_OPCODE_INTERFACE_STATUS:
+            self._handle_interface_status(data, source_ip)
+            self._notify_conmon_waiter(source_ip, opcode)
+            return True
+        elif opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
             self._handle_make_model_response(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
             return True
@@ -419,6 +452,91 @@ class DanteNotificationService(DanteMulticastService):
                 device.ptp_v1_role = ptp_v1_role
 
         self._notify_preferred_leader_waiter(source_ip, preferred_leader)
+
+    def _handle_interface_status(self, data: bytes, source_ip: str) -> None:
+        if len(data) < 0x40:
+            return
+
+        interface_count = struct.unpack(">H", data[0x20:0x22])[0]
+        interfaces = []
+
+        offset = 0x28
+        for _ in range(interface_count):
+            if offset + 20 > len(data):
+                break
+
+            mode_value = struct.unpack(">H", data[offset:offset + 2])[0]
+            mode = INTERFACE_MODE_NAMES.get(mode_value, f"unknown(0x{mode_value:04X})")
+            mac_bytes = data[offset + 2:offset + 8]
+            mac_address = ":".join(f"{byte:02X}" for byte in mac_bytes)
+            ip_address = socket.inet_ntoa(data[offset + 8:offset + 12])
+            netmask = socket.inet_ntoa(data[offset + 12:offset + 16])
+
+            interface_info = {
+                "mode": mode,
+                "mac_address": mac_address,
+                "ip_address": ip_address,
+                "netmask": netmask,
+            }
+
+            if mode == "dynamic":
+                gateway = socket.inet_ntoa(data[offset + 16:offset + 20])
+                dns_server = socket.inet_ntoa(data[offset + 20:offset + 24])
+                interface_info["gateway"] = gateway
+                interface_info["dns_server"] = dns_server
+                offset += 24
+            elif mode == "static":
+                dns_server = socket.inet_ntoa(data[offset + 16:offset + 20])
+                gateway = socket.inet_ntoa(data[offset + 20:offset + 24])
+                interface_info["dns_server"] = dns_server
+                interface_info["gateway"] = gateway
+                offset += 24
+            else:
+                offset += 20
+
+            interfaces.append(interface_info)
+
+        reboot_required = False
+        pending_config = None
+        if len(data) > 0x49:
+            reboot_flag = struct.unpack(">H", data[0x48:0x4a])[0]
+            reboot_required = reboot_flag != 0
+
+            if reboot_flag == 0x0004:
+                pending_config = {"mode": "dynamic"}
+            elif reboot_flag == 0x0006 and len(data) >= 0x5c:
+                pending_ip = socket.inet_ntoa(data[0x4c:0x50])
+                pending_mask = socket.inet_ntoa(data[0x50:0x54])
+                pending_dns = socket.inet_ntoa(data[0x54:0x58])
+                pending_gw = socket.inet_ntoa(data[0x58:0x5c])
+                pending_config = {
+                    "mode": "static",
+                    "ip_address": pending_ip,
+                    "netmask": pending_mask,
+                    "dns_server": pending_dns,
+                    "gateway": pending_gw,
+                }
+
+        logger.debug(
+            f"Conmon interface_status from {source_ip} ({len(data)}B): "
+            f"interface_count={interface_count} reboot_required={reboot_required} "
+            f"pending_config={pending_config} interfaces={interfaces}"
+        )
+
+        device = self._lookup_device(source_ip)
+
+        if device is None:
+            self._cache_pending(source_ip, {
+                "interfaces": interfaces,
+                "interface_reboot_required": reboot_required,
+                "interface_pending_config": pending_config,
+            })
+        else:
+            device.interfaces = interfaces
+            device.interface_reboot_required = reboot_required
+            device.interface_pending_config = pending_config
+
+        self._notify_interface_waiter(source_ip, interfaces)
 
     def _cache_pending(self, source_ip: str, parsed: dict) -> None:
         if source_ip not in self._pending_conmon:
