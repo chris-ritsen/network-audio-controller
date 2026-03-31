@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("netaudio")
 
 NAMED_PIPE_ADDRESS = r"\\.\pipe\netaudio"
 
@@ -120,5 +123,5 @@ def cleanup_daemon_socket():
     if socket_path.exists():
         try:
             socket_path.unlink()
-        except Exception:
-            pass
+        except Exception as exception:
+            logger.debug(f"Failed to remove socket file {socket_path}: {exception}")

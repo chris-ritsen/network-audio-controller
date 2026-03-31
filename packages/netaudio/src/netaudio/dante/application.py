@@ -198,6 +198,10 @@ class DanteApplication:
 
         await self._query_conmon_all()
 
+        await self._probe_interface_status()
+        await self._probe_preferred_leader_all()
+        await self._probe_aes67_all()
+
         return self.devices
 
     def register_device(self, server_name: str, device) -> None:
@@ -288,6 +292,144 @@ class DanteApplication:
         except Exception as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
+
+    async def _probe_interface_status(self, timeout: float = 3.0) -> None:
+        waiters = {}
+        for device in self.devices.values():
+            device_ip = str(device.ipv4) if device.ipv4 else None
+            if device_ip:
+                waiter = self.notifications.register_interface_waiter(device_ip)
+                waiters[device_ip] = waiter
+                self.settings.probe_interface_status(device_ip)
+
+        if not waiters:
+            return
+
+        logger.debug(f"Probed interface status for {len(waiters)} devices")
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            for device_ip in waiters:
+                self.notifications.unregister_interface_waiter(device_ip)
+
+        populated = sum(1 for device in self.devices.values() if device.interfaces)
+        logger.debug(f"Interface status: {populated}/{len(waiters)} devices responded")
+
+    async def _probe_preferred_leader_all(self, timeout: float = 3.0) -> None:
+        waiters = {}
+        for device in self.devices.values():
+            if device.preferred_leader is not None:
+                continue
+            device_ip = str(device.ipv4) if device.ipv4 else None
+            if device_ip:
+                waiter = self.notifications.register_preferred_leader_waiter(device_ip)
+                waiters[device_ip] = waiter
+                self.settings.probe_preferred_leader(device_ip)
+
+        if not waiters:
+            return
+
+        logger.debug(f"Probed preferred leader for {len(waiters)} devices")
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            for device_ip in waiters:
+                result = self.notifications.get_preferred_leader_result(device_ip)
+                if result is not None:
+                    device = self._device_by_ip(device_ip)
+                    if device:
+                        device.preferred_leader = result
+                self.notifications.unregister_preferred_leader_waiter(device_ip)
+
+        populated = sum(1 for device in self.devices.values() if device.preferred_leader is not None)
+        logger.debug(f"Preferred leader: {populated}/{len(self.devices)} devices have data")
+
+    async def _probe_aes67_all(self, timeout: float = 3.0) -> None:
+        waiters = {}
+        for device in self.devices.values():
+            if device.aes67_current is not None:
+                continue
+            device_ip = str(device.ipv4) if device.ipv4 else None
+            if device_ip:
+                waiter = self.notifications.register_aes67_waiter(device_ip)
+                waiters[device_ip] = waiter
+                self.settings.probe_aes67(device_ip)
+
+        if not waiters:
+            return
+
+        logger.debug(f"Probed AES67 for {len(waiters)} devices")
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            for device_ip in waiters:
+                result = self.notifications.get_aes67_result(device_ip)
+                if result is not None:
+                    aes67_current, aes67_configured = result
+                    device = self._device_by_ip(device_ip)
+                    if device:
+                        if aes67_current is not None:
+                            device.aes67_current = aes67_current
+                        if aes67_configured is not None:
+                            device.aes67_configured = aes67_configured
+                self.notifications.unregister_aes67_waiter(device_ip)
+
+        populated = sum(1 for device in self.devices.values() if device.aes67_current is not None)
+        logger.debug(f"AES67: {populated}/{len(self.devices)} devices have data")
+
+    async def probe_interface_status(self, device_ip: str, timeout: float = 2.0) -> list[dict] | None:
+        waiter = self.notifications.register_interface_waiter(device_ip)
+        try:
+            self.settings.probe_interface_status(device_ip)
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            return self.notifications.get_interface_result(device_ip)
+        except asyncio.TimeoutError:
+            logger.debug(f"Interface status probe timeout for {device_ip}")
+            return self.notifications.get_interface_result(device_ip)
+        finally:
+            self.notifications.unregister_interface_waiter(device_ip)
+
+    async def set_interface_dhcp(self, device_ip: str, timeout: float = 2.0) -> list[dict] | None:
+        waiter = self.notifications.register_interface_waiter(device_ip)
+        try:
+            self.settings.set_interface_dhcp(device_ip)
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            return self.notifications.get_interface_result(device_ip)
+        except asyncio.TimeoutError:
+            logger.debug(f"Set interface DHCP timeout for {device_ip}")
+            return self.notifications.get_interface_result(device_ip)
+        finally:
+            self.notifications.unregister_interface_waiter(device_ip)
+
+    async def set_interface_static(self, device_ip: str, ip_address: str, netmask: str, dns_server: str, gateway: str, timeout: float = 2.0) -> list[dict] | None:
+        waiter = self.notifications.register_interface_waiter(device_ip)
+        try:
+            self.settings.set_interface_static(device_ip, ip_address, netmask, dns_server, gateway)
+            await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            return self.notifications.get_interface_result(device_ip)
+        except asyncio.TimeoutError:
+            logger.debug(f"Set interface static timeout for {device_ip}")
+            return self.notifications.get_interface_result(device_ip)
+        finally:
+            self.notifications.unregister_interface_waiter(device_ip)
 
     async def _query_settings_fields(self) -> None:
         host_mac = self.cmc._host_mac

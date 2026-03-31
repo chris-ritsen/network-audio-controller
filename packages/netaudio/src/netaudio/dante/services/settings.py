@@ -77,6 +77,24 @@ class DanteSettingsService(DanteUnicastService):
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
+    def probe_interface_status(self, device_ip: str) -> None:
+        command_args = self._commands.command_probe_interface_status()
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
+    def set_interface_dhcp(self, device_ip: str) -> None:
+        command_args = self._commands.command_set_interface_dhcp()
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
+    def set_interface_static(self, device_ip: str, ip_address: str, netmask: str, dns_server: str, gateway: str) -> None:
+        command_args = self._commands.command_set_interface_static(ip_address, netmask, dns_server, gateway)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
     def probe_aes67(self, device_ip: str, host_mac: bytes = None) -> None:
         command_args = self._commands.command_probe_aes67(host_mac=host_mac)
         packet = command_args[0]

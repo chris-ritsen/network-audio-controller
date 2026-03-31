@@ -288,7 +288,9 @@ def _print_packet_table_header():
         f"{'Source':>{PACKET_ENDPOINT_WIDTH}s} {'Dir':3s} {'Destination':<{PACKET_ENDPOINT_WIDTH}s}  "
         f"{'Type':>10s}  {'Size':>6s}  {'Info'}"
     )
-    print("  " + "─" * (76 + PACKET_ENDPOINT_WIDTH * 2))
+    from netaudio.common.app_config import settings as app_settings
+    separator = "-" if app_settings.no_color else "─"
+    print("  " + separator * (76 + PACKET_ENDPOINT_WIDTH * 2))
 
 
 def _print_packet_line(

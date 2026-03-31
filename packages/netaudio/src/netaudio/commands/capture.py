@@ -48,8 +48,21 @@ except ImportError:
 
 
 from netaudio.icons import icon
+from netaudio._common import ansi
 
 _LAST_REDIS_ERROR: str | None = None
+
+
+def _hrule(width: int) -> str:
+    return "-" * width if app_settings.no_color else "─" * width
+
+
+def _emdash() -> str:
+    return "--" if app_settings.no_color else "\u2014"
+
+
+def _rarrow() -> str:
+    return "->" if app_settings.no_color else "\u2192"
 
 
 _redis_client_cache: dict[str, "Redis"] = {}
@@ -303,7 +316,7 @@ def _print_packet_table_header():
         f"{'Source':>{PACKET_ENDPOINT_WIDTH}s} {'Dir':3s} {'Destination':<{PACKET_ENDPOINT_WIDTH}s}  "
         f"{'Type':>10s}  {'Size':>6s}  {'Info'}"
     )
-    print("  " + "─" * (76 + PACKET_ENDPOINT_WIDTH * 2))
+    print("  " + _hrule(76 + PACKET_ENDPOINT_WIDTH * 2))
 
 
 def _packet_fingerprint(
@@ -1438,7 +1451,7 @@ def live(
         )
         raise typer.Exit(1)
 
-    print(f"{icon('capture')}Capture: Interface {resolved_interface} ({interface_ip}) — {interface_source}")
+    print(f"{icon('capture')}Capture: Interface {resolved_interface} ({interface_ip}) {_emdash()} {interface_source}")
     resolved_relay_stream = _coalesce(relay_stream, capture_cfg.get("ingress_stream"))
 
     daemon = CaptureDaemon(
@@ -1669,8 +1682,8 @@ def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bo
 
         markers = store.get_markers(session_id, marker_types=["evidence"])
 
-        print(f"\n{icon('session')}Session #{session_id} ({session_name}) — {evidence_count} evidence packet(s)")
-        print("─" * 80)
+        print(f"\n{icon('session')}Session #{session_id} ({session_name}) {_emdash()} {evidence_count} evidence packet(s)")
+        print(_hrule(80))
 
         for marker in markers:
             marker_data = marker.get("data")
@@ -1842,7 +1855,7 @@ def _print_marker_row(
         return
 
     print()
-    header = f"\033[1m{marker_type_icon}{marker_type_str}\033[0m  {label_text}"
+    header = f"{ansi('1', f'{marker_type_icon}{marker_type_str}')}  {label_text}"
     if window_packets is not None:
         header += f"  ({window_packets} packets)"
 
@@ -1861,15 +1874,15 @@ def _print_marker_row(
                 payload = pkt.get("payload", b"")
                 evidence_sizes.append(f"#{pid} {len(payload)}B")
         if evidence_sizes:
-            header += f"  \033[90m[{', '.join(evidence_sizes)}]\033[0m"
+            header += f"  {ansi('90', f'[{chr(44).join(evidence_sizes)}]')}"
 
-    print(f"  {time_str}  {header}  \033[90m#{marker_id}\033[0m")
+    print(f"  {time_str}  {header}  {ansi('90', f'#{marker_id}')}")
 
     if summary_text and show_notes:
         _print_wrapped(summary_text)
 
     if show_notes and note_text:
-        _print_wrapped(f"\033[90m{note_text}\033[0m")
+        _print_wrapped(ansi("90", note_text))
     elif not show_notes and summary_text:
         _print_wrapped(summary_text)
 
@@ -2928,7 +2941,7 @@ def packet_list(
         )
 
         scope = f"session #{session_id}" if session_id else "all packets"
-        print(f"Capture: {scope} — {total} matched, showing {len(rows)} (limit={limit} offset={offset})")
+        print(f"Capture: {scope} {_emdash()} {total} matched, showing {len(rows)} (limit={limit} offset={offset})")
 
         filters = []
         if device_ip:
@@ -3127,7 +3140,7 @@ def _print_diff_compact(packets, differing_offsets, max_length):
         header_parts.append(f"  #{pid:<8d}")
     header_parts.append("  ascii")
     print("".join(header_parts))
-    print("  " + "─" * (8 + 12 * len(packets) + 8))
+    print("  " + _hrule(8 + 12 * len(packets) + 8))
 
     for offset in sorted(differing_offsets):
         parts = [f"  {offset:04x}   "]
@@ -3150,7 +3163,7 @@ def _print_diff_full(packets, differing_offsets, max_length):
 
     for compare_pid, _, compare_payload in packets[1:]:
         print(f"\n  #{reference_pid} vs #{compare_pid}")
-        print("  " + "─" * 80)
+        print("  " + _hrule(80))
 
         for row_offset in range(0, max_length, 16):
             ref_chunk = reference_payload[row_offset:row_offset + 16] if row_offset < len(reference_payload) else b""
@@ -3181,8 +3194,8 @@ def _print_diff_full(packets, differing_offsets, max_length):
                     cmp_str = "--"
 
                 if is_diff:
-                    ref_hex_parts.append(f"\033[91m{ref_str}\033[0m")
-                    cmp_hex_parts.append(f"\033[92m{cmp_str}\033[0m")
+                    ref_hex_parts.append(ansi("91", ref_str))
+                    cmp_hex_parts.append(ansi("92", cmp_str))
                 else:
                     ref_hex_parts.append(ref_str)
                     cmp_hex_parts.append(cmp_str)
@@ -3315,12 +3328,12 @@ def _state_diff_print_opcode_diff(
     fact_labels = _load_fact_labels()
     human_name = fact_labels.get(opcode_label, opcode_label)
 
-    print(f"\n  \033[1m{opcode_label}\033[0m  {human_name}")
+    print(f"\n  {ansi('1', opcode_label)}  {human_name}")
     print(f"  before: #{before_representative_id} ({len(before_representative)}B)    after: #{after_representative_id} ({len(after_representative)}B)")
     if jitter_offsets:
-        print(f"  \033[90m({len(jitter_offsets)} jitter bytes excluded, {len(volatile_offsets)} volatile header bytes excluded)\033[0m")
+        print(f"  {ansi('90', f'({len(jitter_offsets)} jitter bytes excluded, {len(volatile_offsets)} volatile header bytes excluded)')}")
     elif volatile_offsets:
-        print(f"  \033[90m({len(volatile_offsets)} volatile header bytes excluded)\033[0m")
+        print(f"  {ansi('90', f'({len(volatile_offsets)} volatile header bytes excluded)')}")
     print(f"  {len(stable_diff_offsets)} stable bytes differ")
 
     if full:
@@ -3348,11 +3361,11 @@ def _state_diff_print_opcode_diff(
                 after_str = f"{after_byte:02x}" if after_byte is not None else "--"
 
                 if is_jitter:
-                    before_hex_parts.append(f"\033[90m{before_str}\033[0m")
-                    after_hex_parts.append(f"\033[90m{after_str}\033[0m")
+                    before_hex_parts.append(ansi("90", before_str))
+                    after_hex_parts.append(ansi("90", after_str))
                 elif is_diff:
-                    before_hex_parts.append(f"\033[91m{before_str}\033[0m")
-                    after_hex_parts.append(f"\033[92m{after_str}\033[0m")
+                    before_hex_parts.append(ansi("91", before_str))
+                    after_hex_parts.append(ansi("92", after_str))
                 else:
                     before_hex_parts.append(before_str)
                     after_hex_parts.append(after_str)
@@ -3373,7 +3386,7 @@ def _state_diff_print_opcode_diff(
     else:
         header_parts = ["  offset", "  before   ", "  after    ", "  ascii"]
         print("".join(header_parts))
-        print("  " + "─" * 50)
+        print("  " + _hrule(50))
         for offset in sorted(stable_diff_offsets):
             before_byte = before_representative[offset] if offset < len(before_representative) else None
             after_byte = after_representative[offset] if offset < len(after_representative) else None
@@ -3381,7 +3394,7 @@ def _state_diff_print_opcode_diff(
             after_str = f"0x{after_byte:02x}" if after_byte is not None else "--  "
             before_char = chr(before_byte) if before_byte is not None and 32 <= before_byte < 127 else "."
             after_char = chr(after_byte) if after_byte is not None and 32 <= after_byte < 127 else "."
-            print(f"  {offset:04x}    {before_str}       {after_str}       {before_char} → {after_char}")
+            print(f"  {offset:04x}    {before_str}       {after_str}       {before_char} {_rarrow()} {after_char}")
 
     return True
 

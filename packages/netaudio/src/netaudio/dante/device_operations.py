@@ -158,6 +158,15 @@ class DanteDeviceOperations:
 
         return response
 
+    async def remove_subscriptions(self, rx_channels):
+        channel_numbers = [channel.number for channel in rx_channels]
+        cmd_args = self.device.commands.command_remove_subscriptions(channel_numbers)
+        response = await self.device.dante_command(
+            *cmd_args, logical_command_name="remove_subscriptions"
+        )
+
+        return response
+
     async def reset_channel_name(self, channel_type, channel_number):
         cmd_args = self.device.commands.command_reset_channel_name(channel_type, channel_number)
         response = await self.device.dante_command(

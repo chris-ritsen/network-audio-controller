@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import time
 from typing import Optional
+
+logger = logging.getLogger("netaudio")
 
 import typer
 
@@ -29,8 +32,8 @@ def _send_shutdown():
             await writer.drain()
             writer.close()
             await writer.wait_closed()
-        except Exception:
-            pass
+        except Exception as exception:
+            logger.debug(f"Failed to send shutdown command: {exception}")
 
     asyncio.run(_run())
 
