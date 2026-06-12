@@ -11,11 +11,11 @@ from typing import Any, Callable, Optional
 
 import typer
 
-from netaudio import DanteBrowser, DanteDevice
+from netaudio import DanteDevice
 from netaudio.common.app_config import settings
-from netaudio.daemon.client import device_request_via_daemon, get_devices_from_daemon
+from netaudio.daemon.client import get_devices_from_daemon
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.const import DEVICE_CONTROL_PORT, DEVICE_SETTINGS_PORT, SERVICE_ARC
+from netaudio.dante.const import SERVICE_ARC
 
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
@@ -83,16 +83,27 @@ def _get_state():
     return state
 
 
-async def _discover() -> dict[str, DanteDevice]:
+async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice]:
     devices = await get_devices_from_daemon()
 
     if devices is None:
-        application = DanteApplication()
+        owns_store = False
+        if packet_store is None:
+            from netaudio._capture import open_capture_session
+            packet_store, session_id = open_capture_session()
+            owns_store = packet_store is not None
+        application = DanteApplication(packet_store=packet_store, dissect=_get_state().dissect)
+        if packet_store and session_id:
+            application.capture_session_id = session_id
+            for service in (application.settings, application.cmc, application.notifications):
+                service.session_id = session_id
         await application.startup()
         try:
             devices = await application.discover_and_populate(timeout=settings.mdns_timeout)
         finally:
             await application.shutdown()
+            if owns_store:
+                packet_store.close()
 
     return devices or {}
 
@@ -122,107 +133,86 @@ def _resolve_one(devices: dict[str, DanteDevice]) -> tuple[str, DanteDevice]:
     return next(iter(devices.items()))
 
 
-async def _send_via_daemon(packet: bytes, device_ip, port: int) -> bytes | None:
-    return await device_request_via_daemon(packet, str(device_ip), port)
+def _make_core_sender(observer=None) -> Callable:
+    from netaudio import core
 
+    clients: dict[str, Any] = {}
+    mac = core.host_mac()
 
-def _make_app_sender(app: DanteApplication) -> Callable:
     async def _send(packet: bytes, device_ip, port: int) -> bytes | None:
         ip = str(device_ip)
-        if port == DEVICE_SETTINGS_PORT:
-            return await app.settings.request(
-                packet, ip, port,
-                logical_command_name="cli_command",
-            )
-        elif port == DEVICE_CONTROL_PORT:
-            return await app.cmc.request(
-                packet, ip, port,
-                logical_command_name="cli_command",
-            )
-        else:
-            return await app.arc.request(
-                packet, ip, port,
-                logical_command_name="cli_command",
-            )
+        client = clients.get(ip)
+        if client is None:
+            client = core.CoreClient(ip)
+            if mac:
+                client.set_host_mac(mac)
+            client.observer = observer
+            clients[ip] = client
+        return await asyncio.to_thread(client.request, packet, port, True)
+
     return _send
 
 
-def _make_capture_store():
+def _capture_observer():
     state = _get_state()
-    if not state.capture:
+    if not state.capture and not state.dissect:
         return None, None
+    from netaudio._capture import make_observer, open_capture_session
 
-    from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
-    from netaudio.dante.packet_store import PacketStore
-
-    try:
-        profile_cfg, _ = load_capture_profile(None, None)
-        db_path = resolve_db_from_config(None, profile_cfg)
-        store = PacketStore(db_path=db_path)
-
-        active_session = store.get_latest_session(active_only=True)
-        session_id = active_session["id"] if active_session else None
-
-        return store, session_id
-    except Exception:
-        return None, None
+    store, session_id = open_capture_session()
+    observer = make_observer(store, session_id, state.dissect)
+    if store and session_id:
+        typer.echo(f"Capture: recording to session #{session_id}", err=True)
+    return observer, store
 
 
 @asynccontextmanager
 async def _command_context():
-    state = _get_state()
-    store, session_id = _make_capture_store()
-
-    devices = await get_devices_from_daemon()
-    if devices is not None:
-        if store and session_id:
-            typer.echo(f"Capture: recording to session #{session_id} (via daemon — request only)", err=True)
-        yield devices, _send_via_daemon
-        if store:
-            store.close()
-        return
-
-    app = DanteApplication(packet_store=store)
-
-    if store and session_id:
-        for service in [app.arc, app.settings, app.cmc, app.notifications]:
-            service.session_id = session_id
-
-    await app.startup()
+    observer, store = _capture_observer()
+    session_id = None
+    if store:
+        active = store.get_latest_session(active_only=True)
+        session_id = active["id"] if active else None
     try:
-        devices = await app.discover_and_populate(timeout=settings.mdns_timeout)
-        if store and session_id:
-            typer.echo(f"Capture: recording to session #{session_id}", err=True)
-        yield devices or {}, _make_app_sender(app)
+        devices = await get_devices_from_daemon()
+        if devices is None:
+            devices = await _discover(packet_store=store, session_id=session_id)
+            if observer is not None:
+                for device in devices.values():
+                    device.rx_channels = {}
+                    device.tx_channels = {}
+            await _populate_controls(devices, observer=observer)
+
+        yield devices or {}, _make_core_sender(observer=observer)
     finally:
-        await app.shutdown()
+        if observer is not None:
+            observer.flush()
         if store:
             store.close()
 
 
-async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
-    unpopulated = {
-        server_name: device
-        for server_name, device in devices.items()
-        if not device.tx_channels and not device.rx_channels
-    }
+async def _populate_controls(devices: dict[str, DanteDevice], observer=None) -> None:
+    unpopulated = [
+        device
+        for device in devices.values()
+        if not device.tx_channels and not device.rx_channels and device.ipv4
+    ]
 
     if not unpopulated:
         return
 
-    application = None
-    for device in unpopulated.values():
-        if device._app is not None:
-            application = device._app
-            break
-
-    if application is None:
+    if observer is not None:
+        from netaudio._capture import populate_instrumented
+        await asyncio.gather(
+            *(populate_instrumented(device, observer) for device in unpopulated),
+            return_exceptions=True,
+        )
         return
 
-    try:
-        await application.populate_controls(unpopulated)
-    finally:
-        await application.shutdown()
+    await asyncio.gather(
+        *(device.populate_from_core() for device in unpopulated),
+        return_exceptions=True,
+    )
 
 
 def _normalize_mac(mac: str) -> str:

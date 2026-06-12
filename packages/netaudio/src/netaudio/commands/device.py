@@ -83,11 +83,9 @@ def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -
 
 
 async def _lock_via_relay(pin: str, action: str) -> dict | None:
-    from netaudio.common.app_config import settings as app_settings
-    relay_port = getattr(app_settings, "relay_port", 9000) or 9000
-
-    import json
     from netaudio.cli import state
+    from netaudio.daemon.client import _relay_request
+
     device_name = None
     if state.names:
         device_name = state.names[0]
@@ -100,24 +98,12 @@ async def _lock_via_relay(pin: str, action: str) -> dict | None:
         _, device = _resolve_one(filtered)
         device_name = device.name or device.server_name
 
-    body = json.dumps({"device": device_name, "pin": pin}).encode()
-    path = f"/{action}"
-
-    try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", relay_port)
-        request = f"POST {path} HTTP/1.0\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
-        writer.write(request)
-        await writer.drain()
-        response = await asyncio.wait_for(reader.read(4096), timeout=5.0)
-        writer.close()
-        await writer.wait_closed()
-        response_str = response.decode("utf-8", errors="replace")
-        body_start = response_str.find("\r\n\r\n")
-        if body_start >= 0:
-            return json.loads(response_str[body_start + 4:])
-    except (ConnectionRefusedError, OSError) as exception:
-        logger.debug(f"Failed to get lock status: {exception}")
-    return None
+    status, data = await _relay_request(
+        "POST", f"/{action}", body={"device": device_name, "pin": pin}, timeout=8.0
+    )
+    if status is None:
+        return None
+    return data
 
 
 def _get_lock_key() -> bytes:
@@ -348,7 +334,7 @@ from netaudio.commands.config import app as device_config_app
 app.add_typer(device_config_app, name="config")
 
 lock_app = typer.Typer(help="Device lock management.", no_args_is_help=True)
-app.add_typer(lock_app, name="lock")
+app.add_typer(lock_app, name="lock", hidden=True)
 
 
 
@@ -615,69 +601,71 @@ def name(
 
 @app.command()
 def clock():
-    """Show PTP clock status (leader, grandmaster, sync)."""
+    """Show PTP clock status (leader, followers, preferred leader)."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices)
-        devices = filter_devices(devices)
-        sorted_devices = list(sort_devices(devices))
+        from netaudio.daemon.client import daemon_is_accessible, get_device_summaries_from_daemon
 
-        if not sorted_devices:
+        summaries = None
+        if daemon_is_accessible():
+            summaries = await get_device_summaries_from_daemon()
+
+        if summaries is not None:
+            entries = [
+                dict(entry, server_name=server_name)
+                for server_name, entry in summaries.items()
+            ]
+            entries.sort(key=lambda entry: (entry.get("name") or "").lower())
+        else:
+            from netaudio.dante.device_serializer import DanteDeviceSerializer
+
+            devices = await _discover()
+            await _populate_controls(devices)
+            devices = filter_devices(devices)
+            entries = [
+                dict(DanteDeviceSerializer.to_json(device), server_name=server_name)
+                for server_name, device in sort_devices(devices)
+            ]
+
+        if not entries:
             typer.echo("No device found.", err=True)
             raise typer.Exit(code=1)
 
-        results = {}
-        for server_name, device in sorted_devices:
-            results[server_name] = await device.get_clocking_status()
+        leader_names = [
+            entry.get("name") or ""
+            for entry in entries
+            if (entry.get("ptp_v1_role") or entry.get("clock_role") or "").lower() == "leader"
+        ]
 
-        leader_name = None
-        leader_mac = None
-        for server_name, device in sorted_devices:
-            r = results[server_name]
-            if r and r["clock_role"] == "leader":
-                leader_name = device.name or server_name
-                leader_mac = r["device_clock_mac"]
-                break
-
-        grandmaster_display = _format_mac(leader_mac) if leader_mac else ""
-        if leader_name:
-            grandmaster_display = f"{leader_name} ({grandmaster_display})"
-
-        headers = ["Name", "Role", "Clock MAC", "Grandmaster", "Server Name"]
+        headers = ["Name", "Role", "Preferred Leader", "Sync to Leader", "Server Name"]
         rows = []
         json_data = {}
 
-        for server_name, device in sorted_devices:
-            r = results[server_name]
-            if r is None:
-                rows.append([device.name or "", "(timeout)", "", "", server_name])
-                json_data[server_name] = {"error": "timeout"}
-                continue
+        for entry in entries:
+            name = entry.get("name") or ""
+            role = entry.get("ptp_v1_role") or entry.get("clock_role") or ""
+            preferred = "yes" if entry.get("preferred_leader") else ""
+            sync_display = ""
+            if role.lower() == "follower" and leader_names:
+                sync_display = leader_names[0]
+            rows.append([name, role, preferred, sync_display, entry.get("server_name") or ""])
+            json_data[entry.get("server_name") or name] = {
+                "name": name,
+                "role": role,
+                "preferred_leader": bool(entry.get("preferred_leader")),
+                "leader": leader_names[0] if leader_names else None,
+            }
 
-            json_entry = dict(r)
-            json_entry["grandmaster_name"] = leader_name
-            json_entry["grandmaster_mac"] = leader_mac
-
-            rows.append([
-                device.name or "",
-                r["clock_role"],
-                _format_mac(r["device_clock_mac"]),
-                grandmaster_display,
-                server_name,
-            ])
-            json_data[server_name] = json_entry
-
-        output_table(headers, rows, json_data=json_data, devices=devices)
+        output_table(headers, rows, json_data=json_data)
 
     asyncio.run(_run())
 
 
 from netaudio.commands.flow import app as flow_app
-app.add_typer(flow_app, name="flow")
+app.add_typer(flow_app, name="flow", hidden=True)
 
 meter_app = typer.Typer(help="Device metering.", no_args_is_help=False, invoke_without_command=True)
-app.add_typer(meter_app, name="meter")
+app.add_typer(meter_app, name="meter", hidden=True)
 
 
 def _render_meter_bar(level: int, bar_width: int = 32, no_color: bool = False) -> str:

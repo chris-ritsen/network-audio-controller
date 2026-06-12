@@ -7,3 +7,4 @@ debug.log
 .hypothesis/
 tests/fixtures/provenance/.local/
 packages/netaudio/man/
+packages/netaudio-core/target/

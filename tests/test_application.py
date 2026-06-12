@@ -13,7 +13,6 @@ class TestDanteApplication:
         application = DanteApplication()
         assert application.devices == {}
         assert application.dispatcher is not None
-        assert application.arc is not None
         assert application.settings is not None
         assert application.cmc is not None
         assert application.notifications is not None

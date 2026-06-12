@@ -10,9 +10,8 @@ logger = logging.getLogger("netaudio")
 
 import typer
 
-from netaudio.common.socket_path import daemon_is_accessible, open_daemon_connection
-from netaudio.daemon.protocol import CMD_SHUTDOWN
-from netaudio.daemon.server import run_daemon
+from netaudio.daemon.client import get_device_summaries_from_daemon, shutdown_daemon
+from netaudio.daemon import service_install
 
 from netaudio.icons import icon
 
@@ -24,52 +23,138 @@ def _port_in_use(port):
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _send_shutdown():
-    async def _run():
-        try:
-            reader, writer = await open_daemon_connection()
-            writer.write(CMD_SHUTDOWN)
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
-        except Exception as exception:
-            logger.debug(f"Failed to send shutdown command: {exception}")
+def _effective_relay_port(relay_port):
+    from netaudio.common.app_config import settings as app_settings
+    return relay_port or app_settings.relay_port
 
-    asyncio.run(_run())
+
+def _pin_client_port(effective_port):
+    from netaudio.common.app_config import settings as app_settings
+    app_settings.relay_port = effective_port
 
 
 def _wait_for_shutdown(relay_port, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not daemon_is_accessible() and not _port_in_use(relay_port):
+        if not _port_in_use(relay_port):
             return True
         time.sleep(0.25)
     return False
+
+
+def _wait_for_startup(relay_port, timeout=15):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _port_in_use(relay_port):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _run_foreground(relay_port):
+    from netaudio.common.app_config import settings as app_settings
+    from netaudio.cli import state
+    from netaudio.daemon.server import run_daemon
+
+    effective_port = _effective_relay_port(relay_port)
+    app_settings.relay_port = effective_port
+    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, relay_port=effective_port))
+
+
+def _uses_configured_port(effective_port) -> bool:
+    return effective_port == _effective_relay_port(None)
+
+
+def _service_active() -> bool:
+    platform = service_install.platform_name()
+    if platform == "systemd":
+        try:
+            return asyncio.run(service_install.systemd_unit_active())
+        except Exception as exception:
+            logger.debug(f"systemd state query failed: {exception}")
+            return False
+    if platform == "launchd":
+        return service_install.launchd_loaded()
+    return False
+
+
+@app.command()
+def run(
+    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+):
+    """Run the daemon in the foreground (Ctrl-C to stop)."""
+    _run_foreground(relay_port)
 
 
 @app.command()
 def start(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
-    from netaudio.common.app_config import settings as app_settings
-    from netaudio.cli import state
+    """Start the daemon (via the boot service if installed, otherwise in the background)."""
+    if service_install.running_under_systemd():
+        _run_foreground(relay_port)
+        return
 
-    effective_port = relay_port or app_settings.relay_port
-    app_settings.relay_port = effective_port
+    effective_port = _effective_relay_port(relay_port)
+    on_configured_port = _uses_configured_port(effective_port)
+    _pin_client_port(effective_port)
+    if _port_in_use(effective_port):
+        typer.echo(f"{icon('online')}Daemon is already running.")
+        return
 
-    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, relay_port=effective_port))
+    platform = service_install.platform_name()
+    use_service = service_install.is_installed() and on_configured_port
+    if use_service and platform == "systemd":
+        asyncio.run(service_install.systemd_start())
+        if not _wait_for_startup(effective_port):
+            typer.echo("Daemon service started but the relay port never opened.", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"{icon('online')}Daemon started (systemd).")
+        return
+
+    if use_service and platform == "launchd":
+        if service_install.launchd_loaded():
+            service_install.launchd_kickstart()
+        else:
+            service_install.launchd_bootstrap()
+        if not _wait_for_startup(effective_port):
+            typer.echo("Daemon service started but the relay port never opened.", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"{icon('online')}Daemon started (launchd).")
+        return
+
+    log_path = service_install.spawn_detached(relay_port)
+    if not _wait_for_startup(effective_port):
+        typer.echo(f"Daemon did not come up. Check logs: {log_path}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"{icon('online')}Daemon started in the background. Logs: {log_path}")
 
 
 @app.command()
-def stop():
-    if not daemon_is_accessible():
+def stop(
+    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+):
+    """Stop the daemon."""
+    effective_port = _effective_relay_port(relay_port)
+    on_configured_port = _uses_configured_port(effective_port)
+    _pin_client_port(effective_port)
+
+    if not _port_in_use(effective_port):
         typer.echo(f"{icon('offline')}Daemon is not running.")
         return
 
-    try:
-        _send_shutdown()
-    except Exception as exception:
-        typer.echo(f"Error stopping daemon: {exception}", err=True)
+    if service_install.platform_name() == "systemd" and on_configured_port and _service_active():
+        asyncio.run(service_install.systemd_stop())
+        if not _wait_for_shutdown(effective_port):
+            typer.echo("Timed out waiting for daemon to stop.", err=True)
+            raise typer.Exit(code=1)
+        return
+
+    if not asyncio.run(shutdown_daemon()):
+        typer.echo("Error stopping daemon: daemon did not acknowledge shutdown.", err=True)
+        raise typer.Exit(code=1)
+    if not _wait_for_shutdown(effective_port):
+        typer.echo("Timed out waiting for daemon to stop.", err=True)
         raise typer.Exit(code=1)
 
 
@@ -77,49 +162,148 @@ def stop():
 def restart(
     relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
 ):
-    from netaudio.common.app_config import settings as app_settings
+    """Restart the daemon."""
+    effective_port = _effective_relay_port(relay_port)
+    on_configured_port = _uses_configured_port(effective_port)
+    _pin_client_port(effective_port)
 
-    effective_port = relay_port or app_settings.relay_port
+    if service_install.platform_name() == "systemd" and on_configured_port and _service_active():
+        asyncio.run(service_install.systemd_restart())
+        if not _wait_for_startup(effective_port):
+            typer.echo("Daemon service restarted but the relay port never opened.", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"{icon('online')}Daemon restarted (systemd).")
+        return
 
-    if daemon_is_accessible():
-        _send_shutdown()
+    if _port_in_use(effective_port):
+        asyncio.run(shutdown_daemon())
         if not _wait_for_shutdown(effective_port):
             typer.echo("Timed out waiting for daemon to stop.", err=True)
             raise typer.Exit(code=1)
 
-    from netaudio.cli import state
-
-    app_settings.relay_port = effective_port
-    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, relay_port=effective_port))
+    start(relay_port=relay_port)
 
 
 @app.command()
-def status():
-    if not daemon_is_accessible():
+def status(
+    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+):
+    """Show daemon status."""
+    effective_port = _effective_relay_port(relay_port)
+    _pin_client_port(effective_port)
+
+    platform = service_install.platform_name()
+    if service_install.is_installed():
+        managed = "netaudio-managed" if service_install.is_managed_by_netaudio() else "user-managed"
+        active = "active" if _service_active() else "inactive"
+        typer.echo(f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_file_path()}")
+    else:
+        typer.echo(f"Boot service: not installed (install with: netaudio daemon install)")
+
+    if not _port_in_use(effective_port):
         typer.echo(f"{icon('offline')}Daemon is not running.")
         raise typer.Exit(code=1)
 
-    async def _run():
-        try:
-            reader, writer = await open_daemon_connection()
-            writer.write(b"\x02")
-            await writer.drain()
+    devices = asyncio.run(get_device_summaries_from_daemon())
+    if devices is None:
+        typer.echo("Daemon port is open but the daemon is not responding.")
+        raise typer.Exit(code=1)
 
-            import struct
+    typer.echo(f"{icon('online')}Daemon is running. {len(devices)} device(s) cached.")
 
-            length_data = await asyncio.wait_for(reader.readexactly(4), timeout=2.0)
-            length = struct.unpack(">I", length_data)[0]
-            data = await asyncio.wait_for(reader.readexactly(length), timeout=2.0)
 
-            import json
+@app.command()
+def install(
+    start_service: bool = typer.Option(True, "--start/--no-start", help="Start the service after installing."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing service file."),
+    print_only: bool = typer.Option(False, "--print", help="Print the generated service file without writing it."),
+):
+    """Install the daemon as a boot service (systemd on Linux, launchd on macOS)."""
+    import sys
 
-            devices = json.loads(data.decode("utf-8"))
-            typer.echo(f"{icon('online')}Daemon is running. {len(devices)} device(s) cached.")
+    platform = service_install.platform_name()
+    if platform == "unsupported":
+        typer.echo(f"No supported service manager on this platform ({sys.platform}).", err=True)
+        raise typer.Exit(code=1)
 
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            typer.echo("Daemon socket exists but is not responding.")
+    content = service_install.generate_service_file()
+    path = service_install.service_file_path()
+
+    if print_only:
+        typer.echo(content)
+        return
+
+    if path.exists() and not force:
+        if service_install.is_managed_by_netaudio():
+            typer.echo(f"Service already installed at {path}. Use --force to rewrite it.")
+        else:
+            typer.echo(f"A service file already exists at {path} and was not created by netaudio. Use --force to overwrite it.", err=True)
             raise typer.Exit(code=1)
+        return
 
-    asyncio.run(_run())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    typer.echo(f"Wrote {path}")
+
+    if platform == "systemd":
+        asyncio.run(service_install.systemd_enable(start_service))
+        typer.echo(f"Enabled {service_install.SYSTEMD_UNIT_NAME}" + (" and started it." if start_service else "."))
+        return
+
+    result = service_install.launchd_bootstrap()
+    if result.returncode != 0:
+        typer.echo(f"launchctl bootstrap failed: {result.stderr.strip()}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Loaded {service_install.LAUNCHD_LABEL} into launchd.")
+
+
+@app.command()
+def uninstall(
+    force: bool = typer.Option(False, "--force", help="Remove the service file even if netaudio did not create it."),
+):
+    """Remove the boot service."""
+    platform = service_install.platform_name()
+    path = service_install.service_file_path()
+
+    if not path.exists():
+        typer.echo("No boot service installed.")
+        return
+
+    if not service_install.is_managed_by_netaudio() and not force:
+        typer.echo(f"{path} was not created by netaudio. Use --force to remove it anyway.", err=True)
+        raise typer.Exit(code=1)
+
+    if platform == "systemd":
+        asyncio.run(service_install.systemd_disable_and_stop())
+    elif platform == "launchd" and service_install.launchd_loaded():
+        service_install.launchd_bootout()
+
+    path.unlink()
+    typer.echo(f"Removed {path}")
+
+
+@app.command()
+def logs(
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow new log output."),
+    lines: int = typer.Option(50, "--lines", "-n", help="Number of recent lines to show."),
+):
+    """Show daemon logs."""
+    import subprocess
+
+    if service_install.platform_name() == "systemd" and service_install.is_installed():
+        command = ["journalctl", "--user", "-u", service_install.SYSTEMD_UNIT_NAME, "-n", str(lines), "--no-pager"]
+        if follow:
+            command.append("-f")
+        raise typer.Exit(code=subprocess.run(command).returncode)
+
+    log_path = service_install.spawn_log_path()
+    if not log_path.exists():
+        typer.echo(f"No log file at {log_path}.", err=True)
+        raise typer.Exit(code=1)
+
+    if follow:
+        raise typer.Exit(code=subprocess.run(["tail", "-n", str(lines), "-f", str(log_path)]).returncode)
+
+    content = log_path.read_text().splitlines()
+    for line in content[-lines:]:
+        typer.echo(line)
