@@ -23,8 +23,8 @@ def platform_name() -> str:
 def executable_path() -> str:
     found = shutil.which("netaudio")
     if found:
-        return str(Path(found).resolve())
-    return str(Path(sys.argv[0]).resolve())
+        return str(Path(found).absolute())
+    return str(Path(sys.argv[0]).absolute())
 
 
 def systemd_unit_path() -> Path:
