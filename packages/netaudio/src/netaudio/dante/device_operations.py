@@ -141,11 +141,31 @@ class DanteDeviceOperations:
 
     async def add_subscription(self, rx_channel, tx_channel, tx_device):
         tx_channel_name = tx_channel.friendly_name if tx_channel.friendly_name else tx_channel.name
-        cmd_args = self.device.commands.command_add_subscription(
+        return await self.add_subscription_by_name(
             rx_channel.number, tx_channel_name, tx_device.name
+        )
+
+    async def add_subscription_by_name(self, rx_channel_number, tx_channel_name, tx_device_name):
+        cmd_args = self.device.commands.command_add_subscription(
+            rx_channel_number, tx_channel_name, tx_device_name
         )
         response = await self.device.dante_command(
             *cmd_args, logical_command_name="add_subscription"
+        )
+
+        return response
+
+    async def add_subscriptions(self, subscriptions):
+        records = []
+        for rx_channel, tx_channel, tx_device in subscriptions:
+            tx_channel_name = tx_channel.friendly_name if tx_channel.friendly_name else tx_channel.name
+            records.append((rx_channel.number, tx_channel_name, tx_device.name))
+        return await self.add_subscriptions_by_name(records)
+
+    async def add_subscriptions_by_name(self, records):
+        cmd_args = self.device.commands.command_add_subscriptions(records)
+        response = await self.device.dante_command(
+            *cmd_args, logical_command_name="add_subscriptions"
         )
 
         return response
@@ -196,30 +216,44 @@ class DanteDeviceOperations:
         return response
 
     async def lock_device(self, pin: str, key: bytes) -> dict:
-        return await _device_lock_operation(str(self.device.ipv4), pin, key, operation=1)
+        result = await _device_lock_operation(str(self.device.ipv4), pin, key, operation=LOCK_OPERATION_LOCK)
+        self._apply_lock_result(result)
+        return result
 
     async def unlock_device(self, pin: str, key: bytes) -> dict:
-        return await _device_lock_operation(str(self.device.ipv4), pin, key, operation=2)
+        result = await _device_lock_operation(str(self.device.ipv4), pin, key, operation=LOCK_OPERATION_UNLOCK)
+        self._apply_lock_result(result)
+        return result
+
+    def _apply_lock_result(self, result: dict) -> None:
+        if not result.get("success"):
+            return
+        self.device.is_locked = result.get("lock_state") == LOCK_STATE_LOCKED
+        if self.device._app is not None:
+            from netaudio.dante.events import DanteEvent, EventType
+            self.device._app.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_UPDATED,
+                    device_name=self.device.name,
+                    server_name=self.device.server_name,
+                )
+            )
 
     async def get_device_settings(self):
-        cmd_args = self.device.commands.command_device_settings()
-        response = await self.device.dante_command(
-            *cmd_args, logical_command_name="get_device_settings"
-        )
-
-        if response:
-            settings = self.device.parser.parse_device_settings(response)
-            if "latency" in settings:
-                self.device.latency = settings["latency"]
-            if "sample_rate" in settings:
-                self.device.sample_rate = settings["sample_rate"]
-            if "min_latency_ns" in settings and settings["min_latency_ns"] is not None:
-                self.device.min_latency = settings["min_latency_ns"] / 1_000_000.0
-            if "max_latency_ns" in settings and settings["max_latency_ns"] is not None:
-                self.device.max_latency = settings["max_latency_ns"] / 1_000_000.0
-            return settings
-
-        return None
+        client = self.device._core_client()
+        if client is None:
+            return None
+        import asyncio
+        settings = await asyncio.to_thread(client.get_device_settings)
+        if settings.get("sample_rate"):
+            self.device.sample_rate = settings["sample_rate"]
+        if settings.get("latency_us") is not None:
+            self.device.latency = settings["latency_us"] / 1_000_000.0
+        if settings.get("min_latency_us") is not None:
+            self.device.min_latency = settings["min_latency_us"] / 1_000_000.0
+        if settings.get("max_latency_us") is not None:
+            self.device.max_latency = settings["max_latency_us"] / 1_000_000.0
+        return settings
 
 
 LOCK_DDP_HEADER = struct.pack(">HHHH", 8, 0x0001, 0x1000, 0x0200)
@@ -246,7 +280,6 @@ def validate_pin(pin: str) -> str | None:
 
 
 async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation: int) -> dict:
-    import nacl.bindings
     from netaudio.dante.const import DEVICE_LOCK_PORT
 
     loop = asyncio.get_running_loop()
@@ -277,7 +310,8 @@ async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation
                 logger.warning(f"Invalid nonce length: {len(nonce)}")
                 continue
 
-            token = nacl.bindings.crypto_secretbox(pin.encode("ascii"), nonce, key)
+            from netaudio import core
+            token = core.lock_token(pin, nonce, key)
 
             auth_header = struct.pack(
                 ">HHHHHHHHH",

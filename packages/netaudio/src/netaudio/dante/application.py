@@ -12,7 +12,6 @@ from netaudio.dante.const import (
     SERVICES,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
-from netaudio.dante.services.arc import DanteARCService
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -27,7 +26,6 @@ class DanteApplication:
     def __init__(self, packet_store=None, dissect=False):
         self.devices: dict = {}
         self.dispatcher = DanteEventDispatcher()
-        self.arc = DanteARCService(packet_store=packet_store, dissect=dissect)
         self.settings = DanteSettingsService(packet_store=packet_store, dissect=dissect)
         from netaudio.common.app_config import settings as app_settings
 
@@ -42,6 +40,35 @@ class DanteApplication:
         self._browser = None
         self._started = False
         self._notification_handlers: dict[int, list] = {}
+        self._packet_store = packet_store
+        self._dissect = dissect
+        self.capture_session_id: int | None = None
+        self.core_observer = self._record_core_traffic if (packet_store is not None or dissect) else None
+        self._capture_queue: asyncio.Queue | None = None
+        self._capture_loop: asyncio.AbstractEventLoop | None = None
+        self._capture_writer_task: asyncio.Task | None = None
+
+    def _record_core_traffic(self, packet, response, device_ip, port):
+        loop = self._capture_loop
+        queue = self._capture_queue
+        if loop is None or queue is None:
+            return
+        loop.call_soon_threadsafe(queue.put_nowait, (packet, device_ip, port, "request", "netaudio_request"))
+        if response is not None:
+            loop.call_soon_threadsafe(queue.put_nowait, (response, device_ip, port, "response", "netaudio_response"))
+
+    async def _capture_writer(self) -> None:
+        from netaudio._capture import _dissect, _record
+
+        while True:
+            item = await self._capture_queue.get()
+            if item is None:
+                return
+            payload, device_ip, port, direction, source_type = item
+            if self._dissect:
+                _dissect(payload, device_ip, port, direction)
+            if self._packet_store is not None:
+                _record(self._packet_store, self.capture_session_id, payload, device_ip, port, direction, source_type)
 
     def on_notification(self, notification_id: int, callback) -> None:
         if notification_id not in self._notification_handlers:
@@ -69,10 +96,14 @@ class DanteApplication:
         if self._started:
             return
 
+        if self.core_observer is not None:
+            self._capture_loop = asyncio.get_running_loop()
+            self._capture_queue = asyncio.Queue()
+            self._capture_writer_task = asyncio.create_task(self._capture_writer())
+
         self.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._dispatch_notification)
         await self.dispatcher.start()
         await self.notifications.start()
-        await self.arc.start()
         await self.settings.start()
         await self.cmc.start()
         self._started = True
@@ -85,8 +116,17 @@ class DanteApplication:
         await self.notifications.stop()
         await self.cmc.stop()
         await self.settings.stop()
-        await self.arc.stop()
         await self.dispatcher.stop()
+
+        if self._capture_writer_task is not None:
+            self._capture_queue.put_nowait(None)
+            try:
+                await asyncio.wait_for(self._capture_writer_task, timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("Capture writer did not drain within 5s")
+            self._capture_writer_task = None
+            self._capture_queue = None
+            self._capture_loop = None
 
         if self._browser:
             try:
@@ -182,9 +222,8 @@ class DanteApplication:
 
         populate_tasks = []
         for device in self.devices.values():
-            arc_port = self.get_arc_port(device)
-            if arc_port:
-                populate_tasks.append(self._populate_device_controls(device, arc_port))
+            if self.get_arc_port(device):
+                populate_tasks.append(self._populate_device_controls(device))
 
         if populate_tasks:
             done, pending = await asyncio.wait(
@@ -277,18 +316,17 @@ class DanteApplication:
 
         tasks = []
         for device in devices.values():
-            arc_port = self.get_arc_port(device)
-            if arc_port:
-                tasks.append(self._populate_device_controls(device, arc_port))
+            if self.get_arc_port(device):
+                tasks.append(self._populate_device_controls(device))
             else:
                 logger.debug(f"No ARC port for {device.server_name}, skipping controls")
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _populate_device_controls(self, device, arc_port: int) -> None:
+    async def _populate_device_controls(self, device) -> None:
         try:
-            await self.arc.get_controls(device, arc_port)
+            await device.populate_from_core()
         except Exception as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
