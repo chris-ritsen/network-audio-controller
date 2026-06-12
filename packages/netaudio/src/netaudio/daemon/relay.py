@@ -2,10 +2,12 @@ import asyncio
 import json
 import logging
 import socket
+from urllib.parse import unquote
 
 from zeroconf import ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
+from netaudio.dante.device_operations import validate_pin
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
@@ -14,15 +16,52 @@ logger = logging.getLogger("netaudio")
 RELAY_SERVICE_TYPE = "_netaudio-relay._tcp.local."
 DEFAULT_RELAY_PORT = 9000
 
+STATUS_TEXT = {
+    200: "OK",
+    400: "Bad Request",
+    404: "Not Found",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+}
+
 
 class RelayServer:
-    def __init__(self, daemon, port=None):
-        self.daemon = daemon
+    def __init__(self, application, state, metering=None, shure=None, port=None, on_shutdown=None):
+        self.application = application
+        self.state = state
+        self.metering = metering
+        self.shure = shure
+        self.on_shutdown = on_shutdown
         self.port = port or DEFAULT_RELAY_PORT
         self.tcp_server = None
         self.zeroconf = None
         self.service_info = None
         self.sse_clients: list[asyncio.StreamWriter] = []
+        self.post_handlers = {
+            "/subscribe": self._handle_subscribe,
+            "/unsubscribe": self._handle_unsubscribe,
+            "/identify": self._handle_identify,
+            "/rename-device": self._handle_rename_device,
+            "/rename-channel": self._handle_rename_channel,
+            "/set-latency": self._handle_set_latency,
+            "/lock": self._handle_lock,
+            "/unlock": self._handle_unlock,
+            "/refresh": self._handle_refresh,
+            "/set-sample-rate": self._handle_set_sample_rate,
+            "/set-encoding": self._handle_set_encoding,
+            "/set-gain": self._handle_set_gain,
+            "/set-aes67": self._handle_set_aes67,
+            "/set-preferred-leader": self._handle_set_preferred_leader,
+            "/reboot": self._handle_reboot,
+            "/interface": self._handle_set_interface,
+            "/metering/start": self._handle_metering_start,
+            "/metering/stop": self._handle_metering_stop,
+            "/report-unresponsive": self._handle_report_unresponsive,
+            "/shutdown": self._handle_shutdown,
+        }
+        self.post_body_optional = {"/refresh", "/shutdown"}
+        self.loopback_only_paths = {"/shutdown"}
 
     async def start(self):
         self.tcp_server = await asyncio.start_server(
@@ -31,30 +70,41 @@ class RelayServer:
         logger.info(f"Relay server listening on port {self.port}")
 
         self._register_events()
-        await self._register_bonjour()
+        try:
+            await self._register_bonjour()
+        except Exception as exception:
+            logger.warning(
+                f"Relay Bonjour registration failed, continuing without it: {type(exception).__name__}: {exception}"
+            )
+            self.service_info = None
 
     async def stop(self):
         if self.zeroconf and self.service_info:
-            await self.zeroconf.async_unregister_service(self.service_info)
-            await self.zeroconf.async_close()
+            try:
+                await asyncio.wait_for(self.zeroconf.async_unregister_service(self.service_info), timeout=5)
+                await asyncio.wait_for(self.zeroconf.async_close(), timeout=5)
+            except Exception as exception:
+                logger.warning(f"Relay Bonjour unregister failed: {type(exception).__name__}: {exception}")
 
         for writer in self.sse_clients:
             try:
                 writer.close()
-            except Exception:
-                pass
+            except Exception as exception:
+                logger.debug(f"SSE client close error: {exception}")
         self.sse_clients.clear()
 
         if self.tcp_server:
             self.tcp_server.close()
-            await self.tcp_server.wait_closed()
+            try:
+                await asyncio.wait_for(self.tcp_server.wait_closed(), timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("Relay connections did not drain within 5s, abandoning them")
 
     def _register_events(self):
-        dispatcher = self.daemon.application.dispatcher
+        dispatcher = self.application.dispatcher
         dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_event)
         dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_event)
         dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
-        dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._on_notification)
         dispatcher.on(EventType.METER_VALUES, self._on_meter_values)
         dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_event)
         dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_event)
@@ -62,14 +112,11 @@ class RelayServer:
         dispatcher.on(EventType.SHURE_METER_VALUES, self._on_shure_meter)
 
     async def _on_device_event(self, event: DanteEvent):
-        device = self.daemon.devices.get(event.server_name)
+        device = self.application.devices.get(event.server_name)
         if not device:
             return
 
         device_json = DanteDeviceSerializer.to_json(device)
-        device_json["online"] = device.online
-        device_json["tx_count"] = device.tx_count
-        device_json["rx_count"] = device.rx_count
 
         await self._broadcast_sse({
             "event": event.type.name.lower(),
@@ -92,9 +139,9 @@ class RelayServer:
         })
 
     async def _on_shure_event(self, event: DanteEvent):
-        if not self.daemon.shure:
+        if not self.shure:
             return
-        device = self.daemon.shure.devices.get(event.device_name)
+        device = self.shure.devices.get(event.device_name)
         if not device:
             return
         await self._broadcast_sse({
@@ -116,22 +163,6 @@ class RelayServer:
             "channel": event.data.get("channel"),
             "key": event.data.get("key"),
             "value": event.data.get("value"),
-        })
-
-    async def _on_notification(self, event: DanteEvent):
-        device = self.daemon.devices.get(event.server_name)
-        if not device:
-            return
-
-        device_json = DanteDeviceSerializer.to_json(device)
-        device_json["online"] = device.online
-        device_json["tx_count"] = device.tx_count
-        device_json["rx_count"] = device.rx_count
-
-        await self._broadcast_sse({
-            "event": "device_updated",
-            "server_name": event.server_name,
-            "device": device_json,
         })
 
     async def _broadcast_sse(self, data):
@@ -212,60 +243,67 @@ class RelayServer:
         if method == "GET" and path == "/events":
             await self._handle_sse(writer, reader)
             return
-        if method == "GET" and path == "/shure/devices":
-            await self._handle_get_shure_devices(writer)
-        elif method == "GET" and path.startswith("/shure/devices/"):
-            mac = path[len("/shure/devices/"):]
-            await self._handle_get_shure_device(writer, mac)
-        elif method == "GET" and path == "/devices":
-            await self._handle_get_devices(writer)
-        elif method == "GET" and path.startswith("/devices/"):
-            server_name = path[len("/devices/"):]
-            await self._handle_get_device(writer, server_name)
-        elif method == "POST" and path == "/subscribe":
-            await self._handle_subscribe(writer, body)
-        elif method == "POST" and path == "/unsubscribe":
-            await self._handle_unsubscribe(writer, body)
-        elif method == "POST" and path == "/identify":
-            await self._handle_identify(writer, body)
-        elif method == "POST" and path == "/rename-device":
-            await self._handle_rename_device(writer, body)
-        elif method == "POST" and path == "/rename-channel":
-            await self._handle_rename_channel(writer, body)
-        elif method == "POST" and path == "/set-latency":
-            await self._handle_set_latency(writer, body)
-        elif method == "POST" and path == "/lock":
-            await self._handle_lock(writer, body)
-        elif method == "POST" and path == "/unlock":
-            await self._handle_unlock(writer, body)
-        elif method == "POST" and path == "/refresh":
-            await self._handle_refresh(writer, body)
-        elif method == "POST" and path == "/set-sample-rate":
-            await self._handle_set_sample_rate(writer, body)
-        elif method == "POST" and path == "/set-encoding":
-            await self._handle_set_encoding(writer, body)
-        elif method == "POST" and path == "/set-gain":
-            await self._handle_set_gain(writer, body)
-        elif method == "POST" and path == "/set-aes67":
-            await self._handle_set_aes67(writer, body)
-        elif method == "POST" and path == "/set-preferred-leader":
-            await self._handle_set_preferred_leader(writer, body)
-        elif method == "POST" and path == "/reboot":
-            await self._handle_reboot(writer, body)
-        elif method == "POST" and path == "/interface":
-            await self._handle_set_interface(writer, body)
-        elif method == "POST" and path == "/metering/start":
-            await self._handle_metering_start(writer, body)
-        elif method == "POST" and path == "/metering/stop":
-            await self._handle_metering_stop(writer, body)
-        else:
-            await self._send_json(writer, {"error": "not found"}, 404)
+
+        try:
+            await self._dispatch(method, path, body, writer)
+        except TimeoutError:
+            await self._send_json(writer, {"error": "device did not respond"}, 504)
+        except Exception as exception:
+            logger.exception(f"Relay error handling {method} {path}")
+            await self._send_json(writer, {"error": str(exception)}, 500)
 
         try:
             writer.close()
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
+
+    async def _dispatch(self, method, path, body, writer):
+        if method == "GET":
+            if path == "/shure/devices":
+                await self._handle_get_shure_devices(writer)
+            elif path.startswith("/shure/devices/"):
+                await self._handle_get_shure_device(writer, path[len("/shure/devices/"):])
+            elif path == "/devices":
+                await self._handle_get_devices(writer)
+            elif path.startswith("/devices/"):
+                await self._handle_get_device(writer, unquote(path[len("/devices/"):]))
+            elif path == "/metering/status":
+                await self._handle_metering_status(writer)
+            elif path.startswith("/metering/snapshot/"):
+                await self._handle_metering_snapshot(writer, unquote(path[len("/metering/snapshot/"):]))
+            else:
+                await self._send_json(writer, {"error": "not found"}, 404)
+            return
+
+        if method != "POST":
+            await self._send_json(writer, {"error": "not found"}, 404)
+            return
+
+        handler = self.post_handlers.get(path)
+        if not handler:
+            await self._send_json(writer, {"error": "not found"}, 404)
+            return
+
+        if path in self.loopback_only_paths and not self._peer_is_loopback(writer):
+            await self._send_json(writer, {"error": "forbidden"}, 403)
+            return
+
+        params = {}
+        if body:
+            try:
+                params = json.loads(body)
+            except json.JSONDecodeError as exception:
+                await self._send_json(writer, {"error": f"invalid json: {exception}"}, 400)
+                return
+            if not isinstance(params, dict):
+                await self._send_json(writer, {"error": "body must be a json object"}, 400)
+                return
+        elif path not in self.post_body_optional:
+            await self._send_json(writer, {"error": "missing body"}, 400)
+            return
+
+        await handler(writer, params)
 
     async def _handle_sse(self, writer, reader):
         response_header = (
@@ -280,16 +318,12 @@ class RelayServer:
         await writer.drain()
 
         full_state = {}
-        for server_name, device in self.daemon.devices.items():
-            device_json = DanteDeviceSerializer.to_json(device)
-            device_json["online"] = device.online
-            device_json["tx_count"] = device.tx_count
-            device_json["rx_count"] = device.rx_count
-            full_state[server_name] = device_json
+        for server_name, device in self.application.devices.items():
+            full_state[server_name] = DanteDeviceSerializer.to_json(device)
 
         shure_state = {}
-        if self.daemon.shure:
-            for mac, device in self.daemon.shure.devices.items():
+        if self.shure:
+            for mac, device in self.shure.devices.items():
                 shure_state[mac] = device.to_json()
 
         initial = f"data: {json.dumps({'event': 'snapshot', 'devices': full_state, 'shure_devices': shure_state}, default=str)}\n\n".encode()
@@ -311,21 +345,21 @@ class RelayServer:
                 self.sse_clients.remove(writer)
 
     async def _handle_get_shure_devices(self, writer):
-        if not self.daemon.shure:
+        if not self.shure:
             await self._send_json(writer, {})
             return
         result = {}
-        for mac, device in self.daemon.shure.devices.items():
+        for mac, device in self.shure.devices.items():
             result[mac] = device.to_json()
         await self._send_json(writer, result)
 
     async def _handle_get_shure_device(self, writer, mac):
-        if not self.daemon.shure:
+        if not self.shure:
             await self._send_json(writer, {"error": "shure not available"}, 404)
             return
-        device = self.daemon.shure.devices.get(mac)
+        device = self.shure.devices.get(mac)
         if not device:
-            for m, d in self.daemon.shure.devices.items():
+            for m, d in self.shure.devices.items():
                 if d.name and d.name.lower() == mac.lower():
                     device = d
                     break
@@ -338,18 +372,16 @@ class RelayServer:
         await self._send_json(writer, device.to_json())
 
     async def _handle_get_devices(self, writer):
-        devices_json = {}
-        for server_name, device in self.daemon.devices.items():
-            devices_json[server_name] = DanteDeviceSerializer.to_json(device)
-            devices_json[server_name]["online"] = device.online
-            devices_json[server_name]["tx_count"] = device.tx_count
-            devices_json[server_name]["rx_count"] = device.rx_count
+        devices_json = {
+            server_name: DanteDeviceSerializer.to_json(device)
+            for server_name, device in self.application.devices.items()
+        }
         await self._send_json(writer, devices_json)
 
     async def _handle_get_device(self, writer, server_name):
-        device = self.daemon.devices.get(server_name)
+        device = self.application.devices.get(server_name)
         if not device:
-            for name, candidate in self.daemon.devices.items():
+            for name, candidate in self.application.devices.items():
                 if candidate.name and candidate.name.lower() == server_name.lower():
                     device = candidate
                     break
@@ -358,26 +390,51 @@ class RelayServer:
             await self._send_json(writer, {"error": "device not found"}, 404)
             return
 
-        device_json = DanteDeviceSerializer.to_json(device)
-        device_json["online"] = device.online
-        device_json["tx_count"] = device.tx_count
-        device_json["rx_count"] = device.rx_count
-        await self._send_json(writer, device_json)
+        await self._send_json(writer, DanteDeviceSerializer.to_json(device))
 
-    async def _handle_subscribe(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
+    async def _handle_subscribe(self, writer, params):
+        rx_device_name = params.get("rx_device")
+        device = await self._require_device(writer, rx_device_name, "rx device not found")
+        if not device:
             return
 
-        params = json.loads(body)
-        rx_device_name = params.get("rx_device")
+        subscriptions = params.get("subscriptions")
+        if subscriptions is not None:
+            try:
+                records = [
+                    (entry["rx_channel"], entry["tx_channel"], entry["tx_device"])
+                    for entry in subscriptions
+                ]
+            except (KeyError, TypeError) as exception:
+                await self._send_json(
+                    writer, {"error": f"invalid subscription entry: {exception}"}, 400
+                )
+                return
+            if not records:
+                await self._send_json(writer, {"error": "subscriptions list is empty"}, 400)
+                return
+
+            for rx_channel_number, tx_channel_name, tx_device_name in records:
+                await self._broadcast_sse({
+                    "event": "subscription_pending",
+                    "action": "add",
+                    "rx_device": rx_device_name,
+                    "rx_channel": rx_channel_number,
+                    "tx_channel": tx_channel_name,
+                    "tx_device": tx_device_name,
+                })
+
+            await device.operations.add_subscriptions_by_name(records)
+            await self._send_json(writer, {"success": True, "count": len(records)})
+            return
+
         rx_channel_number = params.get("rx_channel")
         tx_channel_name = params.get("tx_channel")
         tx_device_name = params.get("tx_device")
-
-        device = self._find_device(rx_device_name)
-        if not device:
-            await self._send_json(writer, {"error": "rx device not found"}, 404)
+        if rx_channel_number is None or not tx_channel_name or not tx_device_name:
+            await self._send_json(
+                writer, {"error": "rx_channel, tx_channel, tx_device required"}, 400
+            )
             return
 
         await self._broadcast_sse({
@@ -389,32 +446,17 @@ class RelayServer:
             "tx_device": tx_device_name,
         })
 
-        try:
-            command_args = device.commands.command_add_subscription(
-                rx_channel_number, tx_channel_name, tx_device_name
-            )
-            await device.dante_command(
-                *command_args, logical_command_name="add_subscription"
-            )
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        await device.operations.add_subscription_by_name(
+            rx_channel_number, tx_channel_name, tx_device_name
+        )
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_unsubscribe(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        rx_device_name = params.get("rx_device")
-        rx_channel_numbers = params.get("rx_channels")
-        rx_channel_number = params.get("rx_channel")
-
-        device = self._find_device(rx_device_name)
+    async def _handle_unsubscribe(self, writer, params):
+        device = await self._require_device(writer, params.get("rx_device"), "rx device not found")
         if not device:
-            await self._send_json(writer, {"error": "rx device not found"}, 404)
             return
 
+        rx_channel_numbers = params.get("rx_channels")
         if rx_channel_numbers:
             rx_channels = []
             for number in rx_channel_numbers:
@@ -424,191 +466,85 @@ class RelayServer:
                     return
                 rx_channels.append(channel)
 
-            try:
-                await device.operations.remove_subscriptions(rx_channels)
-                await self._send_json(writer, {"success": True, "count": len(rx_channels)})
-            except Exception as exception:
-                await self._send_json(writer, {"error": str(exception)}, 500)
-        else:
-            rx_channel = device.rx_channels.get(rx_channel_number)
-            if not rx_channel:
-                await self._send_json(writer, {"error": "rx channel not found"}, 404)
-                return
-
-            try:
-                await device.operations.remove_subscription(rx_channel)
-                await self._send_json(writer, {"success": True})
-            except Exception as exception:
-                await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_identify(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
+            await device.operations.remove_subscriptions(rx_channels)
+            await self._send_json(writer, {"success": True, "count": len(rx_channels)})
             return
 
-        params = json.loads(body)
-        device_name = params.get("device")
+        rx_channel = device.rx_channels.get(params.get("rx_channel"))
+        if not rx_channel:
+            await self._send_json(writer, {"error": "rx channel not found"}, 404)
+            return
 
-        device = self._find_device(device_name)
+        await device.operations.remove_subscription(rx_channel)
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_identify(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
 
-        try:
-            await device.operations.identify()
-            await self._broadcast_sse({
-                "event": "identify_started",
-                "server_name": device.server_name,
-                "duration": 6,
-            })
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_rename_device(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        device_name = params.get("device")
-        new_name = params.get("name")
-
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
-
-        try:
-            await device.operations.set_name(new_name)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_rename_channel(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        device_name = params.get("device")
-        channel_type = params.get("channel_type")
-        channel_number = params.get("channel_number")
-        new_name = params.get("name")
-
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
-
-        try:
-            await device.operations.set_channel_name(channel_type, channel_number, new_name)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_set_latency(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        device_name = params.get("device")
-        latency = params.get("latency")
-
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
-
-        try:
-            await device.operations.set_latency(latency)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_lock(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        device_name = params.get("device")
-        pin = params.get("pin")
-
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
-
-        lock_key = self._get_lock_key()
-        if not lock_key:
-            await self._send_json(writer, {"error": "device_lock_key not configured"}, 503)
-            return
-
-        from netaudio.dante.device_operations import validate_pin
-        error = validate_pin(pin or "")
-        if error:
-            await self._send_json(writer, {"error": error}, 400)
-            return
-
-        try:
-            result = await device.operations.lock_device(pin, lock_key)
-            if result.get("success"):
-                device.is_locked = result.get("lock_state") == 1
-                await self._broadcast_device_updated(device)
-            await self._send_json(writer, result)
-        except TimeoutError:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_unlock(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-
-        params = json.loads(body)
-        device_name = params.get("device")
-        pin = params.get("pin")
-
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
-
-        lock_key = self._get_lock_key()
-        if not lock_key:
-            await self._send_json(writer, {"error": "device_lock_key not configured"}, 503)
-            return
-
-        from netaudio.dante.device_operations import validate_pin
-        error = validate_pin(pin or "")
-        if error:
-            await self._send_json(writer, {"error": error}, 400)
-            return
-
-        try:
-            result = await device.operations.unlock_device(pin, lock_key)
-            if result.get("success"):
-                device.is_locked = result.get("lock_state") == 1
-                await self._broadcast_device_updated(device)
-            await self._send_json(writer, result)
-        except TimeoutError:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _broadcast_device_updated(self, device):
-        device_json = DanteDeviceSerializer.to_json(device)
-        device_json["online"] = device.online
-        device_json["tx_count"] = device.tx_count
-        device_json["rx_count"] = device.rx_count
+        await device.operations.identify()
         await self._broadcast_sse({
-            "event": "device_updated",
+            "event": "identify_started",
             "server_name": device.server_name,
-            "device": device_json,
+            "duration": 6,
         })
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_rename_device(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+
+        await device.operations.set_name(params.get("name"))
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_rename_channel(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+
+        await device.operations.set_channel_name(
+            params.get("channel_type"), params.get("channel_number"), params.get("name")
+        )
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_set_latency(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+
+        await device.operations.set_latency(params.get("latency"))
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_lock(self, writer, params):
+        await self._handle_lock_operation(writer, params, locking=True)
+
+    async def _handle_unlock(self, writer, params):
+        await self._handle_lock_operation(writer, params, locking=False)
+
+    async def _handle_lock_operation(self, writer, params, locking):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+
+        lock_key = self._get_lock_key()
+        if not lock_key:
+            await self._send_json(writer, {"error": "device_lock_key not configured"}, 503)
+            return
+
+        pin = params.get("pin")
+        error = validate_pin(pin or "")
+        if error:
+            await self._send_json(writer, {"error": error}, 400)
+            return
+
+        if locking:
+            result = await device.operations.lock_device(pin, lock_key)
+        else:
+            result = await device.operations.unlock_device(pin, lock_key)
+
+        await self._send_json(writer, result)
 
     def _get_lock_key(self):
         from netaudio.common.app_config import settings as app_settings
@@ -621,206 +557,186 @@ class RelayServer:
             logger.info("Extracted device lock key from Dante Controller")
         return key
 
-    async def _handle_refresh(self, writer, body):
-        try:
-            device_name = None
-            if body:
-                params = json.loads(body)
-                device_name = params.get("device")
-
-            if device_name:
-                device = self._find_device(device_name)
-                if not device:
-                    await self._send_json(writer, {"error": "device not found"}, 404)
-                    return
-                await self.daemon.refresh_device(device.server_name)
-            else:
-                await self.daemon.refresh_all_devices()
-
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_metering_start(self, writer, body):
-        try:
-            if not body:
-                await self._send_json(writer, {"error": "device required"}, 400)
-                return
-            params = json.loads(body)
-            device_name = params.get("device")
-            device = self._find_device(device_name)
+    async def _handle_refresh(self, writer, params):
+        device_name = params.get("device")
+        if device_name:
+            device = await self._require_device(writer, device_name)
             if not device:
-                await self._send_json(writer, {"error": "device not found"}, 404)
                 return
-            client_id = params.get("client_id", "relay_http")
-            if self.daemon.metering:
-                self.daemon.metering.add_persistent(device.server_name, client_id)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+            await self.state.refresh_device(device.server_name)
+        else:
+            await self.state.refresh_all_devices()
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_metering_stop(self, writer, body):
-        try:
-            if not body:
-                await self._send_json(writer, {"error": "device required"}, 400)
-                return
-            params = json.loads(body)
-            device_name = params.get("device")
-            device = self._find_device(device_name)
-            if not device:
-                await self._send_json(writer, {"error": "device not found"}, 404)
-                return
-            client_id = params.get("client_id", "relay_http")
-            if self.daemon.metering:
-                self.daemon.metering.remove_persistent(device.server_name, client_id)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+    @staticmethod
+    def _peer_is_loopback(writer):
+        peername = writer.get_extra_info("peername")
+        if not peername:
+            return False
+        return peername[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
-    async def _handle_set_sample_rate(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-        params = json.loads(body)
-        device_name = params.get("device")
-        sample_rate = params.get("sample_rate")
-        device = self._find_device(device_name)
+    async def _handle_shutdown(self, writer, params):
+        await self._send_json(writer, {"success": True})
+        if self.on_shutdown is not None:
+            self.on_shutdown()
+
+    async def _handle_report_unresponsive(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
+            return
+        if device.online:
+            logger.info(f"Device reported unresponsive, marking offline: {device.server_name}")
+            self.application.mark_device_offline(device.server_name)
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_metering_status(self, writer):
+        if not self.metering:
+            await self._send_json(writer, {})
+            return
+        await self._send_json(writer, self.metering.get_status())
+
+    async def _handle_metering_snapshot(self, writer, name):
+        device = self._find_device(name)
+        if not device or not device.ipv4:
             await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            await device.operations.set_sample_rate(sample_rate)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
-
-    async def _handle_set_encoding(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
+        if not self.metering:
+            await self._send_json(writer, {"error": "metering not available"}, 503)
             return
-        params = json.loads(body)
-        device_name = params.get("device")
-        encoding = params.get("encoding")
-        device = self._find_device(device_name)
+
+        levels = await self.metering.snapshot(device.server_name, timeout=3.0)
+        if levels is None:
+            await self._send_json(writer, {"error": "no metering data"}, 504)
+            return
+
+        tx_names = {}
+        if device.tx_channels:
+            for channel in device.tx_channels.values():
+                tx_names[channel.number] = channel.friendly_name or channel.name
+        rx_names = {}
+        if device.rx_channels:
+            for channel in device.rx_channels.values():
+                rx_names[channel.number] = channel.friendly_name or channel.name
+
+        response = {
+            "tx": {},
+            "rx": {},
+            "wall_time": levels.get("wall_time"),
+            "source_ip": levels.get("source_ip"),
+        }
+        for channel_number, level in levels.get("tx", {}).items():
+            response["tx"][channel_number] = {
+                "name": tx_names.get(channel_number, ""),
+                "level": level,
+            }
+        for channel_number, level in levels.get("rx", {}).items():
+            response["rx"][channel_number] = {
+                "name": rx_names.get(channel_number, ""),
+                "level": level,
+            }
+        await self._send_json(writer, response)
+
+    async def _handle_metering_start(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            await device.operations.set_encoding(encoding)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        client_id = params.get("client_id", "relay_http")
+        if self.metering:
+            self.metering.add_persistent(device.server_name, client_id)
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_set_gain(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-        params = json.loads(body)
-        device_name = params.get("device")
-        channel_number = params.get("channel_number")
-        gain_level = params.get("gain_level")
-        device_type = params.get("device_type", "")
-        device = self._find_device(device_name)
+    async def _handle_metering_stop(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            await device.operations.set_gain_level(channel_number, gain_level, device_type)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        client_id = params.get("client_id", "relay_http")
+        if self.metering:
+            self.metering.remove_persistent(device.server_name, client_id)
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_set_preferred_leader(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-        params = json.loads(body)
-        device_name = params.get("device")
-        preferred = params.get("preferred")
-        device = self._find_device(device_name)
+    async def _handle_set_sample_rate(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            device_ip = str(device.ipv4)
-            await self.daemon.application.settings.set_preferred_leader(device_ip, preferred)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        await device.operations.set_sample_rate(params.get("sample_rate"))
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_set_aes67(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-        params = json.loads(body)
-        device_name = params.get("device")
-        enabled = params.get("enabled")
-        device = self._find_device(device_name)
+    async def _handle_set_encoding(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            await device.operations.enable_aes67(enabled)
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        await device.operations.set_encoding(params.get("encoding"))
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_reboot(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
-            return
-        params = json.loads(body)
-        device_name = params.get("device")
-        device = self._find_device(device_name)
+    async def _handle_set_gain(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
         if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        try:
-            await device.operations.reboot()
-            await self._send_json(writer, {"success": True})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+        await device.operations.set_gain_level(
+            params.get("channel_number"), params.get("gain_level"), params.get("device_type", "")
+        )
+        await self._send_json(writer, {"success": True})
 
-    async def _handle_set_interface(self, writer, body):
-        if not body:
-            await self._send_json(writer, {"error": "missing body"}, 400)
+    async def _handle_set_preferred_leader(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
             return
-        params = json.loads(body)
-        device_name = params.get("device")
+        await self.application.settings.set_preferred_leader(
+            str(device.ipv4), params.get("preferred")
+        )
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_set_aes67(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        await device.operations.enable_aes67(params.get("enabled"))
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_reboot(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        await device.operations.reboot()
+        await self._send_json(writer, {"success": True})
+
+    async def _handle_set_interface(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+
         mode = params.get("mode", "").lower()
-        device = self._find_device(device_name)
-        if not device:
-            await self._send_json(writer, {"error": "device not found"}, 404)
-            return
         if mode not in ("dhcp", "static"):
             await self._send_json(writer, {"error": "mode must be 'dhcp' or 'static'"}, 400)
             return
-        try:
-            device_ip = str(device.ipv4)
-            if mode == "dhcp":
-                result = await self.daemon.application.set_interface_dhcp(device_ip)
-            else:
-                ip_address = params.get("ip")
-                netmask = params.get("netmask")
-                dns_server = params.get("dns")
-                gateway = params.get("gateway")
-                if not all([ip_address, netmask]):
-                    await self._send_json(writer, {"error": "static mode requires ip, netmask"}, 400)
-                    return
-                result = await self.daemon.application.set_interface_static(
-                    device_ip, ip_address, netmask, dns_server or "", gateway or ""
-                )
-            await self._send_json(writer, {"success": True, "reboot_required": True, "interfaces": result})
-        except Exception as exception:
-            await self._send_json(writer, {"error": str(exception)}, 500)
+
+        device_ip = str(device.ipv4)
+        if mode == "dhcp":
+            result = await self.application.set_interface_dhcp(device_ip)
+        else:
+            ip_address = params.get("ip")
+            netmask = params.get("netmask")
+            if not all([ip_address, netmask]):
+                await self._send_json(writer, {"error": "static mode requires ip, netmask"}, 400)
+                return
+            result = await self.application.set_interface_static(
+                device_ip, ip_address, netmask, params.get("dns") or "", params.get("gateway") or ""
+            )
+        await self._send_json(writer, {"success": True, "reboot_required": True, "interfaces": result})
+
+    async def _require_device(self, writer, name, error="device not found"):
+        device = self._find_device(name)
+        if not device:
+            await self._send_json(writer, {"error": error}, 404)
+        return device
 
     def _find_device(self, name):
         if not name:
             return None
-        device = self.daemon.devices.get(name)
+        device = self.application.devices.get(name)
         if device:
             return device
-        for server_name, candidate in self.daemon.devices.items():
+        for server_name, candidate in self.application.devices.items():
             if candidate.name and candidate.name.lower() == name.lower():
                 return candidate
             if candidate.ipv4 and str(candidate.ipv4) == name:
@@ -829,7 +745,7 @@ class RelayServer:
 
     async def _send_json(self, writer, data, status=200):
         body = json.dumps(data, default=str).encode()
-        status_text = "OK" if status == 200 else "Error"
+        status_text = STATUS_TEXT.get(status, "Error")
         response = (
             f"HTTP/1.1 {status} {status_text}\r\n"
             f"Content-Type: application/json\r\n"

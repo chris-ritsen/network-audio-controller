@@ -40,6 +40,11 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
         if mac:
             return mac
 
+    from netaudio import core
+    mac = core.host_mac()
+    if mac:
+        return mac
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect(("224.0.0.231", 1))

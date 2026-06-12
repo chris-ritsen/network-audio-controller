@@ -330,6 +330,6 @@ class TestAES67Waiter:
         device_ip = "192.168.1.247"
 
         service.register_aes67_waiter(device_ip)
-        assert device_ip in service._aes67_waiters
+        assert service._waiters.is_registered("aes67", device_ip)
         service.unregister_aes67_waiter(device_ip)
-        assert device_ip not in service._aes67_waiters
+        assert not service._waiters.is_registered("aes67", device_ip)

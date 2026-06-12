@@ -25,6 +25,15 @@ def load_fixture(filename: str) -> bytes:
     return path.read_bytes()
 
 
+def string_at_offset(data: bytes, offset: int) -> str | None:
+    if offset == 0 or offset >= len(data):
+        return None
+    end = data.find(b"\x00", offset)
+    if end == -1:
+        end = len(data)
+    return data[offset:end].decode("ascii")
+
+
 DEVICE_NAME_FIXTURES = [
     ("20250517_200646_215524_192_168_1_108_get_device_name", "lx-dante"),
     ("20250517_200646_356259_192_168_1_193_get_device_name", "avio-bt-1"),
@@ -70,7 +79,7 @@ class TestCommandDeviceName:
     @pytest.mark.parametrize("fixture_base,expected_name", DEVICE_NAME_FIXTURES)
     def test_response_contains_device_name(self, fixture_base, expected_name):
         response = load_fixture(f"{fixture_base}_response.bin")
-        name = DanteDeviceParser._get_string_at_offset(response, 10)
+        name = string_at_offset(response, 10)
         assert name == expected_name
 
 
@@ -110,33 +119,31 @@ class TestCommandReceivers:
         response = load_fixture(
             "20250517_200646_408078_avio-usb-3_get_receivers_response.bin"
         )
-        parser = DanteDeviceParser()
         body = response[10:]
 
         record_1 = body[2:22]
         assert struct.unpack(">H", record_1[0:2])[0] == 1
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "mic-mix-high"
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "lx-dante"
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix-1"
+        assert string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "mic-mix-high"
+        assert string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "lx-dante"
+        assert string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix-1"
         assert struct.unpack(">H", record_1[14:16])[0] == 9
 
         record_2 = body[22:42]
         assert struct.unpack(">H", record_2[0:2])[0] == 2
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_2[10:12])[0]) == "mic-mix-2"
+        assert string_at_offset(response, struct.unpack(">H", record_2[10:12])[0]) == "mic-mix-2"
         assert struct.unpack(">H", record_2[14:16])[0] == 9
 
     def test_parse_avio_bt_1_rx_channels(self):
         response = load_fixture(
             "20250517_200646_385043_avio-bt-1_get_receivers_response.bin"
         )
-        parser = DanteDeviceParser()
         body = response[10:]
 
         record_1 = body[2:22]
         assert struct.unpack(">H", record_1[0:2])[0] == 1
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "shelford-channel"
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "a32"
-        assert parser._get_string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix"
+        assert string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "shelford-channel"
+        assert string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "a32"
+        assert string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix"
 
 
 class TestCommandTransmitters:

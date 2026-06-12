@@ -177,6 +177,9 @@ def _global_options(
     if numeric_level is None:
         raise typer.BadParameter(f"Invalid log level: {log_level}")
 
+    if dissect and numeric_level > logging.INFO:
+        numeric_level = logging.INFO
+
     if no_color:
         logging.basicConfig(level=numeric_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     else:
@@ -186,23 +189,71 @@ def _global_options(
     if debug:
         settings.debug = True
 
+    from netaudio import core
+    try:
+        core.require()
+    except core.NetaudioCoreError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1)
+
     if ctx.invoked_subcommand is None:
-        from netaudio.commands.device import device_list
-        device_list()
+        from netaudio.commands.status import status as status_command
+        status_command(json_flag=False)
 
 
-from netaudio.commands import capture, channel, config, device, diagnose, fact, key, provenance, server, subscription
+from netaudio.commands import (
+    capture,
+    channel,
+    config,
+    device,
+    diagnose,
+    fact,
+    firmware,
+    flow,
+    key,
+    provenance,
+    server,
+    shure,
+    status,
+    subscription,
+    virtual,
+)
+from netaudio.commands.device import clock as device_clock
+from netaudio.commands.device import lock_app, meter_app
+
+app.command("status")(status.status)
 app.add_typer(device.app, name="device")
 app.add_typer(channel.app, name="channel")
 app.add_typer(subscription.app, name="subscription")
 app.add_typer(subscription.app, name="sub", hidden=True)
+app.add_typer(subscription.app, name="route", hidden=True)
+app.add_typer(flow.app, name="flow")
+app.command("clock")(device_clock)
+
+lock_app.add_typer(key.app, name="key")
+app.add_typer(lock_app, name="lock")
+app.add_typer(key.app, name="key", hidden=True)
+app.add_typer(meter_app, name="meter")
+
+app.add_typer(shure.app, name="shure")
+app.add_typer(virtual.app, name="virtual")
+
+app.add_typer(server.app, name="daemon")
+app.add_typer(server.app, name="server", hidden=True)
 app.add_typer(config.top_app, name="config")
-app.add_typer(server.app, name="server")
-app.add_typer(capture.app, name="capture")
-app.add_typer(provenance.app, name="provenance")
-app.add_typer(fact.app, name="fact")
-app.add_typer(key.app, name="key")
-app.add_typer(diagnose.app, name="diagnose")
+
+lab_app = typer.Typer(help="Protocol engineering: capture, dissection, provenance, firmware.", no_args_is_help=True)
+lab_app.add_typer(capture.app, name="capture")
+lab_app.add_typer(provenance.app, name="provenance")
+lab_app.add_typer(fact.app, name="fact")
+lab_app.add_typer(firmware.app, name="firmware")
+lab_app.add_typer(diagnose.app, name="diagnose")
+app.add_typer(lab_app, name="lab")
+
+app.add_typer(capture.app, name="capture", hidden=True)
+app.add_typer(provenance.app, name="provenance", hidden=True)
+app.add_typer(fact.app, name="fact", hidden=True)
+app.add_typer(diagnose.app, name="diagnose", hidden=True)
 
 
 def main():
