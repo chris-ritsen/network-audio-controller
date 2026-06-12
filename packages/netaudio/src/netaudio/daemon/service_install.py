@@ -9,6 +9,7 @@ from pathlib import Path
 
 SYSTEMD_UNIT_NAME = "netaudio.service"
 LAUNCHD_LABEL = "com.netaudio.daemon"
+WINDOWS_TASK_NAME = "netaudio-daemon"
 MANAGED_MARKER = "X-NetaudioManaged"
 
 
@@ -17,6 +18,8 @@ def platform_name() -> str:
         return "launchd"
     if sys.platform.startswith("linux"):
         return "systemd"
+    if sys.platform == "win32":
+        return "taskscheduler"
     return "unsupported"
 
 
@@ -42,9 +45,18 @@ def service_file_path() -> Path:
     return systemd_unit_path()
 
 
+def service_location() -> str:
+    if platform_name() == "taskscheduler":
+        return f"Task Scheduler task {WINDOWS_TASK_NAME}"
+    return str(service_file_path())
+
+
 def spawn_log_path() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Logs" / "netaudio" / "daemon.log"
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        return base / "netaudio" / "daemon.log"
     base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
     return base / "netaudio" / "daemon.log"
 
@@ -87,10 +99,14 @@ def generate_service_file() -> str:
 
 
 def is_installed() -> bool:
+    if platform_name() == "taskscheduler":
+        return windows_task_installed()
     return service_file_path().exists()
 
 
 def is_managed_by_netaudio() -> bool:
+    if platform_name() == "taskscheduler":
+        return windows_task_managed()
     path = service_file_path()
     if not path.exists():
         return False
@@ -220,18 +236,101 @@ def launchd_loaded() -> bool:
     return result.returncode == 0
 
 
+TASK_TRIGGER_LOGON = 9
+TASK_ACTION_EXEC = 0
+TASK_CREATE_OR_UPDATE = 6
+TASK_LOGON_INTERACTIVE_TOKEN = 3
+
+
+def _task_scheduler():
+    import win32com.client
+
+    scheduler = win32com.client.Dispatch("Schedule.Service")
+    scheduler.Connect()
+    return scheduler
+
+
+def _windows_get_task(scheduler):
+    import pywintypes
+
+    try:
+        return scheduler.GetFolder("\\").GetTask(WINDOWS_TASK_NAME)
+    except pywintypes.com_error:
+        return None
+
+
+def _windows_build_definition(scheduler):
+    definition = scheduler.NewTask(0)
+    definition.RegistrationInfo.Description = (
+        f"netaudio daemon - network audio device discovery and control [{MANAGED_MARKER}]"
+    )
+    definition.Triggers.Create(TASK_TRIGGER_LOGON)
+    action = definition.Actions.Create(TASK_ACTION_EXEC)
+    action.Path = executable_path()
+    action.Arguments = "daemon start"
+    definition.Settings.DisallowStartIfOnBatteries = False
+    definition.Settings.StopIfGoingOnBatteries = False
+    definition.Settings.StartWhenAvailable = True
+    definition.Settings.ExecutionTimeLimit = "PT5M"
+    return definition
+
+
+def windows_task_xml() -> str:
+    return _windows_build_definition(_task_scheduler()).XmlText
+
+
+def windows_task_installed() -> bool:
+    return _windows_get_task(_task_scheduler()) is not None
+
+
+def windows_task_managed() -> bool:
+    task = _windows_get_task(_task_scheduler())
+    if task is None:
+        return False
+    return MANAGED_MARKER in (task.Definition.RegistrationInfo.Description or "")
+
+
+def windows_task_enabled() -> bool:
+    task = _windows_get_task(_task_scheduler())
+    return task is not None and bool(task.Enabled)
+
+
+def windows_task_register() -> None:
+    scheduler = _task_scheduler()
+    definition = _windows_build_definition(scheduler)
+    scheduler.GetFolder("\\").RegisterTaskDefinition(
+        WINDOWS_TASK_NAME, definition, TASK_CREATE_OR_UPDATE, None, None, TASK_LOGON_INTERACTIVE_TOKEN
+    )
+
+
+def windows_task_delete() -> None:
+    _task_scheduler().GetFolder("\\").DeleteTask(WINDOWS_TASK_NAME, 0)
+
+
+def windows_task_run() -> None:
+    task = _windows_get_task(_task_scheduler())
+    if task is None:
+        raise RuntimeError(f"Task Scheduler task {WINDOWS_TASK_NAME} is not installed")
+    task.Run("")
+
+
 def spawn_detached(relay_port: int | None) -> Path:
     log_path = spawn_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [executable_path(), "daemon", "run"]
     if relay_port:
         command.extend(["--relay-port", str(relay_port)])
+    options = {}
+    if sys.platform == "win32":
+        options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
     with open(log_path, "ab") as log_file:
         subprocess.Popen(
             command,
             stdout=log_file,
             stderr=log_file,
             stdin=subprocess.DEVNULL,
-            start_new_session=True,
+            **options,
         )
     return log_path

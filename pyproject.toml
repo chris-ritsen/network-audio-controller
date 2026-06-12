@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.2.4"
+version = "0.2.5"
 description = "CLI for managing network audio devices"
 readme = "README.md"
 license = "Unlicense"
@@ -17,6 +17,7 @@ dependencies = [
     "redis>=5.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
     "dbus-fast>=2.0.0; sys_platform == 'linux'",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
