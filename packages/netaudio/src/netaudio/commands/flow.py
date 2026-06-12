@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import struct
 
 import typer
 
@@ -12,6 +11,8 @@ from netaudio._common import (
     output_table,
 )
 from netaudio._exit_codes import ExitCode
+from netaudio.dante import flows
+from netaudio.dante.const import RESULT_CODE_SUCCESS
 
 app = typer.Typer(help="Manage TX multicast flows.", no_args_is_help=True)
 
@@ -20,9 +21,7 @@ async def _detect_flow_protocol(application, device, arc_port):
     if device.flow_protocol_id is not None:
         return device.flow_protocol_id
 
-    flow_protocol_id = await application.arc.detect_flow_protocol(
-        str(device.ipv4), arc_port
-    )
+    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port)
     if flow_protocol_id is not None:
         device.flow_protocol_id = flow_protocol_id
     return flow_protocol_id
@@ -64,18 +63,18 @@ def flow_list(
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            flows = await application.arc.query_tx_flows(device_ip, arc_port, flow_protocol_id)
-            if flows is None:
+            device_flows = await flows.query_tx_flows(device_ip, arc_port, flow_protocol_id)
+            if device_flows is None:
                 typer.echo("Error: failed to query flows.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            if not flows:
+            if not device_flows:
                 typer.echo("No TX flows configured.")
                 return
 
             headers = ["Slot", "Type", "Channels", "Sample Rate", "Encoding", "FPP"]
             rows = []
-            for flow in flows:
+            for flow in device_flows:
                 channel_list = ", ".join(str(channel_number) for channel_number in flow["channels"])
                 rows.append([
                     str(flow["flow_number"]),
@@ -83,9 +82,9 @@ def flow_list(
                     channel_list or str(flow["channel_count"]),
                     str(flow["sample_rate"]),
                     str(flow["encoding"]),
-                    str(flow["fpp"]),
+                    str(flow["frames_per_packet"]),
                 ])
-            output_table(headers, rows, json_data=flows)
+            output_table(headers, rows, json_data=device_flows)
         finally:
             await application.shutdown()
 
@@ -114,18 +113,14 @@ def flow_create(
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            response = await application.arc.create_tx_flow(
+            result_code = await flows.create_tx_flow(
                 device_ip, arc_port, flow_protocol_id, slot, channel_numbers,
             )
-            if response and len(response) >= 10:
-                result_code = struct.unpack(">H", response[8:10])[0]
-                if result_code == 0x0001:
-                    return
-                else:
-                    typer.echo(f"Error: create flow failed with result 0x{result_code:04X}", err=True)
-                    raise typer.Exit(code=ExitCode.ERROR)
-            else:
+            if result_code is None:
                 typer.echo("Error: no response from device.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            if result_code != RESULT_CODE_SUCCESS:
+                typer.echo(f"Error: create flow failed with result 0x{result_code:04X}", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
         finally:
             await application.shutdown()
@@ -149,18 +144,14 @@ def flow_delete(
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            response = await application.arc.delete_tx_flow(
+            result_code = await flows.delete_tx_flow(
                 device_ip, arc_port, flow_protocol_id, slot,
             )
-            if response and len(response) >= 10:
-                result_code = struct.unpack(">H", response[8:10])[0]
-                if result_code == 0x0001:
-                    return
-                else:
-                    typer.echo(f"Error: delete flow failed with result 0x{result_code:04X}", err=True)
-                    raise typer.Exit(code=ExitCode.ERROR)
-            else:
+            if result_code is None:
                 typer.echo("Error: no response from device.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            if result_code != RESULT_CODE_SUCCESS:
+                typer.echo(f"Error: delete flow failed with result 0x{result_code:04X}", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
         finally:
             await application.shutdown()

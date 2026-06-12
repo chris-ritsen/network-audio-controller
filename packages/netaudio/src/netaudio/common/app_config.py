@@ -31,9 +31,9 @@ class AppSettings:
         self._interface: str = DEFAULT_INTERFACE
         self._interface_ip: str = None
         self.refresh: bool = False
-        self.socket_path: str = None
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
         self.relay_port: int = int(os.environ.get("NETAUDIO_RELAY_PORT", DEFAULT_RELAY_PORT))
+        self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")
         self.lock_state_timeout: float = float(os.environ.get("NETAUDIO_LOCK_STATE_TIMEOUT", 4))
         self._device_lock_key: bytes | None = None
         lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
