@@ -65,20 +65,16 @@ jobs:
           name: xcframework
           path: dist/netaudio_core.xcframework.zip
 
-  publish:
+  release:
     needs: [build-wheel, build-sdist, build-xcframework]
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - run: |
-          mkdir -p dist
-          mv artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/xcframework/netaudio_core.xcframework.zip
+          files: artifacts/*
