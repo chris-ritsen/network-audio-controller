@@ -347,12 +347,15 @@ wheels = [
 
 [[package]]
 name = "netaudio"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "." }
 dependencies = [
+    { name = "dbus-fast", version = "2.45.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10' and sys_platform == 'linux'" },
+    { name = "dbus-fast", version = "4.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and sys_platform == 'linux'" },
     { name = "ifaddr" },
-    { name = "pynacl" },
     { name = "pyyaml" },
+    { name = "redis", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "redis", version = "7.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "rich" },
     { name = "sqlitedict" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
@@ -385,10 +388,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dbus-fast", marker = "sys_platform == 'linux'", specifier = ">=2.0.0" },
     { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
     { name = "ifaddr", specifier = ">=0.2.0" },
-    { name = "pynacl", specifier = ">=1.5.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redis", specifier = ">=5.0.0" },
     { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "sqlitedict", specifier = ">=1.7.0" },

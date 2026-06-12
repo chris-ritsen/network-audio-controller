@@ -4,29 +4,21 @@ import logging
 import socket
 import struct
 import time
-import traceback
-import warnings
 
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.const import (
-    DEVICE_CONTROL_PORT,
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
-    PORTS,
     SERVICE_ARC,
-    SERVICE_CHAN,
 )
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_network import DanteDeviceNetwork
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_parser import DanteDeviceParser
-from netaudio.dante.device_protocol import DanteDeviceProtocol
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
 
 logger = logging.getLogger("netaudio")
-sockets = {}
 
 
 class DanteDevice:
@@ -81,14 +73,23 @@ class DanteDevice:
         self.interface_pending_config: dict | None = None
 
         self._app = app
+        self._core = None
+        self._core_key = None
 
         self.commands = DanteDeviceCommands()
         self.parser = DanteDeviceParser()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            self.protocol = DanteDeviceProtocol(dump_payloads, debug)
-            self.network = DanteDeviceNetwork(self)
         self.operations = DanteDeviceOperations(self)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for key in ("_core", "_core_key", "_app", "commands", "parser", "operations", "sockets"):
+            state.pop(key, None)
+        state["error"] = str(self.error) if self.error else None
+        return state
+
+    def __setstate__(self, state):
+        type(self).__init__(self, server_name=state.get("server_name", ""))
+        self.__dict__.update(state)
 
     @property
     def ipv4(self):
@@ -104,17 +105,55 @@ class DanteDevice:
     def __str__(self):
         return f"{self.name}"
 
-    async def dante_send_command(self, command, service_type=None, port=None):
-        sock = None
+    def get_service(self, service_type):
+        if not self.services:
+            return None
+        for service in self.services.values():
+            if service and service.get("type") == service_type:
+                return service
+        return None
 
-        if service_type:
-            service = self.network.get_service(service_type)
-            sock = self.sockets[service["port"]]
+    def _arc_port(self) -> int:
+        service = self.get_service(SERVICE_ARC)
+        if service and service.get("port"):
+            return service["port"]
+        return 4440
 
+    def _resolve_target_port(self, service_type, port):
         if port:
-            sock = self.sockets[port]
+            return port
+        if service_type:
+            service = self.get_service(service_type)
+            if service and service.get("port"):
+                return service["port"]
+        return None
 
-        await self.protocol.dante_send_command(command, sock)
+    def _core_client(self):
+        from netaudio import core
+        ip = str(self.ipv4) if self.ipv4 else None
+        if not ip:
+            return None
+        arc_port = self._arc_port()
+        key = (ip, arc_port)
+        if self._core is None or self._core_key != key:
+            if self._core is not None:
+                self._core.close()
+            self._core = core.CoreClient(ip, arc_port=arc_port)
+            mac = core.host_mac()
+            if mac:
+                self._core.set_host_mac(mac)
+            observer = getattr(self._app, "core_observer", None)
+            if observer is not None:
+                self._core.observer = observer
+            self._core_key = key
+        return self._core
+
+    async def dante_send_command(self, command, service_type=None, port=None):
+        client = self._core_client()
+        target_port = self._resolve_target_port(service_type, port)
+        if client is None or target_port is None:
+            return
+        await asyncio.to_thread(client.request, command, target_port, False, 1, 0)
 
     async def dante_command(
         self,
@@ -123,91 +162,170 @@ class DanteDevice:
         port=None,
         logical_command_name: str = "unknown",
     ):
-        if self._app is not None:
-            return await self._dante_command_via_app(
-                command, service_type, port, logical_command_name
-            )
-
-        sock = None
-
-        if service_type:
-            service = self.network.get_service(service_type)
-
-            if service and service["port"] and service["port"] in self.sockets:
-                sock = self.sockets[service["port"]]
-
-        if port:
-            sock = self.sockets[port]
-
-        return await self.protocol.dante_command(
-            command, sock, self.name, self.ipv4, logical_command_name
-        )
-
-    async def _dante_command_via_app(
-        self,
-        command,
-        service_type=None,
-        port=None,
-        logical_command_name: str = "unknown",
-    ):
-        device_ip = str(self.ipv4) if self.ipv4 else None
-        if not device_ip:
+        client = self._core_client()
+        target_port = self._resolve_target_port(service_type, port)
+        if client is None or target_port is None:
             return None
+        return await asyncio.to_thread(client.request, command, target_port, True)
 
-        target_port = port
+    def _build_rx_from_records(self, records):
+        rx_channels = {}
+        subscriptions = []
+        for record in records:
+            channel = DanteChannel()
+            channel.channel_type = "rx"
+            channel.device = self
+            channel.name = record["rx_channel_name"]
+            channel.number = record["number"]
+            channel.status_code = record["rx_status_code"]
+            rx_channels[record["number"]] = channel
 
-        if service_type:
-            service = self.network.get_service(service_type)
-            if service and service.get("port"):
-                target_port = service["port"]
+            subscription = DanteSubscription()
+            subscription.rx_channel_name = record["rx_channel_name"]
+            subscription.rx_device_name = self.name
+            subscription.tx_channel_name = record["tx_channel_name"]
+            subscription.status_code = record["subscription_status_code"]
+            subscription.rx_channel_status_code = record["rx_status_code"]
+            tx_device_name = record["tx_device_name"]
+            subscription.tx_device_name = self.name if tx_device_name == "." else tx_device_name
+            subscriptions.append(subscription)
+        return rx_channels, subscriptions
 
-        if target_port is None:
-            return None
-
-        if target_port == DEVICE_SETTINGS_PORT:
-            return await self._app.settings.request(
-                command, device_ip, target_port,
-                device_name=self.name,
-                logical_command_name=logical_command_name,
-            )
-        elif target_port == DEVICE_CONTROL_PORT:
-            return await self._app.cmc.request(
-                command, device_ip, target_port,
-                device_name=self.name,
-                logical_command_name=logical_command_name,
-            )
-        else:
-            return await self._app.arc.request(
-                command, device_ip, target_port,
-                device_name=self.name,
-                logical_command_name=logical_command_name,
-            )
-
-    async def get_controls(self):
-        await self.network.get_controls()
-
-    def parse_volume(self, bytes_volume):
-        self.parser.parse_volume(
-            bytes_volume,
-            self.rx_count_raw,
-            self.tx_count_raw,
-            self.tx_channels,
-            self.rx_channels,
-        )
-
-    async def get_volume(self, ipv4, mac, port):
-        await self.network.get_volume(ipv4, mac, port)
+    def _build_tx_from_records(self, records):
+        tx_channels = {}
+        for record in records:
+            channel = DanteChannel()
+            channel.channel_type = "tx"
+            channel.device = self
+            channel.number = record["number"]
+            channel.name = record["name"]
+            channel.friendly_name = record["friendly_name"]
+            tx_channels[record["number"]] = channel
+        return tx_channels
 
     async def get_rx_channels(self):
-        rx_channels, subscriptions = await self.parser.get_rx_channels(
-            self, self.dante_command
-        )
-        self.rx_channels = rx_channels
-        self.subscriptions = subscriptions
+        client = self._core_client()
+        if client is None:
+            return
+        if client.observer is not None:
+            from netaudio._capture import fetch_rx_records
+            records = await asyncio.to_thread(fetch_rx_records, client, self._arc_port())
+        else:
+            records = await asyncio.to_thread(client.get_rx_channels)
+        self.rx_channels, self.subscriptions = self._build_rx_from_records(records)
 
     async def get_tx_channels(self):
-        tx_channels = await self.parser.get_tx_channels(self, self.dante_command)
-        self.tx_channels = tx_channels
+        client = self._core_client()
+        if client is None:
+            return
+        if client.observer is not None:
+            from netaudio._capture import fetch_tx_records
+            records = await asyncio.to_thread(fetch_tx_records, client, self._arc_port())
+        else:
+            records = await asyncio.to_thread(client.get_tx_channels)
+        self.tx_channels = self._build_tx_from_records(records)
+
+    async def fetch_device_name(self):
+        client = self._core_client()
+        if client is None:
+            return None
+        if client.observer is not None:
+            from netaudio._capture import fetch_device_name
+            return await asyncio.to_thread(fetch_device_name, client, self._arc_port())
+        return await asyncio.to_thread(client.get_device_name)
+
+    async def fetch_controls_data(self):
+        client = self._core_client()
+        if client is None:
+            return None
+
+        if client.observer is not None:
+            from netaudio._capture import _fetch_instrumented
+            raw = await asyncio.to_thread(_fetch_instrumented, client, self._arc_port())
+            return self.controls_data_from_core(raw)
+
+        def _work():
+            result = {
+                "name": client.get_device_name(),
+                "counts": client.get_channel_count(),
+                "rx": client.get_rx_channels(),
+                "tx": client.get_tx_channels(),
+            }
+            from netaudio.core import NetaudioCoreError
+            try:
+                result["settings"] = client.get_device_settings()
+            except NetaudioCoreError:
+                result["settings"] = None
+            try:
+                result["aes67"] = client.get_aes67_configured()
+            except NetaudioCoreError:
+                result["aes67"] = None
+            return result
+
+        return self.controls_data_from_core(await asyncio.to_thread(_work))
+
+    def controls_data_from_core(self, data):
+        controls = {}
+        if data["name"]:
+            controls["name"] = data["name"]
+        tx_count, rx_count, locked = data["counts"]
+        controls["tx_count"] = tx_count
+        controls["rx_count"] = rx_count
+        if locked is not None:
+            controls["is_locked"] = locked
+        if data.get("aes67") is not None:
+            controls["aes67_configured"] = data["aes67"]
+        settings_data = data.get("settings")
+        if settings_data:
+            if settings_data.get("sample_rate"):
+                controls["sample_rate"] = settings_data["sample_rate"]
+            if settings_data.get("latency_us") is not None:
+                controls["latency"] = settings_data["latency_us"] / 1_000_000.0
+            if settings_data.get("min_latency_us") is not None:
+                controls["min_latency"] = settings_data["min_latency_us"] / 1_000_000.0
+            if settings_data.get("max_latency_us") is not None:
+                controls["max_latency"] = settings_data["max_latency_us"] / 1_000_000.0
+        rx_channels, subscriptions = self._build_rx_from_records(data["rx"])
+        if rx_channels:
+            controls["rx_channels"] = rx_channels
+            controls["subscriptions"] = subscriptions
+        tx_channels = self._build_tx_from_records(data["tx"])
+        if tx_channels:
+            controls["tx_channels"] = tx_channels
+        return controls
+
+    async def populate_from_core(self):
+        controls = await self.fetch_controls_data()
+        if controls is None:
+            return False
+        self.apply_controls(controls)
+        return True
+
+    def apply_controls(self, data):
+        if data.get("name"):
+            self.name = data["name"]
+        if data.get("sample_rate"):
+            self.sample_rate = data["sample_rate"]
+        if data.get("latency") is not None:
+            self.latency = data["latency"]
+        if data.get("min_latency") is not None:
+            self.min_latency = data["min_latency"]
+        if data.get("max_latency") is not None:
+            self.max_latency = data["max_latency"]
+        if "tx_count" in data:
+            self.tx_count = self.tx_count_raw = data["tx_count"]
+        if "rx_count" in data:
+            self.rx_count = self.rx_count_raw = data["rx_count"]
+        if "is_locked" in data:
+            self.is_locked = data["is_locked"]
+        if "aes67_configured" in data:
+            self.aes67_configured = data["aes67_configured"]
+        if data.get("tx_channels"):
+            self.tx_channels = data["tx_channels"]
+        if data.get("rx_channels"):
+            self.rx_channels = data["rx_channels"]
+            self.subscriptions = data.get("subscriptions", [])
+        self.error = None
 
     async def get_bluetooth_status(self, host_mac=None):
         if host_mac is None:
@@ -257,58 +375,7 @@ class DanteDevice:
             return None
 
     async def get_clocking_status(self, host_mac=None):
-        if (
-            not hasattr(self.commands, "command_clocking_status")
-            or not hasattr(self.parser, "parse_clocking_status")
-        ):
-            return None
-
-        if host_mac is None:
-            from netaudio.dante.services.cmc import _get_host_mac
-            host_mac = _get_host_mac()
-        packet, _, _ = self.commands.command_clocking_status(host_mac=host_mac)
-        device_ip = str(self.ipv4)
-
-        def _query():
-            mcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            mcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if hasattr(socket, "SO_REUSEPORT"):
-                mcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            mcast_sock.bind(("", DEVICE_INFO_PORT))
-            mreq = struct.pack(
-                "4s4s",
-                socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
-                socket.inet_aton("0.0.0.0"),
-            )
-            mcast_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            mcast_sock.settimeout(2)
-
-            send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if hasattr(socket, "SO_REUSEPORT"):
-                send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            send_sock.bind(("", DEVICE_SETTINGS_PORT))
-
-            try:
-                send_sock.sendto(packet, (device_ip, DEVICE_SETTINGS_PORT))
-                while True:
-                    data, addr = mcast_sock.recvfrom(4096)
-                    if addr[0] == device_ip:
-                        return data
-            finally:
-                send_sock.close()
-                mcast_sock.close()
-
-        try:
-            response = await asyncio.to_thread(_query)
-            result = self.parser.parse_clocking_status(response)
-            if result:
-                self.clock_role = result["clock_role"]
-                self.clock_mac = result["device_clock_mac"]
-            return result
-        except (TimeoutError, socket.timeout):
-            logger.debug(f"Timeout waiting for clocking status from {self.name}")
-            return None
+        return None
 
     def to_json(self):
         return DanteDeviceSerializer.to_json(self)

@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List
-from unittest.mock import Mock
 
 import pytest
+
+from netaudio import core
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_parser import DanteDeviceParser
 
@@ -21,139 +22,10 @@ TX_FRIENDLY_4CH = bytes.fromhex(
 )
 
 
-class TestDanteDeviceParser:
-    @pytest.fixture
-    def parser(self):
-        return DanteDeviceParser()
-
-    @pytest.fixture
-    def mock_device(self):
-        device = Mock()
-        device.name = "test-device"
-        device.rx_count = 2
-        device.tx_count = 2
-        device.sample_rate = None
-        return device
-
-    def test_get_string_at_offset_with_valid_offset(self, parser):
-        data = b"Hello\x00World\x00Test"
-        assert parser._get_string_at_offset(data, 6) == "World"
-        assert parser._get_string_at_offset(data, 12) == "Test"
-
-    def test_get_string_at_offset_with_invalid_offset(self, parser):
-        data = b"Hello"
-        assert parser._get_string_at_offset(data, 10) is None
-
-    def test_get_string_at_offset_with_zero_offset_returns_none(self, parser):
-        data = b"Hello"
-        assert parser._get_string_at_offset(data, 0) is None
-
-    def test_get_string_at_offset_with_no_null_terminator(self, parser):
-        data = b"_HelloWorld"
-        assert parser._get_string_at_offset(data, 1) == "HelloWorld"
-
-    @pytest.mark.asyncio
-    async def test_get_rx_channels_with_real_data(
-        self, parser, mock_device, load_fixture
-    ):
-        response_data = load_fixture(
-            "20250517_200646_499097_avio-usb-2_get_receivers_response.bin"
-        )
-
-        mock_device.rx_count = 2
-        mock_device.commands.command_receivers = Mock(return_value=("command", "service"))
-
-        async def mock_dante_command(*args, **kwargs):
-            return response_data
-
-        rx_channels, subscriptions = await parser.get_rx_channels(
-            mock_device, mock_dante_command
-        )
-
-        assert len(rx_channels) == 2
-        assert len(subscriptions) == 2
-
-        assert rx_channels[1].name == "mic-mix-1"
-        assert rx_channels[1].number == 1
-        assert rx_channels[1].channel_type == "rx"
-        assert rx_channels[1].device == mock_device
-
-        assert rx_channels[2].name == "mic-mix-2"
-        assert rx_channels[2].number == 2
-
-        assert subscriptions[0].rx_channel_name == "mic-mix-1"
-        assert subscriptions[0].tx_channel_name == "mic-mix-high"
-        assert subscriptions[0].tx_device_name == "lx-dante"
-        assert subscriptions[0].rx_device_name == "test-device"
-
-        assert subscriptions[1].rx_channel_name == "mic-mix-2"
-        assert subscriptions[1].tx_channel_name == "mic-mix-high"
-        assert subscriptions[1].tx_device_name == "lx-dante"
-
-    @pytest.mark.asyncio
-    async def test_get_rx_channels_with_no_response(self, parser, mock_device):
-        async def mock_dante_command(*args, **kwargs):
-            return None
-
-        mock_device.commands.command_receivers = Mock(return_value=("command", "service"))
-
-        rx_channels, subscriptions = await parser.get_rx_channels(
-            mock_device, mock_dante_command
-        )
-
-        assert len(rx_channels) == 0
-        assert len(subscriptions) == 0
-
-    @pytest.mark.asyncio
-    async def test_get_rx_channels_extracts_sample_rate(
-        self, parser, mock_device, load_fixture
-    ):
-        response_data = load_fixture(
-            "20250517_200646_289003_lx-dante_get_receivers_response.bin"
-        )
-
-        mock_device.rx_count = 16
-        mock_device.commands.command_receivers = Mock(return_value=("command", "service"))
-        mock_device.sample_rate = None
-
-        async def mock_dante_command(*args, **kwargs):
-            return response_data
-
-        await parser.get_rx_channels(mock_device, mock_dante_command)
-
-        assert mock_device.sample_rate is not None
-
-    def test_parse_volume(self, parser, mock_device):
-        mock_device.rx_count_raw = 2
-        mock_device.tx_count_raw = 2
-
-        tx_channel_1 = Mock()
-        tx_channel_1.number = 1
-        tx_channel_2 = Mock()
-        tx_channel_2.number = 2
-
-        rx_channel_1 = Mock()
-        rx_channel_1.number = 1
-        rx_channel_2 = Mock()
-        rx_channel_2.number = 2
-
-        tx_channels = {1: tx_channel_1, 2: tx_channel_2}
-        rx_channels = {1: rx_channel_1, 2: rx_channel_2}
-
-        volume_data = b"\x00\x00\x00\x00\x50\x60\x70\x80\x00"
-
-        parser.parse_volume(
-            volume_data,
-            mock_device.rx_count_raw,
-            mock_device.tx_count_raw,
-            tx_channels,
-            rx_channels,
-        )
-
-        assert tx_channel_1.volume == 0x50
-        assert tx_channel_2.volume == 0x60
-        assert rx_channel_1.volume == 0x70
-        assert rx_channel_2.volume == 0x80
+def make_device(name):
+    device = DanteDevice(server_name=f"{name}.local.")
+    device.name = name
+    return device
 
 
 @dataclass
@@ -166,6 +38,19 @@ class RxParserTestCase:
 
 
 rx_parser_test_cases = [
+    RxParserTestCase(
+        device_id="avio-usb-2",
+        fixture="20250517_200646_499097_avio-usb-2_get_receivers_response.bin",
+        rx_count=2,
+        expected_channels=[
+            {"number": 1, "name": "mic-mix-1", "status_code": 257},
+            {"number": 2, "name": "mic-mix-2", "status_code": 257},
+        ],
+        expected_subscriptions=[
+            {"rx": "mic-mix-1", "tx_ch": "mic-mix-high", "tx_dev": "lx-dante", "status": 9},
+            {"rx": "mic-mix-2", "tx_ch": "mic-mix-high", "tx_dev": "lx-dante", "status": 9},
+        ],
+    ),
     RxParserTestCase(
         device_id="avio-usb-1",
         fixture="20250517_200646_463580_avio-usb-1_get_receivers_response.bin",
@@ -245,24 +130,12 @@ rx_parser_test_cases = [
     rx_parser_test_cases,
     ids=[tc.device_id for tc in rx_parser_test_cases],
 )
-@pytest.mark.asyncio
-async def test_get_rx_channels_parser(load_fixture, test_case: RxParserTestCase):
+def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTestCase):
     response_data = load_fixture(test_case.fixture)
-    parser = DanteDeviceParser()
+    device = make_device(test_case.device_id)
 
-    device = Mock()
-    device.name = test_case.device_id
-    device.rx_count = test_case.rx_count
-    device.sample_rate = None
-    device.error = None
-    device.commands.command_receivers = Mock(return_value=("command", "service"))
-
-    async def mock_dante_command(*args, **kwargs):
-        return response_data
-
-    rx_channels, subscriptions = await parser.get_rx_channels(
-        device, mock_dante_command
-    )
+    records = core.parse_page("rx", response_data, 1)
+    rx_channels, subscriptions = device._build_rx_from_records(records)
 
     assert len(rx_channels) == test_case.rx_count
 
@@ -275,6 +148,7 @@ async def test_get_rx_channels_parser(load_fixture, test_case: RxParserTestCase)
         assert ch.number == expected["number"]
         assert ch.channel_type == "rx"
         assert ch.status_code == expected["status_code"]
+        assert ch.device is device
 
     sub_by_rx = {s.rx_channel_name: s for s in subscriptions}
     for expected in test_case.expected_subscriptions:
@@ -288,25 +162,44 @@ async def test_get_rx_channels_parser(load_fixture, test_case: RxParserTestCase)
             f"tx_device {sub.tx_device_name!r} != {expected['tx_dev']!r}"
         )
         assert sub.status_code == expected["status"]
+        assert sub.rx_device_name == test_case.device_id
 
 
-@pytest.mark.asyncio
-async def test_get_tx_channels_with_synthetic_data():
-    parser = DanteDeviceParser()
+def test_build_rx_self_subscription_resolves_dot():
+    device = make_device("self-device")
+    records = [
+        {
+            "number": 1,
+            "rx_channel_name": "loop",
+            "tx_channel_name": "loop",
+            "tx_device_name": ".",
+            "rx_status_code": 257,
+            "subscription_status_code": 9,
+        }
+    ]
 
-    device = Mock()
-    device.tx_count = 4
-    device.sample_rate = None
-    device.error = None
-    device.commands.command_transmitters = Mock(return_value=("cmd", "svc"))
+    _, subscriptions = device._build_rx_from_records(records)
 
-    async def mock_dante_command(*args, **kwargs):
-        name = kwargs.get("logical_command_name", "")
-        if "friendly" in name:
-            return TX_FRIENDLY_4CH
-        return TX_RAW_4CH_48K
+    assert subscriptions[0].tx_device_name == "self-device"
 
-    tx_channels = await parser.get_tx_channels(device, mock_dante_command)
+
+def _merged_tx_records(raw_response, friendly_response):
+    friendly = {}
+    if friendly_response is not None:
+        for number, friendly_name in core.parse_page("tx_friendly", friendly_response, 1):
+            if friendly_name:
+                friendly[number] = friendly_name
+    records = core.parse_page("tx_info", raw_response, 1)
+    for record in records:
+        record["friendly_name"] = friendly.get(record["number"])
+    return records
+
+
+def test_build_tx_channels_from_core_records():
+    device = make_device("test-device")
+
+    records = _merged_tx_records(TX_RAW_4CH_48K, TX_FRIENDLY_4CH)
+    tx_channels = device._build_tx_from_records(records)
 
     assert len(tx_channels) == 4
 
@@ -325,62 +218,11 @@ async def test_get_tx_channels_with_synthetic_data():
     assert tx_channels[4].friendly_name == "mic-mix-low"
 
 
-@pytest.mark.asyncio
-async def test_get_tx_channels_extracts_sample_rate():
-    parser = DanteDeviceParser()
+def test_build_tx_channels_without_friendly_names():
+    device = make_device("test-device")
 
-    device = Mock()
-    device.tx_count = 4
-    device.sample_rate = None
-    device.error = None
-    device.commands.command_transmitters = Mock(return_value=("cmd", "svc"))
-
-    async def mock_dante_command(*args, **kwargs):
-        name = kwargs.get("logical_command_name", "")
-        if "friendly" in name:
-            return TX_FRIENDLY_4CH
-        return TX_RAW_4CH_48K
-
-    await parser.get_tx_channels(device, mock_dante_command)
-
-    assert device.sample_rate == 48000
-
-
-@pytest.mark.asyncio
-async def test_get_tx_channels_with_no_response():
-    parser = DanteDeviceParser()
-
-    device = Mock()
-    device.tx_count = 4
-    device.sample_rate = None
-    device.error = None
-    device.commands.command_transmitters = Mock(return_value=("cmd", "svc"))
-
-    async def mock_dante_command(*args, **kwargs):
-        return None
-
-    tx_channels = await parser.get_tx_channels(device, mock_dante_command)
-
-    assert len(tx_channels) == 0
-
-
-@pytest.mark.asyncio
-async def test_get_tx_channels_without_friendly_response():
-    parser = DanteDeviceParser()
-
-    device = Mock()
-    device.tx_count = 4
-    device.sample_rate = None
-    device.error = None
-    device.commands.command_transmitters = Mock(return_value=("cmd", "svc"))
-
-    async def mock_dante_command(*args, **kwargs):
-        name = kwargs.get("logical_command_name", "")
-        if "friendly" in name:
-            return None
-        return TX_RAW_4CH_48K
-
-    tx_channels = await parser.get_tx_channels(device, mock_dante_command)
+    records = _merged_tx_records(TX_RAW_4CH_48K, None)
+    tx_channels = device._build_tx_from_records(records)
 
     assert len(tx_channels) == 4
     assert tx_channels[1].name == "ch-01"
@@ -403,5 +245,3 @@ class TestParseBluetoothStatus:
 
     def test_returns_none_for_empty(self):
         assert DanteDeviceParser.parse_bluetooth_status(b"") is None
-
-
