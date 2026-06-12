@@ -70,16 +70,6 @@ PTP_V1_ROLE_MAP = {
     PTP_V1_ROLE_MASTER: "Leader",
     PTP_V1_ROLE_SLAVE: "Follower",
 }
-CONMON_MANUFACTURER_OFFSET = 0x4C
-CONMON_MANUFACTURER_END = 0xCC
-CONMON_PRODUCT_NAME_OFFSET = 0xCC
-CONMON_PRODUCT_NAME_END = 0x14C
-CONMON_PRODUCT_VERSION_OFFSET = 0x14C
-CONMON_PRODUCT_VERSION_END = 0x150
-CONMON_BOARD_CODENAME_OFFSET = 0x2C
-CONMON_BOARD_CODENAME_END = 0x58
-CONMON_BOARD_NAME_OFFSET = 0x58
-CONMON_BOARD_NAME_END = 0x98
 PROTOCOL_SETTINGS = 0xFFFF
 PROTOCOL_CONTROL = 0x27FF
 
@@ -106,6 +96,34 @@ def parse_aes67_current_new_byte(state_byte: int) -> tuple[bool | None, bool | N
     return (None, None)
 
 
+class _WaiterRegistry:
+    def __init__(self):
+        self._waiters: dict[tuple[str, str], asyncio.Event] = {}
+        self._results: dict[tuple[str, str], object] = {}
+
+    def register(self, kind: str, key: str) -> asyncio.Event:
+        event = asyncio.Event()
+        self._waiters[(kind, key)] = event
+        self._results.pop((kind, key), None)
+        return event
+
+    def unregister(self, kind: str, key: str) -> None:
+        self._waiters.pop((kind, key), None)
+
+    def is_registered(self, kind: str, key: str) -> bool:
+        return (kind, key) in self._waiters
+
+    def take_result(self, kind: str, key: str):
+        return self._results.pop((kind, key), None)
+
+    def notify(self, kind: str, key: str, result) -> None:
+        waiter = self._waiters.get((kind, key))
+        if waiter is None:
+            return
+        self._results[(kind, key)] = result
+        waiter.set()
+
+
 class DanteNotificationService(DanteMulticastService):
     def __init__(self, dispatcher: DanteEventDispatcher, device_lookup=None, packet_store=None, interface_ip: str | None = None, dissect: bool = False):
         super().__init__(
@@ -118,91 +136,68 @@ class DanteNotificationService(DanteMulticastService):
         self._dispatcher = dispatcher
         self._device_lookup = device_lookup
         self._pending_conmon: dict[str, dict] = {}
-        self._conmon_waiters: dict[str, asyncio.Event] = {}
+        self._waiters = _WaiterRegistry()
         self._conmon_received: dict[str, set[int]] = {}
         self._conmon_expected_count: dict[str, int] = {}
-        self._aes67_waiters: dict[str, asyncio.Event] = {}
-        self._aes67_results: dict[str, tuple[bool | None, bool | None]] = {}
-        self._preferred_leader_waiters: dict[str, asyncio.Event] = {}
-        self._preferred_leader_results: dict[str, bool | None] = {}
-        self._interface_waiters: dict[str, asyncio.Event] = {}
-        self._interface_results: dict[str, list[dict]] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
 
     def register_conmon_waiter(self, device_ip: str, expected_count: int = 2) -> asyncio.Event:
-        event = asyncio.Event()
-        self._conmon_waiters[device_ip] = event
         self._conmon_received[device_ip] = set()
         self._conmon_expected_count[device_ip] = expected_count
-        return event
+        return self._waiters.register("conmon", device_ip)
 
     def unregister_conmon_waiter(self, device_ip: str) -> None:
-        self._conmon_waiters.pop(device_ip, None)
+        self._waiters.unregister("conmon", device_ip)
         self._conmon_received.pop(device_ip, None)
         self._conmon_expected_count.pop(device_ip, None)
 
     def register_aes67_waiter(self, device_ip: str) -> asyncio.Event:
-        event = asyncio.Event()
-        self._aes67_waiters[device_ip] = event
-        self._aes67_results.pop(device_ip, None)
-        return event
+        return self._waiters.register("aes67", device_ip)
 
     def unregister_aes67_waiter(self, device_ip: str) -> None:
-        self._aes67_waiters.pop(device_ip, None)
+        self._waiters.unregister("aes67", device_ip)
 
     def get_aes67_result(self, device_ip: str) -> tuple[bool | None, bool | None] | None:
-        return self._aes67_results.pop(device_ip, None)
+        return self._waiters.take_result("aes67", device_ip)
 
     def _notify_aes67_waiter(self, source_ip: str, current: bool | None, configured: bool | None) -> None:
-        if source_ip in self._aes67_waiters:
-            self._aes67_results[source_ip] = (current, configured)
-            self._aes67_waiters[source_ip].set()
+        self._waiters.notify("aes67", source_ip, (current, configured))
 
     def register_preferred_leader_waiter(self, device_ip: str) -> asyncio.Event:
-        event = asyncio.Event()
-        self._preferred_leader_waiters[device_ip] = event
-        self._preferred_leader_results.pop(device_ip, None)
-        return event
+        return self._waiters.register("preferred_leader", device_ip)
 
     def unregister_preferred_leader_waiter(self, device_ip: str) -> None:
-        self._preferred_leader_waiters.pop(device_ip, None)
+        self._waiters.unregister("preferred_leader", device_ip)
 
     def get_preferred_leader_result(self, device_ip: str) -> bool | None:
-        return self._preferred_leader_results.pop(device_ip, None)
+        return self._waiters.take_result("preferred_leader", device_ip)
 
     def _notify_preferred_leader_waiter(self, source_ip: str, preferred_leader: bool | None) -> None:
-        if source_ip in self._preferred_leader_waiters:
-            self._preferred_leader_results[source_ip] = preferred_leader
-            self._preferred_leader_waiters[source_ip].set()
+        self._waiters.notify("preferred_leader", source_ip, preferred_leader)
 
     def register_interface_waiter(self, device_ip: str) -> asyncio.Event:
-        event = asyncio.Event()
-        self._interface_waiters[device_ip] = event
-        self._interface_results.pop(device_ip, None)
-        return event
+        return self._waiters.register("interface", device_ip)
 
     def unregister_interface_waiter(self, device_ip: str) -> None:
-        self._interface_waiters.pop(device_ip, None)
+        self._waiters.unregister("interface", device_ip)
 
     def get_interface_result(self, device_ip: str) -> list[dict] | None:
-        return self._interface_results.pop(device_ip, None)
+        return self._waiters.take_result("interface", device_ip)
 
     def _notify_interface_waiter(self, source_ip: str, interfaces: list[dict]) -> None:
-        if source_ip in self._interface_waiters:
-            self._interface_results[source_ip] = interfaces
-            self._interface_waiters[source_ip].set()
+        self._waiters.notify("interface", source_ip, interfaces)
 
     def _notify_conmon_waiter(self, source_ip: str, opcode: int) -> None:
-        if source_ip not in self._conmon_waiters:
+        if not self._waiters.is_registered("conmon", source_ip):
             return
 
-        self._conmon_received[source_ip].add(opcode)
+        self._conmon_received.setdefault(source_ip, set()).add(opcode)
         expected = self._conmon_expected_count.get(source_ip, 2)
 
         if len(self._conmon_received[source_ip]) >= expected:
-            self._conmon_waiters[source_ip].set()
+            self._waiters.notify("conmon", source_ip, True)
 
     def _on_packet(self, data: bytes, addr: tuple[str, int]) -> None:
         if len(data) < 4:
@@ -583,67 +578,16 @@ class DanteNotificationService(DanteMulticastService):
             return None
 
     @staticmethod
-    def _extract_null_terminated_string(data: bytes, start: int, end: int) -> str:
-        if len(data) < end:
-            return ""
-
-        try:
-            raw = data[start:end]
-            null_pos = raw.find(b"\x00")
-
-            if null_pos >= 0:
-                raw = raw[:null_pos]
-
-            first_printable = 0
-            while first_printable < len(raw) and raw[first_printable] < 0x20:
-                first_printable += 1
-
-            raw = raw[first_printable:]
-
-            if not raw:
-                return ""
-
-            text = raw.decode("utf-8", errors="replace").strip()
-
-            if text and all(c.isprintable() or c == " " for c in text):
-                return text
-        except Exception:
-            pass
-
-        return ""
-
-    @staticmethod
     def parse_make_model_response(data: bytes) -> tuple[str, str, str]:
-        product_name = DanteNotificationService._extract_null_terminated_string(
-            data, CONMON_PRODUCT_NAME_OFFSET, CONMON_PRODUCT_NAME_END
-        )
-        manufacturer = DanteNotificationService._extract_null_terminated_string(
-            data, CONMON_MANUFACTURER_OFFSET, CONMON_MANUFACTURER_END
-        )
-        product_version = ""
-
-        try:
-            if len(data) >= CONMON_PRODUCT_VERSION_END:
-                version_bytes = data[CONMON_PRODUCT_VERSION_OFFSET:CONMON_PRODUCT_VERSION_END]
-                major, minor, patch, build = struct.unpack("BBBB", version_bytes)
-
-                if major or minor or patch or build:
-                    product_version = f"{major}.{minor}.{build}"
-        except Exception:
-            pass
-
-        return product_name, product_version, manufacturer
+        from netaudio import core
+        parsed = core.parse_response("make_model", data)
+        return parsed["product_name"], parsed["product_version"], parsed["manufacturer"]
 
     @staticmethod
     def parse_dante_model_response(data: bytes) -> tuple[str, str]:
-        board_codename = DanteNotificationService._extract_null_terminated_string(
-            data, CONMON_BOARD_CODENAME_OFFSET, CONMON_BOARD_CODENAME_END
-        )
-        board_name = DanteNotificationService._extract_null_terminated_string(
-            data, CONMON_BOARD_NAME_OFFSET, CONMON_BOARD_NAME_END
-        )
-
-        return board_codename, board_name
+        from netaudio import core
+        parsed = core.parse_response("dante_model", data)
+        return parsed["board_codename"], parsed["board_name"]
 
     def _lookup_device(self, ip_str: str):
         if self._device_lookup:
