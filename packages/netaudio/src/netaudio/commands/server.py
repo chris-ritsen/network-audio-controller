@@ -75,6 +75,8 @@ def _service_active() -> bool:
             return False
     if platform == "launchd":
         return service_install.launchd_loaded()
+    if platform == "taskscheduler":
+        return service_install.windows_task_enabled()
     return False
 
 
@@ -121,6 +123,14 @@ def start(
             typer.echo("Daemon service started but the relay port never opened.", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"{icon('online')}Daemon started (launchd).")
+        return
+
+    if use_service and platform == "taskscheduler":
+        service_install.windows_task_run()
+        if not _wait_for_startup(effective_port):
+            typer.echo("Daemon task started but the relay port never opened.", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"{icon('online')}Daemon started (Task Scheduler).")
         return
 
     log_path = service_install.spawn_detached(relay_port)
@@ -196,7 +206,7 @@ def status(
     if service_install.is_installed():
         managed = "netaudio-managed" if service_install.is_managed_by_netaudio() else "user-managed"
         active = "active" if _service_active() else "inactive"
-        typer.echo(f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_file_path()}")
+        typer.echo(f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_location()}")
     else:
         typer.echo(f"Boot service: not installed (install with: netaudio daemon install)")
 
@@ -218,13 +228,30 @@ def install(
     force: bool = typer.Option(False, "--force", help="Overwrite an existing service file."),
     print_only: bool = typer.Option(False, "--print", help="Print the generated service file without writing it."),
 ):
-    """Install the daemon as a boot service (systemd on Linux, launchd on macOS)."""
+    """Install the daemon as a boot service (systemd on Linux, launchd on macOS, Task Scheduler on Windows)."""
     import sys
 
     platform = service_install.platform_name()
     if platform == "unsupported":
         typer.echo(f"No supported service manager on this platform ({sys.platform}).", err=True)
         raise typer.Exit(code=1)
+
+    if platform == "taskscheduler":
+        if print_only:
+            typer.echo(service_install.windows_task_xml())
+            return
+        if service_install.windows_task_installed() and not force:
+            if service_install.windows_task_managed():
+                typer.echo(f"Task {service_install.WINDOWS_TASK_NAME} already registered. Use --force to rewrite it.")
+            else:
+                typer.echo(f"A task named {service_install.WINDOWS_TASK_NAME} already exists and was not created by netaudio. Use --force to overwrite it.", err=True)
+                raise typer.Exit(code=1)
+            return
+        service_install.windows_task_register()
+        typer.echo(f"Registered Task Scheduler task {service_install.WINDOWS_TASK_NAME} (runs at logon).")
+        if start_service:
+            start(relay_port=None)
+        return
 
     content = service_install.generate_service_file()
     path = service_install.service_file_path()
@@ -263,6 +290,18 @@ def uninstall(
 ):
     """Remove the boot service."""
     platform = service_install.platform_name()
+
+    if platform == "taskscheduler":
+        if not service_install.windows_task_installed():
+            typer.echo("No boot service installed.")
+            return
+        if not service_install.windows_task_managed() and not force:
+            typer.echo(f"Task {service_install.WINDOWS_TASK_NAME} was not created by netaudio. Use --force to remove it anyway.", err=True)
+            raise typer.Exit(code=1)
+        service_install.windows_task_delete()
+        typer.echo(f"Removed Task Scheduler task {service_install.WINDOWS_TASK_NAME}")
+        return
+
     path = service_install.service_file_path()
 
     if not path.exists():
@@ -301,9 +340,19 @@ def logs(
         typer.echo(f"No log file at {log_path}.", err=True)
         raise typer.Exit(code=1)
 
-    if follow:
-        raise typer.Exit(code=subprocess.run(["tail", "-n", str(lines), "-f", str(log_path)]).returncode)
-
     content = log_path.read_text().splitlines()
     for line in content[-lines:]:
         typer.echo(line)
+
+    if follow:
+        with open(log_path, "r") as log_file:
+            log_file.seek(0, 2)
+            try:
+                while True:
+                    line = log_file.readline()
+                    if line:
+                        typer.echo(line.rstrip("\n"))
+                    else:
+                        time.sleep(0.25)
+            except KeyboardInterrupt:
+                raise typer.Exit(code=0)
