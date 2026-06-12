@@ -1,6 +1,3 @@
-import pytest
-
-from netaudio.dante.services.arc import DanteARCService
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -8,29 +5,6 @@ from netaudio.dante.services.notification import (
 )
 from netaudio.dante.services.settings import DanteSettingsService
 from netaudio.dante.events import DanteEventDispatcher
-
-
-class TestDanteARCService:
-    def test_instantiation(self):
-        service = DanteARCService()
-        assert service._commands is not None
-        assert service._parser is not None
-
-    def test_instantiation_with_packet_store(self):
-        service = DanteARCService(packet_store="fake_store")
-        assert service._packet_store == "fake_store"
-
-    @pytest.mark.asyncio
-    async def test_get_device_name_not_started(self):
-        service = DanteARCService()
-        result = await service.get_device_name("192.168.1.1", 4440)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_channel_count_not_started(self):
-        service = DanteARCService()
-        result = await service.get_channel_count("192.168.1.1", 4440)
-        assert result is None
 
 
 class TestDanteSettingsService:

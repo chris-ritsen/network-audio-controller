@@ -1,0 +1,380 @@
+{
+  "device_info:0": {
+    "spec": {
+      "command": "device_info"
+    },
+    "hex": "27ff000a000010030000"
+  },
+  "device_name:1": {
+    "spec": {
+      "command": "device_name",
+      "transaction_id": 7
+    },
+    "hex": "27ff000a000710020000"
+  },
+  "channel_count:2": {
+    "spec": {
+      "command": "channel_count",
+      "transaction_id": 1
+    },
+    "hex": "27ff000a000110000000"
+  },
+  "device_settings:3": {
+    "spec": {
+      "command": "device_settings"
+    },
+    "hex": "27ff000a000011000000"
+  },
+  "set_name:4": {
+    "spec": {
+      "command": "set_name",
+      "name": "Studio-AVIO"
+    },
+    "hex": "27ff001600001001000053747564696f2d4156494f00"
+  },
+  "reset_name:5": {
+    "spec": {
+      "command": "reset_name"
+    },
+    "hex": "27ff000a000010010000"
+  },
+  "receivers:6": {
+    "spec": {
+      "command": "receivers",
+      "page": 0
+    },
+    "hex": "27ff0010000030000000000100010000"
+  },
+  "receivers:7": {
+    "spec": {
+      "command": "receivers",
+      "page": 3,
+      "transaction_id": 9
+    },
+    "hex": "27ff0010000930000000000100310000"
+  },
+  "transmitters:8": {
+    "spec": {
+      "command": "transmitters",
+      "page": 0,
+      "friendly_names": false
+    },
+    "hex": "27ff0010000020000000000100010000"
+  },
+  "transmitters:9": {
+    "spec": {
+      "command": "transmitters",
+      "page": 2,
+      "friendly_names": true
+    },
+    "hex": "27ff0010000020100000000100410000"
+  },
+  "reset_channel_name:10": {
+    "spec": {
+      "command": "reset_channel_name",
+      "channel_type": "rx",
+      "channel_number": 5
+    },
+    "hex": "27ff001400003001000002010005001400000000"
+  },
+  "reset_channel_name:11": {
+    "spec": {
+      "command": "reset_channel_name",
+      "channel_type": "tx",
+      "channel_number": 12
+    },
+    "hex": "27ff001800002013000002010000000c0018000000000000"
+  },
+  "set_channel_name:12": {
+    "spec": {
+      "command": "set_channel_name",
+      "channel_type": "rx",
+      "channel_number": 3,
+      "name": "mic-mix-1"
+    },
+    "hex": "27ff001e000030010000020100030014000000006d69632d6d69782d3100"
+  },
+  "set_channel_name:13": {
+    "spec": {
+      "command": "set_channel_name",
+      "channel_type": "tx",
+      "channel_number": 8,
+      "name": "out-left"
+    },
+    "hex": "27ff002100002013000002010000000800180000000000006f75742d6c65667400"
+  },
+  "add_subscriptions:14": {
+    "spec": {
+      "command": "add_subscriptions",
+      "subscriptions": [
+        {
+          "rx_channel": 1,
+          "tx_channel": "mix-hi",
+          "tx_device": "lx-dante"
+        }
+      ]
+    },
+    "hex": "27ff0044000030100000020100010034003b000000000000000000000000000000000000000000000000000000000000000000006d69782d6869006c782d64616e746500"
+  },
+  "add_subscriptions:15": {
+    "spec": {
+      "command": "add_subscriptions",
+      "subscriptions": [
+        {
+          "rx_channel": 1,
+          "tx_channel": "a",
+          "tx_device": "dev-one"
+        },
+        {
+          "rx_channel": 2,
+          "tx_channel": "bb",
+          "tx_device": "dev-two"
+        },
+        {
+          "rx_channel": 5,
+          "tx_channel": "ccc",
+          "tx_device": "dev-three"
+        }
+      ]
+    },
+    "hex": "27ff005700003010000002030001003400360002003e004100050049004d0000000000000000000000000000000000000000000061006465762d6f6e65006262006465762d74776f00636363006465762d746872656500"
+  },
+  "remove_subscriptions:16": {
+    "spec": {
+      "command": "remove_subscriptions",
+      "rx_channels": [
+        3
+      ]
+    },
+    "hex": "27ff0010000030140000000100000003"
+  },
+  "remove_subscriptions:17": {
+    "spec": {
+      "command": "remove_subscriptions",
+      "rx_channels": [
+        1,
+        2,
+        7,
+        16
+      ]
+    },
+    "hex": "27ff001c000030140000000400000001000000020000000700000010"
+  },
+  "set_latency:18": {
+    "spec": {
+      "command": "set_latency",
+      "latency": 0.001
+    },
+    "hex": "27ff0027000011010000050382050020021100108301002482198301830283060003e8000003e8"
+  },
+  "set_latency:19": {
+    "spec": {
+      "command": "set_latency",
+      "latency": 0.005
+    },
+    "hex": "27ff00270000110100000503820500200211001083010024821983018302830600138800001388"
+  },
+  "reboot:20": {
+    "spec": {
+      "command": "reboot",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff002400000000001dc15023680000417564696e617465073a00900000006400010000"
+  },
+  "reboot:21": {
+    "spec": {
+      "command": "reboot",
+      "host_mac": "00:1d:c1:50:23:68"
+    },
+    "hex": "ffff002400000000001dc15023680000417564696e617465073a00900000006400010000"
+  },
+  "identify:22": {
+    "spec": {
+      "command": "identify",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff00200bc800000000000000000000417564696e6174650731006300000064"
+  },
+  "set_encoding:23": {
+    "spec": {
+      "command": "set_encoding",
+      "encoding": 24
+    },
+    "hex": "ffff002803d700005254000000000000417564696e61746507270083000000640000000100000018"
+  },
+  "set_encoding:24": {
+    "spec": {
+      "command": "set_encoding",
+      "encoding": 32
+    },
+    "hex": "ffff002803d700005254000000000000417564696e61746507270083000000640000000100000020"
+  },
+  "set_sample_rate:25": {
+    "spec": {
+      "command": "set_sample_rate",
+      "sample_rate": 48000
+    },
+    "hex": "ffff002803d400005254000000000000417564696e6174650727008100000064000000010000bb80"
+  },
+  "set_sample_rate:26": {
+    "spec": {
+      "command": "set_sample_rate",
+      "sample_rate": 96000
+    },
+    "hex": "ffff002803d400005254000000000000417564696e61746507270081000000640000000100017700"
+  },
+  "set_gain_level:27": {
+    "spec": {
+      "command": "set_gain_level",
+      "channel_number": 1,
+      "gain_level": 4,
+      "device_type": "input"
+    },
+    "hex": "ffff0034034400005254000000000000417564696e617465072710010a0000000000010001000c00100100000000000100000004"
+  },
+  "set_gain_level:28": {
+    "spec": {
+      "command": "set_gain_level",
+      "channel_number": 2,
+      "gain_level": 1,
+      "device_type": "output"
+    },
+    "hex": "ffff0034032600005254000000000000417564696e617465072710020a0000000000010001000c00100200000000000200000001"
+  },
+  "enable_aes67:29": {
+    "spec": {
+      "command": "enable_aes67",
+      "enabled": true,
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff002422dc0000001dc15023680000417564696e617465073410060000006400010001"
+  },
+  "enable_aes67:30": {
+    "spec": {
+      "command": "enable_aes67",
+      "enabled": false,
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff002422dc0000001dc15023680000417564696e617465073410060000006400010000"
+  },
+  "probe_interface_status:31": {
+    "spec": {
+      "command": "probe_interface_status",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff002800000000001dc15023680000417564696e617465073a0013000000640000000000000000"
+  },
+  "set_interface_dhcp:32": {
+    "spec": {
+      "command": "set_interface_dhcp",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff003c00000000001dc15023680000417564696e617465073a001300000064011c0010000000000000000000000000000000000002000000000000"
+  },
+  "set_interface_static:33": {
+    "spec": {
+      "command": "set_interface_static",
+      "ip": "192.168.1.50",
+      "netmask": "255.255.255.0",
+      "dns": "192.168.1.1",
+      "gateway": "192.168.1.1",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff004400000000001dc15023680000417564696e617465073a001300000064011c0f100000000000000002c0a80132ffffff00c0a80101c0a801010002000000000000"
+  },
+  "probe_aes67:34": {
+    "spec": {
+      "command": "probe_aes67",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff002410070000001dc15023680000417564696e617465073a10060000006400000000"
+  },
+  "probe_aes67:35": {
+    "spec": {
+      "command": "probe_aes67",
+      "host_mac": "001dc1502368",
+      "sequence": 4097
+    },
+    "hex": "ffff002410010000001dc15023680000417564696e617465073a10060000006400000000"
+  },
+  "set_preferred_leader:36": {
+    "spec": {
+      "command": "set_preferred_leader",
+      "preferred": true,
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff005c00210000001dc15023680000417564696e617465073a002100000064000200000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "set_preferred_leader:37": {
+    "spec": {
+      "command": "set_preferred_leader",
+      "preferred": false,
+      "clock_source": 1,
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff005c00210000001dc15023680000417564696e617465073a002100000064000200010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "probe_preferred_leader:38": {
+    "spec": {
+      "command": "probe_preferred_leader",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff005c00210000001dc15023680000417564696e617465073a002100000064000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "query_latency_config:39": {
+    "spec": {
+      "command": "query_latency_config",
+      "transaction_id": 3
+    },
+    "hex": "2809003a00031100000000170201820482050210021182188219830183028306031003110303802100f080600022006300640065022202128321"
+  },
+  "bluetooth_status:40": {
+    "spec": {
+      "command": "bluetooth_status",
+      "host_mac": "001dc1502368"
+    },
+    "hex": "ffff003000000000001dc15023680000417564696e617465073a100d00000000000c000c0a0a10091a060a040a020801"
+  },
+  "make_model:41": {
+    "spec": {
+      "command": "make_model",
+      "mac": "001dc1502368"
+    },
+    "hex": "ffff00200fdb0000001dc15023680000417564696e617465073100c100000000"
+  },
+  "dante_model:42": {
+    "spec": {
+      "command": "dante_model",
+      "mac": "001dc1502368"
+    },
+    "hex": "ffff00200fdb0000001dc15023680000417564696e6174650731006100000000"
+  },
+  "volume_start:43": {
+    "spec": {
+      "command": "volume_start",
+      "device_name": "lx-dante",
+      "ipv4": "192.168.1.107",
+      "mac": "001dc1502368",
+      "port": 8751
+    },
+    "hex": "120000460000301000000000001dc150236800000004001400020016000a6c782d64616e7465000000000001001a0001222f00010000c0a8016b222f00000000000000000000"
+  },
+  "metering_start:44": {
+    "spec": {
+      "command": "metering_start",
+      "device_name": "ad4d",
+      "ipv4": "192.168.1.107",
+      "mac": "001dc1502368",
+      "port": 8751
+    },
+    "hex": "120000420000301000000000001dc150236800000004001000020012000a6164346400000000000100160001222f00010000c0a8016b222f00000000000000000000"
+  },
+  "volume_stop:45": {
+    "spec": {
+      "command": "volume_stop",
+      "device_name": "lx-dante",
+      "mac": "001dc1502368"
+    },
+    "hex": "120000460000301000000000001dc150236800000004001400020016000a6c782d64616e7465000000000001001a000100000000000000000000000000000000000000000000"
+  }
+}
