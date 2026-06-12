@@ -22,7 +22,7 @@ jobs:
     needs: check-version
     strategy:
       matrix:
-        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-14]
+        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, windows-latest]
     runs-on: ${{ matrix.runner }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -31,6 +31,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v8
       - run: uv build --wheel
+      - shell: bash
+        run: uv run --no-project --with dist/*.whl netaudio --help
       - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.runner }}
@@ -78,3 +80,16 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*
+
+  publish-pypi:
+    needs: [build-wheel, build-sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "{wheel-*,sdist}"
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
