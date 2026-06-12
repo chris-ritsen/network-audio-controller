@@ -15,6 +15,8 @@ def _extract_tarball(name):
     if name in _extract_cache:
         return _extract_cache[name]
     archive = FIXTURES_ROOT / f"{name}.tar.gz"
+    if not archive.exists():
+        pytest.skip(f"fixture archive {archive.name} not present on this machine", allow_module_level=True)
     tmpdir = tempfile.mkdtemp()
     with tarfile.open(archive, "r:gz") as tar:
         tar.extractall(tmpdir, filter="data")

@@ -24,44 +24,6 @@ class DanteSettingsService(DanteUnicastService):
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
-    async def set_gain_level(
-        self, device_ip: str, channel_number: int, gain_level: int, device_type: str,
-    ) -> bytes | None:
-        command_args = self._commands.command_set_gain_level(channel_number, gain_level, device_type)
-        packet = command_args[0]
-        port = command_args[2] or SETTINGS_PORT
-        return await self.request(
-            packet, device_ip, port,
-            logical_command_name="set_gain_level",
-        )
-
-    async def set_sample_rate(self, device_ip: str, sample_rate: int) -> bytes | None:
-        command_args = self._commands.command_set_sample_rate(sample_rate)
-        packet = command_args[0]
-        port = command_args[2] or SETTINGS_PORT
-        return await self.request(
-            packet, device_ip, port,
-            logical_command_name="set_sample_rate",
-        )
-
-    async def set_encoding(self, device_ip: str, encoding: int) -> bytes | None:
-        command_args = self._commands.command_set_encoding(encoding)
-        packet = command_args[0]
-        port = command_args[2] or SETTINGS_PORT
-        return await self.request(
-            packet, device_ip, port,
-            logical_command_name="set_encoding",
-        )
-
-    async def enable_aes67(self, device_ip: str, is_enabled: bool, host_mac: bytes = None) -> bytes | None:
-        command_args = self._commands.command_enable_aes67(is_enabled, host_mac=host_mac)
-        packet = command_args[0]
-        port = command_args[2] or SETTINGS_PORT
-        return await self.request(
-            packet, device_ip, port,
-            logical_command_name="enable_aes67",
-        )
-
     async def set_preferred_leader(self, device_ip: str, is_preferred: bool, clock_source: int = 0, host_mac: bytes = None) -> None:
         command_args = self._commands.command_set_preferred_leader(is_preferred, clock_source=clock_source, host_mac=host_mac)
         packet = command_args[0]

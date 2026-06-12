@@ -14,8 +14,9 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
     "pyyaml>=6.0",
-    "pynacl>=1.5.0",
+    "redis>=5.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
+    "dbus-fast>=2.0.0; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["packages/netaudio/src/netaudio"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build_core.py"
 
 [dependency-groups]
 dev = [
