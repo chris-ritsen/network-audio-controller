@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv run --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
       - run: |
           tag="${GITHUB_REF_NAME#v}"
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"

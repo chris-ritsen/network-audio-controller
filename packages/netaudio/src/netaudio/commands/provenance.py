@@ -392,9 +392,10 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
         "system": "SYSTEM",
     }
 
-    print(f"\n{("-" if app_settings.no_color else "─") * 72}")
+    rule = ("-" if app_settings.no_color else "─") * 72
+    print(f"\n{rule}")
     print("TIMELINE")
-    print(f"{("-" if app_settings.no_color else "─") * 72}")
+    print(rule)
 
     all_events = []
 
@@ -492,9 +493,10 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
             if payload:
                 print(_format_audit_packet(payload))
 
-    print(f"\n{("-" if app_settings.no_color else "─") * 72}")
+    rule = ("-" if app_settings.no_color else "─") * 72
+    print(f"\n{rule}")
     print("VERIFICATION SUMMARY")
-    print(f"{("-" if app_settings.no_color else "─") * 72}")
+    print(rule)
 
     hypotheses = [m for m in markers if m.get("marker_type") == "hypothesis"]
     observations = [m for m in markers if m.get("marker_type") == "observation"]
