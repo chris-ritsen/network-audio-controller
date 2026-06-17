@@ -9,6 +9,7 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.protocol import DantePacket, DanteParser
 
 from netaudio._common import (
     _command_context,
@@ -180,6 +181,19 @@ def latency(
 
     commands = DanteDeviceCommands()
 
+    async def _get_latency(device, send):
+        arc_port = _get_arc_port(device)
+        packet = commands.command_device_settings()[0]
+        response = await send(packet, device.ipv4, arc_port)
+        if response:
+            try:
+                settings = DanteParser.parse_device_settings(DantePacket.parse_response(response))
+                if settings.latency_us is not None:
+                    return settings.latency_us / 1_000_000.0
+            except Exception:
+                pass
+        return None
+
     async def _run():
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
@@ -187,12 +201,13 @@ def latency(
 
             if value is None:
                 if all_devices:
-                    output_table(
-                        ["Name", "Latency"],
-                        [[device.name or server_name, device.latency or ""] for server_name, device in targets],
-                    )
+                    rows = []
+                    for server_name, device in targets:
+                        latency_ms = await _get_latency(device, send)
+                        rows.append([device.name or server_name, latency_ms if latency_ms is not None else ""])
+                    output_table(["Name", "Latency (ms)"], rows)
                 else:
-                    output_single(targets[0][1].latency)
+                    output_single(await _get_latency(targets[0][1], send))
                 return
 
             packet, service_type = commands.command_set_latency(value)

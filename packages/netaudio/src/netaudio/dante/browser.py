@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -36,6 +37,18 @@ def _default(self, obj):
 
 _default.default = JSONEncoder().default
 JSONEncoder.default = _default
+
+
+def _pick_address(addresses: list[str], interface_ip: str | None) -> str:
+    if interface_ip and len(addresses) > 1:
+        try:
+            local = ipaddress.ip_interface(interface_ip)
+            for addr in addresses:
+                if ipaddress.ip_address(addr) in local.network:
+                    return addr
+        except ValueError:
+            pass
+    return addresses[0]
 
 
 class DanteBrowser:
@@ -94,7 +107,7 @@ class DanteBrowser:
 
         for record in records:
             if isinstance(record, DNSService):
-                ipv4 = addresses[0]
+                ipv4 = _pick_address(addresses, app_settings.interface_ip)
 
                 message = {
                     "service": {
@@ -147,7 +160,7 @@ class DanteBrowser:
 
         for record in records:
             if isinstance(record, DNSService):
-                ipv4 = addresses[0]
+                ipv4 = _pick_address(addresses, app_settings.interface_ip)
 
                 message = {
                     "service": {
@@ -359,7 +372,7 @@ class DanteBrowser:
         if not addresses:
             return
 
-        ipv4 = addresses[0]
+        ipv4 = _pick_address(addresses, app_settings.interface_ip)
 
         try:
             for key, value in info.properties.items():
