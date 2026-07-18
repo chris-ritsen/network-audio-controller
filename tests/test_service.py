@@ -25,22 +25,22 @@ class TestUnicastService:
         assert service._next_transaction_id() == 0  # wraps
 
     def test_extract_transaction_id(self):
-        packet = b'\x27\xFF\x00\x0A' + struct.pack(">H", 0x5678) + b'\x10\x00'
+        packet = b"\x27\xff\x00\x0a" + struct.pack(">H", 0x5678) + b"\x10\x00"
         assert DanteUnicastService._extract_transaction_id(packet) == 0x5678
 
     def test_extract_transaction_id_short(self):
-        assert DanteUnicastService._extract_transaction_id(b'\x00') == 0
+        assert DanteUnicastService._extract_transaction_id(b"\x00") == 0
 
     @pytest.mark.asyncio
     async def test_request_not_started(self):
         service = DanteUnicastService()
-        result = await service.request(b'\x00', "192.168.1.1", 4440)
+        result = await service.request(b"\x00", "192.168.1.1", 4440)
         assert result is None
 
     def test_send_not_started(self):
         service = DanteUnicastService()
         # Should not raise when protocol is None
-        service.send(b'\x00', "192.168.1.1", 4440)
+        service.send(b"\x00", "192.168.1.1", 4440)
 
     @pytest.mark.asyncio
     async def test_start_stop(self):

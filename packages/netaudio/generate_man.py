@@ -19,6 +19,7 @@ def get_version():
         if candidate.exists():
             return tomllib.loads(candidate.read_text())["project"]["version"]
     from netaudio import __version__
+
     return __version__
 
 
@@ -134,7 +135,9 @@ def build_man_page():
     lines.append("[\\fIGLOBAL OPTIONS\\fR] \\fICOMMAND\\fR [\\fICOMMAND OPTIONS\\fR] [\\fIARGS\\fR]")
 
     lines.append(".SH DESCRIPTION")
-    lines.append("netaudio discovers, configures, and monitors network audio devices. It supports Dante and Shure protocols, and can manage subscriptions, device settings, capture and replay traffic, analyze firmware, run a virtual Dante device, and maintain a protocol fact registry built from wire observations.")
+    lines.append(
+        "netaudio discovers, configures, and monitors network audio devices. It supports Dante and Shure protocols, and can manage subscriptions, device settings, capture and replay traffic, analyze firmware, run a virtual Dante device, and maintain a protocol fact registry built from wire observations."
+    )
     lines.append(".PP")
     lines.append("When invoked without a subcommand, netaudio lists all discovered devices.")
 
@@ -167,7 +170,11 @@ def build_man_page():
                     subsub_names = sub_cmd.list_commands(click.Context(sub_cmd))
                     lines.append(f".PP")
                     lines.append(f".B {escape_troff(cmd_name)} {escape_troff(sub_name)}")
-                    sub_help = sub_cmd.get_short_help_str(limit=300) if hasattr(sub_cmd, "get_short_help_str") else (sub_cmd.help or "")
+                    sub_help = (
+                        sub_cmd.get_short_help_str(limit=300)
+                        if hasattr(sub_cmd, "get_short_help_str")
+                        else (sub_cmd.help or "")
+                    )
                     if sub_help:
                         lines.append(f"\\- {escape_troff(sub_help)}")
 
@@ -178,7 +185,11 @@ def build_man_page():
                         full_prefix = f"{cmd_name} {sub_name} {subsub_name}"
                         lines.append(f".TP")
                         lines.append(synopsis_for(subsub_cmd, f"netaudio {full_prefix}"))
-                        subsub_help = subsub_cmd.get_short_help_str(limit=300) if hasattr(subsub_cmd, "get_short_help_str") else (subsub_cmd.help or "")
+                        subsub_help = (
+                            subsub_cmd.get_short_help_str(limit=300)
+                            if hasattr(subsub_cmd, "get_short_help_str")
+                            else (subsub_cmd.help or "")
+                        )
                         if subsub_help:
                             lines.append(escape_troff(subsub_help))
                         write_arguments(lines, subsub_cmd.params)
@@ -187,7 +198,11 @@ def build_man_page():
                     full_prefix = f"{cmd_name} {sub_name}"
                     lines.append(f".TP")
                     lines.append(synopsis_for(sub_cmd, f"netaudio {full_prefix}"))
-                    sub_help = sub_cmd.get_short_help_str(limit=300) if hasattr(sub_cmd, "get_short_help_str") else (sub_cmd.help or "")
+                    sub_help = (
+                        sub_cmd.get_short_help_str(limit=300)
+                        if hasattr(sub_cmd, "get_short_help_str")
+                        else (sub_cmd.help or "")
+                    )
                     if sub_help:
                         lines.append(escape_troff(sub_help))
                     write_arguments(lines, sub_cmd.params)

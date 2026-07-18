@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.2.5"
+version = "0.3.0"
 description = "CLI for managing network audio devices"
 readme = "README.md"
 license = "Unlicense"
@@ -40,13 +40,31 @@ packages = ["packages/netaudio/src/netaudio"]
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build_core.py"
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/LICENSE",
+    "/README.md",
+    "/hatch_build_core.py",
+    "/pyproject.toml",
+    "/packages/netaudio/src/netaudio",
+    "/packages/netaudio-core/Cargo.lock",
+    "/packages/netaudio-core/Cargo.toml",
+    "/packages/netaudio-core/src",
+]
+exclude = [
+    "/.gitignore",
+    "/packages/netaudio/src/netaudio/**/__pycache__",
+]
+
 [dependency-groups]
 dev = [
+    "pyright>=1.1.390",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.8.0",
     "pynacl>=1.6.2",
     "redis>=5.0.0",
+    "tomli>=1.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -57,8 +75,31 @@ target-version = "py39"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "RUF006"]
 ignore = ["E402", "E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pyright]
+include = [
+    "packages/netaudio/src/netaudio/core/binding.py",
+    "packages/netaudio/src/netaudio/cli.py",
+    "packages/netaudio/src/netaudio/commands/preset.py",
+    "packages/netaudio/src/netaudio/commands/report.py",
+    "packages/netaudio/src/netaudio/commands/shure.py",
+    "packages/netaudio/src/netaudio/commands/subscription.py",
+    "packages/netaudio/src/netaudio/daemon/dbus_state.py",
+    "packages/netaudio/src/netaudio/daemon/enforcement.py",
+    "packages/netaudio/src/netaudio/daemon/metering.py",
+    "packages/netaudio/src/netaudio/daemon/relay.py",
+    "packages/netaudio/src/netaudio/daemon/server.py",
+    "packages/netaudio/src/netaudio/dante/browser.py",
+    "packages/netaudio/src/netaudio/dante/device.py",
+    "packages/netaudio/src/netaudio/dante/latency.py",
+    "packages/netaudio/src/netaudio/shure/discovery.py",
+    "packages/netaudio/src/netaudio/shure/manager.py",
+]
+pythonVersion = "3.9"
+typeCheckingMode = "standard"
+reportPrivateImportUsage = false

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -12,6 +14,7 @@ from netaudio.dante.const import (
 )
 
 logger = logging.getLogger("netaudio")
+
 
 def _build_bpf_filter(include_tcp=False):
     if include_tcp:
@@ -99,11 +102,14 @@ class TsharkCapture:
 
         return [
             tshark_path,
-            "-i", self._interface,
-            "-T", "fields",
+            "-i",
+            self._interface,
+            "-T",
+            "fields",
             *field_args,
             "-l",
-            "-f", bpf,
+            "-f",
+            bpf,
         ]
 
     def _parse_line(self, line: str):
@@ -166,13 +172,14 @@ class TsharkCapture:
 
         if not is_multicast_dst:
             is_device_traffic = (
-                src_ip in self._known_device_ips
-                or dst_ip in self._known_device_ips
-                or src_port in dante_ports
-                or dst_port in dante_ports
-            ) if self._known_device_ips else (
-                src_port in dante_ports
-                or dst_port in dante_ports
+                (
+                    src_ip in self._known_device_ips
+                    or dst_ip in self._known_device_ips
+                    or src_port in dante_ports
+                    or dst_port in dante_ports
+                )
+                if self._known_device_ips
+                else (src_port in dante_ports or dst_port in dante_ports)
             )
             if not is_device_traffic:
                 return None
@@ -306,7 +313,7 @@ class TsharkCapture:
                 try:
                     await self._process.wait()
                 except Exception:
-                    pass
+                    logger.exception("Failed to wait for tshark process shutdown")
 
             if self._process and not was_cancelled and self._process.returncode not in (None, 0):
                 stderr_text = ""

@@ -14,10 +14,8 @@ class CoreLibraryBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         crate_dir = Path(self.root) / "packages" / "netaudio-core"
+        self._build_core(crate_dir)
         library_path = self._find_library(crate_dir)
-        if library_path is None:
-            self._build_core(crate_dir)
-            library_path = self._find_library(crate_dir)
         if library_path is None:
             raise RuntimeError(
                 f"netaudio-core library not found in {crate_dir / 'target' / 'release'} after cargo build"
@@ -28,11 +26,16 @@ class CoreLibraryBuildHook(BuildHookInterface):
 
     def _find_library(self, crate_dir):
         release_dir = crate_dir / "target" / "release"
-        for library_name in ("libnetaudio_core.so", "libnetaudio_core.dylib", "netaudio_core.dll"):
-            library_path = release_dir / library_name
-            if library_path.exists():
-                return library_path
-        return None
+        library_path = release_dir / self._library_name()
+        return library_path if library_path.exists() else None
+
+    @staticmethod
+    def _library_name():
+        if sys.platform == "darwin":
+            return "libnetaudio_core.dylib"
+        if sys.platform == "win32":
+            return "netaudio_core.dll"
+        return "libnetaudio_core.so"
 
     def _build_core(self, crate_dir):
         cargo = shutil.which("cargo")

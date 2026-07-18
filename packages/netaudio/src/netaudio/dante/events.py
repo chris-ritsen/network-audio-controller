@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Callable, Coroutine
@@ -33,7 +36,8 @@ EventCallback = Callable[[DanteEvent], Coroutine[Any, Any, None]]
 class DanteEventDispatcher:
     def __init__(self):
         self._listeners: dict[EventType, list[EventCallback]] = {}
-        self._queue: asyncio.Queue[DanteEvent] = asyncio.Queue()
+        self._queue: asyncio.Queue[DanteEvent | None] | None = None
+        self._pending_events: deque[DanteEvent] = deque()
         self._dispatch_task: asyncio.Task | None = None
         self._running = False
 
@@ -43,48 +47,56 @@ class DanteEventDispatcher:
         self._listeners[event_type].append(callback)
 
     def off(self, event_type: EventType, callback: EventCallback) -> None:
-        if event_type in self._listeners:
-            try:
-                self._listeners[event_type].remove(callback)
-            except ValueError:
-                pass
+        listeners = self._listeners.get(event_type)
+        if listeners is not None and callback in listeners:
+            listeners.remove(callback)
 
     def emit_nowait(self, event: DanteEvent) -> None:
-        self._queue.put_nowait(event)
+        queue = self._queue
+        if queue is None:
+            self._pending_events.append(event)
+            return
+        queue.put_nowait(event)
 
     async def emit(self, event: DanteEvent) -> None:
-        await self._queue.put(event)
+        queue = self._queue
+        if queue is None:
+            self._pending_events.append(event)
+            return
+        await queue.put(event)
 
     async def start(self) -> None:
         if self._running:
             return
+        queue: asyncio.Queue[DanteEvent | None] = asyncio.Queue()
+        while self._pending_events:
+            queue.put_nowait(self._pending_events.popleft())
+        self._queue = queue
         self._running = True
-        self._dispatch_task = asyncio.create_task(self._dispatch_loop())
+        self._dispatch_task = asyncio.create_task(self._dispatch_loop(queue))
 
     async def stop(self) -> None:
+        if not self._running:
+            return
         self._running = False
-        if self._dispatch_task is not None:
-            self._dispatch_task.cancel()
-            try:
-                await self._dispatch_task
-            except asyncio.CancelledError:
-                pass
+        queue = self._queue
+        self._queue = None
+        dispatch_task = self._dispatch_task
+        if queue is not None:
+            queue.put_nowait(None)
+        if dispatch_task is not None and dispatch_task is not asyncio.current_task():
+            await dispatch_task
+        if self._dispatch_task is dispatch_task:
             self._dispatch_task = None
 
-    async def _dispatch_loop(self) -> None:
-        while self._running:
-            try:
-                event = await asyncio.wait_for(self._queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:
-                break
-
+    async def _dispatch_loop(self, queue: asyncio.Queue[DanteEvent | None]) -> None:
+        while True:
+            event = await queue.get()
+            if event is None:
+                return
             callbacks = self._listeners.get(event.type, [])
             for callback in callbacks:
                 try:
                     await callback(event)
                 except Exception:
-                    logger.exception(
-                        f"Error in event callback for {event.type.name}"
-                    )
+                    logger.exception(f"Error in event callback for {event.type.name}")
