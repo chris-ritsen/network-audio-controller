@@ -107,11 +107,15 @@ def _create_evidence_markers(evidence_refs: list[str], category: str, key: str, 
 
 @app.command("add")
 def fact_add(
-    category: str = typer.Option(..., "--category", "-c", help="Fact category (e.g. arc_opcode, conmon_message, multicast_announcement)."),
+    category: str = typer.Option(
+        ..., "--category", "-c", help="Fact category (e.g. arc_opcode, conmon_message, multicast_announcement)."
+    ),
     key: str = typer.Option(..., "--key", "-k", help="Unique key within category (e.g. 0x1001, 0x0081)."),
     name: str = typer.Option(..., "--name", help="Human-readable name for this protocol element."),
     note: Optional[str] = typer.Option(None, "--note", help="Short summary of what this does."),
-    body: Optional[str] = typer.Option(None, "--body", help="Detailed content (markdown, structured text, JSON). Use --body-file for longer content."),
+    body: Optional[str] = typer.Option(
+        None, "--body", help="Detailed content (markdown, structured text, JSON). Use --body-file for longer content."
+    ),
     body_file: Optional[str] = typer.Option(None, "--body-file", help="Read body from file (use - for stdin)."),
     field: Optional[list[str]] = typer.Option(
         None,
@@ -126,8 +130,12 @@ def fact_add(
     ),
     confidence: str = typer.Option("verified", "--confidence", help="Confidence level: verified, inferred, uncertain."),
     supersedes: Optional[str] = typer.Option(None, "--supersedes", help="Fact key this replaces (category:key)."),
-    protocol: Optional[str] = typer.Option(None, "--protocol", help="Protocol ID this fact applies to (e.g. 0xFFFF, 0x2729). Enables auto-dissection."),
-    match: Optional[str] = typer.Option(None, "--match", help="Payload offset:size where the key value is found (e.g. 6:2). Enables auto-dissection."),
+    protocol: Optional[str] = typer.Option(
+        None, "--protocol", help="Protocol ID this fact applies to (e.g. 0xFFFF, 0x2729). Enables auto-dissection."
+    ),
+    match: Optional[str] = typer.Option(
+        None, "--match", help="Payload offset:size where the key value is found (e.g. 6:2). Enables auto-dissection."
+    ),
 ):
     from netaudio.dante.fact_store import add_fact
 
@@ -221,7 +229,9 @@ def fact_update(
         "-e",
         help="Add evidence reference: session_name:packet_id. Repeatable.",
     ),
-    confidence: Optional[str] = typer.Option(None, "--confidence", help="Update confidence level: verified, observed, inferred, uncertain."),
+    confidence: Optional[str] = typer.Option(
+        None, "--confidence", help="Update confidence level: verified, observed, inferred, uncertain."
+    ),
     supersedes: Optional[str] = typer.Option(None, "--supersedes", help="Fact key this replaces (category:key)."),
     protocol: Optional[str] = typer.Option(None, "--protocol", help="Protocol ID (e.g. 0xFFFF, 0x2729)."),
     match: Optional[str] = typer.Option(None, "--match", help="Payload offset:size for auto-dissection (e.g. 6:2)."),
@@ -359,10 +369,21 @@ def fact_list(
 def fact_show(
     category: str = typer.Option(..., "--category", "-c", help="Fact category."),
     key: str = typer.Option(..., "--key", "-k", help="Fact key."),
-    prove: bool = typer.Option(False, "--prove", "-p", help="Show full proof: load evidence bundles, dissect packets, verify fields."),
-    provenance_dir: Optional[str] = typer.Option(None, "--provenance-dir", help="Path to provenance bundles directory."),
+    prove: bool = typer.Option(
+        False, "--prove", "-p", help="Show full proof: load evidence bundles, dissect packets, verify fields."
+    ),
+    provenance_dir: Optional[str] = typer.Option(
+        None, "--provenance-dir", help="Path to provenance bundles directory."
+    ),
 ):
-    from netaudio.dante.fact_store import get_fact, get_confidence, _parse_evidence_ref, _find_bundle, _load_bundle, _verify_field
+    from netaudio.dante.fact_store import (
+        get_fact,
+        get_confidence,
+        _parse_evidence_ref,
+        _find_bundle,
+        _load_bundle,
+        _verify_field,
+    )
 
     facts_path = _resolve_facts_path()
     fact = get_fact(facts_path, category, key)
@@ -413,6 +434,7 @@ def fact_show(
             timestamp_ns = entry.get("timestamp_ns", 0)
             timestamp_s = timestamp_ns / 1_000_000_000 if timestamp_ns else 0
             from datetime import datetime
+
             timestamp_str = datetime.fromtimestamp(timestamp_s).strftime("%Y-%m-%d %H:%M") if timestamp_s else "?"
             print(f"    {timestamp_str}  {entry['level']}")
 
@@ -477,6 +499,7 @@ def fact_show(
             print(f"      Size: {len(payload)}B")
             print(f"      Payload:")
             from netaudio.dante.packet_dissector import dissect_and_render
+
             print(dissect_and_render(payload, indent="        "))
 
             if fact.get("fields"):
@@ -496,10 +519,22 @@ def fact_show(
 @app.command("check")
 def fact_check(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Check only facts in this category."),
-    prove: bool = typer.Option(False, "--prove", "-p", help="Show full proof: hexdump evidence packets and verify fields."),
-    provenance_dir: Optional[str] = typer.Option(None, "--provenance-dir", help="Path to provenance bundles directory."),
+    prove: bool = typer.Option(
+        False, "--prove", "-p", help="Show full proof: hexdump evidence packets and verify fields."
+    ),
+    provenance_dir: Optional[str] = typer.Option(
+        None, "--provenance-dir", help="Path to provenance bundles directory."
+    ),
 ):
-    from netaudio.dante.fact_store import check_facts, list_facts, get_fact, _parse_evidence_ref, _find_bundle, _load_bundle, _verify_field
+    from netaudio.dante.fact_store import (
+        check_facts,
+        list_facts,
+        get_fact,
+        _parse_evidence_ref,
+        _find_bundle,
+        _load_bundle,
+        _verify_field,
+    )
 
     facts_path = _resolve_facts_path()
 
@@ -593,13 +628,16 @@ def fact_check(
                     print(f"         Packet #{packet_id}  {direction}  opcode={opcode_str}  {len(payload)}B")
                     print(f"         {src} -> {dst}")
                     from netaudio.dante.packet_dissector import dissect_and_render
+
                     print(dissect_and_render(payload, indent="           "))
 
                     if fact.get("fields"):
                         for field_def in fact["fields"]:
                             field_result = _verify_field(payload, field_def)
                             if field_result["ok"]:
-                                print(f"           [PASS] {field_result['name']}: {field_result['expected']} == {field_result['actual']}")
+                                print(
+                                    f"           [PASS] {field_result['name']}: {field_result['expected']} == {field_result['actual']}"
+                                )
                             else:
                                 print(f"           [FAIL] {field_result['error']}")
 
@@ -647,11 +685,15 @@ def fact_verify(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
     key: Optional[str] = typer.Option(None, "--key", "-k", help="Verify a single fact."),
     write: bool = typer.Option(False, "--write", help="Include write commands (dangerous)."),
-    auto_disprove: bool = typer.Option(False, "--auto-disprove", help="Automatically disprove facts that fail verification."),
+    auto_disprove: bool = typer.Option(
+        False, "--auto-disprove", help="Automatically disprove facts that fail verification."
+    ),
     timeout: float = typer.Option(2.0, "--timeout", help="Response timeout per packet."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be sent without sending."),
     session_name: Optional[str] = typer.Option(None, "--session-name", help="Override verification session name."),
-    provenance_dir: Optional[str] = typer.Option(None, "--provenance-dir", help="Path to provenance bundles directory."),
+    provenance_dir: Optional[str] = typer.Option(
+        None, "--provenance-dir", help="Path to provenance bundles directory."
+    ),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
@@ -728,12 +770,14 @@ def fact_verify(
             print(f"  [SKIP] {fk:30s} {fact['name']} (no request packet in evidence)")
             continue
 
-        verify_plan.append({
-            "fact": fact,
-            "fact_key": fk,
-            "request_packet": request_packet,
-            "port": request_port,
-        })
+        verify_plan.append(
+            {
+                "fact": fact,
+                "fact_key": fk,
+                "request_packet": request_packet,
+                "port": request_port,
+            }
+        )
 
     if not verify_plan:
         print("No facts with request packets to verify.", file=sys.stderr)
@@ -757,16 +801,18 @@ def fact_verify(
         print(f"\nDry run: {len(verify_plan)} packets would be sent.")
         return
 
-    asyncio.run(_run_fact_verify(
-        verify_plan=verify_plan,
-        device_ip=device_ip,
-        timeout=timeout,
-        session_name=session_name or f"fact_verify_{device_ip.replace('.', '_')}",
-        config=config,
-        profile=profile,
-        db_override=db,
-        auto_disprove=auto_disprove,
-    ))
+    asyncio.run(
+        _run_fact_verify(
+            verify_plan=verify_plan,
+            device_ip=device_ip,
+            timeout=timeout,
+            session_name=session_name or f"fact_verify_{device_ip.replace('.', '_')}",
+            config=config,
+            profile=profile,
+            db_override=db,
+            auto_disprove=auto_disprove,
+        )
+    )
 
 
 async def _run_fact_verify(
@@ -791,7 +837,6 @@ async def _run_fact_verify(
         db=db_override,
         record=False,
     ) as verifier:
-
         verifier.marker(
             "fact_verify_started",
             marker_type="system",
@@ -917,6 +962,9 @@ def fact_spec(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
     output: Optional[str] = typer.Option(None, "--output", help="Write to file instead of stdout."),
     markdown: bool = typer.Option(False, "--markdown", "--md", help="Force markdown output."),
+    prove: bool = typer.Option(
+        False, "--prove", "-p", help="Annotate with provenance: evidence bundles and packet IDs."
+    ),
 ):
     from netaudio._common import output_single
     from netaudio.cli import OutputFormat, state as cli_state
@@ -928,12 +976,13 @@ def fact_spec(
         raise typer.Exit(1)
 
     from netaudio.dante.fact_store import get_categories
+
     categories = get_categories(facts_path)
     if not categories:
         print("No facts registered yet.", file=sys.stderr)
         raise typer.Exit(1)
 
-    spec_data = _build_spec_data(facts_path, category_filter=category)
+    spec_data = _build_spec_data(facts_path, category_filter=category, include_provenance=prove)
 
     if markdown or (output and output.endswith(".md")):
         text = _spec_to_markdown(spec_data)
@@ -941,7 +990,7 @@ def fact_spec(
         output_single(spec_data)
         return
     else:
-        text = _spec_to_plain(spec_data)
+        text = _spec_to_plain(spec_data, facts_path=facts_path)
 
     if output:
         output_path = Path(output)

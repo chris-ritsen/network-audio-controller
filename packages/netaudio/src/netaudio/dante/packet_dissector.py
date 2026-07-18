@@ -63,46 +63,46 @@ DECIMAL_FIELD_NAMES = {
 
 
 DISSECT_FIELD_ICONS = {
-    "protocol_id": "\U000f0003",       # nf-md-access_point
-    "packet_length": "\U000f03d3",     # nf-md-package
-    "sequence": "\U000f03a0",          # nf-md-numeric
-    "transaction_id": "\U000f03a0",    # nf-md-numeric
-    "opcode": "\U000f0169",            # nf-md-code_braces
-    "status": "\U000f02fc",            # nf-md-information
-    "source_eui64": "\U000f0237",       # nf-md-fingerprint
-    "magic": "\uebcf",                 # nf-cod-wand
-    "version": "\uf02b",               # nf-fa-tag
-    "message_type": "\U000f0315",      # nf-md-label
-    "channel_number": "\U000f062e",    # nf-md-tune
-    "channel_count": "\U000f062e",     # nf-md-tune
-    "tx_count": "\uf093",              # nf-fa-upload
-    "rx_count": "\uf019",              # nf-fa-download
-    "sample_rate": "\U000f1479",       # nf-md-cosine_wave
-    "sample_rate_ptr": "\U000f1479",   # nf-md-cosine_wave
-    "tx_channel_ptr": "\uf093",        # nf-fa-upload
-    "tx_device_ptr": "\U000f04c3",     # nf-md-speaker
-    "rx_channel_ptr": "\uf019",        # nf-fa-download
-    "name_ptr": "\U000f0455",          # nf-md-rename_box
-    "metadata_ptr": "\U000f0328",      # nf-md-layers
-    "flags": "\U000f0328",             # nf-md-layers
-    "subscription_status": "\uf0c1",   # nf-fa-link
-    "default_latency": "\U000f04c5",   # nf-md-speedometer
-    "current_latency": "\U000f04c5",   # nf-md-speedometer
-    "max_latency": "\U000f04c5",       # nf-md-speedometer
-    "min_latency": "\U000f04c5",       # nf-md-speedometer
-    "target_latency": "\U000f04c5",    # nf-md-speedometer
-    "latency": "\U000f04c5",           # nf-md-speedometer
-    "max_per_page": "\U000f03a0",      # nf-md-numeric
-    "named_count": "\U000f03a0",       # nf-md-numeric
-    "string": "\U000f0455",            # nf-md-rename_box
-    "padding": "\U000f0328",           # nf-md-layers
-    "unknown_6": "\U000f02fc",         # nf-md-information
+    "protocol_id": "\U000f0003",
+    "packet_length": "\U000f03d3",
+    "sequence": "\U000f03a0",
+    "transaction_id": "\U000f03a0",
+    "opcode": "\U000f0169",
+    "status": "\U000f02fc",
+    "source_eui64": "\U000f0237",
+    "magic": "\uebcf",
+    "version": "\uf02b",
+    "message_type": "\U000f0315",
+    "channel_number": "\U000f062e",
+    "channel_count": "\U000f062e",
+    "tx_count": "\uf093",
+    "rx_count": "\uf019",
+    "sample_rate": "\U000f1479",
+    "sample_rate_ptr": "\U000f1479",
+    "tx_channel_ptr": "\uf093",
+    "tx_device_ptr": "\U000f04c3",
+    "rx_channel_ptr": "\uf019",
+    "name_ptr": "\U000f0455",
+    "metadata_ptr": "\U000f0328",
+    "flags": "\U000f0328",
+    "subscription_status": "\uf0c1",
+    "default_latency": "\U000f04c5",
+    "current_latency": "\U000f04c5",
+    "max_latency": "\U000f04c5",
+    "min_latency": "\U000f04c5",
+    "target_latency": "\U000f04c5",
+    "latency": "\U000f04c5",
+    "max_per_page": "\U000f03a0",
+    "named_count": "\U000f03a0",
+    "string": "\U000f0455",
+    "padding": "\U000f0328",
+    "unknown_6": "\U000f02fc",
 }
 
 DISSECT_SECTION_ICONS = {
-    "protocol_structure:arc_header": "\U000f0003",     # nf-md-access_point
-    "protocol_structure:conmon_header": "\U000f0003",   # nf-md-access_point
-    "protocol_structure:cmc_header": "\U000f0003",      # nf-md-access_point
+    "protocol_structure:arc_header": "\U000f0003",
+    "protocol_structure:conmon_header": "\U000f0003",
+    "protocol_structure:cmc_header": "\U000f0003",
 }
 
 
@@ -143,9 +143,6 @@ DIRECTION_COLORS = {
     "send": _COLOR_DIRECTION_SEND,
     "multicast": _COLOR_DIRECTION_MULTICAST,
 }
-
-
-
 
 
 def _format_ns(value: int) -> str:
@@ -305,7 +302,7 @@ def _load_facts_for_packet(
         if match_offset + match_size > len(payload):
             continue
 
-        actual_value = int.from_bytes(payload[match_offset:match_offset + match_size], "big")
+        actual_value = int.from_bytes(payload[match_offset : match_offset + match_size], "big")
         fact_key = fact["key"]
         try:
             expected_value = int(fact_key, 0)
@@ -420,18 +417,34 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
     header_section_label = "RX Channel Body Header"
     result.sections.append((header_section_ref, header_section_label))
 
-    result.spans.append(Span(
-        offset=10, length=1, name="max_per_page",
-        raw=payload[10:11], value=str(max_per_page), detail="",
-        fact_ref=header_section_ref, section=header_section_label, dtype="uint8",
-    ))
+    result.spans.append(
+        Span(
+            offset=10,
+            length=1,
+            name="max_per_page",
+            raw=payload[10:11],
+            value=str(max_per_page),
+            detail="",
+            fact_ref=header_section_ref,
+            section=header_section_label,
+            dtype="uint8",
+        )
+    )
     covered.add(10)
 
-    result.spans.append(Span(
-        offset=11, length=1, name="channel_count",
-        raw=payload[11:12], value=str(channel_count), detail="",
-        fact_ref=header_section_ref, section=header_section_label, dtype="uint8",
-    ))
+    result.spans.append(
+        Span(
+            offset=11,
+            length=1,
+            name="channel_count",
+            raw=payload[11:12],
+            value=str(channel_count),
+            detail="",
+            fact_ref=header_section_ref,
+            section=header_section_label,
+            dtype="uint8",
+        )
+    )
     covered.add(11)
 
     section_ref = "arc_opcode:0x3000_body"
@@ -444,19 +457,19 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
     metadata_pointer = None
 
     while offset + record_size <= len(payload) and record_index < max_records:
-        channel_number = struct.unpack(">H", payload[offset:offset + 2])[0]
+        channel_number = struct.unpack(">H", payload[offset : offset + 2])[0]
         if channel_number == 0:
             break
 
-        flags = struct.unpack(">H", payload[offset + 2:offset + 4])[0]
-        sample_rate_pointer = struct.unpack(">H", payload[offset + 4:offset + 6])[0]
+        flags = struct.unpack(">H", payload[offset + 2 : offset + 4])[0]
+        sample_rate_pointer = struct.unpack(">H", payload[offset + 4 : offset + 6])[0]
         if metadata_pointer is None and sample_rate_pointer > 0:
             metadata_pointer = sample_rate_pointer
-        tx_channel_pointer = struct.unpack(">H", payload[offset + 6:offset + 8])[0]
-        tx_device_pointer = struct.unpack(">H", payload[offset + 8:offset + 10])[0]
-        rx_channel_pointer = struct.unpack(">H", payload[offset + 10:offset + 12])[0]
-        status = struct.unpack(">H", payload[offset + 12:offset + 14])[0]
-        subscription_status = struct.unpack(">H", payload[offset + 14:offset + 16])[0]
+        tx_channel_pointer = struct.unpack(">H", payload[offset + 6 : offset + 8])[0]
+        tx_device_pointer = struct.unpack(">H", payload[offset + 8 : offset + 10])[0]
+        rx_channel_pointer = struct.unpack(">H", payload[offset + 10 : offset + 12])[0]
+        status = struct.unpack(">H", payload[offset + 12 : offset + 14])[0]
+        subscription_status = struct.unpack(">H", payload[offset + 14 : offset + 16])[0]
 
         rx_channel_name = ""
         if rx_channel_pointer > 0:
@@ -472,7 +485,7 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
 
         sample_rate = None
         if sample_rate_pointer > 0 and sample_rate_pointer + 4 <= len(payload):
-            raw_rate = struct.unpack(">I", payload[sample_rate_pointer:sample_rate_pointer + 4])[0]
+            raw_rate = struct.unpack(">I", payload[sample_rate_pointer : sample_rate_pointer + 4])[0]
             if 8000 <= raw_rate <= 384000:
                 sample_rate = raw_rate
 
@@ -491,89 +504,148 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
         if sample_rate:
             channel_detail += f" ({_format_hz(sample_rate)})"
 
-        result.spans.append(Span(
-            offset=offset, length=2, name="channel_number",
-            raw=payload[offset:offset + 2],
-            value=str(channel_number), detail=channel_detail,
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset,
+                length=2,
+                name="channel_number",
+                raw=payload[offset : offset + 2],
+                value=str(channel_number),
+                detail=channel_detail,
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset, offset + 2):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 2, length=2, name="flags",
-            raw=payload[offset + 2:offset + 4],
-            value=f"0x{flags:04X}", detail="",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 2,
+                length=2,
+                name="flags",
+                raw=payload[offset + 2 : offset + 4],
+                value=f"0x{flags:04X}",
+                detail="",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 2, offset + 4):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 4, length=2, name="sample_rate_ptr",
-            raw=payload[offset + 4:offset + 6],
-            value=f"0x{sample_rate_pointer:04X}",
-            detail=_format_hz(sample_rate) if sample_rate else "",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 4,
+                length=2,
+                name="sample_rate_ptr",
+                raw=payload[offset + 4 : offset + 6],
+                value=f"0x{sample_rate_pointer:04X}",
+                detail=_format_hz(sample_rate) if sample_rate else "",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 4, offset + 6):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 6, length=2, name="tx_channel_ptr",
-            raw=payload[offset + 6:offset + 8],
-            value=f"0x{tx_channel_pointer:04X}",
-            detail=tx_channel_name if tx_channel_name and tx_channel_name != "." else "",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 6,
+                length=2,
+                name="tx_channel_ptr",
+                raw=payload[offset + 6 : offset + 8],
+                value=f"0x{tx_channel_pointer:04X}",
+                detail=tx_channel_name if tx_channel_name and tx_channel_name != "." else "",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 6, offset + 8):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 8, length=2, name="tx_device_ptr",
-            raw=payload[offset + 8:offset + 10],
-            value=f"0x{tx_device_pointer:04X}",
-            detail=tx_device_name if tx_device_name and tx_device_name != "." else "",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 8,
+                length=2,
+                name="tx_device_ptr",
+                raw=payload[offset + 8 : offset + 10],
+                value=f"0x{tx_device_pointer:04X}",
+                detail=tx_device_name if tx_device_name and tx_device_name != "." else "",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 8, offset + 10):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 10, length=2, name="rx_channel_ptr",
-            raw=payload[offset + 10:offset + 12],
-            value=f"0x{rx_channel_pointer:04X}",
-            detail=rx_channel_name,
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 10,
+                length=2,
+                name="rx_channel_ptr",
+                raw=payload[offset + 10 : offset + 12],
+                value=f"0x{rx_channel_pointer:04X}",
+                detail=rx_channel_name,
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 10, offset + 12):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 12, length=2, name="status",
-            raw=payload[offset + 12:offset + 14],
-            value=f"0x{status:04X}", detail="",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 12,
+                length=2,
+                name="status",
+                raw=payload[offset + 12 : offset + 14],
+                value=f"0x{status:04X}",
+                detail="",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 12, offset + 14):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 14, length=2, name="subscription_status",
-            raw=payload[offset + 14:offset + 16],
-            value=f"0x{subscription_status:04X}", detail=sub_detail,
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 14,
+                length=2,
+                name="subscription_status",
+                raw=payload[offset + 14 : offset + 16],
+                value=f"0x{subscription_status:04X}",
+                detail=sub_detail,
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 14, offset + 16):
             covered.add(byte_offset)
 
         if offset + 16 < offset + record_size:
-            result.spans.append(Span(
-                offset=offset + 16, length=4, name="padding",
-                raw=payload[offset + 16:offset + 20],
-                value=payload[offset + 16:offset + 20].hex(), detail="",
-                fact_ref=section_ref, section=section_label, dtype="hex",
-            ))
+            result.spans.append(
+                Span(
+                    offset=offset + 16,
+                    length=4,
+                    name="padding",
+                    raw=payload[offset + 16 : offset + 20],
+                    value=payload[offset + 16 : offset + 20].hex(),
+                    detail="",
+                    fact_ref=section_ref,
+                    section=section_label,
+                    dtype="hex",
+                )
+            )
             for byte_offset in range(offset + 16, offset + 20):
                 covered.add(byte_offset)
 
@@ -599,27 +671,40 @@ def _dissect_rx_metadata_block(
     section_label = "RX Channel Metadata"
     result.sections.append((section_ref, section_label))
 
-    sample_rate = struct.unpack(">I", payload[start_offset:start_offset + 4])[0]
-    result.spans.append(Span(
-        offset=start_offset, length=4, name="sample_rate",
-        raw=payload[start_offset:start_offset + 4],
-        value=str(sample_rate),
-        detail=_format_hz(sample_rate) if 8000 <= sample_rate <= 384000 else "",
-        fact_ref=section_ref, section=section_label, dtype="uint32_be",
-    ))
+    sample_rate = struct.unpack(">I", payload[start_offset : start_offset + 4])[0]
+    result.spans.append(
+        Span(
+            offset=start_offset,
+            length=4,
+            name="sample_rate",
+            raw=payload[start_offset : start_offset + 4],
+            value=str(sample_rate),
+            detail=_format_hz(sample_rate) if 8000 <= sample_rate <= 384000 else "",
+            fact_ref=section_ref,
+            section=section_label,
+            dtype="uint32_be",
+        )
+    )
     for byte_offset in range(start_offset, start_offset + 4):
         covered.add(byte_offset)
 
     field_names = ["unknown_0x04", "unknown_0x06", "unknown_0x08", "unknown_0x0A", "unknown_0x0C", "unknown_0x0E"]
     for index, field_name in enumerate(field_names):
         field_offset = start_offset + 4 + index * 2
-        field_value = struct.unpack(">H", payload[field_offset:field_offset + 2])[0]
-        result.spans.append(Span(
-            offset=field_offset, length=2, name=field_name,
-            raw=payload[field_offset:field_offset + 2],
-            value=str(field_value), detail="",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        field_value = struct.unpack(">H", payload[field_offset : field_offset + 2])[0]
+        result.spans.append(
+            Span(
+                offset=field_offset,
+                length=2,
+                name=field_name,
+                raw=payload[field_offset : field_offset + 2],
+                value=str(field_value),
+                detail="",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(field_offset, field_offset + 2):
             covered.add(byte_offset)
 
@@ -638,18 +723,34 @@ def _dissect_tx_channels_body(payload: bytes, result: DissectedPacket, covered: 
     header_section_label = "TX Channel Body Header"
     result.sections.append((header_section_ref, header_section_label))
 
-    result.spans.append(Span(
-        offset=10, length=1, name="max_per_page",
-        raw=payload[10:11], value=str(max_per_page), detail="",
-        fact_ref=header_section_ref, section=header_section_label, dtype="uint8",
-    ))
+    result.spans.append(
+        Span(
+            offset=10,
+            length=1,
+            name="max_per_page",
+            raw=payload[10:11],
+            value=str(max_per_page),
+            detail="",
+            fact_ref=header_section_ref,
+            section=header_section_label,
+            dtype="uint8",
+        )
+    )
     covered.add(10)
 
-    result.spans.append(Span(
-        offset=11, length=1, name="channel_count",
-        raw=payload[11:12], value=str(channel_count), detail="",
-        fact_ref=header_section_ref, section=header_section_label, dtype="uint8",
-    ))
+    result.spans.append(
+        Span(
+            offset=11,
+            length=1,
+            name="channel_count",
+            raw=payload[11:12],
+            value=str(channel_count),
+            detail="",
+            fact_ref=header_section_ref,
+            section=header_section_label,
+            dtype="uint8",
+        )
+    )
     covered.add(11)
 
     section_ref = "arc_opcode:0x2000_body"
@@ -662,13 +763,13 @@ def _dissect_tx_channels_body(payload: bytes, result: DissectedPacket, covered: 
     metadata_pointer = None
 
     while offset + record_size <= len(payload) and record_index < max_records:
-        channel_number = struct.unpack(">H", payload[offset:offset + 2])[0]
+        channel_number = struct.unpack(">H", payload[offset : offset + 2])[0]
         if channel_number == 0:
             break
 
-        unknown_field = struct.unpack(">H", payload[offset + 2:offset + 4])[0]
-        metadata_ptr = struct.unpack(">H", payload[offset + 4:offset + 6])[0]
-        name_pointer = struct.unpack(">H", payload[offset + 6:offset + 8])[0]
+        unknown_field = struct.unpack(">H", payload[offset + 2 : offset + 4])[0]
+        metadata_ptr = struct.unpack(">H", payload[offset + 4 : offset + 6])[0]
+        name_pointer = struct.unpack(">H", payload[offset + 6 : offset + 8])[0]
 
         if metadata_pointer is None and metadata_ptr > 0:
             metadata_pointer = metadata_ptr
@@ -679,7 +780,7 @@ def _dissect_tx_channels_body(payload: bytes, result: DissectedPacket, covered: 
 
         sample_rate = None
         if metadata_ptr > 0 and metadata_ptr + 4 <= len(payload):
-            raw_rate = struct.unpack(">I", payload[metadata_ptr:metadata_ptr + 4])[0]
+            raw_rate = struct.unpack(">I", payload[metadata_ptr : metadata_ptr + 4])[0]
             if 8000 <= raw_rate <= 384000:
                 sample_rate = raw_rate
 
@@ -687,41 +788,67 @@ def _dissect_tx_channels_body(payload: bytes, result: DissectedPacket, covered: 
         if sample_rate:
             channel_detail += f" ({_format_hz(sample_rate)})"
 
-        result.spans.append(Span(
-            offset=offset, length=2, name="channel_number",
-            raw=payload[offset:offset + 2],
-            value=str(channel_number), detail=channel_detail,
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset,
+                length=2,
+                name="channel_number",
+                raw=payload[offset : offset + 2],
+                value=str(channel_number),
+                detail=channel_detail,
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset, offset + 2):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 2, length=2, name="unknown_0x02",
-            raw=payload[offset + 2:offset + 4],
-            value=f"0x{unknown_field:04X}", detail="",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 2,
+                length=2,
+                name="unknown_0x02",
+                raw=payload[offset + 2 : offset + 4],
+                value=f"0x{unknown_field:04X}",
+                detail="",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 2, offset + 4):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 4, length=2, name="metadata_ptr",
-            raw=payload[offset + 4:offset + 6],
-            value=f"0x{metadata_ptr:04X}",
-            detail=_format_hz(sample_rate) if sample_rate else "",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 4,
+                length=2,
+                name="metadata_ptr",
+                raw=payload[offset + 4 : offset + 6],
+                value=f"0x{metadata_ptr:04X}",
+                detail=_format_hz(sample_rate) if sample_rate else "",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 4, offset + 6):
             covered.add(byte_offset)
 
-        result.spans.append(Span(
-            offset=offset + 6, length=2, name="name_ptr",
-            raw=payload[offset + 6:offset + 8],
-            value=f"0x{name_pointer:04X}",
-            detail=channel_name,
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        result.spans.append(
+            Span(
+                offset=offset + 6,
+                length=2,
+                name="name_ptr",
+                raw=payload[offset + 6 : offset + 8],
+                value=f"0x{name_pointer:04X}",
+                detail=channel_name,
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(offset + 6, offset + 8):
             covered.add(byte_offset)
 
@@ -747,27 +874,40 @@ def _dissect_tx_metadata_block(
     section_label = "TX Channel Metadata"
     result.sections.append((section_ref, section_label))
 
-    sample_rate = struct.unpack(">I", payload[start_offset:start_offset + 4])[0]
-    result.spans.append(Span(
-        offset=start_offset, length=4, name="sample_rate",
-        raw=payload[start_offset:start_offset + 4],
-        value=str(sample_rate),
-        detail=_format_hz(sample_rate) if 8000 <= sample_rate <= 384000 else "",
-        fact_ref=section_ref, section=section_label, dtype="uint32_be",
-    ))
+    sample_rate = struct.unpack(">I", payload[start_offset : start_offset + 4])[0]
+    result.spans.append(
+        Span(
+            offset=start_offset,
+            length=4,
+            name="sample_rate",
+            raw=payload[start_offset : start_offset + 4],
+            value=str(sample_rate),
+            detail=_format_hz(sample_rate) if 8000 <= sample_rate <= 384000 else "",
+            fact_ref=section_ref,
+            section=section_label,
+            dtype="uint32_be",
+        )
+    )
     for byte_offset in range(start_offset, start_offset + 4):
         covered.add(byte_offset)
 
     field_names = ["unknown_0x04", "unknown_0x06", "unknown_0x08", "unknown_0x0A", "unknown_0x0C", "unknown_0x0E"]
     for index, field_name in enumerate(field_names):
         field_offset = start_offset + 4 + index * 2
-        field_value = struct.unpack(">H", payload[field_offset:field_offset + 2])[0]
-        result.spans.append(Span(
-            offset=field_offset, length=2, name=field_name,
-            raw=payload[field_offset:field_offset + 2],
-            value=str(field_value), detail="",
-            fact_ref=section_ref, section=section_label, dtype="uint16_be",
-        ))
+        field_value = struct.unpack(">H", payload[field_offset : field_offset + 2])[0]
+        result.spans.append(
+            Span(
+                offset=field_offset,
+                length=2,
+                name=field_name,
+                raw=payload[field_offset : field_offset + 2],
+                value=str(field_value),
+                detail="",
+                fact_ref=section_ref,
+                section=section_label,
+                dtype="uint16_be",
+            )
+        )
         for byte_offset in range(field_offset, field_offset + 2):
             covered.add(byte_offset)
 
@@ -800,12 +940,19 @@ def _dissect_string_area(
         result.sections.append((section_ref, section_label))
         for string_offset, string_val in strings_found:
             string_length = len(string_val) + 1
-            result.spans.append(Span(
-                offset=string_offset, length=string_length, name="string",
-                raw=payload[string_offset:string_offset + string_length],
-                value=f'"{string_val}"', detail="",
-                fact_ref=section_ref, section=section_label, dtype="ascii",
-            ))
+            result.spans.append(
+                Span(
+                    offset=string_offset,
+                    length=string_length,
+                    name="string",
+                    raw=payload[string_offset : string_offset + string_length],
+                    value=f'"{string_val}"',
+                    detail="",
+                    fact_ref=section_ref,
+                    section=section_label,
+                    dtype="ascii",
+                )
+            )
             for byte_offset in range(string_offset, string_offset + string_length):
                 covered.add(byte_offset)
 
@@ -917,20 +1064,13 @@ def _add_unknown_regions(result: DissectedPacket, covered: set[int]):
         )
 
 
-
-
-
-
 _VALUE_WIDTH = 20
 
 
 def _format_value_with_detail(span: Span, field_color: str = "") -> str:
     if field_color:
         if span.detail:
-            return (
-                f"{field_color}{span.value:<{_VALUE_WIDTH}s}{_RESET}"
-                f" {_COLOR_ANNOTATION}{span.detail}{_RESET}"
-            )
+            return f"{field_color}{span.value:<{_VALUE_WIDTH}s}{_RESET} {_COLOR_ANNOTATION}{span.detail}{_RESET}"
         return f"{field_color}{span.value}{_RESET}"
     else:
         if span.detail:
@@ -1010,9 +1150,7 @@ def _render_hexdump_region(raw: bytes, start_offset: int, indent: str, color: bo
         abs_offset = start_offset + chunk_offset
         if color:
             lines.append(
-                f"{indent}  {_COLOR_OFFSET}{abs_offset:04x}{_RESET}  "
-                f"{left:<23s}  {right:<23s}  "
-                f"|{ascii_part}|{_RESET}"
+                f"{indent}  {_COLOR_OFFSET}{abs_offset:04x}{_RESET}  {left:<23s}  {right:<23s}  |{ascii_part}|{_RESET}"
             )
         else:
             lines.append(f"{indent}  {abs_offset:04x}  {left:<23s}  {right:<23s}  |{ascii_part}|")
@@ -1193,16 +1331,20 @@ def dissect_and_render(
 ) -> str:
     if color is None:
         from netaudio.common.app_config import settings as app_settings
+
         color = not app_settings.no_color
     if icons is None:
         icons = _resolve_icons_setting()
     dissected = dissect(payload, facts=facts, facts_path=facts_path)
-    return render_dissection(dissected, indent=indent, show_unknown_hexdump=show_unknown_hexdump, color=color, icons=icons)
+    return render_dissection(
+        dissected, indent=indent, show_unknown_hexdump=show_unknown_hexdump, color=color, icons=icons
+    )
 
 
 def _resolve_icons_setting() -> bool:
     try:
         from netaudio.cli import state
+
         return state.icons
     except Exception:
         return False
@@ -1252,6 +1394,7 @@ def hexdump_or_dissect(
 ) -> str:
     if color is None:
         from netaudio.common.app_config import settings as app_settings
+
         color = not app_settings.no_color
     if not dissect_mode:
         return _plain_hexdump(payload, indent, color=color)

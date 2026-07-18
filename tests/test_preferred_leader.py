@@ -1,3 +1,4 @@
+import asyncio
 import struct
 
 import pytest
@@ -62,7 +63,7 @@ class TestPreferredLeaderSetPacket:
         commands = DanteDeviceCommands()
         packet, _, _ = commands.command_set_preferred_leader(True)
         assert struct.unpack(">H", packet[0:2])[0] == 0xFFFF
-        magic_offset = packet.find(b'Audinate')
+        magic_offset = packet.find(b"Audinate")
         assert magic_offset == 0x10
 
 
@@ -96,13 +97,14 @@ class TestPreferredLeaderFromConmon0x0020:
         packet = bytearray(184)
         struct.pack_into(">H", packet, 0, 0xFFFF)
         struct.pack_into(">H", packet, 2, 184)
-        packet[0x10:0x18] = b'Audinate'
+        packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x18, 0x073A)
         struct.pack_into(">H", packet, 0x1A, 0x0020)
         packet[CONMON_PREFERRED_LEADER_OFFSET] = preferred_leader_byte
         return bytes(packet)
 
-    def test_preferred_leader_on(self):
+    @pytest.mark.asyncio
+    async def test_preferred_leader_on(self):
         dispatcher = DanteEventDispatcher()
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.34"
@@ -111,12 +113,13 @@ class TestPreferredLeaderFromConmon0x0020:
         packet = self._build_conmon_0020_packet(0x01)
         service._on_packet(packet, (device_ip, 1030))
 
-        assert waiter.is_set()
+        await asyncio.wait_for(waiter.wait(), timeout=1)
         result = service.get_preferred_leader_result(device_ip)
         assert result is True
         service.unregister_preferred_leader_waiter(device_ip)
 
-    def test_preferred_leader_off(self):
+    @pytest.mark.asyncio
+    async def test_preferred_leader_off(self):
         dispatcher = DanteEventDispatcher()
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.34"
@@ -125,7 +128,7 @@ class TestPreferredLeaderFromConmon0x0020:
         packet = self._build_conmon_0020_packet(0x00)
         service._on_packet(packet, (device_ip, 1030))
 
-        assert waiter.is_set()
+        await asyncio.wait_for(waiter.wait(), timeout=1)
         result = service.get_preferred_leader_result(device_ip)
         assert result is False
         service.unregister_preferred_leader_waiter(device_ip)
@@ -181,7 +184,7 @@ class TestPTPv1RoleFromConmon0x0020:
         packet = bytearray(184)
         struct.pack_into(">H", packet, 0, 0xFFFF)
         struct.pack_into(">H", packet, 2, 184)
-        packet[0x10:0x18] = b'Audinate'
+        packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x18, 0x073A)
         struct.pack_into(">H", packet, 0x1A, 0x0020)
         packet[CONMON_PREFERRED_LEADER_OFFSET] = preferred_leader_byte

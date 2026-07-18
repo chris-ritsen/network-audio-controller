@@ -14,7 +14,9 @@ def make_device():
     device.mac_address = "001dc1aabbcc"
     device.model_id = "DAI2"
     device.sample_rate = 48000
-    device.latency = 0.001
+    device.latency = 0.15
+    device.min_latency = 0.15
+    device.max_latency = 21.333334
     device.is_locked = False
     device.tx_count = 2
     device.rx_count = 2
@@ -72,6 +74,9 @@ class TestSerializerRoundtrip:
         assert restored.mac_address == "001dc1aabbcc"
         assert restored.model_id == "DAI2"
         assert restored.sample_rate == 48000
+        assert restored.latency == 0.15
+        assert restored.min_latency == 0.15
+        assert restored.max_latency == 21.333334
         assert restored.is_locked is False
         assert restored.tx_count == 2
         assert restored.rx_count == 2

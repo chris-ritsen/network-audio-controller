@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import struct
@@ -76,6 +78,9 @@ class DanteHeartbeatService(DanteMulticastService):
         device = self._device_by_ip(source_ip)
         if device:
             device.update_last_seen()
+            if not device.online:
+                logger.info(f"Device back online (heartbeat received): {device.server_name}")
+                device.online = True
             if getattr(device, "model_id", None) in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
                 return
             lock_state = _parse_lock_state(data)
@@ -108,5 +113,5 @@ class DanteHeartbeatService(DanteMulticastService):
                 continue
             age = now - device.last_seen
             if age > OFFLINE_THRESHOLD_SECONDS:
-                logger.info(f"Device offline (no heartbeat for {age:.1f}s): {server_name}")
+                logger.info(f"Device heartbeat stale for {age:.1f}s: {server_name}")
                 self._mark_offline(server_name)

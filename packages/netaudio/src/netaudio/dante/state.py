@@ -36,12 +36,15 @@ class DanteStateService:
         self.application = application
         self._populating: set[str] = set()
         self._device_locks: dict[str, asyncio.Lock] = {}
+        self._registered = False
 
     @property
     def devices(self) -> dict:
         return self.application.devices
 
     def register(self) -> None:
+        if self._registered:
+            return
         app = self.application
         app.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
         app.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
@@ -61,6 +64,7 @@ class DanteStateService:
         app.on_notification(NOTIFICATION_CLEAR_CONFIG_STATUS, self._on_device_state_changed)
         app.on_notification(NOTIFICATION_ROUTING_READY, self._on_device_state_changed)
         app.on_notification(NOTIFICATION_ROUTING_DEVICE_CHANGE, self._on_routing_changed)
+        self._registered = True
 
     def _lock_for(self, server_name: str) -> asyncio.Lock:
         lock = self._device_locks.get(server_name)

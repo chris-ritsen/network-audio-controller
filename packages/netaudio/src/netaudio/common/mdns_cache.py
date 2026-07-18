@@ -27,12 +27,7 @@ class MdnsCache:
 
         entry: Union[Dict[str, Any], None] = self._db.get(key)
 
-        if (
-            entry is None
-            or not isinstance(entry, dict)
-            or "last_seen" not in entry
-            or "data" not in entry
-        ):
+        if entry is None or not isinstance(entry, dict) or "last_seen" not in entry or "data" not in entry:
             self.delete(key)
             return None
 

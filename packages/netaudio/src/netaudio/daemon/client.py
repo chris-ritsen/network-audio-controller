@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -14,6 +16,7 @@ RELAY_HOST = "127.0.0.1"
 
 def relay_port() -> int:
     from netaudio.common.app_config import settings as app_settings
+
     return app_settings.relay_port or DEFAULT_RELAY_PORT
 
 
@@ -58,8 +61,14 @@ async def _relay_request(method: str, path: str, body=None, timeout: float = 5.0
             data = await asyncio.wait_for(reader.readexactly(content_length), timeout=timeout)
 
         return status, json.loads(data) if data else None
-    except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionResetError,
-            BrokenPipeError, ValueError, json.JSONDecodeError) as exception:
+    except (
+        asyncio.TimeoutError,
+        asyncio.IncompleteReadError,
+        ConnectionResetError,
+        BrokenPipeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exception:
         logger.debug(f"Relay request {method} {path} failed: {exception}")
         return None, None
     finally:
@@ -72,6 +81,7 @@ async def _relay_request(method: str, path: str, body=None, timeout: float = 5.0
 
 def daemon_is_accessible() -> bool:
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.settimeout(0.5)
         return probe.connect_ex((RELAY_HOST, relay_port())) == 0
@@ -83,8 +93,7 @@ async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
         return None
 
     devices = {
-        server_name: DanteDeviceSerializer.device_from_json(device_json)
-        for server_name, device_json in data.items()
+        server_name: DanteDeviceSerializer.device_from_json(device_json) for server_name, device_json in data.items()
     }
     logger.info(f"Daemon: {len(devices)} devices")
     return devices
@@ -114,9 +123,7 @@ async def shutdown_daemon() -> bool:
 
 
 async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
-    status, data = await _relay_request(
-        "GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0
-    )
+    status, data = await _relay_request("GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0)
     if status != 200 or data is None:
         if data and data.get("error"):
             logger.debug(f"Daemon metering error: {data['error']}")
@@ -125,15 +132,11 @@ async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
 
 
 async def meter_start_on_daemon(server_name: str, client_id: str) -> None:
-    await _relay_request(
-        "POST", "/metering/start", body={"device": server_name, "client_id": client_id}
-    )
+    await _relay_request("POST", "/metering/start", body={"device": server_name, "client_id": client_id})
 
 
 async def meter_stop_on_daemon(server_name: str, client_id: str) -> None:
-    await _relay_request(
-        "POST", "/metering/stop", body={"device": server_name, "client_id": client_id}
-    )
+    await _relay_request("POST", "/metering/stop", body={"device": server_name, "client_id": client_id})
 
 
 async def meter_status_from_daemon() -> dict | None:

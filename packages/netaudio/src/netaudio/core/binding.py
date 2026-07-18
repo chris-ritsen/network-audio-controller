@@ -1,15 +1,21 @@
+from __future__ import annotations
+
 import ctypes
 import json
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 
 logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 1
+ABI_VERSION = 2
+
+LOCK_NONCE_LENGTH = 24
+LOCK_KEY_LENGTH = 32
 
 
 def _library_names():
@@ -18,6 +24,7 @@ def _library_names():
     if sys.platform == "win32":
         return ("netaudio_core.dll",)
     return ("libnetaudio_core.so",)
+
 
 STATUS_OK = 0
 
@@ -41,6 +48,17 @@ _STATUS_NAMES = {
     17: "invalid lock key",
     18: "pin must be exactly 4 digits",
     19: "crypto error",
+    20: "page exceeds the protocol channel range",
+    21: "subscription receiver channel must fit in one byte",
+    22: "device type must be 'input' or 'output'",
+    23: "command packet exceeds the protocol length limit",
+    24: "channel number must be at least 1",
+    25: "latency must be finite, nonnegative, and fit on the wire",
+    26: "unsupported sample rate",
+    27: "encoding must be 16, 24, or 32 bits",
+    28: "gain level must be an integer from 1 through 5",
+    29: "flow slot must be from 1 through 32",
+    30: "flow protocol must be 0x2729, 0x2801, or 0x2809",
 }
 
 
@@ -121,7 +139,9 @@ def _configure(lib):
     lib.netaudio_lock_token.argtypes = [
         ctypes.c_char_p,
         ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_size_t,
         *buffer_out,
     ]
     lib.netaudio_lock_token.restype = ctypes.c_int
@@ -150,9 +170,21 @@ def _configure(lib):
         *buffer_out,
     ]
     lib.netaudio_client_request.restype = ctypes.c_int
-    lib.netaudio_client_lock.argtypes = [ctypes.c_void_p, ctypes.c_char_p, u8p, *buffer_out]
+    lib.netaudio_client_lock.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        u8p,
+        ctypes.c_size_t,
+        *buffer_out,
+    ]
     lib.netaudio_client_lock.restype = ctypes.c_int
-    lib.netaudio_client_unlock.argtypes = [ctypes.c_void_p, ctypes.c_char_p, u8p, *buffer_out]
+    lib.netaudio_client_unlock.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        u8p,
+        ctypes.c_size_t,
+        *buffer_out,
+    ]
     lib.netaudio_client_unlock.restype = ctypes.c_int
     lib.netaudio_host_mac.argtypes = [u8p]
     lib.netaudio_host_mac.restype = ctypes.c_int
@@ -225,9 +257,7 @@ def parse_response(kind: str, data: bytes):
     if lib is None:
         raise NetaudioCoreError(8, "netaudio-core library not found")
     in_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
-    status, out = _call_buffer(
-        lib.netaudio_parse_response, kind.encode("utf-8"), in_buffer, len(data)
-    )
+    status, out = _call_buffer(lib.netaudio_parse_response, kind.encode("utf-8"), in_buffer, len(data))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"parse_response {kind}")
     return json.loads(out)
@@ -238,22 +268,30 @@ def parse_page(kind: str, data: bytes, starting_channel: int):
     if lib is None:
         raise NetaudioCoreError(8, "netaudio-core library not found")
     in_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
-    status, out = _call_buffer(
-        lib.netaudio_parse_page, kind.encode("utf-8"), in_buffer, len(data), starting_channel
-    )
+    status, out = _call_buffer(lib.netaudio_parse_page, kind.encode("utf-8"), in_buffer, len(data), starting_channel)
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"parse_page {kind}")
     return json.loads(out)
 
 
 def lock_token(pin: str, nonce: bytes, key: bytes) -> bytes:
+    if len(nonce) != LOCK_NONCE_LENGTH:
+        raise ValueError(f"nonce must be exactly {LOCK_NONCE_LENGTH} bytes")
+    if len(key) != LOCK_KEY_LENGTH:
+        raise ValueError(f"key must be exactly {LOCK_KEY_LENGTH} bytes")
     lib = _load()
     if lib is None:
         raise NetaudioCoreError(8, "netaudio-core library not found")
     nonce_buffer = (ctypes.c_uint8 * len(nonce)).from_buffer_copy(nonce)
     key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
     status, token = _call_buffer(
-        lib.netaudio_lock_token, pin.encode("ascii"), nonce_buffer, key_buffer, capacity=256
+        lib.netaudio_lock_token,
+        pin.encode("ascii"),
+        nonce_buffer,
+        len(nonce),
+        key_buffer,
+        len(key),
+        capacity=256,
     )
     if status != STATUS_OK:
         raise NetaudioCoreError(status, "lock_token")
@@ -276,47 +314,77 @@ def _as_buffer(data: bytes):
 
 class CoreClient:
     def __init__(self, device_ip: str, arc_port: int = 4440, timeout_ms: int = 1000, attempts: int = 3):
-        lib = _load()
-        if lib is None:
+        self._native_lock = threading.RLock()
+        self._handle = ctypes.c_void_p()
+        self._lib = None
+        library = _load()
+        if library is None:
             raise NetaudioCoreError(8, "netaudio-core library not found")
-        self._lib = lib
+        self._lib = library
         self._device_ip = device_ip
         self.observer = None
-        self._handle = ctypes.c_void_p()
-        status = lib.netaudio_client_new(
-            device_ip.encode("ascii"), arc_port, timeout_ms, attempts, ctypes.byref(self._handle)
-        )
+        with self._native_lock:
+            status = library.netaudio_client_new(
+                device_ip.encode("ascii"), arc_port, timeout_ms, attempts, ctypes.byref(self._handle)
+            )
         if status != STATUS_OK:
             raise NetaudioCoreError(status, f"client_new {device_ip}")
 
     def close(self):
-        if self._handle:
-            self._lib.netaudio_client_free(self._handle)
-            self._handle = ctypes.c_void_p()
+        with self._native_lock:
+            if self._handle and self._lib is not None:
+                self._lib.netaudio_client_free(self._handle)
+                self._handle = ctypes.c_void_p()
 
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc_info):
+    def __exit__(self, *_exception_information):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            logger.exception("Failed to close native core client")
+
+    def _require_library(self):
+        if self._lib is None:
+            raise NetaudioCoreError(8, "netaudio-core library not loaded")
+        return self._lib
 
     def set_host_mac(self, mac: bytes):
+        if len(mac) != 6:
+            raise ValueError("mac must be exactly 6 bytes")
         buffer = (ctypes.c_uint8 * 6).from_buffer_copy(mac)
-        self._lib.netaudio_client_set_host_mac(self._handle, buffer)
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_set_host_mac(self._handle, buffer)
+        if status != STATUS_OK:
+            raise NetaudioCoreError(status, "set_host_mac")
 
-    def request(self, packet: bytes, target_port: int, expect_response: bool = True, repeat: int = 1, interval_ms: int = 0):
+    def request(
+        self, packet: bytes, target_port: int, expect_response: bool = True, repeat: int = 1, interval_ms: int = 0
+    ):
         out = (ctypes.c_uint8 * 65536)()
         length = ctypes.c_size_t(0)
-        status = self._lib.netaudio_client_request(
-            self._handle, _as_buffer(packet), len(packet), target_port,
-            expect_response, repeat, interval_ms, out, 65536, ctypes.byref(length),
-        )
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_request(
+                self._handle,
+                _as_buffer(packet),
+                len(packet),
+                target_port,
+                expect_response,
+                repeat,
+                interval_ms,
+                out,
+                65536,
+                ctypes.byref(length),
+            )
+            data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "client_request")
-        data = bytes(out[: length.value])
         response = data if data else None
         if self.observer is not None:
             self.observer(packet, response, self._device_ip, target_port)
@@ -325,21 +393,26 @@ class CoreClient:
     def execute(self, spec: dict):
         out = (ctypes.c_uint8 * 65536)()
         length = ctypes.c_size_t(0)
-        status = self._lib.netaudio_client_execute(
-            self._handle, json.dumps(spec).encode("utf-8"), out, 65536, ctypes.byref(length)
-        )
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_execute(
+                self._handle, json.dumps(spec).encode("utf-8"), out, 65536, ctypes.byref(length)
+            )
+            data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, f"execute {spec.get('command')}")
-        data = bytes(out[: length.value])
-        return json.loads(data) if data else None
+        return data if data else None
 
     def _json_getter(self, name):
         out = (ctypes.c_uint8 * 262144)()
         length = ctypes.c_size_t(0)
-        status = getattr(self._lib, name)(self._handle, out, 262144, ctypes.byref(length))
+        library = self._require_library()
+        with self._native_lock:
+            status = getattr(library, name)(self._handle, out, 262144, ctypes.byref(length))
+            data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
-        return json.loads(bytes(out[: length.value]))
+        return json.loads(data)
 
     def get_rx_channels(self):
         return self._json_getter("netaudio_client_get_rx_channels_json")
@@ -360,9 +433,11 @@ class CoreClient:
         tx = ctypes.c_uint16(0)
         rx = ctypes.c_uint16(0)
         locked = ctypes.c_int32(-2)
-        status = self._lib.netaudio_client_get_channel_count(
-            self._handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked)
-        )
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_get_channel_count(
+                self._handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked)
+            )
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "get_channel_count")
         lock_state = None if locked.value < 0 else bool(locked.value)
@@ -370,7 +445,9 @@ class CoreClient:
 
     def get_aes67_configured(self):
         state = ctypes.c_int32(-2)
-        status = self._lib.netaudio_client_get_aes67_configured(self._handle, ctypes.byref(state))
+        library = self._require_library()
+        with self._native_lock:
+            status = library.netaudio_client_get_aes67_configured(self._handle, ctypes.byref(state))
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "get_aes67_configured")
         return None if state.value < 0 else bool(state.value)
@@ -382,12 +459,23 @@ class CoreClient:
         return self._lock_op("netaudio_client_unlock", pin, key)
 
     def _lock_op(self, name, pin, key):
+        if len(key) != LOCK_KEY_LENGTH:
+            raise ValueError(f"key must be exactly {LOCK_KEY_LENGTH} bytes")
         key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
         out = (ctypes.c_uint8 * 4096)()
         length = ctypes.c_size_t(0)
-        status = getattr(self._lib, name)(
-            self._handle, pin.encode("ascii"), key_buffer, out, 4096, ctypes.byref(length)
-        )
+        library = self._require_library()
+        with self._native_lock:
+            status = getattr(library, name)(
+                self._handle,
+                pin.encode("ascii"),
+                key_buffer,
+                len(key),
+                out,
+                4096,
+                ctypes.byref(length),
+            )
+            data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
-        return json.loads(bytes(out[: length.value]))
+        return json.loads(data)

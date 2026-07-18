@@ -54,6 +54,7 @@ pub fn validate_pin(pin: &str) -> Result<(), LockError> {
 }
 
 pub fn compute_token(pin: &str, nonce: &[u8], key: &[u8]) -> Result<Vec<u8>, LockError> {
+    validate_pin(pin)?;
     if key.len() != KEY_LENGTH {
         return Err(LockError::InvalidKey);
     }
@@ -174,7 +175,10 @@ pub fn lock_operation(
 }
 
 fn is_timeout(error: &io::Error) -> bool {
-    matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 #[cfg(test)]
@@ -209,6 +213,16 @@ mod tests {
     fn token_length_is_tag_plus_pin() {
         let token = compute_token("1234", &[0u8; 24], &[0u8; 32]).unwrap();
         assert_eq!(token.len(), 16 + 4);
+    }
+
+    #[test]
+    fn token_generation_rejects_invalid_pins() {
+        for pin in ["", "123", "12345", "abcd", "１２３４"] {
+            assert!(matches!(
+                compute_token(pin, &[0u8; NONCE_LENGTH], &[0u8; KEY_LENGTH]),
+                Err(LockError::InvalidPin)
+            ));
+        }
     }
 
     #[test]

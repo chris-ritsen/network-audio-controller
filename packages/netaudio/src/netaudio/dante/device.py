@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import ipaddress
 import logging
@@ -16,6 +18,7 @@ from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.subscription import DanteSubscription
 
 logger = logging.getLogger("netaudio")
@@ -47,7 +50,7 @@ class DanteDevice:
         self.server_name = server_name
         self.services = {}
         self.sockets = {}
-        self.software = None
+        self.software: str | None = None
         self.subscriptions = []
         self.tx_channels = {}
         self.tx_count = None
@@ -130,6 +133,7 @@ class DanteDevice:
 
     def _core_client(self):
         from netaudio import core
+
         ip = str(self.ipv4) if self.ipv4 else None
         if not ip:
             return None
@@ -142,7 +146,7 @@ class DanteDevice:
             mac = core.host_mac()
             if mac:
                 self._core.set_host_mac(mac)
-            observer = getattr(self._app, "core_observer", None)
+            observer = self._app.core_observer if self._app is not None else None
             if observer is not None:
                 self._core.observer = observer
             self._core_key = key
@@ -209,6 +213,7 @@ class DanteDevice:
             return
         if client.observer is not None:
             from netaudio._capture import fetch_rx_records
+
             records = await asyncio.to_thread(fetch_rx_records, client, self._arc_port())
         else:
             records = await asyncio.to_thread(client.get_rx_channels)
@@ -219,8 +224,21 @@ class DanteDevice:
         if client is None:
             return
         if client.observer is not None:
-            from netaudio._capture import fetch_tx_records
-            records = await asyncio.to_thread(fetch_tx_records, client, self._arc_port())
+            from netaudio._capture import _query, fetch_tx_records
+
+            if self.tx_count is None:
+                channel_counts = await asyncio.to_thread(
+                    _query,
+                    client,
+                    {"command": "channel_count"},
+                    self._arc_port(),
+                    "channel_count",
+                )
+                if channel_counts is not None:
+                    self.tx_count = channel_counts["tx_count"]
+                    self.rx_count = channel_counts["rx_count"]
+
+            records = await asyncio.to_thread(fetch_tx_records, client, self._arc_port(), self.tx_count or 0)
         else:
             records = await asyncio.to_thread(client.get_tx_channels)
         self.tx_channels = self._build_tx_from_records(records)
@@ -231,6 +249,7 @@ class DanteDevice:
             return None
         if client.observer is not None:
             from netaudio._capture import fetch_device_name
+
             return await asyncio.to_thread(fetch_device_name, client, self._arc_port())
         return await asyncio.to_thread(client.get_device_name)
 
@@ -241,6 +260,7 @@ class DanteDevice:
 
         if client.observer is not None:
             from netaudio._capture import _fetch_instrumented
+
             raw = await asyncio.to_thread(_fetch_instrumented, client, self._arc_port())
             return self.controls_data_from_core(raw)
 
@@ -252,6 +272,7 @@ class DanteDevice:
                 "tx": client.get_tx_channels(),
             }
             from netaudio.core import NetaudioCoreError
+
             try:
                 result["settings"] = client.get_device_settings()
             except NetaudioCoreError:
@@ -279,12 +300,12 @@ class DanteDevice:
         if settings_data:
             if settings_data.get("sample_rate"):
                 controls["sample_rate"] = settings_data["sample_rate"]
-            if settings_data.get("latency_us") is not None:
-                controls["latency"] = settings_data["latency_us"] / 1_000_000.0
-            if settings_data.get("min_latency_us") is not None:
-                controls["min_latency"] = settings_data["min_latency_us"] / 1_000_000.0
-            if settings_data.get("max_latency_us") is not None:
-                controls["max_latency"] = settings_data["max_latency_us"] / 1_000_000.0
+            if settings_data.get("latency_ns") is not None:
+                controls["latency"] = nanoseconds_to_milliseconds(settings_data["latency_ns"])
+            if settings_data.get("min_latency_ns") is not None:
+                controls["min_latency"] = nanoseconds_to_milliseconds(settings_data["min_latency_ns"])
+            if settings_data.get("max_latency_ns") is not None:
+                controls["max_latency"] = nanoseconds_to_milliseconds(settings_data["max_latency_ns"])
         rx_channels, subscriptions = self._build_rx_from_records(data["rx"])
         if rx_channels:
             controls["rx_channels"] = rx_channels
@@ -330,6 +351,7 @@ class DanteDevice:
     async def get_bluetooth_status(self, host_mac=None):
         if host_mac is None:
             from netaudio.dante.services.cmc import _get_host_mac
+
             host_mac = _get_host_mac()
         packet, _, _ = self.commands.command_bluetooth_status(host_mac=host_mac)
         device_ip = str(self.ipv4)

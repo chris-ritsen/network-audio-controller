@@ -3,6 +3,7 @@ import json
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -55,15 +56,22 @@ INVALID_NAMES = {
 }
 
 
+def _library_name():
+    if sys.platform == "darwin":
+        return "libnetaudio_core.dylib"
+    if sys.platform == "win32":
+        return "netaudio_core.dll"
+    return "libnetaudio_core.so"
+
+
 def _find_or_build_library():
-    for profile in ("release", "debug"):
-        library_path = CRATE_DIR / "target" / profile / "libnetaudio_core.so"
-        if library_path.exists():
-            return library_path
     if not shutil.which("cargo"):
-        pytest.skip("netaudio-core not built and cargo not available")
+        pytest.skip("cargo is required to build netaudio-core for protocol tests")
     subprocess.run(["cargo", "build"], cwd=CRATE_DIR, check=True, capture_output=True)
-    return CRATE_DIR / "target" / "debug" / "libnetaudio_core.so"
+    library_path = CRATE_DIR / "target" / "debug" / _library_name()
+    if library_path.exists():
+        return library_path
+    pytest.skip("netaudio-core build produced no loadable library")
 
 
 @pytest.fixture(scope="module")
@@ -157,11 +165,12 @@ def load_fixture(name):
 
 
 class FakeDanteDevice:
-    def __init__(self, respond=True):
+    def __init__(self, respond=True, result_code=0x0001):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("127.0.0.1", 0))
         self.socket.settimeout(2.0)
         self.respond = respond
+        self.result_code = result_code
         self.requests = []
         self.thread = threading.Thread(target=self._serve)
 
@@ -176,7 +185,7 @@ class FakeDanteDevice:
             return
         self.requests.append(request)
         if self.respond:
-            response = request[0:2] + (10).to_bytes(2, "big") + request[4:8] + b"\x00\x00"
+            response = request[0:2] + (10).to_bytes(2, "big") + request[4:8] + self.result_code.to_bytes(2, "big")
             self.socket.sendto(response, source)
 
     def __enter__(self):
@@ -194,9 +203,7 @@ def client_factory(core):
 
     def _create(port, timeout_milliseconds=500, attempts=1):
         handle = ctypes.c_void_p()
-        status = core.netaudio_client_new(
-            b"127.0.0.1", port, timeout_milliseconds, attempts, ctypes.byref(handle)
-        )
+        status = core.netaudio_client_new(b"127.0.0.1", port, timeout_milliseconds, attempts, ctypes.byref(handle))
         assert status == NETAUDIO_OK
         created.append(handle)
         return handle
@@ -218,6 +225,7 @@ def rust_build_set_device_name(core, name, transaction_id=0, capacity=64):
 
 def _control_packet(opcode, payload, transaction_id):
     import struct
+
     header = struct.pack(">HH", 0x27FF, 8 + len(payload))
     header += struct.pack(">HH", transaction_id, opcode)
     return header + payload
@@ -238,9 +246,7 @@ class TestSetDeviceNameParity:
             b"\x00\x00" + b"Studio-AVIO" + b"\x00",
             transaction_id=transaction_id,
         )
-        status, rust_packet = rust_build_set_device_name(
-            core, "Studio-AVIO", transaction_id=transaction_id
-        )
+        status, rust_packet = rust_build_set_device_name(core, "Studio-AVIO", transaction_id=transaction_id)
         assert status == NETAUDIO_OK
         assert rust_packet == python_packet
 
@@ -277,9 +283,7 @@ class TestClientSetDeviceName:
             status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
 
         assert status == NETAUDIO_OK
-        expected = _control_packet(
-            0x1001, b"\x00\x00" + b"Studio-AVIO" + b"\x00", transaction_id=1
-        )
+        expected = _control_packet(0x1001, b"\x00\x00" + b"Studio-AVIO" + b"\x00", transaction_id=1)
         assert device.requests == [expected]
 
     def test_transaction_id_increments_across_calls(self, core, client_factory):
@@ -294,6 +298,13 @@ class TestClientSetDeviceName:
             core.netaudio_client_set_device_name(second_client, b"Second")
 
         assert int.from_bytes(second_device.requests[0][4:6], "big") == 1
+
+    def test_failure_acknowledgement_is_not_reported_as_success(self, core, client_factory):
+        with FakeDanteDevice(result_code=0x0600) as device:
+            client = client_factory(device.port)
+            status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
+
+        assert status == NETAUDIO_MALFORMED_RESPONSE
 
     def test_timeout_when_device_silent(self, core, client_factory):
         with FakeDanteDevice(respond=False) as device:
@@ -352,8 +363,8 @@ class TestChannelCountBuilderAndParse:
         assert status == NETAUDIO_OK
         expected_request = DanteDeviceCommands().command_channel_count(transaction_id=1)[0]
         assert device.requests == [expected_request]
-        assert tx.value == count_fixture[13]
-        assert rx.value == count_fixture[15]
+        assert tx.value == int.from_bytes(count_fixture[12:14], "big")
+        assert rx.value == int.from_bytes(count_fixture[14:16], "big")
         expected_locked = -1
         if len(count_fixture) >= 36:
             expected_locked = 1 if int.from_bytes(count_fixture[34:36], "big") else 0
@@ -362,22 +373,58 @@ class TestChannelCountBuilderAndParse:
 
 GOLDEN_RX_CHANNELS = {
     "avio-usb-2": [
-        {"number": 1, "rx_channel_name": "mic-mix-1", "rx_status_code": 257,
-         "tx_channel_name": "mic-mix-high", "tx_device_name": "lx-dante", "subscription_status_code": 9},
-        {"number": 2, "rx_channel_name": "mic-mix-2", "rx_status_code": 257,
-         "tx_channel_name": "mic-mix-high", "tx_device_name": "lx-dante", "subscription_status_code": 9},
+        {
+            "number": 1,
+            "rx_channel_name": "mic-mix-1",
+            "rx_status_code": 257,
+            "tx_channel_name": "mic-mix-high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 9,
+        },
+        {
+            "number": 2,
+            "rx_channel_name": "mic-mix-2",
+            "rx_status_code": 257,
+            "tx_channel_name": "mic-mix-high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 9,
+        },
     ],
     "avio-usb-1": [
-        {"number": 1, "rx_channel_name": "mic-mix-1", "rx_status_code": 257,
-         "tx_channel_name": "mic-mix-high", "tx_device_name": "lx-dante", "subscription_status_code": 9},
-        {"number": 2, "rx_channel_name": "mic-mix-2", "rx_status_code": 257,
-         "tx_channel_name": "mic-mix-high", "tx_device_name": "lx-dante", "subscription_status_code": 9},
+        {
+            "number": 1,
+            "rx_channel_name": "mic-mix-1",
+            "rx_status_code": 257,
+            "tx_channel_name": "mic-mix-high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 9,
+        },
+        {
+            "number": 2,
+            "rx_channel_name": "mic-mix-2",
+            "rx_status_code": 257,
+            "tx_channel_name": "mic-mix-high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 9,
+        },
     ],
     "avio-aes3-1": [
-        {"number": 1, "rx_channel_name": "unused-1", "rx_status_code": 0,
-         "tx_channel_name": "linux-mic-mix:high", "tx_device_name": "lx-dante", "subscription_status_code": 1},
-        {"number": 2, "rx_channel_name": "unused-2", "rx_status_code": 0,
-         "tx_channel_name": "linux-mic-mix:high", "tx_device_name": "lx-dante", "subscription_status_code": 1},
+        {
+            "number": 1,
+            "rx_channel_name": "unused-1",
+            "rx_status_code": 0,
+            "tx_channel_name": "linux-mic-mix:high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 1,
+        },
+        {
+            "number": 2,
+            "rx_channel_name": "unused-2",
+            "rx_status_code": 0,
+            "tx_channel_name": "linux-mic-mix:high",
+            "tx_device_name": "lx-dante",
+            "subscription_status_code": 1,
+        },
     ],
 }
 
@@ -390,9 +437,7 @@ class TestRxChannelsGolden:
 
         with FakeReplayDevice([count_fixture, receivers_fixture]) as device:
             client = client_factory(device.port)
-            status, rust_channels = rust_client_json(
-                core, "netaudio_client_get_rx_channels_json", client
-            )
+            status, rust_channels = rust_client_json(core, "netaudio_client_get_rx_channels_json", client)
 
         assert status == NETAUDIO_OK
 
@@ -401,8 +446,7 @@ class TestRxChannelsGolden:
         for rust_channel, expected_channel in zip(rust_channels, expected):
             for key, value in expected_channel.items():
                 assert rust_channel[key] == value, (
-                    f"{device_name} ch{expected_channel['number']} {key}: "
-                    f"{rust_channel[key]!r} != {value!r}"
+                    f"{device_name} ch{expected_channel['number']} {key}: {rust_channel[key]!r} != {value!r}"
                 )
 
     def test_request_sequence_matches_python_builders(self, core, client_factory):

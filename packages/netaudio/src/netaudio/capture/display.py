@@ -65,9 +65,7 @@ def _print_marker_row(
     marker_time = int(marker["timestamp_ns"])
     window_packets = None
     if show_window_packets:
-        window_packets = store.get_session_packet_count(
-            session_id, start_ns=marker_time, end_ns=next_ts
-        )
+        window_packets = store.get_session_packet_count(session_id, start_ns=marker_time, end_ns=next_ts)
 
     summary_text = marker.get("summary") or ""
     label_text = marker.get("label") or ""
@@ -146,13 +144,16 @@ def _print_marker_row(
                 opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
 
             pkt_dir = pkt.get("direction") or "multicast"
-            pkt_dir_icon = icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
+            pkt_dir_icon = (
+                icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
+            )
             src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
             dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
             print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
 
             if use_dissect:
                 from netaudio.dante.packet_dissector import dissect_and_render
+
                 print(dissect_and_render(payload, indent=evidence_indent + "  "))
             else:
                 print(_hexdump(payload, indent=evidence_indent + "  "))
@@ -198,7 +199,10 @@ def _follow_session_timeline(
                     next_ts = None
 
                 _print_marker_row(
-                    marker, next_ts, session_id, store,
+                    marker,
+                    next_ts,
+                    session_id,
+                    store,
                     use_dissect=use_dissect,
                     show_notes=show_notes,
                     show_packets=show_packets,
@@ -229,7 +233,9 @@ def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bo
 
         markers = store.get_markers(session_id, marker_types=["evidence"])
 
-        print(f"\n{icon('session')}Session #{session_id} ({session_name}) {_emdash()} {evidence_count} evidence packet(s)")
+        print(
+            f"\n{icon('session')}Session #{session_id} ({session_name}) {_emdash()} {evidence_count} evidence packet(s)"
+        )
         print(_hrule(80))
 
         for marker in markers:
@@ -263,7 +269,9 @@ def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bo
                 if len(payload) >= 8:
                     opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
 
-                direction_icon = icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
+                direction_icon = (
+                    icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
+                )
                 arrow = "->" if direction == "request" else "<-" if direction == "response" else "**"
 
                 print(
@@ -306,12 +314,11 @@ def _print_diff_full(packets, differing_offsets, max_length):
         print("  " + _hrule(80))
 
         for row_offset in range(0, max_length, 16):
-            ref_chunk = reference_payload[row_offset:row_offset + 16] if row_offset < len(reference_payload) else b""
-            cmp_chunk = compare_payload[row_offset:row_offset + 16] if row_offset < len(compare_payload) else b""
+            ref_chunk = reference_payload[row_offset : row_offset + 16] if row_offset < len(reference_payload) else b""
+            cmp_chunk = compare_payload[row_offset : row_offset + 16] if row_offset < len(compare_payload) else b""
 
             row_has_diff = any(
-                offset in differing_offsets
-                for offset in range(row_offset, min(row_offset + 16, max_length))
+                offset in differing_offsets for offset in range(row_offset, min(row_offset + 16, max_length))
             )
             if not row_has_diff:
                 continue
@@ -340,12 +347,8 @@ def _print_diff_full(packets, differing_offsets, max_length):
                     ref_hex_parts.append(ref_str)
                     cmp_hex_parts.append(cmp_str)
 
-            ref_ascii = "".join(
-                chr(b) if 32 <= b < 127 else "." for b in ref_chunk
-            ).ljust(16)
-            cmp_ascii = "".join(
-                chr(b) if 32 <= b < 127 else "." for b in cmp_chunk
-            ).ljust(16)
+            ref_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in ref_chunk).ljust(16)
+            cmp_ascii = "".join(chr(b) if 32 <= b < 127 else "." for b in cmp_chunk).ljust(16)
 
             ref_hex = " ".join(ref_hex_parts[:8]) + "  " + " ".join(ref_hex_parts[8:])
             cmp_hex = " ".join(cmp_hex_parts[:8]) + "  " + " ".join(cmp_hex_parts[8:])
@@ -386,21 +389,28 @@ def _state_diff_print_opcode_diff(
     human_name = fact_labels.get(opcode_label, opcode_label)
 
     print(f"\n  {ansi('1', opcode_label)}  {human_name}")
-    print(f"  before: #{before_representative_id} ({len(before_representative)}B)    after: #{after_representative_id} ({len(after_representative)}B)")
+    print(
+        f"  before: #{before_representative_id} ({len(before_representative)}B)    after: #{after_representative_id} ({len(after_representative)}B)"
+    )
     if jitter_offsets:
-        print(f"  {ansi('90', f'({len(jitter_offsets)} jitter bytes excluded, {len(volatile_offsets)} volatile header bytes excluded)')}")
+        print(
+            f"  {ansi('90', f'({len(jitter_offsets)} jitter bytes excluded, {len(volatile_offsets)} volatile header bytes excluded)')}"
+        )
     elif volatile_offsets:
         print(f"  {ansi('90', f'({len(volatile_offsets)} volatile header bytes excluded)')}")
     print(f"  {len(stable_diff_offsets)} stable bytes differ")
 
     if full:
         for row_offset in range(0, max_length, 16):
-            before_chunk = before_representative[row_offset:row_offset + 16] if row_offset < len(before_representative) else b""
-            after_chunk = after_representative[row_offset:row_offset + 16] if row_offset < len(after_representative) else b""
+            before_chunk = (
+                before_representative[row_offset : row_offset + 16] if row_offset < len(before_representative) else b""
+            )
+            after_chunk = (
+                after_representative[row_offset : row_offset + 16] if row_offset < len(after_representative) else b""
+            )
 
             row_has_diff = any(
-                offset in stable_diff_offsets
-                for offset in range(row_offset, min(row_offset + 16, max_length))
+                offset in stable_diff_offsets for offset in range(row_offset, min(row_offset + 16, max_length))
             )
             if not row_has_diff:
                 continue
@@ -430,12 +440,8 @@ def _state_diff_print_opcode_diff(
             before_hex = " ".join(before_hex_parts[:8]) + "  " + " ".join(before_hex_parts[8:])
             after_hex = " ".join(after_hex_parts[:8]) + "  " + " ".join(after_hex_parts[8:])
 
-            before_ascii = "".join(
-                chr(byte) if 32 <= byte < 127 else "." for byte in before_chunk
-            ).ljust(16)
-            after_ascii = "".join(
-                chr(byte) if 32 <= byte < 127 else "." for byte in after_chunk
-            ).ljust(16)
+            before_ascii = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in before_chunk).ljust(16)
+            after_ascii = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in after_chunk).ljust(16)
 
             print(f"  {row_offset:04x}  {before_hex}  |{before_ascii}|")
             print(f"  {row_offset:04x}  {after_hex}  |{after_ascii}|")

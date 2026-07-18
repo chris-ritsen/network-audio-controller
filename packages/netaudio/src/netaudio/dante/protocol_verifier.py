@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -17,8 +19,15 @@ SERVICE_PORT_MAP = {
 }
 
 
-def export_session_bundle(store: PacketStore, session_id: int, output_dir: str | None = None) -> Path:
+def export_session_bundle(
+    store: PacketStore,
+    session_id: int,
+    output_dir: str | None = None,
+    packet_ids: set | None = None,
+    bundle_format: str = "tar.gz",
+) -> Path:
     import tarfile
+    import zipfile
     import io
 
     session = store.get_session(session_id)
@@ -27,13 +36,16 @@ def export_session_bundle(store: PacketStore, session_id: int, output_dir: str |
 
     markers = store.get_markers(session_id)
 
-    evidence_packet_ids = set()
-    for marker_row in markers:
-        if marker_row.get("marker_type") == "evidence":
-            marker_data = marker_row.get("data")
-            if marker_data and marker_data.get("packet_ids"):
-                for pid in marker_data["packet_ids"]:
-                    evidence_packet_ids.add(pid)
+    if packet_ids is not None:
+        evidence_packet_ids = set(packet_ids)
+    else:
+        evidence_packet_ids = set()
+        for marker_row in markers:
+            if marker_row.get("marker_type") == "evidence":
+                marker_data = marker_row.get("data")
+                if marker_data and marker_data.get("packet_ids"):
+                    for pid in marker_data["packet_ids"]:
+                        evidence_packet_ids.add(pid)
 
     evidence_packets = []
     for packet_id in sorted(evidence_packet_ids):
@@ -116,23 +128,32 @@ def export_session_bundle(store: PacketStore, session_id: int, output_dir: str |
         }
         return sample, filename
 
-    tar_path = output_path / f"{bundle_name}.tar.gz"
-    with tarfile.open(tar_path, "w:gz") as tar:
-        for packet_row in evidence_packets:
-            sample, filename = _build_sample_entry(packet_row)
-            manifest["samples"].append(sample)
-            data = packet_row["payload"]
-            info = tarfile.TarInfo(name=f"{bundle_name}/{filename}")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
+    file_entries = {}
+    for packet_row in evidence_packets:
+        sample, filename = _build_sample_entry(packet_row)
+        manifest["samples"].append(sample)
+        file_entries[filename] = packet_row["payload"]
 
-        manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8") + b"\n"
-        info = tarfile.TarInfo(name=f"{bundle_name}/manifest.json")
-        info.size = len(manifest_bytes)
-        tar.addfile(info, io.BytesIO(manifest_bytes))
+    manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8") + b"\n"
+    file_entries["manifest.json"] = manifest_bytes
 
-    logger.info(f"Exported provenance bundle: {tar_path} ({len(evidence_packets)} evidence packets, {len(markers)} markers)")
-    return tar_path
+    if bundle_format == "zip":
+        bundle_path = output_path / f"{bundle_name}.zip"
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for filename, data in file_entries.items():
+                zf.writestr(f"{bundle_name}/{filename}", data)
+    else:
+        bundle_path = output_path / f"{bundle_name}.tar.gz"
+        with tarfile.open(bundle_path, "w:gz") as tar:
+            for filename, data in file_entries.items():
+                info = tarfile.TarInfo(name=f"{bundle_name}/{filename}")
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+    logger.info(
+        f"Exported provenance bundle: {bundle_path} ({len(evidence_packets)} evidence packets, {len(markers)} markers)"
+    )
+    return bundle_path
 
 
 class ProtocolVerifier:
@@ -492,5 +513,7 @@ class ProtocolVerifier:
             manifest_file.write("\n")
 
         total = len(session_packets) + len(evidence_packets)
-        logger.info(f"Exported provenance bundle: {target_path} ({total} packets, {len(evidence_packets)} evidence, {len(markers)} markers)")
+        logger.info(
+            f"Exported provenance bundle: {target_path} ({total} packets, {len(evidence_packets)} evidence, {len(markers)} markers)"
+        )
         return target_path

@@ -93,19 +93,25 @@ async def meter_device(device, application, timeout: float = 3.0) -> dict:
     try:
         logger.debug(f"Requesting metering from {device_name} ({device_ip})")
         application.cmc.start_metering(
-            device_ip, device_name, host_ip, host_mac, metering_port,
+            device_ip,
+            device_name,
+            host_ip,
+            host_mac,
+            metering_port,
         )
 
         try:
             await asyncio.wait_for(received.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise RuntimeError(
-                f"No metering response from {device_name} within {timeout}s"
-            )
+            raise RuntimeError(f"No metering response from {device_name} within {timeout}s")
     finally:
         logger.debug(f"Stopping metering for {device_name}")
         application.cmc.stop_metering(
-            device_ip, device_name, host_ip, host_mac, metering_port,
+            device_ip,
+            device_name,
+            host_ip,
+            host_mac,
+            metering_port,
         )
         transport.close()
 

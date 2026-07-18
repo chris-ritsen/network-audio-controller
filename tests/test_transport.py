@@ -9,14 +9,14 @@ from netaudio.dante.transport import DanteMulticastProtocol, DanteUnicastProtoco
 class TestUnicastProtocol:
     def test_extract_transaction_id(self):
         # Build a minimal packet: 4 bytes prefix + 2 bytes transaction_id
-        packet = b'\x27\xFF\x00\x0A' + struct.pack(">H", 0x1234) + b'\x10\x00'
+        packet = b"\x27\xff\x00\x0a" + struct.pack(">H", 0x1234) + b"\x10\x00"
         assert DanteUnicastProtocol._extract_transaction_id(packet) == 0x1234
 
     def test_extract_transaction_id_short_packet(self):
-        assert DanteUnicastProtocol._extract_transaction_id(b'\x00\x01') is None
+        assert DanteUnicastProtocol._extract_transaction_id(b"\x00\x01") is None
 
     def test_extract_transaction_id_empty(self):
-        assert DanteUnicastProtocol._extract_transaction_id(b'') is None
+        assert DanteUnicastProtocol._extract_transaction_id(b"") is None
 
     def test_initial_state(self):
         protocol = DanteUnicastProtocol()
@@ -32,7 +32,7 @@ class TestUnicastProtocol:
         protocol._pending[key] = future
 
         # Build a response with transaction_id = 0x0042
-        response = b'\x27\xFF\x00\x10' + struct.pack(">H", 0x0042) + b'\x10\x02\x00\x01'
+        response = b"\x27\xff\x00\x10" + struct.pack(">H", 0x0042) + b"\x10\x02\x00\x01"
         protocol.datagram_received(response, ("192.168.1.1", 4440))
 
         assert future.done()
@@ -44,7 +44,7 @@ class TestUnicastProtocol:
         protocol = DanteUnicastProtocol()
 
         # No pending futures - should not raise
-        response = b'\x27\xFF\x00\x10' + struct.pack(">H", 0x0042) + b'\x10\x02\x00\x01'
+        response = b"\x27\xff\x00\x10" + struct.pack(">H", 0x0042) + b"\x10\x02\x00\x01"
         protocol.datagram_received(response, ("192.168.1.1", 4440))
 
     def test_connection_lost_cancels_futures(self):
@@ -64,7 +64,7 @@ class TestUnicastProtocol:
     def test_send_fire_and_forget_no_transport(self):
         protocol = DanteUnicastProtocol()
         # Should not raise when transport is None
-        protocol.send_fire_and_forget(b'\x00', ("192.168.1.1", 4440))
+        protocol.send_fire_and_forget(b"\x00", ("192.168.1.1", 4440))
 
     def test_close_no_transport(self):
         protocol = DanteUnicastProtocol()
@@ -80,10 +80,10 @@ class TestMulticastProtocol:
             received.append((data, addr))
 
         protocol = DanteMulticastProtocol(callback)
-        protocol.datagram_received(b'\x00\x01\x02', ("224.0.0.231", 8702))
+        protocol.datagram_received(b"\x00\x01\x02", ("224.0.0.231", 8702))
 
         assert len(received) == 1
-        assert received[0][0] == b'\x00\x01\x02'
+        assert received[0][0] == b"\x00\x01\x02"
         assert received[0][1] == ("224.0.0.231", 8702)
 
     def test_callback_error_handled(self):
@@ -92,7 +92,7 @@ class TestMulticastProtocol:
 
         protocol = DanteMulticastProtocol(bad_callback)
         # Should not propagate the exception
-        protocol.datagram_received(b'\x00', ("224.0.0.231", 8702))
+        protocol.datagram_received(b"\x00", ("224.0.0.231", 8702))
 
     def test_close_no_transport(self):
         protocol = DanteMulticastProtocol(lambda d, a: None)

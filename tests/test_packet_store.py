@@ -76,7 +76,7 @@ class TestStorePacket:
         assert packets[0]["opcode"] == 0x1002
 
     def test_stores_and_decompresses_payload(self, store):
-        pkt = _make_packet(body=b"\xDE\xAD")
+        pkt = _make_packet(body=b"\xde\xad")
         store.store_packet(payload=pkt, source_type="tshark")
         packets = store.get_packets()
         assert packets[0]["payload"] == pkt
