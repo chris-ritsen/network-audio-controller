@@ -61,6 +61,7 @@ NOTIFICATION_NAMES = {
 CONMON_OPCODE_INTERFACE_STATUS = 0x0011
 CONMON_OPCODE_MAKE_MODEL_RESPONSE = 0x00C0
 CONMON_OPCODE_DANTE_MODEL_RESPONSE = 0x0060
+CONMON_OPCODE_SAMPLE_RATE_STATUS = 0x0080
 CONMON_OPCODE_AES67_CURRENT_NEW = 0x1007
 CONMON_AES67_CURRENT_NEW_OFFSET = 0x21
 CONMON_OPCODE_PTP_CLOCK_STATUS = 0x0020
@@ -187,6 +188,23 @@ class DanteNotificationService(DanteMulticastService):
 
     def _notify_aes67_waiter(self, source_ip: str, current: bool | None, configured: bool | None) -> None:
         self._waiters.notify("aes67", source_ip, (current, configured))
+
+    def register_sample_rate_waiter(self, device_ip_address: str) -> asyncio.Event:
+        return self._waiters.register("sample_rate", device_ip_address)
+
+    def unregister_sample_rate_waiter(self, device_ip_address: str) -> None:
+        self._waiters.unregister("sample_rate", device_ip_address)
+
+    def get_sample_rate_result(self, device_ip_address: str) -> tuple[int, list[int]] | None:
+        return self._waiters.take_result("sample_rate", device_ip_address)
+
+    def _notify_sample_rate_waiter(
+        self,
+        source_ip_address: str,
+        current_sample_rate: int,
+        supported_sample_rates: list[int],
+    ) -> None:
+        self._waiters.notify("sample_rate", source_ip_address, (current_sample_rate, supported_sample_rates))
 
     def register_preferred_leader_waiter(self, device_ip: str) -> asyncio.Event:
         return self._waiters.register("preferred_leader", device_ip)
@@ -324,7 +342,13 @@ class DanteNotificationService(DanteMulticastService):
             )
         )
 
-    def _handle_settings_notification(self, data: bytes, source_ip: str) -> None:
+    def _handle_settings_notification(
+        self,
+        data: bytes,
+        source_ip: str,
+        state_applied: bool = False,
+        conmon_response: bool = False,
+    ) -> None:
         device = self._lookup_device(source_ip)
         device_name = device.name if device else ""
         server_name = device.server_name if device else ""
@@ -351,6 +375,8 @@ class DanteNotificationService(DanteMulticastService):
                         "notification_id": notification_id,
                         "notification_name": notification_name,
                         "source_ip": source_ip,
+                        "state_applied": state_applied,
+                        "conmon_response": conmon_response,
                         "raw": data,
                     },
                 )
@@ -365,6 +391,15 @@ class DanteNotificationService(DanteMulticastService):
         if opcode == CONMON_OPCODE_INTERFACE_STATUS:
             self._handle_interface_status(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
+            return True
+        elif opcode == CONMON_OPCODE_SAMPLE_RATE_STATUS:
+            state_applied = self._handle_sample_rate_status(data, source_ip)
+            self._handle_settings_notification(
+                data,
+                source_ip,
+                state_applied=state_applied,
+                conmon_response=True,
+            )
             return True
         elif opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
             self._handle_make_model_response(data, source_ip)
@@ -384,6 +419,49 @@ class DanteNotificationService(DanteMulticastService):
             return True
 
         return False
+
+    def _handle_sample_rate_status(self, data: bytes, source_ip: str) -> bool:
+        from netaudio import core
+
+        try:
+            parsed_response = core.parse_response("sample_rate_status", data)
+        except core.NetaudioCoreError as exception:
+            logger.warning(f"Invalid sample rate status from {source_ip}: {exception}")
+            return False
+
+        current_sample_rate = parsed_response["current_sample_rate"]
+        supported_sample_rates = parsed_response["supported_sample_rates"]
+        self._notify_sample_rate_waiter(source_ip, current_sample_rate, supported_sample_rates)
+        logger.debug(
+            f"Conmon sample_rate_status from {source_ip} ({len(data)}B): "
+            f"current={current_sample_rate} supported={supported_sample_rates}"
+        )
+
+        device = self._lookup_device(source_ip)
+        if device is None:
+            self._cache_pending(
+                source_ip,
+                {
+                    "sample_rate": current_sample_rate,
+                    "supported_sample_rates": supported_sample_rates,
+                },
+            )
+            return True
+        if not device.online:
+            return True
+
+        changed = device.sample_rate != current_sample_rate or device.supported_sample_rates != supported_sample_rates
+        device.sample_rate = current_sample_rate
+        device.supported_sample_rates = supported_sample_rates
+        if changed:
+            self._dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_UPDATED,
+                    device_name=device.name,
+                    server_name=device.server_name,
+                )
+            )
+        return True
 
     def _handle_make_model_response(self, data: bytes, source_ip: str) -> None:
         product_name, product_version, manufacturer = self.parse_make_model_response(data)
@@ -603,7 +681,7 @@ class DanteNotificationService(DanteMulticastService):
     @staticmethod
     def _apply_conmon_data(device, parsed: dict) -> None:
         for field, value in parsed.items():
-            if field == "manufacturer":
+            if field in ("manufacturer", "sample_rate", "supported_sample_rates"):
                 setattr(device, field, value)
             elif not getattr(device, field, None):
                 setattr(device, field, value)
@@ -624,20 +702,17 @@ class DanteNotificationService(DanteMulticastService):
         if len(data) < 0x20:
             return None
 
-        try:
-            magic_pos = data.find(b"Audinate", 4)
+        magic_pos = data.find(b"Audinate", 4)
 
-            if magic_pos < 0:
-                return None
-
-            opcode_pos = magic_pos + 10
-
-            if opcode_pos + 2 > len(data):
-                return None
-
-            return struct.unpack(">H", data[opcode_pos : opcode_pos + 2])[0]
-        except Exception:
+        if magic_pos < 0:
             return None
+
+        opcode_pos = magic_pos + 10
+
+        if opcode_pos + 2 > len(data):
+            return None
+
+        return struct.unpack(">H", data[opcode_pos : opcode_pos + 2])[0]
 
     @staticmethod
     def parse_make_model_response(data: bytes) -> tuple[str, str, str]:

@@ -9,6 +9,7 @@ DEVICE_SCALAR_FIELDS = (
     "model",
     "model_id",
     "sample_rate",
+    "supported_sample_rates",
     "aes67_configured",
     "aes67_current",
     "preferred_leader",

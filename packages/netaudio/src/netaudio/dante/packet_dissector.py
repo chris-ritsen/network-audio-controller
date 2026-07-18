@@ -4,6 +4,8 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from netaudio.dante.debug_formatter import get_subscription_status_name
+
 
 @dataclass
 class Span:
@@ -47,8 +49,6 @@ NANOSECOND_FIELD_NAMES = {
     "min_latency",
     "target_latency",
     "latency",
-    "target_sample_rate",
-    "current_rate",
 }
 
 DECIMAL_FIELD_NAMES = {
@@ -197,8 +197,8 @@ def _format_detail(name: str, raw: bytes, int_val, dtype: str) -> str:
 
 CONMON_MESSAGE_NAMES = {
     0x0060: "dante_model_response",
-    0x0080: "sample_rate_announcement",
-    0x0081: "set_sample_rate",
+    0x0080: "sample_rate_status",
+    0x0081: "sample_rate_control",
     0x0090: "reboot",
     0x0092: "reboot_ack",
     0x00C0: "make_model_response",
@@ -255,7 +255,7 @@ def _humanize_value(name: str, int_val, display: str, dtype: str) -> str:
     if name in NANOSECOND_FIELD_NAMES and dtype in ("uint32_be", "int32_be"):
         return f"{int_val:,} ns ({_format_ns(int_val)})"
 
-    if "sample_rate" in name and dtype in ("uint32_be",) and int_val > 8000:
+    if ("sample_rate" in name or name == "current_rate") and dtype == "uint32_be" and int_val > 8000:
         return f"{int_val:,} ({_format_hz(int_val)})"
 
     return display
@@ -384,16 +384,6 @@ def _build_span(
     )
 
 
-RX_SUBSCRIPTION_STATUS_NAMES = {
-    0x0000: "unsubscribed",
-    0x0001: "idle",
-    0x0002: "in_progress",
-    0x0003: "subscribed",
-    0x0004: "error",
-    0x0005: "rejected",
-}
-
-
 def _get_null_terminated_string(payload: bytes, abs_offset: int) -> str:
     if abs_offset < 0 or abs_offset >= len(payload):
         return ""
@@ -489,7 +479,7 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
             if 8000 <= raw_rate <= 384000:
                 sample_rate = raw_rate
 
-        sub_detail = RX_SUBSCRIPTION_STATUS_NAMES.get(subscription_status, "")
+        subscription_status_detail = get_subscription_status_name(subscription_status)
 
         channel_label = rx_channel_name or str(channel_number)
         subscription_info = ""
@@ -623,7 +613,7 @@ def _dissect_rx_channels_body(payload: bytes, result: DissectedPacket, covered: 
                 name="subscription_status",
                 raw=payload[offset + 14 : offset + 16],
                 value=f"0x{subscription_status:04X}",
-                detail=sub_detail,
+                detail=subscription_status_detail,
                 fact_ref=section_ref,
                 section=section_label,
                 dtype="uint16_be",

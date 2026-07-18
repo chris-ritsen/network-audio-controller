@@ -383,5 +383,13 @@
       "host_mac": "001dc1502368"
     },
     "hex": "120000141234100100000000001dc15023680000"
+  },
+  "probe_sample_rate_packet_4170622": {
+    "spec": {
+      "command": "probe_sample_rate",
+      "host_mac": "3e42274cff24",
+      "sequence": 66
+    },
+    "hex": "ffff0028004200003e42274cff240000417564696e617465073a0081000000640000000000000000"
   }
 }
