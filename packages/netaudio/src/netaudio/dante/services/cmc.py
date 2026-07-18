@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import socket
@@ -12,9 +14,6 @@ logger = logging.getLogger("netaudio")
 
 CMC_PORT = DEVICE_CONTROL_PORT
 
-PROTOCOL_CMC = 0x1200
-CMC_COMMAND_REGISTER = 0x1001
-
 SIOCGIFADDR = 0x8915
 SIOCGIFHWADDR = 0x8927
 
@@ -27,7 +26,7 @@ def _get_mac_for_interface(interface_name: str) -> bytes | None:
 
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack('256s', interface_name.encode()))
+        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack("256s", interface_name.encode()))
         s.close()
         return mac_info[18:24]
     except OSError:
@@ -41,6 +40,7 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
             return mac
 
     from netaudio import core
+
     mac = core.host_mac()
     if mac:
         return mac
@@ -57,10 +57,10 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
             for _, name in socket.if_nameindex():
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    addr_info = fcntl.ioctl(s.fileno(), SIOCGIFADDR, struct.pack('256s', name.encode()))
+                    addr_info = fcntl.ioctl(s.fileno(), SIOCGIFADDR, struct.pack("256s", name.encode()))
                     ip = socket.inet_ntoa(addr_info[20:24])
                     if ip == local_ip:
-                        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack('256s', name.encode()))
+                        mac_info = fcntl.ioctl(s.fileno(), SIOCGIFHWADDR, struct.pack("256s", name.encode()))
                         s.close()
                         return mac_info[18:24]
                     s.close()
@@ -69,11 +69,14 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
 
         if sys.platform == "darwin":
             import subprocess
+
             for interface in ["en0", "en1", "en2", "en3", "en4"]:
                 try:
                     result = subprocess.run(
                         ["ifconfig", interface],
-                        capture_output=True, text=True, timeout=2,
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
                     )
                     if result.returncode != 0:
                         continue
@@ -90,9 +93,10 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
                 except Exception:
                     continue
     except Exception:
-        pass
+        logger.exception("Failed to derive host MAC address from network interfaces")
 
     import uuid
+
     return uuid.getnode().to_bytes(6, "big")
 
 
@@ -106,15 +110,7 @@ class DanteCMCService(DanteUnicastService):
         self._host_mac = _get_host_mac(interface_name)
 
     def _build_registration_packet(self, sequence: int) -> bytes:
-        payload = struct.pack(">H", sequence)
-        payload += struct.pack(">H", CMC_COMMAND_REGISTER)
-        payload += b"\x00" * 4
-        payload += self._host_mac
-        payload += b"\x00\x00"
-
-        length = len(payload) + 4
-        header = struct.pack(">HH", PROTOCOL_CMC, length)
-        return header + payload
+        return self._commands.command_cmc_register(sequence, self._host_mac)
 
     async def register_device(self, device_ip: str) -> bytes | None:
         sequence = self._sequence_counter
@@ -122,7 +118,9 @@ class DanteCMCService(DanteUnicastService):
 
         packet = self._build_registration_packet(sequence)
         response = await self.request(
-            packet, device_ip, CMC_PORT,
+            packet,
+            device_ip,
+            CMC_PORT,
             timeout=1.0,
             logical_command_name="cmc_register",
         )
@@ -138,9 +136,7 @@ class DanteCMCService(DanteUnicastService):
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def start_heartbeat(self, get_device_ips) -> None:
-        self._heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(get_device_ips)
-        )
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(get_device_ips))
 
     async def _heartbeat_loop(self, get_device_ips) -> None:
         while True:
@@ -166,7 +162,12 @@ class DanteCMCService(DanteUnicastService):
         await super().stop()
 
     def start_metering(
-        self, device_ip: str, device_name: str, ipv4, mac, port: int,
+        self,
+        device_ip: str,
+        device_name: str,
+        ipv4,
+        mac,
+        port: int,
     ) -> None:
         command_args = self._commands.command_metering_start(device_name, ipv4, mac, port)
         packet = command_args[0]
@@ -174,7 +175,12 @@ class DanteCMCService(DanteUnicastService):
         self.send(packet, device_ip, target_port)
 
     def stop_metering(
-        self, device_ip: str, device_name: str, ipv4, mac, port: int,
+        self,
+        device_ip: str,
+        device_name: str,
+        ipv4,
+        mac,
+        port: int,
     ) -> None:
         command_args = self._commands.command_metering_stop(device_name, ipv4, mac, port)
         packet = command_args[0]

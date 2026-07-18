@@ -79,8 +79,13 @@ def _parse_time_to_ns(value: str) -> int | None:
 
         today = datetime.date.today()
         target = datetime.datetime(
-            today.year, today.month, today.day,
-            hours, minutes, seconds, microseconds,
+            today.year,
+            today.month,
+            today.day,
+            hours,
+            minutes,
+            seconds,
+            microseconds,
         )
         return int(target.timestamp() * 1e9)
     except (ValueError, IndexError):

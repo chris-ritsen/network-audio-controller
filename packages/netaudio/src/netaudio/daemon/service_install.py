@@ -61,6 +61,20 @@ def spawn_log_path() -> Path:
     return base / "netaudio" / "daemon.log"
 
 
+def _systemd_exec_arg(value: str) -> str:
+    if "\0" in value:
+        raise ValueError("systemd executable path cannot contain NUL")
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("%", "%%")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
 def generate_systemd_unit(executable: str) -> str:
     return (
         "[Unit]\n"
@@ -70,7 +84,7 @@ def generate_systemd_unit(executable: str) -> str:
         "\n"
         "[Service]\n"
         "Type=notify\n"
-        f"ExecStart={executable} daemon run\n"
+        f"ExecStart={_systemd_exec_arg(executable)} daemon run\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"
@@ -267,11 +281,11 @@ def _windows_build_definition(scheduler):
     definition.Triggers.Create(TASK_TRIGGER_LOGON)
     action = definition.Actions.Create(TASK_ACTION_EXEC)
     action.Path = executable_path()
-    action.Arguments = "daemon start"
+    action.Arguments = "daemon run"
     definition.Settings.DisallowStartIfOnBatteries = False
     definition.Settings.StopIfGoingOnBatteries = False
     definition.Settings.StartWhenAvailable = True
-    definition.Settings.ExecutionTimeLimit = "PT5M"
+    definition.Settings.ExecutionTimeLimit = "PT0S"
     return definition
 
 

@@ -6,7 +6,7 @@ import stat
 import struct
 import sys
 import zlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Optional
 
 import typer
@@ -151,13 +151,15 @@ def _parse_sections(data, hdr_len):
             break
         if s_type == 0 and s_ver == 0 and s_off == 0 and s_size == 0:
             continue
-        sections.append({
-            "type": s_type,
-            "type_name": SECTION_TYPES.get(s_type, f"unknown-{s_type}"),
-            "version": f"{(s_ver >> 24) & 0xFF}.{(s_ver >> 16) & 0xFF}.{(s_ver >> 8) & 0xFF}.{s_ver & 0xFF}",
-            "offset": s_off,
-            "size": s_size,
-        })
+        sections.append(
+            {
+                "type": s_type,
+                "type_name": SECTION_TYPES.get(s_type, f"unknown-{s_type}"),
+                "version": f"{(s_ver >> 24) & 0xFF}.{(s_ver >> 16) & 0xFF}.{(s_ver >> 8) & 0xFF}.{s_ver & 0xFF}",
+                "offset": s_off,
+                "size": s_size,
+            }
+        )
     return sections
 
 
@@ -190,25 +192,29 @@ def _scan_for_embedded(data, sec_offset, sec_size):
             fs_size = 0
             if pos + 8 <= len(blob):
                 fs_size = struct.unpack(f"{endian}I", blob[pos + 4 : pos + 8])[0]
-            found.append({
-                "type": label,
-                "offset": abs_off,
-                "section_offset": pos,
-                "size": fs_size,
-                "endian": "big" if endian == ">" else "little",
-            })
+            found.append(
+                {
+                    "type": label,
+                    "offset": abs_off,
+                    "section_offset": pos,
+                    "size": fs_size,
+                    "endian": "big" if endian == ">" else "little",
+                }
+            )
             idx = pos + 1
 
     for needle, label in [(b"Linux version ", "linux-banner")]:
         pos = blob.find(needle)
         if pos != -1:
             banner = _read_str(blob, pos, 200)
-            found.append({
-                "type": label,
-                "offset": sec_offset + pos,
-                "section_offset": pos,
-                "text": banner,
-            })
+            found.append(
+                {
+                    "type": label,
+                    "offset": sec_offset + pos,
+                    "section_offset": pos,
+                    "text": banner,
+                }
+            )
     return found
 
 
@@ -327,15 +333,17 @@ def firmware_info(
     headers = ["dev_id", "fw_ver", "mfg", "product", "model_id", "tx", "rx"]
     rows = []
     for r in results:
-        rows.append([
-            str(r.get("device_type_id", "")),
-            r.get("firmware_version", ""),
-            r.get("manufacturer_header", ""),
-            (r.get("product_name", "") or "")[:30],
-            (r.get("model_id", "") or "")[:20],
-            str(r.get("tx_channel_count", "")),
-            str(r.get("rx_channel_count", "")),
-        ])
+        rows.append(
+            [
+                str(r.get("device_type_id", "")),
+                r.get("firmware_version", ""),
+                r.get("manufacturer_header", ""),
+                (r.get("product_name", "") or "")[:30],
+                (r.get("model_id", "") or "")[:20],
+                str(r.get("tx_channel_count", "")),
+                str(r.get("rx_channel_count", "")),
+            ]
+        )
 
     output_table(headers, rows, json_data=results)
 
@@ -456,8 +464,7 @@ def firmware_db(
                     """INSERT OR REPLACE INTO sections
                        (sha256, idx, type, type_name, version, offset, size)
                        VALUES (?,?,?,?,?,?,?)""",
-                    (sha, idx, sec["type"], sec["type_name"],
-                     sec["version"], sec["offset"], sec["size"]),
+                    (sha, idx, sec["type"], sec["type_name"], sec["version"], sec["offset"], sec["size"]),
                 )
 
             existing.add(sha)
@@ -515,7 +522,10 @@ def firmware_sections(
         firmware_version = data[20:24]
 
         typer.echo(f"File: {file_path} ({len(data):,} bytes)", err=True)
-        typer.echo(f"Device type: {dev_type_id}  Firmware: {firmware_version[0]}.{firmware_version[1]}.{firmware_version[2]}.{firmware_version[3]}  Manufacturer: {_read_str(data, 0x1C, 8)}", err=True)
+        typer.echo(
+            f"Device type: {dev_type_id}  Firmware: {firmware_version[0]}.{firmware_version[1]}.{firmware_version[2]}.{firmware_version[3]}  Manufacturer: {_read_str(data, 0x1C, 8)}",
+            err=True,
+        )
 
         sections = _parse_sections(data, hdr_len)
 
@@ -598,7 +608,9 @@ def firmware_hexdump(
     path: Path = typer.Argument(..., help=".dnt file."),
     offset: int = typer.Option(0, "--offset", help="Start offset in file."),
     length: int = typer.Option(256, "--length", "-l", help="Number of bytes to dump."),
-    section: Optional[int] = typer.Option(None, "--section", "-s", help="Dump from this section index instead of file offset."),
+    section: Optional[int] = typer.Option(
+        None, "--section", "-s", help="Dump from this section index instead of file offset."
+    ),
 ):
     """Hex dump a region of a .dnt file."""
     with open(path, "rb") as f:
@@ -674,37 +686,37 @@ SECTION_ENTRY_FIELDS = [
 
 def _format_value(chunk, kind, endian=">"):
     if kind == "magic":
-        if all(32 <= b < 127 for b in chunk):
+        if all(32 <= byte_value < 127 for byte_value in chunk):
             return f'"{chunk.decode("ascii")}"'
         byte_order = "little" if endian == "<" else "big"
-        val = int.from_bytes(chunk, byte_order)
-        return f"0x{val:0{len(chunk)*2}X}"
+        value = int.from_bytes(chunk, byte_order)
+        return f"0x{value:0{len(chunk) * 2}X}"
     if kind == "u32" and len(chunk) == 4:
-        val = struct.unpack(f"{endian}I", chunk)[0]
-        return f"{val:,} (0x{val:X})"
+        value = struct.unpack(f"{endian}I", chunk)[0]
+        return f"{value:,} (0x{value:X})"
     if kind == "version" and len(chunk) == 4:
         return f"{chunk[0]}.{chunk[1]}.{chunk[2]}.{chunk[3]}"
     if kind == "type" and len(chunk) == 4:
-        val = struct.unpack(f"{endian}I", chunk)[0]
-        name = SECTION_TYPES.get(val, "")
-        return f"{val}" + (f" ({name})" if name else "")
+        value = struct.unpack(f"{endian}I", chunk)[0]
+        name = SECTION_TYPES.get(value, "")
+        return f"{value}" + (f" ({name})" if name else "")
     if kind == "type" and len(chunk) == 1:
         return f"{chunk[0]}"
     if kind == "crc" and len(chunk) == 4:
-        val = struct.unpack(f"{endian}I", chunk)[0]
-        return f"0x{val:08X}"
+        value = struct.unpack(f"{endian}I", chunk)[0]
+        return f"0x{value:08X}"
     if kind == "string":
         end = chunk.find(b"\x00")
         if end == -1:
             end = len(chunk)
         try:
-            s = chunk[:end].decode("ascii")
+            decoded_text = chunk[:end].decode("ascii")
         except UnicodeDecodeError:
-            s = ""
-        while s and ord(s[-1]) < 32:
-            s = s[:-1]
-        if s and _is_printable(s):
-            return f'"{s}"'
+            decoded_text = ""
+        while decoded_text and ord(decoded_text[-1]) < 32:
+            decoded_text = decoded_text[:-1]
+        if decoded_text and _is_printable(decoded_text):
+            return f'"{decoded_text}"'
     return ""
 
 
@@ -758,18 +770,12 @@ def _span_lines(data, file_offset, length, kind, name, dtype, endian=">", field_
             else:
                 row_hex = f"{_COLOR_TYPE}{' '.join(f'{byte:02x}' for byte in row_bytes)}{_RESET}"
             absolute_offset = file_offset + row_offset
-            lines.append(
-                f"  {_COLOR_OFFSET}{absolute_offset:08x}{_RESET}  "
-                f"{row_hex}"
-            )
+            lines.append(f"  {_COLOR_OFFSET}{absolute_offset:08x}{_RESET}  {row_hex}")
     return lines
 
 
 def _section_header(title):
-    return (
-        f"{_COLOR_SECTION}{title}{_RESET}\n"
-        f"{_COLOR_SEPARATOR}{'─' * 90}{_RESET}"
-    )
+    return f"{_COLOR_SECTION}{title}{_RESET}\n{_COLOR_SEPARATOR}{'─' * 90}{_RESET}"
 
 
 def _dissect_uimage(data, abs_off, lines, fi):
@@ -890,7 +896,9 @@ def _dissect_config_section(data, sec_off, sec_size, sec_type, lines, fi):
                 if off + maxlen <= sec_size:
                     s = _read_str(cfg, off, maxlen)
                     if _is_printable(s) and len(s) >= 2:
-                        lines.extend(_span_lines(data, sec_off + off, maxlen, "string", name, f"char[{maxlen}]", field_idx=fi))
+                        lines.extend(
+                            _span_lines(data, sec_off + off, maxlen, "string", name, f"char[{maxlen}]", field_idx=fi)
+                        )
                         fi += 1
                         break
         for tx_base in [0x060C, 0x0634, 0x061C, 0x0644]:
@@ -912,7 +920,9 @@ def _dissect_config_section(data, sec_off, sec_size, sec_type, lines, fi):
                 if off + maxlen <= sec_size:
                     s = _read_str(cfg, off, maxlen)
                     if _is_printable(s) and len(s) >= 2:
-                        lines.extend(_span_lines(data, sec_off + off, maxlen, "string", name, f"char[{maxlen}]", field_idx=fi))
+                        lines.extend(
+                            _span_lines(data, sec_off + off, maxlen, "string", name, f"char[{maxlen}]", field_idx=fi)
+                        )
                         fi += 1
                         break
 
@@ -1051,6 +1061,76 @@ class _CramfsInode:
         return chars
 
 
+class _CramfsExtractionError(ValueError):
+    pass
+
+
+def _validate_cramfs_name(name: str) -> str:
+    if not name:
+        raise _CramfsExtractionError("empty inode name")
+    if "\x00" in name:
+        raise _CramfsExtractionError("inode name contains a NUL byte")
+    if name in (".", ".."):
+        raise _CramfsExtractionError(f"unsafe inode name: {name!r}")
+    if "/" in name or "\\" in name:
+        raise _CramfsExtractionError(f"inode name contains a path separator: {name!r}")
+    if PurePosixPath(name).is_absolute() or PureWindowsPath(name).drive:
+        raise _CramfsExtractionError(f"absolute inode name is not allowed: {name!r}")
+    return name
+
+
+def _decode_cramfs_name(raw_name: bytes) -> str:
+    raw_name = raw_name.rstrip(b"\x00")
+    if b"\x00" in raw_name:
+        raise _CramfsExtractionError("inode name contains a NUL byte")
+    try:
+        name = raw_name.decode("ascii")
+    except UnicodeDecodeError as exception:
+        raise _CramfsExtractionError("inode name is not valid ASCII") from exception
+    return _validate_cramfs_name(name)
+
+
+def _require_cramfs_containment(root: Path, candidate: Path, description: str) -> Path:
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError) as exception:
+        raise _CramfsExtractionError(f"could not resolve {description}: {exception}") from exception
+
+    try:
+        resolved.relative_to(root)
+    except ValueError as exception:
+        raise _CramfsExtractionError(f"{description} escapes extraction root: {candidate}") from exception
+    return resolved
+
+
+def _safe_cramfs_destination(root: Path, components: tuple[str, ...]) -> Path:
+    for component in components:
+        _validate_cramfs_name(component)
+    destination = root.joinpath(*components)
+    _require_cramfs_containment(root, destination, "inode path")
+    return destination
+
+
+def _safe_cramfs_symlink_target(root: Path, destination: Path, target: str) -> str:
+    if not target:
+        raise _CramfsExtractionError(f"empty symlink target for {destination}")
+    if "\x00" in target:
+        raise _CramfsExtractionError(f"symlink target contains a NUL byte: {destination}")
+    posix_target = PurePosixPath(target)
+    has_windows_drive = PureWindowsPath(target).drive or any(PureWindowsPath(part).drive for part in posix_target.parts)
+    if "\\" in target or has_windows_drive:
+        raise _CramfsExtractionError(f"symlink target uses an unsafe platform-specific path: {target!r}")
+
+    if posix_target.is_absolute():
+        candidate = root.joinpath(*posix_target.parts[1:])
+        _require_cramfs_containment(root, candidate, "symlink target")
+        return os.path.relpath(candidate, start=destination.parent)
+
+    candidate = destination.parent.joinpath(*posix_target.parts)
+    _require_cramfs_containment(root, candidate, "symlink target")
+    return target
+
+
 def _cramfs_extract_file(data, inode):
     if inode.size == 0:
         return b""
@@ -1073,56 +1153,105 @@ def _cramfs_extract_file(data, inode):
     return result[: inode.size]
 
 
-def _cramfs_walk(data, inode, path, outdir, verbose=False):
+def _cramfs_walk_directory(data, inode, components, root, verbose, visited):
     if not inode.is_dir():
         return
+
+    directory_key = (inode.data_offset, inode.size)
+    if directory_key in visited:
+        raise _CramfsExtractionError(f"recursive directory inode at offset 0x{inode.data_offset:X}")
+    visited.add(directory_key)
+
     pos = inode.data_offset
     end = pos + inode.size
     while pos + 12 <= end and pos + 12 <= len(data):
         child = _CramfsInode(data, pos)
         pos += 12
         name_bytes = child.namelen * 4
-        if name_bytes > 0 and pos + name_bytes <= len(data):
-            name = data[pos : pos + name_bytes].rstrip(b"\x00").decode("ascii", errors="replace")
+        if name_bytes > 0 and pos + name_bytes <= end and pos + name_bytes <= len(data):
+            name = _decode_cramfs_name(data[pos : pos + name_bytes])
             pos += name_bytes
         else:
-            break
-        if not name:
-            continue
-        full = f"{path}/{name}"
+            raise _CramfsExtractionError(f"invalid inode name length at directory offset 0x{inode.data_offset:X}")
+
+        child_components = (*components, name)
+        full = "/" + "/".join(child_components)
+        dest = _safe_cramfs_destination(root, child_components)
+
         if child.is_dir():
             if verbose:
                 typer.echo(f"{child.mode_str()} {full}/")
-            dest = os.path.join(outdir, full.lstrip("/"))
-            os.makedirs(dest, exist_ok=True)
-            _cramfs_walk(data, child, full, outdir, verbose)
+            if os.path.lexists(dest):
+                raise _CramfsExtractionError(f"duplicate inode path: {full}")
+            try:
+                dest.mkdir()
+            except OSError as exception:
+                raise _CramfsExtractionError(f"could not create directory {full}: {exception}") from exception
+            _cramfs_walk_directory(
+                data,
+                child,
+                child_components,
+                root,
+                verbose,
+                visited,
+            )
         elif child.is_lnk():
             target_data = _cramfs_extract_file(data, child)
-            target = target_data.decode("ascii", errors="replace") if target_data else "?"
-            if verbose:
-                typer.echo(f"{child.mode_str()} {full} -> {target}")
-            dest = os.path.join(outdir, full.lstrip("/"))
+            if target_data is None or len(target_data) != child.size:
+                raise _CramfsExtractionError(f"invalid symlink data for {full}")
             try:
-                if os.path.lexists(dest):
-                    os.unlink(dest)
-                os.symlink(target, dest)
-            except OSError:
-                pass
+                target = target_data.decode("ascii")
+            except UnicodeDecodeError as exception:
+                raise _CramfsExtractionError(f"symlink target is not valid ASCII: {full}") from exception
+            safe_target = _safe_cramfs_symlink_target(root, dest, target)
+            if verbose:
+                typer.echo(f"{child.mode_str()} {full} -> {safe_target}")
+            if os.path.lexists(dest):
+                raise _CramfsExtractionError(f"duplicate inode path: {full}")
+            try:
+                os.symlink(safe_target, dest)
+            except OSError as exception:
+                raise _CramfsExtractionError(f"could not create symlink {full}: {exception}") from exception
         elif child.is_reg():
             fdata = _cramfs_extract_file(data, child)
-            sz = len(fdata) if fdata else 0
+            if fdata is None or len(fdata) != child.size:
+                raise _CramfsExtractionError(f"invalid file data for {full}")
+            sz = len(fdata)
             if verbose:
                 typer.echo(f"{child.mode_str()} {full}  ({child.size} -> {sz} bytes)")
-            if fdata:
-                dest = os.path.join(outdir, full.lstrip("/"))
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with open(dest, "wb") as f:
+            if os.path.lexists(dest):
+                raise _CramfsExtractionError(f"duplicate inode path: {full}")
+            try:
+                with open(dest, "xb") as f:
                     f.write(fdata)
                 if child.mode & 0o111:
                     os.chmod(dest, child.mode & 0o7777)
+            except OSError as exception:
+                raise _CramfsExtractionError(f"could not write file {full}: {exception}") from exception
         else:
             if verbose:
                 typer.echo(f"{child.type_char()} {full}  (special)")
+
+    visited.remove(directory_key)
+
+
+def _cramfs_walk(data, inode, path, outdir, verbose=False):
+    output = Path(outdir)
+    if output.is_symlink():
+        raise _CramfsExtractionError(f"extraction root must not be a symlink: {output}")
+    try:
+        root = output.resolve(strict=True)
+    except (OSError, RuntimeError) as exception:
+        raise _CramfsExtractionError(f"could not resolve extraction root {output}: {exception}") from exception
+    if not root.is_dir():
+        raise _CramfsExtractionError(f"extraction root is not a directory: {root}")
+
+    if path:
+        raw_components = tuple(component for component in path.split("/") if component)
+        components = tuple(_validate_cramfs_name(component) for component in raw_components)
+    else:
+        components = ()
+    _cramfs_walk_directory(data, inode, components, root, verbose, set())
 
 
 def _cramfs_find_file(data, root_inode, target_path):
@@ -1191,11 +1320,50 @@ def _cramfs_to_le(data, cramfs_off, cramfs_size, is_be):
     return bytes(blob)
 
 
+def _prepare_rootfs_output(output: Path, force: bool = False) -> None:
+    output_exists = output.exists() or output.is_symlink()
+    if output_exists and not force:
+        typer.echo(
+            f"Error: output path already exists: {output}. Use --force to replace it.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if output_exists:
+        resolved = output.expanduser().resolve()
+        home = Path.home().resolve()
+        cwd = Path.cwd().resolve()
+        protected_paths = {
+            Path(resolved.anchor),
+            home,
+            cwd,
+            *home.parents,
+            *cwd.parents,
+        }
+        if resolved in protected_paths:
+            typer.echo(f"Error: refusing to replace unsafe output path: {resolved}", err=True)
+            raise typer.Exit(code=1)
+
+        if output.is_symlink() or not output.is_dir():
+            output.unlink()
+        else:
+            import shutil
+
+            shutil.rmtree(output)
+
+    output.mkdir(parents=True, exist_ok=False)
+
+
 @app.command("rootfs")
 def firmware_rootfs(
     path: Path = typer.Argument(..., help=".dnt file containing a CramFS rootfs."),
     output: Path = typer.Argument(..., help="Output directory for extracted filesystem."),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Print each extracted file."),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Delete and replace an existing output path.",
+    ),
 ):
     """Extract the Linux root filesystem from a .dnt firmware image."""
     with open(path, "rb") as f:
@@ -1222,12 +1390,13 @@ def firmware_rootfs(
 
     root = _CramfsInode(cramfs_data, 0x40)
 
-    if output.exists():
-        import shutil
-        shutil.rmtree(output)
-    output.mkdir(parents=True)
+    _prepare_rootfs_output(output, force=force)
 
-    _cramfs_walk(cramfs_data, root, "", str(output), verbose=verbose)
+    try:
+        _cramfs_walk(cramfs_data, root, "", output, verbose=verbose)
+    except _CramfsExtractionError as exception:
+        typer.echo(f"Error: could not safely extract CramFS: {exception}", err=True)
+        raise typer.Exit(code=1) from exception
     typer.echo(f"Extracted to {output}", err=True)
 
 

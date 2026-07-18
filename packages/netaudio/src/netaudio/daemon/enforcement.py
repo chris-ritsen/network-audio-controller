@@ -21,6 +21,8 @@ class EnforcementManager:
         self.shure_desired: dict[str, dict] = {}
         self._socket_server = None
         self._enforce_tasks: dict[str, asyncio.Task] = {}
+        self._command_tasks: set[asyncio.Task] = set()
+        self._listeners_registered = False
         self._running = False
 
     async def start(self):
@@ -29,34 +31,54 @@ class EnforcementManager:
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
 
-        self._socket_server = await asyncio.start_unix_server(
-            self._handle_client, path=SOCKET_PATH
-        )
+        self._socket_server = await asyncio.start_unix_server(self._handle_client, path=SOCKET_PATH)
         os.chmod(SOCKET_PATH, 0o660)
 
-        dispatcher = self.daemon.application.dispatcher
-        dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_event)
-        dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_event)
-        dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_device_event)
-        dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_device_event)
+        self._register_event_listeners()
 
         logger.info("EnforcementManager started")
 
     async def stop(self):
         self._running = False
+        self._unregister_event_listeners()
 
-        for task in self._enforce_tasks.values():
+        tasks = [*self._enforce_tasks.values(), *self._command_tasks]
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._enforce_tasks.clear()
+        self._command_tasks.clear()
 
         if self._socket_server:
             self._socket_server.close()
             await self._socket_server.wait_closed()
+            self._socket_server = None
 
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
 
         logger.info("EnforcementManager stopped")
+
+    def _register_event_listeners(self) -> None:
+        if self._listeners_registered:
+            return
+        dispatcher = self.daemon.application.dispatcher
+        dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_event)
+        dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_device_event)
+        dispatcher.on(EventType.SHURE_DEVICE_UPDATED, self._on_shure_device_event)
+        self._listeners_registered = True
+
+    def _unregister_event_listeners(self) -> None:
+        if not self._listeners_registered:
+            return
+        dispatcher = self.daemon.application.dispatcher
+        dispatcher.off(EventType.DEVICE_DISCOVERED, self._on_device_event)
+        dispatcher.off(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.off(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_device_event)
+        dispatcher.off(EventType.SHURE_DEVICE_UPDATED, self._on_shure_device_event)
+        self._listeners_registered = False
 
     async def _handle_client(self, reader, writer):
         try:
@@ -75,13 +97,13 @@ class EnforcementManager:
                 writer.write(json.dumps(error).encode("utf-8"))
                 await writer.drain()
             except Exception:
-                pass
+                logger.exception("Failed to send enforcement error response")
         finally:
             writer.close()
             try:
                 await writer.wait_closed()
             except Exception:
-                pass
+                logger.exception("Failed to close enforcement client connection")
 
     def _process_request(self, request):
         handlers = {
@@ -122,10 +144,7 @@ class EnforcementManager:
         else:
             subs[rx_channel] = None
 
-        logger.info(
-            f"Enforcement rule: subscription {tx_device}:{tx_channel} -> "
-            f"{rx_device}:{rx_channel} ({state})"
-        )
+        logger.info(f"Enforcement rule: subscription {tx_device}:{tx_channel} -> {rx_device}:{rx_channel} ({state})")
 
         self._schedule_enforce(rx_device)
         return {"status": "accepted", "message": "State change queued for enforcement"}
@@ -153,8 +172,7 @@ class EnforcementManager:
         names[f"{channel_type}:{channel_number}"] = channel_name
 
         logger.info(
-            f"Enforcement rule: channel name {device} "
-            f"{channel_type.upper()} {channel_number} -> '{channel_name}'"
+            f"Enforcement rule: channel name {device} {channel_type.upper()} {channel_number} -> '{channel_name}'"
         )
 
         self._schedule_enforce(device)
@@ -169,10 +187,7 @@ class EnforcementManager:
         if device in self.desired_states and "channel_names" in self.desired_states[device]:
             self.desired_states[device]["channel_names"].pop(key, None)
 
-        logger.info(
-            f"Enforcement rule removed: channel name {device} "
-            f"{channel_type.upper()} {channel_number}"
-        )
+        logger.info(f"Enforcement rule removed: channel name {device} {channel_type.upper()} {channel_number}")
         return {"status": "accepted", "message": "Channel name rule removed"}
 
     def _req_set_device_name(self, request):
@@ -182,9 +197,7 @@ class EnforcementManager:
         device_names = self.desired_states.setdefault("device_names", {})
         device_names[device_identifier] = target_name
 
-        logger.info(
-            f"Enforcement rule: device name {device_identifier} -> '{target_name}'"
-        )
+        logger.info(f"Enforcement rule: device name {device_identifier} -> '{target_name}'")
 
         self._schedule_enforce_all()
         return {"status": "accepted", "message": "Device name change queued for enforcement"}
@@ -301,7 +314,22 @@ class EnforcementManager:
         return {"status": "accepted", "message": "Command sent"}
 
     def _schedule_shure_command(self, mac, settings):
-        asyncio.create_task(self._execute_shure_command(mac, settings))
+        if not self._running:
+            return
+        task = asyncio.create_task(
+            self._execute_shure_command(mac, settings),
+            name=f"enforcement-shure-command:{mac}",
+        )
+        self._command_tasks.add(task)
+        task.add_done_callback(self._command_task_done)
+
+    def _command_task_done(self, task: asyncio.Task) -> None:
+        self._command_tasks.discard(task)
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is not None:
+            logger.error("Shure enforcement command failed", exc_info=exception)
 
     async def _execute_shure_command(self, mac, settings):
         shure = self.daemon.shure
@@ -360,14 +388,14 @@ class EnforcementManager:
     # ── Scheduling ──
 
     def _schedule_enforce(self, device_name, delay=ENFORCE_DELAY):
+        if not self._running:
+            return
         key = f"dante:{device_name}"
         existing = self._enforce_tasks.pop(key, None)
         if existing and not existing.done():
             existing.cancel()
 
-        self._enforce_tasks[key] = asyncio.create_task(
-            self._delayed_enforce(device_name, delay)
-        )
+        self._enforce_tasks[key] = asyncio.create_task(self._delayed_enforce(device_name, delay))
 
     def _schedule_enforce_all(self, delay=ENFORCE_DELAY):
         for device in self.daemon.application.devices.values():
@@ -375,14 +403,14 @@ class EnforcementManager:
                 self._schedule_enforce(device.name, delay)
 
     def _schedule_shure_enforce(self, mac, delay=ENFORCE_DELAY):
+        if not self._running:
+            return
         key = f"shure:{mac}"
         existing = self._enforce_tasks.pop(key, None)
         if existing and not existing.done():
             existing.cancel()
 
-        self._enforce_tasks[key] = asyncio.create_task(
-            self._delayed_shure_enforce(mac, delay)
-        )
+        self._enforce_tasks[key] = asyncio.create_task(self._delayed_shure_enforce(mac, delay))
 
     def _schedule_shure_enforce_all(self, delay=ENFORCE_DELAY):
         if not hasattr(self.daemon, "shure") or not self.daemon.shure:
@@ -492,10 +520,7 @@ class EnforcementManager:
         if device.sample_rate == target_rate:
             return
 
-        logger.info(
-            f"Enforcing sample rate on {device.name}: "
-            f"{device.sample_rate} -> {target_rate}"
-        )
+        logger.info(f"Enforcing sample rate on {device.name}: {device.sample_rate} -> {target_rate}")
         try:
             await device.operations.set_sample_rate(target_rate)
         except Exception as exc:
@@ -532,10 +557,7 @@ class EnforcementManager:
             try:
                 await device.operations.set_channel_name(channel_type, ch_num, target_name)
             except Exception as exc:
-                logger.warning(
-                    f"Failed to set channel name {device.name} "
-                    f"{channel_type} {ch_num}: {exc}"
-                )
+                logger.warning(f"Failed to set channel name {device.name} {channel_type} {ch_num}: {exc}")
 
     async def _enforce_subscriptions(self, device):
         desired = self.desired_states.get(device.name, {})
@@ -562,10 +584,7 @@ class EnforcementManager:
             if desired_tx:
                 tx_dev_name, tx_ch_name = desired_tx.split(":", 1)
 
-                logger.info(
-                    f"Enforcing subscription on {device.name}: "
-                    f"{rx_channel_name} <- {desired_tx}"
-                )
+                logger.info(f"Enforcing subscription on {device.name}: {rx_channel_name} <- {desired_tx}")
 
                 rx_ch_obj = None
                 for ch in (device.rx_channels or {}).values():
@@ -585,13 +604,10 @@ class EnforcementManager:
 
                 if rx_ch_obj and tx_ch_obj and tx_dev_obj:
                     try:
-                        await device.operations.add_subscription(
-                            rx_ch_obj, tx_ch_obj, tx_dev_obj
-                        )
+                        await device.operations.add_subscription(rx_ch_obj, tx_ch_obj, tx_dev_obj)
                     except Exception as exc:
                         logger.warning(
-                            f"Failed to add subscription {device.name}:"
-                            f"{rx_channel_name} <- {desired_tx}: {exc}"
+                            f"Failed to add subscription {device.name}:{rx_channel_name} <- {desired_tx}: {exc}"
                         )
                 else:
                     missing = []
@@ -606,10 +622,7 @@ class EnforcementManager:
                 if not current_tx:
                     continue
 
-                logger.info(
-                    f"Enforcing disconnection on {device.name}: "
-                    f"{rx_channel_name} (was {current_tx})"
-                )
+                logger.info(f"Enforcing disconnection on {device.name}: {rx_channel_name} (was {current_tx})")
 
                 rx_ch_obj = None
                 for ch in (device.rx_channels or {}).values():
@@ -621,10 +634,7 @@ class EnforcementManager:
                     try:
                         await device.operations.remove_subscription(rx_ch_obj)
                     except Exception as exc:
-                        logger.warning(
-                            f"Failed to remove subscription {device.name}:"
-                            f"{rx_channel_name}: {exc}"
-                        )
+                        logger.warning(f"Failed to remove subscription {device.name}:{rx_channel_name}: {exc}")
 
     # ── Shure enforcement ──
 

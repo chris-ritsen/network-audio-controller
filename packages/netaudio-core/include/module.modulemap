@@ -1,0 +1,4 @@
+module netaudio_core {
+    header "netaudio_core.h"
+    export *
+}

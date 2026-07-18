@@ -103,16 +103,23 @@ class ShureDeviceInfo:
             "name": self.name,
         }
 
-        for attr in ("model", "firmware_version", "rf_band", "transmission_mode",
-                      "quadversity_mode", "encryption_mode", "dante_mac"):
-            val = getattr(self, attr)
-            if val is not None:
-                result[attr] = val
+        optional_values = {
+            "model": self.model,
+            "firmware_version": self.firmware_version,
+            "rf_band": self.rf_band,
+            "transmission_mode": self.transmission_mode,
+            "quadversity_mode": self.quadversity_mode,
+            "encryption_mode": self.encryption_mode,
+            "dante_mac": self.dante_mac,
+        }
+        for field_name, field_value in optional_values.items():
+            if field_value is not None:
+                result[field_name] = field_value
 
         if self.channels:
             result["channels"] = {}
-            for num, ch in sorted(self.channels.items()):
-                result["channels"][num] = _channel_to_json(ch)
+            for channel_number, channel in sorted(self.channels.items()):
+                result["channels"][channel_number] = _channel_to_json(channel)
 
         return result
 
@@ -123,19 +130,29 @@ def _channel_to_json(channel):
     return _p10t_channel_to_json(channel)
 
 
-def _ad4d_channel_to_json(ch: ShureChannel):
-    result = {"name": ch.name, "active": ch.active}
+def _ad4d_channel_to_json(channel: ShureChannel):
+    result: dict[str, object] = {"name": channel.name, "active": channel.active}
 
-    for attr in ("frequency", "audio_gain", "audio_mute", "audio_level_peak",
-                  "audio_level_rms", "signal_quality", "antenna_status",
-                  "encryption_status", "interference_status", "fd_mode", "group_channel"):
-        val = getattr(ch, attr)
-        if val is not None and val is not False:
-            result[attr] = val
+    optional_values = {
+        "frequency": channel.frequency,
+        "audio_gain": channel.audio_gain,
+        "audio_mute": channel.audio_mute,
+        "audio_level_peak": channel.audio_level_peak,
+        "audio_level_rms": channel.audio_level_rms,
+        "signal_quality": channel.signal_quality,
+        "antenna_status": channel.antenna_status,
+        "encryption_status": channel.encryption_status,
+        "interference_status": channel.interference_status,
+        "fd_mode": channel.fd_mode,
+        "group_channel": channel.group_channel,
+    }
+    for field_name, field_value in optional_values.items():
+        if field_value is not None and field_value is not False:
+            result[field_name] = field_value
 
-    if ch.transmitter and ch.transmitter.connected:
-        tx = ch.transmitter
-        tx_json = {"model": tx.model}
+    if channel.transmitter and channel.transmitter.connected:
+        tx = channel.transmitter
+        tx_json: dict[str, object] = {"model": tx.model}
         if tx.device_id:
             tx_json["device_id"] = tx.device_id
         if tx.battery_hours is not None:
@@ -160,15 +177,23 @@ def _ad4d_channel_to_json(ch: ShureChannel):
     return result
 
 
-def _p10t_channel_to_json(ch: ShureP10TChannel):
-    result = {"name": ch.name}
+def _p10t_channel_to_json(channel: ShureP10TChannel):
+    result: dict[str, object] = {"name": channel.name}
 
-    for attr in ("frequency", "audio_in_level", "audio_in_level_l", "audio_in_level_r",
-                  "rf_tx_level", "rf_mute", "audio_tx_mode", "audio_in_line_level",
-                  "group_channel"):
-        val = getattr(ch, attr)
-        if val is not None and val is not False:
-            result[attr] = val
+    optional_values = {
+        "frequency": channel.frequency,
+        "audio_in_level": channel.audio_in_level,
+        "audio_in_level_l": channel.audio_in_level_l,
+        "audio_in_level_r": channel.audio_in_level_r,
+        "rf_tx_level": channel.rf_tx_level,
+        "rf_mute": channel.rf_mute,
+        "audio_tx_mode": channel.audio_tx_mode,
+        "audio_in_line_level": channel.audio_in_line_level,
+        "group_channel": channel.group_channel,
+    }
+    for field_name, field_value in optional_values.items():
+        if field_value is not None and field_value is not False:
+            result[field_name] = field_value
 
     return result
 
@@ -180,92 +205,91 @@ def _safe_int(value, default=None):
         return default
 
 
-def parse_ad4d(raw: dict, ip: str, mac: str) -> ShureDeviceInfo:
+def parse_ad4d(raw_response: dict, ip: str, mac: str) -> ShureDeviceInfo:
     device = ShureDeviceInfo(
         ip=ip,
         mac=mac,
         device_type=ShureDeviceType.ad4d,
-        name=raw.get("DEVICE_ID", ""),
-        model=raw.get("MODEL"),
-        firmware_version=raw.get("FW_VER"),
-        rf_band=raw.get("RF_BAND"),
-        transmission_mode=raw.get("TRANSMISSION_MODE"),
-        quadversity_mode=raw.get("QUADVERSITY_MODE"),
-        encryption_mode=raw.get("ENCRYPTION_MODE"),
+        name=raw_response.get("DEVICE_ID", ""),
+        model=raw_response.get("MODEL"),
+        firmware_version=raw_response.get("FW_VER"),
+        rf_band=raw_response.get("RF_BAND"),
+        transmission_mode=raw_response.get("TRANSMISSION_MODE"),
+        quadversity_mode=raw_response.get("QUADVERSITY_MODE"),
+        encryption_mode=raw_response.get("ENCRYPTION_MODE"),
     )
 
-    for ch_num in (1, 2, 3, 4):
-        ch_data = raw.get(ch_num, {})
-        if not ch_data:
+    for channel_number in (1, 2, 3, 4):
+        channel_data = raw_response.get(channel_number, {})
+        if not channel_data:
             continue
 
         tx = ShureTransmitter(
-            model=ch_data.get("TX_MODEL"),
-            device_id=ch_data.get("TX_DEVICE_ID") or None,
-            battery_minutes=_safe_int(ch_data.get("TX_BATT_MINS")),
-            battery_type=BatteryType(ch_data["TX_BATT_TYPE"]) if ch_data.get("TX_BATT_TYPE") in BatteryType._value2member_map_ else None,
-            battery_charge_percent=_safe_int(ch_data.get("TX_BATT_CHARGE_PERCENT")),
-            battery_bars=_safe_int(ch_data.get("TX_BATT_BARS")),
-            battery_cycle_count=_safe_int(ch_data.get("TX_BATT_CYCLE_COUNT")),
-            battery_temp_f=_safe_int(ch_data.get("TX_BATT_TEMP_F")),
-            power_level=_safe_int(ch_data.get("TX_POWER_LEVEL")),
-            mute_status=ch_data.get("TX_MUTE_MODE_STATUS"),
+            model=channel_data.get("TX_MODEL"),
+            device_id=channel_data.get("TX_DEVICE_ID") or None,
+            battery_minutes=_safe_int(channel_data.get("TX_BATT_MINS")),
+            battery_type=BatteryType(channel_data["TX_BATT_TYPE"])
+            if channel_data.get("TX_BATT_TYPE") in BatteryType._value2member_map_
+            else None,
+            battery_charge_percent=_safe_int(channel_data.get("TX_BATT_CHARGE_PERCENT")),
+            battery_bars=_safe_int(channel_data.get("TX_BATT_BARS")),
+            battery_cycle_count=_safe_int(channel_data.get("TX_BATT_CYCLE_COUNT")),
+            battery_temp_f=_safe_int(channel_data.get("TX_BATT_TEMP_F")),
+            power_level=_safe_int(channel_data.get("TX_POWER_LEVEL")),
+            mute_status=channel_data.get("TX_MUTE_MODE_STATUS"),
         )
 
-        freq_raw = ch_data.get("FREQUENCY")
-        freq = _safe_int(freq_raw)
-        if freq and freq > 100000:
-            freq = freq
+        frequency = _safe_int(channel_data.get("FREQUENCY"))
 
         channel = ShureChannel(
-            number=ch_num,
-            name=ch_data.get("CHAN_NAME"),
-            frequency=freq,
-            audio_gain=_safe_int(ch_data.get("AUDIO_GAIN")),
-            audio_mute=ch_data.get("AUDIO_MUTE") == "ON",
-            audio_level_peak=_safe_int(ch_data.get("AUDIO_LEVEL_PEAK")),
-            audio_level_rms=_safe_int(ch_data.get("AUDIO_LEVEL_RMS")),
-            signal_quality=_safe_int(ch_data.get("CHAN_QUALITY")),
-            antenna_status=ch_data.get("ANTENNA_STATUS"),
-            encryption_status=ch_data.get("ENCRYPTION_STATUS"),
-            interference_status=ch_data.get("INTERFERENCE_STATUS"),
-            fd_mode=ch_data.get("FD_MODE") == "ON",
-            group_channel=ch_data.get("GROUP_CHANNEL"),
+            number=channel_number,
+            name=channel_data.get("CHAN_NAME"),
+            frequency=frequency,
+            audio_gain=_safe_int(channel_data.get("AUDIO_GAIN")),
+            audio_mute=channel_data.get("AUDIO_MUTE") == "ON",
+            audio_level_peak=_safe_int(channel_data.get("AUDIO_LEVEL_PEAK")),
+            audio_level_rms=_safe_int(channel_data.get("AUDIO_LEVEL_RMS")),
+            signal_quality=_safe_int(channel_data.get("CHAN_QUALITY")),
+            antenna_status=channel_data.get("ANTENNA_STATUS"),
+            encryption_status=channel_data.get("ENCRYPTION_STATUS"),
+            interference_status=channel_data.get("INTERFERENCE_STATUS"),
+            fd_mode=channel_data.get("FD_MODE") == "ON",
+            group_channel=channel_data.get("GROUP_CHANNEL"),
             transmitter=tx,
         )
 
-        device.channels[ch_num] = channel
+        device.channels[channel_number] = channel
 
     return device
 
 
-def parse_p10t(raw: dict, ip: str, mac: str) -> ShureDeviceInfo:
+def parse_p10t(raw_response: dict, ip: str, mac: str) -> ShureDeviceInfo:
     device = ShureDeviceInfo(
         ip=ip,
         mac=mac,
         device_type=ShureDeviceType.p10t,
-        name=raw.get("DEVICE_NAME", ""),
+        name=raw_response.get("DEVICE_NAME", ""),
     )
 
-    for ch_num in (1, 2):
-        ch_data = raw.get(ch_num, {})
-        if not ch_data:
+    for channel_number in (1, 2):
+        channel_data = raw_response.get(channel_number, {})
+        if not channel_data:
             continue
 
         channel = ShureP10TChannel(
-            number=ch_num,
-            name=ch_data.get("CHAN_NAME"),
-            frequency=_safe_int(ch_data.get("FREQUENCY")),
-            audio_in_level=_safe_int(ch_data.get("AUDIO_IN_LVL")),
-            audio_in_level_l=_safe_int(ch_data.get("AUDIO_IN_LVL_L")),
-            audio_in_level_r=_safe_int(ch_data.get("AUDIO_IN_LVL_R")),
-            rf_tx_level=_safe_int(ch_data.get("RF_TX_LVL")),
-            rf_mute=ch_data.get("RF_MUTE") == "1",
-            audio_tx_mode=_safe_int(ch_data.get("AUDIO_TX_MODE")),
-            audio_in_line_level=_safe_int(ch_data.get("AUDIO_IN_LINE_LVL")),
-            group_channel=ch_data.get("GROUP_CHAN"),
+            number=channel_number,
+            name=channel_data.get("CHAN_NAME"),
+            frequency=_safe_int(channel_data.get("FREQUENCY")),
+            audio_in_level=_safe_int(channel_data.get("AUDIO_IN_LVL")),
+            audio_in_level_l=_safe_int(channel_data.get("AUDIO_IN_LVL_L")),
+            audio_in_level_r=_safe_int(channel_data.get("AUDIO_IN_LVL_R")),
+            rf_tx_level=_safe_int(channel_data.get("RF_TX_LVL")),
+            rf_mute=channel_data.get("RF_MUTE") == "1",
+            audio_tx_mode=_safe_int(channel_data.get("AUDIO_TX_MODE")),
+            audio_in_line_level=_safe_int(channel_data.get("AUDIO_IN_LINE_LVL")),
+            group_channel=channel_data.get("GROUP_CHAN"),
         )
 
-        device.channels[ch_num] = channel
+        device.channels[channel_number] = channel
 
     return device

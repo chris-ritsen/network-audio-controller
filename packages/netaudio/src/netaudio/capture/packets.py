@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import struct
 
 
@@ -17,6 +18,8 @@ ARC_PROTOCOLS = (0x27FF, 0x2809)
 
 _FACT_LABEL_CACHE: dict[str, str] | None = None
 
+logger = logging.getLogger("netaudio")
+
 
 def _load_fact_labels() -> dict[str, str]:
     global _FACT_LABEL_CACHE
@@ -26,6 +29,7 @@ def _load_fact_labels() -> dict[str, str]:
     _FACT_LABEL_CACHE = {}
     try:
         from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
+
         if DEFAULT_FACTS_PATH.exists():
             for fact in list_facts(DEFAULT_FACTS_PATH):
                 category = fact["category"]
@@ -38,7 +42,7 @@ def _load_fact_labels() -> dict[str, str]:
                 elif category == "multicast_announcement":
                     _FACT_LABEL_CACHE[f"multicast:{key}"] = name
     except Exception:
-        pass
+        logger.exception("Failed to load capture fact labels")
 
     return _FACT_LABEL_CACHE
 
@@ -146,6 +150,7 @@ def _print_packet_table_header():
         f"{'Type':>10s}  {'Size':>6s}  {'Info'}"
     )
     from netaudio.common.app_config import settings as app_settings
+
     separator = "-" if app_settings.no_color else "─"
     print("  " + separator * (76 + PACKET_ENDPOINT_WIDTH * 2))
 

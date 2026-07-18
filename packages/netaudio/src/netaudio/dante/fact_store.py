@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import tarfile
 import time
@@ -34,19 +36,23 @@ def get_confidence(fact: dict) -> str:
 
 
 def _append_confidence(fact: dict, level: str):
-    fact.setdefault("confidence_log", []).append({
-        "level": level,
-        "timestamp_ns": time.time_ns(),
-    })
+    fact.setdefault("confidence_log", []).append(
+        {
+            "level": level,
+            "timestamp_ns": time.time_ns(),
+        }
+    )
     fact.pop("confidence", None)
 
 
 def _migrate_confidence(fact: dict):
     if "confidence" in fact and "confidence_log" not in fact:
-        fact["confidence_log"] = [{
-            "level": fact.pop("confidence"),
-            "timestamp_ns": fact.get("added_ns", time.time_ns()),
-        }]
+        fact["confidence_log"] = [
+            {
+                "level": fact.pop("confidence"),
+                "timestamp_ns": fact.get("added_ns", time.time_ns()),
+            }
+        ]
 
 
 def add_fact(
@@ -110,12 +116,14 @@ def add_fact(
         if existing_confidence_log:
             fact["confidence_log"] = existing_confidence_log + fact["confidence_log"]
         fact["history"] = existing.get("history", [])
-        fact["history"].append({
-            "replaced_ns": time.time_ns(),
-            "previous_name": existing.get("name"),
-            "previous_confidence": get_confidence(existing),
-            "previous_note": existing.get("note"),
-        })
+        fact["history"].append(
+            {
+                "replaced_ns": time.time_ns(),
+                "previous_name": existing.get("name"),
+                "previous_confidence": get_confidence(existing),
+                "previous_note": existing.get("note"),
+            }
+        )
 
     data["facts"][fk] = fact
     _save_facts(data, path)
@@ -156,13 +164,15 @@ def update_fact(
 
     _migrate_confidence(fact)
 
-    fact.setdefault("history", []).append({
-        "replaced_ns": time.time_ns(),
-        "previous_name": fact.get("name"),
-        "previous_confidence": get_confidence(fact),
-        "previous_note": fact.get("note"),
-        "action": "updated",
-    })
+    fact.setdefault("history", []).append(
+        {
+            "replaced_ns": time.time_ns(),
+            "previous_name": fact.get("name"),
+            "previous_confidence": get_confidence(fact),
+            "previous_note": fact.get("note"),
+            "action": "updated",
+        }
+    )
 
     if name is not None:
         fact["name"] = name
@@ -240,12 +250,14 @@ def disprove_fact(
 
     _migrate_confidence(fact)
 
-    fact.setdefault("history", []).append({
-        "replaced_ns": time.time_ns(),
-        "previous_confidence": get_confidence(fact),
-        "previous_note": fact.get("note"),
-        "action": "disproved",
-    })
+    fact.setdefault("history", []).append(
+        {
+            "replaced_ns": time.time_ns(),
+            "previous_confidence": get_confidence(fact),
+            "previous_note": fact.get("note"),
+            "action": "disproved",
+        }
+    )
 
     _append_confidence(fact, "disproved")
 
@@ -283,12 +295,14 @@ def reinstate_fact(
 
     _migrate_confidence(fact)
 
-    fact.setdefault("history", []).append({
-        "replaced_ns": time.time_ns(),
-        "previous_confidence": get_confidence(fact),
-        "previous_note": fact.get("note"),
-        "action": "reinstated",
-    })
+    fact.setdefault("history", []).append(
+        {
+            "replaced_ns": time.time_ns(),
+            "previous_confidence": get_confidence(fact),
+            "previous_note": fact.get("note"),
+            "action": "reinstated",
+        }
+    )
 
     _append_confidence(fact, confidence)
     if note is not None:
@@ -377,12 +391,13 @@ def _find_bundle(provenance_dir: Path, session_ref: str) -> Path | None:
     if dir_path.is_dir() and (dir_path / "manifest.json").exists():
         return dir_path
 
-    tar_path = provenance_dir / f"{session_ref}.tar.gz"
-    if tar_path.exists():
-        return tar_path
+    for extension in [".tar.gz", ".zip"]:
+        archive_path = provenance_dir / f"{session_ref}{extension}"
+        if archive_path.exists():
+            return archive_path
 
     for item in provenance_dir.iterdir():
-        name = item.name.replace(".tar.gz", "")
+        name = item.name.replace(".tar.gz", "").replace(".zip", "")
         if session_ref in name:
             if item.is_dir() and (item / "manifest.json").exists():
                 return item
@@ -393,10 +408,19 @@ def _find_bundle(provenance_dir: Path, session_ref: str) -> Path | None:
 
 
 def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
+    import zipfile
+
     manifest = {}
     files = {}
 
-    if bundle_path.suffix == ".gz" and bundle_path.stem.endswith(".tar"):
+    if bundle_path.suffix == ".zip":
+        with zipfile.ZipFile(bundle_path, "r") as zf:
+            for name in zf.namelist():
+                if name.endswith("manifest.json"):
+                    manifest = json.loads(zf.read(name))
+                elif name.endswith(".bin"):
+                    files[Path(name).name] = zf.read(name)
+    elif bundle_path.suffix == ".gz" and bundle_path.stem.endswith(".tar"):
         with tarfile.open(bundle_path, "r:gz") as tar:
             for member in tar.getmembers():
                 if member.name.endswith("manifest.json"):
@@ -445,7 +469,9 @@ def _extract_field_value(payload: bytes, field: dict) -> tuple[object, str]:
         value = raw.hex()
 
     if isinstance(value, int) and dtype in ("uint16_be", "uint32_be", "uint8"):
-        display = f"0x{value:04X}" if dtype == "uint16_be" else f"0x{value:08X}" if dtype == "uint32_be" else f"0x{value:02X}"
+        display = (
+            f"0x{value:04X}" if dtype == "uint16_be" else f"0x{value:08X}" if dtype == "uint32_be" else f"0x{value:02X}"
+        )
     else:
         display = str(value)
 

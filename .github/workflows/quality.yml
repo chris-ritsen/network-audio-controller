@@ -1,0 +1,156 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  python-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - run: cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
+      - run: uv sync --python ${{ matrix.python-version }} --all-groups
+      - run: uv run --python ${{ matrix.python-version }} pytest -q
+
+  native-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cbindgen@0.29.4
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --python 3.9 --all-groups
+      - run: uv lock --check
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: >-
+          cbindgen --verify --config packages/netaudio-core/cbindgen.toml
+          --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h
+          packages/netaudio-core
+      - run: cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
+
+  installed-wheel:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux
+            architecture: x86_64
+            manylinux-image: quay.io/pypa/manylinux_2_28_x86_64:latest
+            library: packages/netaudio-core/target/release/libnetaudio_core.so
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            architecture: aarch64
+            manylinux-image: quay.io/pypa/manylinux_2_28_aarch64:latest
+            library: packages/netaudio-core/target/release/libnetaudio_core.so
+          - runner: macos-15
+            platform: macos
+            architecture: arm64
+            library: packages/netaudio-core/target/release/libnetaudio_core.dylib
+          - runner: macos-15-intel
+            platform: macos
+            architecture: x86_64
+            library: packages/netaudio-core/target/release/libnetaudio_core.dylib
+          - runner: windows-latest
+            platform: windows
+            architecture: x86_64
+            library: packages/netaudio-core/target/release/netaudio_core.dll
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - if: matrix.platform == 'linux'
+        name: Build at the manylinux 2.28 compatibility floor
+        shell: bash
+        run: |
+          docker run --pull always --rm \
+            --volume "$PWD:/project" --workdir /project \
+            "${{ matrix.manylinux-image }}" /bin/bash -euxo pipefail -c '
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+              export PATH="$HOME/.cargo/bin:/opt/python/cp39-cp39/bin:$PATH"
+              python -m pip install --disable-pip-version-check uv auditwheel
+              uv build --wheel
+              wheel=(dist/*.whl)
+              test "${#wheel[@]}" -eq 1
+              auditwheel show "${wheel[0]}"
+            '
+      - if: matrix.platform != 'linux'
+        run: uv build --wheel
+      - shell: bash
+        run: |
+          wheel=(dist/*.whl)
+          if [ "${#wheel[@]}" -ne 1 ]; then
+            echo "expected exactly one wheel in dist, found ${#wheel[@]}" >&2
+            exit 1
+          fi
+          python scripts/verify_wheel_artifact.py "${wheel[0]}" \
+            --platform "${{ matrix.platform }}" --architecture "${{ matrix.architecture }}"
+          for python_version in 3.9 3.10 3.11 3.12 3.13; do
+            uv run --isolated --no-project --python "$python_version" \
+              python scripts/smoke_wheel_install.py "${wheel[0]}"
+          done
+      - run: python scripts/check_native_abi.py "${{ matrix.library }}"
+      - if: matrix.platform == 'linux' || matrix.platform == 'macos'
+        name: Compile and link the public C example
+        shell: bash
+        run: |
+          cc -Wall -Wextra -Werror \
+            -Ipackages/netaudio-core/include packages/netaudio-core/examples/rename_channel.c \
+            -Lpackages/netaudio-core/target/release -lnetaudio_core -o "$RUNNER_TEMP/netaudio-c-example"
+          set +e
+          LD_LIBRARY_PATH="packages/netaudio-core/target/release:${LD_LIBRARY_PATH:-}" \
+          DYLD_LIBRARY_PATH="packages/netaudio-core/target/release:${DYLD_LIBRARY_PATH:-}" \
+            "$RUNNER_TEMP/netaudio-c-example"
+          status=$?
+          set -e
+          test "$status" -eq 2
+      - if: matrix.platform == 'windows'
+        name: Compile and link the public C example
+        shell: pwsh
+        run: |
+          cl /nologo /W4 "/Ipackages/netaudio-core/include" `
+            packages/netaudio-core/examples/rename_channel.c `
+            "/Fe:$env:RUNNER_TEMP/netaudio-c-example.exe" `
+            /link "/LIBPATH:packages/netaudio-core/target/release" netaudio_core.dll.lib
+          $env:PATH = "$(Resolve-Path packages/netaudio-core/target/release);$env:PATH"
+          & "$env:RUNNER_TEMP/netaudio-c-example.exe"
+          if ($LASTEXITCODE -ne 2) {
+            throw "C example returned $LASTEXITCODE, expected its no-arguments status 2"
+          }
+      - if: matrix.platform == 'macos'
+        name: Compile and link the public Swift example
+        shell: bash
+        run: |
+          swiftc -warnings-as-errors \
+            -import-objc-header packages/netaudio-core/include/netaudio_core.h \
+            packages/netaudio-core/examples/rename_channel.swift \
+            -Lpackages/netaudio-core/target/release -lnetaudio_core \
+            -o "$RUNNER_TEMP/netaudio-swift-example"
+          set +e
+          DYLD_LIBRARY_PATH="packages/netaudio-core/target/release:${DYLD_LIBRARY_PATH:-}" \
+            "$RUNNER_TEMP/netaudio-swift-example"
+          status=$?
+          set -e
+          test "$status" -eq 2

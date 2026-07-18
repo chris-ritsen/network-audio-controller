@@ -29,12 +29,14 @@ def cmds():
 def load_sub_fixture(load_fixture):
     def _load(name):
         return load_fixture(f"{FIXTURES_DIR}/{name}")
+
     return _load
 
 
 # ---------------------------------------------------------------------------
 # Test the actual command builders
 # ---------------------------------------------------------------------------
+
 
 class TestAddSubscriptionCommand:
     def test_produces_valid_header(self, cmds):
@@ -126,6 +128,7 @@ class TestRemoveSubscriptionCommand:
 # Test that captured Dante Controller packets parse correctly
 # ---------------------------------------------------------------------------
 
+
 class TestCapturedSubscriptionHeaders:
     """Verify _parse_header handles the Dante Controller protocol variant."""
 
@@ -190,6 +193,7 @@ class TestCapturedSubscriptionHeaders:
 # ---------------------------------------------------------------------------
 # Verify PacketStore correlation works with captured subscription traffic
 # ---------------------------------------------------------------------------
+
 
 class TestSubscriptionCorrelation:
     """Feed real captured packets through PacketStore and verify
@@ -274,6 +278,8 @@ class TestSubscriptionCorrelation:
                 timestamp_ns=1000,
             )
             row = store.get_packet(pid)
-            assert row["opcode_name"] == expected_opcode_name, f"{name}: expected {expected_opcode_name}, got {row['opcode_name']}"
+            assert row["opcode_name"] == expected_opcode_name, (
+                f"{name}: expected {expected_opcode_name}, got {row['opcode_name']}"
+            )
 
         store.close()

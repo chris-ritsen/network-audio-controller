@@ -26,6 +26,17 @@ typedef enum {
   NETAUDIO_STATUS_INVALID_KEY = 17,
   NETAUDIO_STATUS_INVALID_PIN = 18,
   NETAUDIO_STATUS_CRYPTO_ERROR = 19,
+  NETAUDIO_STATUS_INVALID_PAGE = 20,
+  NETAUDIO_STATUS_INVALID_SUBSCRIPTION_CHANNEL = 21,
+  NETAUDIO_STATUS_INVALID_DEVICE_TYPE = 22,
+  NETAUDIO_STATUS_PACKET_TOO_LARGE = 23,
+  NETAUDIO_STATUS_INVALID_CHANNEL = 24,
+  NETAUDIO_STATUS_INVALID_LATENCY = 25,
+  NETAUDIO_STATUS_INVALID_SAMPLE_RATE = 26,
+  NETAUDIO_STATUS_INVALID_ENCODING = 27,
+  NETAUDIO_STATUS_INVALID_GAIN_LEVEL = 28,
+  NETAUDIO_STATUS_INVALID_FLOW_SLOT = 29,
+  NETAUDIO_STATUS_INVALID_FLOW_PROTOCOL = 30,
 } NetaudioStatus;
 
 typedef struct NetaudioClient NetaudioClient;
@@ -38,7 +49,7 @@ uint32_t netaudio_abi_version(void);
 
 const char *netaudio_service_arc(void);
 
-const char *netaudio_status_name(NetaudioStatus status);
+const char *netaudio_status_name(int32_t status);
 
 uintptr_t netaudio_lock_nonce_length(void);
 
@@ -118,7 +129,9 @@ NetaudioStatus netaudio_client_execute(NetaudioClient *client,
 
 NetaudioStatus netaudio_lock_token(const char *pin,
                                    const uint8_t *nonce,
+                                   uintptr_t nonce_len,
                                    const uint8_t *key,
+                                   uintptr_t key_len,
                                    uint8_t *out_buffer,
                                    uintptr_t out_capacity,
                                    uintptr_t *out_length);
@@ -126,6 +139,7 @@ NetaudioStatus netaudio_lock_token(const char *pin,
 NetaudioStatus netaudio_client_lock(NetaudioClient *client,
                                     const char *pin,
                                     const uint8_t *key,
+                                    uintptr_t key_len,
                                     uint8_t *out_buffer,
                                     uintptr_t out_capacity,
                                     uintptr_t *out_length);
@@ -133,6 +147,7 @@ NetaudioStatus netaudio_client_lock(NetaudioClient *client,
 NetaudioStatus netaudio_client_unlock(NetaudioClient *client,
                                       const char *pin,
                                       const uint8_t *key,
+                                      uintptr_t key_len,
                                       uint8_t *out_buffer,
                                       uintptr_t out_capacity,
                                       uintptr_t *out_length);
@@ -147,6 +162,13 @@ NetaudioStatus netaudio_client_request(NetaudioClient *client,
                                        uint8_t *out_buffer,
                                        uintptr_t out_capacity,
                                        uintptr_t *out_length);
+
+NetaudioStatus netaudio_client_clear_wire_captures(NetaudioClient *client);
+
+NetaudioStatus netaudio_client_get_wire_captures_json(NetaudioClient *client,
+                                                      uint8_t *out_buffer,
+                                                      uintptr_t out_capacity,
+                                                      uintptr_t *out_length);
 
 NetaudioStatus netaudio_client_set_host_mac(NetaudioClient *client, const uint8_t *host_mac);
 

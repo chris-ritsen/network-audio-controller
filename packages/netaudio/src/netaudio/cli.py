@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, field
-
-logger = logging.getLogger("netaudio")
 from enum import Enum
 from typing import Optional
 
 import typer
 
+from netaudio import __version__
 from netaudio.common.app_config import settings
 
-from netaudio import __version__
+logger = logging.getLogger("netaudio")
 
 
 def _version_callback(value: bool):
@@ -98,13 +98,10 @@ def _load_icons_from_config() -> bool:
     try:
         from netaudio.common.config_loader import default_config_path
 
-        try:
+        if sys.version_info >= (3, 11):
             import tomllib
-        except ImportError:
-            try:
-                import tomli as tomllib
-            except ImportError:
-                return False
+        else:
+            import tomli as tomllib
 
         config_path = default_config_path()
         if not config_path.exists():
@@ -130,24 +127,54 @@ app = typer.Typer(
 @app.callback()
 def _global_options(
     ctx: typer.Context,
-    name: Optional[list[str]] = typer.Option(None, "-n", "--name", help="Filter by device name (glob).", envvar="NETAUDIO_NAME"),
+    name: Optional[list[str]] = typer.Option(
+        None, "-n", "--name", help="Filter by device name (glob).", envvar="NETAUDIO_NAME"
+    ),
     host: Optional[list[str]] = typer.Option(None, "-h", "--host", help="Filter by device IP.", envvar="NETAUDIO_HOST"),
-    server_name: Optional[list[str]] = typer.Option(None, "-s", "--server-name", help="Filter by mDNS server name (glob).", envvar="NETAUDIO_SERVER_NAME"),
-    mac: Optional[list[str]] = typer.Option(None, "-m", "--mac", help="Filter by MAC address (any format).", envvar="NETAUDIO_MAC"),
-    output_format: OutputFormat = typer.Option(OutputFormat.plain, "-o", "--output", help="Output format.", envvar="NETAUDIO_OUTPUT"),
+    server_name: Optional[list[str]] = typer.Option(
+        None, "-s", "--server-name", help="Filter by mDNS server name (glob).", envvar="NETAUDIO_SERVER_NAME"
+    ),
+    mac: Optional[list[str]] = typer.Option(
+        None, "-m", "--mac", help="Filter by MAC address (any format).", envvar="NETAUDIO_MAC"
+    ),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.plain, "-o", "--output", help="Output format.", envvar="NETAUDIO_OUTPUT"
+    ),
     json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
-    sort: str = typer.Option("mac", "--sort", help="Sort field[:asc|desc]. Fields: mac, name, ip, model, server-name.", envvar="NETAUDIO_SORT"),
+    sort: str = typer.Option(
+        "mac",
+        "--sort",
+        help="Sort field[:asc|desc]. Fields: mac, name, ip, model, server-name.",
+        envvar="NETAUDIO_SORT",
+    ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output.", envvar="NETAUDIO_NO_COLOR"),
-    timeout: float = typer.Option(5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"),
-    lock_state_timeout: float = typer.Option(4.0, "--lock-state-timeout", help="Lock state collection timeout in seconds.", envvar="NETAUDIO_LOCK_STATE_TIMEOUT"),
-    interface: Optional[str] = typer.Option(None, "--interface", help="Network interface to use.", envvar="NETAUDIO_INTERFACE"),
-    log_level: str = typer.Option("WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR).", envvar="NETAUDIO_LOG_LEVEL"),
+    timeout: float = typer.Option(
+        5.0, "--timeout", help="mDNS discovery timeout in seconds.", envvar="NETAUDIO_TIMEOUT"
+    ),
+    lock_state_timeout: float = typer.Option(
+        4.0,
+        "--lock-state-timeout",
+        help="Lock state collection timeout in seconds.",
+        envvar="NETAUDIO_LOCK_STATE_TIMEOUT",
+    ),
+    interface: Optional[str] = typer.Option(
+        None, "--interface", help="Network interface to use.", envvar="NETAUDIO_INTERFACE"
+    ),
+    log_level: str = typer.Option(
+        "WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR).", envvar="NETAUDIO_LOG_LEVEL"
+    ),
     debug: bool = typer.Option(False, "--debug", help="Shorthand for --log-level DEBUG.", envvar="NETAUDIO_DEBUG"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
-    dissect: bool = typer.Option(False, "--dissect", help="Annotated protocol dissection for packet displays.", envvar="NETAUDIO_DISSECT"),
-    capture: bool = typer.Option(False, "--capture", help="Record all packets to capture database.", envvar="NETAUDIO_CAPTURE"),
+    dissect: bool = typer.Option(
+        False, "--dissect", help="Annotated protocol dissection for packet displays.", envvar="NETAUDIO_DISSECT"
+    ),
+    capture: bool = typer.Option(
+        False, "--capture", help="Record all packets to capture database.", envvar="NETAUDIO_CAPTURE"
+    ),
     icons: bool = typer.Option(False, "--icons", help="Use Nerd Font icons in output.", envvar="NETAUDIO_ICONS"),
-    version: Optional[bool] = typer.Option(None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True),
+    version: Optional[bool] = typer.Option(
+        None, "-V", "--version", help="Show version and exit.", callback=_version_callback, is_eager=True
+    ),
 ):
     state.names = name or []
     state.hosts = host or []
@@ -190,6 +217,7 @@ def _global_options(
         settings.debug = True
 
     from netaudio import core
+
     try:
         core.require()
     except core.NetaudioCoreError as error:
@@ -198,6 +226,7 @@ def _global_options(
 
     if ctx.invoked_subcommand is None:
         from netaudio.commands.status import status as status_command
+
         status_command(json_flag=False)
 
 
@@ -211,7 +240,9 @@ from netaudio.commands import (
     firmware,
     flow,
     key,
+    preset,
     provenance,
+    report,
     server,
     shure,
     status,
@@ -237,6 +268,8 @@ app.add_typer(meter_app, name="meter")
 
 app.add_typer(shure.app, name="shure")
 app.add_typer(virtual.app, name="virtual")
+app.add_typer(preset.app, name="preset")
+app.add_typer(report.app, name="report")
 
 app.add_typer(server.app, name="daemon")
 app.add_typer(server.app, name="server", hidden=True)

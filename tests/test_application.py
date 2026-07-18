@@ -54,30 +54,60 @@ class TestDanteApplication:
         assert application.devices["test.local."] is device
         assert device._app is application
 
-    def test_register_device_emits_discovered(self):
+    @pytest.mark.asyncio
+    async def test_register_device_emits_discovered(self):
         application = DanteApplication()
+        received_event = asyncio.Event()
+        received_dante_event = None
+
+        async def receive_dante_event(dante_event):
+            nonlocal received_dante_event
+            received_dante_event = dante_event
+            received_event.set()
+
+        application.dispatcher.on(EventType.DEVICE_DISCOVERED, receive_dante_event)
+        await application.dispatcher.start()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             device = DanteDevice(server_name="test.local.")
 
-        application.register_device("test.local.", device)
+        try:
+            application.register_device("test.local.", device)
+            await asyncio.wait_for(received_event.wait(), timeout=1)
+        finally:
+            await application.dispatcher.stop()
 
-        # Check the event was queued
-        assert application.dispatcher._queue.qsize() == 1
+        assert received_dante_event is not None
+        assert received_dante_event.type == EventType.DEVICE_DISCOVERED
+        assert received_dante_event.server_name == "test.local."
 
-    def test_register_existing_device_emits_updated(self):
+    @pytest.mark.asyncio
+    async def test_register_existing_device_emits_updated(self):
         application = DanteApplication()
+        received_event = asyncio.Event()
+        received_dante_event = None
+
+        async def receive_dante_event(dante_event):
+            nonlocal received_dante_event
+            received_dante_event = dante_event
+            received_event.set()
+
+        application.dispatcher.on(EventType.DEVICE_UPDATED, receive_dante_event)
+        await application.dispatcher.start()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             device = DanteDevice(server_name="test.local.")
 
-        application.register_device("test.local.", device)
-        # Drain first event
-        application.dispatcher._queue.get_nowait()
+        try:
+            application.register_device("test.local.", device)
+            application.register_device("test.local.", device)
+            await asyncio.wait_for(received_event.wait(), timeout=1)
+        finally:
+            await application.dispatcher.stop()
 
-        application.register_device("test.local.", device)
-        event = application.dispatcher._queue.get_nowait()
-        assert event.type == EventType.DEVICE_UPDATED
+        assert received_dante_event is not None
+        assert received_dante_event.type == EventType.DEVICE_UPDATED
+        assert received_dante_event.server_name == "test.local."
 
     def test_unregister_device(self):
         application = DanteApplication()

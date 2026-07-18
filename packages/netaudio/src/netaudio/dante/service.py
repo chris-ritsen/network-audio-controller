@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import socket
@@ -81,8 +83,11 @@ class DanteUnicastService:
             self._log_dissected(packet, device_ip, port, direction="request", command_name=logical_command_name)
 
         response = await self._protocol.send_and_expect(
-            packet, (device_ip, port), transaction_id,
-            timeout=timeout, logical_command_name=logical_command_name,
+            packet,
+            (device_ip, port),
+            transaction_id,
+            timeout=timeout,
+            logical_command_name=logical_command_name,
         )
 
         if self._dissect and response is not None:
@@ -115,10 +120,13 @@ class DanteUnicastService:
             self._log_dissected(packet, device_ip, port, direction="send")
         self._protocol.send_fire_and_forget(packet, (device_ip, port))
 
-    def _log_dissected(self, payload: bytes, device_ip: str, port: int, direction: str = "", command_name: str = "") -> None:
+    def _log_dissected(
+        self, payload: bytes, device_ip: str, port: int, direction: str = "", command_name: str = ""
+    ) -> None:
         try:
             from netaudio.common.app_config import settings as app_settings
             from netaudio.dante.packet_dissector import dissect_and_render, format_dissect_label
+
             color = not app_settings.no_color
             label = format_dissect_label(direction, f"{device_ip}:{port}", command_name=command_name, color=color)
             rendered = dissect_and_render(payload, indent="  ", color=color)
@@ -134,7 +142,14 @@ class DanteUnicastService:
 
 
 class DanteMulticastService:
-    def __init__(self, multicast_group: str, multicast_port: int, packet_store=None, interface_ip: str | None = None, dissect: bool = False):
+    def __init__(
+        self,
+        multicast_group: str,
+        multicast_port: int,
+        packet_store=None,
+        interface_ip: str | None = None,
+        dissect: bool = False,
+    ):
         self._multicast_group = multicast_group
         self._multicast_port = multicast_port
         self._protocol: DanteMulticastProtocol | None = None
@@ -174,7 +189,9 @@ class DanteMulticastService:
             sock=sock,
         )
         self._protocol = protocol
-        logger.info(f"Multicast service started on {self._multicast_group}:{self._multicast_port} (interface {local_ip})")
+        logger.info(
+            f"Multicast service started on {self._multicast_group}:{self._multicast_port} (interface {local_ip})"
+        )
 
     def _detect_interface_ip(self) -> str:
         try:
