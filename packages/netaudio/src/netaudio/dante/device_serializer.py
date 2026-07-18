@@ -88,16 +88,11 @@ class DanteDeviceSerializer:
             device.interface_reboot_required = True
 
         channels = data.get("channels") or {}
-        device.rx_channels = DanteDeviceSerializer._channels_from_json(
-            channels.get("receivers") or {}, "rx", device
-        )
-        device.tx_channels = DanteDeviceSerializer._channels_from_json(
-            channels.get("transmitters") or {}, "tx", device
-        )
+        device.rx_channels = DanteDeviceSerializer._channels_from_json(channels.get("receivers") or {}, "rx", device)
+        device.tx_channels = DanteDeviceSerializer._channels_from_json(channels.get("transmitters") or {}, "tx", device)
 
         device.subscriptions = [
-            DanteDeviceSerializer._subscription_from_json(entry)
-            for entry in data.get("subscriptions") or []
+            DanteDeviceSerializer._subscription_from_json(entry) for entry in data.get("subscriptions") or []
         ]
 
         return device
@@ -188,7 +183,10 @@ class DanteDeviceSerializer:
             "status": DanteDeviceSerializer._status_to_json(subscription.status_code),
         }
 
-        if subscription.rx_channel_status_code is not None and subscription.rx_channel_status_code != subscription.status_code:
+        if (
+            subscription.rx_channel_status_code is not None
+            and subscription.rx_channel_status_code != subscription.status_code
+        ):
             as_json["rx_channel_status"] = DanteDeviceSerializer._status_to_json(subscription.rx_channel_status_code)
 
         return as_json

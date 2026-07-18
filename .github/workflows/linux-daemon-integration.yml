@@ -1,0 +1,25 @@
+name: Linux daemon integration
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  real-session-dbus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - run: sudo apt-get update && sudo apt-get install --yes dbus-daemon
+      - run: cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
+      - run: uv sync --python 3.9 --all-groups
+      - name: Exercise exported objects on a real D-Bus session
+        run: dbus-run-session -- env NETAUDIO_REAL_DBUS_TEST=1 uv run pytest -q tests/test_dbus_integration.py
+      - name: Validate generated systemd unit syntax
+        run: |
+          unit="$(mktemp --suffix=.service)"
+          uv run python -c 'from netaudio.daemon.service_install import generate_systemd_unit; import sys; print(generate_systemd_unit(sys.executable), end="")' > "$unit"
+          systemd-analyze verify "$unit"

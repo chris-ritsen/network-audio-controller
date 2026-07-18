@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import json
 import logging
@@ -16,10 +18,12 @@ from netaudio.dante.debug_formatter import (
 
 logger = logging.getLogger("netaudio")
 
+
 def _default_db_path():
     data_dir = os.path.join(os.path.expanduser("~"), ".local", "share", "netaudio")
     os.makedirs(data_dir, exist_ok=True)
     return os.path.join(data_dir, "packet_capture.sqlite")
+
 
 DEFAULT_DB_PATH = _default_db_path()
 
@@ -107,8 +111,7 @@ class PacketStore:
         self._conn.create_function("decompress_hex", 1, self._decompress_hex_func)
         self._create_tables()
         self._has_payload_hex = "payload_hex" in {
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()
+            row["name"] for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()
         }
 
     @staticmethod
@@ -199,48 +202,25 @@ class PacketStore:
             CREATE INDEX IF NOT EXISTS idx_packet_sessions_session
                 ON packet_sessions(session_id, packet_id);
         """)
-        columns = {
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()
-        }
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()}
         if "session_id" not in columns:
-            self._conn.execute(
-                "ALTER TABLE packets ADD COLUMN session_id INTEGER REFERENCES capture_sessions(id)"
-            )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_packets_session ON packets(session_id, timestamp_ns)"
-        )
-        session_columns = {
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(capture_sessions)").fetchall()
-        }
+            self._conn.execute("ALTER TABLE packets ADD COLUMN session_id INTEGER REFERENCES capture_sessions(id)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_packets_session ON packets(session_id, timestamp_ns)")
+        session_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(capture_sessions)").fetchall()}
         if "category" not in session_columns:
-            self._conn.execute(
-                "ALTER TABLE capture_sessions ADD COLUMN category TEXT DEFAULT 'experiment'"
-            )
+            self._conn.execute("ALTER TABLE capture_sessions ADD COLUMN category TEXT DEFAULT 'experiment'")
         if "source_host" not in columns:
-            self._conn.execute(
-                "ALTER TABLE packets ADD COLUMN source_host TEXT"
-            )
+            self._conn.execute("ALTER TABLE packets ADD COLUMN source_host TEXT")
         if "interface" not in columns:
-            self._conn.execute(
-                "ALTER TABLE packets ADD COLUMN interface TEXT"
-            )
-        marker_columns = {
-            row["name"]
-            for row in self._conn.execute("PRAGMA table_info(capture_markers)").fetchall()
-        }
+            self._conn.execute("ALTER TABLE packets ADD COLUMN interface TEXT")
+        marker_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(capture_markers)").fetchall()}
         if "summary" not in marker_columns:
-            self._conn.execute(
-                "ALTER TABLE capture_markers ADD COLUMN summary TEXT"
-            )
+            self._conn.execute("ALTER TABLE capture_markers ADD COLUMN summary TEXT")
         self._conn.commit()
 
     @staticmethod
     def _iso_from_ns(timestamp_ns: int) -> str:
-        return datetime.datetime.fromtimestamp(
-            timestamp_ns / 1e9
-        ).isoformat(timespec="microseconds")
+        return datetime.datetime.fromtimestamp(timestamp_ns / 1e9).isoformat(timespec="microseconds")
 
     def start_session(
         self,
@@ -409,7 +389,7 @@ class PacketStore:
             )
             self._conn.commit()
         except sqlite3.Error:
-            pass
+            logger.exception(f"Failed to link packet {packet_id} to capture session {session_id}")
 
     def get_latest_session(self, active_only: bool = False) -> dict | None:
         query = "SELECT * FROM capture_sessions"
@@ -642,7 +622,7 @@ class PacketStore:
                 )
                 self._conn.commit()
             except sqlite3.Error:
-                pass
+                logger.exception(f"Failed to link packet {packet_id} to capture session {session_id}")
 
         if header and header["transaction_id"] is not None:
             self._correlate_by_transaction_id(packet_id, header, device_ip, direction)
@@ -714,9 +694,7 @@ class PacketStore:
         return [self._decode_packet_row(row) for row in rows]
 
     def get_packet(self, packet_id):
-        row = self._conn.execute(
-            "SELECT * FROM packets WHERE id = ?", (packet_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (packet_id,)).fetchone()
         return self._decode_packet_row(row)
 
     def get_correlated_pairs(self, opcode=None):
@@ -738,9 +716,7 @@ class PacketStore:
         pairs = []
         for row in self._conn.execute(query, params).fetchall():
             request = self._decode_packet_row(row)
-            resp_row = self._conn.execute(
-                "SELECT * FROM packets WHERE id = ?", (request["resp_id"],)
-            ).fetchone()
+            resp_row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (request["resp_id"],)).fetchone()
             if resp_row:
                 pairs.append((request, self._decode_packet_row(resp_row)))
 
@@ -876,7 +852,8 @@ class PacketStore:
         query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
         params: list = [session_id]
         query, params = self._apply_packet_filters(
-            query, params,
+            query,
+            params,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,
@@ -913,7 +890,8 @@ class PacketStore:
         query = "SELECT * FROM packets WHERE session_id = ?"
         params: list = [session_id]
         query, params = self._apply_packet_filters(
-            query, params,
+            query,
+            params,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,
@@ -958,7 +936,8 @@ class PacketStore:
             query = "SELECT * FROM packets WHERE 1=1"
             params = []
         query, params = self._apply_packet_filters(
-            query, params,
+            query,
+            params,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,
@@ -1000,7 +979,8 @@ class PacketStore:
             query = "SELECT COUNT(*) AS count FROM packets WHERE 1=1"
             params = []
         query, params = self._apply_packet_filters(
-            query, params,
+            query,
+            params,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,
@@ -1036,9 +1016,7 @@ class PacketStore:
         return int(row["timestamp_ns"])
 
     def export_fixture(self, packet_id, output_dir):
-        row = self._conn.execute(
-            "SELECT * FROM packets WHERE id = ?", (packet_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (packet_id,)).fetchone()
         if not row:
             return None
 
@@ -1064,9 +1042,7 @@ class PacketStore:
         return filepath
 
     def export_correlated_pair(self, request_id, output_dir):
-        row = self._conn.execute(
-            "SELECT * FROM packets WHERE id = ?", (request_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM packets WHERE id = ?", (request_id,)).fetchone()
         if not row or not row["correlated_packet_id"]:
             return None
 
@@ -1162,9 +1138,7 @@ class PacketStore:
         row = self._conn.execute("SELECT COUNT(*) as total FROM packets").fetchone()
         stats["total"] = row["total"]
 
-        rows = self._conn.execute(
-            "SELECT source_type, COUNT(*) as count FROM packets GROUP BY source_type"
-        ).fetchall()
+        rows = self._conn.execute("SELECT source_type, COUNT(*) as count FROM packets GROUP BY source_type").fetchall()
         stats["by_source"] = {r["source_type"]: r["count"] for r in rows}
 
         rows = self._conn.execute(
@@ -1172,8 +1146,7 @@ class PacketStore:
             "GROUP BY opcode_name, direction ORDER BY count DESC"
         ).fetchall()
         stats["by_opcode"] = [
-            {"opcode_name": r["opcode_name"], "direction": r["direction"], "count": r["count"]}
-            for r in rows
+            {"opcode_name": r["opcode_name"], "direction": r["direction"], "count": r["count"]} for r in rows
         ]
 
         row = self._conn.execute(
@@ -1181,9 +1154,7 @@ class PacketStore:
         ).fetchone()
         stats["correlated"] = row["count"]
 
-        row = self._conn.execute(
-            "SELECT COUNT(*) as count FROM packets WHERE correlated_packet_id IS NULL"
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) as count FROM packets WHERE correlated_packet_id IS NULL").fetchone()
         stats["uncorrelated"] = row["count"]
 
         return stats

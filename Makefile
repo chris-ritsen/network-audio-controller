@@ -1,4 +1,4 @@
-.PHONY: core header example example-swift test install restart deploy check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -24,8 +24,33 @@ restart:
 
 deploy: install restart
 
+dev:
+	@echo "Watching for changes... (restart daemon on *.py save)"
+	@find packages/netaudio/src -name '*.py' | entr -r make restart
+
 test:
 	uv run pytest -q
+
+quality:
+	uv lock --check
+	uv run ruff check .
+	uv run ruff format --check .
+	uv run pyright
+	cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
+	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
+	cargo test --manifest-path packages/netaudio-core/Cargo.toml
+
+wheel-smoke:
+	@tmp=$$(mktemp -d) || exit 1; \
+		trap 'rm -rf "$$tmp"' 0; \
+		uv build --wheel --out-dir "$$tmp"; \
+		set -- "$$tmp"/netaudio-*.whl; \
+		if [ "$$#" -ne 1 ] || [ ! -f "$$1" ]; then \
+			echo "expected exactly one wheel, found $$#" >&2; \
+			exit 1; \
+		fi; \
+		uv run --isolated --no-project python scripts/verify_wheel_artifact.py "$$1"; \
+		uv run --isolated --no-project python scripts/smoke_wheel_install.py "$$1"
 
 check-label-provenance:
 	uv run netaudio provenance check

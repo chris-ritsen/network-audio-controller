@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger("netaudio")
 
 
 _CATEGORY_TITLES = {
@@ -27,10 +30,7 @@ def _format_field_table(fields: list[dict]) -> str:
     lines.append("|--------|--------|------|-------|-------|")
     for field in sorted(fields, key=lambda f: f.get("offset", 0)):
         value = field.get("value", "")
-        lines.append(
-            f"| {field['offset']} | {field['length']} | {field['dtype']} "
-            f"| {field['name']} | {value} |"
-        )
+        lines.append(f"| {field['offset']} | {field['length']} | {field['dtype']} | {field['name']} | {value} |")
     return "\n".join(lines)
 
 
@@ -39,10 +39,12 @@ def _spec_overview() -> list[str]:
     lines = []
     lines.append("## Overview")
     lines.append("")
-    lines.append("This documents the Dante **control protocol** — device discovery, configuration, "
-                 "routing, and monitoring. It does not cover the audio transport (RTP/AES67). "
-                 "All control traffic is **UDP** with **big-endian** (network byte order) encoding. "
-                 "Strings are **null-terminated ASCII**.")
+    lines.append(
+        "This documents the Dante **control protocol** — device discovery, configuration, "
+        "routing, and monitoring. It does not cover the audio transport (RTP/AES67). "
+        "All control traffic is **UDP** with **big-endian** (network byte order) encoding. "
+        "Strings are **null-terminated ASCII**."
+    )
     lines.append("")
     lines.append("### Discovery")
     lines.append("")
@@ -55,8 +57,10 @@ def _spec_overview() -> list[str]:
     lines.append("| CMC (Control & Monitoring) | `_netaudio-cmc._udp.local.` |")
     lines.append("| DBC (Device Browsing) | `_netaudio-dbc._udp.local.` |")
     lines.append("")
-    lines.append("The mDNS TXT record for `_netaudio-arc` contains the device's ARC port "
-                 "(usually 4440 but can vary). The resolved IP address is the device's control address.")
+    lines.append(
+        "The mDNS TXT record for `_netaudio-arc` contains the device's ARC port "
+        "(usually 4440 but can vary). The resolved IP address is the device's control address."
+    )
     lines.append("")
     lines.append("### Ports")
     lines.append("")
@@ -78,10 +82,12 @@ def _spec_overview() -> list[str]:
     lines.append("")
     lines.append("### Request/Response Pattern")
     lines.append("")
-    lines.append("Most ARC and CMC commands follow a request/response pattern over unicast UDP. "
-                 "The response echoes the request's `transaction_id`. Some Conmon commands "
-                 "(set_sample_rate, reboot, identify) are **fire-and-forget** — confirmation "
-                 "arrives as a multicast notification burst on 224.0.0.231:8702.")
+    lines.append(
+        "Most ARC and CMC commands follow a request/response pattern over unicast UDP. "
+        "The response echoes the request's `transaction_id`. Some Conmon commands "
+        "(set_sample_rate, reboot, identify) are **fire-and-forget** — confirmation "
+        "arrives as a multicast notification burst on 224.0.0.231:8702."
+    )
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -91,6 +97,7 @@ def _spec_overview() -> list[str]:
 def _build_spec_data(
     facts_path: Path,
     category_filter: Optional[str] = None,
+    include_provenance: bool = False,
 ) -> dict:
     from netaudio.dante.fact_store import list_facts, get_categories, get_confidence
 
@@ -147,13 +154,21 @@ def _build_spec_data(
                     }
                     for field in sorted(fields, key=lambda f: f.get("offset", 0))
                 ]
+
+            if include_provenance:
+                evidence_list = fact.get("evidence", [])
+                if evidence_list:
+                    entry["evidence"] = evidence_list
+
             entries.append(entry)
 
-        spec_categories.append({
-            "category": cat,
-            "title": title,
-            "facts": entries,
-        })
+        spec_categories.append(
+            {
+                "category": cat,
+                "title": title,
+                "facts": entries,
+            }
+        )
 
     return {
         "title": "Dante Control Protocol Reference",
@@ -214,7 +229,44 @@ def _spec_to_markdown(spec_data: dict) -> str:
     return "\n".join(lines)
 
 
-def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
+_prove_cache: dict[str, str | None] = {}
+
+
+def _dissect_evidence_packet(provenance_dir, session_ref: str, packet_id: int) -> str | None:
+    from netaudio.dante.fact_store import _find_bundle, _load_bundle
+
+    bundle_path = _find_bundle(provenance_dir, session_ref)
+    if bundle_path is None:
+        return None
+
+    manifest, files = _load_bundle(bundle_path)
+    if not manifest:
+        return None
+
+    for sample in manifest.get("samples", []):
+        if sample.get("packet_id") == packet_id:
+            filename = sample.get("file", "")
+            payload = files.get(filename)
+            if payload:
+                try:
+                    from netaudio.dante.packet_dissector import dissect_and_render
+                    from netaudio.common.app_config import settings as app_settings
+
+                    color = not app_settings.no_color
+                    rendered = dissect_and_render(payload, indent="        ", color=color)
+                    source_endpoint = f"{sample.get('src_ip', '')}:{sample.get('src_port', '')}"
+                    destination_endpoint = f"{sample.get('dst_ip', '')}:{sample.get('dst_port', '')}"
+                    direction = sample.get("direction", "")
+                    header = f"{source_endpoint} {'->' if direction == 'request' else '<-' if direction == 'response' else '**'} {destination_endpoint}  {len(payload)}B"
+                    return f"{header}\n{rendered}"
+                except Exception:
+                    logger.exception("Failed to dissect provenance packet %s", packet_id)
+                    return f"{len(payload)}B (dissection failed)"
+
+    return None
+
+
+def _spec_to_plain(spec_data: dict, terminal_width: int = 120, facts_path: Path | None = None) -> str:
     import shutil
     import textwrap
     from netaudio._common import ansi
@@ -297,6 +349,41 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120) -> str:
                             subsequent_indent="    ",
                         )
                         lines.append(ansi("90", wrapped))
+
+            evidence = fact.get("evidence", [])
+            if evidence and facts_path is not None:
+                from netaudio.cli import state as cli_state
+
+                full_dissect = cli_state.dissect
+
+                lines.append("")
+                lines.append(f"    {ansi('33', f'Evidence ({len(evidence)} packets):')}")
+                for evidence_ref in evidence:
+                    if isinstance(evidence_ref, str) and ":" in evidence_ref:
+                        session_ref, packet_id_str = evidence_ref.rsplit(":", 1)
+                        try:
+                            packet_id = int(packet_id_str)
+                        except ValueError:
+                            lines.append(f"      {ansi('90', evidence_ref)}")
+                            continue
+
+                        dissection = _prove_cache.get(evidence_ref)
+                        if dissection is None:
+                            dissection = _dissect_evidence_packet(facts_path.parent, session_ref, packet_id)
+                            _prove_cache[evidence_ref] = dissection
+
+                        if dissection:
+                            header_line = dissection.split("\n")[0] if dissection else ""
+                            lines.append(
+                                f"      {ansi('33', f'#{packet_id}')} {ansi('90', f'({session_ref})')} {header_line}"
+                            )
+                            if full_dissect:
+                                for dissect_line in dissection.split("\n")[1:]:
+                                    lines.append(f"      {dissect_line}")
+                        else:
+                            lines.append(f"      {ansi('33', f'#{packet_id}')} {ansi('90', f'({session_ref})')}")
+                    elif isinstance(evidence_ref, str):
+                        lines.append(f"      {ansi('90', evidence_ref)}")
 
         lines.append("")
 

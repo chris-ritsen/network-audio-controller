@@ -22,6 +22,7 @@ class TestParseLine:
         class MockStore:
             def store_packet(self, **kwargs):
                 return 1
+
         return TsharkCapture(packet_store=MockStore())
 
     def test_valid_line(self, capture):
@@ -98,6 +99,7 @@ class TestBuildCommand:
     def test_command_structure(self, tmp_path):
         class MockStore:
             pass
+
         cap = TsharkCapture(packet_store=MockStore(), interface="eth0")
         cmd = cap._build_command()
 

@@ -120,7 +120,7 @@ class TestAES67CurrentNewFromConmon1007:
         packet = bytearray(36)
         struct.pack_into(">H", packet, 0, 0xFFFF)
         struct.pack_into(">H", packet, 2, 36)
-        packet[0x10:0x18] = b'Audinate'
+        packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x1A, 0x1007)
         packet[CONMON_AES67_CURRENT_NEW_OFFSET] = state_byte
         return bytes(packet)
@@ -224,7 +224,7 @@ class TestAES67ProbePacket:
         commands = DanteDeviceCommands()
         packet, _, _ = commands.command_probe_aes67()
         assert struct.unpack(">H", packet[0:2])[0] == 0xFFFF
-        magic_offset = packet.find(b'Audinate')
+        magic_offset = packet.find(b"Audinate")
         assert magic_offset == 0x10
         message_type = struct.unpack(">H", packet[0x1A:0x1C])[0]
         assert message_type == 0x1006
@@ -232,8 +232,8 @@ class TestAES67ProbePacket:
     def test_probe_has_zero_presence_and_enable_flags(self):
         commands = DanteDeviceCommands()
         packet, _, _ = commands.command_probe_aes67()
-        assert packet[32:34] == b'\x00\x00'
-        assert packet[34:36] == b'\x00\x00'
+        assert packet[32:34] == b"\x00\x00"
+        assert packet[34:36] == b"\x00\x00"
 
     def test_probe_has_nonzero_sequence(self):
         commands = DanteDeviceCommands()
@@ -243,7 +243,7 @@ class TestAES67ProbePacket:
 
     def test_probe_with_custom_mac(self):
         commands = DanteDeviceCommands()
-        mac = b'\xaa\xbb\xcc\xdd\xee\xff'
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
         packet, _, _ = commands.command_probe_aes67(host_mac=mac)
         assert packet[8:14] == mac
 
@@ -251,8 +251,8 @@ class TestAES67ProbePacket:
         commands = DanteDeviceCommands()
         probe, _, _ = commands.command_probe_aes67()
         enable, _, _ = commands.command_enable_aes67(True)
-        assert probe[32:36] == b'\x00\x00\x00\x00'
-        assert enable[32:36] == b'\x00\x01\x00\x01'
+        assert probe[32:36] == b"\x00\x00\x00\x00"
+        assert enable[32:36] == b"\x00\x01\x00\x01"
 
 
 class TestAES67Waiter:
@@ -262,7 +262,7 @@ class TestAES67Waiter:
         struct.pack_into(">H", packet, 2, 36)
         if source_eui64:
             packet[8:16] = source_eui64
-        packet[0x10:0x18] = b'Audinate'
+        packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x18, 0x073A)
         struct.pack_into(">H", packet, 0x1A, 0x1007)
         packet[CONMON_AES67_CURRENT_NEW_OFFSET] = state_byte

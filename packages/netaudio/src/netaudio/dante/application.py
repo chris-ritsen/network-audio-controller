@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -12,6 +14,7 @@ from netaudio.dante.const import (
     SERVICES,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
+from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -132,7 +135,7 @@ class DanteApplication:
             try:
                 await self._browser.async_close()
             except Exception:
-                pass
+                logger.exception("Failed to close discovery browser")
             self._browser = None
 
         self._started = False
@@ -210,7 +213,7 @@ class DanteApplication:
                 if "rate" in service_properties:
                     device.sample_rate = int(service_properties["rate"])
                 if "latency_ns" in service_properties:
-                    device.latency = int(service_properties["latency_ns"])
+                    device.latency = nanoseconds_to_milliseconds(service_properties["latency_ns"])
 
         await browser.aio_browser.async_cancel()
         await browser.aio_zc.async_close()
@@ -351,7 +354,7 @@ class DanteApplication:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            pass
+            logger.debug("Interface status probe did not receive every response")
         finally:
             for device_ip in waiters:
                 self.notifications.unregister_interface_waiter(device_ip)
@@ -381,7 +384,7 @@ class DanteApplication:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            pass
+            logger.debug("Preferred leader probe did not receive every response")
         finally:
             for device_ip in waiters:
                 result = self.notifications.get_preferred_leader_result(device_ip)
@@ -416,7 +419,7 @@ class DanteApplication:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            pass
+            logger.debug("AES67 probe did not receive every response")
         finally:
             for device_ip in waiters:
                 result = self.notifications.get_aes67_result(device_ip)
@@ -457,7 +460,9 @@ class DanteApplication:
         finally:
             self.notifications.unregister_interface_waiter(device_ip)
 
-    async def set_interface_static(self, device_ip: str, ip_address: str, netmask: str, dns_server: str, gateway: str, timeout: float = 2.0) -> list[dict] | None:
+    async def set_interface_static(
+        self, device_ip: str, ip_address: str, netmask: str, dns_server: str, gateway: str, timeout: float = 2.0
+    ) -> list[dict] | None:
         waiter = self.notifications.register_interface_waiter(device_ip)
         try:
             self.settings.set_interface_static(device_ip, ip_address, netmask, dns_server, gateway)
@@ -468,6 +473,38 @@ class DanteApplication:
             return self.notifications.get_interface_result(device_ip)
         finally:
             self.notifications.unregister_interface_waiter(device_ip)
+
+    async def set_preferred_leader_state(
+        self,
+        device_ip: str,
+        is_preferred: bool,
+        timeout: float = 2.0,
+    ) -> bool | None:
+        waiter = self.notifications.register_preferred_leader_waiter(device_ip)
+        try:
+            await self.settings.set_preferred_leader(device_ip, is_preferred)
+            self.settings.probe_preferred_leader(device_ip)
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.debug(f"Preferred leader write verification timeout for {device_ip}")
+            return self.notifications.get_preferred_leader_result(device_ip)
+        finally:
+            self.notifications.unregister_preferred_leader_waiter(device_ip)
+
+    async def set_aes67_state(self, device, is_enabled: bool, timeout: float = 2.0):
+        device_ip_address = str(device.ipv4)
+        waiter = self.notifications.register_aes67_waiter(device_ip_address)
+        try:
+            await device.operations.enable_aes67(is_enabled, retries=1)
+            self.settings.probe_aes67(device_ip_address)
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.debug(f"AES67 write verification timeout for {device_ip_address}")
+            return self.notifications.get_aes67_result(device_ip_address)
+        finally:
+            self.notifications.unregister_aes67_waiter(device_ip_address)
 
     async def _query_settings_fields(self) -> None:
         host_mac = self.cmc._host_mac

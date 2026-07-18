@@ -28,7 +28,9 @@ pub fn string_at_pointer(data: &[u8], pointer: u16) -> Option<String> {
     if pointer == 0 || pointer as usize >= data.len() {
         return None;
     }
-    std::str::from_utf8(null_terminated_slice(data, pointer as usize))
+    let offset = pointer as usize;
+    let terminator = data[offset..].iter().position(|&byte| byte == 0)?;
+    std::str::from_utf8(&data[offset..offset + terminator])
         .ok()
         .map(str::to_owned)
 }

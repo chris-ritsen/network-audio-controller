@@ -72,13 +72,9 @@ get_device_name_test_cases = [
     get_device_name_test_cases,
     ids=[tc.device_id for tc in get_device_name_test_cases],
 )
-def test_generate_get_device_name_command_payload(
-    load_fixture, test_case: GetNameTestCase
-):
+def test_generate_get_device_name_command_payload(load_fixture, test_case: GetNameTestCase):
     device = DanteDevice()
-    hex_command_str, service_type = device.commands.command_device_name(
-        transaction_id=test_case.sequence_id
-    )
+    hex_command_str, service_type = device.commands.command_device_name(transaction_id=test_case.sequence_id)
 
     check_generated_command_payload(
         generated_hex_payload=hex_command_str,
@@ -95,9 +91,7 @@ def test_generate_get_device_name_command_payload(
     get_device_name_test_cases,
     ids=[tc.device_id for tc in get_device_name_test_cases],
 )
-def test_parse_get_device_name_response_payload(
-    load_fixture, test_case: GetNameTestCase
-):
+def test_parse_get_device_name_response_payload(load_fixture, test_case: GetNameTestCase):
     raw_response_data = load_fixture(test_case.response_fixture)
 
     try:
@@ -107,9 +101,7 @@ def test_parse_get_device_name_response_payload(
             )
 
         parsed_name = (
-            raw_response_data[
-                DEVICE_NAME_RESPONSE_PAYLOAD_START_OFFSET:DEVICE_NAME_RESPONSE_PAYLOAD_END_OFFSET
-            ]
+            raw_response_data[DEVICE_NAME_RESPONSE_PAYLOAD_START_OFFSET:DEVICE_NAME_RESPONSE_PAYLOAD_END_OFFSET]
             .decode("utf-8", errors="replace")
             .strip()
         )

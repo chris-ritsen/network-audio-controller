@@ -4,9 +4,19 @@ import re
 
 
 STANDARD_MARKER_TYPES = (
-    "action", "observation", "state_change", "system", "hypothesis",
-    "evidence", "analysis", "bug", "bug:fix", "code_change",
-    "code_change:fix", "code_change:feat", "code_change:refactor",
+    "action",
+    "observation",
+    "state_change",
+    "system",
+    "hypothesis",
+    "evidence",
+    "analysis",
+    "bug",
+    "bug:fix",
+    "code_change",
+    "code_change:fix",
+    "code_change:feat",
+    "code_change:refactor",
 )
 MARKER_TYPE_ALIASES = {
     "action": "action",

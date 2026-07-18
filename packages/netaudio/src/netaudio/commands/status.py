@@ -99,8 +99,7 @@ async def _gather_status() -> tuple[list[list[str]], dict]:
         await _populate_controls(devices)
         devices = filter_devices(devices)
         json_data["dante"] = {
-            server_name: DanteDeviceSerializer.to_json(device)
-            for server_name, device in devices.items()
+            server_name: DanteDeviceSerializer.to_json(device) for server_name, device in devices.items()
         }
         for _, device in sort_devices(devices):
             rows.append(_dante_row_from_device(device))
@@ -130,7 +129,9 @@ def status(
         typer.echo("No devices found.")
         if not daemon_is_accessible():
             typer.echo("The netaudio daemon is not running; discovery used a one-shot mDNS scan.")
-            typer.echo("Start it with 'netaudio daemon start', or install it as a boot service with 'netaudio daemon install'.")
+            typer.echo(
+                "Start it with 'netaudio daemon start', or install it as a boot service with 'netaudio daemon install'."
+            )
         typer.echo("Run 'netaudio --help' to see all commands.")
         return
 

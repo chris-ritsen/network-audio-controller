@@ -6,6 +6,12 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.services.notification import (
+    NOTIFICATION_PROPERTY_CHANGE,
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_LABEL_CHANGE,
+)
 
 from netaudio._common import (
     _command_context,
@@ -17,6 +23,8 @@ from netaudio._common import (
     find_channel,
     output_single,
     output_table,
+    readback_after_notification,
+    send_and_wait_for_notification,
     sort_devices,
 )
 from netaudio._exit_codes import ExitCode
@@ -42,11 +50,19 @@ def channel_list():
                 data[server_name] = {
                     "name": device.name,
                     "tx_channels": {
-                        channel.name: {"number": channel.number, "name": channel.name, "friendly_name": channel.friendly_name}
+                        channel.name: {
+                            "number": channel.number,
+                            "name": channel.name,
+                            "friendly_name": channel.friendly_name,
+                        }
                         for channel in sorted(device.tx_channels.values(), key=lambda channel: channel.number)
                     },
                     "rx_channels": {
-                        channel.name: {"number": channel.number, "name": channel.name, "friendly_name": channel.friendly_name}
+                        channel.name: {
+                            "number": channel.number,
+                            "name": channel.name,
+                            "friendly_name": channel.friendly_name,
+                        }
                         for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number)
                     },
                 }
@@ -90,6 +106,10 @@ def name(
             filtered = filter_devices(devices)
             server_name, device = _resolve_one(filtered)
 
+            if channel_type not in ("tx", "rx"):
+                typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+
             found_channel = find_channel(device, channel, channel_type)
             if found_channel is None:
                 typer.echo(f"Error: channel '{channel}' not found.", err=True)
@@ -103,12 +123,66 @@ def name(
 
             if new_name == "":
                 packet, _ = commands.command_reset_channel_name(channel_type, found_channel.number)
-                await send(packet, device.ipv4, arc_port)
-                typer.echo(f"{icon('name')}Reset channel name: {found_channel.name}")
+                try:
+                    await send(packet, device.ipv4, arc_port)
+                except Exception as exception:
+                    typer.echo(f"Error: could not request channel name reset: {exception}", err=True)
+                    raise typer.Exit(code=ExitCode.ERROR)
+                typer.echo(f"{icon('name')}Channel name reset requested for {found_channel.name}; not verified.")
             else:
                 packet, _ = commands.command_set_channel_name(channel_type, found_channel.number, new_name)
-                await send(packet, device.ipv4, arc_port)
-                typer.echo(f"{icon('name')}Set channel name: {new_name}")
+                try:
+                    notification_ids = (
+                        (NOTIFICATION_RX_CHANNEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE)
+                        if channel_type == "rx"
+                        else (
+                            NOTIFICATION_TX_CHANNEL_CHANGE,
+                            NOTIFICATION_TX_LABEL_CHANGE,
+                            NOTIFICATION_PROPERTY_CHANGE,
+                        )
+                    )
+                    await send_and_wait_for_notification(
+                        send,
+                        packet,
+                        device.ipv4,
+                        arc_port,
+                        notification_ids,
+                    )
+                except Exception as exception:
+                    typer.echo(f"Error: could not send channel name change: {exception}", err=True)
+                    raise typer.Exit(code=ExitCode.ERROR)
+
+                async def _read_channel_name():
+                    if channel_type == "rx":
+                        await device.get_rx_channels()
+                        refreshed = device.rx_channels.get(found_channel.number)
+                        reported_name = refreshed.name if refreshed else None
+                    else:
+                        await device.get_tx_channels()
+                        refreshed = device.tx_channels.get(found_channel.number)
+                        reported_name = refreshed.friendly_name if refreshed else None
+                    if not isinstance(reported_name, str):
+                        raise RuntimeError("channel name readback was unavailable")
+                    return reported_name
+
+                result = await readback_after_notification(_read_channel_name, new_name)
+                if result.matched:
+                    typer.echo(f"{icon('name')}Set channel name: {new_name} (verified)")
+                elif result.observed_available:
+                    typer.echo(
+                        "Error: channel name change sent, but the device reports "
+                        f"{result.observed!r} instead of {new_name!r}.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=ExitCode.ERROR)
+                else:
+                    detail = f": {result.error}" if result.error is not None else ""
+                    typer.echo(
+                        f"Error: channel name change sent, but readback was unavailable{detail}; "
+                        "the change was not verified.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -116,7 +190,7 @@ def name(
 @app.command()
 def gain(
     channel: str = typer.Argument(help="Channel number or name."),
-    level: Optional[float] = typer.Argument(None, help="Gain level (1-5)."),
+    level: Optional[int] = typer.Argument(None, help="Gain level (1-5)."),
     channel_type: str = typer.Option("rx", "--type", "-t", help="Channel type: tx or rx."),
 ):
     """Get or set channel gain level."""
@@ -127,6 +201,10 @@ def gain(
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
             server_name, device = _resolve_one(filtered)
+
+            if channel_type not in ("tx", "rx"):
+                typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
 
             found_channel = find_channel(device, channel, channel_type)
             if found_channel is None:
@@ -142,8 +220,12 @@ def gain(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             device_type = "input" if channel_type == "tx" else "output"
-            packet, _, port = commands.command_set_gain_level(found_channel.number, int(level), device_type)
-            await send(packet, device.ipv4, port)
-            typer.echo(f"{icon('gain')}Set gain level: {level}")
+            packet, _, port = commands.command_set_gain_level(found_channel.number, level, device_type)
+            try:
+                await send(packet, device.ipv4, port)
+            except Exception as exception:
+                typer.echo(f"Error: could not request gain change: {exception}", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            typer.echo(f"{icon('gain')}Gain change requested: {level}; not verified.")
 
     asyncio.run(_run())

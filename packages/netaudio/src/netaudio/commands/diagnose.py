@@ -20,10 +20,6 @@ DIAGNOSE_QUERIES = [
     ("tx_channels_p1", "command_transmitters", {"page": 1}),
     ("tx_channels_p2", "command_transmitters", {"page": 2}),
     ("tx_channels_p3", "command_transmitters", {"page": 3}),
-    ("tx_channel_names_p0", "command_transmitters", {"page": 0, "friendly_names": True}),
-    ("tx_channel_names_p1", "command_transmitters", {"page": 1, "friendly_names": True}),
-    ("tx_channel_names_p2", "command_transmitters", {"page": 2, "friendly_names": True}),
-    ("tx_channel_names_p3", "command_transmitters", {"page": 3, "friendly_names": True}),
     ("rx_channels_p0", "command_receivers", {"page": 0}),
     ("rx_channels_p1", "command_receivers", {"page": 1}),
     ("rx_channels_p2", "command_receivers", {"page": 2}),
@@ -41,15 +37,17 @@ def diagnose_run(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    asyncio.run(_run_diagnose(
-        device_ip=device_ip,
-        timeout=timeout,
-        session_name=session_name or f"diagnose_{device_ip.replace('.', '_')}",
-        output_dir=output_dir,
-        config=config,
-        profile=profile,
-        db_override=db,
-    ))
+    asyncio.run(
+        _run_diagnose(
+            device_ip=device_ip,
+            timeout=timeout,
+            session_name=session_name or f"diagnose_{device_ip.replace('.', '_')}",
+            output_dir=output_dir,
+            config=config,
+            profile=profile,
+            db_override=db,
+        )
+    )
 
 
 async def _run_diagnose(
@@ -75,7 +73,6 @@ async def _run_diagnose(
         output_dir=output_dir,
         category="diagnostic",
     ) as verifier:
-
         verifier.marker(
             "diagnose_started",
             marker_type="system",
@@ -93,7 +90,9 @@ async def _run_diagnose(
             command_tuple = method(**kwargs)
 
             response = await verifier.send_command(
-                command_tuple, timeout=timeout, label=label,
+                command_tuple,
+                timeout=timeout,
+                label=label,
             )
 
             if response is None:
@@ -103,6 +102,7 @@ async def _run_diagnose(
                 opcode_hex = ""
                 if len(response) >= 8:
                     import struct
+
                     opcode = struct.unpack(">H", response[6:8])[0]
                     opcode_hex = f"0x{opcode:04X}"
                 print(f"  {icon('success')}[{label:30s}]  {len(response):>5d}B  {opcode_hex}")

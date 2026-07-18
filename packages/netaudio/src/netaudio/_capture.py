@@ -109,26 +109,36 @@ def fetch_rx_records(client, arc_port):
     return rx
 
 
-def fetch_tx_records(client, arc_port):
+def fetch_tx_records(client, arc_port, channel_count):
     friendly = {}
-    page = 0
-    while True:
-        records = _query(
-            client, {"command": "transmitters", "page": page, "friendly_names": True}, arc_port, "tx_friendly", page * 32 + 1
-        ) or []
-        for number, friendly_name in records:
+    if channel_count > 0:
+        friendly_records = (
+            _query(
+                client,
+                {"command": "transmitter_names", "channel_count": channel_count},
+                arc_port,
+                "tx_friendly",
+                1,
+            )
+            or []
+        )
+        for number, friendly_name in friendly_records:
             if friendly_name:
                 friendly[number] = friendly_name
-        if len(records) < 32:
-            break
-        page += 1
 
     tx = []
     page = 0
     while True:
-        records = _query(
-            client, {"command": "transmitters", "page": page, "friendly_names": False}, arc_port, "tx_info", page * 32 + 1
-        ) or []
+        records = (
+            _query(
+                client,
+                {"command": "transmitters", "page": page},
+                arc_port,
+                "tx_info",
+                page * 32 + 1,
+            )
+            or []
+        )
         for record in records:
             record["friendly_name"] = friendly.get(record["number"])
         tx.extend(records)
@@ -145,7 +155,7 @@ def _fetch_instrumented(client, arc_port):
         counts = {"tx_count": 0, "rx_count": 0, "locked": None}
 
     rx = fetch_rx_records(client, arc_port)
-    tx = fetch_tx_records(client, arc_port)
+    tx = fetch_tx_records(client, arc_port, counts["tx_count"])
 
     settings_data = _query(client, {"command": "device_settings"}, arc_port, "device_settings")
     aes67 = _query(client, {"command": "query_latency_config"}, arc_port, "aes67_configured")
