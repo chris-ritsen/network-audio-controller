@@ -1,4 +1,5 @@
 import struct
+from unittest.mock import MagicMock
 
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
@@ -8,7 +9,14 @@ from netaudio.dante.services.notification import (
 )
 from netaudio.dante.services.settings import DanteSettingsService
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.events import DanteEventDispatcher
+from netaudio.dante.events import DanteEventDispatcher, EventType
+
+
+SAMPLE_RATE_STATUS_PACKET = bytes.fromhex(
+    "ffff004816310000001dc10812580000417564696e6174650724008000000000"
+    "001800060000ac4400000000000200000000ac440000bb800001588800017700"
+    "0002b1100002ee00"
+)
 
 
 class TestDanteSettingsService:
@@ -19,6 +27,16 @@ class TestDanteSettingsService:
     def test_identify_not_started(self):
         service = DanteSettingsService()
         service.identify("192.168.1.1")
+
+    def test_probe_sample_rate_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_probe_sample_rate = MagicMock(return_value=(b"probe", None, 8700))
+        service.send = MagicMock()
+
+        service.probe_sample_rate("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+
+        service._commands.command_probe_sample_rate.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
+        service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
 
 
 class TestDanteCMCService:
@@ -161,6 +179,85 @@ class TestDanteNotificationService:
         assert device.interfaces[1]["ip_address"] == "192.168.2.20"
         assert device.interface_reboot_required is False
         assert device.interface_pending_config is None
+
+    def test_sample_rate_status_updates_device_and_emits_once(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.name = "lx-dante"
+        device.ipv4 = "192.168.1.108"
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        assert device.sample_rate == 44_100
+        assert device.supported_sample_rates == [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        device_updated_events = [event for event in emitted_events if event.type == EventType.DEVICE_UPDATED]
+        notification_events = [event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED]
+        assert len(device_updated_events) == 1
+        assert device_updated_events[0].server_name == "lx-dante.local."
+        assert len(notification_events) == 1
+        assert notification_events[0].data["notification_id"] == 128
+        assert notification_events[0].data["state_applied"] is True
+        assert notification_events[0].data["conmon_response"] is True
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        assert sum(event.type == EventType.NOTIFICATION_RECEIVED for event in emitted_events) == 2
+
+    def test_sample_rate_status_notifies_registered_waiter(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        waiter = service.register_notification_waiter("192.168.1.108", (128,))
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        assert waiter.event.is_set()
+        assert waiter.notification_id == 128
+
+    def test_sample_rate_status_returns_typed_probe_result(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        waiter = service.register_sample_rate_waiter("192.168.1.108")
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        assert waiter.is_set()
+        assert service.get_sample_rate_result("192.168.1.108") == (
+            44_100,
+            [44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+        )
+        service.unregister_sample_rate_waiter("192.168.1.108")
+
+    def test_sample_rate_status_does_not_repopulate_offline_device(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.ipv4 = "192.168.1.108"
+        device.online = False
+        service = DanteNotificationService(
+            dispatcher=MagicMock(),
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        assert device.sample_rate is None
+        assert device.supported_sample_rates is None
+
+    def test_sample_rate_status_is_applied_when_device_appears(self):
+        dispatcher = MagicMock()
+        service = DanteNotificationService(dispatcher=dispatcher)
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.ipv4 = "192.168.1.108"
+
+        service.apply_pending_for_device(device)
+
+        assert device.sample_rate == 44_100
+        assert device.supported_sample_rates == [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert all(event.type != EventType.DEVICE_UPDATED for event in emitted_events)
 
 
 class TestHeartbeatLockStateParsing:

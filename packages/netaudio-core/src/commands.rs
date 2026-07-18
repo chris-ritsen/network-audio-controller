@@ -441,6 +441,15 @@ pub fn build_set_sample_rate(sample_rate: u32) -> Result<Vec<u8>, NetaudioError>
     )
 }
 
+pub fn build_probe_sample_rate(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>, NetaudioError> {
+    let mut body = Vec::with_capacity(14);
+    body.extend_from_slice(&0x0081u16.to_be_bytes());
+    body.extend_from_slice(&100u32.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    settings_packet(sequence, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
+}
+
 pub fn build_set_gain_level(
     channel_number: u8,
     gain_level: u8,
@@ -1026,6 +1035,19 @@ mod tests {
         for level in MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL {
             assert!(build_set_gain_level(1, level, false).is_ok(), "{level}");
         }
+    }
+
+    #[test]
+    fn probe_sample_rate_matches_captured_packet_4170622() {
+        let packet = build_probe_sample_rate([0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24], 0x0042).unwrap();
+        assert_eq!(
+            packet,
+            [
+                0xFF, 0xFF, 0x00, 0x28, 0x00, 0x42, 0x00, 0x00, 0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24,
+                0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x3A, 0x00, 0x81,
+                0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]
+        );
     }
 
     #[test]
