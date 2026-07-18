@@ -100,6 +100,7 @@ def get_settings_message_type_name(message_type):
 
     return f"msg:0x{message_type:04X}"
 
+
 RESULT_NAMES = {
     0x0001: "RESULT_CODE_SUCCESS",
     0x0022: "RESULT_CODE_ERROR",
@@ -157,19 +158,19 @@ def format_hex(data: bytes) -> str:
 def print_field(offset: int, length: int, raw: bytes, name: str, value: str, color: str = None):
     if color is None:
         color = C.WHITE
-    offset_str = f"{C.DIM}[{offset:3d}:{offset+length:3d}]{C.RESET}"
+    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
     hex_str = format_hex(raw)
     print(f"  {offset_str} {hex_str:20s}  {color}{name:28s}{C.RESET} = {value}", file=sys.stderr)
 
 
 def print_const(offset: int, length: int, raw: bytes, const_name: str):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset+length:3d}]{C.RESET}"
+    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
     hex_str = f"{C.YELLOW}{C.BOLD}{format_hex(raw)}{C.RESET}"
     print(f"  {offset_str} {hex_str:30s}  {C.YELLOW}{const_name}{C.RESET}", file=sys.stderr)
 
 
 def print_pointer(offset: int, length: int, raw: bytes, name: str, ptr_value: int, body: bytes):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset+length:3d}]{C.RESET}"
+    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
     hex_str = f"{C.MAGENTA}{format_hex(raw)}{C.RESET}"
 
     string_offset = ptr_value - 10
@@ -182,7 +183,7 @@ def print_pointer(offset: int, length: int, raw: bytes, name: str, ptr_value: in
             string_bytes = body[string_offset:end_offset]
             string_hex = format_hex(string_bytes)
 
-            ptr_str = f"{C.DIM}-> @{ptr_value}:{C.RESET} {C.DIM}{string_hex}{C.RESET} {C.CYAN}\"{resolved}\"{C.RESET}"
+            ptr_str = f'{C.DIM}-> @{ptr_value}:{C.RESET} {C.DIM}{string_hex}{C.RESET} {C.CYAN}"{resolved}"{C.RESET}'
         else:
             ptr_str = f"{C.DIM}-> @{ptr_value} (empty){C.RESET}"
     else:
@@ -196,13 +197,13 @@ def print_record_separator(num: int, record_type: str):
 
 
 def print_sample_rate_offset(offset: int, length: int, raw: bytes, name: str, offset_value: int, body: bytes):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset+length:3d}]{C.RESET}"
+    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
     hex_str = f"{C.MAGENTA}{format_hex(raw)}{C.RESET}"
 
     body_offset = offset_value - 10
 
     if 0 <= body_offset and body_offset + 4 <= len(body):
-        sample_rate_bytes = body[body_offset:body_offset + 4]
+        sample_rate_bytes = body[body_offset : body_offset + 4]
         sample_rate = struct.unpack(">I", sample_rate_bytes)[0]
         raw_hex = format_hex(sample_rate_bytes)
         result_str = f"{C.DIM}-> @{offset_value}:{C.RESET} {C.DIM}{raw_hex}{C.RESET} {C.CYAN}{sample_rate} Hz{C.RESET}"
@@ -242,7 +243,10 @@ def format_request(data: bytes, device_name: str, command_name: str):
 
     opcode_name = get_opcode_name(protocol, opcode)
 
-    print(f"\n{C.CYAN}{C.BOLD}>>> REQUEST{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}", file=sys.stderr)
+    print(
+        f"\n{C.CYAN}{C.BOLD}>>> REQUEST{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}",
+        file=sys.stderr,
+    )
     print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
 
     highlights = [
@@ -294,7 +298,10 @@ def format_response(data: bytes, device_name: str, command_name: str):
 
     opcode_name = get_opcode_name(protocol, opcode)
 
-    print(f"\n{C.GREEN}{C.BOLD}<<< RESPONSE{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}", file=sys.stderr)
+    print(
+        f"\n{C.GREEN}{C.BOLD}<<< RESPONSE{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}",
+        file=sys.stderr,
+    )
     print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
 
     result_color = C.RED if result == 0x0022 else C.GREEN
@@ -328,7 +335,10 @@ def format_response(data: bytes, device_name: str, command_name: str):
 
     if result in RESULT_NAMES:
         color = C.RED if result == 0x0022 else C.GREEN
-        print(f"  {C.DIM}[  8: 10]{C.RESET} {color}{C.BOLD}{format_hex(data[8:10])}{C.RESET}  {color}{RESULT_NAMES[result]}{C.RESET}", file=sys.stderr)
+        print(
+            f"  {C.DIM}[  8: 10]{C.RESET} {color}{C.BOLD}{format_hex(data[8:10])}{C.RESET}  {color}{RESULT_NAMES[result]}{C.RESET}",
+            file=sys.stderr,
+        )
     else:
         print_field(8, 2, data[8:10], "result_code", f"0x{result:04X}", C.YELLOW)
 
@@ -340,7 +350,7 @@ def format_response(data: bytes, device_name: str, command_name: str):
     if opcode == 0x1002:
         name = body.rstrip(b"\x00").decode("utf-8", errors="replace")
         print(f"\n  {C.DIM}Parsed:{C.RESET}", file=sys.stderr)
-        print(f"  {C.CYAN}\"{name}\"{C.RESET}", file=sys.stderr)
+        print(f'  {C.CYAN}"{name}"{C.RESET}', file=sys.stderr)
 
     elif opcode == 0x1000:
         format_channel_count_body(body)
@@ -506,7 +516,9 @@ def format_rx_channels_body(body: bytes):
         print_field(10 + record_start + 2, 2, record[2:4], "unknown", f"0x{unknown:04X}", C.DIM)
 
         if record_index == 0 and tx_device_offset != 0:
-            print_sample_rate_offset(10 + record_start + 4, 2, record[4:6], "sample_rate_offset", sample_rate_offset_val, body)
+            print_sample_rate_offset(
+                10 + record_start + 4, 2, record[4:6], "sample_rate_offset", sample_rate_offset_val, body
+            )
         else:
             print_field(10 + record_start + 4, 2, record[4:6], "unknown", f"0x{sample_rate_offset_val:04X}", C.DIM)
 
@@ -519,7 +531,10 @@ def format_rx_channels_body(body: bytes):
         sub_state = get_subscription_status_state(sub_status)
 
         if sub_state == "connected":
-            print(f"  {C.DIM}[{10+record_start+14:3d}:{10+record_start+16:3d}]{C.RESET} {C.GREEN}{C.BOLD}{format_hex(record[14:16])}{C.RESET}  {C.GREEN}subscription_status          {C.RESET} = {sub_name}", file=sys.stderr)
+            print(
+                f"  {C.DIM}[{10 + record_start + 14:3d}:{10 + record_start + 16:3d}]{C.RESET} {C.GREEN}{C.BOLD}{format_hex(record[14:16])}{C.RESET}  {C.GREEN}subscription_status          {C.RESET} = {sub_name}",
+                file=sys.stderr,
+            )
         else:
             print_field(10 + record_start + 14, 2, record[14:16], "subscription_status", sub_name, C.YELLOW)
 

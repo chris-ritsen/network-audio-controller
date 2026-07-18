@@ -400,18 +400,22 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
     all_events = []
 
     for marker_item in markers:
-        all_events.append({
-            "type": "marker",
-            "timestamp_ns": marker_item.get("timestamp_ns", 0),
-            "data": marker_item,
-        })
+        all_events.append(
+            {
+                "type": "marker",
+                "timestamp_ns": marker_item.get("timestamp_ns", 0),
+                "data": marker_item,
+            }
+        )
 
     for sample in samples:
-        all_events.append({
-            "type": "packet",
-            "timestamp_ns": sample.get("timestamp_ns", 0),
-            "data": sample,
-        })
+        all_events.append(
+            {
+                "type": "packet",
+                "timestamp_ns": sample.get("timestamp_ns", 0),
+                "data": sample,
+            }
+        )
 
     all_events.sort(key=lambda event: event["timestamp_ns"])
 
@@ -480,7 +484,9 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
             filename = sample.get("file", "?")
             is_evidence = sample.get("evidence", False)
             source_label = "EVIDENCE PACKET" if is_evidence else "PACKET"
-            source_session = f" (from session {sample['session_id']})" if is_evidence and sample.get("session_id") else ""
+            source_session = (
+                f" (from session {sample['session_id']})" if is_evidence and sample.get("session_id") else ""
+            )
 
             src_dst = ""
             if sample.get("src_ip") and sample.get("dst_ip"):
@@ -871,7 +877,9 @@ def provenance_show(
     print(f"  Device:      {scope.get('device_name', '')} ({scope.get('device_ip', '')})")
     print(f"  Started:     {manifest.get('started_iso', '')}")
     print(f"  Ended:       {manifest.get('ended_iso', '')}")
-    print(f"  Packets:     {manifest.get('session_packet_count', manifest.get('count', 0))} session, {manifest.get('evidence_packet_count', 0)} evidence")
+    print(
+        f"  Packets:     {manifest.get('session_packet_count', manifest.get('count', 0))} session, {manifest.get('evidence_packet_count', 0)} evidence"
+    )
     print(f"  Markers:     {len(markers)}")
 
     if not markers and not samples:
@@ -920,7 +928,9 @@ def provenance_show(
 
 @app.command("audit")
 def provenance_audit(
-    bundle: Optional[str] = typer.Argument(None, help="Path to a bundle directory or .tar.gz. Omit to scan all bundles."),
+    bundle: Optional[str] = typer.Argument(
+        None, help="Path to a bundle directory or .tar.gz. Omit to scan all bundles."
+    ),
     fixtures_root: Optional[str] = typer.Option(
         None, "--fixtures-root", help="Fixture root containing provenance session dirs."
     ),
@@ -932,9 +942,7 @@ def provenance_audit(
         provenance_dir = root / "provenance" if root.name != "provenance" else root
         if not provenance_dir.exists():
             raise typer.Exit(f"Provenance directory not found: {provenance_dir}")
-        bundle_paths = sorted(
-            list(provenance_dir.glob("session_*/")) + list(provenance_dir.glob("session_*.tar.gz"))
-        )
+        bundle_paths = sorted(list(provenance_dir.glob("session_*/")) + list(provenance_dir.glob("session_*.tar.gz")))
         if not bundle_paths:
             raise typer.Exit(f"No session bundles found in {provenance_dir}")
 
@@ -964,7 +972,9 @@ def provenance_audit(
 def provenance_export(
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(
-        None, "--session", help="Session reference (ID, name, latest, active). Defaults to latest.",
+        None,
+        "--session",
+        help="Session reference (ID, name, latest, active). Defaults to latest.",
     ),
     out: Optional[str] = typer.Option(None, "--out", help="Output directory for the bundle."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
@@ -999,11 +1009,15 @@ def provenance_evidence(
     packet_id: Optional[list[int]] = typer.Option(None, "--packet-id", help="Specific packet IDs to tag (repeatable)."),
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(
-        None, "--session", help="Session reference (ID, name, latest, active). Defaults to active.",
+        None,
+        "--session",
+        help="Session reference (ID, name, latest, active). Defaults to active.",
     ),
     device_ip: Optional[str] = typer.Option(None, "--device-ip", help="Filter packets by device IP."),
     opcode: Optional[str] = typer.Option(None, "--opcode", help="Filter packets by opcode (hex, e.g. 0x1100)."),
-    direction: Optional[str] = typer.Option(None, "--direction", help="Filter packets by direction (request/response)."),
+    direction: Optional[str] = typer.Option(
+        None, "--direction", help="Filter packets by direction (request/response)."
+    ),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
@@ -1060,9 +1074,7 @@ def provenance_evidence(
             data={
                 "packet_ids": resolved_packet_ids,
                 "filters": {
-                    k: (f"0x{v:04X}" if k == "opcode" else v)
-                    for k, v in query_kwargs.items()
-                    if k != "session_id"
+                    k: (f"0x{v:04X}" if k == "opcode" else v) for k, v in query_kwargs.items() if k != "session_id"
                 },
             },
         )
@@ -1097,7 +1109,9 @@ def provenance_analysis(
     ),
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(
-        None, "--session", help="Session reference (ID, name, latest, active). Defaults to active.",
+        None,
+        "--session",
+        help="Session reference (ID, name, latest, active). Defaults to active.",
     ),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
@@ -1254,12 +1268,16 @@ def provenance_send(
     device_ip: str = typer.Option(..., "--device-ip", help="Target device IP address."),
     port: int = typer.Option(4440, "--port", help="Target UDP port."),
     payload_hex: Optional[str] = typer.Option(None, "--payload-hex", help="Raw payload as hex string."),
-    packet_id: Optional[int] = typer.Option(None, "--packet-id", help="Replay an existing packet's payload (to a new target)."),
+    packet_id: Optional[int] = typer.Option(
+        None, "--packet-id", help="Replay an existing packet's payload (to a new target)."
+    ),
     label: str = typer.Option(..., "--label", help="Label for this send (used in evidence marker)."),
     note: Optional[str] = typer.Option(None, "--note", help="Descriptive note."),
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(
-        None, "--session", help="Session reference (ID, name, latest, active). Defaults to active.",
+        None,
+        "--session",
+        help="Session reference (ID, name, latest, active). Defaults to active.",
     ),
     timeout: float = typer.Option(2.0, "--timeout", help="Response timeout in seconds."),
     dump: bool = typer.Option(False, "--dump", help="Dump packet payloads as hex + ASCII."),
@@ -1380,7 +1398,9 @@ def _do_send(
         )
 
         reply_info = _label_packet(reply_data)
-        print(f"Recv: #{reply_id}  {reply_ip}:{reply_port} -> {local_ip}:{local_port}  {len(reply_data)}B  {reply_info or ''}")
+        print(
+            f"Recv: #{reply_id}  {reply_ip}:{reply_port} -> {local_ip}:{local_port}  {len(reply_data)}B  {reply_info or ''}"
+        )
 
         if dump:
             print(_hexdump(reply_data))
@@ -1485,19 +1505,23 @@ def provenance_replay(
             if original_response_sample:
                 original_response = files.get(original_response_sample["file"])
             port = sample.get("dst_port") or 4440
-            request_response_pairs.append({
-                "sample": sample,
-                "payload": payload,
-                "port": port,
-                "original_response": original_response,
-                "original_response_sample": original_response_sample,
-            })
+            request_response_pairs.append(
+                {
+                    "sample": sample,
+                    "payload": payload,
+                    "port": port,
+                    "original_response": original_response,
+                    "original_response_sample": original_response_sample,
+                }
+            )
 
     if dry_run:
         for idx, pair in enumerate(request_response_pairs, 1):
             sample = pair["sample"]
             opcode_hex = sample.get("opcode_hex", f"0x{sample.get('opcode', 0):04X}")
-            print(f"  [{idx}/{len(request_response_pairs)}] {opcode_hex} -> {target_ip}:{pair['port']}  {len(pair['payload'])}B")
+            print(
+                f"  [{idx}/{len(request_response_pairs)}] {opcode_hex} -> {target_ip}:{pair['port']}  {len(pair['payload'])}B"
+            )
             for line in _compact_hexdump(pair["payload"], max_lines=4):
                 print(line)
             if pair["original_response"]:
@@ -1505,17 +1529,19 @@ def provenance_replay(
         print(f"\nDry run: {len(request_response_pairs)} packets would be sent.")
         return
 
-    asyncio.run(_run_replay(
-        request_response_pairs=request_response_pairs,
-        target_ip=target_ip,
-        replay_name=replay_name,
-        original_name=original_name,
-        bundle_path=bundle_path,
-        timeout=timeout,
-        config=config,
-        profile=profile,
-        db_override=db,
-    ))
+    asyncio.run(
+        _run_replay(
+            request_response_pairs=request_response_pairs,
+            target_ip=target_ip,
+            replay_name=replay_name,
+            original_name=original_name,
+            bundle_path=bundle_path,
+            timeout=timeout,
+            config=config,
+            profile=profile,
+            db_override=db,
+        )
+    )
 
 
 async def _run_replay(
@@ -1539,7 +1565,6 @@ async def _run_replay(
         profile=profile,
         db=db_override,
     ) as verifier:
-
         verifier.marker(
             "replay_started",
             marker_type="system",
@@ -1609,10 +1634,15 @@ async def _run_replay(
                 )
             else:
                 print(f"{len(response)}B  SIZE_DIFF (expected {len(original_response)}B)")
-                results.append({
-                    "opcode_hex": opcode_hex, "status": "size_diff", "idx": idx,
-                    "got_len": len(response), "expected_len": len(original_response),
-                })
+                results.append(
+                    {
+                        "opcode_hex": opcode_hex,
+                        "status": "size_diff",
+                        "idx": idx,
+                        "got_len": len(response),
+                        "expected_len": len(original_response),
+                    }
+                )
                 verifier.observation(
                     f"replay_{opcode_hex}_{idx}_size_diff",
                     note=f"{opcode_hex} response size differs: got {len(response)}B, expected {len(original_response)}B",

@@ -132,8 +132,7 @@ def _parse_field_spec(spec: str) -> dict:
     parts = spec.split(":")
     if len(parts) < 4:
         print(
-            f"Invalid --field format: {spec!r}. "
-            "Expected name:offset:length:type[:value]",
+            f"Invalid --field format: {spec!r}. Expected name:offset:length:type[:value]",
             file=sys.stderr,
         )
         raise typer.Exit(1)
@@ -280,9 +279,7 @@ def _parse_time_filter(value: str | None, store: PacketStore, session_id: int) -
                 frac = sec_parts[1].ljust(6, "0")[:6]
                 microseconds = int(frac)
 
-        target = session_date.replace(
-            hour=hours, minute=minutes, second=seconds, microsecond=microseconds
-        )
+        target = session_date.replace(hour=hours, minute=minutes, second=seconds, microsecond=microseconds)
         return int(target.timestamp() * 1e9)
     except (ValueError, IndexError):
         print(f"Capture: invalid time format: {value}", file=sys.stderr)
@@ -370,4 +367,5 @@ def _parse_optional_int(value):
 
 def _resolve_facts_path() -> Path:
     from netaudio.dante.fact_store import DEFAULT_FACTS_PATH
+
     return DEFAULT_FACTS_PATH

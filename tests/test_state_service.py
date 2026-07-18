@@ -28,11 +28,24 @@ def make_application(devices):
         probe_preferred_leader_state=AsyncMock(return_value=None),
         probe_interface_status=AsyncMock(return_value=None),
         _send_conmon_query_for_device=MagicMock(),
+        on_notification=MagicMock(),
     )
 
 
 def emitted_events(application):
     return [call.args[0] for call in application.dispatcher.emit_nowait.call_args_list]
+
+
+def test_notification_registration_is_idempotent():
+    application = make_application({})
+    state = DanteStateService(application)
+
+    state.register()
+    registered_count = application.on_notification.call_count
+    state.register()
+
+    assert registered_count > 0
+    assert application.on_notification.call_count == registered_count
 
 
 class TestRefetchDeviceControls:
@@ -130,9 +143,7 @@ class TestFetchDeviceControls:
     async def test_refresh_clears_populating_guard(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
-        device.fetch_controls_data = AsyncMock(
-            return_value={"name": "Device1", "tx_count": 2, "rx_count": 2}
-        )
+        device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
         state = DanteStateService(application)
 
         await state.refresh_device("dev1.local.")
@@ -185,11 +196,13 @@ class TestRefreshAffectedSubscriptions:
         subscriber.subscriptions = [SimpleNamespace(tx_device_name="Sender")]
         bystander = make_device(server_name="other.local.", name="Other")
 
-        application = make_application({
-            "tx.local.": offline_device,
-            "rx.local.": subscriber,
-            "other.local.": bystander,
-        })
+        application = make_application(
+            {
+                "tx.local.": offline_device,
+                "rx.local.": subscriber,
+                "other.local.": bystander,
+            }
+        )
         subscriber.get_rx_channels = AsyncMock()
         bystander.get_rx_channels = AsyncMock()
         state = DanteStateService(application)

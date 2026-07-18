@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import collections
 import ipaddress
@@ -49,10 +51,7 @@ class MeteringManager:
             probe.close()
 
     def _is_active(self, server_name: str) -> bool:
-        return bool(
-            self._persistent_refs.get(server_name)
-            or self._snapshot_count.get(server_name, 0) > 0
-        )
+        return bool(self._persistent_refs.get(server_name) or self._snapshot_count.get(server_name, 0) > 0)
 
     def _get_device(self, server_name: str):
         return self._application.devices.get(server_name)
@@ -80,7 +79,10 @@ class MeteringManager:
         device_name = device.name or device.server_name
         logger.debug(f"Sending metering start to {device_name} ({device_ip})")
         self._application.cmc.start_metering(
-            device_ip, device_name, self._host_ip, self._host_mac,
+            device_ip,
+            device_name,
+            self._host_ip,
+            self._host_mac,
             self._active_port,
         )
 
@@ -92,7 +94,10 @@ class MeteringManager:
         device_name = device.name or device.server_name
         logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
         self._application.cmc.stop_metering(
-            device_ip, device_name, self._host_ip, self._host_mac,
+            device_ip,
+            device_name,
+            self._host_ip,
+            self._host_mac,
             self._active_port,
         )
 
@@ -106,8 +111,7 @@ class MeteringManager:
         else:
             fallback_port = preferred_port + 1
             logger.warning(
-                f"Metering port {preferred_port} is in use (Dante Controller?), "
-                f"falling back to {fallback_port}"
+                f"Metering port {preferred_port} is in use (Dante Controller?), falling back to {fallback_port}"
             )
             self._active_port = fallback_port
 
@@ -149,16 +153,18 @@ class MeteringManager:
                 cached = self._latest_levels.get(server_name)
                 if not cached:
                     continue
-                self._application.dispatcher.emit_nowait(DanteEvent(
-                    type=EventType.METER_VALUES,
-                    server_name=server_name,
-                    data={
-                        "tx": cached["tx"],
-                        "rx": cached["rx"],
-                        "wall_time": cached.get("wall_time"),
-                        "source_ip": cached.get("source_ip"),
-                    },
-                ))
+                self._application.dispatcher.emit_nowait(
+                    DanteEvent(
+                        type=EventType.METER_VALUES,
+                        server_name=server_name,
+                        data={
+                            "tx": cached["tx"],
+                            "rx": cached["rx"],
+                            "wall_time": cached.get("wall_time"),
+                            "source_ip": cached.get("source_ip"),
+                        },
+                    )
+                )
 
     async def stop(self):
         if self._broadcast_task:

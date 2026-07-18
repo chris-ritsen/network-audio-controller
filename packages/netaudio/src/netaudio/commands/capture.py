@@ -559,9 +559,15 @@ def session_rename(
 def session_list(
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     limit: int = typer.Option(25, "--limit", help="Number of sessions to show."),
-    category: Optional[str] = typer.Option(None, "--category", help="Filter by category (experiment, diagnostic, etc)."),
-    has_evidence: bool = typer.Option(False, "--has-evidence", "--evidence", help="Only show sessions with evidence-tagged packets."),
-    no_evidence: bool = typer.Option(False, "--no-evidence", help="Only show sessions with no evidence-tagged packets."),
+    category: Optional[str] = typer.Option(
+        None, "--category", help="Filter by category (experiment, diagnostic, etc)."
+    ),
+    has_evidence: bool = typer.Option(
+        False, "--has-evidence", "--evidence", help="Only show sessions with evidence-tagged packets."
+    ),
+    no_evidence: bool = typer.Option(
+        False, "--no-evidence", help="Only show sessions with no evidence-tagged packets."
+    ),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
@@ -594,20 +600,23 @@ def session_list(
                 continue
 
             rows.append([str(session_id), started, ended, str(packets), str(evidence), session_category, name])
-            json_data.append({
-                "id": session_id,
-                "name": name,
-                "category": session_category,
-                "started": started,
-                "ended": ended,
-                "packets": packets,
-                "evidence": evidence,
-                "source_host": session.get("source_host") or "",
-                "description": session.get("description") or "",
-            })
+            json_data.append(
+                {
+                    "id": session_id,
+                    "name": name,
+                    "category": session_category,
+                    "started": started,
+                    "ended": ended,
+                    "packets": packets,
+                    "evidence": evidence,
+                    "source_host": session.get("source_host") or "",
+                    "description": session.get("description") or "",
+                }
+            )
         output_table(headers, rows, json_data=json_data, title="Sessions")
 
         from netaudio.cli import state as cli_state
+
         if cli_state.dissect:
             _print_session_evidence(store, sessions, has_evidence, no_evidence)
     finally:
@@ -622,12 +631,20 @@ def session_show(
         "--session",
         help="Session reference (ID, exact name, latest, or active). Defaults to latest.",
     ),
-    follow_mode: bool = typer.Option(False, "--follow", "-f", help="Tail the session timeline, polling for new markers."),
+    follow_mode: bool = typer.Option(
+        False, "--follow", "-f", help="Tail the session timeline, polling for new markers."
+    ),
     poll_interval: float = typer.Option(1.0, "--poll", help="Poll interval in seconds for --follow mode."),
     marker_type: Optional[list[str]] = typer.Option(None, "--type", help="Filter by marker type (repeatable)."),
-    after: Optional[str] = typer.Option(None, "--after", help="Show markers after this time (HH:MM:SS or ISO timestamp)."),
-    before: Optional[str] = typer.Option(None, "--before", help="Show markers before this time (HH:MM:SS or ISO timestamp)."),
-    grep: Optional[str] = typer.Option(None, "--grep", help="Filter markers matching string in label, summary, or note."),
+    after: Optional[str] = typer.Option(
+        None, "--after", help="Show markers after this time (HH:MM:SS or ISO timestamp)."
+    ),
+    before: Optional[str] = typer.Option(
+        None, "--before", help="Show markers before this time (HH:MM:SS or ISO timestamp)."
+    ),
+    grep: Optional[str] = typer.Option(
+        None, "--grep", help="Filter markers matching string in label, summary, or note."
+    ),
     brief: bool = typer.Option(False, "--brief", help="One-line per marker: summary or label only."),
     no_notes: bool = typer.Option(False, "--no-notes", help="Hide full notes (show summary if available)."),
     packets: bool = typer.Option(False, "--packets", help="Show evidence packet dumps and per-marker packet counts."),
@@ -684,17 +701,19 @@ def session_show(
                     entry["note"] = m.get("note") or ""
                 entry["data"] = m.get("data")
                 marker_list.append(entry)
-            output_single({
-                "id": resolved_session_id,
-                "name": session_row.get("name") or "",
-                "category": session_row.get("category") or "",
-                "source_host": session_row.get("source_host") or "",
-                "started": session_row.get("started_iso") or "",
-                "ended": session_row.get("ended_iso") or "",
-                "packets": total_packets,
-                "description": session_row.get("description") or "",
-                "markers": marker_list,
-            })
+            output_single(
+                {
+                    "id": resolved_session_id,
+                    "name": session_row.get("name") or "",
+                    "category": session_row.get("category") or "",
+                    "source_host": session_row.get("source_host") or "",
+                    "started": session_row.get("started_iso") or "",
+                    "ended": session_row.get("ended_iso") or "",
+                    "packets": total_packets,
+                    "description": session_row.get("description") or "",
+                    "markers": marker_list,
+                }
+            )
             return
 
         print(f"Session #{resolved_session_id}")
@@ -713,7 +732,10 @@ def session_show(
             next_times = [m["timestamp_ns"] for m in markers[1:]] + [None]
             for m, next_ts in zip(markers, next_times):
                 _print_marker_row(
-                    m, next_ts, resolved_session_id, store,
+                    m,
+                    next_ts,
+                    resolved_session_id,
+                    store,
                     use_dissect=cli_state.dissect,
                     show_notes=show_notes,
                     show_packets=show_packets,
@@ -723,7 +745,8 @@ def session_show(
 
         if follow_mode:
             _follow_session_timeline(
-                store, resolved_session_id,
+                store,
+                resolved_session_id,
                 last_marker_id=int(markers[-1]["id"]) if markers else 0,
                 poll_interval=poll_interval,
                 use_dissect=cli_state.dissect,
@@ -750,10 +773,18 @@ def session_packets(
     from_label: Optional[str] = typer.Option(None, "--from-label", help="Start at first marker with this label."),
     to_label: Optional[str] = typer.Option(None, "--to-label", help="End at last marker with this label."),
     opcode: Optional[str] = typer.Option(None, "--opcode", help="Filter by opcode (hex like 0x2010 or decimal)."),
-    protocol: Optional[str] = typer.Option(None, "--protocol", help="Filter by protocol ID (hex like 0x2729 or decimal)."),
-    direction: Optional[str] = typer.Option(None, "--direction", help="Filter by direction: request, response, or multicast."),
-    after: Optional[str] = typer.Option(None, "--after", help="Show packets after this time (HH:MM:SS or HH:MM:SS.fff)."),
-    before: Optional[str] = typer.Option(None, "--before", help="Show packets before this time (HH:MM:SS or HH:MM:SS.fff)."),
+    protocol: Optional[str] = typer.Option(
+        None, "--protocol", help="Filter by protocol ID (hex like 0x2729 or decimal)."
+    ),
+    direction: Optional[str] = typer.Option(
+        None, "--direction", help="Filter by direction: request, response, or multicast."
+    ),
+    after: Optional[str] = typer.Option(
+        None, "--after", help="Show packets after this time (HH:MM:SS or HH:MM:SS.fff)."
+    ),
+    before: Optional[str] = typer.Option(
+        None, "--before", help="Show packets before this time (HH:MM:SS or HH:MM:SS.fff)."
+    ),
     limit: int = typer.Option(200, "--limit", min=1, max=5000, help="Max packets to show."),
     offset: int = typer.Option(0, "--offset", min=0, help="Packet offset within filtered result."),
     descending: bool = typer.Option(False, "--descending", help="Show newest packets first."),
@@ -1462,27 +1493,16 @@ def follow(
 @packet_app.command("list")
 def packet_list(
     session: Optional[str] = typer.Option(
-        None, "--session",
+        None,
+        "--session",
         help="Session reference (ID, name, latest, active). Omit to search all packets.",
     ),
-    device_ip: Optional[str] = typer.Option(
-        None, "--device-ip", help="Filter by device IP (src or dst)."
-    ),
-    source_ip: Optional[str] = typer.Option(
-        None, "--src", help="Filter by source IP."
-    ),
-    destination_ip: Optional[str] = typer.Option(
-        None, "--dst", help="Filter by destination IP."
-    ),
-    port: Optional[int] = typer.Option(
-        None, "--port", help="Filter by port (src or dst)."
-    ),
-    device_name: Optional[str] = typer.Option(
-        None, "--device", help="Filter by device name."
-    ),
-    opcode: Optional[str] = typer.Option(
-        None, "--opcode", help="Filter by opcode (hex like 0x2000 or decimal)."
-    ),
+    device_ip: Optional[str] = typer.Option(None, "--device-ip", help="Filter by device IP (src or dst)."),
+    source_ip: Optional[str] = typer.Option(None, "--src", help="Filter by source IP."),
+    destination_ip: Optional[str] = typer.Option(None, "--dst", help="Filter by destination IP."),
+    port: Optional[int] = typer.Option(None, "--port", help="Filter by port (src or dst)."),
+    device_name: Optional[str] = typer.Option(None, "--device", help="Filter by device name."),
+    opcode: Optional[str] = typer.Option(None, "--opcode", help="Filter by opcode (hex like 0x2000 or decimal)."),
     protocol: Optional[str] = typer.Option(
         None, "--protocol", help="Filter by protocol ID (hex like 0x27FF or decimal)."
     ),
@@ -1495,9 +1515,7 @@ def packet_list(
     before: Optional[str] = typer.Option(
         None, "--before", help="Show packets before this time (HH:MM:SS or ISO timestamp)."
     ),
-    grep: Optional[str] = typer.Option(
-        None, "--grep", help="Filter packets containing this string in their payload."
-    ),
+    grep: Optional[str] = typer.Option(None, "--grep", help="Filter packets containing this string in their payload."),
     tail: Optional[int] = typer.Option(
         None, "--tail", help="Show the N most recent packets (shorthand for --descending --limit N)."
     ),
@@ -1531,7 +1549,10 @@ def packet_list(
         session_row = None
         if session is not None:
             session_id, session_row = _resolve_session_reference(
-                store, session_id=None, session=session, default_selector="latest",
+                store,
+                session_id=None,
+                session=session,
+                default_selector="latest",
             )
 
         start_ns = None
@@ -1700,6 +1721,7 @@ def packet_show(
                 print(_hexdump(payload, indent="    "))
             else:
                 from netaudio.dante.packet_dissector import dissect_and_render
+
                 print(dissect_and_render(payload, indent="  "))
 
             print()
@@ -1710,7 +1732,9 @@ def packet_show(
 @packet_app.command("diff")
 def packet_diff(
     packet_ids: list[int] = typer.Argument(..., help="Two or more packet IDs to compare."),
-    full: bool = typer.Option(False, "--full", help="Show full hex dump with diffs highlighted, not just changed bytes."),
+    full: bool = typer.Option(
+        False, "--full", help="Show full hex dump with diffs highlighted, not just changed bytes."
+    ),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
@@ -1775,11 +1799,23 @@ def packet_diff(
 @packet_app.command("state-diff")
 def packet_state_diff(
     device_ip: str = typer.Option(..., "--device-ip", help="Device IP address."),
-    before_time: str = typer.Option(..., "--before", help="Time before state change (HH:MM:SS). Packets before this time."),
+    before_time: str = typer.Option(
+        ..., "--before", help="Time before state change (HH:MM:SS). Packets before this time."
+    ),
     after_time: str = typer.Option(..., "--after", help="Time after state change (HH:MM:SS). Packets after this time."),
-    ignore_volatile: bool = typer.Option(True, "--ignore-volatile/--no-ignore-volatile", help="Exclude known volatile header bytes (transaction_id, sequence)."),
-    ignore_jitter: bool = typer.Option(True, "--ignore-jitter/--no-ignore-jitter", help="Exclude bytes that vary within the same time window (counters/timestamps)."),
-    direction: Optional[str] = typer.Option("response", "--direction", help="Packet direction filter (default: response)."),
+    ignore_volatile: bool = typer.Option(
+        True,
+        "--ignore-volatile/--no-ignore-volatile",
+        help="Exclude known volatile header bytes (transaction_id, sequence).",
+    ),
+    ignore_jitter: bool = typer.Option(
+        True,
+        "--ignore-jitter/--no-ignore-jitter",
+        help="Exclude bytes that vary within the same time window (counters/timestamps).",
+    ),
+    direction: Optional[str] = typer.Option(
+        "response", "--direction", help="Packet direction filter (default: response)."
+    ),
     opcode: Optional[str] = typer.Option(None, "--opcode", help="Filter to specific opcode (hex like 0x2000)."),
     full: bool = typer.Option(False, "--full", help="Show full hex dump with diffs highlighted."),
     session: Optional[str] = typer.Option(None, "--session", help="Session reference (ID, name, latest, active)."),
@@ -1820,7 +1856,10 @@ def packet_state_diff(
         session_id = None
         if session is not None:
             session_id, _ = _resolve_session_reference(
-                store, session_id=None, session=session, default_selector="latest",
+                store,
+                session_id=None,
+                session=session,
+                default_selector="latest",
             )
 
         before_rows = store.search_packets(
@@ -1869,8 +1908,12 @@ def packet_state_diff(
         after_ts = datetime.datetime.fromtimestamp(after_ns / 1e9).strftime("%H:%M:%S")
 
         print(f"State diff for {device_ip}")
-        print(f"  before window: ≤ {before_ts} ({sum(len(v) for v in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)")
-        print(f"  after  window: ≥ {after_ts} ({sum(len(v) for v in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)")
+        print(
+            f"  before window: ≤ {before_ts} ({sum(len(v) for v in before_by_opcode.values())} packets, {len(before_by_opcode)} opcodes)"
+        )
+        print(
+            f"  after  window: ≥ {after_ts} ({sum(len(v) for v in after_by_opcode.values())} packets, {len(after_by_opcode)} opcodes)"
+        )
         print(f"  common opcodes: {len(common_opcodes)}")
 
         before_only = sorted(set(before_by_opcode.keys()) - set(after_by_opcode.keys()))
@@ -1894,13 +1937,23 @@ def packet_state_diff(
             before_only_payloads = [payload for _, payload in before_payloads]
             after_only_payloads = [payload for _, payload in after_payloads]
 
-            before_jitter = _detect_jitter_offsets(before_only_payloads) if ignore_jitter and len(before_only_payloads) > 1 else set()
-            after_jitter = _detect_jitter_offsets(after_only_payloads) if ignore_jitter and len(after_only_payloads) > 1 else set()
+            before_jitter = (
+                _detect_jitter_offsets(before_only_payloads)
+                if ignore_jitter and len(before_only_payloads) > 1
+                else set()
+            )
+            after_jitter = (
+                _detect_jitter_offsets(after_only_payloads) if ignore_jitter and len(after_only_payloads) > 1 else set()
+            )
             jitter_offsets = before_jitter | after_jitter
 
             had_diff = _state_diff_print_opcode_diff(
-                opcode_label, before_payloads, after_payloads,
-                volatile_offsets, jitter_offsets, full,
+                opcode_label,
+                before_payloads,
+                after_payloads,
+                volatile_offsets,
+                jitter_offsets,
+                full,
             )
             if had_diff:
                 diff_count += 1

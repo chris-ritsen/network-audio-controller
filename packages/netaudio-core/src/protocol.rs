@@ -6,6 +6,77 @@ pub const OPCODE_TX_CHANNEL_NAMES: u16 = 0x2010;
 pub const OPCODE_RX_CHANNELS: u16 = 0x3000;
 pub const SERVICE_ARC: &str = "_netaudio-arc._udp.local.";
 pub const DANTE_NAME_MAX_LENGTH: usize = 31;
+pub const RESPONSE_HEADER_SIZE: usize = 10;
+pub const RESULT_CODE_SUCCESS: u16 = 0x0001;
+pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
+pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, 0x2809];
+
+const PROTOCOL_SETTINGS: u16 = 0xFFFF;
+const CONMON_MINIMUM_SIZE: usize = 28;
+const CONMON_MAGIC_OFFSET: usize = 16;
+const CONMON_FAMILY_OFFSET: usize = 24;
+const CONMON_OPCODE_OFFSET: usize = 26;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResponseEnvelope<'a> {
+    pub protocol_id: u16,
+    pub opcode: u16,
+    pub result_code: u16,
+    pub body: &'a [u8],
+}
+
+pub fn response_envelope(response: &[u8]) -> Option<ResponseEnvelope<'_>> {
+    if response.len() < RESPONSE_HEADER_SIZE
+        || usize::from(crate::bytes::read_u16(response, 2)?) != response.len()
+    {
+        return None;
+    }
+    Some(ResponseEnvelope {
+        protocol_id: crate::bytes::read_u16(response, 0)?,
+        opcode: crate::bytes::read_u16(response, 6)?,
+        result_code: crate::bytes::read_u16(response, 8)?,
+        body: &response[RESPONSE_HEADER_SIZE..],
+    })
+}
+
+pub fn validate_response_envelope<'a>(
+    response: &'a [u8],
+    expected_protocol_opcodes: &[(u16, u16)],
+    accepted_results: &[u16],
+) -> Option<ResponseEnvelope<'a>> {
+    let envelope = response_envelope(response)?;
+    if !expected_protocol_opcodes.contains(&(envelope.protocol_id, envelope.opcode))
+        || !accepted_results.contains(&envelope.result_code)
+    {
+        return None;
+    }
+    Some(envelope)
+}
+
+pub fn common_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 3] {
+    COMMON_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
+}
+
+pub fn is_common_arc_protocol(protocol_id: u16) -> bool {
+    COMMON_ARC_PROTOCOL_IDS.contains(&protocol_id)
+}
+
+pub fn conmon_opcode(data: &[u8]) -> Option<u16> {
+    if data.len() < CONMON_MINIMUM_SIZE
+        || crate::bytes::read_u16(data, 0)? != PROTOCOL_SETTINGS
+        || usize::from(crate::bytes::read_u16(data, 2)?) != data.len()
+        || crate::bytes::read_u16(data, 6)? != 0
+        || data.get(CONMON_MAGIC_OFFSET..CONMON_MAGIC_OFFSET + 8)? != b"Audinate"
+        || data.get(CONMON_FAMILY_OFFSET).copied()? != 0x07
+    {
+        return None;
+    }
+    crate::bytes::read_u16(data, CONMON_OPCODE_OFFSET)
+}
+
+pub fn validate_conmon_envelope(data: &[u8], expected_opcode: u16) -> Option<()> {
+    (conmon_opcode(data)? == expected_opcode).then_some(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetaudioError {
@@ -13,9 +84,22 @@ pub enum NetaudioError {
     NameInvalidHyphen,
     NameInvalidChars,
     SubscriptionCount,
+    InvalidPage,
+    InvalidSubscriptionChannel,
+    PacketTooLarge,
+    InvalidChannel,
+    InvalidLatency,
+    InvalidSampleRate,
+    InvalidEncoding,
+    InvalidGainLevel,
+    InvalidFlowSlot,
+    InvalidFlowProtocol,
 }
 
-fn validate_dante_name_with_colon_policy(name: &str, allow_colon: bool) -> Result<(), NetaudioError> {
+fn validate_dante_name_with_colon_policy(
+    name: &str,
+    allow_colon: bool,
+) -> Result<(), NetaudioError> {
     if name.chars().count() > DANTE_NAME_MAX_LENGTH {
         return Err(NetaudioError::NameTooLong);
     }
@@ -34,7 +118,8 @@ fn validate_dante_name_with_colon_policy(name: &str, allow_colon: bool) -> Resul
         return Ok(());
     }
 
-    if name.starts_with('-') || name.ends_with('-') || name.starts_with(':') || name.ends_with(':') {
+    if name.starts_with('-') || name.ends_with('-') || name.starts_with(':') || name.ends_with(':')
+    {
         return Err(NetaudioError::NameInvalidHyphen);
     }
 
@@ -49,15 +134,22 @@ pub fn validate_dante_channel_name(name: &str) -> Result<(), NetaudioError> {
     validate_dante_name_with_colon_policy(name, true)
 }
 
-pub fn build_control_packet(opcode: u16, payload: &[u8], transaction_id: u16) -> Vec<u8> {
-    let length = 8 + payload.len();
+pub fn build_control_packet(
+    opcode: u16,
+    payload: &[u8],
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    let length = 8usize
+        .checked_add(payload.len())
+        .ok_or(NetaudioError::PacketTooLarge)?;
+    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
     let mut packet = Vec::with_capacity(length);
     packet.extend_from_slice(&PROTOCOL_ID.to_be_bytes());
-    packet.extend_from_slice(&(length as u16).to_be_bytes());
+    packet.extend_from_slice(&encoded_length.to_be_bytes());
     packet.extend_from_slice(&transaction_id.to_be_bytes());
     packet.extend_from_slice(&opcode.to_be_bytes());
     packet.extend_from_slice(payload);
-    packet
+    Ok(packet)
 }
 
 pub fn build_set_device_name(name: &str, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
@@ -69,7 +161,7 @@ pub fn build_set_device_name(name: &str, transaction_id: u16) -> Result<Vec<u8>,
     payload.extend_from_slice(name_bytes);
     payload.push(0);
 
-    Ok(build_control_packet(OPCODE_DEVICE_NAME_SET, &payload, transaction_id))
+    build_control_packet(OPCODE_DEVICE_NAME_SET, &payload, transaction_id)
 }
 
 #[cfg(test)]
@@ -80,8 +172,8 @@ mod tests {
     fn set_device_name_known_bytes() {
         let packet = build_set_device_name("AVIO", 0).unwrap();
         let expected = [
-            0x27, 0xFF, 0x00, 0x0F, 0x00, 0x00, 0x10, 0x01, 0x00, 0x00, 0x41, 0x56, 0x49,
-            0x4F, 0x00,
+            0x27, 0xFF, 0x00, 0x0F, 0x00, 0x00, 0x10, 0x01, 0x00, 0x00, 0x41, 0x56, 0x49, 0x4F,
+            0x00,
         ];
         assert_eq!(packet, expected);
     }
@@ -101,6 +193,18 @@ mod tests {
     }
 
     #[test]
+    fn control_packet_rejects_declared_length_overflow() {
+        assert_eq!(
+            build_control_packet(0x1000, &vec![0; 65_528], 0),
+            Err(NetaudioError::PacketTooLarge)
+        );
+
+        let maximum = build_control_packet(0x1000, &vec![0; 65_527], 0).unwrap();
+        assert_eq!(maximum.len(), u16::MAX as usize);
+        assert_eq!(&maximum[2..4], &u16::MAX.to_be_bytes());
+    }
+
+    #[test]
     fn validate_accepts_valid_names() {
         for name in ["a", "A1", "Studio-AVIO", "x-1-y", "Z", &"a".repeat(31)] {
             assert_eq!(validate_dante_name(name), Ok(()), "{name}");
@@ -109,7 +213,11 @@ mod tests {
 
     #[test]
     fn validate_channel_name_accepts_colon_labels() {
-        for name in ["windows-gaming:left", "main-mix:right", "shelford-channel:0dB"] {
+        for name in [
+            "windows-gaming:left",
+            "main-mix:right",
+            "shelford-channel:0dB",
+        ] {
             assert_eq!(validate_dante_channel_name(name), Ok(()), "{name}");
         }
     }
@@ -124,8 +232,14 @@ mod tests {
 
     #[test]
     fn validate_rejects_hyphen_at_edges() {
-        assert_eq!(validate_dante_name("-foo"), Err(NetaudioError::NameInvalidHyphen));
-        assert_eq!(validate_dante_name("foo-"), Err(NetaudioError::NameInvalidHyphen));
+        assert_eq!(
+            validate_dante_name("-foo"),
+            Err(NetaudioError::NameInvalidHyphen)
+        );
+        assert_eq!(
+            validate_dante_name("foo-"),
+            Err(NetaudioError::NameInvalidHyphen)
+        );
     }
 
     #[test]

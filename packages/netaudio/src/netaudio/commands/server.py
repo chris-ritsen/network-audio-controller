@@ -25,11 +25,13 @@ def _port_in_use(port):
 
 def _effective_relay_port(relay_port):
     from netaudio.common.app_config import settings as app_settings
+
     return relay_port or app_settings.relay_port
 
 
 def _pin_client_port(effective_port):
     from netaudio.common.app_config import settings as app_settings
+
     app_settings.relay_port = effective_port
 
 
@@ -82,7 +84,9 @@ def _service_active() -> bool:
 
 @app.command()
 def run(
-    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+    relay_port: Optional[int] = typer.Option(
+        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    ),
 ):
     """Run the daemon in the foreground (Ctrl-C to stop)."""
     _run_foreground(relay_port)
@@ -90,7 +94,9 @@ def run(
 
 @app.command()
 def start(
-    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+    relay_port: Optional[int] = typer.Option(
+        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    ),
 ):
     """Start the daemon (via the boot service if installed, otherwise in the background)."""
     if service_install.running_under_systemd():
@@ -142,7 +148,9 @@ def start(
 
 @app.command()
 def stop(
-    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+    relay_port: Optional[int] = typer.Option(
+        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    ),
 ):
     """Stop the daemon."""
     effective_port = _effective_relay_port(relay_port)
@@ -170,7 +178,9 @@ def stop(
 
 @app.command()
 def restart(
-    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+    relay_port: Optional[int] = typer.Option(
+        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    ),
 ):
     """Restart the daemon."""
     effective_port = _effective_relay_port(relay_port)
@@ -196,7 +206,9 @@ def restart(
 
 @app.command()
 def status(
-    relay_port: Optional[int] = typer.Option(None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"),
+    relay_port: Optional[int] = typer.Option(
+        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    ),
 ):
     """Show daemon status."""
     effective_port = _effective_relay_port(relay_port)
@@ -244,7 +256,10 @@ def install(
             if service_install.windows_task_managed():
                 typer.echo(f"Task {service_install.WINDOWS_TASK_NAME} already registered. Use --force to rewrite it.")
             else:
-                typer.echo(f"A task named {service_install.WINDOWS_TASK_NAME} already exists and was not created by netaudio. Use --force to overwrite it.", err=True)
+                typer.echo(
+                    f"A task named {service_install.WINDOWS_TASK_NAME} already exists and was not created by netaudio. Use --force to overwrite it.",
+                    err=True,
+                )
                 raise typer.Exit(code=1)
             return
         service_install.windows_task_register()
@@ -264,7 +279,10 @@ def install(
         if service_install.is_managed_by_netaudio():
             typer.echo(f"Service already installed at {path}. Use --force to rewrite it.")
         else:
-            typer.echo(f"A service file already exists at {path} and was not created by netaudio. Use --force to overwrite it.", err=True)
+            typer.echo(
+                f"A service file already exists at {path} and was not created by netaudio. Use --force to overwrite it.",
+                err=True,
+            )
             raise typer.Exit(code=1)
         return
 
@@ -296,7 +314,10 @@ def uninstall(
             typer.echo("No boot service installed.")
             return
         if not service_install.windows_task_managed() and not force:
-            typer.echo(f"Task {service_install.WINDOWS_TASK_NAME} was not created by netaudio. Use --force to remove it anyway.", err=True)
+            typer.echo(
+                f"Task {service_install.WINDOWS_TASK_NAME} was not created by netaudio. Use --force to remove it anyway.",
+                err=True,
+            )
             raise typer.Exit(code=1)
         service_install.windows_task_delete()
         typer.echo(f"Removed Task Scheduler task {service_install.WINDOWS_TASK_NAME}")

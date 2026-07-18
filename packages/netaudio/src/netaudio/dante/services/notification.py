@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import socket
 import struct
+from dataclasses import dataclass, field as dataclass_field
 
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
@@ -81,6 +84,10 @@ INTERFACE_MODE_NAMES = {
     INTERFACE_MODE_STATIC: "static",
 }
 
+INTERFACE_RECORD_SIZE = 20
+INTERFACE_CONFIGURED_RECORD_SIZE = 24
+INTERFACE_CONFIGURED_RECORD_STRIDE = 28
+
 AES67_CURRENT_NEW_MAP = {
     0x00: (False, False),
     0x01: (True, False),
@@ -124,8 +131,23 @@ class _WaiterRegistry:
         waiter.set()
 
 
+@dataclass(eq=False)
+class NotificationWaiter:
+    device_ip_address: str
+    notification_ids: frozenset[int]
+    event: asyncio.Event = dataclass_field(default_factory=asyncio.Event)
+    notification_id: int | None = None
+
+
 class DanteNotificationService(DanteMulticastService):
-    def __init__(self, dispatcher: DanteEventDispatcher, device_lookup=None, packet_store=None, interface_ip: str | None = None, dissect: bool = False):
+    def __init__(
+        self,
+        dispatcher: DanteEventDispatcher,
+        device_lookup=None,
+        packet_store=None,
+        interface_ip: str | None = None,
+        dissect: bool = False,
+    ):
         super().__init__(
             multicast_group=MULTICAST_GROUP_CONTROL_MONITORING,
             multicast_port=DEVICE_INFO_PORT,
@@ -139,6 +161,7 @@ class DanteNotificationService(DanteMulticastService):
         self._waiters = _WaiterRegistry()
         self._conmon_received: dict[str, set[int]] = {}
         self._conmon_expected_count: dict[str, int] = {}
+        self._notification_waiters: dict[str, set[NotificationWaiter]] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -189,6 +212,34 @@ class DanteNotificationService(DanteMulticastService):
     def _notify_interface_waiter(self, source_ip: str, interfaces: list[dict]) -> None:
         self._waiters.notify("interface", source_ip, interfaces)
 
+    def register_notification_waiter(
+        self,
+        device_ip_address: str,
+        notification_ids,
+    ) -> NotificationWaiter:
+        waiter = NotificationWaiter(
+            device_ip_address=device_ip_address,
+            notification_ids=frozenset(notification_ids),
+        )
+        if not waiter.notification_ids:
+            raise ValueError("notification_ids cannot be empty")
+        self._notification_waiters.setdefault(device_ip_address, set()).add(waiter)
+        return waiter
+
+    def unregister_notification_waiter(self, waiter: NotificationWaiter) -> None:
+        waiters = self._notification_waiters.get(waiter.device_ip_address)
+        if waiters is None:
+            return
+        waiters.discard(waiter)
+        if not waiters:
+            self._notification_waiters.pop(waiter.device_ip_address, None)
+
+    def _notify_notification_waiters(self, source_ip: str, notification_id: int) -> None:
+        for waiter in tuple(self._notification_waiters.get(source_ip, ())):
+            if notification_id in waiter.notification_ids:
+                waiter.notification_id = notification_id
+                waiter.event.set()
+
     def _notify_conmon_waiter(self, source_ip: str, opcode: int) -> None:
         if not self._waiters.is_registered("conmon", source_ip):
             return
@@ -209,6 +260,7 @@ class DanteNotificationService(DanteMulticastService):
             try:
                 from netaudio.common.app_config import settings as app_settings
                 from netaudio.dante.packet_dissector import dissect_and_render, format_dissect_label
+
                 color = not app_settings.no_color
                 label = format_dissect_label("multicast", f"{source_ip}:{addr[1]}", color=color)
                 rendered = dissect_and_render(data, indent="  ", color=color)
@@ -254,6 +306,7 @@ class DanteNotificationService(DanteMulticastService):
 
         notification_id = struct.unpack(">H", data[26:28])[0]
         notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
+        self._notify_notification_waiters(source_ip, notification_id)
 
         logger.debug(f"Notification from {source_ip} ({device_name}): {notification_name} (id={notification_id})")
 
@@ -288,6 +341,7 @@ class DanteNotificationService(DanteMulticastService):
 
         if notification_id is not None:
             notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
+            self._notify_notification_waiters(source_ip, notification_id)
             self._dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.NOTIFICATION_RECEIVED,
@@ -424,7 +478,7 @@ class DanteNotificationService(DanteMulticastService):
 
         ptp_v1_role = None
         if len(data) >= CONMON_PTP_V1_ROLE_OFFSET + 2:
-            role_value = struct.unpack(">H", data[CONMON_PTP_V1_ROLE_OFFSET:CONMON_PTP_V1_ROLE_OFFSET + 2])[0]
+            role_value = struct.unpack(">H", data[CONMON_PTP_V1_ROLE_OFFSET : CONMON_PTP_V1_ROLE_OFFSET + 2])[0]
             ptp_v1_role = PTP_V1_ROLE_MAP.get(role_value)
 
         logger.debug(
@@ -457,15 +511,20 @@ class DanteNotificationService(DanteMulticastService):
 
         offset = 0x28
         for _ in range(interface_count):
-            if offset + 20 > len(data):
+            if offset + INTERFACE_RECORD_SIZE > len(data):
                 break
 
-            mode_value = struct.unpack(">H", data[offset:offset + 2])[0]
+            mode_value = struct.unpack(">H", data[offset : offset + 2])[0]
             mode = INTERFACE_MODE_NAMES.get(mode_value, f"unknown(0x{mode_value:04X})")
-            mac_bytes = data[offset + 2:offset + 8]
+            configured = mode in ("dynamic", "static")
+            record_size = INTERFACE_CONFIGURED_RECORD_SIZE if configured else INTERFACE_RECORD_SIZE
+            if offset + record_size > len(data):
+                break
+
+            mac_bytes = data[offset + 2 : offset + 8]
             mac_address = ":".join(f"{byte:02X}" for byte in mac_bytes)
-            ip_address = socket.inet_ntoa(data[offset + 8:offset + 12])
-            netmask = socket.inet_ntoa(data[offset + 12:offset + 16])
+            ip_address = socket.inet_ntoa(data[offset + 8 : offset + 12])
+            netmask = socket.inet_ntoa(data[offset + 12 : offset + 16])
 
             interface_info = {
                 "mode": mode,
@@ -475,35 +534,35 @@ class DanteNotificationService(DanteMulticastService):
             }
 
             if mode == "dynamic":
-                gateway = socket.inet_ntoa(data[offset + 16:offset + 20])
-                dns_server = socket.inet_ntoa(data[offset + 20:offset + 24])
+                gateway = socket.inet_ntoa(data[offset + 16 : offset + 20])
+                dns_server = socket.inet_ntoa(data[offset + 20 : offset + 24])
                 interface_info["gateway"] = gateway
                 interface_info["dns_server"] = dns_server
-                offset += 24
+                offset += INTERFACE_CONFIGURED_RECORD_STRIDE
             elif mode == "static":
-                dns_server = socket.inet_ntoa(data[offset + 16:offset + 20])
-                gateway = socket.inet_ntoa(data[offset + 20:offset + 24])
+                dns_server = socket.inet_ntoa(data[offset + 16 : offset + 20])
+                gateway = socket.inet_ntoa(data[offset + 20 : offset + 24])
                 interface_info["dns_server"] = dns_server
                 interface_info["gateway"] = gateway
-                offset += 24
+                offset += INTERFACE_CONFIGURED_RECORD_STRIDE
             else:
-                offset += 20
+                offset += INTERFACE_RECORD_SIZE
 
             interfaces.append(interface_info)
 
         reboot_required = False
         pending_config = None
-        if len(data) > 0x49:
-            reboot_flag = struct.unpack(">H", data[0x48:0x4a])[0]
+        if interface_count == 1 and len(data) > 0x49:
+            reboot_flag = struct.unpack(">H", data[0x48:0x4A])[0]
             reboot_required = reboot_flag != 0
 
             if reboot_flag == 0x0004:
                 pending_config = {"mode": "dynamic"}
-            elif reboot_flag == 0x0006 and len(data) >= 0x5c:
-                pending_ip = socket.inet_ntoa(data[0x4c:0x50])
+            elif reboot_flag == 0x0006 and len(data) >= 0x5C:
+                pending_ip = socket.inet_ntoa(data[0x4C:0x50])
                 pending_mask = socket.inet_ntoa(data[0x50:0x54])
                 pending_dns = socket.inet_ntoa(data[0x54:0x58])
-                pending_gw = socket.inet_ntoa(data[0x58:0x5c])
+                pending_gw = socket.inet_ntoa(data[0x58:0x5C])
                 pending_config = {
                     "mode": "static",
                     "ip_address": pending_ip,
@@ -521,11 +580,14 @@ class DanteNotificationService(DanteMulticastService):
         device = self._lookup_device(source_ip)
 
         if device is None:
-            self._cache_pending(source_ip, {
-                "interfaces": interfaces,
-                "interface_reboot_required": reboot_required,
-                "interface_pending_config": pending_config,
-            })
+            self._cache_pending(
+                source_ip,
+                {
+                    "interfaces": interfaces,
+                    "interface_reboot_required": reboot_required,
+                    "interface_pending_config": pending_config,
+                },
+            )
         else:
             device.interfaces = interfaces
             device.interface_reboot_required = reboot_required
@@ -580,12 +642,14 @@ class DanteNotificationService(DanteMulticastService):
     @staticmethod
     def parse_make_model_response(data: bytes) -> tuple[str, str, str]:
         from netaudio import core
+
         parsed = core.parse_response("make_model", data)
         return parsed["product_name"], parsed["product_version"], parsed["manufacturer"]
 
     @staticmethod
     def parse_dante_model_response(data: bytes) -> tuple[str, str]:
         from netaudio import core
+
         parsed = core.parse_response("dante_model", data)
         return parsed["board_codename"], parsed["board_name"]
 

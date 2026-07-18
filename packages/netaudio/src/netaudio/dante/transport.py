@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import struct
@@ -25,10 +27,7 @@ class DanteUnicastProtocol(asyncio.DatagramProtocol):
                 future.set_result(data)
                 return
 
-        logger.debug(
-            f"Unmatched unicast packet from {remote_ip}, "
-            f"transaction_id={transaction_id}, length={len(data)}"
-        )
+        logger.debug(f"Unmatched unicast packet from {remote_ip}, transaction_id={transaction_id}, length={len(data)}")
 
     def error_received(self, exc: Exception) -> None:
         logger.debug(f"Unicast protocol error: {exc}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
+import logging
 import os
 import socket
 import struct
@@ -18,6 +19,8 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.packet_store import PacketStore
 from netaudio.dante.tshark_capture import TsharkCapture
+
+logger = logging.getLogger("netaudio")
 
 try:
     from redis import Redis
@@ -81,8 +84,12 @@ def _get_redis_client(
 
         if resolved_socket:
             client = Redis(
-                unix_socket_path=resolved_socket, db=resolved_db, password=resolved_password,
-                decode_responses=True, socket_timeout=5, socket_connect_timeout=5,
+                unix_socket_path=resolved_socket,
+                db=resolved_db,
+                password=resolved_password,
+                decode_responses=True,
+                socket_timeout=5,
+                socket_connect_timeout=5,
             )
         else:
             resolved_ip = _resolve_host_ipv4(resolved_host)
@@ -92,7 +99,8 @@ def _get_redis_client(
                 db=resolved_db,
                 password=resolved_password,
                 decode_responses=True,
-                socket_timeout=5, socket_connect_timeout=5,
+                socket_timeout=5,
+                socket_connect_timeout=5,
             )
         client.ping()
         _LAST_REDIS_ERROR = None
@@ -116,7 +124,7 @@ def _resolve_devices_from_redis(redis_client):
                 name = data.get("name") or key.rsplit(":", 1)[-1]
                 mapping[name] = data["ipv4"]
     except Exception:
-        pass
+        logger.exception("Failed to resolve daemon devices from Redis")
     return mapping
 
 
@@ -156,6 +164,7 @@ def _print_packet_line(
 
     if dissect_mode:
         from netaudio.dante.packet_dissector import dissect_and_render
+
         print(dissect_and_render(payload))
     elif dump:
         print(_hexdump(payload))
@@ -692,4 +701,3 @@ class CaptureDaemon:
 
             self.store.close()
             print(f"\n{icon('capture')}Capture stopped.")
-

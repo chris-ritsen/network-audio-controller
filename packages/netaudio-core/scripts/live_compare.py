@@ -55,18 +55,14 @@ def main():
     library = load_library()
 
     handle = ctypes.c_void_p()
-    status = library.netaudio_client_new(
-        device_ip.encode(), arc_port, 1000, 3, ctypes.byref(handle)
-    )
+    status = library.netaudio_client_new(device_ip.encode(), arc_port, 1000, 3, ctypes.byref(handle))
     if status != NETAUDIO_OK:
         raise SystemExit(f"client_new failed: {status}")
 
     tx = ctypes.c_uint16(0)
     rx = ctypes.c_uint16(0)
     locked = ctypes.c_int32(-2)
-    library.netaudio_client_get_channel_count(
-        handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked)
-    )
+    library.netaudio_client_get_channel_count(handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked))
 
     result = {
         "device_ip": device_ip,

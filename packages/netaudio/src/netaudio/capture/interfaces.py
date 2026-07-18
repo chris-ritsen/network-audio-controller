@@ -32,7 +32,9 @@ def _default_interface_macos() -> tuple[str | None, str | None]:
     try:
         result = subprocess.run(
             ["networksetup", "-listnetworkserviceorder"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None, None
@@ -40,13 +42,10 @@ def _default_interface_macos() -> tuple[str | None, str | None]:
     if result.returncode != 0:
         return None, None
 
-    available_ips = {
-        name: ip
-        for name, ip, _ in get_available_interfaces()
-        if ip != "127.0.0.1"
-    }
+    available_ips = {name: ip for name, ip, _ in get_available_interfaces() if ip != "127.0.0.1"}
 
     import re
+
     for match in re.finditer(
         r"^\(\d+\)\s+(.+)\n\(Hardware Port: .+, Device: (\S+)\)",
         result.stdout,

@@ -5,9 +5,7 @@ import binascii
 
 class DantePresetXMLSerializer:
     @staticmethod
-    def devices_to_xml(
-        devices_data, preset_name="dante", description="Dante Controller preset"
-    ):
+    def devices_to_xml(devices_data, preset_name="dante", description="Dante Controller preset"):
         root = ET.Element("preset", version="2.1.0")
         name_elem = ET.SubElement(root, "name")
         name_elem.text = preset_name
@@ -88,9 +86,7 @@ class DantePresetXMLSerializer:
         preferred_master = device_data.get("preferred_master")
 
         if preferred_master is not None:
-            preferred_master_elem = ET.SubElement(
-                device_elem, "preferred_master", value=str(preferred_master).lower()
-            )
+            preferred_master_elem = ET.SubElement(device_elem, "preferred_master", value=str(preferred_master).lower())
 
         sample_rate = device_data.get("sample_rate")
 
@@ -114,30 +110,21 @@ class DantePresetXMLSerializer:
         transmitters = channels.get("transmitters", {})
 
         for channel_num, channel_data in transmitters.items():
-            tx_elem = ET.SubElement(
-                device_elem, "txchannel", danteId=str(channel_num), mediaType="audio"
-            )
+            tx_elem = ET.SubElement(device_elem, "txchannel", danteId=str(channel_num), mediaType="audio")
             label_elem = ET.SubElement(tx_elem, "label")
-            label_elem.text = channel_data.get("friendly_name") or channel_data.get(
-                "name", f"tx-{channel_num}"
-            )
+            label_elem.text = channel_data.get("friendly_name") or channel_data.get("name", f"tx-{channel_num}")
 
         receivers = channels.get("receivers", {})
         subscriptions = device_data.get("subscriptions", [])
 
         for channel_num, channel_data in receivers.items():
-            rx_elem = ET.SubElement(
-                device_elem, "rxchannel", danteId=str(channel_num), mediaType="audio"
-            )
+            rx_elem = ET.SubElement(device_elem, "rxchannel", danteId=str(channel_num), mediaType="audio")
 
             name_elem = ET.SubElement(rx_elem, "name")
             name_elem.text = channel_data.get("name", f"rx-{channel_num}")
 
             for sub in subscriptions:
-                if (
-                    sub.get("rx_channel") == channel_data.get("name")
-                    and sub.get("tx_device") is not None
-                ):
+                if sub.get("rx_channel") == channel_data.get("name") and sub.get("tx_device") is not None:
                     sub_channel_elem = ET.SubElement(rx_elem, "subscribed_channel")
                     sub_channel_elem.text = sub.get("tx_channel", "")
 

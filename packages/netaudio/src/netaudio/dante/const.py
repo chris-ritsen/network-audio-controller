@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from netaudio.dante.clean_labels import load_clean_subscription_status_labels
 
 
@@ -56,7 +58,7 @@ OPCODE_RX_CHANNEL_NAME_SET = 0x3001
 OPCODE_SUBSCRIPTION_ADD = 0x3010
 OPCODE_SUBSCRIPTION_REMOVE = 0x3014
 
-FLOW_PROTOCOL_IDS = (0x2729, 0x2801, 0x2809)
+FLOW_PROTOCOL_IDS = (0x2729, 0x2801)
 
 OPCODE_QUERY_TX_FLOWS = 0x2200
 OPCODE_CREATE_TX_FLOW = 0x2201
