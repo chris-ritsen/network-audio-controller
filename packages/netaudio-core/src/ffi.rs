@@ -610,6 +610,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
                 out_capacity,
                 out_length,
             ),
+            "sample_rate_status" => write_optional_json(
+                responses::parse_sample_rate_status(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
             "result_code" => write_optional_json(
                 responses::parse_result_code(bytes),
                 out_buffer,

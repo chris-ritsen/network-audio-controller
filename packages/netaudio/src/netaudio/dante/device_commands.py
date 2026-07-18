@@ -144,6 +144,13 @@ class DanteDeviceCommands:
     def command_set_sample_rate(self, sample_rate):
         return self._settings({"command": "set_sample_rate", "sample_rate": sample_rate})
 
+    def command_probe_sample_rate(self, host_mac=None, sequence=0x0081):
+        command_specification = self._with_host_mac(
+            {"command": "probe_sample_rate", "sequence": sequence},
+            host_mac,
+        )
+        return self._settings(command_specification)
+
     def command_set_gain_level(self, channel_number, gain_level, device_type):
         return self._settings(
             {

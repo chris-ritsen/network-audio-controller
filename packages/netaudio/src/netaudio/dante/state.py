@@ -49,7 +49,7 @@ class DanteStateService:
         app.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
         app.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
         app.on_notification(NOTIFICATION_TX_LABEL_CHANGE, self._on_channel_name_changed)
-        app.on_notification(NOTIFICATION_SAMPLE_RATE_STATUS, self._on_controls_changed)
+        app.on_notification(NOTIFICATION_SAMPLE_RATE_STATUS, self._on_sample_rate_status)
         app.on_notification(NOTIFICATION_ENCODING_STATUS, self._on_controls_changed)
         app.on_notification(NOTIFICATION_INTERFACE_STATUS, self._on_controls_changed)
         app.on_notification(NOTIFICATION_PROPERTY_CHANGE, self._on_controls_changed)
@@ -145,14 +145,34 @@ class DanteStateService:
         self._emit_device_updated(device)
 
     async def _on_device_state_changed(self, event: DanteEvent) -> None:
-        if not self._online_device(event.server_name):
+        device = self._online_device(event.server_name)
+        if not device:
             return
         await self.fetch_device_controls(event.server_name)
+        if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and device.ipv4:
+            await self._refresh_sample_rate_status(device, "configuration cleared")
 
     async def _on_controls_changed(self, event: DanteEvent) -> None:
+        if event.data.get("state_applied"):
+            return
         if not self._online_device(event.server_name):
             return
         await self.refetch_device_controls(event.server_name)
+
+    async def _on_sample_rate_status(self, event: DanteEvent) -> None:
+        if event.data.get("state_applied") or event.data.get("conmon_response"):
+            return
+        device = self._online_device(event.server_name)
+        if not device or not device.ipv4:
+            return
+        await self._refresh_sample_rate_status(device, "sample rate changed")
+
+    async def _refresh_sample_rate_status(self, device, reason: str) -> None:
+        logger.info(f"Re-fetching sample rate status for {device.server_name} ({reason})")
+        try:
+            await self.application.probe_sample_rate_status(str(device.ipv4))
+        except Exception as exception:
+            logger.warning(f"Error re-fetching sample rate status for {device.server_name}: {exception}")
 
     async def _on_device_reboot(self, event: DanteEvent) -> None:
         server_name = event.server_name
@@ -185,7 +205,7 @@ class DanteStateService:
                     device.aes67_configured = aes67_configured
         except Exception as exception:
             logger.warning(f"Error re-fetching AES67 for {server_name}: {exception}")
-            return
+        await self._refresh_sample_rate_status(device, "AES67 status changed")
         self._emit_device_updated(device)
 
     async def _on_settings_change(self, event: DanteEvent) -> None:
@@ -323,6 +343,9 @@ class DanteStateService:
                             break
                 except Exception as exception:
                     logger.warning(f"Error probing AES67 for {server_name}: {exception}")
+
+                if device.supported_sample_rates is None:
+                    await self._refresh_sample_rate_status(device, "device discovered")
 
                 try:
                     device_ip = str(device.ipv4)

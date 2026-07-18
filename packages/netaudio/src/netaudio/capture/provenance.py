@@ -11,6 +11,7 @@ from netaudio.dante.debug_formatter import (
     OPCODE_NAMES_BY_PROTOCOL,
     SETTINGS_MESSAGE_TYPE_NAMES,
 )
+from netaudio.dante.packet_store import _decompress_payload
 
 logger = logging.getLogger("netaudio")
 
@@ -174,7 +175,7 @@ def _query_observed_subscription_statuses(
     stats: dict[int, dict[str, int]] = {}
     for row in rows:
         packet_id = int(row["id"])
-        payload = row["payload"]
+        payload = _decompress_payload(row["payload"])
         codes = _extract_subscription_status_codes(payload)
         for code in codes:
             entry = stats.get(code)
@@ -203,7 +204,7 @@ def _extract_seed_samples(
     start_ns: int | None = None,
     end_ns: int | None = None,
     device_ip: str | None = None,
-) -> tuple[list[sqlite3.Row], list[dict[str, object]]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     protocol_csv = ",".join(str(p) for p in TARGET_PROTOCOLS)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
@@ -224,7 +225,12 @@ def _extract_seed_samples(
         ) s ON p.id = s.sample_id
         ORDER BY p.protocol_id, p.opcode
     """
-    rows = conn.execute(query, scope_params).fetchall()
+    database_rows = conn.execute(query, scope_params).fetchall()
+    rows: list[dict[str, object]] = []
+    for database_row in database_rows:
+        sample = dict(database_row)
+        sample["payload"] = _decompress_payload(sample["payload"])
+        rows.append(sample)
 
     arc_protocol_csv = ",".join(str(p) for p in ARC_PROTOCOLS)
     status_rows = conn.execute(
@@ -243,7 +249,8 @@ def _extract_seed_samples(
     status_samples_by_code: dict[int, dict[str, object]] = {}
     for row in status_rows:
         packet_id = int(row["id"])
-        codes = _extract_subscription_status_codes(row["payload"])
+        payload = _decompress_payload(row["payload"])
+        codes = _extract_subscription_status_codes(payload)
         for status_code in sorted(codes):
             if status_code in status_samples_by_code:
                 continue
@@ -254,7 +261,7 @@ def _extract_seed_samples(
                 "opcode": int(row["opcode"]),
                 "opcode_name": row["opcode_name"],
                 "timestamp_iso": row["timestamp_iso"],
-                "payload": row["payload"],
+                "payload": payload,
             }
 
     status_samples = [status_samples_by_code[code] for code in sorted(status_samples_by_code)]
@@ -262,7 +269,7 @@ def _extract_seed_samples(
 
 
 def _write_seed_samples(
-    rows: list[sqlite3.Row],
+    rows: list[dict[str, object]],
     status_samples: list[dict[str, object]],
     output_dir: Path,
     *,
