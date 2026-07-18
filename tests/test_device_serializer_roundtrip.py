@@ -14,6 +14,7 @@ def make_device():
     device.mac_address = "001dc1aabbcc"
     device.model_id = "DAI2"
     device.sample_rate = 48000
+    device.supported_sample_rates = [44100, 48000]
     device.latency = 0.15
     device.min_latency = 0.15
     device.max_latency = 21.333334
@@ -74,6 +75,7 @@ class TestSerializerRoundtrip:
         assert restored.mac_address == "001dc1aabbcc"
         assert restored.model_id == "DAI2"
         assert restored.sample_rate == 48000
+        assert restored.supported_sample_rates == [44100, 48000]
         assert restored.latency == 0.15
         assert restored.min_latency == 0.15
         assert restored.max_latency == 21.333334

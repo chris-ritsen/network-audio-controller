@@ -43,6 +43,7 @@ class DanteDevice:
         self.rx_count = None
         self.rx_count_raw = None
         self.sample_rate = None
+        self.supported_sample_rates: list[int] | None = None
         self.aes67_configured = None
         self.aes67_current = None
         self.preferred_leader = None
