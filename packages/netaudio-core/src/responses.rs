@@ -508,9 +508,13 @@ pub fn parse_conmon_opcode(data: &[u8]) -> Option<ConmonOpcode> {
 pub const CONMON_OPCODE_INTERFACE_STATUS: u16 = 0x0011;
 pub const CONMON_OPCODE_MAKE_MODEL_RESPONSE: u16 = 0x00C0;
 pub const CONMON_OPCODE_DANTE_MODEL_RESPONSE: u16 = 0x0060;
+pub const CONMON_OPCODE_SAMPLE_RATE_STATUS: u16 = 0x0080;
 pub const CONMON_OPCODE_AES67_CURRENT_NEW: u16 = 0x1007;
 pub const CONMON_OPCODE_PTP_CLOCK_STATUS: u16 = 0x0020;
 
+const CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET: usize = 0x22;
+const CONMON_CURRENT_SAMPLE_RATE_OFFSET: usize = 0x24;
+const CONMON_SUPPORTED_SAMPLE_RATES_OFFSET: usize = 0x30;
 const CONMON_PREFERRED_LEADER_OFFSET: usize = 0x26;
 const CONMON_PTP_V1_ROLE_OFFSET: usize = 0x48;
 const CONMON_AES67_CURRENT_NEW_OFFSET: usize = 0x21;
@@ -527,6 +531,35 @@ const INTERFACE_MODE_DYNAMIC: u16 = 0x0001;
 const INTERFACE_MODE_STATIC: u16 = 0x0003;
 const INTERFACE_REBOOT_PENDING_DYNAMIC: u16 = 0x0004;
 const INTERFACE_REBOOT_PENDING_STATIC: u16 = 0x0006;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SampleRateStatus {
+    pub current_sample_rate: u32,
+    pub supported_sample_rates: Vec<u32>,
+}
+
+pub fn parse_sample_rate_status(data: &[u8]) -> Option<SampleRateStatus> {
+    validate_conmon_envelope(data, CONMON_OPCODE_SAMPLE_RATE_STATUS)?;
+    let supported_sample_rate_count =
+        usize::from(read_u16(data, CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET)?);
+    let current_sample_rate = read_u32(data, CONMON_CURRENT_SAMPLE_RATE_OFFSET)?;
+    let supported_sample_rates_byte_length = supported_sample_rate_count.checked_mul(4)?;
+    let supported_sample_rates_end =
+        CONMON_SUPPORTED_SAMPLE_RATES_OFFSET.checked_add(supported_sample_rates_byte_length)?;
+    data.get(CONMON_SUPPORTED_SAMPLE_RATES_OFFSET..supported_sample_rates_end)?;
+
+    let mut supported_sample_rates = Vec::with_capacity(supported_sample_rate_count);
+    for supported_sample_rate_index in 0..supported_sample_rate_count {
+        let supported_sample_rate_offset = CONMON_SUPPORTED_SAMPLE_RATES_OFFSET
+            .checked_add(supported_sample_rate_index.checked_mul(4)?)?;
+        supported_sample_rates.push(read_u32(data, supported_sample_rate_offset)?);
+    }
+
+    Some(SampleRateStatus {
+        current_sample_rate,
+        supported_sample_rates,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PtpClockStatus {
@@ -935,6 +968,75 @@ mod tests {
         assert_eq!(parse_conmon_opcode(&[0u8; 4]), None);
     }
 
+    fn captured_sample_rate_status_packet_28101() -> Vec<u8> {
+        vec![
+            0xFF, 0xFF, 0x00, 0x48, 0x16, 0x31, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x08, 0x12, 0x58,
+            0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x24, 0x00, 0x80,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x06, 0x00, 0x00, 0xAC, 0x44, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0xAC, 0x44, 0x00, 0x00, 0xBB, 0x80,
+            0x00, 0x01, 0x58, 0x88, 0x00, 0x01, 0x77, 0x00, 0x00, 0x02, 0xB1, 0x10, 0x00, 0x02,
+            0xEE, 0x00,
+        ]
+    }
+
+    #[test]
+    fn sample_rate_status_parses_captured_packet_28101() {
+        let parsed = parse_sample_rate_status(&captured_sample_rate_status_packet_28101()).unwrap();
+        assert_eq!(parsed.current_sample_rate, 44_100);
+        assert_eq!(
+            parsed.supported_sample_rates,
+            vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        );
+    }
+
+    #[test]
+    fn sample_rate_status_parses_captured_packet_4170820() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x34, 0x06, 0x1A, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x08, 0x12, 0x58,
+            0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x24, 0x00, 0x80,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x01, 0x00, 0x00, 0xBB, 0x80, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0xBB, 0x80,
+        ];
+        let parsed = parse_sample_rate_status(&data).unwrap();
+        assert_eq!(parsed.current_sample_rate, 48_000);
+        assert_eq!(parsed.supported_sample_rates, vec![48_000]);
+    }
+
+    #[test]
+    fn sample_rate_status_parses_captured_packet_9695783() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x40, 0xFD, 0x2A, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x53,
+            0xEF, 0x37, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x00, 0x80,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x04, 0x00, 0x00, 0xBB, 0x80, 0x00, 0x00,
+            0xBB, 0x80, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0xAC, 0x44, 0x00, 0x00, 0xBB, 0x80,
+            0x00, 0x01, 0x58, 0x88, 0x00, 0x01, 0x77, 0x00,
+        ];
+        let parsed = parse_sample_rate_status(&data).unwrap();
+        assert_eq!(parsed.current_sample_rate, 48_000);
+        assert_eq!(
+            parsed.supported_sample_rates,
+            vec![44_100, 48_000, 88_200, 96_000]
+        );
+    }
+
+    #[test]
+    fn sample_rate_status_rejects_count_exceeding_packet() {
+        let mut data = captured_sample_rate_status_packet_28101();
+        data[CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET
+            ..CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET + 2]
+            .copy_from_slice(&7u16.to_be_bytes());
+        assert_eq!(parse_sample_rate_status(&data), None);
+    }
+
+    #[test]
+    fn sample_rate_status_preserves_uninterpreted_trailing_bytes() {
+        let mut data = captured_sample_rate_status_packet_28101();
+        data.extend_from_slice(&[0x12, 0x34]);
+        let packet_length = u16::try_from(data.len()).unwrap();
+        data[2..4].copy_from_slice(&packet_length.to_be_bytes());
+        assert!(parse_sample_rate_status(&data).is_some());
+    }
+
     #[test]
     fn ptp_clock_status_parses_preferred_and_role() {
         let mut data = vec![0u8; 0x4A];
@@ -1133,6 +1235,14 @@ mod tests {
             assert_eq!(parse_ptp_clock_status(&conmon[..length]), None);
             assert_eq!(parse_conmon_opcode(&conmon[..length]), None);
         }
+
+        let sample_rate_status = captured_sample_rate_status_packet_28101();
+        for length in 0..sample_rate_status.len() {
+            assert_eq!(
+                parse_sample_rate_status(&sample_rate_status[..length]),
+                None
+            );
+        }
     }
 
     #[test]
@@ -1238,6 +1348,7 @@ mod tests {
                 let _ = parse_ptp_clock_status(&data);
                 let _ = parse_aes67_status(&data);
                 let _ = parse_interface_status(&data);
+                let _ = parse_sample_rate_status(&data);
             });
             assert!(result.is_ok(), "length={length}");
             assert_eq!(parse_device_name(&data), None);

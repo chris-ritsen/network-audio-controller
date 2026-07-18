@@ -112,6 +112,12 @@ enum CommandSpec {
     SetSampleRate {
         sample_rate: u32,
     },
+    ProbeSampleRate {
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default = "default_sample_rate_sequence")]
+        sequence: u16,
+    },
     SetGainLevel {
         channel_number: u8,
         gain_level: u8,
@@ -241,6 +247,10 @@ fn default_aes67_sequence() -> u16 {
     0x1007
 }
 
+fn default_sample_rate_sequence() -> u16 {
+    0x0081
+}
+
 fn default_leader_sequence() -> u16 {
     0x0021
 }
@@ -347,6 +357,7 @@ fn route(command: &str) -> (Target, IoMode) {
         ),
         "identify"
         | "probe_interface_status"
+        | "probe_sample_rate"
         | "set_interface_dhcp"
         | "set_interface_static"
         | "probe_aes67"
@@ -467,6 +478,9 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
         CommandSpec::Identify {} => commands::build_identify()?,
         CommandSpec::SetEncoding { encoding } => commands::build_set_encoding(encoding)?,
         CommandSpec::SetSampleRate { sample_rate } => commands::build_set_sample_rate(sample_rate)?,
+        CommandSpec::ProbeSampleRate { host_mac, sequence } => {
+            commands::build_probe_sample_rate(parse_mac(&host_mac, default_host_mac)?, sequence)?
+        }
         CommandSpec::SetGainLevel {
             channel_number,
             gain_level,
@@ -655,6 +669,16 @@ mod tests {
     fn routes_single_fire_and_control_commands() {
         assert_eq!(
             route("identify"),
+            (
+                Target::Settings,
+                IoMode::Fire {
+                    repeat: 1,
+                    interval_ms: 0
+                }
+            )
+        );
+        assert_eq!(
+            route("probe_sample_rate"),
             (
                 Target::Settings,
                 IoMode::Fire {

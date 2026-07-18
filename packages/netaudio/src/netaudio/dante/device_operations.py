@@ -97,6 +97,11 @@ class DanteDeviceOperations:
         return response
 
     async def set_sample_rate(self, sample_rate):
+        supported_sample_rates = self.device.supported_sample_rates
+        if supported_sample_rates is not None and sample_rate not in supported_sample_rates:
+            raise ValueError(
+                f"requested sample rate {sample_rate} is not supported; device reports {supported_sample_rates}"
+            )
         cmd_args = self.device.commands.command_set_sample_rate(sample_rate)
         response = await self.device.dante_command(*cmd_args, logical_command_name="set_sample_rate")
 

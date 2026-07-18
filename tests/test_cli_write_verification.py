@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -94,6 +95,31 @@ def _install_context(monkeypatch, module, devices, *, send_error_for=None):
 
     monkeypatch.setattr(module, "_command_context", command_context)
     return sent
+
+
+def _make_sample_rate_operations(supported_sample_rates):
+    commands = SimpleNamespace(command_set_sample_rate=MagicMock(return_value=(b"sample-rate", None, 8700)))
+    device = SimpleNamespace(
+        supported_sample_rates=supported_sample_rates,
+        commands=commands,
+        dante_command=AsyncMock(return_value=b"response"),
+    )
+    return DanteDeviceOperations(device), commands, device
+
+
+async def _assert_sample_rate_operation_sends(supported_sample_rates):
+    operations, commands, device = _make_sample_rate_operations(supported_sample_rates)
+
+    response = await operations.set_sample_rate(96_000)
+
+    assert response == b"response"
+    commands.command_set_sample_rate.assert_called_once_with(96_000)
+    device.dante_command.assert_awaited_once_with(
+        b"sample-rate",
+        None,
+        8700,
+        logical_command_name="set_sample_rate",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -262,6 +288,27 @@ async def test_reboot_operation_uses_core_repeat_sender_when_discovery_applicati
     )
 
     assert calls == [(b"reboot", 8700, False, 3, 100)]
+
+
+@pytest.mark.asyncio
+async def test_sample_rate_operation_rejects_known_unsupported_rate_without_sending():
+    operations, commands, device = _make_sample_rate_operations([48_000])
+
+    with pytest.raises(ValueError, match="requested sample rate 96000 is not supported"):
+        await operations.set_sample_rate(96_000)
+
+    commands.command_set_sample_rate.assert_not_called()
+    device.dante_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sample_rate_operation_sends_known_supported_rate():
+    await _assert_sample_rate_operation_sends([48_000, 96_000])
+
+
+@pytest.mark.asyncio
+async def test_sample_rate_operation_preserves_send_when_capabilities_are_unknown():
+    await _assert_sample_rate_operation_sends(None)
 
 
 def test_device_name_only_reports_success_after_matching_readback(monkeypatch):

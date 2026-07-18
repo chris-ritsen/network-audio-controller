@@ -3,8 +3,8 @@
     "conmon_message:0x0081": {
       "category": "conmon_message",
       "key": "0x0081",
-      "name": "set_sample_rate",
-      "note": "Sets device sample rate. Unicast request to device port 8700. Fire-and-forget \u2014 no unicast reply. Confirmation arrives via multicast notification burst: 0x0100 (+47ms), 0x0086 transition marker (+810ms), sample_rate_announcement 0x0080 with new rate (+1.3s), 0x0082 (+1.6s), 0x0100 (+2s), 0x0120 (+2.7s), 0x0102 (+2.8s).",
+      "name": "sample_rate_control",
+      "note": "Unicast request to device port 8700. Operation mode at offset 32 selects behavior: mode 1 with a nonzero sample rate at offset 36 changes the device rate; mode 0 with rate 0 queries current and supported rates and triggers a multicast 0x0080 response. Query packet 4170622 produced response packet 4170820 34.631 ms later. Set requests have no unicast acknowledgement; changes are observed through subsequent multicast notifications.",
       "fields": [
         {
           "name": "message_type",
@@ -12,6 +12,12 @@
           "length": 2,
           "dtype": "uint16_be",
           "value": "0x0081"
+        },
+        {
+          "name": "operation_mode",
+          "offset": 32,
+          "length": 4,
+          "dtype": "uint32_be"
         },
         {
           "name": "target_sample_rate",
@@ -23,9 +29,9 @@
       "evidence": [
         "sample_rate_discovery:28075",
         "fact_catalog_expansion:708982",
-        "fact_catalog_expansion:705653"
+        "fact_catalog_expansion:705653",
+        "lx_dante_aes67_on_to_off_pending:4170622"
       ],
-      "confidence": "verified",
       "added_ns": 1773025341611162000,
       "protocol_id": 65535,
       "match_offset": 26,
@@ -42,23 +48,49 @@
           "previous_name": "set_sample_rate",
           "previous_confidence": "verified",
           "previous_note": "Sets device sample rate. Unicast request to device port 8700. Fire-and-forget \u2014 no unicast reply. Confirmation arrives via multicast notification burst: 0x0100 (+47ms), 0x0086 transition marker (+810ms), sample_rate_announcement 0x0080 with new rate (+1.3s), 0x0082 (+1.6s), 0x0100 (+2s), 0x0120 (+2.7s), 0x0102 (+2.8s). Dante Controller sends from port 8700 (src=dst=8700). netaudio sends from ephemeral port."
+        },
+        {
+          "replaced_ns": 1784382693193890000,
+          "previous_name": "set_sample_rate",
+          "previous_confidence": "verified",
+          "previous_note": "Sets device sample rate. Unicast request to device port 8700. Fire-and-forget \u2014 no unicast reply. Confirmation arrives via multicast notification burst: 0x0100 (+47ms), 0x0086 transition marker (+810ms), sample_rate_announcement 0x0080 with new rate (+1.3s), 0x0082 (+1.6s), 0x0100 (+2s), 0x0120 (+2.7s), 0x0102 (+2.8s).",
+          "action": "updated"
+        }
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773025341611162000
         }
       ]
     },
     "conmon_message:0x0080": {
       "category": "conmon_message",
       "key": "0x0080",
-      "name": "sample_rate_announcement",
-      "note": "Periodic multicast heartbeat (~7.5s interval) on 224.0.0.231:8702 from device port 1027. Contains current_rate at offset 36 and supported rates list starting at offset 48. NOT triggered by sample rate changes \u2014 just reflects current state each cycle. After a set_sample_rate (0x0081), the next heartbeat shows the new rate.",
+      "name": "sample_rate_status",
+      "note": "Multicast sample-rate status sent to 224.0.0.231:8702. Devices broadcast it periodically, and a mode-zero 0x0081 query can trigger an immediate response: request packet 4170622 produced response packet 4170820 34.631 ms later. The uint16 count at offset 34 determines how many uint32 supported sample rates begin at offset 48; the current sample rate is at offset 36. The supported list depends on device capabilities and current configuration.",
       "fields": [
         {
-          "name": "current_rate",
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0080"
+        },
+        {
+          "name": "supported_sample_rate_count",
+          "offset": 34,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "current_sample_rate",
           "offset": 36,
           "length": 4,
           "dtype": "uint32_be"
         },
         {
-          "name": "supported_rates_start",
+          "name": "supported_sample_rates_start",
           "offset": 48,
           "length": 4,
           "dtype": "uint32_be"
@@ -67,9 +99,9 @@
       "evidence": [
         "sample_rate_discovery:28101",
         "fact_catalog_expansion:709014",
-        "fact_catalog_expansion:678575"
+        "fact_catalog_expansion:678575",
+        "lx_dante_aes67_on_to_off_pending:4170820"
       ],
-      "confidence": "verified",
       "added_ns": 1772938752234833000,
       "history": [
         {
@@ -77,11 +109,24 @@
           "previous_name": "sample_rate_announcement",
           "previous_confidence": "verified",
           "previous_note": "Device multicasts current and all supported sample rates on 224.0.0.231:8702 after a sample rate change."
+        },
+        {
+          "replaced_ns": 1784382694005041000,
+          "previous_name": "sample_rate_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Periodic multicast heartbeat (~7.5s interval) on 224.0.0.231:8702 from device port 1027. Contains current_rate at offset 36 and supported rates list starting at offset 48. NOT triggered by sample rate changes \u2014 just reflects current state each cycle. After a set_sample_rate (0x0081), the next heartbeat shows the new rate.",
+          "action": "updated"
         }
       ],
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1772938752234833000
+        }
+      ]
     },
     "conmon_message:0x0092": {
       "category": "conmon_message",
@@ -4101,6 +4146,6 @@
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1774898356248700000
+    "updated_ns": 1784382694005049000
   }
 }
