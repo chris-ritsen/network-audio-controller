@@ -41,18 +41,14 @@ class TestMdnsCache(unittest.TestCase):
 
         self.cache.set(key, data)
         retrieved_data = self.cache.get(key)
-        self.assertEqual(
-            retrieved_data, data
-        )
+        self.assertEqual(retrieved_data, data)
 
         mock_time.return_value = initial_timestamp + self.test_ttl + 1
 
         retrieved_data_stale = self.cache.get(key)
         self.assertIsNone(retrieved_data_stale)
 
-        self.assertIsNone(
-            self.cache._db.get(key)
-        )
+        self.assertIsNone(self.cache._db.get(key))
 
     def test_04_set_updates_existing_entry_and_timestamp(self):
         key = "device3.local."
@@ -70,10 +66,7 @@ class TestMdnsCache(unittest.TestCase):
             self.cache.set(key, data2)
             entry2 = self.cache._db.get(key)
             self.assertEqual(entry2["data"], data2)
-            self.assertEqual(
-                entry2["last_seen"],
-                1000.0 + self.test_ttl / 2
-            )
+            self.assertEqual(entry2["last_seen"], 1000.0 + self.test_ttl / 2)
 
             retrieved_data = self.cache.get(key)
             self.assertEqual(retrieved_data, data2)
@@ -86,21 +79,15 @@ class TestMdnsCache(unittest.TestCase):
 
         self.cache.delete(key)
         self.assertIsNone(self.cache.get(key))
-        self.assertIsNone(
-            self.cache._db.get(key)
-        )
+        self.assertIsNone(self.cache._db.get(key))
 
     def test_06_clear_cache(self):
         self.cache.set("dev1", {"ip": "1.1.1.1"})
         self.cache.set("dev2", {"ip": "2.2.2.2"})
-        self.assertTrue(
-            len(list(self.cache._db.keys())) > 0
-        )
+        self.assertTrue(len(list(self.cache._db.keys())) > 0)
 
         self.cache.clear()
-        self.assertEqual(
-            len(list(self.cache._db.keys())), 0
-        )
+        self.assertEqual(len(list(self.cache._db.keys())), 0)
         self.assertIsNone(self.cache.get("dev1"))
         self.assertIsNone(self.cache.get("dev2"))
 
@@ -132,14 +119,10 @@ class TestMdnsCache(unittest.TestCase):
 
         mock_time.return_value = current_time + self.test_ttl + 1
         self.assertIsNone(self.cache.get(key))
-        self.assertIsNone(
-            self.cache._db.get(key)
-        )
+        self.assertIsNone(self.cache._db.get(key))
 
     def test_09_default_ttl_usage(self):
-        specific_test_cache_dir = os.path.join(
-            self.cache_dir, "subdir_for_default_ttl_test"
-        )
+        specific_test_cache_dir = os.path.join(self.cache_dir, "subdir_for_default_ttl_test")
         os.makedirs(specific_test_cache_dir, exist_ok=True)
 
         cache_with_default_ttl = MdnsCache(cache_dir=specific_test_cache_dir)
@@ -157,9 +140,7 @@ class TestMdnsCache(unittest.TestCase):
         with MdnsCache(ttl=1, cache_dir=temp_dir_ctx.name) as ctx_cache:
             ctx_cache.set("ctx_key", {"data": "test"})
             self.assertIsNotNone(ctx_cache.get("ctx_key"))
-            self.assertTrue(
-                hasattr(ctx_cache._db, "conn") and ctx_cache._db.conn is not None
-        )
+            self.assertTrue(hasattr(ctx_cache._db, "conn") and ctx_cache._db.conn is not None)
 
         expected_cache_file = os.path.join(temp_dir_ctx.name, CACHE_FILENAME)
         self.assertTrue(os.path.exists(expected_cache_file))
@@ -172,24 +153,16 @@ class TestMdnsCache(unittest.TestCase):
             "nodata": True,
             "wrong_timestamp_field": "abc",
         }
-        self.assertIsNone(
-            self.cache.get(key)
-        )
-        self.assertIsNone(
-            self.cache._db.get(key)
-        )
+        self.assertIsNone(self.cache.get(key))
+        self.assertIsNone(self.cache._db.get(key))
 
         key2 = "bad_timestamp.local."
         self.cache._db[key2] = {
             "data": {"ip": "1.2.3.4"},
             "last_seen": "not_a_timestamp",
         }
-        self.assertIsNone(
-            self.cache.get(key2)
-        )
-        self.assertIsNone(
-            self.cache._db.get(key2)
-        )
+        self.assertIsNone(self.cache.get(key2))
+        self.assertIsNone(self.cache._db.get(key2))
 
     def test_11_cache_flushing_on_ttl_zero(self):
         pass

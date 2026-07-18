@@ -1,27 +1,52 @@
+use std::collections::VecDeque;
 use std::io;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
+
+use crate::commands;
 use crate::parser::{
     parse_channel_count, parse_rx_page, parse_tx_friendly_page, parse_tx_info_page, ChannelCount,
     RxChannel, TxChannel, RX_CHANNELS_PER_PAGE, TX_CHANNELS_PER_PAGE,
 };
-use crate::commands;
 use crate::protocol::{build_set_device_name, NetaudioError};
 use crate::responses::{
-    parse_aes67_configured, parse_device_info, parse_device_name, parse_device_settings, DeviceInfo,
-    DeviceSettings,
+    parse_aes67_configured, parse_device_info, parse_device_name, parse_device_settings,
+    parse_result_code, DeviceInfo, DeviceSettings, RESULT_CODE_SUCCESS,
 };
 use crate::spec::{build_routed_command, IoMode, SpecError, Target};
 
 pub const DEVICE_SETTINGS_PORT: u16 = 8700;
 pub const DEVICE_CONTROL_PORT: u16 = 8800;
 
+const MAX_WIRE_CAPTURES: usize = 256;
+const MAX_WIRE_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_UDP_DATAGRAM_BYTES: usize = 65_535;
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+#[derive(Clone, Debug, Serialize)]
+pub struct WireCapture {
+    pub timestamp_unix_milliseconds: u64,
+    pub direction: &'static str,
+    pub port: u16,
+    pub matched: Option<bool>,
+    pub payload_hex: String,
+}
+
+#[derive(Default)]
+struct WireCaptureBuffer {
+    entries: VecDeque<WireCapture>,
+    payload_bytes: usize,
+}
+
 #[derive(Debug)]
 pub enum ClientError {
     Protocol(NetaudioError),
     Io(io::Error),
+    InvalidAddress,
     Timeout,
     MalformedResponse,
     Spec(SpecError),
@@ -60,6 +85,7 @@ pub struct Client {
     timeout: Duration,
     attempts: u32,
     host_mac: [u8; 6],
+    wire_captures: Mutex<WireCaptureBuffer>,
 }
 
 impl Client {
@@ -69,6 +95,9 @@ impl Client {
         timeout: Duration,
         attempts: u32,
     ) -> Result<Client, ClientError> {
+        if !device_ip.is_ipv4() {
+            return Err(ClientError::InvalidAddress);
+        }
         let socket = UdpSocket::bind(("0.0.0.0", 0))?;
         Ok(Client {
             socket,
@@ -77,7 +106,69 @@ impl Client {
             timeout,
             attempts: attempts.max(1),
             host_mac: crate::netif::discover_host_mac().unwrap_or([0u8; 6]),
+            wire_captures: Mutex::new(WireCaptureBuffer::default()),
         })
+    }
+
+    fn lock_wire_captures(&self) -> MutexGuard<'_, WireCaptureBuffer> {
+        match self.wire_captures.lock() {
+            Ok(captures) => captures,
+            Err(poisoned_captures) => poisoned_captures.into_inner(),
+        }
+    }
+
+    pub fn clear_wire_captures(&self) {
+        let mut captures = self.lock_wire_captures();
+        captures.entries.clear();
+        captures.payload_bytes = 0;
+    }
+
+    pub fn wire_captures(&self) -> Vec<WireCapture> {
+        self.lock_wire_captures().entries.iter().cloned().collect()
+    }
+
+    fn record_wire_capture(
+        &self,
+        direction: &'static str,
+        port: u16,
+        matched: Option<bool>,
+        payload: &[u8],
+    ) {
+        if payload.len() > MAX_WIRE_CAPTURE_BYTES {
+            return;
+        }
+
+        let mut payload_hex = String::with_capacity(payload.len() * 2);
+        for byte in payload {
+            payload_hex.push(char::from(HEX_DIGITS[usize::from(*byte >> 4)]));
+            payload_hex.push(char::from(HEX_DIGITS[usize::from(*byte & 0x0F)]));
+        }
+
+        let timestamp_unix_milliseconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+
+        let mut captures = self.lock_wire_captures();
+        while !captures.entries.is_empty()
+            && (captures.entries.len() >= MAX_WIRE_CAPTURES
+                || captures.payload_bytes + payload.len() > MAX_WIRE_CAPTURE_BYTES)
+        {
+            if let Some(removed) = captures.entries.pop_front() {
+                captures.payload_bytes = captures
+                    .payload_bytes
+                    .saturating_sub(removed.payload_hex.len() / 2);
+            }
+        }
+        captures.payload_bytes += payload.len();
+        captures.entries.push_back(WireCapture {
+            timestamp_unix_milliseconds,
+            direction,
+            port,
+            matched,
+            payload_hex,
+        });
     }
 
     pub fn set_host_mac(&mut self, host_mac: [u8; 6]) {
@@ -112,8 +203,12 @@ impl Client {
                     Err(error) => Err(error),
                 }
             }
-            IoMode::Fire { repeat, interval_ms } => {
+            IoMode::Fire {
+                repeat,
+                interval_ms,
+            } => {
                 for attempt in 0..repeat {
+                    self.record_wire_capture("request", address.port(), None, &routed.packet);
                     self.socket.send_to(&routed.packet, address)?;
                     if attempt + 1 < repeat && interval_ms > 0 {
                         thread::sleep(Duration::from_millis(interval_ms));
@@ -132,7 +227,11 @@ impl Client {
     pub fn set_device_name(&mut self, name: &str) -> Result<Vec<u8>, ClientError> {
         let transaction_id = self.next_transaction_id();
         let packet = build_set_device_name(name, transaction_id)?;
-        self.request(&packet, transaction_id)
+        let response = self.request(&packet, transaction_id)?;
+        if parse_result_code(&response) != Some(RESULT_CODE_SUCCESS) {
+            return Err(ClientError::MalformedResponse);
+        }
+        Ok(response)
     }
 
     pub fn lock_device(
@@ -163,9 +262,11 @@ impl Client {
 
     pub fn get_device_name(&mut self) -> Result<Option<String>, ClientError> {
         let transaction_id = self.next_transaction_id();
-        let packet = commands::build_device_name(transaction_id);
+        let packet = commands::build_device_name(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
-        Ok(parse_device_name(&response))
+        parse_device_name(&response)
+            .map(Some)
+            .ok_or(ClientError::MalformedResponse)
     }
 
     pub fn request_raw(
@@ -191,6 +292,7 @@ impl Client {
         }
 
         for attempt in 0..repeat.max(1) {
+            self.record_wire_capture("request", address.port(), None, packet);
             self.socket.send_to(packet, address)?;
             if attempt + 1 < repeat.max(1) && interval_ms > 0 {
                 thread::sleep(Duration::from_millis(interval_ms));
@@ -201,28 +303,30 @@ impl Client {
 
     pub fn get_device_info(&mut self) -> Result<DeviceInfo, ClientError> {
         let transaction_id = self.next_transaction_id();
-        let packet = commands::build_device_info(transaction_id);
+        let packet = commands::build_device_info(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
         parse_device_info(&response).ok_or(ClientError::MalformedResponse)
     }
 
     pub fn get_device_settings(&mut self) -> Result<DeviceSettings, ClientError> {
         let transaction_id = self.next_transaction_id();
-        let packet = commands::build_device_settings(transaction_id);
+        let packet = commands::build_device_settings(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
         parse_device_settings(&response).ok_or(ClientError::MalformedResponse)
     }
 
     pub fn get_aes67_configured(&mut self) -> Result<Option<bool>, ClientError> {
         let transaction_id = self.next_transaction_id();
-        let packet = commands::build_query_latency_config(transaction_id);
+        let packet = commands::build_query_latency_config(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
-        Ok(parse_aes67_configured(&response))
+        parse_aes67_configured(&response)
+            .map(Some)
+            .ok_or(ClientError::MalformedResponse)
     }
 
     pub fn get_channel_count(&mut self) -> Result<ChannelCount, ClientError> {
         let transaction_id = self.next_transaction_id();
-        let packet = commands::build_channel_count(transaction_id);
+        let packet = commands::build_channel_count(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
         parse_channel_count(&response).ok_or(ClientError::MalformedResponse)
     }
@@ -234,15 +338,20 @@ impl Client {
 
         for page in 0..pages {
             let transaction_id = self.next_transaction_id();
-            let packet = commands::build_receivers(page, transaction_id);
+            let packet = commands::build_receivers(page, transaction_id)?;
             let response = self.request(&packet, transaction_id)?;
             let starting_channel = page * RX_CHANNELS_PER_PAGE + 1;
-            let parsed = parse_rx_page(&response, starting_channel);
+            let parsed =
+                parse_rx_page(&response, starting_channel).ok_or(ClientError::MalformedResponse)?;
             let complete = parsed.len() == RX_CHANNELS_PER_PAGE as usize;
             channels.extend(parsed);
             if !complete {
                 break;
             }
+        }
+
+        if channels.len() != usize::from(rx_count) {
+            return Err(ClientError::MalformedResponse);
         }
 
         Ok(channels)
@@ -252,26 +361,23 @@ impl Client {
         let tx_count = self.get_channel_count()?.tx_count;
         let pages = page_count(tx_count, TX_CHANNELS_PER_PAGE);
 
-        let mut friendly_names = Vec::new();
-        for page in 0..pages {
+        let friendly_names = if tx_count == 0 {
+            Vec::new()
+        } else {
             let transaction_id = self.next_transaction_id();
-            let packet = commands::build_transmitters(page, true, transaction_id);
+            let packet = commands::build_transmitter_names(tx_count, transaction_id)?;
             let response = self.request(&packet, transaction_id)?;
-            let parsed = parse_tx_friendly_page(&response);
-            let complete = parsed.len() == TX_CHANNELS_PER_PAGE as usize;
-            friendly_names.extend(parsed);
-            if !complete {
-                break;
-            }
-        }
+            parse_tx_friendly_page(&response, 1).ok_or(ClientError::MalformedResponse)?
+        };
 
         let mut channels = Vec::new();
         for page in 0..pages {
             let transaction_id = self.next_transaction_id();
-            let packet = commands::build_transmitters(page, false, transaction_id);
+            let packet = commands::build_transmitters(page, false, transaction_id)?;
             let response = self.request(&packet, transaction_id)?;
             let starting_channel = page * TX_CHANNELS_PER_PAGE + 1;
-            let parsed = parse_tx_info_page(&response, starting_channel);
+            let parsed = parse_tx_info_page(&response, starting_channel)
+                .ok_or(ClientError::MalformedResponse)?;
             let complete = parsed.len() == TX_CHANNELS_PER_PAGE as usize;
             channels.extend(parsed);
             if !complete {
@@ -279,8 +385,15 @@ impl Client {
             }
         }
 
+        if channels.len() != usize::from(tx_count) {
+            return Err(ClientError::MalformedResponse);
+        }
+
         for channel in &mut channels {
-            if let Some((_, name)) = friendly_names.iter().find(|(number, _)| *number == channel.number) {
+            if let Some((_, name)) = friendly_names
+                .iter()
+                .find(|(number, _)| *number == channel.number)
+            {
                 channel.friendly_name = Some(name.clone());
             }
         }
@@ -299,6 +412,7 @@ impl Client {
         address: SocketAddr,
     ) -> Result<Vec<u8>, ClientError> {
         for _ in 0..self.attempts {
+            self.record_wire_capture("request", address.port(), None, packet);
             self.socket.send_to(packet, address)?;
             if let Some(response) = self.wait_for_response(match_id)? {
                 return Ok(response);
@@ -309,7 +423,7 @@ impl Client {
 
     fn wait_for_response(&self, transaction_id: u16) -> Result<Option<Vec<u8>>, ClientError> {
         let deadline = Instant::now() + self.timeout;
-        let mut buffer = [0u8; 2048];
+        let mut buffer = [0u8; MAX_UDP_DATAGRAM_BYTES];
 
         loop {
             let now = Instant::now();
@@ -332,10 +446,10 @@ impl Client {
             if source.ip() != self.device_address.ip() {
                 continue;
             }
-            if length < 6 {
-                continue;
-            }
-            if u16::from_be_bytes([buffer[4], buffer[5]]) != transaction_id {
+            let matched =
+                length >= 6 && u16::from_be_bytes([buffer[4], buffer[5]]) == transaction_id;
+            self.record_wire_capture("response", source.port(), Some(matched), &buffer[..length]);
+            if !matched {
                 continue;
             }
 
@@ -372,10 +486,29 @@ mod tests {
         }
 
         fn reply(&self, request: &[u8], destination: SocketAddr) {
-            let mut response = vec![0x27, 0xFF, 0x00, 0x0A];
+            self.reply_with_arc_body(
+                request,
+                destination,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &[],
+            );
+        }
+
+        fn reply_with_arc_body(
+            &self,
+            request: &[u8],
+            destination: SocketAddr,
+            result_code: u16,
+            body: &[u8],
+        ) {
+            let response_length = u16::try_from(10 + body.len()).unwrap();
+            let mut response = Vec::with_capacity(usize::from(response_length));
+            response.extend_from_slice(&0x27FFu16.to_be_bytes());
+            response.extend_from_slice(&response_length.to_be_bytes());
             response.extend_from_slice(&request[4..6]);
             response.extend_from_slice(&request[6..8]);
-            response.extend_from_slice(&[0x00, 0x00]);
+            response.extend_from_slice(&result_code.to_be_bytes());
+            response.extend_from_slice(body);
             self.socket.send_to(&response, destination).unwrap();
         }
     }
@@ -409,6 +542,31 @@ mod tests {
         let expected = build_set_device_name("Studio-AVIO", 1).unwrap();
         assert_eq!(request, expected);
         assert_eq!(&response[4..6], &[0x00, 0x01]);
+    }
+
+    #[test]
+    fn set_device_name_rejects_failure_acknowledgement() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+
+        let device_thread = thread::spawn(move || {
+            let (request, source) = device.receive();
+            device.reply_with_arc_body(&request, source, 0x0600, &[]);
+        });
+
+        assert!(matches!(
+            client.set_device_name("Studio-AVIO"),
+            Err(ClientError::MalformedResponse)
+        ));
+        device_thread.join().unwrap();
+    }
+
+    #[test]
+    fn construction_rejects_ipv6_addresses() {
+        assert!(matches!(
+            Client::new("::1".parse().unwrap(), 4440, Duration::from_millis(1), 1,),
+            Err(ClientError::InvalidAddress)
+        ));
     }
 
     #[test]
@@ -528,6 +686,150 @@ mod tests {
     }
 
     #[test]
+    fn wire_captures_preserve_requests_and_all_device_responses() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+
+        let device_thread = thread::spawn(move || {
+            let (request, source) = device.receive();
+            let mut bogus = request.clone();
+            bogus[4] = 0xDE;
+            bogus[5] = 0xAD;
+            device.reply(&bogus, source);
+            device.reply(&request, source);
+        });
+
+        client.set_device_name("Studio-AVIO").unwrap();
+        device_thread.join().unwrap();
+
+        let captures = client.wire_captures();
+        assert_eq!(captures.len(), 3);
+        assert_eq!(captures[0].direction, "request");
+        assert_eq!(captures[0].matched, None);
+        assert_eq!(captures[1].direction, "response");
+        assert_eq!(captures[1].matched, Some(false));
+        assert_eq!(captures[2].direction, "response");
+        assert_eq!(captures[2].matched, Some(true));
+        assert_eq!(&captures[2].payload_hex[8..12], "0001");
+
+        client.clear_wire_captures();
+        assert!(client.wire_captures().is_empty());
+    }
+
+    #[test]
+    fn wire_capture_does_not_truncate_datagrams_larger_than_two_kibibytes() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+
+        let device_thread = thread::spawn(move || {
+            let (request, source) = device.receive();
+            let mut response = vec![0xA5; 4_096];
+            response[0..4].copy_from_slice(&[0x27, 0xFF, 0x10, 0x00]);
+            response[4..6].copy_from_slice(&request[4..6]);
+            response[6..8].copy_from_slice(&request[6..8]);
+            response[8..10].copy_from_slice(&crate::protocol::RESULT_CODE_SUCCESS.to_be_bytes());
+            device.socket.send_to(&response, source).unwrap();
+        });
+
+        let response = client.set_device_name("Studio-AVIO").unwrap();
+        device_thread.join().unwrap();
+
+        assert_eq!(response.len(), 4_096);
+        let capture = client.wire_captures().pop().unwrap();
+        assert_eq!(capture.direction, "response");
+        assert_eq!(capture.payload_hex.len(), 8_192);
+        assert!(capture.payload_hex.ends_with("a5a5"));
+    }
+
+    #[test]
+    fn rx_inventory_rejects_page_count_mismatch() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+
+        let device_thread = thread::spawn(move || {
+            let (count_request, count_source) = device.receive();
+            device.reply_with_arc_body(
+                &count_request,
+                count_source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &[0, 0, 0, 0, 0, 2],
+            );
+
+            let (page_request, page_source) = device.receive();
+            let mut body = vec![1, 1];
+            let mut record = [0u8; crate::parser::RX_RECORD_SIZE];
+            record[0..2].copy_from_slice(&1u16.to_be_bytes());
+            record[10..12].copy_from_slice(&32u16.to_be_bytes());
+            body.extend_from_slice(&record);
+            body.extend_from_slice(b"rx\0");
+            device.reply_with_arc_body(
+                &page_request,
+                page_source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &body,
+            );
+        });
+
+        assert!(matches!(
+            client.get_rx_channels(),
+            Err(ClientError::MalformedResponse)
+        ));
+        device_thread.join().unwrap();
+    }
+
+    #[test]
+    fn tx_inventory_rejects_page_count_mismatch() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+
+        let device_thread = thread::spawn(move || {
+            let (count_request, count_source) = device.receive();
+            device.reply_with_arc_body(
+                &count_request,
+                count_source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &[0, 0, 0, 1, 0, 0],
+            );
+
+            let (friendly_request, friendly_source) = device.receive();
+            assert_eq!(
+                &friendly_request[10..],
+                &[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]
+            );
+            device.reply_with_arc_body(
+                &friendly_request,
+                friendly_source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &[0, 0],
+            );
+
+            let (page_request, page_source) = device.receive();
+            let mut body = vec![0, 0];
+            for (channel_number, name_pointer) in [(1u16, 32u16), (2u16, 34u16)] {
+                let mut record = [0u8; crate::parser::TX_RECORD_SIZE];
+                record[0..2].copy_from_slice(&channel_number.to_be_bytes());
+                record[4..6].copy_from_slice(&0x002Cu16.to_be_bytes());
+                record[6..8].copy_from_slice(&name_pointer.to_be_bytes());
+                body.extend_from_slice(&record);
+            }
+            body.extend_from_slice(&[0, 0, 0xBB, 0x80]);
+            body.extend_from_slice(b"a\0b\0");
+            device.reply_with_arc_body(
+                &page_request,
+                page_source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &body,
+            );
+        });
+
+        assert!(matches!(
+            client.get_tx_channels(),
+            Err(ClientError::MalformedResponse)
+        ));
+        device_thread.join().unwrap();
+    }
+
+    #[test]
     fn invalid_name_fails_without_sending() {
         let device = FakeDevice::new();
         let mut client = test_client(device.port());
@@ -538,7 +840,10 @@ mod tests {
             Err(ClientError::Protocol(NetaudioError::NameInvalidHyphen))
         ));
 
-        device.socket.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        device
+            .socket
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
         let mut buffer = [0u8; 64];
         assert!(device.socket.recv_from(&mut buffer).is_err());
     }

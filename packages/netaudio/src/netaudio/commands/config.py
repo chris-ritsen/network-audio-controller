@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import subprocess
 import sys
@@ -9,6 +10,13 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.services.notification import (
+    NOTIFICATION_AES67_STATUS,
+    NOTIFICATION_LATENCY_CHANGE,
+    NOTIFICATION_SAMPLE_RATE_STATUS,
+    NOTIFICATION_SETTINGS_CHANGE,
+)
 
 from netaudio._common import (
     _command_context,
@@ -18,6 +26,8 @@ from netaudio._common import (
     filter_devices,
     output_single,
     output_table,
+    readback_after_notification,
+    send_and_wait_for_notification,
     sort_devices,
 )
 from netaudio._exit_codes import ExitCode
@@ -36,11 +46,14 @@ def _moved_command(name: str):
     def handler(ctx: typer.Context):
         typer.echo(f"This command has moved. Use: netaudio device config {name}", err=True)
         raise typer.Exit(code=1)
+
     return handler
 
 
 for _name in MOVED_COMMANDS:
-    top_app.command(_name, hidden=True, context_settings={"allow_extra_args": True, "allow_interspersed_args": False})(_moved_command(_name))
+    top_app.command(_name, hidden=True, context_settings={"allow_extra_args": True, "allow_interspersed_args": False})(
+        _moved_command(_name)
+    )
 
 
 @top_app.command("edit")
@@ -101,6 +114,104 @@ def _resolve_targets(filtered, all_devices):
     return [next(iter(filtered.items()))]
 
 
+async def _read_settings_value(device, key):
+    settings = await device.operations.get_device_settings()
+    if not isinstance(settings, dict) or settings.get(key) is None:
+        raise RuntimeError(f"{key} readback was unavailable")
+    return settings[key]
+
+
+async def _read_aes67_configured(device):
+    configured = await device.operations.get_aes67_configured()
+    if configured is None:
+        raise RuntimeError("AES67 configured-state readback was unavailable")
+    return configured
+
+
+async def _read_latency_milliseconds(device):
+    latency_nanoseconds = await _read_settings_value(device, "latency_ns")
+    return nanoseconds_to_milliseconds(latency_nanoseconds)
+
+
+async def _send_verified_change(
+    targets,
+    send,
+    packet,
+    port_for,
+    expected,
+    read_for,
+    action,
+    success_message,
+    notification_ids,
+    send_kwargs=None,
+):
+    send_kwargs = send_kwargs or {}
+
+    async def _send_and_read(server_name, device):
+        label = device.name or server_name
+        try:
+            await send_and_wait_for_notification(
+                send,
+                packet,
+                device.ipv4,
+                port_for(device),
+                notification_ids,
+                **send_kwargs,
+            )
+        except Exception as exception:
+            return label, None, exception
+
+        result = await readback_after_notification(lambda: read_for(device), expected)
+        return label, result, None
+
+    results = await asyncio.gather(*(_send_and_read(server_name, device) for server_name, device in targets))
+
+    failures = 0
+    for label, result, send_error in results:
+        if send_error is not None:
+            typer.echo(f"Error: could not send {action} to {label}: {send_error}", err=True)
+            failures += 1
+            continue
+        if result.matched:
+            typer.echo(success_message(label))
+            continue
+
+        failures += 1
+        if result.observed_available:
+            typer.echo(
+                f"Error: {action} sent to {label}, but the device reports {result.observed!r} instead of {expected!r}.",
+                err=True,
+            )
+        else:
+            detail = f": {result.error}" if result.error is not None else ""
+            typer.echo(
+                f"Error: {action} sent to {label}, but readback was unavailable{detail}; the change was not verified.",
+                err=True,
+            )
+    return failures
+
+
+async def _send_requested_change(targets, request_for, action, success_message):
+    async def _request(server_name, device):
+        label = device.name or server_name
+        try:
+            await request_for(device)
+            return label, None
+        except Exception as exception:
+            return label, exception
+
+    results = await asyncio.gather(*(_request(server_name, device) for server_name, device in targets))
+
+    failures = 0
+    for label, error in results:
+        if error is not None:
+            typer.echo(f"Error: could not request {action} for {label}: {error}", err=True)
+            failures += 1
+        else:
+            typer.echo(success_message(label))
+    return failures
+
+
 @app.command("sample-rate")
 def sample_rate(
     rate: Optional[int] = typer.Argument(None, help=f"Sample rate: {VALID_SAMPLE_RATES}"),
@@ -130,8 +241,19 @@ def sample_rate(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             packet, _, port = commands.command_set_sample_rate(rate)
-            for server_name, device in targets:
-                await send(packet, device.ipv4, port)
+            failures = await _send_verified_change(
+                targets,
+                send,
+                packet,
+                lambda _device: port,
+                rate,
+                lambda device: _read_settings_value(device, "sample_rate"),
+                "sample rate change",
+                lambda label: f"Set sample rate for {label}: {rate} Hz (verified)",
+                (NOTIFICATION_SAMPLE_RATE_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+            )
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -154,7 +276,10 @@ def encoding(
                 if all_devices:
                     output_table(
                         ["Name", "Encoding"],
-                        [[device.name or server_name, device.encoding if device.encoding is not None else "N/A"] for server_name, device in targets],
+                        [
+                            [device.name or server_name, device.encoding if device.encoding is not None else "N/A"]
+                            for server_name, device in targets
+                        ],
                     )
                 else:
                     output_single(targets[0][1].encoding if targets[0][1].encoding is not None else "N/A")
@@ -165,8 +290,14 @@ def encoding(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             packet, _, port = commands.command_set_encoding(bits)
-            for server_name, device in targets:
-                await send(packet, device.ipv4, port)
+            failures = await _send_requested_change(
+                targets,
+                lambda device: send(packet, device.ipv4, port),
+                "encoding change",
+                lambda label: f"Encoding change requested for {label}: {bits}-bit; not verified.",
+            )
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -186,19 +317,57 @@ def latency(
             targets = _resolve_targets(filtered, all_devices)
 
             if value is None:
+
+                async def _read_target(server_name, device):
+                    try:
+                        return server_name, device, await _read_latency_milliseconds(device), None
+                    except Exception as exception:
+                        return server_name, device, None, exception
+
+                readings = await asyncio.gather(*(_read_target(server_name, device) for server_name, device in targets))
+                failures = [
+                    (server_name, device, exception)
+                    for server_name, device, _, exception in readings
+                    if exception is not None
+                ]
+                if failures:
+                    for server_name, device, exception in failures:
+                        typer.echo(
+                            f"Error: could not read latency from {device.name or server_name}: {exception}",
+                            err=True,
+                        )
+                    raise typer.Exit(code=ExitCode.ERROR)
                 if all_devices:
                     output_table(
                         ["Name", "Latency"],
-                        [[device.name or server_name, device.latency or ""] for server_name, device in targets],
+                        [
+                            [device.name or server_name, f"{latency_value:g}"]
+                            for server_name, device, latency_value, _ in readings
+                        ],
                     )
                 else:
-                    output_single(targets[0][1].latency)
+                    output_single(readings[0][2])
                 return
 
+            if not math.isfinite(value) or value < 0:
+                typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+
             packet, service_type = commands.command_set_latency(value)
-            for server_name, device in targets:
-                arc_port = _get_arc_port(device)
-                await send(packet, device.ipv4, arc_port)
+            expected_ns = int(round(value * 1_000_000))
+            failures = await _send_verified_change(
+                targets,
+                send,
+                packet,
+                _get_arc_port,
+                expected_ns,
+                lambda device: _read_settings_value(device, "latency_ns"),
+                "latency change",
+                lambda label: f"Set latency for {label}: {value:g} ms (verified)",
+                (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
+            )
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -234,12 +403,14 @@ def aes67(
                     headers = ["Name", "Current", "Configured", "Reboot Required"]
                     rows = []
                     for server_name, device in targets:
-                        rows.append([
-                            device.name or server_name,
-                            _aes67_state_label(device.aes67_current),
-                            _aes67_state_label(device.aes67_configured),
-                            "yes" if _aes67_reboot_required(device) else "no",
-                        ])
+                        rows.append(
+                            [
+                                device.name or server_name,
+                                _aes67_state_label(device.aes67_current),
+                                _aes67_state_label(device.aes67_configured),
+                                "yes" if _aes67_reboot_required(device) else "no",
+                            ]
+                        )
                     output_table(headers, rows)
                 else:
                     device = targets[0][1]
@@ -265,8 +436,20 @@ def aes67(
 
             is_enabled = enabled.lower() == "on"
             packet, _, port = commands.command_enable_aes67(is_enabled)
-            for server_name, device in targets:
-                await send(packet, device.ipv4, port)
+            failures = await _send_verified_change(
+                targets,
+                send,
+                packet,
+                lambda _device: port,
+                is_enabled,
+                _read_aes67_configured,
+                "AES67 configuration change",
+                lambda label: f"Set AES67 configured state for {label}: {enabled.lower()} (verified)",
+                (NOTIFICATION_AES67_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+                send_kwargs={"expect_response": False, "repeat": 3, "interval_ms": 100},
+            )
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -287,10 +470,12 @@ def preferred_leader(
 
             if enabled is None:
                 if all_devices:
+
                     def _pref_display(device):
                         if device.preferred_leader is None:
                             return "N/A"
                         return "on" if device.preferred_leader else "off"
+
                     output_table(
                         ["Name", "Preferred Leader"],
                         [[device.name or server_name, _pref_display(device)] for server_name, device in targets],
@@ -309,11 +494,25 @@ def preferred_leader(
 
             is_preferred = enabled.lower() == "on"
             packet, _, port = commands.command_set_preferred_leader(is_preferred)
-            for server_name, device in targets:
-                for attempt in range(3):
-                    await send(packet, device.ipv4, port)
-                    if attempt < 2:
-                        await asyncio.sleep(0.5)
+
+            async def _request_preferred(device):
+                await send(
+                    packet,
+                    device.ipv4,
+                    port,
+                    expect_response=False,
+                    repeat=3,
+                    interval_ms=500,
+                )
+
+            failures = await _send_requested_change(
+                targets,
+                _request_preferred,
+                "preferred leader change",
+                lambda label: f"Preferred leader change requested for {label}: {enabled.lower()}; not verified.",
+            )
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
 
@@ -367,20 +566,33 @@ def interface(
                         pending_label = pending_mode
 
                 if not interfaces:
-                    rows.append([device.name or server_name, "0", "", str(device.ipv4) if device.ipv4 else "", "", "", "", pending_label])
+                    rows.append(
+                        [
+                            device.name or server_name,
+                            "0",
+                            "",
+                            str(device.ipv4) if device.ipv4 else "",
+                            "",
+                            "",
+                            "",
+                            pending_label,
+                        ]
+                    )
                     continue
 
                 for index, iface in enumerate(interfaces):
-                    rows.append([
-                        device.name or server_name,
-                        str(index),
-                        iface.get("mode", ""),
-                        iface.get("ip_address", ""),
-                        iface.get("netmask", ""),
-                        iface.get("gateway", ""),
-                        iface.get("dns_server", ""),
-                        pending_label if index == 0 else "",
-                    ])
+                    rows.append(
+                        [
+                            device.name or server_name,
+                            str(index),
+                            iface.get("mode", ""),
+                            iface.get("ip_address", ""),
+                            iface.get("netmask", ""),
+                            iface.get("gateway", ""),
+                            iface.get("dns_server", ""),
+                            pending_label if index == 0 else "",
+                        ]
+                    )
 
                 device_json = {
                     "name": device.name,
@@ -406,15 +618,24 @@ def interface(
             filtered = filter_devices(devices)
             targets = _resolve_targets(filtered, all_devices)
 
-            for server_name, device in targets:
-                device_ip = str(device.ipv4)
-                if mode == "dhcp":
-                    packet, _, port = commands.command_set_interface_dhcp()
-                else:
-                    packet, _, port = commands.command_set_interface_static(ip_address, netmask, dns_server, gateway)
-                await send(packet, device_ip, port)
-                typer.echo(f"Set {device.name or server_name} to {mode}", err=True)
+            if mode == "dhcp":
+                packet, _, port = commands.command_set_interface_dhcp()
+            else:
+                packet, _, port = commands.command_set_interface_static(ip_address, netmask, dns_server, gateway)
+            failures = await _send_requested_change(
+                targets,
+                lambda device: send(
+                    packet,
+                    str(device.ipv4),
+                    port,
+                    expect_response=False,
+                ),
+                "interface change",
+                lambda label: f"Interface change requested for {label}: {mode}; not verified.",
+            )
 
             typer.echo("Reboot required for changes to take effect.", err=True)
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())

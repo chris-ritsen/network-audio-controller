@@ -16,18 +16,18 @@
   "core_device_info_avio-aes3-1.bin": {
     "kind": "device_info",
     "parsed": {
+      "model_name": "",
       "display_name": "",
       "model_code": "DIOAES3",
-      "model_name": "",
       "port": ":800"
     }
   },
   "core_device_info_lx-dante.bin": {
     "kind": "device_info",
     "parsed": {
+      "model_name": "lx-dante",
       "display_name": "LX-DANTE-081258",
       "model_code": "Audinate DCM",
-      "model_name": "lx-dante",
       "port": ":702"
     }
   },
@@ -38,6 +38,11 @@
   "core_device_settings_avio-aes3-1.bin": {
     "kind": "device_settings",
     "parsed": {
+      "sample_rate": 48000,
+      "latency_ns": 1000000,
+      "default_latency_ns": 1000000,
+      "min_latency_ns": 1000000,
+      "max_latency_ns": 20312500,
       "info_codes": [
         [
           32800,
@@ -46,10 +51,6 @@
         [
           32801,
           0
-        ],
-        [
-          35,
-          2293784
         ],
         [
           32864,
@@ -62,26 +63,6 @@
         [
           33285,
           1000000
-        ],
-        [
-          528,
-          2149646496
-        ],
-        [
-          529,
-          2149646496
-        ],
-        [
-          530,
-          2181300404
-        ],
-        [
-          531,
-          2149646496
-        ],
-        [
-          532,
-          2149646496
         ],
         [
           33537,
@@ -100,31 +81,20 @@
           2000000
         ],
         [
-          784,
-          2149646496
-        ],
-        [
-          785,
-          2149646496
-        ],
-        [
-          786,
-          2181300404
-        ],
-        [
           33776,
           5
         ]
-      ],
-      "latency_us": 1000000,
-      "max_latency_us": 20312500,
-      "min_latency_us": 1000000,
-      "sample_rate": 48000
+      ]
     }
   },
   "core_device_settings_lx-dante.bin": {
     "kind": "device_settings",
     "parsed": {
+      "sample_rate": 48000,
+      "latency_ns": 1000000,
+      "default_latency_ns": 1000000,
+      "min_latency_ns": 150000,
+      "max_latency_ns": 21333334,
       "info_codes": [
         [
           32800,
@@ -143,22 +113,6 @@
           1000000
         ],
         [
-          528,
-          2149646460
-        ],
-        [
-          529,
-          2149646460
-        ],
-        [
-          530,
-          34275328
-        ],
-        [
-          532,
-          34603024
-        ],
-        [
           33537,
           1000000
         ],
@@ -171,18 +125,10 @@
           21333334
         ],
         [
-          784,
-          2149646460
-        ],
-        [
           33776,
           5
         ]
-      ],
-      "latency_us": 1000000,
-      "max_latency_us": 21333334,
-      "min_latency_us": 1000000,
-      "sample_rate": 48000
+      ]
     }
   },
   "core_latency_config_avio-aes3-1.bin": {

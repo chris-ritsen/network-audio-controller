@@ -142,8 +142,7 @@ def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTe
     for expected in test_case.expected_channels:
         ch = rx_channels[expected["number"]]
         assert ch.name == expected["name"], (
-            f"{test_case.device_id} ch{expected['number']}: "
-            f"name {ch.name!r} != {expected['name']!r}"
+            f"{test_case.device_id} ch{expected['number']}: name {ch.name!r} != {expected['name']!r}"
         )
         assert ch.number == expected["number"]
         assert ch.channel_type == "rx"
@@ -154,12 +153,10 @@ def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTe
     for expected in test_case.expected_subscriptions:
         sub = sub_by_rx[expected["rx"]]
         assert sub.tx_channel_name == expected["tx_ch"], (
-            f"{test_case.device_id} sub {expected['rx']}: "
-            f"tx_channel {sub.tx_channel_name!r} != {expected['tx_ch']!r}"
+            f"{test_case.device_id} sub {expected['rx']}: tx_channel {sub.tx_channel_name!r} != {expected['tx_ch']!r}"
         )
         assert sub.tx_device_name == expected["tx_dev"], (
-            f"{test_case.device_id} sub {expected['rx']}: "
-            f"tx_device {sub.tx_device_name!r} != {expected['tx_dev']!r}"
+            f"{test_case.device_id} sub {expected['rx']}: tx_device {sub.tx_device_name!r} != {expected['tx_dev']!r}"
         )
         assert sub.status_code == expected["status"]
         assert sub.rx_device_name == test_case.device_id

@@ -81,13 +81,9 @@ get_channel_count_test_cases = [
     get_channel_count_test_cases,
     ids=[tc.device_id for tc in get_channel_count_test_cases],
 )
-def test_generate_get_channel_count_command_payload(
-    load_fixture, test_case: GetChannelCountTestCase
-):
+def test_generate_get_channel_count_command_payload(load_fixture, test_case: GetChannelCountTestCase):
     device = DanteDevice()
-    hex_command_str, service_type = device.commands.command_channel_count(
-        transaction_id=test_case.sequence_id
-    )
+    hex_command_str, service_type = device.commands.command_channel_count(transaction_id=test_case.sequence_id)
 
     check_generated_command_payload(
         generated_hex_payload=hex_command_str,
@@ -104,9 +100,7 @@ def test_generate_get_channel_count_command_payload(
     get_channel_count_test_cases,
     ids=[tc.device_id for tc in get_channel_count_test_cases],
 )
-def test_parse_get_channel_count_response_payload(
-    load_fixture, test_case: GetChannelCountTestCase
-):
+def test_parse_get_channel_count_response_payload(load_fixture, test_case: GetChannelCountTestCase):
     raw_response_data = load_fixture(test_case.response_fixture)
     try:
         if len(raw_response_data) < MIN_CHANNEL_COUNT_RESPONSE_LENGTH:
@@ -114,21 +108,15 @@ def test_parse_get_channel_count_response_payload(
                 f"For {test_case.device_id}, response from {test_case.response_fixture} too short (len {len(raw_response_data)}). Min {MIN_CHANNEL_COUNT_RESPONSE_LENGTH} bytes needed."
             )
         parsed_tx_count = int.from_bytes(
-            raw_response_data[
-                CHANNEL_COUNT_RESPONSE_TX_START_OFFSET:CHANNEL_COUNT_RESPONSE_TX_END_OFFSET
-            ],
+            raw_response_data[CHANNEL_COUNT_RESPONSE_TX_START_OFFSET:CHANNEL_COUNT_RESPONSE_TX_END_OFFSET],
             "big",
         )
         parsed_rx_count = int.from_bytes(
-            raw_response_data[
-                CHANNEL_COUNT_RESPONSE_RX_START_OFFSET:CHANNEL_COUNT_RESPONSE_RX_END_OFFSET
-            ],
+            raw_response_data[CHANNEL_COUNT_RESPONSE_RX_START_OFFSET:CHANNEL_COUNT_RESPONSE_RX_END_OFFSET],
             "big",
         )
     except Exception as e:
-        pytest.fail(
-            f"For {test_case.device_id}, error parsing {test_case.response_fixture}: {e}"
-        )
+        pytest.fail(f"For {test_case.device_id}, error parsing {test_case.response_fixture}: {e}")
 
     assert parsed_tx_count == test_case.expected_tx, (
         f"For {test_case.device_id}, parsed Tx count {parsed_tx_count} from {test_case.response_fixture} != expected {test_case.expected_tx}."
