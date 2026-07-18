@@ -62,6 +62,12 @@ class DanteSettingsService(DanteUnicastService):
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
+    def probe_sample_rate(self, device_ip_address: str, host_mac: bytes | None = None) -> None:
+        command_args = self._commands.command_probe_sample_rate(host_mac=host_mac)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
     def request_bluetooth_status(self, device_ip: str, host_mac: bytes = None) -> None:
         command_args = self._commands.command_bluetooth_status(host_mac=host_mac)
         packet = command_args[0]

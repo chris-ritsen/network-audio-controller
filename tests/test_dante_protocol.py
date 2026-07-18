@@ -248,6 +248,7 @@ class TestSettingsCommandPacketFormat:
                 ("192.0.2.10", "255.255.255.0", "192.0.2.53", "192.0.2.1"),
             ),
             ("command_probe_aes67", ()),
+            ("command_probe_sample_rate", ()),
             ("command_set_preferred_leader", (True,)),
             ("command_probe_preferred_leader", ()),
             ("command_bluetooth_status", ()),

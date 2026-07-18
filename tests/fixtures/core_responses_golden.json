@@ -151,5 +151,43 @@
       "product_name": "AVIO-AES3",
       "product_version": ""
     }
+  },
+  "sample_rate_status_lx-dante": {
+    "hex": "ffff004816310000001dc10812580000417564696e6174650724008000000000001800060000ac4400000000000200000000ac440000bb8000015888000177000002b1100002ee00",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 44100,
+      "supported_sample_rates": [
+        44100,
+        48000,
+        88200,
+        96000,
+        176400,
+        192000
+      ]
+    }
+  },
+  "sample_rate_status_packet_4170820": {
+    "hex": "ffff0034061a0000001dc10812580000417564696e6174650724008000000000001800010000bb8000000000000200000000bb80",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 48000,
+      "supported_sample_rates": [
+        48000
+      ]
+    }
+  },
+  "sample_rate_status_packet_9695783": {
+    "hex": "ffff0040fd2a0000001dc1fffe53ef37417564696e6174650738008000000000001800040000bb800000bb80000200000000ac440000bb800001588800017700",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 48000,
+      "supported_sample_rates": [
+        44100,
+        48000,
+        88200,
+        96000
+      ]
+    }
   }
 }
