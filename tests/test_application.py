@@ -126,16 +126,18 @@ class TestDanteApplication:
         application = DanteApplication()
         application.unregister_device("nonexistent.local.")  # Should not raise
 
-    def test_mark_device_offline_clears_sample_rate_capabilities(self):
+    def test_mark_device_offline_clears_device_capabilities(self):
         application = DanteApplication()
         device = DanteDevice(server_name="test.local.")
         device.supported_sample_rates = [44_100, 48_000]
+        device.supported_encodings = [16, 24, 32]
         application.register_device("test.local.", device)
 
         application.mark_device_offline("test.local.")
 
         assert device.online is False
         assert device.supported_sample_rates is None
+        assert device.supported_encodings is None
 
     @pytest.mark.asyncio
     async def test_probe_sample_rates_all_probes_online_devices_and_applies_results(self):
@@ -208,6 +210,78 @@ class TestDanteApplication:
 
         assert results == [(48_000, [48_000]), (96_000, [48_000, 96_000])]
         assert application.settings.probe_sample_rate.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_probe_encodings_all_probes_online_devices_and_applies_advertised_results(self):
+        application = DanteApplication()
+        online_device = DanteDevice(server_name="online.local.")
+        online_device.ipv4 = "192.168.1.108"
+        duplicate_address_device = DanteDevice(server_name="duplicate.local.")
+        duplicate_address_device.ipv4 = "192.168.1.108"
+        known_device = DanteDevice(server_name="known.local.")
+        known_device.ipv4 = "192.168.1.110"
+        known_device.supported_encodings = [24]
+        offline_device = DanteDevice(server_name="offline.local.")
+        offline_device.ipv4 = "192.168.1.109"
+        offline_device.online = False
+        application.devices = {
+            online_device.server_name: online_device,
+            duplicate_address_device.server_name: duplicate_address_device,
+            known_device.server_name: known_device,
+            offline_device.server_name: offline_device,
+        }
+
+        def respond_to_probe(device_ip_address):
+            application.notifications._notify_encoding_waiter(device_ip_address, 24, [24, 16, 32])
+
+        application.settings.probe_encoding = MagicMock(side_effect=respond_to_probe)
+
+        await application._probe_encodings_all(timeout=0.1)
+
+        application.settings.probe_encoding.assert_called_once_with("192.168.1.108")
+        assert online_device.encoding == 24
+        assert online_device.supported_encodings == [24, 16, 32]
+        assert duplicate_address_device.encoding == 24
+        assert duplicate_address_device.supported_encodings == [24, 16, 32]
+        assert known_device.supported_encodings == [24]
+        assert offline_device.supported_encodings is None
+
+    @pytest.mark.asyncio
+    async def test_probe_encoding_status_returns_typed_result_and_unregisters_waiter(self):
+        application = DanteApplication()
+
+        def respond_to_probe(device_ip_address):
+            application.notifications._notify_encoding_waiter(device_ip_address, 24, [24])
+
+        application.settings.probe_encoding = MagicMock(side_effect=respond_to_probe)
+
+        result = await application.probe_encoding_status("192.168.1.108", timeout=0.1)
+
+        assert result == (24, [24])
+        assert not application.notifications._waiters.is_registered("encoding", "192.168.1.108")
+
+    @pytest.mark.asyncio
+    async def test_concurrent_encoding_probes_for_one_device_are_serialized(self):
+        application = DanteApplication()
+        probe_results = [(24, [24]), (16, [24, 16, 32])]
+
+        def respond_to_probe(device_ip_address):
+            current_encoding, supported_encodings = probe_results.pop(0)
+            application.notifications._notify_encoding_waiter(
+                device_ip_address,
+                current_encoding,
+                supported_encodings,
+            )
+
+        application.settings.probe_encoding = MagicMock(side_effect=respond_to_probe)
+
+        results = await asyncio.gather(
+            application.probe_encoding_status("192.168.1.108", timeout=0.1),
+            application.probe_encoding_status("192.168.1.108", timeout=0.1),
+        )
+
+        assert results == [(24, [24]), (16, [24, 16, 32])]
+        assert application.settings.probe_encoding.call_count == 2
 
     def test_get_arc_port(self):
         application = DanteApplication()

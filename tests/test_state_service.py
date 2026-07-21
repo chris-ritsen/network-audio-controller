@@ -27,6 +27,7 @@ def make_application(devices):
         get_arc_port=lambda device: 4440,
         probe_aes67_state=AsyncMock(return_value=None),
         probe_sample_rate_status=AsyncMock(return_value=None),
+        probe_encoding_status=AsyncMock(return_value=None),
         probe_preferred_leader_state=AsyncMock(return_value=None),
         probe_interface_status=AsyncMock(return_value=None),
         _send_conmon_query_for_device=MagicMock(),
@@ -176,6 +177,29 @@ class TestFetchDeviceControls:
 
         application.probe_sample_rate_status.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_initial_fetch_probes_unknown_encoding_capabilities(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
+        state = DanteStateService(application)
+
+        await state.fetch_device_controls("dev1.local.")
+
+        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+
+    @pytest.mark.asyncio
+    async def test_initial_fetch_preserves_known_encoding_capabilities_without_reprobing(self):
+        device = make_device()
+        device.supported_encodings = [24]
+        application = make_application({"dev1.local.": device})
+        device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
+        state = DanteStateService(application)
+
+        await state.fetch_device_controls("dev1.local.")
+
+        application.probe_encoding_status.assert_not_awaited()
+
 
 class TestControlNotifications:
     @pytest.mark.asyncio
@@ -222,15 +246,132 @@ class TestControlNotifications:
         device = make_device()
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
+        device.operations.get_device_settings = AsyncMock()
         event = DanteEvent(
             type=EventType.NOTIFICATION_RECEIVED,
             server_name="dev1.local.",
-            data={"state_applied": True},
+            data={
+                "state_applied": True,
+                "conmon_response": True,
+                "current_value_changed": False,
+                "supported_values_changed": True,
+            },
         )
 
         await state._on_sample_rate_status(event)
 
         application.probe_sample_rate_status.assert_not_awaited()
+        device.operations.get_device_settings.assert_not_awaited()
+        application.dispatcher.emit_nowait.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_typed_sample_rate_value_change_refreshes_settings_then_emits(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        device.fetch_controls_data = AsyncMock()
+
+        async def get_device_settings():
+            device.min_latency = 0.5
+            device.max_latency = 5.0
+            return {"min_latency_ns": 500_000, "max_latency_ns": 5_000_000}
+
+        device.operations.get_device_settings = AsyncMock(side_effect=get_device_settings)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={
+                "state_applied": True,
+                "conmon_response": True,
+                "current_value_changed": True,
+                "supported_values_changed": False,
+            },
+        )
+
+        await state._on_sample_rate_status(event)
+
+        device.operations.get_device_settings.assert_awaited_once_with()
+        device.fetch_controls_data.assert_not_awaited()
+        assert device.min_latency == 0.5
+        assert device.max_latency == 5.0
+        events = emitted_events(application)
+        assert len(events) == 1
+        assert events[0].type == EventType.DEVICE_UPDATED
+        assert events[0].server_name == "dev1.local."
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("settings_result", [None, TimeoutError("no settings response")])
+    async def test_failed_sample_rate_settings_refresh_clears_stale_latency_state(self, settings_result):
+        device = make_device()
+        device.latency = 1.0
+        device.active_latency = 1.0
+        device.configured_latency = 0.25
+        device.default_latency = 1.0
+        device.min_latency = 0.15
+        device.max_latency = 21.333334
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        if isinstance(settings_result, BaseException):
+            device.operations.get_device_settings = AsyncMock(side_effect=settings_result)
+        else:
+            device.operations.get_device_settings = AsyncMock(return_value=settings_result)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"conmon_response": True, "current_value_changed": True},
+        )
+
+        await state._on_sample_rate_status(event)
+
+        assert device.latency is None
+        assert device.active_latency is None
+        assert device.configured_latency is None
+        assert device.default_latency is None
+        assert device.min_latency is None
+        assert device.max_latency is None
+        events = emitted_events(application)
+        assert len(events) == 1
+        assert events[0].type == EventType.DEVICE_UPDATED
+
+    @pytest.mark.asyncio
+    async def test_sample_rate_settings_refresh_uses_device_lock(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        settings_entered = asyncio.Event()
+        release_settings = asyncio.Event()
+        routing_started = asyncio.Event()
+        operation_order = []
+
+        async def get_device_settings():
+            operation_order.append("settings enter")
+            settings_entered.set()
+            await release_settings.wait()
+            operation_order.append("settings exit")
+
+        async def get_rx_channels():
+            operation_order.append("routing")
+
+        async def refresh_routing():
+            routing_started.set()
+            await state._on_routing_changed(DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name="dev1.local."))
+
+        device.operations.get_device_settings = AsyncMock(side_effect=get_device_settings)
+        device.get_rx_channels = AsyncMock(side_effect=get_rx_channels)
+        sample_rate_event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"conmon_response": True, "current_value_changed": True},
+        )
+
+        sample_rate_task = asyncio.create_task(state._on_sample_rate_status(sample_rate_event))
+        await settings_entered.wait()
+        routing_task = asyncio.create_task(refresh_routing())
+        await routing_started.wait()
+        release_settings.set()
+        await asyncio.gather(sample_rate_task, routing_task)
+
+        assert operation_order == ["settings enter", "settings exit", "routing"]
 
     @pytest.mark.asyncio
     async def test_unparsed_conmon_response_does_not_create_probe_loop(self):
@@ -248,7 +389,48 @@ class TestControlNotifications:
         application.probe_sample_rate_status.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_aes67_notification_refreshes_sample_rate_capabilities(self):
+    async def test_unparsed_encoding_notification_probes_typed_status(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name="dev1.local.")
+
+        await state._on_encoding_status(event)
+
+        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+
+    @pytest.mark.asyncio
+    async def test_typed_encoding_notification_does_not_probe_again(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"state_applied": True},
+        )
+
+        await state._on_encoding_status(event)
+
+        application.probe_encoding_status.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unparsed_encoding_conmon_response_does_not_create_probe_loop(self):
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"state_applied": False, "conmon_response": True},
+        )
+
+        await state._on_encoding_status(event)
+
+        application.probe_encoding_status.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_aes67_notification_refreshes_audio_capabilities(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
         application.probe_aes67_state.return_value = (True, True)
@@ -258,9 +440,10 @@ class TestControlNotifications:
         await state._on_aes67_status(event)
 
         application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
 
     @pytest.mark.asyncio
-    async def test_clear_configuration_notification_refreshes_sample_rate_capabilities(self):
+    async def test_clear_configuration_notification_refreshes_audio_capabilities(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
@@ -275,6 +458,7 @@ class TestControlNotifications:
 
         state.fetch_device_controls.assert_awaited_once_with("dev1.local.")
         application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
 
 
 class TestConmonRetry:

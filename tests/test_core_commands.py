@@ -54,13 +54,21 @@ class TestSpecErrors:
     def test_invalid_latency(self, latency):
         assert self._status({"command": "set_latency", "latency": latency}) == 25
 
-    @pytest.mark.parametrize("sample_rate", [0, 123456, 0x01000000])
-    def test_unsupported_sample_rate(self, sample_rate):
-        assert self._status({"command": "set_sample_rate", "sample_rate": sample_rate}) == 26
+    def test_zero_sample_rate_is_rejected(self):
+        assert self._status({"command": "set_sample_rate", "sample_rate": 0}) == 26
 
-    @pytest.mark.parametrize("encoding", [0, 20, 255])
-    def test_unsupported_encoding(self, encoding):
-        assert self._status({"command": "set_encoding", "encoding": encoding}) == 27
+    @pytest.mark.parametrize("sample_rate", [32_000, 123_456, 0x01000000])
+    def test_nonzero_sample_rate_preserves_full_advertised_value(self, sample_rate):
+        packet = core.build_command({"command": "set_sample_rate", "sample_rate": sample_rate})
+        assert packet[36:40] == sample_rate.to_bytes(4, "big")
+
+    def test_zero_encoding_is_rejected(self):
+        assert self._status({"command": "set_encoding", "encoding": 0}) == 27
+
+    @pytest.mark.parametrize("encoding", [16, 20, 24, 32, 256, 0xFFFFFFFF])
+    def test_nonzero_encoding_preserves_advertised_value(self, encoding):
+        packet = core.build_command({"command": "set_encoding", "encoding": encoding})
+        assert packet[36:40] == encoding.to_bytes(4, "big")
 
     def test_channel_zero_is_rejected(self):
         assert (

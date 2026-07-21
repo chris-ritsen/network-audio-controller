@@ -55,6 +55,7 @@ C = Colors()
 
 PROTOCOL_NAMES = {
     0x1200: "PROTOCOL_CMC",
+    0x2729: "PROTOCOL_ARC_2729",
     0x27FF: "PROTOCOL_ARC",
     0x2801: "PROTOCOL_ARC_2801",
     0x2809: "PROTOCOL_ARC_SETTINGS",
@@ -81,7 +82,7 @@ def get_opcode_name(protocol, opcode):
     if external_label:
         return external_label
 
-    arc_protocols = (0x27FF, 0x2801, 0x2809)
+    arc_protocols = (0x2729, 0x27FF, 0x2801, 0x2809)
     if protocol in arc_protocols:
         for fallback_protocol in arc_protocols:
             if fallback_protocol != protocol:

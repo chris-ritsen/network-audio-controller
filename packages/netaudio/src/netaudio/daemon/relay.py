@@ -14,11 +14,12 @@ from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.common.app_config import settings as app_settings
+from netaudio.dante import flows
+from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.device_operations import validate_pin
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante import flows
-from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
 
 logger = logging.getLogger("netaudio")
 
@@ -30,6 +31,7 @@ BONJOUR_SLEEP_GAP_MULTIPLIER = 3
 SSE_CLIENT_QUEUE_SIZE = 128
 SSE_DRAIN_TIMEOUT_SECONDS = 5
 SSE_CLOSE_TIMEOUT_SECONDS = 1
+AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS = 2
 
 STATUS_TEXT = {
     200: "OK",
@@ -85,6 +87,7 @@ class RelayServer:
         self._bonjour_monitor_task: asyncio.Task | None = None
         self._bonjour_registered_monotonic: float | None = None
         self._last_bonjour_probe_wall_time: float | None = None
+        self.audio_capability_verification_timeout = AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS
         self.post_handlers = {
             "/subscribe": self._handle_subscribe,
             "/unsubscribe": self._handle_unsubscribe,
@@ -1018,18 +1021,96 @@ class RelayServer:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        response = await device.operations.set_sample_rate(params.get("sample_rate"))
-        if not await self._require_arc_write_success(writer, response, "sample rate change"):
+        requested_sample_rate = params.get("sample_rate")
+        if not await self._require_audio_capability_value(writer, requested_sample_rate, "sample_rate"):
             return
-        await self._send_json(writer, {"success": True})
+        await self._set_and_verify_audio_capability(
+            writer,
+            device,
+            requested_sample_rate,
+            device.operations.set_sample_rate,
+            self.application.probe_sample_rate_status,
+            "sample_rate",
+            "supported_sample_rates",
+            "sample rate",
+        )
 
     async def _handle_set_encoding(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        response = await device.operations.set_encoding(params.get("encoding"))
-        if not await self._require_arc_write_success(writer, response, "encoding change"):
+        requested_encoding = params.get("encoding")
+        if not await self._require_audio_capability_value(writer, requested_encoding, "encoding"):
             return
+        await self._set_and_verify_audio_capability(
+            writer,
+            device,
+            requested_encoding,
+            device.operations.set_encoding,
+            self.application.probe_encoding_status,
+            "encoding",
+            "supported_encodings",
+            "encoding",
+        )
+
+    async def _require_audio_capability_value(self, writer, value, field_name):
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 0xFFFFFFFF:
+            await self._send_json(writer, {"error": f"{field_name} must be an integer from 1 through 4294967295"}, 400)
+            return False
+        return True
+
+    async def _set_and_verify_audio_capability(
+        self,
+        writer,
+        device,
+        requested_value,
+        set_value,
+        probe_status,
+        current_value_field,
+        supported_values_field,
+        capability_description,
+    ):
+        device_ip_address = str(device.ipv4)
+
+        async def mutate() -> None:
+            await set_value(requested_value)
+
+        async def probe():
+            return await probe_status(device_ip_address)
+
+        try:
+            status = await mutate_and_wait_for_capability_value(
+                self.application.notifications,
+                current_value_field,
+                device_ip_address,
+                requested_value,
+                mutate,
+                probe,
+                self.audio_capability_verification_timeout,
+            )
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+
+        if status is None:
+            await self._send_json(writer, {"error": f"{capability_description} readback was unavailable"}, 504)
+            return
+
+        observed_value, supported_values = status
+        setattr(device, current_value_field, observed_value)
+        setattr(device, supported_values_field, supported_values)
+        if observed_value != requested_value:
+            await self._send_json(
+                writer,
+                {
+                    "error": f"{capability_description} change was not applied",
+                    "observed": observed_value,
+                    "supported": supported_values,
+                },
+                409,
+            )
+            return
+
         await self._send_json(writer, {"success": True})
 
     async def _handle_set_gain(self, writer, params):

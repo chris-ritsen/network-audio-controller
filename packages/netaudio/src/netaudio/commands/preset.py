@@ -213,12 +213,24 @@ def _unsupported_load_fields(config: dict) -> list[str]:
     return [label for field, label in UNSUPPORTED_LOAD_FIELDS.items() if field in config]
 
 
-def _validate_supported_config(device_name: str, config: dict) -> None:
+def _validate_supported_config(device_name: str, config: dict, device) -> None:
     from netaudio.commands.config import VALID_SAMPLE_RATES
 
     sample_rate = config.get("sample_rate")
-    if sample_rate is not None and sample_rate not in VALID_SAMPLE_RATES:
-        raise ValueError(f"{device_name}: unsupported sample rate {sample_rate}; expected one of {VALID_SAMPLE_RATES}")
+    if sample_rate is not None:
+        if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or not 1 <= sample_rate <= 0xFFFFFFFF:
+            raise ValueError(f"{device_name}: sample rate must be an integer from 1 through 4294967295")
+        supported_sample_rates = device.supported_sample_rates
+        if supported_sample_rates is None and sample_rate not in VALID_SAMPLE_RATES:
+            raise ValueError(
+                f"{device_name}: sample-rate capabilities are unavailable; "
+                f"cannot verify that {sample_rate} is supported"
+            )
+        if supported_sample_rates is not None and sample_rate not in supported_sample_rates:
+            raise ValueError(
+                f"{device_name}: device reports supported sample rates {supported_sample_rates}; "
+                f"{sample_rate} is not supported"
+            )
 
     mode = config.get("interface_mode")
     if mode is not None and mode not in ("dynamic", "dhcp", "static"):
@@ -373,7 +385,7 @@ def preset_load(
                     preflight_errors.append(f"{device_name}: unsupported fields: {', '.join(unsupported)}")
                     continue
                 try:
-                    _validate_supported_config(device_name, config)
+                    _validate_supported_config(device_name, config, device)
                     actions = []
                     if "sample_rate" in config:
                         packet, _, port = commands.command_set_sample_rate(config["sample_rate"])

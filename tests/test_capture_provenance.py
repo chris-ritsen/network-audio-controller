@@ -3,11 +3,13 @@ import sqlite3
 import struct
 import zlib
 
+from netaudio.capture import provenance
 from netaudio.capture.provenance import (
     _extract_seed_samples,
     _query_observed_subscription_statuses,
     _write_seed_samples,
 )
+from netaudio.capture.packets import ARC_PROTOCOLS, TARGET_PROTOCOLS
 
 
 def _subscription_status_packet(status_code: int) -> bytes:
@@ -88,3 +90,18 @@ def test_seed_samples_write_decompressed_packet_bytes(tmp_path):
 
     assert (tmp_path / samples_by_type["protocol_opcode"]["file"]).read_bytes() == payload
     assert (tmp_path / samples_by_type["subscription_status"]["file"]).read_bytes() == payload
+
+
+def test_capture_classifies_all_captured_arc_protocol_variants():
+    assert ARC_PROTOCOLS == (0x2729, 0x27FF, 0x2801, 0x2809)
+    assert set(ARC_PROTOCOLS).issubset(TARGET_PROTOCOLS)
+
+
+def test_opcode_label_proof_accepts_evidence_from_every_arc_variant(monkeypatch):
+    monkeypatch.setattr(
+        provenance,
+        "OPCODE_NAMES_BY_PROTOCOL",
+        {0x2801: {0x2200: "query_tx_flows"}},
+    )
+
+    assert provenance._check_opcode_labels({(0x2729, 0x2200)}, set()) == []
