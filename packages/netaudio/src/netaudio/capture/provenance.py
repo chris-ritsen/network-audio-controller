@@ -357,7 +357,7 @@ def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int
 
         protocol = struct.unpack(">H", payload[0:2])[0]
 
-        if protocol in (0x27FF, 0x2809, 0x1200) and len(payload) >= 8:
+        if protocol in (*ARC_PROTOCOLS, 0x1200) and len(payload) >= 8:
             opcode = struct.unpack(">H", payload[6:8])[0]
             observed_opcodes.add((protocol, opcode))
 
@@ -404,7 +404,7 @@ def _check_opcode_labels(
     overrides: set[tuple[int, int]],
 ) -> list[str]:
     failures: list[str] = []
-    arc_variant_protocols = {0x27FF, 0x2809}
+    arc_variant_protocols = set(ARC_PROTOCOLS)
 
     for protocol, mapping in OPCODE_NAMES_BY_PROTOCOL.items():
         for opcode, label in mapping.items():
@@ -414,7 +414,7 @@ def _check_opcode_labels(
             if key in observed or key in overrides:
                 continue
             if protocol in arc_variant_protocols:
-                if (0x27FF, opcode) in observed or (0x2809, opcode) in observed:
+                if any((fallback_protocol, opcode) in observed for fallback_protocol in arc_variant_protocols):
                     continue
             failures.append(f"unproven opcode label: protocol=0x{protocol:04X} opcode=0x{opcode:04X} label={label!r}")
 
@@ -436,9 +436,10 @@ def _check_message_labels(
 
 
 KNOWN_PROTOCOL_NAMES = {
-    0x2729: "DEVICE_CONFIG",
-    0x27FF: "CONTROL",
-    0x2809: "AES67_CONFIG",
+    0x2729: "ARC",
+    0x27FF: "ARC",
+    0x2801: "ARC",
+    0x2809: "ARC",
     0xFFFF: "SETTINGS",
     0x1200: "CMC",
 }
@@ -450,6 +451,7 @@ KNOWN_OPCODE_NAMES = {
     0x1003: "DEVICE_INFO",
     0x1100: "DEVICE_SETTINGS",
     0x1101: "SET_LATENCY",
+    0x1102: "PROPERTY_DIRECTORY",
 }
 
 

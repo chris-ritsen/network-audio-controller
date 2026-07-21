@@ -20,6 +20,7 @@ from netaudio.dante.device_operations import (
     validate_pin,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.latency import standard_latency_choices_for_range
 from netaudio.dante.services.notification import (
     NOTIFICATION_ROUTING_DEVICE_CHANGE,
     NOTIFICATION_SETTINGS_CHANGE,
@@ -54,22 +55,36 @@ def _format_mac(mac: str) -> str:
     return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
 
 
-STANDARD_LATENCIES_MS = [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
+def _format_latency_milliseconds(latency_milliseconds: float) -> str:
+    if latency_milliseconds == int(latency_milliseconds):
+        return str(int(latency_milliseconds))
+    return f"{latency_milliseconds:g}"
 
 
-def _format_latency_ms(v: float) -> str:
-    if v == int(v):
-        return str(int(v))
-    return f"{v:g}"
-
-
-def _format_supported_latencies(min_lat: float | None, max_lat: float | None) -> str:
-    if min_lat is None:
+def _format_standard_latency_choices(
+    minimum_latency_milliseconds: float | None,
+    maximum_latency_milliseconds: float | None,
+) -> str:
+    choices = standard_latency_choices_for_range(
+        minimum_latency_milliseconds,
+        maximum_latency_milliseconds,
+    )
+    if choices is None:
         return ""
-    steps = [v for v in STANDARD_LATENCIES_MS if v >= min_lat and (max_lat is None or v <= max_lat)]
-    if not steps:
+    if not choices:
         return ""
-    return ", ".join(_format_latency_ms(v) for v in steps) + "ms"
+    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + "ms"
+
+
+def _format_latency_range(
+    minimum_latency_milliseconds: float | None,
+    maximum_latency_milliseconds: float | None,
+) -> str:
+    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
+        return ""
+    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
+    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
+    return f"{minimum_label}-{maximum_label}ms"
 
 
 def _format_last_seen(last_seen: float | None) -> str:
@@ -188,9 +203,14 @@ def device_list(
             "Firmware",
             "Software",
             "Sample Rate",
+            "Supported Sample Rates",
             "Encoding",
+            "Supported Encodings",
             "Bit Depth",
             "Latency",
+            "Configured Latency",
+            "Latency Range",
+            "Standard Latencies",
             "Flows",
             "AES67",
             "Preferred Leader",
@@ -234,15 +254,24 @@ def device_list(
                 row.append(device.firmware_version or "")
                 row.append(device.software_version or "")
                 row.append(str(device.sample_rate or ""))
+                row.append(", ".join(str(value) for value in device.supported_sample_rates or []))
 
                 encoding = getattr(device, "encoding", None)
                 row.append(f"PCM{encoding}" if encoding is not None else "")
 
+                supported_encodings = device.supported_encodings
+                row.append(", ".join(f"PCM{value}" for value in supported_encodings or []))
+
                 bit_depth = getattr(device, "bit_depth", None)
                 row.append(str(bit_depth) if bit_depth is not None else "")
 
-                latency = getattr(device, "latency", None)
+                latency = device.active_latency if device.active_latency is not None else device.latency
                 row.append(f"{latency}ms" if latency is not None else "")
+
+                configured_latency = device.configured_latency
+                row.append(f"{configured_latency}ms" if configured_latency is not None else "")
+                row.append(_format_latency_range(device.min_latency, device.max_latency))
+                row.append(_format_standard_latency_choices(device.min_latency, device.max_latency))
 
                 tx_flows = getattr(device, "tx_flow_count", None)
                 rx_flows = getattr(device, "rx_flow_count", None)

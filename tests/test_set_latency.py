@@ -41,10 +41,11 @@ def _extract_tarball(name):
 SESSION_27 = _extract_tarball("session_27_set_latency_full_provenance")
 SESSION_28 = _extract_tarball("session_28_set_latency_full_provenance_step2")
 
-LATENCY_OFFSET = 108
-MIN_LATENCY_OFFSET = 120
-MAX_LATENCY_OFFSET = 116
-DEFAULT_LATENCY_OFFSET = 104
+DEFAULT_LATENCY_INFO_CODE = 0x8204
+CONFIGURED_LATENCY_INFO_CODE = 0x8205
+ACTIVE_LATENCY_INFO_CODE = 0x8301
+MAXIMUM_LATENCY_INFO_CODE = 0x8302
+MINIMUM_LATENCY_INFO_CODE = 0x8306
 SET_TEMPLATE_RANGE = slice(8, 32)
 
 ALL_VALUES_NS = [150_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000]
@@ -81,8 +82,19 @@ def latency_from_set_payload(data):
     return struct.unpack(">I", data[-8:-4])[0], struct.unpack(">I", data[-4:])[0]
 
 
+def settings_values_by_info_code(data):
+    record_count = data[11]
+    values = {}
+    for record_index in range(record_count):
+        record_offset = 12 + record_index * 4
+        info_code, value_pointer = struct.unpack(">HH", data[record_offset : record_offset + 4])
+        if info_code & 0x8000:
+            values[info_code] = struct.unpack(">I", data[value_pointer : value_pointer + 4])[0]
+    return values
+
+
 def latency_from_read_response(data):
-    return struct.unpack(">I", data[LATENCY_OFFSET : LATENCY_OFFSET + 4])[0]
+    return settings_values_by_info_code(data)[ACTIVE_LATENCY_INFO_CODE]
 
 
 def narrate(lines):
@@ -116,19 +128,22 @@ class TestDeviceReportsLatencyRange:
         read_response = samples_by(manifest, "0x1100", "response")[0]
         payload = load_bin(session_dir(150_000), read_response["file"])
 
-        current_ns = struct.unpack(">I", payload[LATENCY_OFFSET : LATENCY_OFFSET + 4])[0]
-        min_ns = struct.unpack(">I", payload[MIN_LATENCY_OFFSET : MIN_LATENCY_OFFSET + 4])[0]
-        max_ns = struct.unpack(">I", payload[MAX_LATENCY_OFFSET : MAX_LATENCY_OFFSET + 4])[0]
-        default_ns = struct.unpack(">I", payload[DEFAULT_LATENCY_OFFSET : DEFAULT_LATENCY_OFFSET + 4])[0]
+        settings_values = settings_values_by_info_code(payload)
+        configured_ns = settings_values[CONFIGURED_LATENCY_INFO_CODE]
+        active_ns = settings_values[ACTIVE_LATENCY_INFO_CODE]
+        min_ns = settings_values[MINIMUM_LATENCY_INFO_CODE]
+        max_ns = settings_values[MAXIMUM_LATENCY_INFO_CODE]
+        default_ns = settings_values[DEFAULT_LATENCY_INFO_CODE]
 
         narrate(
             [
                 "DEVICE:     LX-DANTE-081258 (192.168.1.108)",
                 f"READ:       Opcode 0x1100, {len(payload)}-byte response",
-                f"CURRENT:    offset {LATENCY_OFFSET}: {current_ns} ns ({current_ns / 1_000_000} ms)",
-                f"DEFAULT:    offset {DEFAULT_LATENCY_OFFSET}: {default_ns} ns ({default_ns / 1_000_000} ms)",
-                f"MIN:        offset {MIN_LATENCY_OFFSET}: {min_ns} ns ({min_ns / 1_000_000} ms)",
-                f"MAX:        offset {MAX_LATENCY_OFFSET}: {max_ns} ns ({max_ns / 1_000_000} ms)",
+                f"CONFIGURED: {configured_ns} ns ({configured_ns / 1_000_000} ms)",
+                f"ACTIVE:     {active_ns} ns ({active_ns / 1_000_000} ms)",
+                f"DEFAULT:    {default_ns} ns ({default_ns / 1_000_000} ms)",
+                f"MIN:        {min_ns} ns ({min_ns / 1_000_000} ms)",
+                f"MAX:        {max_ns} ns ({max_ns / 1_000_000} ms)",
             ]
         )
 
@@ -173,12 +188,12 @@ class TestSetLatencyValue:
 
         read_responses = samples_by(manifest, "0x1100", "response")
         after_payload = load_bin(directory, read_responses[-1]["file"])
-        readback_ns = struct.unpack(">I", after_payload[LATENCY_OFFSET : LATENCY_OFFSET + 4])[0]
+        readback_ns = latency_from_read_response(after_payload)
 
         narrate(
             [
                 f"READ-BACK:  After setting {target_ms}ms",
-                f"OFFSET {LATENCY_OFFSET}: 0x{after_payload[LATENCY_OFFSET : LATENCY_OFFSET + 4].hex()} = {readback_ns} ns ({readback_ns / 1_000_000} ms)",
+                f"ACTIVE:     0x8301 = {readback_ns} ns ({readback_ns / 1_000_000} ms)",
                 f"MATCH:      {'YES' if readback_ns == target_ns else 'NO'}",
             ]
         )
@@ -249,7 +264,7 @@ class TestDanteControllerDoesNotOffer10ms:
         readback_payload = load_bin(directory, samples_by(manifest, "0x1100", "response")[-1]["file"])
 
         resp_status = parse_header(resp_payload)["status"]
-        readback_ns = struct.unpack(">I", readback_payload[LATENCY_OFFSET : LATENCY_OFFSET + 4])[0]
+        readback_ns = latency_from_read_response(readback_payload)
 
         user_marker = next(m for m in manifest["markers"] if m.get("label") == "user_confirmed")
 
@@ -258,8 +273,8 @@ class TestDanteControllerDoesNotOffer10ms:
                 "FINDING:    10ms is NOT offered in Dante Controller's latency dropdown",
                 f"DEVICE:     Accepted anyway — status=0x{resp_status:04X}, read-back={readback_ns}ns (10.0ms)",
                 f"DC BEHAVIOR:{user_marker['data']['notable']}",
-                "CONCLUSION: Device accepts arbitrary values within min/max range (0.15ms-21.3ms)",
-                "            Dante Controller's dropdown is a UI constraint, not a protocol constraint",
+                "CONCLUSION: This captured device applied nonstandard 10ms within its advertised range",
+                "            Dante Controller's standard menu is not an exhaustive wire-level list",
             ]
         )
 
@@ -277,13 +292,13 @@ class TestAllValuesConclusion:
             readback_payload = load_bin(directory, samples_by(manifest, "0x1100", "response")[-1]["file"])
 
             status = parse_header(resp_payload)["status"]
-            readback = struct.unpack(">I", readback_payload[LATENCY_OFFSET : LATENCY_OFFSET + 4])[0]
+            readback = latency_from_read_response(readback_payload)
             results.append((target_ns, status, readback))
 
         narrate(
             [
                 "=" * 72,
-                "CONCLUSION: All Dante Latency Values Tested and Proven",
+                "CAPTURED LX-DANTE LATENCY VALUES",
                 "=" * 72,
                 "",
                 "DEVICE:     LX-DANTE-081258 (192.168.1.108)",
@@ -301,7 +316,7 @@ class TestAllValuesConclusion:
                 "",
                 "  * 10ms not offered by Dante Controller but accepted by device",
                 "",
-                "ALL VALUES: Accepted (status 0x0001), read-back matches target",
+                "CAPTURED VALUES: Accepted (status 0x0001), active read-back matches target",
                 "=" * 72,
             ]
         )
@@ -362,7 +377,7 @@ class TestEvidenceChain:
         assert len(step1_reads) == 4
         assert len(step1_sets) == 2
 
-    def test_conclusion_set_latency_wire_protocol_fully_proven(self):
+    def test_captured_set_latency_wire_layout_and_readback(self):
         manifest_27 = load_manifest(SESSION_27)
         manifest_28 = load_manifest(SESSION_28)
 
@@ -386,7 +401,7 @@ class TestEvidenceChain:
         narrate(
             [
                 "=" * 72,
-                "CONCLUSION: Dante Set Latency Wire Protocol — Fully Proven",
+                "DANTE SET LATENCY WIRE LAYOUT — CAPTURED EVIDENCE",
                 "=" * 72,
                 "",
                 "PROTOCOL:   0x2729",
@@ -396,7 +411,7 @@ class TestEvidenceChain:
                 "",
                 "ENCODING:   Latency in nanoseconds, 4-byte big-endian",
                 "            Set: repeated twice at end of 40-byte payload (offsets 32-36 and 36-40)",
-                "            Read: at offset 108 of 140-byte response",
+                "            Read: active/applied value from info code 0x8301",
                 f"TEMPLATE:   Fixed bytes 8-32: {controller_payload[SET_TEMPLATE_RANGE].hex()}",
                 "",
                 "EVIDENCE CHAIN:",

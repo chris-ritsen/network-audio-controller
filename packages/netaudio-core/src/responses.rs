@@ -12,9 +12,10 @@ use crate::commands::{
     PROTOCOL_DANTE_FLOW_2801,
 };
 use crate::protocol::{
-    common_arc_protocol_opcodes, conmon_opcode, is_common_arc_protocol, response_envelope,
-    validate_conmon_envelope, validate_response_envelope, OPCODE_CHANNEL_COUNT,
-    OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
+    common_arc_protocol_opcodes, conmon_opcode, device_settings_arc_protocol_opcodes,
+    is_common_arc_protocol, response_envelope, validate_conmon_envelope,
+    validate_response_envelope, OPCODE_CHANNEL_COUNT, OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS,
+    OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
 };
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
@@ -30,8 +31,11 @@ const FLOW_RECORD_CHANNEL_COUNT: usize = 14;
 const FLOW_TYPE_UNICAST: u16 = 0x0011;
 
 pub const DEVICE_SETTINGS_INFO_SAMPLE_RATE: u16 = 0x8020;
+pub const DEVICE_SETTINGS_INFO_AES67_CONFIGURED: u16 = 0x0063;
 pub const DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS: u16 = 0x8204;
-pub const DEVICE_SETTINGS_INFO_LATENCY_NS: u16 = 0x8205;
+pub const DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS: u16 = 0x8205;
+pub const DEVICE_SETTINGS_INFO_LATENCY_NS: u16 = DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS;
+pub const DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS: u16 = 0x8301;
 pub const DEVICE_SETTINGS_INFO_MAX_LATENCY_NS: u16 = 0x8302;
 pub const DEVICE_SETTINGS_INFO_MIN_LATENCY_NS: u16 = 0x8306;
 
@@ -58,6 +62,8 @@ pub struct DeviceInfo {
 pub struct DeviceSettings {
     pub sample_rate: Option<u32>,
     pub latency_ns: Option<u32>,
+    pub configured_latency_ns: Option<u32>,
+    pub active_latency_ns: Option<u32>,
     pub default_latency_ns: Option<u32>,
     pub min_latency_ns: Option<u32>,
     pub max_latency_ns: Option<u32>,
@@ -161,7 +167,7 @@ pub fn parse_device_info(response: &[u8]) -> Option<DeviceInfo> {
 pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
     let body = validate_response_envelope(
         response,
-        &common_arc_protocol_opcodes(OPCODE_DEVICE_SETTINGS),
+        &device_settings_arc_protocol_opcodes(OPCODE_DEVICE_SETTINGS),
         &[RESULT_CODE_SUCCESS],
     )?
     .body;
@@ -173,6 +179,8 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
     let mut settings = DeviceSettings {
         sample_rate: None,
         latency_ns: None,
+        configured_latency_ns: None,
+        active_latency_ns: None,
         default_latency_ns: None,
         min_latency_ns: None,
         max_latency_ns: None,
@@ -184,6 +192,9 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
         let offset = 2 + index * 4;
         let info_code = u16_at(body, offset);
         let value_pointer = u16_at(body, offset + 2);
+        if info_code == 0 {
+            continue;
+        }
         if !info_codes.insert(info_code) {
             return None;
         }
@@ -203,30 +214,55 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
         match info_code {
             DEVICE_SETTINGS_INFO_SAMPLE_RATE => settings.sample_rate = Some(value),
             DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS => settings.default_latency_ns = Some(value),
-            DEVICE_SETTINGS_INFO_LATENCY_NS => settings.latency_ns = Some(value),
+            DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS => {
+                settings.configured_latency_ns = Some(value)
+            }
+            DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS => settings.active_latency_ns = Some(value),
             DEVICE_SETTINGS_INFO_MIN_LATENCY_NS => settings.min_latency_ns = Some(value),
             DEVICE_SETTINGS_INFO_MAX_LATENCY_NS => settings.max_latency_ns = Some(value),
             _ => {}
         }
     }
 
+    settings.latency_ns = settings
+        .active_latency_ns
+        .or(settings.configured_latency_ns);
+
     Some(settings)
 }
 
-pub fn parse_aes67_configured(response: &[u8]) -> Option<bool> {
-    validate_response_envelope(
+pub fn parse_aes67_configured(response: &[u8]) -> Option<Option<bool>> {
+    let body = validate_response_envelope(
         response,
-        &common_arc_protocol_opcodes(OPCODE_DEVICE_SETTINGS),
+        &device_settings_arc_protocol_opcodes(OPCODE_DEVICE_SETTINGS),
         &[RESULT_CODE_SUCCESS],
-    )?;
-    if response.len() <= 0x53 {
-        return None;
+    )?
+    .body;
+    let record_count = usize::from(*body.get(1)?);
+    let record_bytes = record_count.checked_mul(4)?;
+    let records_end = 2usize.checked_add(record_bytes)?;
+    body.get(..records_end)?;
+    let mut configured = None;
+    for record_index in 0..record_count {
+        let record_offset = 2 + record_index * 4;
+        let info_code = u16_at(body, record_offset);
+        let inline_value = u16_at(body, record_offset + 2);
+        if info_code == 0 {
+            continue;
+        }
+        if info_code != DEVICE_SETTINGS_INFO_AES67_CONFIGURED {
+            continue;
+        }
+        if configured.is_some() {
+            return None;
+        }
+        configured = match inline_value {
+            0x0003 => Some(true),
+            0x0001 => Some(false),
+            _ => return None,
+        };
     }
-    match response[0x53] {
-        0x03 => Some(true),
-        0x01 => Some(false),
-        _ => None,
-    }
+    Some(configured)
 }
 
 fn conmon_string(data: &[u8], start: usize, end: usize) -> Option<String> {
@@ -509,12 +545,16 @@ pub const CONMON_OPCODE_INTERFACE_STATUS: u16 = 0x0011;
 pub const CONMON_OPCODE_MAKE_MODEL_RESPONSE: u16 = 0x00C0;
 pub const CONMON_OPCODE_DANTE_MODEL_RESPONSE: u16 = 0x0060;
 pub const CONMON_OPCODE_SAMPLE_RATE_STATUS: u16 = 0x0080;
+pub const CONMON_OPCODE_ENCODING_STATUS: u16 = 0x0082;
 pub const CONMON_OPCODE_AES67_CURRENT_NEW: u16 = 0x1007;
 pub const CONMON_OPCODE_PTP_CLOCK_STATUS: u16 = 0x0020;
 
 const CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET: usize = 0x22;
 const CONMON_CURRENT_SAMPLE_RATE_OFFSET: usize = 0x24;
 const CONMON_SUPPORTED_SAMPLE_RATES_OFFSET: usize = 0x30;
+const CONMON_SUPPORTED_ENCODING_COUNT_OFFSET: usize = 0x22;
+const CONMON_CURRENT_ENCODING_OFFSET: usize = 0x24;
+const CONMON_SUPPORTED_ENCODINGS_OFFSET: usize = 0x30;
 const CONMON_PREFERRED_LEADER_OFFSET: usize = 0x26;
 const CONMON_PTP_V1_ROLE_OFFSET: usize = 0x48;
 const CONMON_AES67_CURRENT_NEW_OFFSET: usize = 0x21;
@@ -538,26 +578,63 @@ pub struct SampleRateStatus {
     pub supported_sample_rates: Vec<u32>,
 }
 
-pub fn parse_sample_rate_status(data: &[u8]) -> Option<SampleRateStatus> {
-    validate_conmon_envelope(data, CONMON_OPCODE_SAMPLE_RATE_STATUS)?;
-    let supported_sample_rate_count =
-        usize::from(read_u16(data, CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET)?);
-    let current_sample_rate = read_u32(data, CONMON_CURRENT_SAMPLE_RATE_OFFSET)?;
-    let supported_sample_rates_byte_length = supported_sample_rate_count.checked_mul(4)?;
-    let supported_sample_rates_end =
-        CONMON_SUPPORTED_SAMPLE_RATES_OFFSET.checked_add(supported_sample_rates_byte_length)?;
-    data.get(CONMON_SUPPORTED_SAMPLE_RATES_OFFSET..supported_sample_rates_end)?;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EncodingStatus {
+    pub current_encoding: u32,
+    pub supported_encodings: Vec<u32>,
+}
 
-    let mut supported_sample_rates = Vec::with_capacity(supported_sample_rate_count);
-    for supported_sample_rate_index in 0..supported_sample_rate_count {
-        let supported_sample_rate_offset = CONMON_SUPPORTED_SAMPLE_RATES_OFFSET
-            .checked_add(supported_sample_rate_index.checked_mul(4)?)?;
-        supported_sample_rates.push(read_u32(data, supported_sample_rate_offset)?);
+fn parse_supported_u32_values(
+    data: &[u8],
+    expected_opcode: u16,
+    supported_value_count_offset: usize,
+    current_value_offset: usize,
+    supported_values_offset: usize,
+) -> Option<(u32, Vec<u32>)> {
+    validate_conmon_envelope(data, expected_opcode)?;
+    let supported_value_count = usize::from(read_u16(data, supported_value_count_offset)?);
+    let current_value = read_u32(data, current_value_offset)?;
+    let supported_values_byte_length = supported_value_count.checked_mul(4)?;
+    let supported_values_end = supported_values_offset.checked_add(supported_values_byte_length)?;
+    data.get(supported_values_offset..supported_values_end)?;
+
+    let mut supported_values = Vec::with_capacity(supported_value_count);
+    for supported_value_index in 0..supported_value_count {
+        let supported_value_offset =
+            supported_values_offset.checked_add(supported_value_index.checked_mul(4)?)?;
+        supported_values.push(read_u32(data, supported_value_offset)?);
     }
+
+    Some((current_value, supported_values))
+}
+
+pub fn parse_sample_rate_status(data: &[u8]) -> Option<SampleRateStatus> {
+    let (current_sample_rate, supported_sample_rates) = parse_supported_u32_values(
+        data,
+        CONMON_OPCODE_SAMPLE_RATE_STATUS,
+        CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET,
+        CONMON_CURRENT_SAMPLE_RATE_OFFSET,
+        CONMON_SUPPORTED_SAMPLE_RATES_OFFSET,
+    )?;
 
     Some(SampleRateStatus {
         current_sample_rate,
         supported_sample_rates,
+    })
+}
+
+pub fn parse_encoding_status(data: &[u8]) -> Option<EncodingStatus> {
+    let (current_encoding, supported_encodings) = parse_supported_u32_values(
+        data,
+        CONMON_OPCODE_ENCODING_STATUS,
+        CONMON_SUPPORTED_ENCODING_COUNT_OFFSET,
+        CONMON_CURRENT_ENCODING_OFFSET,
+        CONMON_SUPPORTED_ENCODINGS_OFFSET,
+    )?;
+
+    Some(EncodingStatus {
+        current_encoding,
+        supported_encodings,
     })
 }
 
@@ -786,22 +863,14 @@ mod tests {
         assert_eq!(parse_device_name(&response).as_deref(), Some("avio-aes3-1"));
     }
 
-    #[test]
-    fn device_settings_decodes_distinct_latency_fields_as_nanoseconds() {
-        let values = [
-            (DEVICE_SETTINGS_INFO_SAMPLE_RATE, 48_000u32),
-            (DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS, 1_000_000u32),
-            (DEVICE_SETTINGS_INFO_LATENCY_NS, 150_000u32),
-            (DEVICE_SETTINGS_INFO_MAX_LATENCY_NS, 21_333_334u32),
-            (DEVICE_SETTINGS_INFO_MIN_LATENCY_NS, 150_000u32),
-        ];
+    fn device_settings_response(values: &[(u16, u32)]) -> Vec<u8> {
         let mut body = vec![0x00, values.len() as u8];
         let first_value_offset = RESPONSE_HEADER_SIZE + 2 + values.len() * 4;
         for (index, (info_code, _)) in values.iter().enumerate() {
             body.extend_from_slice(&info_code.to_be_bytes());
             body.extend_from_slice(&((first_value_offset + index * 4) as u16).to_be_bytes());
         }
-        for (_, value) in values {
+        for (_, value) in values.iter().copied() {
             body.extend_from_slice(&value.to_be_bytes());
         }
         let mut response = vec![0u8; 10];
@@ -812,13 +881,105 @@ mod tests {
             OPCODE_DEVICE_SETTINGS,
             RESULT_CODE_SUCCESS,
         );
+        response
+    }
+
+    #[test]
+    fn device_settings_decodes_distinct_latency_fields_as_nanoseconds() {
+        let response = device_settings_response(&[
+            (DEVICE_SETTINGS_INFO_SAMPLE_RATE, 48_000u32),
+            (DEVICE_SETTINGS_INFO_DEFAULT_LATENCY_NS, 1_000_000u32),
+            (DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS, 150_000u32),
+            (DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS, 1_000_000u32),
+            (DEVICE_SETTINGS_INFO_MAX_LATENCY_NS, 21_333_334u32),
+            (DEVICE_SETTINGS_INFO_MIN_LATENCY_NS, 150_000u32),
+        ]);
 
         let settings = parse_device_settings(&response).unwrap();
         assert_eq!(settings.sample_rate, Some(48_000));
         assert_eq!(settings.default_latency_ns, Some(1_000_000));
-        assert_eq!(settings.latency_ns, Some(150_000));
+        assert_eq!(settings.configured_latency_ns, Some(150_000));
+        assert_eq!(settings.active_latency_ns, Some(1_000_000));
+        assert_eq!(settings.latency_ns, Some(1_000_000));
         assert_eq!(settings.max_latency_ns, Some(21_333_334));
         assert_eq!(settings.min_latency_ns, Some(150_000));
+    }
+
+    #[test]
+    fn device_settings_uses_configured_latency_when_active_is_absent() {
+        let response =
+            device_settings_response(&[(DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS, 250_000)]);
+        let settings = parse_device_settings(&response).unwrap();
+        assert_eq!(settings.configured_latency_ns, Some(250_000));
+        assert_eq!(settings.active_latency_ns, None);
+        assert_eq!(settings.latency_ns, Some(250_000));
+    }
+
+    fn captured_selective_device_settings_packet_87509() -> Vec<u8> {
+        vec![
+            0x28, 0x01, 0x00, 0x94, 0x14, 0x21, 0x11, 0x00, 0x00, 0x01, 0x17, 0x17, 0x02, 0x01,
+            0x00, 0x01, 0x82, 0x04, 0x00, 0x68, 0x82, 0x05, 0x00, 0x6C, 0x02, 0x10, 0x00, 0x10,
+            0x02, 0x11, 0x00, 0x10, 0x00, 0x00, 0x82, 0x18, 0x00, 0x00, 0x82, 0x19, 0x83, 0x01,
+            0x00, 0x70, 0x83, 0x02, 0x00, 0x74, 0x83, 0x06, 0x00, 0x78, 0x03, 0x10, 0x00, 0x10,
+            0x03, 0x11, 0x00, 0x02, 0x03, 0x03, 0x00, 0x04, 0x80, 0x21, 0x00, 0x7C, 0x00, 0xF0,
+            0x00, 0x00, 0x80, 0x60, 0x00, 0x8C, 0x00, 0x22, 0x00, 0x01, 0x00, 0x63, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x65, 0x02, 0x22, 0x13, 0x8C, 0x02, 0x12,
+            0x00, 0x30, 0x83, 0x21, 0x00, 0x90, 0x00, 0x0F, 0x42, 0x40, 0x00, 0x0F, 0x42, 0x40,
+            0x00, 0x0F, 0x42, 0x40, 0x14, 0x58, 0x55, 0x56, 0x00, 0x03, 0xD0, 0x90, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xEF, 0x45, 0x00, 0x00, 0x00, 0x1E, 0x84, 0x80,
+        ]
+    }
+
+    #[test]
+    fn device_settings_accepts_captured_2801_response() {
+        let settings =
+            parse_device_settings(&captured_selective_device_settings_packet_87509()).unwrap();
+        assert_eq!(settings.default_latency_ns, Some(1_000_000));
+        assert_eq!(settings.configured_latency_ns, Some(1_000_000));
+        assert_eq!(settings.active_latency_ns, Some(1_000_000));
+        assert_eq!(settings.latency_ns, Some(1_000_000));
+        assert_eq!(settings.min_latency_ns, Some(250_000));
+        assert_eq!(settings.max_latency_ns, Some(341_333_334));
+    }
+
+    fn captured_selective_device_settings_packet_9084571() -> Vec<u8> {
+        vec![
+            0x28, 0x09, 0x00, 0x94, 0x00, 0x10, 0x11, 0x00, 0x00, 0x01, 0x17, 0x17, 0x02, 0x01,
+            0x00, 0x01, 0x82, 0x04, 0x00, 0x68, 0x82, 0x05, 0x00, 0x6C, 0x02, 0x10, 0x00, 0x10,
+            0x02, 0x11, 0x00, 0x10, 0x00, 0x00, 0x82, 0x18, 0x00, 0x00, 0x82, 0x19, 0x83, 0x01,
+            0x00, 0x70, 0x83, 0x02, 0x00, 0x74, 0x83, 0x06, 0x00, 0x78, 0x03, 0x10, 0x00, 0x10,
+            0x03, 0x11, 0x00, 0x10, 0x03, 0x03, 0x00, 0x02, 0x80, 0x21, 0x00, 0x7C, 0x00, 0x00,
+            0x00, 0xF0, 0x80, 0x60, 0x00, 0x8C, 0x00, 0x22, 0x00, 0x01, 0x00, 0x63, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x65, 0x02, 0x22, 0x13, 0x8C, 0x02, 0x12,
+            0x00, 0x30, 0x83, 0x21, 0x00, 0x90, 0x00, 0x0F, 0x42, 0x40, 0x00, 0x0F, 0x42, 0x40,
+            0x00, 0x0F, 0x42, 0x40, 0x00, 0xA7, 0x87, 0x5F, 0x00, 0x0F, 0x42, 0x40, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xEF, 0x45, 0x00, 0x00, 0x00, 0x1E, 0x84, 0x80,
+        ]
+    }
+
+    #[test]
+    fn device_settings_accepts_captured_repeated_zero_placeholders() {
+        let settings =
+            parse_device_settings(&captured_selective_device_settings_packet_9084571()).unwrap();
+        assert_eq!(settings.default_latency_ns, Some(1_000_000));
+        assert_eq!(settings.configured_latency_ns, Some(1_000_000));
+        assert_eq!(settings.active_latency_ns, Some(1_000_000));
+        assert_eq!(settings.latency_ns, Some(1_000_000));
+        assert_eq!(settings.min_latency_ns, Some(1_000_000));
+        assert_eq!(settings.max_latency_ns, Some(10_979_167));
+        assert!(settings
+            .info_codes
+            .iter()
+            .all(|(info_code, _)| *info_code != 0));
+    }
+
+    #[test]
+    fn device_settings_rejects_duplicate_non_placeholder_info_codes() {
+        let mut response = captured_selective_device_settings_packet_9084571();
+        response[32..34].copy_from_slice(&DEVICE_SETTINGS_INFO_CONFIGURED_LATENCY_NS.to_be_bytes());
+        assert_eq!(parse_device_settings(&response), None);
     }
 
     fn flow_query_response() -> Vec<u8> {
@@ -939,21 +1100,53 @@ mod tests {
         assert_eq!(parse_result_code(&[0u8; 4]), None);
     }
 
-    #[test]
-    fn aes67_byte_maps_to_bool() {
-        let mut response = vec![0u8; 0x54];
+    fn aes67_settings_response(records: &[(u16, u16)]) -> Vec<u8> {
+        let mut response = vec![0u8; RESPONSE_HEADER_SIZE];
+        response.extend_from_slice(&[0, records.len() as u8]);
+        for (info_code, inline_value) in records {
+            response.extend_from_slice(&info_code.to_be_bytes());
+            response.extend_from_slice(&inline_value.to_be_bytes());
+        }
         stamp_arc_response(
             &mut response,
             PROTOCOL_AES67_CONFIG,
             OPCODE_DEVICE_SETTINGS,
             RESULT_CODE_SUCCESS,
         );
-        response[0x53] = 0x03;
-        assert_eq!(parse_aes67_configured(&response), Some(true));
-        response[0x53] = 0x01;
-        assert_eq!(parse_aes67_configured(&response), Some(false));
-        response[0x53] = 0x00;
-        assert_eq!(parse_aes67_configured(&response), None);
+        response
+    }
+
+    #[test]
+    fn aes67_configured_uses_property_identity_not_record_offset() {
+        let enabled = aes67_settings_response(&[
+            (0x0211, 0x0004),
+            (DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0003),
+            (0x0310, 0x0004),
+        ]);
+        assert_eq!(parse_aes67_configured(&enabled), Some(Some(true)));
+
+        let disabled = aes67_settings_response(&[
+            (DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0001),
+            (0x0211, 0x0004),
+        ]);
+        assert_eq!(parse_aes67_configured(&disabled), Some(Some(false)));
+
+        let unsupported = aes67_settings_response(&[(0x0000, 0x0063), (0x0211, 0x0004)]);
+        assert_eq!(parse_aes67_configured(&unsupported), Some(None));
+
+        let duplicate = aes67_settings_response(&[
+            (DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0001),
+            (DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0003),
+        ]);
+        assert_eq!(parse_aes67_configured(&duplicate), None);
+    }
+
+    #[test]
+    fn aes67_configured_accepts_captured_2801_device_settings_response() {
+        assert_eq!(
+            parse_aes67_configured(&captured_selective_device_settings_packet_87509()),
+            Some(Some(false))
+        );
     }
 
     #[test]
@@ -1035,6 +1228,57 @@ mod tests {
         let packet_length = u16::try_from(data.len()).unwrap();
         data[2..4].copy_from_slice(&packet_length.to_be_bytes());
         assert!(parse_sample_rate_status(&data).is_some());
+    }
+
+    fn captured_encoding_status_packet_204720() -> Vec<u8> {
+        vec![
+            0xFF, 0xFF, 0x00, 0x3C, 0x21, 0x02, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x10, 0x73, 0x32,
+            0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x24, 0x00, 0x82,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x03, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x10,
+            0x00, 0x00, 0x00, 0x20,
+        ]
+    }
+
+    #[test]
+    fn encoding_status_parses_captured_packet_204720() {
+        let parsed = parse_encoding_status(&captured_encoding_status_packet_204720()).unwrap();
+        assert_eq!(parsed.current_encoding, 24);
+        assert_eq!(parsed.supported_encodings, vec![24, 16, 32]);
+    }
+
+    #[test]
+    fn encoding_status_parses_captured_packet_645566() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x34, 0x79, 0xB2, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50,
+            0xCA, 0xC5, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x00, 0x82,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x01, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00,
+            0x00, 0x18, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18,
+        ];
+        let parsed = parse_encoding_status(&data).unwrap();
+        assert_eq!(parsed.current_encoding, 24);
+        assert_eq!(parsed.supported_encodings, vec![24]);
+    }
+
+    #[test]
+    fn encoding_status_rejects_invalid_envelope_and_oversized_count() {
+        let mut wrong_protocol = captured_encoding_status_packet_204720();
+        wrong_protocol[0..2].copy_from_slice(&PROTOCOL_ID.to_be_bytes());
+        assert_eq!(parse_encoding_status(&wrong_protocol), None);
+
+        let mut wrong_opcode = captured_encoding_status_packet_204720();
+        wrong_opcode[26..28].copy_from_slice(&CONMON_OPCODE_SAMPLE_RATE_STATUS.to_be_bytes());
+        assert_eq!(parse_encoding_status(&wrong_opcode), None);
+
+        let mut wrong_declared_length = captured_encoding_status_packet_204720();
+        wrong_declared_length[2..4].copy_from_slice(&59u16.to_be_bytes());
+        assert_eq!(parse_encoding_status(&wrong_declared_length), None);
+
+        let mut oversized_count = captured_encoding_status_packet_204720();
+        oversized_count
+            [CONMON_SUPPORTED_ENCODING_COUNT_OFFSET..CONMON_SUPPORTED_ENCODING_COUNT_OFFSET + 2]
+            .copy_from_slice(&4u16.to_be_bytes());
+        assert_eq!(parse_encoding_status(&oversized_count), None);
     }
 
     #[test]
@@ -1243,6 +1487,16 @@ mod tests {
                 None
             );
         }
+
+        let encoding_status = captured_encoding_status_packet_204720();
+        for length in 0..encoding_status.len() {
+            assert_eq!(parse_encoding_status(&encoding_status[..length]), None);
+        }
+
+        let device_settings = captured_selective_device_settings_packet_9084571();
+        for length in 0..device_settings.len() {
+            assert_eq!(parse_device_settings(&device_settings[..length]), None);
+        }
     }
 
     #[test]
@@ -1291,14 +1545,8 @@ mod tests {
             RESULT_CODE_SUCCESS,
         );
 
-        let mut aes67_config = vec![0u8; 0x54];
-        stamp_arc_response(
-            &mut aes67_config,
-            PROTOCOL_AES67_CONFIG,
-            OPCODE_DEVICE_SETTINGS,
-            RESULT_CODE_SUCCESS,
-        );
-        aes67_config[0x53] = 0x03;
+        let aes67_config =
+            aes67_settings_response(&[(DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0003)]);
 
         let mut bluetooth = vec![0u8; 62];
         stamp_conmon_response(&mut bluetooth, CONMON_OPCODE_BLUETOOTH_STATUS);
@@ -1349,6 +1597,7 @@ mod tests {
                 let _ = parse_aes67_status(&data);
                 let _ = parse_interface_status(&data);
                 let _ = parse_sample_rate_status(&data);
+                let _ = parse_encoding_status(&data);
             });
             assert!(result.is_ok(), "length={length}");
             assert_eq!(parse_device_name(&data), None);

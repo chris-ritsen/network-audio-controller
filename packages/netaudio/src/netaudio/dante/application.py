@@ -50,13 +50,14 @@ class DanteApplication:
         self._capture_queue: asyncio.Queue | None = None
         self._capture_loop: asyncio.AbstractEventLoop | None = None
         self._capture_writer_task: asyncio.Task | None = None
-        self._sample_rate_probe_locks: dict[str, asyncio.Lock] = {}
+        self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
-    def _sample_rate_probe_lock(self, device_ip_address: str) -> asyncio.Lock:
-        lock = self._sample_rate_probe_locks.get(device_ip_address)
+    def _capability_probe_lock(self, capability_name: str, device_ip_address: str) -> asyncio.Lock:
+        lock_key = (capability_name, device_ip_address)
+        lock = self._capability_probe_locks.get(lock_key)
         if lock is None:
             lock = asyncio.Lock()
-            self._sample_rate_probe_locks[device_ip_address] = lock
+            self._capability_probe_locks[lock_key] = lock
         return lock
 
     def _record_core_traffic(self, packet, response, device_ip, port):
@@ -250,7 +251,11 @@ class DanteApplication:
 
         await self._probe_interface_status()
         await self._probe_preferred_leader_all()
-        await asyncio.gather(self._probe_aes67_all(), self._probe_sample_rates_all())
+        await asyncio.gather(
+            self._probe_aes67_all(),
+            self._probe_sample_rates_all(),
+            self._probe_encodings_all(),
+        )
 
         return self.devices
 
@@ -304,6 +309,7 @@ class DanteApplication:
         if device and device.online:
             device.online = False
             device.supported_sample_rates = None
+            device.supported_encodings = None
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_REMOVED,
@@ -445,41 +451,75 @@ class DanteApplication:
         populated = sum(1 for device in self.devices.values() if device.aes67_current is not None)
         logger.debug(f"AES67: {populated}/{len(self.devices)} devices have data")
 
-    async def _probe_sample_rates_all(self, timeout: float = 3.0) -> None:
+    async def _probe_capabilities_all(
+        self,
+        capability_is_known,
+        apply_capability,
+        probe_status,
+        capability_description: str,
+        timeout: float,
+    ) -> None:
         probe_tasks = {}
         target_devices_by_ip_address = {}
         for device in self.devices.values():
-            if not device.online or not device.ipv4 or device.supported_sample_rates is not None:
+            if not device.online or not device.ipv4 or capability_is_known(device):
                 continue
             device_ip_address = str(device.ipv4)
             target_devices_by_ip_address.setdefault(device_ip_address, []).append(device)
             if device_ip_address in probe_tasks:
                 continue
-            probe_tasks[device_ip_address] = asyncio.create_task(
-                self.probe_sample_rate_status(device_ip_address, timeout=timeout)
-            )
+            probe_tasks[device_ip_address] = asyncio.create_task(probe_status(device_ip_address, timeout=timeout))
 
         if not probe_tasks:
             return
 
-        logger.debug(f"Probed sample rates for {len(probe_tasks)} device addresses")
+        logger.debug(f"Probed {capability_description} for {len(probe_tasks)} device addresses")
 
         probe_results = await asyncio.gather(*probe_tasks.values(), return_exceptions=True)
         response_count = 0
         for device_ip_address, result in zip(probe_tasks, probe_results):
             if isinstance(result, Exception):
-                logger.warning(f"Failed to probe sample rates for {device_ip_address}: {result}")
+                logger.warning(f"Failed to probe {capability_description} for {device_ip_address}: {result}")
                 continue
             if result is None:
                 continue
             response_count += 1
-            current_sample_rate, supported_sample_rates = result
+            current_value, supported_values = result
             for device in target_devices_by_ip_address[device_ip_address]:
                 if device.online:
-                    device.sample_rate = current_sample_rate
-                    device.supported_sample_rates = supported_sample_rates
+                    apply_capability(device, current_value, supported_values)
 
-        logger.debug(f"Sample rates: {response_count}/{len(probe_tasks)} device addresses responded")
+        logger.debug(
+            f"{capability_description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded"
+        )
+
+    async def _probe_sample_rates_all(self, timeout: float = 3.0) -> None:
+        await self._probe_capabilities_all(
+            lambda device: device.supported_sample_rates is not None,
+            self._apply_sample_rate_capability,
+            self.probe_sample_rate_status,
+            "sample rates",
+            timeout,
+        )
+
+    async def _probe_encodings_all(self, timeout: float = 3.0) -> None:
+        await self._probe_capabilities_all(
+            lambda device: device.supported_encodings is not None,
+            self._apply_encoding_capability,
+            self.probe_encoding_status,
+            "encodings",
+            timeout,
+        )
+
+    @staticmethod
+    def _apply_sample_rate_capability(device, current_sample_rate: int, supported_sample_rates: list[int]) -> None:
+        device.sample_rate = current_sample_rate
+        device.supported_sample_rates = supported_sample_rates
+
+    @staticmethod
+    def _apply_encoding_capability(device, current_encoding: int, supported_encodings: list[int]) -> None:
+        device.encoding = current_encoding
+        device.supported_encodings = supported_encodings
 
     async def probe_interface_status(self, device_ip: str, timeout: float = 2.0) -> list[dict] | None:
         waiter = self.notifications.register_interface_waiter(device_ip)
@@ -496,17 +536,53 @@ class DanteApplication:
     async def probe_sample_rate_status(
         self, device_ip_address: str, timeout: float = 2.0
     ) -> tuple[int, list[int]] | None:
-        async with self._sample_rate_probe_lock(device_ip_address):
-            waiter = self.notifications.register_sample_rate_waiter(device_ip_address)
+        return await self._probe_capability_status(
+            "sample_rate",
+            device_ip_address,
+            self.notifications.register_sample_rate_waiter,
+            self.settings.probe_sample_rate,
+            self.notifications.get_sample_rate_result,
+            self.notifications.unregister_sample_rate_waiter,
+            "Sample rate",
+            timeout,
+        )
+
+    async def probe_encoding_status(
+        self, device_ip_address: str, timeout: float = 2.0
+    ) -> tuple[int, list[int]] | None:
+        return await self._probe_capability_status(
+            "encoding",
+            device_ip_address,
+            self.notifications.register_encoding_waiter,
+            self.settings.probe_encoding,
+            self.notifications.get_encoding_result,
+            self.notifications.unregister_encoding_waiter,
+            "Encoding",
+            timeout,
+        )
+
+    async def _probe_capability_status(
+        self,
+        capability_name: str,
+        device_ip_address: str,
+        register_waiter,
+        send_probe,
+        get_result,
+        unregister_waiter,
+        capability_description: str,
+        timeout: float,
+    ) -> tuple[int, list[int]] | None:
+        async with self._capability_probe_lock(capability_name, device_ip_address):
+            waiter = register_waiter(device_ip_address)
             try:
-                self.settings.probe_sample_rate(device_ip_address)
+                send_probe(device_ip_address)
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
-                return self.notifications.get_sample_rate_result(device_ip_address)
+                return get_result(device_ip_address)
             except asyncio.TimeoutError:
-                logger.debug(f"Sample rate probe timeout for {device_ip_address}")
-                return self.notifications.get_sample_rate_result(device_ip_address)
+                logger.debug(f"{capability_description} probe timeout for {device_ip_address}")
+                return get_result(device_ip_address)
             finally:
-                self.notifications.unregister_sample_rate_waiter(device_ip_address)
+                unregister_waiter(device_ip_address)
 
     async def set_interface_dhcp(self, device_ip: str, timeout: float = 2.0) -> list[dict] | None:
         waiter = self.notifications.register_interface_waiter(device_ip)

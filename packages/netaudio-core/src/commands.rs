@@ -51,8 +51,6 @@ const LATENCY_CONFIG_QUERY_INFO_CODES: [u8; 48] = [
     0x80, 0x60, 0x00, 0x22, 0x00, 0x63, 0x00, 0x64, 0x00, 0x65, 0x02, 0x22, 0x02, 0x12, 0x83, 0x21,
 ];
 
-pub const VALID_SAMPLE_RATES: [u32; 6] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
-pub const VALID_ENCODINGS: [u8; 3] = [16, 24, 32];
 pub const MIN_GAIN_LEVEL: u8 = 1;
 pub const MAX_GAIN_LEVEL: u8 = 5;
 pub const MAX_LATENCY_MILLISECONDS: f64 = u32::MAX as f64 / 1_000_000.0;
@@ -409,14 +407,12 @@ pub fn build_identify() -> Result<Vec<u8>, NetaudioError> {
     )
 }
 
-pub fn build_set_encoding(encoding: u8) -> Result<Vec<u8>, NetaudioError> {
-    if !VALID_ENCODINGS.contains(&encoding) {
+pub fn build_set_encoding(encoding: u32) -> Result<Vec<u8>, NetaudioError> {
+    if encoding == 0 {
         return Err(NetaudioError::InvalidEncoding);
     }
-    let mut tail = vec![
-        0x00, 0x83, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-    ];
-    tail.push(encoding);
+    let mut tail = vec![0x00, 0x83, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01];
+    tail.extend_from_slice(&encoding.to_be_bytes());
     settings_packet(
         0x03D7,
         AUDIO_CONFIG_PSEUDO_MAC,
@@ -426,13 +422,11 @@ pub fn build_set_encoding(encoding: u8) -> Result<Vec<u8>, NetaudioError> {
 }
 
 pub fn build_set_sample_rate(sample_rate: u32) -> Result<Vec<u8>, NetaudioError> {
-    if !VALID_SAMPLE_RATES.contains(&sample_rate) {
+    if sample_rate == 0 {
         return Err(NetaudioError::InvalidSampleRate);
     }
-    let mut tail = vec![
-        0x00, 0x81, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01, 0x00,
-    ];
-    tail.extend_from_slice(&sample_rate.to_be_bytes()[1..]);
+    let mut tail = vec![0x00, 0x81, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01];
+    tail.extend_from_slice(&sample_rate.to_be_bytes());
     settings_packet(
         0x03D4,
         AUDIO_CONFIG_PSEUDO_MAC,
@@ -441,13 +435,25 @@ pub fn build_set_sample_rate(sample_rate: u32) -> Result<Vec<u8>, NetaudioError>
     )
 }
 
-pub fn build_probe_sample_rate(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>, NetaudioError> {
+fn build_audio_config_probe(
+    host_mac: [u8; 6],
+    sequence: u16,
+    message_type: u16,
+) -> Result<Vec<u8>, NetaudioError> {
     let mut body = Vec::with_capacity(14);
-    body.extend_from_slice(&0x0081u16.to_be_bytes());
+    body.extend_from_slice(&message_type.to_be_bytes());
     body.extend_from_slice(&100u32.to_be_bytes());
     body.extend_from_slice(&0u32.to_be_bytes());
     body.extend_from_slice(&0u32.to_be_bytes());
     settings_packet(sequence, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
+}
+
+pub fn build_probe_sample_rate(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_audio_config_probe(host_mac, sequence, 0x0081)
+}
+
+pub fn build_probe_encoding(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_audio_config_probe(host_mac, sequence, 0x0083)
 }
 
 pub fn build_set_gain_level(
@@ -998,28 +1004,27 @@ mod tests {
     }
 
     #[test]
-    fn audio_settings_reject_unsupported_wire_values() {
-        for sample_rate in VALID_SAMPLE_RATES {
+    fn audio_settings_accept_nonzero_wire_values_without_truncation() {
+        for sample_rate in [44_100, 48_000, 192_000, 123_456, u32::MAX] {
             assert!(build_set_sample_rate(sample_rate).is_ok(), "{sample_rate}");
         }
-        for sample_rate in [0, 44_099, 123_456, 0x0100_0000] {
-            assert_eq!(
-                build_set_sample_rate(sample_rate),
-                Err(NetaudioError::InvalidSampleRate),
-                "{sample_rate}"
-            );
-        }
+        assert_eq!(
+            &build_set_sample_rate(u32::MAX).unwrap()[36..40],
+            &u32::MAX.to_be_bytes()
+        );
+        assert_eq!(
+            build_set_sample_rate(0),
+            Err(NetaudioError::InvalidSampleRate)
+        );
 
-        for encoding in VALID_ENCODINGS {
+        for encoding in [1, 16, 24, 32, 256, u32::MAX] {
             assert!(build_set_encoding(encoding).is_ok(), "{encoding}");
         }
-        for encoding in [0, 8, 20, 255] {
-            assert_eq!(
-                build_set_encoding(encoding),
-                Err(NetaudioError::InvalidEncoding),
-                "{encoding}"
-            );
-        }
+        assert_eq!(
+            &build_set_encoding(u32::MAX).unwrap()[36..40],
+            &u32::MAX.to_be_bytes()
+        );
+        assert_eq!(build_set_encoding(0), Err(NetaudioError::InvalidEncoding));
 
         assert_eq!(
             build_set_gain_level(0, 1, true),
@@ -1045,6 +1050,19 @@ mod tests {
             [
                 0xFF, 0xFF, 0x00, 0x28, 0x00, 0x42, 0x00, 0x00, 0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24,
                 0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x3A, 0x00, 0x81,
+                0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn probe_encoding_matches_captured_packet_204680() {
+        let packet = build_probe_encoding([0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24], 0x985A).unwrap();
+        assert_eq!(
+            packet,
+            [
+                0xFF, 0xFF, 0x00, 0x28, 0x98, 0x5A, 0x00, 0x00, 0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24,
+                0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x3A, 0x00, 0x83,
                 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ]
         );

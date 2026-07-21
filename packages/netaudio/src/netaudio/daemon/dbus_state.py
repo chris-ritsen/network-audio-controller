@@ -11,9 +11,14 @@ DANTE_PROPERTY_NAMES = {
     "dante_model": "DanteModel",
     "board_name": "BoardName",
     "sample_rate": "SampleRate",
+    "supported_sample_rates": "SupportedSampleRates",
     "encoding": "Encoding",
+    "supported_encodings": "SupportedEncodings",
     "bit_depth": "BitDepth",
     "latency": "Latency",
+    "active_latency": "ActiveLatency",
+    "configured_latency": "ConfiguredLatency",
+    "default_latency": "DefaultLatency",
     "min_latency": "MinLatency",
     "max_latency": "MaxLatency",
     "tx_count": "TxCount",
@@ -64,6 +69,10 @@ def dbus_int32(value) -> int:
     return result if -(1 << 31) <= result < (1 << 31) else 0
 
 
+def dbus_uint_list(values) -> list[int]:
+    return [dbus_uint(value) for value in values or []]
+
+
 def dbus_double(value) -> float:
     try:
         result = float(value)
@@ -108,9 +117,14 @@ def snapshot_dante_device(device):
         "dante_model": dbus_string(device.dante_model),
         "board_name": dbus_string(device.board_name),
         "sample_rate": dbus_uint(device.sample_rate),
+        "supported_sample_rates": dbus_uint_list(device.supported_sample_rates),
         "encoding": dbus_uint(device.encoding),
+        "supported_encodings": dbus_uint_list(device.supported_encodings),
         "bit_depth": dbus_uint(device.bit_depth),
         "latency": latency_milliseconds(device.latency),
+        "active_latency": latency_milliseconds(device.active_latency),
+        "configured_latency": latency_milliseconds(device.configured_latency),
+        "default_latency": latency_milliseconds(device.default_latency),
         "min_latency": latency_milliseconds(device.min_latency),
         "max_latency": latency_milliseconds(device.max_latency),
         "tx_count": dbus_uint(device.tx_count),
