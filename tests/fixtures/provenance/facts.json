@@ -287,7 +287,7 @@
       "category": "protocol_structure",
       "key": "arc_header",
       "name": "ARC Protocol Header",
-      "note": "Common header for all ARC (Audio Routing and Control) messages on port 4440",
+      "note": "Common 10-byte header captured across ARC protocol IDs 0x2729, 0x27FF, 0x2801, and 0x2809 on port 4440.",
       "fields": [
         {
           "name": "protocol_id",
@@ -322,15 +322,38 @@
       ],
       "evidence": [
         "tx_channel_names_discovery:28782",
-        "tx_channel_names_discovery:29006"
+        "tx_channel_names_discovery:29006",
+        "latency_capability_discovery:12358033",
+        "latency_capability_discovery:548323",
+        "latency_capability_discovery:87438",
+        "latency_capability_discovery:12358132"
       ],
-      "confidence": "verified",
       "added_ns": 1772739953008814225,
-      "body": "## ARC Header Format (10 bytes minimum)\n\n| Offset | Length | Type      | Field          |\n|--------|--------|-----------|----------------|\n| 0      | 2      | uint16_be | protocol_id    |\n| 2      | 2      | uint16_be | packet_length  |\n| 4      | 2      | uint16_be | transaction_id |\n| 6      | 2      | uint16_be | opcode         |\n| 8      | 2      | uint16_be | status         |\n\n### Protocol ID\nVaries by device model. Known values:\n- 0x2729 \u2014 LX-DANTE (128ch)\n- 0x2809 \u2014 AVIO adapters (BT, USB, AES3)\n\n### Status\n- 0x0000 in requests\n- 0x0001 in successful responses (most opcodes)\n- 0x8112 in paginated responses (0x2000, 0x3000)\n\n### Transaction ID\nIncremented per request. Response echoes the same transaction_id.",
+      "body": "Offsets 0, 2, 4, 6, and 8 are uint16 big-endian protocol ID, declared packet length, transaction ID, opcode, and status. Requests normally use status 0x0000. Successful responses normally use 0x0001, with 0x8112 observed for paginated responses. Responses echo the request transaction ID.",
       "protocol_id": [
         10025,
-        10249,
-        10239
+        10239,
+        10241,
+        10249
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1772739953008814225
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1784649241218371000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1784649241218365000,
+          "previous_name": "ARC Protocol Header",
+          "previous_confidence": "verified",
+          "previous_note": "Common header for all ARC (Audio Routing and Control) messages on port 4440",
+          "action": "updated"
+        }
       ]
     },
     "conmon_message:0x0090": {
@@ -527,115 +550,6 @@
       ],
       "match_offset": 6,
       "match_size": 2
-    },
-    "arc_opcode:0x1100": {
-      "category": "arc_opcode",
-      "key": "0x1100",
-      "name": "query_latency_config",
-      "note": "Queries latency/config on proto 0x2809. On Dante AVIO-USB devices, response byte at offset 0x53 reports the Dante Controller New/configured AES67 state: 0x01=disabled, 0x03=enabled. This does not report the current applied AES67 state.",
-      "fields": [
-        {
-          "name": "protocol_id",
-          "offset": 0,
-          "length": 2,
-          "dtype": "uint16_be",
-          "value": "0x2809"
-        },
-        {
-          "name": "opcode",
-          "offset": 6,
-          "length": 2,
-          "dtype": "uint16_be",
-          "value": "0x1100"
-        },
-        {
-          "name": "aes67_mode",
-          "offset": 83,
-          "length": 1,
-          "dtype": "uint8"
-        }
-      ],
-      "evidence": [
-        "set_latency_full_provenance_step2:23376",
-        "set_latency_full_provenance_step2:23377",
-        "set_latency_full_provenance:23155",
-        "set_latency_full_provenance:23156",
-        "latency_discovery_avio:47493",
-        "latency_discovery_avio:47608",
-        "latency_discovery_avio:47490",
-        "latency_discovery_avio:47491",
-        "aes67_toggle:4078090",
-        "aes67_toggle:4082007",
-        "aes67_toggle:4085879",
-        "aes67_toggle:4078014",
-        "aes67_toggle:4086891",
-        "aes67_toggle:4077944",
-        "aes67_toggle:4081335",
-        "aes67_toggle:4086958",
-        "aes67_toggle:4115821",
-        "aes67_toggle:4114833",
-        "aes67_toggle:4115822"
-      ],
-      "added_ns": 1772753655089245084,
-      "history": [
-        {
-          "replaced_ns": 1772752006997090120,
-          "previous_confidence": "verified",
-          "previous_note": "Reads device latency configuration on port 4440. 58B request, 140B response. Response contains default, current, max, and min latency values as uint32_be nanoseconds.",
-          "action": "disproved"
-        },
-        {
-          "replaced_ns": 1772752024515738194,
-          "previous_confidence": "disproved",
-          "previous_note": "Reads device latency configuration on port 4440. 58B request, 140B response. Response contains default, current, max, and min latency values as uint32_be nanoseconds.",
-          "action": "reinstated"
-        },
-        {
-          "replaced_ns": 1772752040441098609,
-          "previous_confidence": "verified",
-          "previous_note": "Reinstated for auto-disprove test",
-          "action": "disproved"
-        },
-        {
-          "replaced_ns": 1772753636841706893,
-          "previous_confidence": "disproved",
-          "previous_note": "Reinstated for auto-disprove test",
-          "action": "reinstated"
-        },
-        {
-          "replaced_ns": 1772753655089252933,
-          "previous_name": "query_latency_config",
-          "previous_confidence": "verified",
-          "previous_note": "Reinstated after session 58 (latency_discovery_avio). Field offsets 104/108/112/116/120 are IDENTICAL on both LX-DANTE (140B) and all 5 AVIO devices (148B). The 8-byte size difference is in the header/TLV structure, not the latency payload fields. Previous disprovals were based on response size difference, not actual field value mismatch. Tested: AVIOBT-5279b6 (set 5ms/1ms, observed offset 108 change), AVIOAES3, 3x AVIOUSB \u2014 all confirmed."
-        },
-        {
-          "replaced_ns": 1774719693668947000,
-          "previous_name": "query_latency_config",
-          "previous_confidence": "verified",
-          "previous_note": null,
-          "action": "updated"
-        },
-        {
-          "replaced_ns": 1774723064133665000,
-          "previous_name": "query_latency_config",
-          "previous_confidence": "verified",
-          "previous_note": "Queries latency/config on proto 0x2809. On Dante AVIO-USB devices, response byte at offset 0x53 reports AES67 mode: 0x01=disabled, 0x03=enabled. Verified in session aes67_toggle via same-device OFF->ON and ON->OFF transitions on avio-usb-1 and avio-usb-3, plus OFF->ON on avio-usb-2.",
-          "action": "updated"
-        }
-      ],
-      "protocol_id": [
-        10025,
-        10249,
-        10239
-      ],
-      "match_offset": 6,
-      "match_size": 2,
-      "confidence_log": [
-        {
-          "level": "verified",
-          "timestamp_ns": 1772753655089245084
-        }
-      ]
     },
     "arc_opcode:0x1101": {
       "category": "arc_opcode",
@@ -1035,19 +949,6 @@
       "match_offset": 26,
       "match_size": 2
     },
-    "conmon_message:0x03D7": {
-      "category": "conmon_message",
-      "key": "0x03D7",
-      "name": "set_encoding",
-      "note": "Sets device encoding (PCM16/PCM24/PCM32). Unicast to port 8700.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "inferred",
-      "added_ns": 1772916090811227000,
-      "protocol_id": 65535,
-      "match_offset": 26,
-      "match_size": 2
-    },
     "conmon_message:0x0344": {
       "category": "conmon_message",
       "key": "0x0344",
@@ -1137,8 +1038,8 @@
     "conmon_message:0x0082": {
       "category": "conmon_message",
       "key": "0x0082",
-      "name": "config_change_complete",
-      "note": "Multicast notification sent ~1.6s after set_sample_rate. 60 bytes. Only appears during configuration changes, not in regular heartbeat. May signal that the device has finished applying the new configuration.",
+      "name": "encoding_status",
+      "note": "Multicast encoding status and capability announcement on port 8702. Devices send it periodically and immediately after a mode-zero 0x0083 read query. The uint16 count at offset 34 controls the uint32 supported PCM bit-depth list beginning at offset 48; the current PCM bit depth is uint32 at offset 36. Bytes 40 through 47 remain uninterpreted.",
       "fields": [
         {
           "name": "message_type",
@@ -1150,44 +1051,30 @@
       ],
       "evidence": [
         "fact_catalog_expansion:709022",
-        "fact_catalog_expansion:679196"
+        "fact_catalog_expansion:679196",
+        "encoding_capability_discovery:204720",
+        "encoding_capability_discovery:645566"
       ],
-      "confidence": "observed",
       "added_ns": 1772938773671395000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
-    },
-    "arc_opcode:0x1102": {
-      "category": "arc_opcode",
-      "key": "0x1102",
-      "name": "unknown_1102",
-      "note": "Protocol 0x2809 on port 4440. 10B request, 136B response. Polled frequently alongside 0x1100. Possibly extended device settings or latency info.",
-      "fields": [],
-      "evidence": [
-        "lock_status_inaccurate:548323",
-        "lock_status_inaccurate:374864"
-      ],
-      "added_ns": 1772988408733638000,
-      "protocol_id": [
-        10025,
-        10249,
-        10239
-      ],
-      "match_offset": 6,
       "match_size": 2,
       "confidence_log": [
         {
           "level": "observed",
-          "timestamp_ns": 1772988408733638000
+          "timestamp_ns": 1772938773671395000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1784649179433584000
         }
       ],
       "history": [
         {
-          "replaced_ns": 1773116899970559000,
-          "previous_name": "unknown_1102",
+          "replaced_ns": 1784649179433578000,
+          "previous_name": "config_change_complete",
           "previous_confidence": "observed",
-          "previous_note": "Protocol 0x2809 on port 4440. 10B request, 136B response. Polled frequently alongside 0x1100. Possibly extended device settings or latency info.",
+          "previous_note": "Multicast notification sent ~1.6s after set_sample_rate. 60 bytes. Only appears during configuration changes, not in regular heartbeat. May signal that the device has finished applying the new configuration.",
           "action": "updated"
         }
       ]
@@ -1753,15 +1640,71 @@
     "conmon_message:0x0083": {
       "category": "conmon_message",
       "key": "0x0083",
-      "name": "unknown_0083",
-      "note": "Unicast to 8700. 40B fixed. Near 0x0082 (config_change_complete). Possibly config query.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "encoding_control",
+      "note": "Unicast encoding read/set family on port 8700. The uint32 operation mode at offset 32 is zero for a read query that triggers multicast 0x0082 status, and one for a set request whose uint32 target PCM bit depth is at offset 36. Both captured mode-zero Controller queries use a zero operand at offset 36.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0083"
+        },
+        {
+          "name": "control_constant",
+          "offset": 28,
+          "length": 4,
+          "dtype": "uint32_be",
+          "value": "0x00000064"
+        },
+        {
+          "name": "operation_mode",
+          "offset": 32,
+          "length": 4,
+          "dtype": "uint32_be"
+        },
+        {
+          "name": "encoding_operand",
+          "offset": 36,
+          "length": 4,
+          "dtype": "uint32_be"
+        }
+      ],
+      "evidence": [
+        "encoding_capability_discovery:204680",
+        "encoding_capability_discovery:645542",
+        "encoding_capability_discovery:4506539"
+      ],
       "added_ns": 1772988423962461000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988423962461000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1784649186943832000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1784649186943830000,
+          "previous_name": "unknown_0083",
+          "previous_confidence": "observed",
+          "previous_note": "Unicast to 8700. 40B fixed. Near 0x0082 (config_change_complete). Possibly config query.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1784650681847587000,
+          "previous_name": "encoding_control",
+          "previous_confidence": "verified",
+          "previous_note": "Unicast encoding read/set family on port 8700. The uint32 operation mode at offset 32 is zero for a read query that triggers multicast 0x0082 status, and one for a set request whose uint32 target PCM bit depth is at offset 36. The offset-36 operand is ignored in mode zero and varies in captured Controller queries.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0084": {
       "category": "conmon_message",
@@ -3822,21 +3765,6 @@
       ],
       "added_ns": 1773121487226063000
     },
-    "ddp_notification:0x0082": {
-      "category": "ddp_notification",
-      "key": "0x0082",
-      "name": "notification_config_change_complete",
-      "note": "DDP config change complete notification. 52B. 28 instances from bt-1. Body contains structured data.",
-      "fields": [],
-      "evidence": [],
-      "confidence_log": [
-        {
-          "level": "observed",
-          "timestamp_ns": 1773121487369969000
-        }
-      ],
-      "added_ns": 1773121487369969000
-    },
     "ddp_notification:0x010D": {
       "category": "ddp_notification",
       "key": "0x010D",
@@ -4015,35 +3943,6 @@
       ],
       "added_ns": 1774746131574636000
     },
-    "conmon_opcode:0x0083": {
-      "category": "conmon_opcode",
-      "key": "0x0083",
-      "name": "set_encoding",
-      "note": "Set audio encoding (bit depth) on port 8700. Body: [0x1c:0x20]=presence (0x00000064), [0x20:0x24]=set_flag (0x00000001), [0x24:0x28]=encoding_bits (0x00000018=24-bit). Observed during DC preset load 'Set Audio Encoding' phase.",
-      "fields": [
-        {
-          "name": "message_type",
-          "offset": 26,
-          "length": 2,
-          "dtype": "uint16_be",
-          "value": "0x0083"
-        }
-      ],
-      "evidence": [
-        "dc_preset_save_load:4498278",
-        "dc_preset_save_load:4498279",
-        "dc_preset_save_load:4498280",
-        "dc_preset_save_load:4498281",
-        "dc_preset_save_load:4498282"
-      ],
-      "confidence_log": [
-        {
-          "level": "verified",
-          "timestamp_ns": 1774897929780735000
-        }
-      ],
-      "added_ns": 1774897929780736000
-    },
     "conmon_opcode:0x0013": {
       "category": "conmon_opcode",
       "key": "0x0013",
@@ -4142,10 +4041,90 @@
         }
       ],
       "added_ns": 1774898342200220000
+    },
+    "arc_opcode:0x1102": {
+      "category": "arc_opcode",
+      "key": "0x1102",
+      "name": "query_property_directory",
+      "note": "Empty 10-byte read query captured across ARC protocol IDs 0x2729, 0x27FF, 0x2801, and 0x2809. A successful response begins with a uint16 record count at offset 10, followed by four-byte records containing a uint16 property ID and uint16 property flags. Captures repeatedly contain flag values 0x0001 and 0x0003; their exact bit meanings are not yet proven.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1102"
+        }
+      ],
+      "evidence": [
+        "latency_capability_discovery:12358033",
+        "latency_capability_discovery:12358036",
+        "latency_capability_discovery:548323",
+        "latency_capability_discovery:548324",
+        "latency_capability_discovery:87438",
+        "latency_capability_discovery:87446",
+        "latency_capability_discovery:12358132",
+        "latency_capability_discovery:12358133"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1784649211895192000
+        }
+      ],
+      "added_ns": 1784649211895194000,
+      "protocol_id": [
+        10025,
+        10239,
+        10241,
+        10249
+      ],
+      "match_offset": 6,
+      "match_size": 2
+    },
+    "arc_opcode:0x1100": {
+      "category": "arc_opcode",
+      "key": "0x1100",
+      "name": "query_device_settings",
+      "note": "Read-only device-settings query captured across ARC protocol IDs 0x2729, 0x27FF, 0x2801, and 0x2809. An empty 10-byte request asks for the full table; a selective request carries a uint8 property count at offset 11 followed by uint16 property IDs. Successful responses carry a uint8 record count at offset 11 followed by four-byte records. High-bit property IDs use an absolute uint16 pointer to a uint32 big-endian value. A zero property ID marks an unsupported requested property, named by the second word. Latency properties are nanoseconds: 0x8204 default, 0x8205 configured/requested, 0x8301 active/applied, 0x8302 reported maximum, and 0x8306 reported minimum.",
+      "fields": [
+        {
+          "name": "opcode",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x1100"
+        }
+      ],
+      "evidence": [
+        "latency_capability_discovery:508170",
+        "latency_capability_discovery:508172",
+        "latency_capability_discovery:9088822",
+        "latency_capability_discovery:9088832",
+        "latency_capability_discovery:87505",
+        "latency_capability_discovery:87509",
+        "latency_capability_discovery:12358135",
+        "latency_capability_discovery:12358136"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1784649336591556000
+        }
+      ],
+      "added_ns": 1784649336591558000,
+      "protocol_id": [
+        10025,
+        10239,
+        10241,
+        10249
+      ],
+      "match_offset": 6,
+      "match_size": 2
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1784382694005049000
+    "updated_ns": 1784650681847593000
   }
 }

@@ -6,13 +6,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from typer.testing import CliRunner
 
-from netaudio._common import _make_core_sender, readback_after_notification
+from netaudio._common import CoreCommandSender, _make_core_sender, readback_after_notification
 from netaudio.commands import channel as channel_commands
 from netaudio.commands import config as config_commands
 from netaudio.commands import device as device_commands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.services.notification import DanteNotificationService
+from netaudio.dante.services.notification import (
+    DanteNotificationService,
+    mutate_and_wait_for_capability_value,
+)
 
 
 runner = CliRunner()
@@ -35,12 +38,31 @@ class FakeOperations:
 
 
 class FakeDevice:
-    def __init__(self, name, *, name_reads=None, settings=None, aes67=None, ipv4="192.0.2.10"):
+    def __init__(
+        self,
+        name,
+        *,
+        name_reads=None,
+        settings=None,
+        aes67=None,
+        ipv4="192.0.2.10",
+        encoding=None,
+        supported_sample_rates=None,
+        supported_encodings=None,
+        min_latency=None,
+        max_latency=None,
+    ):
         self.name = name
         self.ipv4 = ipv4
         self.mac_address = "00:1D:C1:00:00:01"
         self.model_id = "fake"
         self.services = {}
+        self.sample_rate = None
+        self.supported_sample_rates = supported_sample_rates
+        self.encoding = encoding
+        self.supported_encodings = supported_encodings
+        self.min_latency = min_latency
+        self.max_latency = max_latency
         self.aes67_current = None
         self.aes67_configured = None
         self.operations = FakeOperations(settings=settings, aes67=aes67)
@@ -80,7 +102,7 @@ def _next_value(value):
     return item
 
 
-def _install_context(monkeypatch, module, devices, *, send_error_for=None):
+def _install_context(monkeypatch, module, devices, *, send_error_for=None, notification_timeout=False):
     sent = []
 
     async def send(packet, ipv4, port, **kwargs):
@@ -88,6 +110,45 @@ def _install_context(monkeypatch, module, devices, *, send_error_for=None):
         if str(ipv4) == send_error_for:
             raise OSError("send failed")
         return b"an ACK is deliberately not authoritative"
+
+    async def probe_sample_rate_status(ipv4):
+        device = next(device for device in devices.values() if str(device.ipv4) == str(ipv4))
+        settings = await device.operations.get_device_settings()
+        if not isinstance(settings, dict) or settings.get("sample_rate") is None:
+            raise RuntimeError("sample rate status unavailable")
+        current_sample_rate = settings["sample_rate"]
+        supported_sample_rates = device.supported_sample_rates or [current_sample_rate]
+        return current_sample_rate, supported_sample_rates
+
+    async def probe_encoding_status(ipv4):
+        device = next(device for device in devices.values() if str(device.ipv4) == str(ipv4))
+        if device.encoding is None or device.supported_encodings is None:
+            raise RuntimeError("encoding status unavailable")
+        return device.encoding, device.supported_encodings
+
+    send.probe_sample_rate_status = probe_sample_rate_status
+    send.probe_encoding_status = probe_encoding_status
+
+    async def send_and_wait_for_capability_value(
+        packet,
+        ipv4,
+        port,
+        _capability_name,
+        _expected_value,
+        probe_status,
+        **kwargs,
+    ):
+        await send(packet, ipv4, port, **kwargs)
+        return await probe_status()
+
+    send.send_and_wait_for_capability_value = send_and_wait_for_capability_value
+    if notification_timeout:
+
+        async def send_and_wait_for_notification(packet, ipv4, port, _notification_ids, **kwargs):
+            await send(packet, ipv4, port, **kwargs)
+            raise TimeoutError("device sent no mutation notification")
+
+        send.send_and_wait_for_notification = send_and_wait_for_notification
 
     @asynccontextmanager
     async def command_context():
@@ -97,29 +158,53 @@ def _install_context(monkeypatch, module, devices, *, send_error_for=None):
     return sent
 
 
-def _make_sample_rate_operations(supported_sample_rates):
-    commands = SimpleNamespace(command_set_sample_rate=MagicMock(return_value=(b"sample-rate", None, 8700)))
+def _make_audio_capability_operations(command_method_name, packet, supported_values_field, supported_values):
+    command_builder = MagicMock(return_value=(packet, None, 8700))
+    commands = SimpleNamespace(**{command_method_name: command_builder})
     device = SimpleNamespace(
-        supported_sample_rates=supported_sample_rates,
         commands=commands,
-        dante_command=AsyncMock(return_value=b"response"),
+        dante_send_command=AsyncMock(),
     )
+    setattr(device, supported_values_field, supported_values)
     return DanteDeviceOperations(device), commands, device
+
+
+def _make_sample_rate_operations(supported_sample_rates):
+    return _make_audio_capability_operations(
+        "command_set_sample_rate",
+        b"sample-rate",
+        "supported_sample_rates",
+        supported_sample_rates,
+    )
+
+
+def _make_encoding_operations(supported_encodings):
+    return _make_audio_capability_operations(
+        "command_set_encoding",
+        b"encoding",
+        "supported_encodings",
+        supported_encodings,
+    )
 
 
 async def _assert_sample_rate_operation_sends(supported_sample_rates):
     operations, commands, device = _make_sample_rate_operations(supported_sample_rates)
 
-    response = await operations.set_sample_rate(96_000)
+    result = await operations.set_sample_rate(96_000)
 
-    assert response == b"response"
+    assert result is None
     commands.command_set_sample_rate.assert_called_once_with(96_000)
-    device.dante_command.assert_awaited_once_with(
-        b"sample-rate",
-        None,
-        8700,
-        logical_command_name="set_sample_rate",
-    )
+    device.dante_send_command.assert_awaited_once_with(b"sample-rate", None, 8700)
+
+
+async def _assert_encoding_operation_sends(supported_encodings):
+    operations, commands, device = _make_encoding_operations(supported_encodings)
+
+    result = await operations.set_encoding(32)
+
+    assert result is None
+    commands.command_set_encoding.assert_called_once_with(32)
+    device.dante_send_command.assert_awaited_once_with(b"encoding", None, 8700)
 
 
 @pytest.fixture(autouse=True)
@@ -242,6 +327,122 @@ async def test_core_sender_forwards_fire_and_repeat_options(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_core_sender_starts_one_notification_service_for_concurrent_probes(monkeypatch):
+    notification_start_entered = asyncio.Event()
+    allow_notification_start = asyncio.Event()
+    notification_start_calls = []
+
+    async def start_notification_service(notification_service):
+        notification_start_calls.append(notification_service)
+        notification_start_entered.set()
+        await allow_notification_start.wait()
+
+    monkeypatch.setattr(DanteNotificationService, "start", start_notification_service)
+    send = _make_core_sender()
+
+    first_start = asyncio.create_task(send._ensure_notifications())
+    await notification_start_entered.wait()
+    second_start = asyncio.create_task(send._ensure_notifications())
+    allow_notification_start.set()
+    first_service, second_service = await asyncio.gather(first_start, second_start)
+
+    assert first_service is second_service
+    assert notification_start_calls == [first_service]
+    await send.close()
+
+
+@pytest.mark.asyncio
+async def test_core_sender_capability_verification_ignores_old_and_unrelated_status(monkeypatch):
+    notifications = DanteNotificationService(DanteEventDispatcher())
+    sender = CoreCommandSender()
+    sender._ensure_notifications = AsyncMock(return_value=notifications)
+    mutation_sent = asyncio.Event()
+    old_status_observed = asyncio.Event()
+
+    async def send_packet(
+        _sender,
+        _packet,
+        _device_ip_address,
+        _port,
+        **_send_options,
+    ):
+        mutation_sent.set()
+
+    async def probe_status():
+        notifications._notify_capability_value_waiters(
+            "sample_rate",
+            "192.0.2.10",
+            48_000,
+            [48_000, 96_000],
+        )
+        old_status_observed.set()
+        return 48_000, [48_000, 96_000]
+
+    monkeypatch.setattr(CoreCommandSender, "__call__", send_packet)
+    verification_task = asyncio.create_task(
+        sender.send_and_wait_for_capability_value(
+            b"set sample rate",
+            "192.0.2.10",
+            8700,
+            "sample_rate",
+            96_000,
+            probe_status,
+            capability_timeout=1,
+            expect_response=False,
+        )
+    )
+    await mutation_sent.wait()
+    await old_status_observed.wait()
+
+    assert not verification_task.done()
+    notifications._notify_capability_value_waiters(
+        "sample_rate",
+        "192.0.2.11",
+        96_000,
+        [48_000, 96_000],
+    )
+    notifications._notify_capability_value_waiters(
+        "encoding",
+        "192.0.2.10",
+        96_000,
+        [48_000, 96_000],
+    )
+    assert not verification_task.done()
+    notifications._notify_capability_value_waiters(
+        "sample_rate",
+        "192.0.2.10",
+        96_000,
+        [48_000, 96_000],
+    )
+
+    assert await verification_task == (96_000, [48_000, 96_000])
+
+
+@pytest.mark.asyncio
+async def test_capability_value_waiter_unregisters_after_timeout():
+    notifications = DanteNotificationService(DanteEventDispatcher())
+
+    async def mutate():
+        return None
+
+    async def probe_status():
+        return 48_000, [48_000, 96_000]
+
+    status = await mutate_and_wait_for_capability_value(
+        notifications,
+        "sample_rate",
+        "192.0.2.10",
+        96_000,
+        mutate,
+        probe_status,
+        0.01,
+    )
+
+    assert status == (48_000, [48_000, 96_000])
+    assert notifications._capability_value_waiters == {}
+
+
+@pytest.mark.asyncio
 async def test_operations_aes67_getter_updates_configured_state():
     class FakeClient:
         def get_aes67_configured(self):
@@ -298,7 +499,7 @@ async def test_sample_rate_operation_rejects_known_unsupported_rate_without_send
         await operations.set_sample_rate(96_000)
 
     commands.command_set_sample_rate.assert_not_called()
-    device.dante_command.assert_not_awaited()
+    device.dante_send_command.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -309,6 +510,27 @@ async def test_sample_rate_operation_sends_known_supported_rate():
 @pytest.mark.asyncio
 async def test_sample_rate_operation_preserves_send_when_capabilities_are_unknown():
     await _assert_sample_rate_operation_sends(None)
+
+
+@pytest.mark.asyncio
+async def test_encoding_operation_rejects_known_unsupported_value_without_sending():
+    operations, commands, device = _make_encoding_operations([24])
+
+    with pytest.raises(ValueError, match="requested encoding 32 is not supported"):
+        await operations.set_encoding(32)
+
+    commands.command_set_encoding.assert_not_called()
+    device.dante_send_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_encoding_operation_sends_known_supported_value():
+    await _assert_encoding_operation_sends([16, 24, 32])
+
+
+@pytest.mark.asyncio
+async def test_encoding_operation_preserves_send_when_capabilities_are_unknown():
+    await _assert_encoding_operation_sends(None)
 
 
 def test_device_name_only_reports_success_after_matching_readback(monkeypatch):
@@ -448,8 +670,65 @@ def test_sample_rate_all_aggregates_readback_failures(monkeypatch):
     assert "44100 instead of 48000" in result.output
 
 
+def test_sample_rate_uses_advertised_capabilities_for_nonstandard_future_rate(monkeypatch):
+    device = FakeDevice(
+        "Future",
+        settings={"sample_rate": 384_000},
+        supported_sample_rates=[48_000, 384_000],
+    )
+    sent = _install_context(monkeypatch, config_commands, {"future.local.": device})
+
+    result = runner.invoke(config_commands.app, ["sample-rate", "384000"])
+
+    assert result.exit_code == 0
+    assert "384000 Hz (verified)" in result.output
+    assert sent[0][3] == {"expect_response": False}
+
+
+def test_sample_rate_uses_active_readback_when_mutation_notification_is_absent(monkeypatch):
+    device = FakeDevice(
+        "Quiet Device",
+        settings={"sample_rate": 96000},
+        supported_sample_rates=[48000, 96000],
+    )
+    sent = _install_context(
+        monkeypatch,
+        config_commands,
+        {"quiet.local.": device},
+        notification_timeout=True,
+    )
+
+    result = runner.invoke(config_commands.app, ["sample-rate", "96000"])
+
+    assert result.exit_code == 0
+    assert "96000 Hz (verified)" in result.output
+    assert len(sent) == 1
+
+
+def test_encoding_rejects_value_missing_from_advertised_capabilities(monkeypatch):
+    device = FakeDevice("AVIO", encoding=24, supported_encodings=[24])
+    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
+
+    result = runner.invoke(config_commands.app, ["encoding", "16"])
+
+    assert result.exit_code == 1
+    assert "reports supported encoding values [24]" in result.output
+    assert sent == []
+
+
+def test_encoding_uses_advertised_nonstandard_future_value(monkeypatch):
+    device = FakeDevice("Future", encoding=20, supported_encodings=[20, 24])
+    sent = _install_context(monkeypatch, config_commands, {"future.local.": device})
+
+    result = runner.invoke(config_commands.app, ["encoding", "20"])
+
+    assert result.exit_code == 0
+    assert "20-bit (verified)" in result.output
+    assert sent[0][3] == {"expect_response": False}
+
+
 def test_fractional_latency_verifies_rounded_nanoseconds(monkeypatch):
-    device = FakeDevice("AVIO", settings={"latency_ns": 150_000})
+    device = FakeDevice("AVIO", settings={"active_latency_ns": 150_000})
     _install_context(monkeypatch, config_commands, {"avio.local.": device})
     result = runner.invoke(config_commands.app, ["latency", "0.15"])
 
@@ -458,7 +737,14 @@ def test_fractional_latency_verifies_rounded_nanoseconds(monkeypatch):
 
 
 def test_latency_get_uses_active_device_readback(monkeypatch):
-    device = FakeDevice("AVIO", settings={"latency_ns": 150_000})
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 150_000,
+            "latency_ns": 150_000,
+        },
+    )
     device.latency = 99.0
     _install_context(monkeypatch, config_commands, {"avio.local.": device})
 
@@ -469,9 +755,43 @@ def test_latency_get_uses_active_device_readback(monkeypatch):
     assert device.operations.settings_calls == 1
 
 
+def test_latency_does_not_treat_configured_value_as_applied(monkeypatch):
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 150_000,
+            "active_latency_ns": 1_000_000,
+            "latency_ns": 1_000_000,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"avio.local.": device})
+
+    result = runner.invoke(config_commands.app, ["latency", "0.15"])
+
+    assert result.exit_code == 1
+    assert "1000000 instead of 150000" in result.output
+    assert "Set latency for AVIO" not in result.output
+
+
+def test_latency_range_does_not_block_device_verified_nonstandard_value(monkeypatch):
+    device = FakeDevice(
+        "AVIO",
+        min_latency=1.0,
+        max_latency=5.0,
+        settings={"active_latency_ns": 250_000},
+    )
+    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
+
+    result = runner.invoke(config_commands.app, ["latency", "0.25"])
+
+    assert result.exit_code == 0
+    assert "Set latency for AVIO: 0.25 ms (verified)" in result.output
+    assert len(sent) == 1
+
+
 @pytest.mark.parametrize("value", ["-0.1", "nan", "inf"])
 def test_latency_rejects_nonfinite_or_negative_values_before_sending(monkeypatch, value):
-    device = FakeDevice("AVIO", settings={"latency_ns": 0})
+    device = FakeDevice("AVIO", settings={"active_latency_ns": 0})
     sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
 
     result = runner.invoke(config_commands.app, ["latency", "--", value])
@@ -493,10 +813,20 @@ def test_aes67_verifies_configured_state_not_current_state(monkeypatch):
     assert sent[0][3] == {"expect_response": False, "repeat": 3, "interval_ms": 100}
 
 
+def test_encoding_is_verified_from_reported_status(monkeypatch):
+    device = FakeDevice("AVIO", encoding=24, supported_encodings=[24])
+    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
+
+    result = runner.invoke(config_commands.app, ["encoding", "24"])
+
+    assert result.exit_code == 0
+    assert "Set encoding for AVIO: 24-bit (verified)" in result.output
+    assert sent[0][3] == {"expect_response": False}
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected", "send_kwargs"),
     [
-        (["encoding", "24"], "Encoding change requested for AVIO: 24-bit; not verified", {}),
         (
             ["preferred-leader", "on"],
             "Preferred leader change requested for AVIO: on; not verified",

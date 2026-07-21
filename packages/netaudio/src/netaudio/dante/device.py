@@ -18,7 +18,7 @@ from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.latency import latency_controls_from_settings, standard_latency_choices_for_range
 from netaudio.dante.subscription import DanteSubscription
 
 logger = logging.getLogger("netaudio")
@@ -33,6 +33,9 @@ class DanteDevice:
         self.error = None
         self._ipv4 = None
         self.latency = None
+        self.active_latency: float | None = None
+        self.configured_latency: float | None = None
+        self.default_latency: float | None = None
         self.mac_address = None
         self.manufacturer = ""
         self.manufacturer_mdns = ""
@@ -63,6 +66,7 @@ class DanteDevice:
         self.flow_protocol_id: int | None = None
         self.num_networks: int | None = None
         self.encoding: int | None = None
+        self.supported_encodings: list[int] | None = None
         self.bit_depth: int | None = None
         self.software_version: str | None = None
         self.firmware_version: str | None = None
@@ -102,6 +106,10 @@ class DanteDevice:
     @ipv4.setter
     def ipv4(self, value):
         self._ipv4 = ipaddress.ip_address(value) if value is not None else None
+
+    @property
+    def standard_latency_choices(self):
+        return standard_latency_choices_for_range(self.min_latency, self.max_latency)
 
     def update_last_seen(self):
         self.last_seen = time.time()
@@ -301,12 +309,7 @@ class DanteDevice:
         if settings_data:
             if settings_data.get("sample_rate"):
                 controls["sample_rate"] = settings_data["sample_rate"]
-            if settings_data.get("latency_ns") is not None:
-                controls["latency"] = nanoseconds_to_milliseconds(settings_data["latency_ns"])
-            if settings_data.get("min_latency_ns") is not None:
-                controls["min_latency"] = nanoseconds_to_milliseconds(settings_data["min_latency_ns"])
-            if settings_data.get("max_latency_ns") is not None:
-                controls["max_latency"] = nanoseconds_to_milliseconds(settings_data["max_latency_ns"])
+            controls.update(latency_controls_from_settings(settings_data))
         rx_channels, subscriptions = self._build_rx_from_records(data["rx"])
         if rx_channels:
             controls["rx_channels"] = rx_channels
@@ -328,11 +331,17 @@ class DanteDevice:
             self.name = data["name"]
         if data.get("sample_rate"):
             self.sample_rate = data["sample_rate"]
-        if data.get("latency") is not None:
+        if "latency" in data:
             self.latency = data["latency"]
-        if data.get("min_latency") is not None:
+        if "active_latency" in data:
+            self.active_latency = data["active_latency"]
+        if "configured_latency" in data:
+            self.configured_latency = data["configured_latency"]
+        if "default_latency" in data:
+            self.default_latency = data["default_latency"]
+        if "min_latency" in data:
             self.min_latency = data["min_latency"]
-        if data.get("max_latency") is not None:
+        if "max_latency" in data:
             self.max_latency = data["max_latency"]
         if "tx_count" in data:
             self.tx_count = self.tx_count_raw = data["tx_count"]

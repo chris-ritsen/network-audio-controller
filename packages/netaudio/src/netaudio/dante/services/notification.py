@@ -4,6 +4,7 @@ import asyncio
 import logging
 import socket
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass, field as dataclass_field
 
 from netaudio.dante.const import (
@@ -62,6 +63,7 @@ CONMON_OPCODE_INTERFACE_STATUS = 0x0011
 CONMON_OPCODE_MAKE_MODEL_RESPONSE = 0x00C0
 CONMON_OPCODE_DANTE_MODEL_RESPONSE = 0x0060
 CONMON_OPCODE_SAMPLE_RATE_STATUS = 0x0080
+CONMON_OPCODE_ENCODING_STATUS = 0x0082
 CONMON_OPCODE_AES67_CURRENT_NEW = 0x1007
 CONMON_AES67_CURRENT_NEW_OFFSET = 0x21
 CONMON_OPCODE_PTP_CLOCK_STATUS = 0x0020
@@ -140,6 +142,29 @@ class NotificationWaiter:
     notification_id: int | None = None
 
 
+@dataclass(eq=False)
+class CapabilityValueWaiter:
+    capability_name: str
+    device_ip_address: str
+    value_matches: Callable[[int], bool]
+    event: asyncio.Event = dataclass_field(default_factory=asyncio.Event)
+    latest_result: tuple[int, list[int]] | None = None
+
+    def observe(self, current_value: int, supported_values: list[int]) -> None:
+        if self.event.is_set():
+            return
+        self.latest_result = (current_value, supported_values)
+        if self.value_matches(current_value):
+            self.event.set()
+
+
+@dataclass(frozen=True)
+class _CapabilityStatusChanges:
+    device_state_changed: bool = False
+    current_value_changed: bool = False
+    supported_values_changed: bool = False
+
+
 class DanteNotificationService(DanteMulticastService):
     def __init__(
         self,
@@ -163,6 +188,7 @@ class DanteNotificationService(DanteMulticastService):
         self._conmon_received: dict[str, set[int]] = {}
         self._conmon_expected_count: dict[str, int] = {}
         self._notification_waiters: dict[str, set[NotificationWaiter]] = {}
+        self._capability_value_waiters: dict[tuple[str, str], set[CapabilityValueWaiter]] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -205,6 +231,58 @@ class DanteNotificationService(DanteMulticastService):
         supported_sample_rates: list[int],
     ) -> None:
         self._waiters.notify("sample_rate", source_ip_address, (current_sample_rate, supported_sample_rates))
+
+    def register_encoding_waiter(self, device_ip_address: str) -> asyncio.Event:
+        return self._waiters.register("encoding", device_ip_address)
+
+    def unregister_encoding_waiter(self, device_ip_address: str) -> None:
+        self._waiters.unregister("encoding", device_ip_address)
+
+    def get_encoding_result(self, device_ip_address: str) -> tuple[int, list[int]] | None:
+        return self._waiters.take_result("encoding", device_ip_address)
+
+    def _notify_encoding_waiter(
+        self,
+        source_ip_address: str,
+        current_encoding: int,
+        supported_encodings: list[int],
+    ) -> None:
+        self._waiters.notify("encoding", source_ip_address, (current_encoding, supported_encodings))
+
+    def register_capability_value_waiter(
+        self,
+        capability_name: str,
+        device_ip_address: str,
+        value_matches: Callable[[int], bool],
+    ) -> CapabilityValueWaiter:
+        waiter = CapabilityValueWaiter(
+            capability_name=capability_name,
+            device_ip_address=device_ip_address,
+            value_matches=value_matches,
+        )
+        waiter_key = (capability_name, device_ip_address)
+        self._capability_value_waiters.setdefault(waiter_key, set()).add(waiter)
+        return waiter
+
+    def unregister_capability_value_waiter(self, waiter: CapabilityValueWaiter) -> None:
+        waiter_key = (waiter.capability_name, waiter.device_ip_address)
+        waiters = self._capability_value_waiters.get(waiter_key)
+        if waiters is None:
+            return
+        waiters.discard(waiter)
+        if not waiters:
+            self._capability_value_waiters.pop(waiter_key, None)
+
+    def _notify_capability_value_waiters(
+        self,
+        capability_name: str,
+        source_ip_address: str,
+        current_value: int,
+        supported_values: list[int],
+    ) -> None:
+        waiter_key = (capability_name, source_ip_address)
+        for waiter in tuple(self._capability_value_waiters.get(waiter_key, ())):
+            waiter.observe(current_value, supported_values)
 
     def register_preferred_leader_waiter(self, device_ip: str) -> asyncio.Event:
         return self._waiters.register("preferred_leader", device_ip)
@@ -348,6 +426,8 @@ class DanteNotificationService(DanteMulticastService):
         source_ip: str,
         state_applied: bool = False,
         conmon_response: bool = False,
+        current_value_changed: bool = False,
+        supported_values_changed: bool = False,
     ) -> None:
         device = self._lookup_device(source_ip)
         device_name = device.name if device else ""
@@ -377,6 +457,8 @@ class DanteNotificationService(DanteMulticastService):
                         "source_ip": source_ip,
                         "state_applied": state_applied,
                         "conmon_response": conmon_response,
+                        "current_value_changed": current_value_changed,
+                        "supported_values_changed": supported_values_changed,
                         "raw": data,
                     },
                 )
@@ -393,12 +475,25 @@ class DanteNotificationService(DanteMulticastService):
             self._notify_conmon_waiter(source_ip, opcode)
             return True
         elif opcode == CONMON_OPCODE_SAMPLE_RATE_STATUS:
-            state_applied = self._handle_sample_rate_status(data, source_ip)
+            changes = self._handle_sample_rate_status(data, source_ip)
             self._handle_settings_notification(
                 data,
                 source_ip,
-                state_applied=state_applied,
+                state_applied=changes.device_state_changed,
                 conmon_response=True,
+                current_value_changed=changes.current_value_changed,
+                supported_values_changed=changes.supported_values_changed,
+            )
+            return True
+        elif opcode == CONMON_OPCODE_ENCODING_STATUS:
+            changes = self._handle_encoding_status(data, source_ip)
+            self._handle_settings_notification(
+                data,
+                source_ip,
+                state_applied=changes.device_state_changed,
+                conmon_response=True,
+                current_value_changed=changes.current_value_changed,
+                supported_values_changed=changes.supported_values_changed,
             )
             return True
         elif opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
@@ -420,21 +515,70 @@ class DanteNotificationService(DanteMulticastService):
 
         return False
 
-    def _handle_sample_rate_status(self, data: bytes, source_ip: str) -> bool:
+    def _handle_sample_rate_status(self, data: bytes, source_ip: str) -> _CapabilityStatusChanges:
+        return self._handle_capability_status(
+            data,
+            source_ip,
+            "sample_rate_status",
+            "sample rate",
+            "current_sample_rate",
+            "supported_sample_rates",
+            "sample_rate",
+            "supported_sample_rates",
+            self._notify_sample_rate_waiter,
+            self._apply_sample_rate_status,
+            defer_current_value_change=True,
+        )
+
+    def _handle_encoding_status(self, data: bytes, source_ip: str) -> _CapabilityStatusChanges:
+        return self._handle_capability_status(
+            data,
+            source_ip,
+            "encoding_status",
+            "encoding",
+            "current_encoding",
+            "supported_encodings",
+            "encoding",
+            "supported_encodings",
+            self._notify_encoding_waiter,
+            self._apply_encoding_status,
+            defer_current_value_change=False,
+        )
+
+    def _handle_capability_status(
+        self,
+        data: bytes,
+        source_ip: str,
+        response_kind: str,
+        capability_name: str,
+        current_response_field_name: str,
+        supported_response_field_name: str,
+        current_device_field_name: str,
+        supported_device_field_name: str,
+        notify_waiter,
+        apply_status,
+        defer_current_value_change: bool,
+    ) -> _CapabilityStatusChanges:
         from netaudio import core
 
         try:
-            parsed_response = core.parse_response("sample_rate_status", data)
+            parsed_response = core.parse_response(response_kind, data)
         except core.NetaudioCoreError as exception:
-            logger.warning(f"Invalid sample rate status from {source_ip}: {exception}")
-            return False
+            logger.warning(f"Invalid {capability_name} status from {source_ip}: {exception}")
+            return _CapabilityStatusChanges()
 
-        current_sample_rate = parsed_response["current_sample_rate"]
-        supported_sample_rates = parsed_response["supported_sample_rates"]
-        self._notify_sample_rate_waiter(source_ip, current_sample_rate, supported_sample_rates)
+        current_value = parsed_response[current_response_field_name]
+        supported_values = parsed_response[supported_response_field_name]
+        notify_waiter(source_ip, current_value, supported_values)
+        self._notify_capability_value_waiters(
+            current_device_field_name,
+            source_ip,
+            current_value,
+            supported_values,
+        )
         logger.debug(
-            f"Conmon sample_rate_status from {source_ip} ({len(data)}B): "
-            f"current={current_sample_rate} supported={supported_sample_rates}"
+            f"Conmon {response_kind} from {source_ip} ({len(data)}B): "
+            f"current={current_value} supported={supported_values}"
         )
 
         device = self._lookup_device(source_ip)
@@ -442,18 +586,19 @@ class DanteNotificationService(DanteMulticastService):
             self._cache_pending(
                 source_ip,
                 {
-                    "sample_rate": current_sample_rate,
-                    "supported_sample_rates": supported_sample_rates,
+                    current_device_field_name: current_value,
+                    supported_device_field_name: supported_values,
                 },
             )
-            return True
+            return _CapabilityStatusChanges()
         if not device.online:
-            return True
+            return _CapabilityStatusChanges()
 
-        changed = device.sample_rate != current_sample_rate or device.supported_sample_rates != supported_sample_rates
-        device.sample_rate = current_sample_rate
-        device.supported_sample_rates = supported_sample_rates
-        if changed:
+        changes = apply_status(device, current_value, supported_values)
+        should_emit_update = changes.device_state_changed and not (
+            defer_current_value_change and changes.current_value_changed
+        )
+        if should_emit_update:
             self._dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_UPDATED,
@@ -461,7 +606,41 @@ class DanteNotificationService(DanteMulticastService):
                     server_name=device.server_name,
                 )
             )
-        return True
+        return changes
+
+    @staticmethod
+    def _apply_sample_rate_status(
+        device,
+        current_sample_rate: int,
+        supported_sample_rates: list[int],
+    ) -> _CapabilityStatusChanges:
+        current_value_changed = device.sample_rate is not None and device.sample_rate != current_sample_rate
+        supported_values_changed = device.supported_sample_rates != supported_sample_rates
+        device_state_changed = device.sample_rate != current_sample_rate or supported_values_changed
+        device.sample_rate = current_sample_rate
+        device.supported_sample_rates = supported_sample_rates
+        return _CapabilityStatusChanges(
+            device_state_changed=device_state_changed,
+            current_value_changed=current_value_changed,
+            supported_values_changed=supported_values_changed,
+        )
+
+    @staticmethod
+    def _apply_encoding_status(
+        device,
+        current_encoding: int,
+        supported_encodings: list[int],
+    ) -> _CapabilityStatusChanges:
+        current_value_changed = device.encoding is not None and device.encoding != current_encoding
+        supported_values_changed = device.supported_encodings != supported_encodings
+        device_state_changed = device.encoding != current_encoding or supported_values_changed
+        device.encoding = current_encoding
+        device.supported_encodings = supported_encodings
+        return _CapabilityStatusChanges(
+            device_state_changed=device_state_changed,
+            current_value_changed=current_value_changed,
+            supported_values_changed=supported_values_changed,
+        )
 
     def _handle_make_model_response(self, data: bytes, source_ip: str) -> None:
         product_name, product_version, manufacturer = self.parse_make_model_response(data)
@@ -681,7 +860,13 @@ class DanteNotificationService(DanteMulticastService):
     @staticmethod
     def _apply_conmon_data(device, parsed: dict) -> None:
         for field, value in parsed.items():
-            if field in ("manufacturer", "sample_rate", "supported_sample_rates"):
+            if field in (
+                "manufacturer",
+                "sample_rate",
+                "supported_sample_rates",
+                "encoding",
+                "supported_encodings",
+            ):
                 setattr(device, field, value)
             elif not getattr(device, field, None):
                 setattr(device, field, value)
@@ -732,3 +917,50 @@ class DanteNotificationService(DanteMulticastService):
         if self._device_lookup:
             return self._device_lookup(ip_str)
         return None
+
+
+async def mutate_and_wait_for_capability_value(
+    notifications: DanteNotificationService,
+    capability_name: str,
+    device_ip_address: str,
+    expected_value: int,
+    mutate,
+    probe_status,
+    timeout: float,
+) -> tuple[int, list[int]] | None:
+    waiter = notifications.register_capability_value_waiter(
+        capability_name,
+        device_ip_address,
+        lambda current_value: current_value == expected_value,
+    )
+    probe_task = None
+
+    async def probe_and_observe() -> None:
+        try:
+            status = await probe_status()
+        except Exception as exception:
+            logger.warning(f"Failed to probe {capability_name} status for {device_ip_address}: {exception}")
+            return
+        if status is None:
+            logger.debug(f"{capability_name} status unavailable for {device_ip_address}")
+            return
+        current_value, supported_values = status
+        waiter.observe(current_value, supported_values)
+
+    try:
+        await mutate()
+        if not waiter.event.is_set():
+            probe_task = asyncio.create_task(probe_and_observe())
+            try:
+                await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.debug(
+                    f"Timed out waiting for {capability_name}={expected_value} from {device_ip_address}"
+                )
+        return waiter.latest_result
+    finally:
+        notifications.unregister_capability_value_waiter(waiter)
+        if probe_task is not None and not probe_task.done():
+            probe_task.cancel()
+        if probe_task is not None:
+            await asyncio.gather(probe_task, return_exceptions=True)

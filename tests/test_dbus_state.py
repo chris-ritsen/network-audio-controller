@@ -14,6 +14,7 @@ from netaudio.daemon.dbus_state import (
     dbus_int32,
     dbus_string,
     dbus_uint,
+    dbus_uint_list,
     latency_milliseconds,
     snapshot_dante_device,
     snapshot_shure_device,
@@ -172,6 +173,7 @@ def test_dbus_scalar_adapters_never_leak_none_or_out_of_range_values():
     assert dbus_uint(-1) == 0
     assert dbus_uint(2**32) == 0
     assert dbus_uint(65535, bits=16) == 65535
+    assert dbus_uint_list([48_000, None, -1]) == [48_000, 0, 0]
     assert dbus_int32(-(2**31)) == -(2**31)
     assert dbus_int32(2**31) == 0
     assert dbus_double(None) == 0.0
@@ -192,16 +194,26 @@ def test_aes67_enabled_uses_applied_state_not_pending_configuration():
 def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device = DanteDevice(server_name="device.local.")
     device.latency = 0.15
+    device.active_latency = 0.15
+    device.configured_latency = 0.25
+    device.default_latency = 1.0
     device.min_latency = 0.125
     device.max_latency = 21.333334
+    device.supported_sample_rates = [48_000, 96_000]
+    device.supported_encodings = [16, 24, 32]
     device.aes67_current = False
     device.aes67_configured = True
 
     snapshot = snapshot_dante_device(device)
 
     assert snapshot["latency"] == 0.15
+    assert snapshot["active_latency"] == 0.15
+    assert snapshot["configured_latency"] == 0.25
+    assert snapshot["default_latency"] == 1.0
     assert snapshot["min_latency"] == 0.125
     assert snapshot["max_latency"] == 21.333334
+    assert snapshot["supported_sample_rates"] == [48_000, 96_000]
+    assert snapshot["supported_encodings"] == [16, 24, 32]
     assert snapshot["aes67_current"] is False
     assert "aes67_enabled" not in snapshot
     assert DANTE_PROPERTY_NAMES["min_latency"] == "MinLatency"
@@ -259,18 +271,30 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     module = dbus_interfaces_without_dependency
     device = DanteDevice()
     device.latency = 0.15
+    device.active_latency = 0.15
+    device.configured_latency = 0.25
+    device.default_latency = 1.0
     device.min_latency = 0.125
     device.max_latency = 21.333334
+    device.supported_sample_rates = [48_000, 96_000]
+    device.supported_encodings = [16, 24, 32]
     device.aes67_current = False
     device.aes67_configured = True
 
     interface = module.DanteDeviceInterface(device)
 
     assert interface.Latency() == 0.15
+    assert interface.ActiveLatency() == 0.15
+    assert interface.ConfiguredLatency() == 0.25
+    assert interface.DefaultLatency() == 1.0
     assert interface.MinLatency() == 0.125
     assert interface.MaxLatency() == 21.333334
+    assert interface.SupportedSampleRates() == [48_000, 96_000]
+    assert interface.SupportedEncodings() == [16, 24, 32]
     assert interface.Aes67Enabled() is False
     assert module.DanteDeviceInterface.Latency.__annotations__["return"] == "d"
+    assert module.DanteDeviceInterface.SupportedSampleRates.__annotations__["return"] == "au"
+    assert module.DanteDeviceInterface.SupportedEncodings.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.MinLatency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.MaxLatency.__annotations__["return"] == "d"
 

@@ -18,6 +18,10 @@ SAMPLE_RATE_STATUS_PACKET = bytes.fromhex(
     "0002b1100002ee00"
 )
 
+ENCODING_STATUS_PACKET = bytes.fromhex(
+    "ffff003413870000001dc10812580000417564696e61746507240082000000000018000100000018000000000000000000000018"
+)
+
 
 class TestDanteSettingsService:
     def test_instantiation(self):
@@ -36,6 +40,16 @@ class TestDanteSettingsService:
         service.probe_sample_rate("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         service._commands.command_probe_sample_rate.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
+        service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
+
+    def test_probe_encoding_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_probe_encoding = MagicMock(return_value=(b"probe", None, 8700))
+        service.send = MagicMock()
+
+        service.probe_encoding("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+
+        service._commands.command_probe_encoding.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
         service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
 
 
@@ -129,6 +143,7 @@ class TestDanteNotificationService:
 
     def test_notification_names(self):
         assert NOTIFICATION_NAMES[128] == "Sample Rate Status"
+        assert NOTIFICATION_NAMES[130] == "Encoding Status"
         assert NOTIFICATION_NAMES[257] == "TX Channel Change"
         assert NOTIFICATION_NAMES[258] == "RX Channel Change"
         assert NOTIFICATION_NAMES[4103] == "AES67 Status"
@@ -203,11 +218,59 @@ class TestDanteNotificationService:
         assert notification_events[0].data["notification_id"] == 128
         assert notification_events[0].data["state_applied"] is True
         assert notification_events[0].data["conmon_response"] is True
+        assert notification_events[0].data["current_value_changed"] is False
+        assert notification_events[0].data["supported_values_changed"] is True
 
         service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
         emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
         assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
         assert sum(event.type == EventType.NOTIFICATION_RECEIVED for event in emitted_events) == 2
+        latest_notification = [event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED][-1]
+        assert latest_notification.data["state_applied"] is False
+        assert latest_notification.data["current_value_changed"] is False
+        assert latest_notification.data["supported_values_changed"] is False
+
+    def test_sample_rate_value_change_defers_device_update_for_settings_refresh(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.name = "lx-dante"
+        device.ipv4 = "192.168.1.108"
+        device.sample_rate = 48_000
+        device.supported_sample_rates = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert all(event.type != EventType.DEVICE_UPDATED for event in emitted_events)
+        notification_event = next(event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED)
+        assert notification_event.data["state_applied"] is True
+        assert notification_event.data["current_value_changed"] is True
+        assert notification_event.data["supported_values_changed"] is False
+
+    def test_sample_rate_supported_list_change_emits_without_settings_refresh(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.name = "lx-dante"
+        device.ipv4 = "192.168.1.108"
+        device.sample_rate = 44_100
+        device.supported_sample_rates = [44_100]
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
+
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        notification_event = next(event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED)
+        assert notification_event.data["state_applied"] is True
+        assert notification_event.data["current_value_changed"] is False
+        assert notification_event.data["supported_values_changed"] is True
 
     def test_sample_rate_status_notifies_registered_waiter(self):
         service = DanteNotificationService(dispatcher=MagicMock())
@@ -258,6 +321,74 @@ class TestDanteNotificationService:
         assert device.supported_sample_rates == [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
         emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
         assert all(event.type != EventType.DEVICE_UPDATED for event in emitted_events)
+
+    def test_encoding_status_updates_device_and_emits_once(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.name = "lx-dante"
+        device.ipv4 = "192.168.1.108"
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(ENCODING_STATUS_PACKET, ("192.168.1.108", 1034))
+
+        assert device.encoding == 24
+        assert device.supported_encodings == [24]
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        device_updated_events = [event for event in emitted_events if event.type == EventType.DEVICE_UPDATED]
+        notification_events = [event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED]
+        assert len(device_updated_events) == 1
+        assert device_updated_events[0].server_name == "lx-dante.local."
+        assert len(notification_events) == 1
+        assert notification_events[0].data["notification_id"] == 130
+        assert notification_events[0].data["state_applied"] is True
+        assert notification_events[0].data["conmon_response"] is True
+
+        service._on_packet(ENCODING_STATUS_PACKET, ("192.168.1.108", 1034))
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        assert sum(event.type == EventType.NOTIFICATION_RECEIVED for event in emitted_events) == 2
+
+    def test_encoding_status_returns_device_scoped_typed_probe_result(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        matching_waiter = service.register_encoding_waiter("192.168.1.108")
+        unrelated_waiter = service.register_encoding_waiter("192.168.1.109")
+
+        service._on_packet(ENCODING_STATUS_PACKET, ("192.168.1.108", 1034))
+
+        assert matching_waiter.is_set()
+        assert not unrelated_waiter.is_set()
+        assert service.get_encoding_result("192.168.1.108") == (24, [24])
+        assert service.get_encoding_result("192.168.1.109") is None
+        service.unregister_encoding_waiter("192.168.1.108")
+        service.unregister_encoding_waiter("192.168.1.109")
+
+    def test_encoding_status_does_not_repopulate_offline_device(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.ipv4 = "192.168.1.108"
+        device.online = False
+        service = DanteNotificationService(
+            dispatcher=MagicMock(),
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(ENCODING_STATUS_PACKET, ("192.168.1.108", 1034))
+
+        assert device.encoding is None
+        assert device.supported_encodings is None
+
+    def test_encoding_status_is_applied_when_device_appears(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        service._on_packet(ENCODING_STATUS_PACKET, ("192.168.1.108", 1034))
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.ipv4 = "192.168.1.108"
+
+        service.apply_pending_for_device(device)
+
+        assert device.encoding == 24
+        assert device.supported_encodings == [24]
 
 
 class TestHeartbeatLockStateParsing:
