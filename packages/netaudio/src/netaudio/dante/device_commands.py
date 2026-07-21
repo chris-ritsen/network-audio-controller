@@ -151,6 +151,13 @@ class DanteDeviceCommands:
         )
         return self._settings(command_specification)
 
+    def command_probe_encoding(self, host_mac=None, sequence=0x0083):
+        command_specification = self._with_host_mac(
+            {"command": "probe_encoding", "sequence": sequence},
+            host_mac,
+        )
+        return self._settings(command_specification)
+
     def command_set_gain_level(self, channel_number, gain_level, device_type):
         return self._settings(
             {

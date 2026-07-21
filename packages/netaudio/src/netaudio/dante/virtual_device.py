@@ -52,6 +52,8 @@ class Opcode(IntEnum):
 
 DEVICE_ARC_SECONDARY_PORT = 4455
 MCAST_HEADER_LENGTH = 32
+PCM_ENCODING_CAPABILITY_BITS = {16: 0x0002, 24: 0x0004, 32: 0x0008}
+PCM_ENCODING_OCTETS = {16: 2, 24: 3, 32: 4}
 
 logger = logging.getLogger("netaudio")
 
@@ -64,8 +66,25 @@ class VirtualDeviceConfig:
     tx_channels: list[str] = field(default_factory=lambda: ["Ch 1", "Ch 2"])
     rx_channels: list[str] = field(default_factory=lambda: ["Ch 1", "Ch 2"])
     sample_rate: int = 48000
+    supported_sample_rates: list[int] | None = None
+    encoding: int = 24
+    supported_encodings: list[int] = field(default_factory=lambda: [24, 16, 32])
     latency_ns: int = 1_000_000
+    active_latency_ns: int | None = None
+    default_latency_ns: int = 1_000_000
+    minimum_latency_ns: int = 150_000
+    maximum_latency_ns: int = 21_333_334
     interface_ip: str | None = None
+
+    def __post_init__(self):
+        if self.supported_sample_rates is None:
+            self.supported_sample_rates = [self.sample_rate]
+        if self.sample_rate not in self.supported_sample_rates:
+            raise ValueError("sample_rate must be present in supported_sample_rates")
+        if self.encoding not in self.supported_encodings:
+            raise ValueError("encoding must be present in supported_encodings")
+        if self.active_latency_ns is None:
+            self.active_latency_ns = self.latency_ns
 
 
 class VirtualDevice:
@@ -237,6 +256,87 @@ class VirtualDevice:
             bytes(content),
         )
 
+    def _build_audio_capability_status_packet(
+        self,
+        status_opcode: int,
+        current_value: int,
+        supported_values: list[int],
+    ) -> bytes:
+        content = struct.pack(">HHI", 0x0018, len(supported_values), current_value)
+        content += struct.pack(">II", 0, 0x00020000)
+        content += b"".join(struct.pack(">I", value) for value in supported_values)
+        return self._build_mcast_packet(
+            0xFFFF,
+            bytes([0x07, 0x24]) + struct.pack(">H", status_opcode) + bytes(4),
+            content,
+        )
+
+    def _send_audio_capability_status(
+        self,
+        status_opcode: int,
+        current_value: int,
+        supported_values: list[int],
+    ) -> None:
+        packet = self._build_audio_capability_status_packet(status_opcode, current_value, supported_values)
+        if self._mcast_transport:
+            self._mcast_transport.sendto(packet, (MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT))
+        elif self._mcast_sock:
+            self._mcast_sock.sendto(packet, (MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT))
+        else:
+            logger.warning("no mcast socket available")
+
+    def _send_sample_rate_status(self) -> None:
+        self._send_audio_capability_status(
+            0x0080,
+            self._config.sample_rate,
+            self._config.supported_sample_rates,
+        )
+
+    def _send_encoding_status(self) -> None:
+        self._send_audio_capability_status(
+            0x0082,
+            self._config.encoding,
+            self._config.supported_encodings,
+        )
+
+    def _legacy_pcm_capability(self) -> tuple[int, int] | None:
+        current_encoding_octets = PCM_ENCODING_OCTETS.get(self._config.encoding)
+        if current_encoding_octets is None:
+            return None
+
+        capability_bitmap = 0
+        for supported_encoding in self._config.supported_encodings:
+            capability_bit = PCM_ENCODING_CAPABILITY_BITS.get(supported_encoding)
+            if capability_bit is None:
+                return None
+            capability_bitmap |= capability_bit
+
+        return current_encoding_octets, capability_bitmap
+
+    def _pcm_capability_property(self) -> str | None:
+        legacy_pcm_capability = self._legacy_pcm_capability()
+        if legacy_pcm_capability is None:
+            return None
+        current_encoding_octets, capability_bitmap = legacy_pcm_capability
+
+        return f"{current_encoding_octets} 0x{capability_bitmap:x}"
+
+    def _build_channel_metadata(self) -> bytes | None:
+        legacy_pcm_capability = self._legacy_pcm_capability()
+        if legacy_pcm_capability is None:
+            return None
+        _, capability_bitmap = legacy_pcm_capability
+        return struct.pack(
+            ">IHHHHHH",
+            self._config.sample_rate,
+            0x0101,
+            self._config.encoding,
+            0x0400,
+            self._config.encoding,
+            self._config.encoding,
+            capability_bitmap,
+        )
+
     async def _start_mcast_server(self) -> None:
         loop = asyncio.get_running_loop()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -337,24 +437,27 @@ class VirtualDevice:
         self._service_infos = [arc_info, cmc_info]
 
         for i, ch_name in enumerate(self._config.tx_channels):
+            channel_properties = {
+                "txtvers": "2",
+                "dbcp1": "0x1102",
+                "dbcp": "0x1004",
+                "id": str(i + 1),
+                "rate": str(self._config.sample_rate),
+                "enc": str(self._config.encoding),
+                "en": str(self._config.encoding),
+                "latency_ns": str(self._config.latency_ns),
+                "fpp": "32,2",
+                "nchan": "8",
+            }
+            pcm_capability_property = self._pcm_capability_property()
+            if pcm_capability_property is not None:
+                channel_properties["pcm"] = pcm_capability_property
             chan_info = ServiceInfo(
                 SERVICE_CHAN,
                 f"{ch_name}@{self._config.name}.{SERVICE_CHAN}",
                 addresses=[ip_bytes],
                 port=DEVICE_ARC_SECONDARY_PORT,
-                properties={
-                    "txtvers": "2",
-                    "dbcp1": "0x1102",
-                    "dbcp": "0x1004",
-                    "id": str(i + 1),
-                    "rate": str(self._config.sample_rate),
-                    "pcm": "3 0xe",
-                    "enc": "24",
-                    "en": "24",
-                    "latency_ns": str(self._config.latency_ns),
-                    "fpp": "32,2",
-                    "nchan": "8",
-                },
+                properties=channel_properties,
                 server=server_name,
             )
             self._service_infos.append(chan_info)
@@ -452,7 +555,15 @@ class VirtualDevice:
         return None
 
     def _handle_mcast_format_request(self, data: bytes, addr: tuple[str, int]) -> None:
+        if struct.unpack(">H", data[0:2])[0] not in (0xFFFF, 0xFFFE):
+            return
+        if struct.unpack(">H", data[2:4])[0] != len(data):
+            return
+        if data[16:24] != b"Audinate":
+            return
         opcode = data[24:32]
+        if opcode[0] != 0x07 or opcode[2] != 0:
+            return
         info_type = opcode[3]
         logger.debug(f"Mcast-format request from {addr}: opcode={opcode.hex()} info_type=0x{info_type:02x}")
 
@@ -478,6 +589,24 @@ class VirtualDevice:
                 bytes([0x07, 0x2A, 0x00, 0x78, 0, 0, 0, 0]),
                 bytes([0, 0, 0, 3, 0, 0, 0, 0]),
             )
+        elif info_type == 0x81:
+            if len(data) < 40:
+                return
+            operation_mode, requested_sample_rate = struct.unpack(">II", data[32:40])
+            if operation_mode == 1 and requested_sample_rate in self._config.supported_sample_rates:
+                self._config.sample_rate = requested_sample_rate
+            elif operation_mode != 0:
+                return
+            self._send_sample_rate_status()
+        elif info_type == 0x83:
+            if len(data) < 40:
+                return
+            operation_mode, requested_encoding = struct.unpack(">II", data[32:40])
+            if operation_mode == 1 and requested_encoding in self._config.supported_encodings:
+                self._config.encoding = requested_encoding
+            elif operation_mode != 0:
+                return
+            self._send_encoding_status()
         else:
             logger.debug(f"Unhandled mcast info_type 0x{info_type:02x} from {addr}")
 
@@ -538,9 +667,16 @@ class VirtualDevice:
         header = struct.pack(">HHHHH", start_code, length, seqnum, opcode1, RESULT_CODE_SUCCESS)
         return header + body
 
-    def _build_response(self, transaction_id: int, opcode: int, body: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
+    def _build_response(
+        self,
+        transaction_id: int,
+        opcode: int,
+        body: bytes,
+        protocol_id: int = PROTOCOL_ID,
+        result_code: int = RESULT_CODE_SUCCESS,
+    ) -> bytes:
         length = 10 + len(body)
-        header = struct.pack(">HHHHH", protocol_id, length, transaction_id, opcode, RESULT_CODE_SUCCESS)
+        header = struct.pack(">HHHHH", protocol_id, length, transaction_id, opcode, result_code)
         return header + body
 
     def _handle_device_name(self, transaction_id: int, data: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
@@ -602,8 +738,15 @@ class VirtualDevice:
         body_header_size = 2
 
         sample_rate_area_offset = header_size + body_header_size + (num_ch * record_size)
-        metadata = struct.pack(">I", self._config.sample_rate)
-        metadata += bytes([0x01, 0x01, 0x00, 0x18, 0x04, 0x00, 0x00, 0x18, 0x00, 0x18, 0x00, 0x0E])
+        metadata = self._build_channel_metadata()
+        if metadata is None:
+            return self._build_response(
+                transaction_id,
+                Opcode.TX_CHANNELS,
+                b"",
+                protocol_id,
+                result_code=0x0030,
+            )
         string_area_offset = sample_rate_area_offset + len(metadata)
 
         name_offsets = []
@@ -658,8 +801,15 @@ class VirtualDevice:
         body_header_size = 2
 
         sample_rate_area_offset = header_size + body_header_size + (num_ch * record_size)
-        metadata = struct.pack(">I", self._config.sample_rate)
-        metadata += bytes([0x01, 0x01, 0x00, 0x18, 0x04, 0x00, 0x00, 0x18, 0x00, 0x18, 0x00, 0x0E])
+        metadata = self._build_channel_metadata()
+        if metadata is None:
+            return self._build_response(
+                transaction_id,
+                Opcode.RX_CHANNELS,
+                b"",
+                protocol_id,
+                result_code=0x0030,
+            )
 
         string_table = bytearray()
         string_base = sample_rate_area_offset + len(metadata)
@@ -749,10 +899,11 @@ class VirtualDevice:
     def _handle_device_settings(self, transaction_id: int, data: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
         settings = [
             (0x8020, self._config.sample_rate),
-            (0x8204, 1_000_000),
+            (0x8204, self._config.default_latency_ns),
             (0x8205, self._config.latency_ns),
-            (0x8302, 21_333_334),
-            (0x8306, 150_000),
+            (0x8301, int(self._config.active_latency_ns)),
+            (0x8302, self._config.maximum_latency_ns),
+            (0x8306, self._config.minimum_latency_ns),
         ]
         first_value_offset = 10 + 2 + len(settings) * 4
         body = struct.pack(">BB", 2, len(settings))
@@ -762,6 +913,44 @@ class VirtualDevice:
             body += struct.pack(">I", value)
 
         return self._build_response(transaction_id, Opcode.DEVICE_SETTINGS, body, protocol_id)
+
+    def _handle_device_settings_set(
+        self,
+        transaction_id: int,
+        data: bytes,
+        protocol_id: int = PROTOCOL_ID,
+    ) -> bytes:
+        if len(data) < 12:
+            return self._handle_unsupported(transaction_id, data, protocol_id)
+        record_count = data[11]
+        configured_latency_nanoseconds = None
+        active_latency_nanoseconds = None
+        for record_index in range(record_count):
+            record_offset = 12 + record_index * 4
+            if record_offset + 4 > len(data):
+                return self._handle_unsupported(transaction_id, data, protocol_id)
+            info_code, value_pointer = struct.unpack(">HH", data[record_offset : record_offset + 4])
+            if info_code not in (0x8205, 0x8301):
+                continue
+            if value_pointer + 4 > len(data):
+                return self._handle_unsupported(transaction_id, data, protocol_id)
+            value = struct.unpack(">I", data[value_pointer : value_pointer + 4])[0]
+            if info_code == 0x8205:
+                configured_latency_nanoseconds = value
+            else:
+                active_latency_nanoseconds = value
+        if configured_latency_nanoseconds is None or active_latency_nanoseconds != configured_latency_nanoseconds:
+            return self._handle_unsupported(transaction_id, data, protocol_id)
+
+        self._config.latency_ns = configured_latency_nanoseconds
+        self._config.active_latency_ns = active_latency_nanoseconds
+        response_body = struct.pack(">BB", 4, 4)
+        response_body += struct.pack(">HH", 0x8205, 28)
+        response_body += struct.pack(">HH", 0x0211, 4)
+        response_body += struct.pack(">HH", 0x8301, 32)
+        response_body += struct.pack(">HH", 0x0310, 4)
+        response_body += struct.pack(">II", configured_latency_nanoseconds, active_latency_nanoseconds)
+        return self._build_response(transaction_id, Opcode.DEVICE_SETTINGS_SET, response_body, protocol_id)
 
     def _handle_tx_flows(self, transaction_id: int, data: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
         body = struct.pack(">BB", 0x02, 0x00)
@@ -839,9 +1028,7 @@ class VirtualDevice:
 
     def _handle_unsupported(self, transaction_id: int, data: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
         opcode = struct.unpack(">H", data[6:8])[0]
-        length = 10
-        header = struct.pack(">HHHHH", protocol_id, length, transaction_id, opcode, 0x0030)
-        return header
+        return self._build_response(transaction_id, opcode, b"", protocol_id, result_code=0x0030)
 
     _opcode_handlers = {
         Opcode.DEVICE_NAME: _handle_device_name,
@@ -851,6 +1038,7 @@ class VirtualDevice:
         Opcode.TX_CHANNEL_NAMES: _handle_tx_channel_names,
         Opcode.RX_CHANNELS: _handle_rx_channels,
         Opcode.DEVICE_SETTINGS: _handle_device_settings,
+        Opcode.DEVICE_SETTINGS_SET: _handle_device_settings_set,
         0x1102: _handle_property_directory,
         0x2200: _handle_tx_flows,
         0x2204: _handle_tx_flow_labels,
@@ -890,41 +1078,6 @@ class _McastInfoProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         logger.debug(f"MCAST_RECV {addr} ({len(data)}B)")
-
-        if self._device._local_ip and addr[0] == self._device._local_ip:
-            return
-
         if len(data) < MCAST_HEADER_LENGTH:
             return
-
-        opcode = data[24:32]
-
-        info_type = opcode[3] if opcode[0] == 0x07 and opcode[2] == 0 else None
-
-        if info_type == 0x61:
-            logger.debug(f"Mcast request: board_info from {addr}")
-            self._device._send_mcast_board_info()
-            self._device._send_unicast_from_settings(
-                addr, bytes([0x07, 0x2A, 0x00, 0x60, 0, 0, 0, 0]), self._device._build_board_info_content()
-            )
-        elif info_type == 0xC1:
-            logger.debug(f"Mcast request: product_info from {addr}")
-            self._device._send_mcast_product_info()
-            self._device._send_unicast_from_settings(
-                addr, bytes([0x07, 0x2A, 0x00, 0xC0, 0, 0, 0, 0]), self._device._build_product_info_content()
-            )
-        elif info_type == 0x21:
-            logger.debug(f"Mcast request: clock_stats from {addr}")
-            self._device._send_mcast_clock_stats()
-        elif info_type == 0x13:
-            logger.debug(f"Mcast request: network_info from {addr}")
-            self._device._send_mcast_network_info()
-        elif info_type == 0x77:
-            logger.debug(f"Mcast request: capability from {addr}")
-            self._device._mcast_send(
-                MULTICAST_GROUP_CONTROL_MONITORING,
-                DEVICE_INFO_PORT,
-                0xFFFF,
-                bytes([0x07, 0x2A, 0x00, 0x78, 0, 0, 0, 0]),
-                bytes([0, 0, 0, 3, 0, 0, 0, 0]),
-            )
+        self._device._handle_mcast_format_request(data, addr)

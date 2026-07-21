@@ -505,7 +505,7 @@ def _write_preset(path, devices):
     path.write_text(f'<?xml version="1.0"?><preset><name>test</name>{"".join(device_xml)}</preset>')
 
 
-def _preset_device(name, sample_rate=48000):
+def _preset_device(name, sample_rate=48000, supported_sample_rates=None):
     operations = SimpleNamespace()
 
     async def get_device_settings():
@@ -516,6 +516,7 @@ def _preset_device(name, sample_rate=48000):
         name=name,
         server_name=f"{name.lower()}.local.",
         ipv4="192.0.2.40",
+        supported_sample_rates=supported_sample_rates,
         interface_pending_config=None,
         operations=operations,
     )
@@ -775,6 +776,53 @@ def test_preset_filters_devices_before_unsupported_preflight(
     assert sends[0][1]["expect_response"] is False
     assert "sample rate 48000 Hz (verified)" in result.output
     assert "Excluded" not in result.output
+
+
+def test_preset_accepts_nonstandard_sample_rate_advertised_by_device(monkeypatch, tmp_path):
+    preset = tmp_path / "future-rate.xml"
+    _write_preset(preset, [{"name": "Device", "sample_rate": 384000}])
+    devices = {
+        "device.local.": _preset_device(
+            "Device",
+            sample_rate=384000,
+            supported_sample_rates=[48000, 384000],
+        )
+    }
+    sends = []
+
+    async def send(*args, **kwargs):
+        sends.append((args, kwargs))
+
+    _install_preset_context(monkeypatch, devices, send)
+
+    result = runner.invoke(preset_commands.app, ["load", str(preset)])
+
+    assert result.exit_code == 0
+    assert len(sends) == 1
+    assert "sample rate 384000 Hz (verified)" in result.output
+
+
+def test_preset_rejects_sample_rate_missing_from_device_capabilities(monkeypatch, tmp_path):
+    preset = tmp_path / "unsupported-rate.xml"
+    _write_preset(preset, [{"name": "Device", "sample_rate": 96000}])
+    devices = {
+        "device.local.": _preset_device(
+            "Device",
+            supported_sample_rates=[48000],
+        )
+    }
+    sends = []
+
+    async def send(*args, **kwargs):
+        sends.append((args, kwargs))
+
+    _install_preset_context(monkeypatch, devices, send)
+
+    result = runner.invoke(preset_commands.app, ["load", str(preset)])
+
+    assert result.exit_code == 1
+    assert "device reports supported sample rates [48000]" in result.output
+    assert sends == []
 
 
 def test_preset_preflight_rejects_incomplete_static_interface(monkeypatch, tmp_path):

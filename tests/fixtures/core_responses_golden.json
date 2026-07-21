@@ -40,6 +40,8 @@
     "parsed": {
       "sample_rate": 48000,
       "latency_ns": 1000000,
+      "configured_latency_ns": 1000000,
+      "active_latency_ns": 1000000,
       "default_latency_ns": 1000000,
       "min_latency_ns": 1000000,
       "max_latency_ns": 20312500,
@@ -92,6 +94,8 @@
     "parsed": {
       "sample_rate": 48000,
       "latency_ns": 1000000,
+      "configured_latency_ns": 1000000,
+      "active_latency_ns": 1000000,
       "default_latency_ns": 1000000,
       "min_latency_ns": 150000,
       "max_latency_ns": 21333334,
@@ -189,5 +193,37 @@
         96000
       ]
     }
+  },
+  "encoding_status_packet_204720": {
+    "hex": "ffff003c21020000001dc11073320000417564696e617465072400820000000000180003000000180000000000020000000000180000001000000020",
+    "kind": "encoding_status",
+    "parsed": {
+      "current_encoding": 24,
+      "supported_encodings": [
+        24,
+        16,
+        32
+      ]
+    }
+  },
+  "encoding_status_packet_645566": {
+    "hex": "ffff003479b20000001dc1fffe50cac5417564696e61746507380082000000000018000100000018000000180001000000000018",
+    "kind": "encoding_status",
+    "parsed": {
+      "current_encoding": 24,
+      "supported_encodings": [
+        24
+      ]
+    }
+  },
+  "aes67_configured_packet_1479697": {
+    "hex": "28090094003611000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f42400f424000000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480",
+    "kind": "aes67_configured",
+    "parsed": false
+  },
+  "aes67_unsupported_placeholder_packet_9088832": {
+    "hex": "2729008c006711000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110002030300048021007c00f000000000806000220001000000630000006400000065000002220212003000008321001e8480000f4240000f4240028b0aab0003d09000000000000000000000000000000000",
+    "kind": "aes67_configured",
+    "parsed": null
   }
 }

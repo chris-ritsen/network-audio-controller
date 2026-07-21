@@ -5,6 +5,7 @@ import struct
 from netaudio.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.events import DanteEvent, EventType
+from netaudio.dante.latency import unavailable_latency_controls
 from netaudio.dante.services.notification import (
     NOTIFICATION_AES67_STATUS,
     NOTIFICATION_CLEAR_CONFIG_STATUS,
@@ -50,7 +51,7 @@ class DanteStateService:
         app.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
         app.on_notification(NOTIFICATION_TX_LABEL_CHANGE, self._on_channel_name_changed)
         app.on_notification(NOTIFICATION_SAMPLE_RATE_STATUS, self._on_sample_rate_status)
-        app.on_notification(NOTIFICATION_ENCODING_STATUS, self._on_controls_changed)
+        app.on_notification(NOTIFICATION_ENCODING_STATUS, self._on_encoding_status)
         app.on_notification(NOTIFICATION_INTERFACE_STATUS, self._on_controls_changed)
         app.on_notification(NOTIFICATION_PROPERTY_CHANGE, self._on_controls_changed)
         app.on_notification(NOTIFICATION_DEVICE_REBOOT, self._on_device_reboot)
@@ -150,7 +151,10 @@ class DanteStateService:
             return
         await self.fetch_device_controls(event.server_name)
         if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and device.ipv4:
-            await self._refresh_sample_rate_status(device, "configuration cleared")
+            await asyncio.gather(
+                self._refresh_sample_rate_status(device, "configuration cleared"),
+                self._refresh_encoding_status(device, "configuration cleared"),
+            )
 
     async def _on_controls_changed(self, event: DanteEvent) -> None:
         if event.data.get("state_applied"):
@@ -160,19 +164,61 @@ class DanteStateService:
         await self.refetch_device_controls(event.server_name)
 
     async def _on_sample_rate_status(self, event: DanteEvent) -> None:
-        if event.data.get("state_applied") or event.data.get("conmon_response"):
+        if event.data.get("conmon_response"):
+            if event.data.get("current_value_changed"):
+                device = self._online_device(event.server_name)
+                if device:
+                    await self._refresh_settings_after_sample_rate_change(device)
+            return
+        if event.data.get("state_applied"):
             return
         device = self._online_device(event.server_name)
         if not device or not device.ipv4:
             return
         await self._refresh_sample_rate_status(device, "sample rate changed")
 
+    async def _refresh_settings_after_sample_rate_change(self, device) -> None:
+        logger.info(f"Re-fetching device settings for {device.server_name} (sample rate changed)")
+        async with self._lock_for(device.server_name):
+            device.apply_controls(unavailable_latency_controls())
+            try:
+                settings = await device.operations.get_device_settings()
+                if settings is None:
+                    logger.warning(f"Device settings unavailable for {device.server_name} after sample rate changed")
+            except Exception as exception:
+                logger.warning(f"Error re-fetching device settings for {device.server_name}: {exception}")
+        self._emit_device_updated(device)
+
     async def _refresh_sample_rate_status(self, device, reason: str) -> None:
-        logger.info(f"Re-fetching sample rate status for {device.server_name} ({reason})")
+        await self._refresh_capability_status(
+            device,
+            reason,
+            "sample rate",
+            self.application.probe_sample_rate_status,
+        )
+
+    async def _on_encoding_status(self, event: DanteEvent) -> None:
+        if event.data.get("state_applied") or event.data.get("conmon_response"):
+            return
+        device = self._online_device(event.server_name)
+        if not device or not device.ipv4:
+            return
+        await self._refresh_encoding_status(device, "encoding changed")
+
+    async def _refresh_encoding_status(self, device, reason: str) -> None:
+        await self._refresh_capability_status(
+            device,
+            reason,
+            "encoding",
+            self.application.probe_encoding_status,
+        )
+
+    async def _refresh_capability_status(self, device, reason: str, capability_name: str, probe_status) -> None:
+        logger.info(f"Re-fetching {capability_name} status for {device.server_name} ({reason})")
         try:
-            await self.application.probe_sample_rate_status(str(device.ipv4))
+            await probe_status(str(device.ipv4))
         except Exception as exception:
-            logger.warning(f"Error re-fetching sample rate status for {device.server_name}: {exception}")
+            logger.warning(f"Error re-fetching {capability_name} status for {device.server_name}: {exception}")
 
     async def _on_device_reboot(self, event: DanteEvent) -> None:
         server_name = event.server_name
@@ -205,7 +251,10 @@ class DanteStateService:
                     device.aes67_configured = aes67_configured
         except Exception as exception:
             logger.warning(f"Error re-fetching AES67 for {server_name}: {exception}")
-        await self._refresh_sample_rate_status(device, "AES67 status changed")
+        await asyncio.gather(
+            self._refresh_sample_rate_status(device, "AES67 status changed"),
+            self._refresh_encoding_status(device, "AES67 status changed"),
+        )
         self._emit_device_updated(device)
 
     async def _on_settings_change(self, event: DanteEvent) -> None:
@@ -344,8 +393,13 @@ class DanteStateService:
                 except Exception as exception:
                     logger.warning(f"Error probing AES67 for {server_name}: {exception}")
 
+                capability_tasks = []
                 if device.supported_sample_rates is None:
-                    await self._refresh_sample_rate_status(device, "device discovered")
+                    capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
+                if device.supported_encodings is None:
+                    capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
+                if capability_tasks:
+                    await asyncio.gather(*capability_tasks)
 
                 try:
                     device_ip = str(device.ipv4)

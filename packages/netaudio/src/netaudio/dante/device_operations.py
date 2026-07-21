@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 
-from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.latency import latency_controls_from_settings
 
 logger = logging.getLogger("netaudio")
 
@@ -43,10 +44,8 @@ class DanteDeviceOperations:
         return response
 
     async def identify(self):
-        command_identify_args = self.device.commands.command_identify()
-        packet = command_identify_args[0]
-        port = command_identify_args[2]
-        await self.device.dante_send_command(packet, port=port)
+        command_arguments = self.device.commands.command_identify()
+        await self._send_without_response(command_arguments)
 
     async def reboot(self, host_mac=None, retries=3, retry_delay=0.1):
         if host_mac is None:
@@ -57,7 +56,10 @@ class DanteDeviceOperations:
         await self._send_repeated_settings_command(packet, port, retries, retry_delay)
 
     async def set_latency(self, latency):
-        cmd_args = self.device.commands.command_set_latency(latency)
+        latency_milliseconds = float(latency)
+        if not math.isfinite(latency_milliseconds) or latency_milliseconds < 0:
+            raise ValueError("latency must be a finite, nonnegative number")
+        cmd_args = self.device.commands.command_set_latency(latency_milliseconds)
         response = await self.device.dante_command(*cmd_args, logical_command_name="set_latency")
 
         return response
@@ -90,11 +92,15 @@ class DanteDeviceOperations:
             interval_milliseconds,
         )
 
-    async def set_encoding(self, encoding):
-        cmd_args = self.device.commands.command_set_encoding(encoding)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="set_encoding")
+    async def _send_without_response(self, command_arguments):
+        await self.device.dante_send_command(*command_arguments)
 
-        return response
+    async def set_encoding(self, encoding):
+        supported_encodings = self.device.supported_encodings
+        if supported_encodings is not None and encoding not in supported_encodings:
+            raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
+        command_arguments = self.device.commands.command_set_encoding(encoding)
+        await self._send_without_response(command_arguments)
 
     async def set_sample_rate(self, sample_rate):
         supported_sample_rates = self.device.supported_sample_rates
@@ -102,10 +108,8 @@ class DanteDeviceOperations:
             raise ValueError(
                 f"requested sample rate {sample_rate} is not supported; device reports {supported_sample_rates}"
             )
-        cmd_args = self.device.commands.command_set_sample_rate(sample_rate)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="set_sample_rate")
-
-        return response
+        command_arguments = self.device.commands.command_set_sample_rate(sample_rate)
+        await self._send_without_response(command_arguments)
 
     async def add_subscription(self, rx_channel, tx_channel, tx_device):
         tx_channel_name = tx_channel.friendly_name if tx_channel.friendly_name else tx_channel.name
@@ -197,14 +201,10 @@ class DanteDeviceOperations:
         import asyncio
 
         settings = await asyncio.to_thread(client.get_device_settings)
+        controls = latency_controls_from_settings(settings)
         if settings.get("sample_rate"):
-            self.device.sample_rate = settings["sample_rate"]
-        if settings.get("latency_ns") is not None:
-            self.device.latency = nanoseconds_to_milliseconds(settings["latency_ns"])
-        if settings.get("min_latency_ns") is not None:
-            self.device.min_latency = nanoseconds_to_milliseconds(settings["min_latency_ns"])
-        if settings.get("max_latency_ns") is not None:
-            self.device.max_latency = nanoseconds_to_milliseconds(settings["max_latency_ns"])
+            controls["sample_rate"] = settings["sample_rate"]
+        self.device.apply_controls(controls)
         return settings
 
     async def get_aes67_configured(self):
