@@ -616,6 +616,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
                 out_capacity,
                 out_length,
             ),
+            "encoding_status" => write_optional_json(
+                responses::parse_encoding_status(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
             "result_code" => write_optional_json(
                 responses::parse_result_code(bytes),
                 out_buffer,
@@ -1070,6 +1076,24 @@ mod tests {
         }
     }
 
+    fn parse_response_call(kind: &str, data: &[u8]) -> (NetaudioStatus, Vec<u8>) {
+        let kind = CString::new(kind).unwrap();
+        let mut output = vec![0u8; 1024];
+        let mut output_length = 0usize;
+        let status = unsafe {
+            netaudio_parse_response(
+                kind.as_ptr(),
+                data.as_ptr(),
+                data.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                &mut output_length,
+            )
+        };
+        output.truncate(output_length);
+        (status, output)
+    }
+
     #[test]
     fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
         for status in [-1, 31, i32::MAX] {
@@ -1222,7 +1246,6 @@ mod tests {
 
     #[test]
     fn interface_status_response_kind_serializes_expected_schema() {
-        let kind = CString::new("interface_status").unwrap();
         let mut data = [0u8; 0x40];
         data[0..2].copy_from_slice(&0xFFFFu16.to_be_bytes());
         data[2..4].copy_from_slice(&0x40u16.to_be_bytes());
@@ -1230,25 +1253,30 @@ mod tests {
         data[24] = 0x07;
         data[26..28]
             .copy_from_slice(&crate::responses::CONMON_OPCODE_INTERFACE_STATUS.to_be_bytes());
-        let mut output = vec![0u8; 256];
-        let mut output_length = 0usize;
-
-        let status = unsafe {
-            netaudio_parse_response(
-                kind.as_ptr(),
-                data.as_ptr(),
-                data.len(),
-                output.as_mut_ptr(),
-                output.len(),
-                &mut output_length,
-            )
-        };
+        let (status, output) = parse_response_call("interface_status", &data);
 
         assert_eq!(status, NetaudioStatus::Ok);
-        let json: serde_json::Value = serde_json::from_slice(&output[..output_length]).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(json["interfaces"], serde_json::json!([]));
         assert_eq!(json["reboot_required"], false);
         assert_eq!(json["pending_config"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn encoding_status_response_kind_serializes_expected_schema() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x3C, 0x21, 0x02, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x10, 0x73, 0x32,
+            0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x24, 0x00, 0x82,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x03, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x10,
+            0x00, 0x00, 0x00, 0x20,
+        ];
+        let (status, output) = parse_response_call("encoding_status", &data);
+
+        assert_eq!(status, NetaudioStatus::Ok);
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(json["current_encoding"], 24);
+        assert_eq!(json["supported_encodings"], serde_json::json!([24, 16, 32]));
     }
 
     #[test]
@@ -1291,11 +1319,11 @@ mod tests {
                 NetaudioStatus::InvalidLatency,
             ),
             (
-                r#"{"command":"set_sample_rate","sample_rate":16777216}"#,
+                r#"{"command":"set_sample_rate","sample_rate":0}"#,
                 NetaudioStatus::InvalidSampleRate,
             ),
             (
-                r#"{"command":"set_encoding","encoding":20}"#,
+                r#"{"command":"set_encoding","encoding":0}"#,
                 NetaudioStatus::InvalidEncoding,
             ),
             (

@@ -295,8 +295,16 @@ class NetaudioDaemon:
             "ip": str(device.ipv4) if device.ipv4 else "",
             "mac": device.mac_address or "",
             "sample_rate": device.sample_rate,
+            "supported_sample_rates": device.supported_sample_rates,
             "encoding": device.encoding,
+            "supported_encodings": device.supported_encodings,
             "latency": device.latency,
+            "active_latency": device.active_latency,
+            "configured_latency": device.configured_latency,
+            "default_latency": device.default_latency,
+            "min_latency": device.min_latency,
+            "max_latency": device.max_latency,
+            "standard_latency_choices": device.standard_latency_choices,
         }
 
         if device.tx_channels:

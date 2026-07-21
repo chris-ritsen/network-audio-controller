@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.daemon.relay import RelayServer
+from netaudio.dante.services.notification import DanteNotificationService
 
 
 class FakeWriter:
@@ -49,6 +50,10 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         flow_protocol_id=None,
         is_locked=False,
         interface_pending_config=None,
+        sample_rate=None,
+        supported_sample_rates=None,
+        encoding=None,
+        supported_encodings=None,
         _arc_port=MagicMock(return_value=4440),
         operations=MagicMock(),
     )
@@ -83,8 +88,6 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         "set_channel_name",
         "reset_channel_name",
         "set_latency",
-        "set_sample_rate",
-        "set_encoding",
         "set_gain_level",
     ):
         setattr(device.operations, method, AsyncMock(return_value=arc_success))
@@ -94,11 +97,15 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
 
 
 def make_relay(devices=None, metering=None, on_shutdown=None):
+    notifications = DanteNotificationService(dispatcher=MagicMock())
     application = SimpleNamespace(
         devices=devices or {},
         dispatcher=MagicMock(),
+        notifications=notifications,
         settings=MagicMock(),
         mark_device_offline=MagicMock(),
+        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
+        probe_encoding_status=AsyncMock(return_value=(24, [16, 24, 32])),
         set_preferred_leader_state=AsyncMock(side_effect=lambda _address, expected: expected),
         set_aes67_state=AsyncMock(side_effect=lambda _device, expected: (False, expected)),
         set_interface_dhcp=AsyncMock(return_value=[{"mode": "dynamic"}]),
@@ -118,7 +125,9 @@ def make_relay(devices=None, metering=None, on_shutdown=None):
         refresh_device=AsyncMock(),
         refresh_all_devices=AsyncMock(),
     )
-    return RelayServer(application, state, metering=metering, on_shutdown=on_shutdown)
+    relay = RelayServer(application, state, metering=metering, on_shutdown=on_shutdown)
+    relay.audio_capability_verification_timeout = 0.05
+    return relay
 
 
 async def post(relay, path, body):
@@ -210,8 +219,6 @@ class TestMutationVerification:
         ("path", "body", "method_name"),
         [
             ("/set-latency", {"device": "dev1", "latency": 1.0}, "set_latency"),
-            ("/set-sample-rate", {"device": "dev1", "sample_rate": 48000}, "set_sample_rate"),
-            ("/set-encoding", {"device": "dev1", "encoding": 24}, "set_encoding"),
             (
                 "/set-gain",
                 {"device": "dev1", "channel_number": 1, "gain_level": 3, "device_type": "input"},
@@ -229,6 +236,254 @@ class TestMutationVerification:
 
         assert status == 409
         assert response["result_code"] == 0x0600
+
+    @pytest.mark.parametrize(
+        ("path", "body", "method_name", "probe_name", "expected_status"),
+        [
+            (
+                "/set-sample-rate",
+                {"device": "dev1", "sample_rate": 48000},
+                "set_sample_rate",
+                "probe_sample_rate_status",
+                (48000, [48000, 96000]),
+            ),
+            (
+                "/set-encoding",
+                {"device": "dev1", "encoding": 24},
+                "set_encoding",
+                "probe_encoding_status",
+                (24, [16, 24, 32]),
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_mutations_require_matching_readback(
+        self,
+        path,
+        body,
+        method_name,
+        probe_name,
+        expected_status,
+    ):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        getattr(relay.application, probe_name).return_value = expected_status
+
+        status, response = await post(relay, path, body)
+
+        assert status == 200
+        assert response == {"success": True}
+        requested_value = next(value for field_name, value in body.items() if field_name != "device")
+        getattr(device.operations, method_name).assert_awaited_once_with(requested_value)
+        getattr(relay.application, probe_name).assert_awaited_once_with("192.168.1.50")
+
+    @pytest.mark.parametrize(
+        ("path", "body", "method_name", "probe_name", "capability_name", "old_status", "requested_status"),
+        [
+            (
+                "/set-sample-rate",
+                {"device": "dev1", "sample_rate": 96000},
+                "set_sample_rate",
+                "probe_sample_rate_status",
+                "sample_rate",
+                (48000, [48000, 96000]),
+                (96000, [48000, 96000]),
+            ),
+            (
+                "/set-encoding",
+                {"device": "dev1", "encoding": 32},
+                "set_encoding",
+                "probe_encoding_status",
+                "encoding",
+                (24, [16, 24, 32]),
+                (32, [16, 24, 32]),
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_mutation_ignores_old_status_until_requested_value_arrives(
+        self,
+        path,
+        body,
+        method_name,
+        probe_name,
+        capability_name,
+        old_status,
+        requested_status,
+    ):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        old_status_observed = asyncio.Event()
+
+        async def probe_status(_device_ip_address):
+            relay.application.notifications._notify_capability_value_waiters(
+                capability_name,
+                "192.168.1.50",
+                old_status[0],
+                old_status[1],
+            )
+            old_status_observed.set()
+            return old_status
+
+        setattr(relay.application, probe_name, AsyncMock(side_effect=probe_status))
+        request_task = asyncio.create_task(post(relay, path, body))
+        await old_status_observed.wait()
+
+        assert not request_task.done()
+        relay.application.notifications._notify_capability_value_waiters(
+            capability_name,
+            "192.168.1.99",
+            requested_status[0],
+            requested_status[1],
+        )
+        relay.application.notifications._notify_capability_value_waiters(
+            "encoding" if capability_name == "sample_rate" else "sample_rate",
+            "192.168.1.50",
+            requested_status[0],
+            requested_status[1],
+        )
+        assert not request_task.done()
+        relay.application.notifications._notify_capability_value_waiters(
+            capability_name,
+            "192.168.1.50",
+            requested_status[0],
+            requested_status[1],
+        )
+
+        status, response = await request_task
+
+        assert status == 200
+        assert response == {"success": True}
+        requested_value = next(value for field_name, value in body.items() if field_name != "device")
+        getattr(device.operations, method_name).assert_awaited_once_with(requested_value)
+
+    @pytest.mark.parametrize(
+        ("path", "body", "probe_name", "observed", "supported"),
+        [
+            (
+                "/set-sample-rate",
+                {"device": "dev1", "sample_rate": 96000},
+                "probe_sample_rate_status",
+                48000,
+                [48000, 96000],
+            ),
+            (
+                "/set-encoding",
+                {"device": "dev1", "encoding": 32},
+                "probe_encoding_status",
+                24,
+                [16, 24, 32],
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_mutation_mismatch_is_conflict(
+        self,
+        path,
+        body,
+        probe_name,
+        observed,
+        supported,
+    ):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        getattr(relay.application, probe_name).return_value = (observed, supported)
+
+        status, response = await post(relay, path, body)
+
+        assert status == 409
+        assert response["observed"] == observed
+        assert response["supported"] == supported
+
+    @pytest.mark.parametrize(
+        ("path", "body", "probe_name", "description"),
+        [
+            (
+                "/set-sample-rate",
+                {"device": "dev1", "sample_rate": 48000},
+                "probe_sample_rate_status",
+                "sample rate",
+            ),
+            (
+                "/set-encoding",
+                {"device": "dev1", "encoding": 24},
+                "probe_encoding_status",
+                "encoding",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_mutation_missing_readback_is_gateway_timeout(
+        self,
+        path,
+        body,
+        probe_name,
+        description,
+    ):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        getattr(relay.application, probe_name).return_value = None
+
+        status, response = await post(relay, path, body)
+
+        assert status == 504
+        assert response == {"error": f"{description} readback was unavailable"}
+
+    @pytest.mark.parametrize(
+        ("path", "body", "method_name", "probe_name"),
+        [
+            (
+                "/set-sample-rate",
+                {"device": "dev1", "sample_rate": 96000},
+                "set_sample_rate",
+                "probe_sample_rate_status",
+            ),
+            (
+                "/set-encoding",
+                {"device": "dev1", "encoding": 32},
+                "set_encoding",
+                "probe_encoding_status",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_rejection_is_conflict_without_readback(
+        self,
+        path,
+        body,
+        method_name,
+        probe_name,
+    ):
+        device = make_device()
+        getattr(device.operations, method_name).side_effect = ValueError("requested value is not supported")
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(relay, path, body)
+
+        assert status == 409
+        assert response == {"error": "requested value is not supported"}
+        getattr(relay.application, probe_name).assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            ("/set-sample-rate", {"device": "dev1", "sample_rate": 0}),
+            ("/set-sample-rate", {"device": "dev1", "sample_rate": True}),
+            ("/set-encoding", {"device": "dev1", "encoding": "24"}),
+            ("/set-encoding", {"device": "dev1", "encoding": 0x100000000}),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_audio_capability_mutation_rejects_invalid_wire_values(self, path, body):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(relay, path, body)
+
+        assert status == 400
+        assert "must be an integer" in response["error"]
+        device.operations.set_sample_rate.assert_not_awaited()
+        device.operations.set_encoding.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_subscription_rejection_is_not_reported_as_success(self):

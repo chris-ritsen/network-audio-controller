@@ -15,7 +15,12 @@ def make_device():
     device.model_id = "DAI2"
     device.sample_rate = 48000
     device.supported_sample_rates = [44100, 48000]
+    device.encoding = 24
+    device.supported_encodings = [24, 16, 32]
     device.latency = 0.15
+    device.active_latency = 0.15
+    device.configured_latency = 0.25
+    device.default_latency = 1.0
     device.min_latency = 0.15
     device.max_latency = 21.333334
     device.is_locked = False
@@ -76,9 +81,15 @@ class TestSerializerRoundtrip:
         assert restored.model_id == "DAI2"
         assert restored.sample_rate == 48000
         assert restored.supported_sample_rates == [44100, 48000]
+        assert restored.encoding == 24
+        assert restored.supported_encodings == [24, 16, 32]
         assert restored.latency == 0.15
+        assert restored.active_latency == 0.15
+        assert restored.configured_latency == 0.25
+        assert restored.default_latency == 1.0
         assert restored.min_latency == 0.15
         assert restored.max_latency == 21.333334
+        assert restored.standard_latency_choices == [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
         assert restored.is_locked is False
         assert restored.tx_count == 2
         assert restored.rx_count == 2
