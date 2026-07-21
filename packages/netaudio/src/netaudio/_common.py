@@ -59,6 +59,9 @@ class CoreCommandSender:
         self._session_id = session_id
         self._dispatcher = None
         self._notifications = None
+        self._notification_start_lock = asyncio.Lock()
+        self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._client_request_locks: dict[str, asyncio.Lock] = {}
 
     async def __call__(
         self,
@@ -71,54 +74,59 @@ class CoreCommandSender:
         interval_ms: int = 0,
     ) -> bytes | None:
         address = str(device_ip_address)
-        client = self._clients.get(address)
-        if client is None:
-            client = self._core.CoreClient(address)
-            if self._host_mac:
-                client.set_host_mac(self._host_mac)
-            client.observer = self._observer
-            self._clients[address] = client
-        return await asyncio.to_thread(
-            client.request,
-            packet,
-            port,
-            expect_response,
-            repeat,
-            interval_ms,
-        )
+        request_lock = self._client_request_locks.setdefault(address, asyncio.Lock())
+        async with request_lock:
+            client = self._clients.get(address)
+            if client is None:
+                client = self._core.CoreClient(address)
+                if self._host_mac:
+                    client.set_host_mac(self._host_mac)
+                client.observer = self._observer
+                self._clients[address] = client
+            return await asyncio.to_thread(
+                client.request,
+                packet,
+                port,
+                expect_response,
+                repeat,
+                interval_ms,
+            )
 
     async def _ensure_notifications(self):
         if self._notifications is not None:
             return self._notifications
+        async with self._notification_start_lock:
+            if self._notifications is not None:
+                return self._notifications
 
-        from netaudio.common.app_config import settings as app_settings
-        from netaudio.dante.events import DanteEventDispatcher
-        from netaudio.dante.services.notification import DanteNotificationService
+            from netaudio.common.app_config import settings as app_settings
+            from netaudio.dante.events import DanteEventDispatcher
+            from netaudio.dante.services.notification import DanteNotificationService
 
-        def device_lookup(device_ip_address):
-            for device in self._devices.values():
-                if device.ipv4 and str(device.ipv4) == device_ip_address:
-                    return device
-            return None
+            def device_lookup(device_ip_address):
+                for device in self._devices.values():
+                    if device.ipv4 and str(device.ipv4) == device_ip_address:
+                        return device
+                return None
 
-        dispatcher = DanteEventDispatcher()
-        notifications = DanteNotificationService(
-            dispatcher=dispatcher,
-            device_lookup=device_lookup,
-            packet_store=self._packet_store,
-            interface_ip=app_settings.interface_ip,
-            dissect=_get_state().dissect,
-        )
-        notifications.session_id = self._session_id
-        await dispatcher.start()
-        try:
-            await notifications.start()
-        except BaseException:
-            await dispatcher.stop()
-            raise
-        self._dispatcher = dispatcher
-        self._notifications = notifications
-        return notifications
+            dispatcher = DanteEventDispatcher()
+            notifications = DanteNotificationService(
+                dispatcher=dispatcher,
+                device_lookup=device_lookup,
+                packet_store=self._packet_store,
+                interface_ip=app_settings.interface_ip,
+                dissect=_get_state().dissect,
+            )
+            notifications.session_id = self._session_id
+            await dispatcher.start()
+            try:
+                await notifications.start()
+            except BaseException:
+                await dispatcher.stop()
+                raise
+            self._dispatcher = dispatcher
+            self._notifications = notifications
+            return notifications
 
     async def send_and_wait_for_notification(
         self,
@@ -142,6 +150,99 @@ class CoreCommandSender:
         finally:
             notifications.unregister_notification_waiter(waiter)
 
+    async def send_and_wait_for_capability_value(
+        self,
+        packet: bytes,
+        device_ip_address,
+        port: int,
+        capability_name: str,
+        expected_value: int,
+        probe_status,
+        *,
+        capability_timeout: float = 2.0,
+        **send_options,
+    ) -> tuple[int, list[int]] | None:
+        from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
+
+        notifications = await self._ensure_notifications()
+        address = str(device_ip_address)
+
+        async def mutate() -> None:
+            await self(packet, address, port, **send_options)
+
+        return await mutate_and_wait_for_capability_value(
+            notifications,
+            capability_name,
+            address,
+            expected_value,
+            mutate,
+            probe_status,
+            capability_timeout,
+        )
+
+    async def _probe_audio_capability(
+        self,
+        capability_name: str,
+        device_ip_address,
+        command_builder,
+        register_waiter_name: str,
+        get_result_name: str,
+        unregister_waiter_name: str,
+        capability_description: str,
+        timeout: float,
+    ):
+        address = str(device_ip_address)
+        probe_lock = self._capability_probe_locks.setdefault((capability_name, address), asyncio.Lock())
+        async with probe_lock:
+            notifications = await self._ensure_notifications()
+            waiter = getattr(notifications, register_waiter_name)(address)
+            try:
+                packet, _, port = command_builder()
+                await self(packet, address, port, expect_response=False)
+                try:
+                    await asyncio.wait_for(waiter.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    result = getattr(notifications, get_result_name)(address)
+                    if result is None:
+                        raise RuntimeError(f"{capability_description} readback timed out for {address}")
+                    return result
+                result = getattr(notifications, get_result_name)(address)
+                if result is None:
+                    raise RuntimeError(f"{capability_description} readback was unavailable for {address}")
+                return result
+            finally:
+                getattr(notifications, unregister_waiter_name)(address)
+
+    async def probe_sample_rate_status(self, device_ip_address, timeout: float = 2.0):
+        from netaudio.dante.device_commands import DanteDeviceCommands
+
+        commands = DanteDeviceCommands(host_mac=self._host_mac)
+        return await self._probe_audio_capability(
+            "sample_rate",
+            device_ip_address,
+            commands.command_probe_sample_rate,
+            "register_sample_rate_waiter",
+            "get_sample_rate_result",
+            "unregister_sample_rate_waiter",
+            "sample rate",
+            timeout,
+        )
+
+    async def probe_encoding_status(self, device_ip_address, timeout: float = 2.0):
+        from netaudio.dante.device_commands import DanteDeviceCommands
+
+        commands = DanteDeviceCommands(host_mac=self._host_mac)
+        return await self._probe_audio_capability(
+            "encoding",
+            device_ip_address,
+            commands.command_probe_encoding,
+            "register_encoding_waiter",
+            "get_encoding_result",
+            "unregister_encoding_waiter",
+            "encoding",
+            timeout,
+        )
+
     async def close(self) -> None:
         notifications = self._notifications
         dispatcher = self._dispatcher
@@ -153,6 +254,8 @@ class CoreCommandSender:
             await dispatcher.stop()
         clients = list(self._clients.values())
         self._clients.clear()
+        self._client_request_locks.clear()
+        self._capability_probe_locks.clear()
         for client in clients:
             client.close()
 
@@ -523,7 +626,9 @@ def _device_to_preset_xml(device: DanteDevice) -> ET.Element:
     if device.encoding:
         _sub_text(element, "encoding", str(device.encoding))
 
-    latency = device.latency
+    latency = device.configured_latency
+    if latency is None and device.active_latency is None:
+        latency = device.latency
     if latency:
         _sub_text(element, "unicast_latency", str(milliseconds_to_microseconds(latency)))
 

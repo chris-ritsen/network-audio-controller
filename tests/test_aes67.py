@@ -3,6 +3,7 @@ import struct
 
 import pytest
 
+from netaudio import core
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
@@ -17,42 +18,28 @@ from netaudio.dante.services.notification import (
 
 
 class TestAES67ConfiguredFromARC1100:
-    AES67_MODE_OFFSET = 0x53
-
-    def _build_latency_config_response(self, aes67_byte):
-        response = bytearray(148)
+    def _build_latency_config_response(self, records):
+        response = bytearray(12 + len(records) * 4)
         struct.pack_into(">H", response, 0, 0x2809)
-        struct.pack_into(">H", response, 2, 148)
+        struct.pack_into(">H", response, 2, len(response))
         struct.pack_into(">H", response, 6, 0x1100)
         struct.pack_into(">H", response, 8, 0x0001)
-        response[self.AES67_MODE_OFFSET] = aes67_byte
+        response[11] = len(records)
+        for record_index, (info_code, inline_value) in enumerate(records):
+            struct.pack_into(">HH", response, 12 + record_index * 4, info_code, inline_value)
         return bytes(response)
 
-    def test_byte_0x01_means_configured_disabled(self):
-        response = self._build_latency_config_response(0x01)
-        assert response[self.AES67_MODE_OFFSET] == 0x01
+    def test_property_identity_survives_record_reordering(self):
+        enabled = self._build_latency_config_response([(0x0211, 4), (0x0063, 3), (0x0310, 4)])
+        disabled = self._build_latency_config_response([(0x0063, 1), (0x0211, 4)])
 
-    def test_byte_0x03_means_configured_enabled(self):
-        response = self._build_latency_config_response(0x03)
-        assert response[self.AES67_MODE_OFFSET] == 0x03
+        assert core.parse_response("aes67_configured", enabled) is True
+        assert core.parse_response("aes67_configured", disabled) is False
 
-    def test_response_parsing_disabled(self):
-        response = self._build_latency_config_response(0x01)
-        aes67_byte = response[self.AES67_MODE_OFFSET]
-        assert aes67_byte == 0x01
-        configured = aes67_byte == 0x03
-        assert configured is False
+    def test_zero_placeholder_reports_unavailable(self):
+        response = self._build_latency_config_response([(0x0000, 0x0063), (0x0211, 4)])
 
-    def test_response_parsing_enabled(self):
-        response = self._build_latency_config_response(0x03)
-        aes67_byte = response[self.AES67_MODE_OFFSET]
-        assert aes67_byte == 0x03
-        configured = aes67_byte == 0x03
-        assert configured is True
-
-    def test_response_too_short_returns_none(self):
-        response = bytes(0x53)
-        assert len(response) <= self.AES67_MODE_OFFSET
+        assert core.parse_response("aes67_configured", response) is None
 
     def test_query_latency_config_packet_structure(self):
         commands = DanteDeviceCommands()

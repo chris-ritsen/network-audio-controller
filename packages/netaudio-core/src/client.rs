@@ -319,9 +319,7 @@ impl Client {
         let transaction_id = self.next_transaction_id();
         let packet = commands::build_query_latency_config(transaction_id)?;
         let response = self.request(&packet, transaction_id)?;
-        parse_aes67_configured(&response)
-            .map(Some)
-            .ok_or(ClientError::MalformedResponse)
+        parse_aes67_configured(&response).ok_or(ClientError::MalformedResponse)
     }
 
     pub fn get_channel_count(&mut self) -> Result<ChannelCount, ClientError> {

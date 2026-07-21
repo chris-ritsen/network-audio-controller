@@ -13,12 +13,14 @@ from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.services.notification import (
     NOTIFICATION_AES67_STATUS,
+    NOTIFICATION_ENCODING_STATUS,
     NOTIFICATION_LATENCY_CHANGE,
     NOTIFICATION_SAMPLE_RATE_STATUS,
     NOTIFICATION_SETTINGS_CHANGE,
 )
 
 from netaudio._common import (
+    ReadbackResult,
     _command_context,
     _discover,
     _get_arc_port,
@@ -129,8 +131,72 @@ async def _read_aes67_configured(device):
 
 
 async def _read_latency_milliseconds(device):
-    latency_nanoseconds = await _read_settings_value(device, "latency_ns")
+    settings = await device.operations.get_device_settings()
+    if not isinstance(settings, dict):
+        raise RuntimeError("active latency readback was unavailable")
+    latency_nanoseconds = settings.get("active_latency_ns")
+    if latency_nanoseconds is None:
+        raise RuntimeError("active latency readback was unavailable")
     return nanoseconds_to_milliseconds(latency_nanoseconds)
+
+
+async def _read_sample_rate_status_result(send, device):
+    current_sample_rate, supported_sample_rates = await send.probe_sample_rate_status(device.ipv4)
+    device.sample_rate = current_sample_rate
+    device.supported_sample_rates = supported_sample_rates
+    return current_sample_rate, supported_sample_rates
+
+
+async def _read_sample_rate_status(send, device):
+    current_sample_rate, _ = await _read_sample_rate_status_result(send, device)
+    return current_sample_rate
+
+
+async def _read_encoding_status_result(send, device):
+    current_encoding, supported_encodings = await send.probe_encoding_status(device.ipv4)
+    device.encoding = current_encoding
+    device.supported_encodings = supported_encodings
+    return current_encoding, supported_encodings
+
+
+async def _read_encoding_status(send, device):
+    current_encoding, _ = await _read_encoding_status_result(send, device)
+    return current_encoding
+
+
+def _targets_supporting_value(
+    targets,
+    requested_value,
+    supported_values_field,
+    fallback_values,
+    capability_description,
+):
+    supported_targets = []
+    failures = 0
+    for server_name, device in targets:
+        label = device.name or server_name
+        supported_values = getattr(device, supported_values_field)
+        if supported_values is None:
+            if requested_value in fallback_values:
+                supported_targets.append((server_name, device))
+                continue
+            typer.echo(
+                f"Error: {capability_description} capabilities are unavailable for {label}; "
+                f"cannot verify that {requested_value} is supported.",
+                err=True,
+            )
+            failures += 1
+            continue
+        if requested_value not in supported_values:
+            typer.echo(
+                f"Error: {label} reports supported {capability_description} values {supported_values}; "
+                f"{requested_value} is not supported.",
+                err=True,
+            )
+            failures += 1
+            continue
+        supported_targets.append((server_name, device))
+    return supported_targets, failures
 
 
 async def _send_verified_change(
@@ -144,12 +210,37 @@ async def _send_verified_change(
     success_message,
     notification_ids,
     send_kwargs=None,
+    capability_name=None,
+    probe_status_for=None,
 ):
     send_kwargs = send_kwargs or {}
 
     async def _send_and_read(server_name, device):
         label = device.name or server_name
         try:
+            capability_sender = getattr(send, "send_and_wait_for_capability_value", None)
+            if capability_name is not None and probe_status_for is not None and capability_sender is not None:
+                status = await capability_sender(
+                    packet,
+                    device.ipv4,
+                    port_for(device),
+                    capability_name,
+                    expected,
+                    lambda: probe_status_for(device),
+                    **send_kwargs,
+                )
+                if status is None:
+                    return label, ReadbackResult(matched=False), None
+                observed_value, _ = status
+                return (
+                    label,
+                    ReadbackResult(
+                        matched=observed_value == expected,
+                        observed=observed_value,
+                        observed_available=True,
+                    ),
+                    None,
+                )
             await send_and_wait_for_notification(
                 send,
                 packet,
@@ -158,6 +249,9 @@ async def _send_verified_change(
                 notification_ids,
                 **send_kwargs,
             )
+        except TimeoutError:
+            result = await readback_after_notification(lambda: read_for(device), expected)
+            return label, result, None
         except Exception as exception:
             return label, None, exception
 
@@ -236,23 +330,34 @@ def sample_rate(
                     output_single(targets[0][1].sample_rate)
                 return
 
-            if rate not in VALID_SAMPLE_RATES:
-                typer.echo(f"Error: invalid sample rate. Must be one of: {VALID_SAMPLE_RATES}", err=True)
+            if rate <= 0 or rate > 0xFFFFFFFF:
+                typer.echo("Error: sample rate must be between 1 and 4294967295 Hz.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+
+            supported_targets, capability_failures = _targets_supporting_value(
+                targets,
+                rate,
+                "supported_sample_rates",
+                VALID_SAMPLE_RATES,
+                "sample rate",
+            )
 
             packet, _, port = commands.command_set_sample_rate(rate)
             failures = await _send_verified_change(
-                targets,
+                supported_targets,
                 send,
                 packet,
                 lambda _device: port,
                 rate,
-                lambda device: _read_settings_value(device, "sample_rate"),
+                lambda device: _read_sample_rate_status(send, device),
                 "sample rate change",
                 lambda label: f"Set sample rate for {label}: {rate} Hz (verified)",
                 (NOTIFICATION_SAMPLE_RATE_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+                send_kwargs={"expect_response": False},
+                capability_name="sample_rate",
+                probe_status_for=lambda device: _read_sample_rate_status_result(send, device),
             )
-            if failures:
+            if failures + capability_failures:
                 raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
@@ -285,18 +390,34 @@ def encoding(
                     output_single(targets[0][1].encoding if targets[0][1].encoding is not None else "N/A")
                 return
 
-            if bits not in VALID_ENCODINGS:
-                typer.echo(f"Error: invalid encoding. Must be one of: {VALID_ENCODINGS}", err=True)
+            if bits <= 0 or bits > 0xFFFFFFFF:
+                typer.echo("Error: encoding value must be between 1 and 4294967295.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            packet, _, port = commands.command_set_encoding(bits)
-            failures = await _send_requested_change(
+            supported_targets, capability_failures = _targets_supporting_value(
                 targets,
-                lambda device: send(packet, device.ipv4, port),
-                "encoding change",
-                lambda label: f"Encoding change requested for {label}: {bits}-bit; not verified.",
+                bits,
+                "supported_encodings",
+                VALID_ENCODINGS,
+                "encoding",
             )
-            if failures:
+
+            packet, _, port = commands.command_set_encoding(bits)
+            failures = await _send_verified_change(
+                supported_targets,
+                send,
+                packet,
+                lambda _device: port,
+                bits,
+                lambda device: _read_encoding_status(send, device),
+                "encoding change",
+                lambda label: f"Set encoding for {label}: {bits}-bit (verified)",
+                (NOTIFICATION_ENCODING_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+                send_kwargs={"expect_response": False},
+                capability_name="encoding",
+                probe_status_for=lambda device: _read_encoding_status_result(send, device),
+            )
+            if failures + capability_failures:
                 raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
@@ -353,7 +474,7 @@ def latency(
                 typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            packet, service_type = commands.command_set_latency(value)
+            packet, _ = commands.command_set_latency(value)
             expected_ns = int(round(value * 1_000_000))
             failures = await _send_verified_change(
                 targets,
@@ -361,7 +482,7 @@ def latency(
                 packet,
                 _get_arc_port,
                 expected_ns,
-                lambda device: _read_settings_value(device, "latency_ns"),
+                lambda device: _read_settings_value(device, "active_latency_ns"),
                 "latency change",
                 lambda label: f"Set latency for {label}: {value:g} ms (verified)",
                 (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),

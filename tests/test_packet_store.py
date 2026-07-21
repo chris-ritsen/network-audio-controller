@@ -4,6 +4,7 @@ import tempfile
 
 import pytest
 
+from netaudio.dante import debug_formatter
 from netaudio.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
 from netaudio.dante.packet_store import PacketStore, _parse_header
 
@@ -57,6 +58,15 @@ class TestParseHeader:
         h = _parse_header(data)
         assert h["opcode"] == 0x9999
         assert h["opcode_name"] == "0x9999"
+
+    def test_opcode_name_falls_back_across_every_arc_variant(self, monkeypatch):
+        monkeypatch.setattr(
+            debug_formatter,
+            "_external_labels",
+            lambda: ({(0x2729, 0x2200): "query_tx_flows"}, {}),
+        )
+
+        assert get_opcode_name(0x2801, 0x2200) == "query_tx_flows"
 
 
 class TestStorePacket:

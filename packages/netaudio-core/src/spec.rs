@@ -107,7 +107,7 @@ enum CommandSpec {
     },
     Identify {},
     SetEncoding {
-        encoding: u8,
+        encoding: u32,
     },
     SetSampleRate {
         sample_rate: u32,
@@ -116,6 +116,12 @@ enum CommandSpec {
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default = "default_sample_rate_sequence")]
+        sequence: u16,
+    },
+    ProbeEncoding {
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default = "default_encoding_sequence")]
         sequence: u16,
     },
     SetGainLevel {
@@ -251,6 +257,10 @@ fn default_sample_rate_sequence() -> u16 {
     0x0081
 }
 
+fn default_encoding_sequence() -> u16 {
+    0x0083
+}
+
 fn default_leader_sequence() -> u16 {
     0x0021
 }
@@ -340,7 +350,14 @@ fn route(command: &str) -> (Target, IoMode) {
     use IoMode::*;
     use Target::*;
     match command {
-        "set_encoding" | "set_sample_rate" | "set_gain_level" => (Settings, Request),
+        "set_gain_level" => (Settings, Request),
+        "set_encoding" | "set_sample_rate" => (
+            Settings,
+            Fire {
+                repeat: 1,
+                interval_ms: 0,
+            },
+        ),
         "reboot" | "enable_aes67" => (
             Settings,
             Fire {
@@ -358,6 +375,7 @@ fn route(command: &str) -> (Target, IoMode) {
         "identify"
         | "probe_interface_status"
         | "probe_sample_rate"
+        | "probe_encoding"
         | "set_interface_dhcp"
         | "set_interface_static"
         | "probe_aes67"
@@ -480,6 +498,9 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
         CommandSpec::SetSampleRate { sample_rate } => commands::build_set_sample_rate(sample_rate)?,
         CommandSpec::ProbeSampleRate { host_mac, sequence } => {
             commands::build_probe_sample_rate(parse_mac(&host_mac, default_host_mac)?, sequence)?
+        }
+        CommandSpec::ProbeEncoding { host_mac, sequence } => {
+            commands::build_probe_encoding(parse_mac(&host_mac, default_host_mac)?, sequence)?
         }
         CommandSpec::SetGainLevel {
             channel_number,
@@ -617,10 +638,21 @@ mod tests {
 
     #[test]
     fn routes_settings_request_commands() {
-        for command in ["set_encoding", "set_sample_rate", "set_gain_level"] {
+        assert_eq!(route("set_gain_level"), (Target::Settings, IoMode::Request));
+    }
+
+    #[test]
+    fn routes_unacknowledged_settings_writes_as_single_fire_commands() {
+        for command in ["set_encoding", "set_sample_rate"] {
             assert_eq!(
                 route(command),
-                (Target::Settings, IoMode::Request),
+                (
+                    Target::Settings,
+                    IoMode::Fire {
+                        repeat: 1,
+                        interval_ms: 0
+                    }
+                ),
                 "{command}"
             );
         }
@@ -688,6 +720,16 @@ mod tests {
             )
         );
         assert_eq!(
+            route("probe_encoding"),
+            (
+                Target::Settings,
+                IoMode::Fire {
+                    repeat: 1,
+                    interval_ms: 0
+                }
+            )
+        );
+        assert_eq!(
             route("metering_start"),
             (
                 Target::Control,
@@ -722,6 +764,17 @@ mod tests {
             build_command_from_json("{\"command\":\"reboot\"}"),
             Err(SpecError::InvalidMac)
         ));
+    }
+
+    #[test]
+    fn probe_encoding_defaults_to_captured_message_sequence() {
+        let routed = build_routed_command(
+            r#"{"command":"probe_encoding"}"#,
+            [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
+        )
+        .unwrap();
+        assert_eq!(&routed.packet[4..6], &0x0083u16.to_be_bytes());
+        assert_eq!(&routed.packet[26..28], &0x0083u16.to_be_bytes());
     }
 
     #[test]

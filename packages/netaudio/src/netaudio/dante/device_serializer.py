@@ -4,6 +4,9 @@ DEVICE_SCALAR_FIELDS = (
     "dante_model",
     "dante_model_id",
     "latency",
+    "active_latency",
+    "configured_latency",
+    "default_latency",
     "mac_address",
     "manufacturer",
     "model",
@@ -18,6 +21,7 @@ DEVICE_SCALAR_FIELDS = (
     "rx_flow_count",
     "num_networks",
     "encoding",
+    "supported_encodings",
     "bit_depth",
     "software_version",
     "firmware_version",
@@ -63,6 +67,10 @@ class DanteDeviceSerializer:
             field_value = getattr(device, field_name)
             if field_value is not None:
                 as_json[field_name] = field_value
+
+        standard_latency_choices = device.standard_latency_choices
+        if standard_latency_choices is not None:
+            as_json["standard_latency_choices"] = standard_latency_choices
 
         if device.interface_reboot_required:
             as_json["interface_reboot_required"] = device.interface_reboot_required

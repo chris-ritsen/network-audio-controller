@@ -10,6 +10,7 @@ pub const RESPONSE_HEADER_SIZE: usize = 10;
 pub const RESULT_CODE_SUCCESS: u16 = 0x0001;
 pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
 pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, 0x2809];
+pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] = [PROTOCOL_ID, 0x2729, 0x2801, 0x2809];
 
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
 const CONMON_MINIMUM_SIZE: usize = 28;
@@ -55,6 +56,10 @@ pub fn validate_response_envelope<'a>(
 
 pub fn common_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 3] {
     COMMON_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
+}
+
+pub fn device_settings_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 4] {
+    DEVICE_SETTINGS_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
 }
 
 pub fn is_common_arc_protocol(protocol_id: u16) -> bool {

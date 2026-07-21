@@ -10,6 +10,7 @@ from netaudio.daemon.dbus_state import (
     dbus_int32,
     dbus_string,
     dbus_uint,
+    dbus_uint_list,
     latency_milliseconds,
     subscription_rows,
 )
@@ -109,8 +110,16 @@ class DanteDeviceInterface(ServiceInterface):
         return dbus_uint(self._device.sample_rate)
 
     @dbus_property(access=RO)
+    def SupportedSampleRates(self) -> "au":
+        return dbus_uint_list(self._device.supported_sample_rates)
+
+    @dbus_property(access=RO)
     def Encoding(self) -> "u":
         return dbus_uint(self._device.encoding)
+
+    @dbus_property(access=RO)
+    def SupportedEncodings(self) -> "au":
+        return dbus_uint_list(self._device.supported_encodings)
 
     @dbus_property(access=RO)
     def BitDepth(self) -> "u":
@@ -119,6 +128,18 @@ class DanteDeviceInterface(ServiceInterface):
     @dbus_property(access=RO)
     def Latency(self) -> "d":
         return latency_milliseconds(self._device.latency)
+
+    @dbus_property(access=RO)
+    def ActiveLatency(self) -> "d":
+        return latency_milliseconds(self._device.active_latency)
+
+    @dbus_property(access=RO)
+    def ConfiguredLatency(self) -> "d":
+        return latency_milliseconds(self._device.configured_latency)
+
+    @dbus_property(access=RO)
+    def DefaultLatency(self) -> "d":
+        return latency_milliseconds(self._device.default_latency)
 
     @dbus_property(access=RO)
     def MinLatency(self) -> "d":
