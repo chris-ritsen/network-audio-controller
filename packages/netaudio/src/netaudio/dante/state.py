@@ -213,6 +213,14 @@ class DanteStateService:
             self.application.probe_encoding_status,
         )
 
+    async def _refresh_gain_status(self, device, reason: str) -> None:
+        await self._refresh_capability_status(
+            device,
+            reason,
+            "gain",
+            self.application.probe_gain_status,
+        )
+
     async def _refresh_capability_status(self, device, reason: str, capability_name: str, probe_status) -> None:
         logger.info(f"Re-fetching {capability_name} status for {device.server_name} ({reason})")
         try:
@@ -398,6 +406,8 @@ class DanteStateService:
                     capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
                 if device.supported_encodings is None:
                     capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
+                if device.supported_gain_levels is None:
+                    capability_tasks.append(self._refresh_gain_status(device, "device discovered"))
                 if capability_tasks:
                     await asyncio.gather(*capability_tasks)
 
@@ -411,7 +421,7 @@ class DanteStateService:
                 except Exception as exception:
                     logger.warning(f"Error probing preferred leader for {server_name}: {exception}")
 
-                if device.interfaces is None:
+                if device.interfaces is None or device.link_speed_mbps is None:
                     try:
                         interfaces = await self.application.probe_interface_status(str(device.ipv4))
                         if interfaces is not None:

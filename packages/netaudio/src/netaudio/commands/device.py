@@ -30,6 +30,7 @@ from netaudio._common import (
     _command_context,
     _discover,
     _get_arc_port,
+    _load_device_for_show,
     _populate_controls,
     _resolve_one,
     filter_devices,
@@ -93,6 +94,163 @@ def _format_last_seen(last_seen: float | None) -> str:
     from datetime import datetime, timezone
 
     return datetime.fromtimestamp(last_seen, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_sample_rate(sample_rate_hertz: int | None) -> str:
+    if sample_rate_hertz is None:
+        return "unknown"
+    return f"{sample_rate_hertz / 1000:g} kHz"
+
+
+def _format_link_speed(link_speed_mbps: int | None) -> str:
+    if link_speed_mbps is None:
+        return "unknown"
+    if link_speed_mbps >= 1_000:
+        return f"{link_speed_mbps / 1_000:g} Gbps"
+    return f"{link_speed_mbps} Mbps"
+
+
+def _format_supported_sample_rates(supported_sample_rates: list[int] | None) -> str:
+    if supported_sample_rates is None:
+        return "unknown"
+    if not supported_sample_rates:
+        return "none advertised"
+    return ", ".join(f"{sample_rate_hertz / 1000:g}" for sample_rate_hertz in supported_sample_rates) + " kHz"
+
+
+def _format_encoding(encoding: int | None) -> str:
+    return f"PCM{encoding}" if encoding is not None else "unknown"
+
+
+def _format_supported_encodings(supported_encodings: list[int] | None) -> str:
+    if supported_encodings is None:
+        return "unknown"
+    if not supported_encodings:
+        return "none advertised"
+    return ", ".join(f"PCM{encoding}" for encoding in supported_encodings)
+
+
+def _format_reference_levels(device) -> str:
+    if device.gain_device_type is None or device.gain_levels is None:
+        return "unknown"
+    return ", ".join(
+        f"{channel_number}: {device.gain_level_label_for_channel(channel_number, 'tx' if device.gain_device_type == 'input' else 'rx')}"
+        for channel_number in range(1, len(device.gain_levels) + 1)
+    )
+
+
+def _format_reference_options(device) -> str:
+    choices = device.gain_level_choices
+    if choices is None:
+        return "unknown"
+    if not choices:
+        return "none advertised"
+    return ", ".join(choice["label"] for choice in choices)
+
+
+def _format_latency(latency_milliseconds: float | None) -> str:
+    if latency_milliseconds is None:
+        return "unknown"
+    return f"{_format_latency_milliseconds(latency_milliseconds)} ms"
+
+
+def _format_show_latency_range(
+    minimum_latency_milliseconds: float | None,
+    maximum_latency_milliseconds: float | None,
+) -> str:
+    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
+        return "unknown"
+    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
+    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
+    return f"{minimum_label}-{maximum_label} ms"
+
+
+def _format_show_standard_latencies(device) -> str:
+    choices = device.standard_latency_choices
+    if choices is None:
+        return "unknown"
+    if not choices:
+        return "none advertised"
+    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + " ms"
+
+
+def _format_aes67(device) -> str:
+    current = device.aes67_current
+    configured = device.aes67_configured
+    if current is None and configured is None:
+        return "unknown"
+    if current is not None and configured is not None and current != configured:
+        current_label = "enabled" if current else "disabled"
+        configured_label = "enabled" if configured else "disabled"
+        return f"{current_label}; configured {configured_label} (reboot required)"
+    effective_state = configured if configured is not None else current
+    return "enabled" if effective_state else "disabled"
+
+
+def _device_show_rows(device) -> list[list[str]]:
+    tx_count = device.tx_count
+    if tx_count is None and device.tx_channels:
+        tx_count = len(device.tx_channels)
+    rx_count = device.rx_count
+    if rx_count is None and device.rx_channels:
+        rx_count = len(device.rx_channels)
+    tx_count_label = str(tx_count) if tx_count is not None else "unknown"
+    rx_count_label = str(rx_count) if rx_count is not None else "unknown"
+    active_latency = device.active_latency if device.active_latency is not None else device.latency
+    model = device.dante_model or device.model_id or device.model
+    manufacturer = device.manufacturer or device.manufacturer_mdns
+    rows = [
+        ["Name", device.name or "unknown"],
+        ["Status", "online" if device.online else "offline"],
+        ["Model", model or "unknown"],
+        ["Manufacturer", manufacturer or "unknown"],
+        ["IP Address", str(device.ipv4) if device.ipv4 else "unknown"],
+        ["MAC Address", _format_mac(device.mac_address) if device.mac_address else "unknown"],
+        ["Link Speed", _format_link_speed(device.link_speed_mbps)],
+    ]
+    if device.firmware_version:
+        rows.append(["Firmware", device.firmware_version])
+    if device.software_version:
+        rows.append(["Software", device.software_version])
+    rows.extend(
+        [
+            ["Channels", f"{tx_count_label} TX / {rx_count_label} RX"],
+            ["Sample Rate", _format_sample_rate(device.sample_rate)],
+            ["Supported Sample Rates", _format_supported_sample_rates(device.supported_sample_rates)],
+            ["Encoding", _format_encoding(device.encoding)],
+            ["Supported Encodings", _format_supported_encodings(device.supported_encodings)],
+            ["Active Latency", _format_latency(active_latency)],
+            ["Configured Latency", _format_latency(device.configured_latency)],
+            ["Default Latency", _format_latency(device.default_latency)],
+            ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
+            ["Standard Latencies", _format_show_standard_latencies(device)],
+            ["AES67", _format_aes67(device)],
+            [
+                "Lock",
+                "unknown" if device.is_locked is None else ("locked" if device.is_locked else "unlocked"),
+            ],
+            [
+                "Preferred Leader",
+                "unknown"
+                if device.preferred_leader is None
+                else ("enabled" if device.preferred_leader else "disabled"),
+            ],
+        ]
+    )
+    if device.gain_device_type is not None:
+        rows.extend(
+            [
+                ["Reference Controls", device.gain_device_type],
+                ["Reference Levels", _format_reference_levels(device)],
+                ["Reference Options", _format_reference_options(device)],
+            ]
+        )
+    if device.ptp_v1_role:
+        rows.append(["PTP Role", device.ptp_v1_role])
+    rows.append(["Server Name", device.server_name or "unknown"])
+    if device.interface_reboot_required:
+        rows.append(["Network Reboot Required", "yes"])
+    return rows
 
 
 def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -> bool:
@@ -202,6 +360,7 @@ def device_list(
             "Board",
             "Firmware",
             "Software",
+            "Link Speed",
             "Sample Rate",
             "Supported Sample Rates",
             "Encoding",
@@ -253,6 +412,7 @@ def device_list(
                 row.append(device.board_name or device.dante_model_id or "")
                 row.append(device.firmware_version or "")
                 row.append(device.software_version or "")
+                row.append(_format_link_speed(device.link_speed_mbps) if device.link_speed_mbps is not None else "")
                 row.append(str(device.sample_rate or ""))
                 row.append(", ".join(str(value) for value in device.supported_sample_rates or []))
 
@@ -318,12 +478,18 @@ def device_show():
     """Show detailed device information."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices)
-        filtered = filter_devices(devices)
-        _, device = _resolve_one(filtered)
+        from netaudio.cli import OutputFormat, state
+
+        include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
+        server_name, device = await _load_device_for_show(include_channels=include_channels)
         data = DanteDeviceSerializer.to_json(device)
-        output_single(data, device=device)
+        output_table(
+            ["Field", "Value"],
+            _device_show_rows(device),
+            json_data=data,
+            title=device.name or server_name,
+            devices={server_name: device},
+        )
 
     asyncio.run(_run())
 

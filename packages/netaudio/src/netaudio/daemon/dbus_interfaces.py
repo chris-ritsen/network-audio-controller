@@ -106,6 +106,10 @@ class DanteDeviceInterface(ServiceInterface):
         return dbus_string(self._device.board_name)
 
     @dbus_property(access=RO)
+    def LinkSpeedMbps(self) -> "u":
+        return dbus_uint(self._device.link_speed_mbps)
+
+    @dbus_property(access=RO)
     def SampleRate(self) -> "u":
         return dbus_uint(self._device.sample_rate)
 

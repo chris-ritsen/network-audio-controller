@@ -78,6 +78,7 @@ class TestSpecErrors:
                     "channel_number": 0,
                     "gain_level": 1,
                     "device_type": "input",
+                    "host_mac": "001122334455",
                 }
             )
             == 24
@@ -103,6 +104,7 @@ class TestSpecErrors:
                     "channel_number": 1,
                     "gain_level": gain_level,
                     "device_type": "output",
+                    "host_mac": "001122334455",
                 }
             )
             == 28

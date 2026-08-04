@@ -154,6 +154,7 @@ def update_fact(
     protocol_id: int | list[int] | None = None,
     match_offset: int | None = None,
     match_size: int | None = None,
+    replace_evidence: bool = False,
 ) -> dict | None:
     data = _load_facts(path)
     fk = _fact_key(category, key)
@@ -193,7 +194,10 @@ def update_fact(
     if match_size is not None:
         fact["match_size"] = match_size
     if evidence:
-        fact["evidence"] = _merge_evidence(fact.get("evidence", []), evidence)
+        if replace_evidence:
+            fact["evidence"] = list(evidence)
+        else:
+            fact["evidence"] = _merge_evidence(fact.get("evidence", []), evidence)
 
     data["facts"][fk] = fact
     _save_facts(data, path)
@@ -343,34 +347,40 @@ def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
             if session_ref is None:
                 result["errors"].append(f"invalid evidence ref: {ref}")
                 continue
+            if packet_id_str is None:
+                result["errors"].append(f"evidence ref must identify a packet: {ref}")
+                continue
 
             bundle_path = _find_bundle(provenance_dir, session_ref)
             if bundle_path is None:
                 result["errors"].append(f"bundle not found for {session_ref}")
                 continue
 
-            if packet_id_str is not None:
+            try:
                 packet_id = int(packet_id_str)
-                manifest, files = _load_bundle(bundle_path)
-                sample_by_id = {s.get("packet_id"): s for s in manifest.get("samples", [])}
-                sample = sample_by_id.get(packet_id)
+            except ValueError:
+                result["errors"].append(f"invalid packet ID in evidence ref: {ref}")
+                continue
+            manifest, files = _load_bundle(bundle_path)
+            sample_by_id = {s.get("packet_id"): s for s in manifest.get("samples", [])}
+            sample = sample_by_id.get(packet_id)
 
-                if sample is None:
-                    result["errors"].append(f"packet #{packet_id} not in bundle {session_ref}")
-                    continue
+            if sample is None:
+                result["errors"].append(f"packet #{packet_id} not in bundle {session_ref}")
+                continue
 
-                filename = sample.get("file", "")
-                payload = files.get(filename)
-                if payload is None:
-                    result["errors"].append(f"payload file missing for packet #{packet_id}")
-                    continue
+            filename = sample.get("file", "")
+            payload = files.get(filename)
+            if payload is None:
+                result["errors"].append(f"payload file missing for packet #{packet_id}")
+                continue
 
-                for field in fact.get("fields", []):
-                    field_result = _verify_field(payload, field)
-                    if field_result["ok"]:
-                        result["verified_fields"].append(field_result)
-                    else:
-                        result["errors"].append(field_result["error"])
+            for field in fact.get("fields", []):
+                field_result = _verify_field(payload, field)
+                if field_result["ok"]:
+                    result["verified_fields"].append(field_result)
+                else:
+                    result["errors"].append(field_result["error"])
 
         results.append(result)
 

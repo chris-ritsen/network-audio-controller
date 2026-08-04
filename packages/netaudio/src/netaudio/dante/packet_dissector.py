@@ -80,6 +80,8 @@ DECIMAL_FIELD_NAMES = {
     "channel_number",
     "tx_count",
     "rx_count",
+    "interface_count",
+    "link_speed_mbps",
 }
 
 
@@ -218,10 +220,15 @@ def _format_detail(name: str, raw: bytes, int_val, dtype: str) -> str:
         if label:
             return label
 
+    if name == "link_speed_mbps" and isinstance(int_val, int):
+        return f"{int_val} Mbps"
+
     return ""
 
 
 CONMON_MESSAGE_NAMES = {
+    0x0011: "interface_status_announcement",
+    0x0013: "interface_configuration",
     0x0060: "dante_model_response",
     0x0080: "sample_rate_status",
     0x0081: "sample_rate_control",
@@ -231,9 +238,9 @@ CONMON_MESSAGE_NAMES = {
     0x0092: "reboot_ack",
     0x00C0: "make_model_response",
     0x01FE: "metering_data",
-    0x0326: "set_output_gain",
-    0x0344: "set_input_gain",
     0x0BC8: "identify",
+    0x100A: "gain_control",
+    0x100B: "gain_status",
     0x22DC: "set_aes67",
     0x40FE: "metering_data_extended",
 }
@@ -254,6 +261,8 @@ def _extract_value(payload: bytes, offset: int, length: int, dtype: str, name: s
         return val, f"0x{val:04X}"
     elif dtype == "uint32_be" and length == 4:
         val = struct.unpack(">I", raw)[0]
+        if name in DECIMAL_FIELD_NAMES:
+            return val, str(val)
         return val, f"0x{val:08X}"
     elif dtype == "int32_be" and length == 4:
         val = struct.unpack(">i", raw)[0]

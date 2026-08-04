@@ -322,6 +322,7 @@ class CoreClient:
             raise NetaudioCoreError(8, "netaudio-core library not found")
         self._lib = library
         self._device_ip = device_ip
+        self._arc_port = arc_port
         self.observer = None
         with self._native_lock:
             status = library.netaudio_client_new(
@@ -428,6 +429,26 @@ class CoreClient:
 
     def get_device_settings(self):
         return self._json_getter("netaudio_client_get_device_settings_json")
+
+    def get_channel_audio_metadata(self, tx_count: int, rx_count: int):
+        candidates = (
+            (tx_count, {"command": "transmitters", "page": 0}),
+            (rx_count, {"command": "receivers", "page": 0}),
+        )
+        for channel_count, specification in candidates:
+            if channel_count <= 0:
+                continue
+            try:
+                packet = build_command(specification)
+                response = self.request(packet, self._arc_port)
+                if response is not None:
+                    return parse_response("channel_audio_metadata", response)
+            except NetaudioCoreError as exception:
+                logger.debug(
+                    f"Channel audio metadata query failed for {self._device_ip} "
+                    f"using {specification['command']}: {exception}"
+                )
+        return None
 
     def get_channel_count(self):
         tx = ctypes.c_uint16(0)
