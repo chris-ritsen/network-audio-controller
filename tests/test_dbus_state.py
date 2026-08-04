@@ -201,6 +201,7 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.max_latency = 21.333334
     device.supported_sample_rates = [48_000, 96_000]
     device.supported_encodings = [16, 24, 32]
+    device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
 
@@ -278,6 +279,7 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.max_latency = 21.333334
     device.supported_sample_rates = [48_000, 96_000]
     device.supported_encodings = [16, 24, 32]
+    device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
 
@@ -291,10 +293,12 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.MaxLatency() == 21.333334
     assert interface.SupportedSampleRates() == [48_000, 96_000]
     assert interface.SupportedEncodings() == [16, 24, 32]
+    assert interface.LinkSpeedMbps() == 2500
     assert interface.Aes67Enabled() is False
     assert module.DanteDeviceInterface.Latency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.SupportedSampleRates.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.SupportedEncodings.__annotations__["return"] == "au"
+    assert module.DanteDeviceInterface.LinkSpeedMbps.__annotations__["return"] == "u"
     assert module.DanteDeviceInterface.MinLatency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.MaxLatency.__annotations__["return"] == "d"
 

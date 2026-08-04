@@ -18,6 +18,7 @@ from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.gain import gain_channel_type, gain_level_choices, gain_level_label
 from netaudio.dante.latency import latency_controls_from_settings, standard_latency_choices_for_range
 from netaudio.dante.subscription import DanteSubscription
 
@@ -67,6 +68,9 @@ class DanteDevice:
         self.num_networks: int | None = None
         self.encoding: int | None = None
         self.supported_encodings: list[int] | None = None
+        self.gain_device_type: str | None = None
+        self.gain_levels: list[int] | None = None
+        self.supported_gain_levels: list[int] | None = None
         self.bit_depth: int | None = None
         self.software_version: str | None = None
         self.firmware_version: str | None = None
@@ -77,6 +81,7 @@ class DanteDevice:
         self.product_version: str | None = None
         self.board_name: str | None = None
         self.interfaces: list[dict] | None = None
+        self.link_speed_mbps: int | None = None
         self.interface_reboot_required: bool = False
         self.interface_pending_config: dict | None = None
 
@@ -111,6 +116,38 @@ class DanteDevice:
     def standard_latency_choices(self):
         return standard_latency_choices_for_range(self.min_latency, self.max_latency)
 
+    @property
+    def encoding_configurable(self):
+        if self.supported_encodings is None:
+            return None
+        return len(set(self.supported_encodings)) > 1
+
+    @property
+    def gain_configurable(self):
+        if self.supported_gain_levels is None:
+            return None
+        return bool(self.supported_gain_levels)
+
+    @property
+    def gain_level_choices(self):
+        if self.gain_device_type is None:
+            return None
+        return gain_level_choices(self.gain_device_type, self.supported_gain_levels)
+
+    def gain_level_for_channel(self, channel_number: int, channel_type: str) -> int | None:
+        if self.gain_levels is None or gain_channel_type(self.gain_device_type or "") != channel_type:
+            return None
+        channel_index = channel_number - 1
+        if not 0 <= channel_index < len(self.gain_levels):
+            return None
+        return self.gain_levels[channel_index]
+
+    def gain_level_label_for_channel(self, channel_number: int, channel_type: str) -> str | None:
+        gain_level = self.gain_level_for_channel(channel_number, channel_type)
+        if gain_level is None or self.gain_device_type is None:
+            return None
+        return gain_level_label(self.gain_device_type, gain_level)
+
     def update_last_seen(self):
         self.last_seen = time.time()
 
@@ -140,18 +177,23 @@ class DanteDevice:
                 return service["port"]
         return None
 
-    def _core_client(self):
+    def _core_client(self, timeout_milliseconds: int = 1000, attempts: int = 3):
         from netaudio import core
 
         ip = str(self.ipv4) if self.ipv4 else None
         if not ip:
             return None
         arc_port = self._arc_port()
-        key = (ip, arc_port)
+        key = (ip, arc_port, timeout_milliseconds, attempts)
         if self._core is None or self._core_key != key:
             if self._core is not None:
                 self._core.close()
-            self._core = core.CoreClient(ip, arc_port=arc_port)
+            self._core = core.CoreClient(
+                ip,
+                arc_port=arc_port,
+                timeout_ms=timeout_milliseconds,
+                attempts=attempts,
+            )
             mac = core.host_mac()
             if mac:
                 self._core.set_host_mac(mac)
@@ -160,6 +202,17 @@ class DanteDevice:
                 self._core.observer = observer
             self._core_key = key
         return self._core
+
+    def _core_client_for_request(
+        self,
+        request_timeout_milliseconds: int | None,
+        request_attempts: int | None,
+    ):
+        if request_timeout_milliseconds is None and request_attempts is None:
+            return self._core_client()
+        timeout_milliseconds = request_timeout_milliseconds if request_timeout_milliseconds is not None else 1000
+        attempts = request_attempts if request_attempts is not None else 3
+        return self._core_client(timeout_milliseconds=timeout_milliseconds, attempts=attempts)
 
     async def dante_send_command(self, command, service_type=None, port=None):
         client = self._core_client()
@@ -252,8 +305,12 @@ class DanteDevice:
             records = await asyncio.to_thread(client.get_tx_channels)
         self.tx_channels = self._build_tx_from_records(records)
 
-    async def fetch_device_name(self):
-        client = self._core_client()
+    async def fetch_device_name(
+        self,
+        request_timeout_milliseconds: int | None = None,
+        request_attempts: int | None = None,
+    ):
+        client = self._core_client_for_request(request_timeout_milliseconds, request_attempts)
         if client is None:
             return None
         if client.observer is not None:
@@ -262,24 +319,36 @@ class DanteDevice:
             return await asyncio.to_thread(fetch_device_name, client, self._arc_port())
         return await asyncio.to_thread(client.get_device_name)
 
-    async def fetch_controls_data(self):
-        client = self._core_client()
+    async def fetch_controls_data(
+        self,
+        include_channels: bool = True,
+        request_timeout_milliseconds: int | None = None,
+        request_attempts: int | None = None,
+    ):
+        client = self._core_client_for_request(request_timeout_milliseconds, request_attempts)
         if client is None:
             return None
 
         if client.observer is not None:
             from netaudio._capture import _fetch_instrumented
 
-            raw = await asyncio.to_thread(_fetch_instrumented, client, self._arc_port())
+            raw = await asyncio.to_thread(
+                _fetch_instrumented,
+                client,
+                self._arc_port(),
+                include_channels,
+            )
             return self.controls_data_from_core(raw)
 
         def _work():
             result = {
                 "name": client.get_device_name(),
                 "counts": client.get_channel_count(),
-                "rx": client.get_rx_channels(),
-                "tx": client.get_tx_channels(),
+                "rx": client.get_rx_channels() if include_channels else [],
+                "tx": client.get_tx_channels() if include_channels else [],
             }
+            tx_count, rx_count, _ = result["counts"]
+            result["channel_audio_metadata"] = client.get_channel_audio_metadata(tx_count, rx_count)
             from netaudio.core import NetaudioCoreError
 
             try:
@@ -310,6 +379,13 @@ class DanteDevice:
             if settings_data.get("sample_rate"):
                 controls["sample_rate"] = settings_data["sample_rate"]
             controls.update(latency_controls_from_settings(settings_data))
+        channel_audio_metadata = data.get("channel_audio_metadata")
+        if channel_audio_metadata:
+            current_encoding = channel_audio_metadata.get("current_encoding")
+            supported_encodings = channel_audio_metadata.get("supported_encodings")
+            if current_encoding and supported_encodings and current_encoding in supported_encodings:
+                controls["channel_metadata_encoding"] = current_encoding
+                controls["channel_metadata_supported_encodings"] = supported_encodings
         rx_channels, subscriptions = self._build_rx_from_records(data["rx"])
         if rx_channels:
             controls["rx_channels"] = rx_channels
@@ -319,8 +395,17 @@ class DanteDevice:
             controls["tx_channels"] = tx_channels
         return controls
 
-    async def populate_from_core(self):
-        controls = await self.fetch_controls_data()
+    async def populate_from_core(
+        self,
+        include_channels: bool = True,
+        request_timeout_milliseconds: int | None = None,
+        request_attempts: int | None = None,
+    ):
+        controls = await self.fetch_controls_data(
+            include_channels=include_channels,
+            request_timeout_milliseconds=request_timeout_milliseconds,
+            request_attempts=request_attempts,
+        )
         if controls is None:
             return False
         self.apply_controls(controls)
@@ -351,6 +436,11 @@ class DanteDevice:
             self.is_locked = data["is_locked"]
         if "aes67_configured" in data:
             self.aes67_configured = data["aes67_configured"]
+        if self.supported_encodings is None and "channel_metadata_supported_encodings" in data:
+            channel_metadata_encoding = data["channel_metadata_encoding"]
+            if self.encoding is None or self.encoding == channel_metadata_encoding:
+                self.encoding = channel_metadata_encoding
+                self.supported_encodings = data["channel_metadata_supported_encodings"]
         if data.get("tx_channels"):
             self.tx_channels = data["tx_channels"]
         if data.get("rx_channels"):

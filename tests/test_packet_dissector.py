@@ -98,6 +98,22 @@ def test_encoding_control_dynamic_fields_replace_generic_fact_spans():
     assert all(span.name != "encoding_operand" for span in result.spans)
 
 
+def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact():
+    payload = bytes.fromhex(
+        "ffff0060dbdb0000001dc1fffe507b8d417564696e6174650727001100000000"
+        "00010000000000640003001dc1507b8dc0a80123ffffff0008080808c0a80101"
+        "0018003000000000000000000000000000000000000000000000000000000000"
+    )
+
+    result = dissect(payload)
+    spans_by_name = {span.name: span for span in result.spans if span.name}
+
+    assert spans_by_name["message_type"].detail == "interface_status_announcement"
+    assert spans_by_name["interface_count"].value == "1"
+    assert spans_by_name["link_speed_mbps"].value == "100"
+    assert spans_by_name["link_speed_mbps"].detail == "100 Mbps"
+
+
 def test_device_settings_resolves_latency_values_through_absolute_pointers():
     properties = [
         (0x8301, 32),
@@ -175,11 +191,21 @@ def test_protocol_facts_use_capability_and_property_table_meanings():
     encoding_control = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0083")
     device_settings = get_fact(DEFAULT_FACTS_PATH, "arc_opcode", "0x1100")
     property_directory = get_fact(DEFAULT_FACTS_PATH, "arc_opcode", "0x1102")
+    interface_status = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0011")
+    interface_configuration = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0013")
 
     assert encoding_status["name"] == "encoding_status"
     assert encoding_control["name"] == "encoding_control"
     assert device_settings["name"] == "query_device_settings"
     assert property_directory["name"] == "query_property_directory"
+    assert interface_status["name"] == "interface_status_announcement"
+    assert interface_configuration["name"] == "interface_configuration"
+    assert next(field for field in interface_status["fields"] if field["name"] == "link_speed_mbps") == {
+        "name": "link_speed_mbps",
+        "offset": 36,
+        "length": 4,
+        "dtype": "uint32_be",
+    }
     assert all(field["name"] != "aes67_mode" for field in device_settings["fields"])
     assert get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x03D7") is None
     assert get_fact(DEFAULT_FACTS_PATH, "conmon_opcode", "0x0083") is None

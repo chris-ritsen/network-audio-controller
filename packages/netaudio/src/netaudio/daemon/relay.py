@@ -1117,10 +1117,30 @@ class RelayServer:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        response = await device.operations.set_gain_level(
-            params.get("channel_number"), params.get("gain_level"), params.get("device_type", "")
-        )
-        if not await self._require_arc_write_success(writer, response, "gain change"):
+        channel_number = params.get("channel_number")
+        gain_level = params.get("gain_level")
+        device_type = params.get("device_type", "")
+        try:
+            status = await device.operations.set_gain_level(channel_number, gain_level, device_type)
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+        if status is None:
+            await self._send_json(writer, {"error": "gain readback was unavailable"}, 504)
+            return
+        observed_device_type, channel_levels = status
+        channel_index = channel_number - 1
+        observed_level = channel_levels[channel_index] if 0 <= channel_index < len(channel_levels) else None
+        if observed_device_type != device_type or observed_level != gain_level:
+            await self._send_json(
+                writer,
+                {
+                    "error": "gain change was not applied",
+                    "observed_device_type": observed_device_type,
+                    "observed_level": observed_level,
+                },
+                409,
+            )
             return
         await self._send_json(writer, {"success": True})
 

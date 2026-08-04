@@ -54,6 +54,9 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         supported_sample_rates=None,
         encoding=None,
         supported_encodings=None,
+        gain_device_type=None,
+        gain_levels=None,
+        supported_gain_levels=None,
         _arc_port=MagicMock(return_value=4440),
         operations=MagicMock(),
     )
@@ -70,7 +73,6 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         "set_latency",
         "set_sample_rate",
         "set_encoding",
-        "set_gain_level",
         "enable_aes67",
         "reboot",
         "lock_device",
@@ -88,9 +90,9 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         "set_channel_name",
         "reset_channel_name",
         "set_latency",
-        "set_gain_level",
     ):
         setattr(device.operations, method, AsyncMock(return_value=arc_success))
+    device.operations.set_gain_level = AsyncMock(return_value=("input", [3]))
     device.operations.lock_device = AsyncMock(return_value={"success": True, "lock_state": 1})
     device.operations.unlock_device = AsyncMock(return_value={"success": True, "lock_state": 0})
     return device
@@ -106,6 +108,7 @@ def make_relay(devices=None, metering=None, on_shutdown=None):
         mark_device_offline=MagicMock(),
         probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
         probe_encoding_status=AsyncMock(return_value=(24, [16, 24, 32])),
+        probe_gain_status=AsyncMock(return_value=("input", [3])),
         set_preferred_leader_state=AsyncMock(side_effect=lambda _address, expected: expected),
         set_aes67_state=AsyncMock(side_effect=lambda _device, expected: (False, expected)),
         set_interface_dhcp=AsyncMock(return_value=[{"mode": "dynamic"}]),
@@ -215,27 +218,65 @@ class TestErrorMapping:
 
 
 class TestMutationVerification:
-    @pytest.mark.parametrize(
-        ("path", "body", "method_name"),
-        [
-            ("/set-latency", {"device": "dev1", "latency": 1.0}, "set_latency"),
-            (
-                "/set-gain",
-                {"device": "dev1", "channel_number": 1, "gain_level": 3, "device_type": "input"},
-                "set_gain_level",
-            ),
-        ],
-    )
     @pytest.mark.asyncio
-    async def test_arc_mutations_report_device_rejection(self, path, body, method_name):
+    async def test_arc_mutations_report_device_rejection(self):
         device = make_device()
-        getattr(device.operations, method_name).return_value = bytes.fromhex("27ff000a000010010600")
+        device.operations.set_latency.return_value = bytes.fromhex("27ff000a000010010600")
         relay = make_relay({"dev1": device})
 
-        status, response = await post(relay, path, body)
+        status, response = await post(relay, "/set-latency", {"device": "dev1", "latency": 1.0})
 
         assert status == 409
         assert response["result_code"] == 0x0600
+
+    @pytest.mark.asyncio
+    async def test_gain_mutation_requires_matching_multicast_readback(self):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(
+            relay,
+            "/set-gain",
+            {"device": "dev1", "channel_number": 1, "gain_level": 3, "device_type": "input"},
+        )
+
+        assert status == 200
+        assert response == {"success": True}
+        device.operations.set_gain_level.assert_awaited_once_with(1, 3, "input")
+
+    @pytest.mark.asyncio
+    async def test_gain_mutation_reports_mismatched_readback(self):
+        device = make_device()
+        device.operations.set_gain_level.return_value = ("input", [5])
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(
+            relay,
+            "/set-gain",
+            {"device": "dev1", "channel_number": 1, "gain_level": 3, "device_type": "input"},
+        )
+
+        assert status == 409
+        assert response == {
+            "error": "gain change was not applied",
+            "observed_device_type": "input",
+            "observed_level": 5,
+        }
+
+    @pytest.mark.asyncio
+    async def test_gain_mutation_reports_missing_readback(self):
+        device = make_device()
+        device.operations.set_gain_level.return_value = None
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(
+            relay,
+            "/set-gain",
+            {"device": "dev1", "channel_number": 1, "gain_level": 3, "device_type": "input"},
+        )
+
+        assert status == 504
+        assert response == {"error": "gain readback was unavailable"}
 
     @pytest.mark.parametrize(
         ("path", "body", "method_name", "probe_name", "expected_status"),

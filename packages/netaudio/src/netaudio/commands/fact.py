@@ -26,83 +26,119 @@ app = typer.Typer(help="Protocol fact registry — what we know and how we prove
 SESSION_SELECTORS = {"active", "latest"}
 
 
-def _resolve_evidence_sessions(evidence_refs: list[str]) -> list[str]:
+def _open_evidence_store():
     from netaudio.capture.sessions import open_packet_store
 
     try:
-        store = open_packet_store()
-    except Exception:
+        return open_packet_store()
+    except Exception as exception:
+        print(f"Capture: unable to open the packet database: {exception}", file=sys.stderr)
+        raise typer.Exit(1)
+
+
+def _resolve_evidence_sessions(evidence_refs: list[str]) -> list[str]:
+    if not any(reference.split(":", 1)[0] in SESSION_SELECTORS for reference in evidence_refs):
         return evidence_refs
 
-    resolved = []
-    for ref in evidence_refs:
-        parts = ref.split(":")
-        if len(parts) != 2:
-            resolved.append(ref)
-            continue
-
-        session_selector, packet_id_str = parts
-        if session_selector not in SESSION_SELECTORS:
-            resolved.append(ref)
-            continue
-
-        if session_selector == "active":
-            session = store.get_latest_session(active_only=True)
-        else:
-            session = store.get_latest_session(active_only=False)
-
-        if session and session.get("name"):
-            resolved.append(f"{session['name']}:{packet_id_str}")
-            print(f"  Resolved {session_selector} -> {session['name']}")
-        else:
-            print(f"  Warning: no {session_selector} session found, keeping '{ref}'", file=sys.stderr)
-            resolved.append(ref)
-
-    store.close()
-    return resolved
-
-
-def _create_evidence_markers(evidence_refs: list[str], category: str, key: str, name: str):
-    from netaudio.capture.sessions import open_packet_store
-
+    store = _open_evidence_store()
     try:
-        store = open_packet_store()
-    except Exception:
-        return
+        resolved = []
+        for reference in evidence_refs:
+            parts = reference.split(":")
+            if len(parts) != 2:
+                resolved.append(reference)
+                continue
 
-    for ref in evidence_refs:
-        parts = ref.split(":")
-        if len(parts) != 2:
-            continue
+            session_selector, packet_id_string = parts
+            if session_selector not in SESSION_SELECTORS:
+                resolved.append(reference)
+                continue
 
-        session_name, packet_id_str = parts
-        try:
-            packet_id = int(packet_id_str)
-        except ValueError:
-            continue
+            if session_selector == "active":
+                session = store.get_latest_session(active_only=True)
+            else:
+                session = store.get_latest_session(active_only=False)
 
-        session = store.find_session_by_name(session_name, active_only=False)
-        if not session:
-            continue
+            if not session or not session.get("name"):
+                print(f"Capture: no {session_selector} session found for evidence reference.", file=sys.stderr)
+                raise typer.Exit(1)
 
-        session_id = session["id"]
-        packet = store.get_packet(packet_id)
-        if not packet:
-            continue
+            resolved.append(f"{session['name']}:{packet_id_string}")
+            print(f"  Resolved {session_selector} -> {session['name']}")
+        return resolved
+    finally:
+        store.close()
 
-        label = f"evidence_{category}_{key}_{packet_id}"
-        summary = f"{category}:{key} ({name}) — packet #{packet_id}"
 
-        store.add_marker(
-            session_id=session_id,
-            label=label,
-            marker_type="evidence",
-            summary=summary,
-            data={"packet_id": packet_id, "fact": f"{category}:{key}"},
-        )
-        print(f"  Marker: #{session_id} {label}")
+def _validate_evidence_references(evidence_refs: list[str]) -> list[tuple[int, int]]:
+    store = _open_evidence_store()
+    try:
+        evidence_targets = []
+        for reference in evidence_refs:
+            parts = reference.split(":")
+            if len(parts) != 2:
+                print(
+                    f"Capture: invalid evidence reference '{reference}'; expected session_name:packet_id.",
+                    file=sys.stderr,
+                )
+                raise typer.Exit(1)
 
-    store.close()
+            session_name, packet_id_string = parts
+            try:
+                packet_id = int(packet_id_string)
+            except ValueError:
+                print(f"Capture: invalid packet ID in evidence reference '{reference}'.", file=sys.stderr)
+                raise typer.Exit(1)
+            if packet_id <= 0:
+                print(f"Capture: packet ID must be positive in evidence reference '{reference}'.", file=sys.stderr)
+                raise typer.Exit(1)
+
+            session = store.find_session_by_name(session_name, active_only=False)
+            if not session:
+                print(f"Capture: evidence session '{session_name}' was not found.", file=sys.stderr)
+                raise typer.Exit(1)
+            if not store.get_packet(packet_id):
+                print(f"Capture: evidence packet #{packet_id} was not found.", file=sys.stderr)
+                raise typer.Exit(1)
+
+            evidence_targets.append((int(session["id"]), packet_id))
+        return evidence_targets
+    finally:
+        store.close()
+
+
+def _create_evidence_markers(evidence_targets: list[tuple[int, int]], category: str, key: str, name: str):
+    store = _open_evidence_store()
+    try:
+        packet_ids_by_session = {}
+        for session_id, packet_id in evidence_targets:
+            packet_ids_by_session.setdefault(session_id, [])
+            if packet_id not in packet_ids_by_session[session_id]:
+                packet_ids_by_session[session_id].append(packet_id)
+
+        for session_id, packet_ids in packet_ids_by_session.items():
+            label = f"evidence_{category}_{key}"
+            summary = f"{category}:{key} ({name}) — {len(packet_ids)} packet(s)"
+            existing_markers = store.get_markers(session_id, marker_types=["evidence"])
+            marker_exists = any(
+                marker.get("label") == label
+                and marker.get("data", {}).get("fact") == f"{category}:{key}"
+                and marker.get("data", {}).get("packet_ids") == packet_ids
+                for marker in existing_markers
+            )
+            if marker_exists:
+                print(f"  Marker: #{session_id} {label} already exists")
+                continue
+            store.add_marker(
+                session_id=session_id,
+                label=label,
+                marker_type="evidence",
+                summary=summary,
+                data={"packet_ids": packet_ids, "fact": f"{category}:{key}"},
+            )
+            print(f"  Marker: #{session_id} {label}")
+    finally:
+        store.close()
 
 
 @app.command("add")
@@ -126,9 +162,11 @@ def fact_add(
         None,
         "--evidence",
         "-e",
-        help="Evidence reference: session_name:packet_id or just session_name. Repeatable.",
+        help="Evidence reference: session_name:packet_id. Repeatable.",
     ),
-    confidence: str = typer.Option("verified", "--confidence", help="Confidence level: verified, inferred, uncertain."),
+    confidence: str = typer.Option(
+        "observed", "--confidence", help="Confidence level: verified, observed, inferred, uncertain."
+    ),
     supersedes: Optional[str] = typer.Option(None, "--supersedes", help="Fact key this replaces (category:key)."),
     protocol: Optional[str] = typer.Option(
         None, "--protocol", help="Protocol ID this fact applies to (e.g. 0xFFFF, 0x2729). Enables auto-dissection."
@@ -142,8 +180,15 @@ def fact_add(
     facts_path = _resolve_facts_path()
     fields_parsed = [_parse_field_spec(f) for f in field] if field else []
 
+    evidence_targets = []
     if evidence:
         evidence = _resolve_evidence_sessions(evidence)
+        evidence_targets = _validate_evidence_references(evidence)
+    if confidence == "verified" and not evidence:
+        print(
+            "Capture: verified facts require at least one session_name:packet_id evidence reference.", file=sys.stderr
+        )
+        raise typer.Exit(1)
 
     resolved_body = body
     if body_file:
@@ -205,7 +250,7 @@ def fact_add(
     if evidence:
         for ref in evidence:
             print(f"  Evidence: {ref}")
-        _create_evidence_markers(evidence, category, key, name)
+        _create_evidence_markers(evidence_targets, category, key, name)
     if "history" in fact:
         print(f"  (updated existing fact, {len(fact['history'])} previous version(s))")
 
@@ -229,6 +274,11 @@ def fact_update(
         "-e",
         help="Add evidence reference: session_name:packet_id. Repeatable.",
     ),
+    replace_evidence: bool = typer.Option(
+        False,
+        "--replace-evidence",
+        help="Replace existing evidence references instead of appending.",
+    ),
     confidence: Optional[str] = typer.Option(
         None, "--confidence", help="Update confidence level: verified, observed, inferred, uncertain."
     ),
@@ -236,13 +286,24 @@ def fact_update(
     protocol: Optional[str] = typer.Option(None, "--protocol", help="Protocol ID (e.g. 0xFFFF, 0x2729)."),
     match: Optional[str] = typer.Option(None, "--match", help="Payload offset:size for auto-dissection (e.g. 6:2)."),
 ):
-    from netaudio.dante.fact_store import update_fact, get_confidence
+    from netaudio.dante.fact_store import get_confidence, get_fact, update_fact
 
     facts_path = _resolve_facts_path()
     fields_parsed = [_parse_field_spec(f) for f in field] if field else None
 
+    evidence_targets = []
     if evidence:
         evidence = _resolve_evidence_sessions(evidence)
+        evidence_targets = _validate_evidence_references(evidence)
+    if confidence == "verified":
+        existing_fact = get_fact(facts_path, category, key)
+        existing_evidence = existing_fact.get("evidence", []) if existing_fact else []
+        if not existing_evidence and not evidence:
+            print(
+                "Capture: verified facts require at least one session_name:packet_id evidence reference.",
+                file=sys.stderr,
+            )
+            raise typer.Exit(1)
 
     resolved_body = body
     if body_file:
@@ -284,6 +345,7 @@ def fact_update(
         protocol_id=parsed_protocol_id,
         match_offset=parsed_match_offset,
         match_size=parsed_match_size,
+        replace_evidence=replace_evidence,
     )
 
     if fact is None:
@@ -297,7 +359,7 @@ def fact_update(
     if evidence:
         for ref in evidence:
             print(f"  Evidence: {ref}")
-        _create_evidence_markers(evidence, category, key, fact["name"])
+        _create_evidence_markers(evidence_targets, category, key, fact["name"])
     if "history" in fact:
         print(f"  ({len(fact['history'])} revision(s))")
 

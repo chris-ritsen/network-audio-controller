@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 
+from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.dante.const import (
@@ -11,14 +12,17 @@ from netaudio.dante.const import (
     DEVICE_SETTINGS_PORT,
     SERVICE_ARC,
     SERVICE_CMC,
+    SERVICE_DBC,
     SERVICES,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
+from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     DanteNotificationService,
     NOTIFICATION_NAMES,
+    send_and_wait_for_gain_status,
 )
 from netaudio.dante.services.settings import DanteSettingsService
 
@@ -108,17 +112,21 @@ class DanteApplication:
         if self._started:
             return
 
+        self._started = True
         if self.core_observer is not None:
             self._capture_loop = asyncio.get_running_loop()
             self._capture_queue = asyncio.Queue()
             self._capture_writer_task = asyncio.create_task(self._capture_writer())
 
-        self.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._dispatch_notification)
-        await self.dispatcher.start()
-        await self.notifications.start()
-        await self.settings.start()
-        await self.cmc.start()
-        self._started = True
+        try:
+            self.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._dispatch_notification)
+            await self.dispatcher.start()
+            await self.notifications.start()
+            await self.settings.start()
+            await self.cmc.start()
+        except BaseException:
+            await self.shutdown()
+            raise
         logger.info("DanteApplication started")
 
     async def shutdown(self) -> None:
@@ -155,12 +163,144 @@ class DanteApplication:
 
         browser = DanteBrowser(mdns_timeout=timeout, app=self)
         self._browser = browser
-        devices = await browser.get_devices()
+        try:
+            devices = await asyncio.wait_for(browser.get_devices(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.debug(f"mDNS discovery reached its {timeout}s deadline")
+            devices = browser.devices
+        finally:
+            await browser.async_close()
+            if self._browser is browser:
+                self._browser = None
 
         if devices:
             self.devices.update(devices)
 
         return self.devices
+
+    def _apply_discovered_services(self, server_name: str, device_services: dict):
+        if server_name in self.devices:
+            device = self.devices[server_name]
+        else:
+            from netaudio.dante.device import DanteDevice
+
+            device = DanteDevice(server_name=server_name, app=self)
+            self.register_device(server_name, device)
+
+        device.services = dict(sorted(device_services.items()))
+        for service in device_services.values():
+            if not device.ipv4:
+                device.ipv4 = service["ipv4"]
+            service_properties = service.get("properties", {})
+            if "id" in service_properties and service["type"] == SERVICE_CMC:
+                device.mac_address = service_properties["id"]
+            if "model" in service_properties:
+                device.model_id = service_properties["model"]
+            if "mf" in service_properties:
+                device.manufacturer_mdns = service_properties["mf"]
+                if not device.manufacturer:
+                    device.manufacturer = service_properties["mf"]
+            if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
+                device.software_version = service_properties["server_vers"]
+            if "router_vers" in service_properties:
+                device.firmware_version = service_properties["router_vers"]
+            if "router_info" in service_properties and service_properties["router_info"] == '"Dante Via"':
+                device.software = "Dante Via"
+            if "rate" in service_properties:
+                device.sample_rate = int(service_properties["rate"])
+            if "latency_ns" in service_properties:
+                device.latency = nanoseconds_to_milliseconds(service_properties["latency_ns"])
+        return device
+
+    async def discover_named_device(self, device_name: str, timeout: float = 2.0) -> dict:
+        from netaudio.dante.browser import DanteBrowser
+
+        browser = DanteBrowser(mdns_timeout=0, app=self)
+        self._browser = browser
+        browser.aio_zc = AsyncZeroconf(**browser.get_zeroconf_kwargs())
+        event_loop = asyncio.get_running_loop()
+        deadline = event_loop.time() + timeout
+        expected_arc_service_name = f"{device_name}.{SERVICE_ARC}"
+        arc_service_future = event_loop.create_future()
+        arc_resolution_tasks = set()
+
+        async def resolve_arc_service(zeroconf, service_type, service_name):
+            try:
+                service = await browser.async_parse_netaudio_service(zeroconf, service_type, service_name)
+            except Exception as exception:
+                logger.warning(f"Failed to resolve {service_name}: {exception}")
+                return
+            if service is not None and not arc_service_future.done():
+                arc_service_future.set_result(service)
+
+        def handle_arc_service(zeroconf, service_type, name, state_change):
+            if state_change is ServiceStateChange.Removed:
+                return
+            if name.casefold() != expected_arc_service_name.casefold():
+                return
+
+            resolution_task = asyncio.create_task(resolve_arc_service(zeroconf, service_type, name))
+            arc_resolution_tasks.add(resolution_task)
+            resolution_task.add_done_callback(arc_resolution_tasks.discard)
+
+        browser.aio_browser = AsyncServiceBrowser(
+            browser.aio_zc.zeroconf,
+            [SERVICE_ARC],
+            handlers=[handle_arc_service],
+        )
+        direct_resolution_task = asyncio.create_task(
+            resolve_arc_service(
+                browser.aio_zc.zeroconf,
+                SERVICE_ARC,
+                expected_arc_service_name,
+            )
+        )
+        arc_resolution_tasks.add(direct_resolution_task)
+        direct_resolution_task.add_done_callback(arc_resolution_tasks.discard)
+        optional_service_tasks = {}
+        completed_optional_tasks = set()
+        try:
+            try:
+                arc_service = await asyncio.wait_for(arc_service_future, timeout=timeout)
+            except asyncio.TimeoutError:
+                return {}
+
+            remaining_time = max(0.0, deadline - event_loop.time())
+            optional_service_tasks = {
+                asyncio.create_task(
+                    browser.async_parse_netaudio_service(
+                        browser.aio_zc.zeroconf,
+                        service_type,
+                        f"{device_name}.{service_type}",
+                    )
+                ): service_type
+                for service_type in (SERVICE_CMC, SERVICE_DBC)
+            }
+            if remaining_time > 0:
+                completed_optional_tasks, _ = await asyncio.wait(optional_service_tasks, timeout=remaining_time)
+        finally:
+            unfinished_tasks = [task for task in (*arc_resolution_tasks, *optional_service_tasks) if not task.done()]
+            for task in unfinished_tasks:
+                task.cancel()
+            if unfinished_tasks:
+                await asyncio.gather(*unfinished_tasks, return_exceptions=True)
+            await browser.async_close()
+            self._browser = None
+
+        services = [arc_service]
+        for task in completed_optional_tasks:
+            exception = task.exception()
+            if exception is not None:
+                logger.warning(f"Failed to resolve {device_name} {optional_service_tasks[task]} service: {exception}")
+                continue
+            service = task.result()
+            if service is not None:
+                services.append(service)
+
+        server_name = arc_service["server_name"]
+        matching_services = {service["name"]: service for service in services if service["server_name"] == server_name}
+        device = self._apply_discovered_services(server_name, matching_services)
+        return {server_name: device}
 
     async def discover_and_populate(self, timeout: float = 5.0) -> dict:
         from netaudio.dante.browser import DanteBrowser
@@ -183,49 +323,8 @@ class DanteApplication:
         if browser.services:
             await asyncio.gather(*browser.services, return_exceptions=True)
 
-        device_hosts = {}
-        for service_future in browser.services:
-            service = service_future.result() if not service_future.cancelled() else None
-            if not service or "server_name" not in service:
-                continue
-            server_name = service["server_name"]
-            if server_name not in device_hosts:
-                device_hosts[server_name] = {}
-            device_hosts[server_name][service["name"]] = service
-
-        for hostname, device_services in device_hosts.items():
-            if hostname in self.devices:
-                device = self.devices[hostname]
-            else:
-                from netaudio.dante.device import DanteDevice
-
-                device = DanteDevice(server_name=hostname, app=self)
-                self.register_device(hostname, device)
-
-            device.services = device_services
-            for service_name, service in device_services.items():
-                if not device.ipv4:
-                    device.ipv4 = service["ipv4"]
-                service_properties = service.get("properties", {})
-                if "id" in service_properties and service["type"] == SERVICE_CMC:
-                    device.mac_address = service_properties["id"]
-                if "model" in service_properties:
-                    device.model_id = service_properties["model"]
-                if "mf" in service_properties:
-                    device.manufacturer_mdns = service_properties["mf"]
-                    if not device.manufacturer:
-                        device.manufacturer = service_properties["mf"]
-                if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
-                    device.software_version = service_properties["server_vers"]
-                if "router_vers" in service_properties:
-                    device.firmware_version = service_properties["router_vers"]
-                if "rate" in service_properties:
-                    device.sample_rate = int(service_properties["rate"])
-                if "latency_ns" in service_properties:
-                    device.latency = nanoseconds_to_milliseconds(service_properties["latency_ns"])
-
-        await browser.aio_browser.async_cancel()
-        await browser.aio_zc.async_close()
+        browser._assemble_completed_services()
+        await browser.async_close()
         self._browser = None
 
         device_ips = [str(device.ipv4) for device in self.devices.values() if device.ipv4]
@@ -255,6 +354,7 @@ class DanteApplication:
             self._probe_aes67_all(),
             self._probe_sample_rates_all(),
             self._probe_encodings_all(),
+            self._probe_gain_levels_all(),
         )
 
         return self.devices
@@ -310,6 +410,9 @@ class DanteApplication:
             device.online = False
             device.supported_sample_rates = None
             device.supported_encodings = None
+            device.gain_device_type = None
+            device.gain_levels = None
+            device.supported_gain_levels = None
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_REMOVED,
@@ -328,30 +431,125 @@ class DanteApplication:
 
         return None
 
-    async def populate_controls(self, devices: dict | None = None) -> None:
+    async def populate_controls(self, devices: dict | None = None, include_channels: bool = True) -> None:
         if devices is None:
             devices = self.devices
 
         tasks = []
         for device in devices.values():
             if self.get_arc_port(device):
-                tasks.append(self._populate_device_controls(device))
+                tasks.append(self._populate_device_controls(device, include_channels=include_channels))
             else:
                 logger.debug(f"No ARC port for {device.server_name}, skipping controls")
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _populate_device_controls(self, device) -> None:
+    async def populate_device_names(
+        self,
+        devices: dict,
+        request_timeout_milliseconds: int | None = None,
+        request_attempts: int | None = None,
+    ) -> None:
+        name_tasks = {
+            asyncio.create_task(
+                device.fetch_device_name(
+                    request_timeout_milliseconds=request_timeout_milliseconds,
+                    request_attempts=request_attempts,
+                )
+            ): device
+            for device in devices.values()
+            if self.get_arc_port(device)
+        }
+        if not name_tasks:
+            return
+
+        name_results = await asyncio.gather(*name_tasks, return_exceptions=True)
+        for task, result in zip(name_tasks, name_results):
+            device = name_tasks[task]
+            if isinstance(result, Exception):
+                logger.debug(f"Failed to read device name from {device.server_name}: {result}")
+            elif result:
+                device.name = result
+
+    async def populate_devices(
+        self,
+        devices: dict,
+        timeout: float = 2.0,
+        include_channels: bool = True,
+    ) -> None:
+        device_ip_addresses = [str(device.ipv4) for device in devices.values() if device.ipv4]
+        request_timeout_milliseconds = None if include_channels else 500
+        request_attempts = None if include_channels else 1
+
+        phase_coroutines = [
+            ("settings", self._query_settings_fields(devices)),
+            ("ConMon", self._query_conmon_all(timeout=timeout, devices=devices)),
+            ("interfaces", self._probe_interface_status(timeout=timeout, devices=devices)),
+            ("preferred leader", self._probe_preferred_leader_all(timeout=timeout, devices=devices)),
+            ("AES67", self._probe_aes67_all(timeout=timeout, devices=devices)),
+            ("sample rates", self._probe_sample_rates_all(timeout=timeout, devices=devices)),
+            ("encodings", self._probe_encodings_all(timeout=timeout, devices=devices)),
+            ("gain levels", self._probe_gain_levels_all(timeout=timeout, devices=devices)),
+        ]
+        if device_ip_addresses:
+            phase_coroutines.append(("CMC registration", self.cmc.register_all(device_ip_addresses)))
+
+        control_coroutines = []
+        for device in devices.values():
+            if self.get_arc_port(device):
+                control_coroutines.append(
+                    self._populate_device_controls(
+                        device,
+                        include_channels=include_channels,
+                        request_timeout_milliseconds=request_timeout_milliseconds,
+                        request_attempts=request_attempts,
+                    )
+                )
+
+        phase_tasks = {
+            asyncio.create_task(phase_coroutine): phase_name for phase_name, phase_coroutine in phase_coroutines
+        }
+        control_tasks = [asyncio.create_task(control_coroutine) for control_coroutine in control_coroutines]
         try:
-            await device.populate_from_core()
+            completed_tasks, pending_tasks = await asyncio.wait(phase_tasks, timeout=timeout)
+        finally:
+            unfinished_tasks = [task for task in phase_tasks if not task.done()]
+            for task in unfinished_tasks:
+                task.cancel()
+            if unfinished_tasks:
+                await asyncio.gather(*unfinished_tasks, return_exceptions=True)
+            if control_tasks:
+                await asyncio.gather(*control_tasks, return_exceptions=True)
+        if pending_tasks:
+            pending_names = ", ".join(sorted(phase_tasks[task] for task in pending_tasks))
+            logger.debug(f"Device detail deadline reached while waiting for: {pending_names}")
+        for task in completed_tasks:
+            exception = task.exception()
+            if exception is not None:
+                logger.warning(f"Failed to populate {phase_tasks[task]}: {exception}")
+
+    async def _populate_device_controls(
+        self,
+        device,
+        include_channels: bool = True,
+        request_timeout_milliseconds: int | None = None,
+        request_attempts: int | None = None,
+    ) -> None:
+        try:
+            await device.populate_from_core(
+                include_channels=include_channels,
+                request_timeout_milliseconds=request_timeout_milliseconds,
+                request_attempts=request_attempts,
+            )
         except Exception as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
 
-    async def _probe_interface_status(self, timeout: float = 3.0) -> None:
+    async def _probe_interface_status(self, timeout: float = 3.0, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
         waiters = {}
-        for device in self.devices.values():
+        for device in target_devices.values():
             device_ip = str(device.ipv4) if device.ipv4 else None
             if device_ip:
                 waiter = self.notifications.register_interface_waiter(device_ip)
@@ -374,12 +572,13 @@ class DanteApplication:
             for device_ip in waiters:
                 self.notifications.unregister_interface_waiter(device_ip)
 
-        populated = sum(1 for device in self.devices.values() if device.interfaces)
+        populated = sum(1 for device in target_devices.values() if device.interfaces)
         logger.debug(f"Interface status: {populated}/{len(waiters)} devices responded")
 
-    async def _probe_preferred_leader_all(self, timeout: float = 3.0) -> None:
+    async def _probe_preferred_leader_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
         waiters = {}
-        for device in self.devices.values():
+        for device in target_devices.values():
             if device.preferred_leader is not None:
                 continue
             device_ip = str(device.ipv4) if device.ipv4 else None
@@ -409,12 +608,13 @@ class DanteApplication:
                         device.preferred_leader = result
                 self.notifications.unregister_preferred_leader_waiter(device_ip)
 
-        populated = sum(1 for device in self.devices.values() if device.preferred_leader is not None)
-        logger.debug(f"Preferred leader: {populated}/{len(self.devices)} devices have data")
+        populated = sum(1 for device in target_devices.values() if device.preferred_leader is not None)
+        logger.debug(f"Preferred leader: {populated}/{len(target_devices)} devices have data")
 
-    async def _probe_aes67_all(self, timeout: float = 3.0) -> None:
+    async def _probe_aes67_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
         waiters = {}
-        for device in self.devices.values():
+        for device in target_devices.values():
             if device.aes67_current is not None:
                 continue
             device_ip = str(device.ipv4) if device.ipv4 else None
@@ -448,8 +648,8 @@ class DanteApplication:
                             device.aes67_configured = aes67_configured
                 self.notifications.unregister_aes67_waiter(device_ip)
 
-        populated = sum(1 for device in self.devices.values() if device.aes67_current is not None)
-        logger.debug(f"AES67: {populated}/{len(self.devices)} devices have data")
+        populated = sum(1 for device in target_devices.values() if device.aes67_current is not None)
+        logger.debug(f"AES67: {populated}/{len(target_devices)} devices have data")
 
     async def _probe_capabilities_all(
         self,
@@ -458,10 +658,12 @@ class DanteApplication:
         probe_status,
         capability_description: str,
         timeout: float,
+        devices: dict | None = None,
     ) -> None:
+        target_devices = self.devices if devices is None else devices
         probe_tasks = {}
         target_devices_by_ip_address = {}
-        for device in self.devices.values():
+        for device in target_devices.values():
             if not device.online or not device.ipv4 or capability_is_known(device):
                 continue
             device_ip_address = str(device.ipv4)
@@ -493,22 +695,34 @@ class DanteApplication:
             f"{capability_description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded"
         )
 
-    async def _probe_sample_rates_all(self, timeout: float = 3.0) -> None:
+    async def _probe_sample_rates_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
             lambda device: device.supported_sample_rates is not None,
             self._apply_sample_rate_capability,
             self.probe_sample_rate_status,
             "sample rates",
             timeout,
+            devices,
         )
 
-    async def _probe_encodings_all(self, timeout: float = 3.0) -> None:
+    async def _probe_encodings_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
             lambda device: device.supported_encodings is not None,
             self._apply_encoding_capability,
             self.probe_encoding_status,
             "encodings",
             timeout,
+            devices,
+        )
+
+    async def _probe_gain_levels_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
+        await self._probe_capabilities_all(
+            lambda device: device.supported_gain_levels is not None,
+            self._apply_gain_capability,
+            self.probe_gain_status,
+            "gain levels",
+            timeout,
+            devices,
         )
 
     @staticmethod
@@ -520,6 +734,12 @@ class DanteApplication:
     def _apply_encoding_capability(device, current_encoding: int, supported_encodings: list[int]) -> None:
         device.encoding = current_encoding
         device.supported_encodings = supported_encodings
+
+    @staticmethod
+    def _apply_gain_capability(device, device_type: str, channel_levels: list[int]) -> None:
+        device.gain_device_type = device_type
+        device.gain_levels = channel_levels
+        device.supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
 
     async def probe_interface_status(self, device_ip: str, timeout: float = 2.0) -> list[dict] | None:
         waiter = self.notifications.register_interface_waiter(device_ip)
@@ -547,9 +767,7 @@ class DanteApplication:
             timeout,
         )
 
-    async def probe_encoding_status(
-        self, device_ip_address: str, timeout: float = 2.0
-    ) -> tuple[int, list[int]] | None:
+    async def probe_encoding_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]] | None:
         return await self._probe_capability_status(
             "encoding",
             device_ip_address,
@@ -560,6 +778,64 @@ class DanteApplication:
             "Encoding",
             timeout,
         )
+
+    async def probe_gain_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> tuple[str, list[int]] | None:
+        async with self._capability_probe_lock("gain", device_ip_address):
+            result = await send_and_wait_for_gain_status(
+                self.notifications,
+                device_ip_address,
+                lambda: self.settings.probe_gain_level(device_ip_address),
+                timeout,
+            )
+            if result is None:
+                logger.debug(f"Gain status probe timeout for {device_ip_address}")
+            return result
+
+    async def set_gain_level_state(
+        self,
+        device,
+        channel_number: int,
+        gain_level: int,
+        device_type: str,
+        timeout: float = 4.0,
+    ) -> tuple[str, list[int]] | None:
+        if device_type not in ("input", "output"):
+            raise ValueError("device_type must be 'input' or 'output'")
+        if isinstance(channel_number, bool) or not isinstance(channel_number, int) or not 1 <= channel_number <= 0xFFFF:
+            raise ValueError("channel_number must be an integer from 1 through 65535")
+        if isinstance(gain_level, bool) or not isinstance(gain_level, int) or gain_level not in SUPPORTED_GAIN_LEVELS:
+            raise ValueError("gain_level must be an integer from 1 through 5")
+        if device.gain_device_type is not None and device.gain_device_type != device_type:
+            raise ValueError(f"device reports {device.gain_device_type} gain controls, not {device_type}")
+        if device.supported_gain_levels is not None and gain_level not in device.supported_gain_levels:
+            raise ValueError(
+                f"requested gain level {gain_level} is not supported; device reports {device.supported_gain_levels}"
+            )
+
+        device_ip_address = str(device.ipv4)
+        async with self._capability_probe_lock("gain", device_ip_address):
+            result = await send_and_wait_for_gain_status(
+                self.notifications,
+                device_ip_address,
+                lambda: self.settings.set_gain_level(
+                    device_ip_address,
+                    channel_number,
+                    gain_level,
+                    device_type,
+                ),
+                timeout,
+                expected_device_type=device_type,
+                channel_number=channel_number,
+                expected_level=gain_level,
+            )
+            if result is not None:
+                observed_device_type, channel_levels = result
+                self._apply_gain_capability(device, observed_device_type, channel_levels)
+            return result
 
     async def _probe_capability_status(
         self,
@@ -575,10 +851,26 @@ class DanteApplication:
         async with self._capability_probe_lock(capability_name, device_ip_address):
             waiter = register_waiter(device_ip_address)
             try:
-                send_probe(device_ip_address)
-                await asyncio.wait_for(waiter.wait(), timeout=timeout)
-                return get_result(device_ip_address)
-            except asyncio.TimeoutError:
+                event_loop = asyncio.get_running_loop()
+                deadline = event_loop.time() + timeout
+                attempt_count = 3
+                for attempt_number in range(attempt_count):
+                    send_probe(device_ip_address)
+                    remaining_time = max(0.0, deadline - event_loop.time())
+                    if remaining_time == 0:
+                        break
+                    if attempt_number == attempt_count - 1:
+                        attempt_timeout = remaining_time
+                    else:
+                        attempt_timeout = min(remaining_time, timeout / 4)
+                    try:
+                        await asyncio.wait_for(waiter.wait(), timeout=attempt_timeout)
+                    except asyncio.TimeoutError:
+                        continue
+                    result = get_result(device_ip_address)
+                    if result is not None:
+                        return result
+                    waiter.clear()
                 logger.debug(f"{capability_description} probe timeout for {device_ip_address}")
                 return get_result(device_ip_address)
             finally:
@@ -642,11 +934,12 @@ class DanteApplication:
         finally:
             self.notifications.unregister_aes67_waiter(device_ip_address)
 
-    async def _query_settings_fields(self) -> None:
+    async def _query_settings_fields(self, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
         host_mac = self.cmc._host_mac
         tasks = []
 
-        for device in self.devices.values():
+        for device in target_devices.values():
             if not device.ipv4:
                 continue
 
@@ -656,12 +949,13 @@ class DanteApplication:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _query_conmon_all(self, timeout: float = 10.0) -> None:
+    async def _query_conmon_all(self, timeout: float = 10.0, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
         deadline = time.monotonic() + timeout
 
         incomplete_devices = []
 
-        for device in self.devices.values():
+        for device in target_devices.values():
             remaining = deadline - time.monotonic()
 
             if remaining <= 0:

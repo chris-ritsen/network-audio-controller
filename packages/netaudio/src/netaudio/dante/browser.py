@@ -252,37 +252,58 @@ class DanteBrowser:
             logger.debug(f"mDNS discovery: waiting {self.mdns_timeout}s...")
             await asyncio.sleep(self.mdns_timeout)
             logger.debug("mDNS discovery: timeout reached, closing browser")
-            await self.async_close()
+            await self._async_close(cancel_service_tasks=False)
 
     async def async_close(self) -> None:
+        await self._async_close(cancel_service_tasks=True)
+
+    async def _async_close(self, cancel_service_tasks: bool) -> None:
         browser = self.aio_browser
         zeroconf = self.aio_zc
         state_change_tasks = list(self._state_change_tasks)
+        service_tasks = list(self.services) if cancel_service_tasks else []
         self.aio_browser = None
         self.aio_zc = None
         self._state_change_tasks.clear()
+        if cancel_service_tasks:
+            self.services = []
         if browser is not None:
             await browser.async_cancel()
-        for task in state_change_tasks:
+        for task in (*state_change_tasks, *service_tasks):
             task.cancel()
-        if state_change_tasks:
-            await asyncio.gather(*state_change_tasks, return_exceptions=True)
+        if state_change_tasks or service_tasks:
+            await asyncio.gather(*state_change_tasks, *service_tasks, return_exceptions=True)
         if zeroconf is not None:
             await zeroconf.async_close()
 
     async def get_devices(self) -> dict:
         start_time = time.monotonic()
-        await self.get_services()
-        logger.debug(f"mDNS: {len(self.services)} services ({time.monotonic() - start_time:.2f}s)")
+        try:
+            await self.get_services()
+            logger.debug(f"mDNS: {len(self.services)} services ({time.monotonic() - start_time:.2f}s)")
 
-        gather_start = time.monotonic()
-        await asyncio.gather(*self.services)
-        logger.debug(f"Service info gathered ({time.monotonic() - gather_start:.2f}s)")
+            gather_start = time.monotonic()
+            await asyncio.gather(*self.services)
+            logger.debug(f"Service info gathered ({time.monotonic() - gather_start:.2f}s)")
+        finally:
+            try:
+                self._assemble_completed_services()
+            finally:
+                await self.async_close()
 
+        return self.devices
+
+    def _assemble_completed_services(self) -> None:
         device_hosts = {}
 
-        for service in self.services:
-            service = service.result()
+        for service_task in self.services:
+            if not service_task.done() or service_task.cancelled():
+                continue
+            exception = service_task.exception()
+            if exception is not None:
+                logger.error("Failed to resolve mDNS service", exc_info=exception)
+                continue
+            service = service_task.result()
             server_name = None
 
             if not service:
@@ -297,14 +318,18 @@ class DanteBrowser:
             device_hosts[server_name][service["name"]] = service
 
         for hostname, device_services in device_hosts.items():
-            device = DanteDevice(
-                server_name=hostname,
-                dump_payloads=app_settings.dump_payloads,
-                debug=app_settings.debug,
-                app=self._app,
-            )
-
             try:
+                if self._app is not None:
+                    device = self._app._apply_discovered_services(hostname, device_services)
+                    self.devices[hostname] = device
+                    continue
+
+                device = DanteDevice(
+                    server_name=hostname,
+                    dump_payloads=app_settings.dump_payloads,
+                    debug=app_settings.debug,
+                    app=self._app,
+                )
                 device.services = device_services
 
                 for service_name, service in device_services.items():
@@ -321,6 +346,17 @@ class DanteBrowser:
                     if "model" in service_properties:
                         device.model_id = service_properties["model"]
 
+                    if "mf" in service_properties:
+                        device.manufacturer_mdns = service_properties["mf"]
+                        if not device.manufacturer:
+                            device.manufacturer = service_properties["mf"]
+
+                    if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
+                        device.software_version = service_properties["server_vers"]
+
+                    if "router_vers" in service_properties:
+                        device.firmware_version = service_properties["router_vers"]
+
                     if "rate" in service_properties:
                         device.sample_rate = int(service_properties["rate"])
 
@@ -331,15 +367,9 @@ class DanteBrowser:
                         device.latency = nanoseconds_to_milliseconds(service_properties["latency_ns"])
 
                 device.services = dict(sorted(device.services.items()))
+                self.devices[hostname] = device
             except Exception:
                 logger.exception("Failed to assemble discovered Dante device %s", hostname)
-
-            self.devices[hostname] = device
-
-            if self._app is not None:
-                self._app.register_device(hostname, device)
-
-        return self.devices
 
     async def get_services(self) -> None:
         try:

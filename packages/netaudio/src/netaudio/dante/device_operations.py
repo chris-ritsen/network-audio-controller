@@ -65,10 +65,14 @@ class DanteDeviceOperations:
         return response
 
     async def set_gain_level(self, channel_number, gain_level, device_type):
-        cmd_args = self.device.commands.command_set_gain_level(channel_number, gain_level, device_type)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="set_gain_level")
-
-        return response
+        if self.device._app is None:
+            raise RuntimeError("verified gain control requires an active Dante application")
+        return await self.device._app.set_gain_level_state(
+            self.device,
+            channel_number,
+            gain_level,
+            device_type,
+        )
 
     async def enable_aes67(self, is_enabled: bool, host_mac=None, retries=3, retry_delay=0.1):
         if host_mac is None:
