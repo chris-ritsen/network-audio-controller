@@ -31,6 +31,13 @@ OUTPUT_GAIN_STATUS_PACKET = bytes.fromhex(
     "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004"
 )
 
+AVIO_APPLIED_DHCP_INTERFACE_STATUS_PACKET = bytes.fromhex(
+    "ffff006c05920000001dc1fffe50692e417564696e6174650727001100000000"
+    "00010000000000640001001dc150692ec0a8018bffffff00c0a80101c0a80101"
+    "0018003000000000000400000000000000000000000000000000000000480000"
+    "6c6f63616c646f6d61696e00"
+)
+
 
 class TestDanteSettingsService:
     def test_instantiation(self):
@@ -235,6 +242,22 @@ class TestDanteNotificationService:
 
         assert device.interfaces[1]["mac_address"] == "02:00:00:04:BB:CC"
         assert device.interfaces[1]["ip_address"] == "192.168.2.20"
+        assert device.interface_reboot_required is False
+        assert device.interface_pending_config is None
+
+    def test_applied_dhcp_target_clears_stale_avio_flag(self):
+        device_ip = "192.168.1.139"
+        device = DanteDevice(server_name="AVIOAI2-50692e.local.")
+        device.ipv4 = device_ip
+        service = DanteNotificationService(
+            dispatcher=DanteEventDispatcher(),
+            device_lookup=lambda ip_address: device if ip_address == device_ip else None,
+        )
+
+        service._on_packet(AVIO_APPLIED_DHCP_INTERFACE_STATUS_PACKET, (device_ip, 8700))
+
+        assert device.interfaces[0]["mode"] == "dynamic"
+        assert device.interfaces[0]["ip_address"] == device_ip
         assert device.interface_reboot_required is False
         assert device.interface_pending_config is None
 

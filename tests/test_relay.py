@@ -49,6 +49,7 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         online=True,
         flow_protocol_id=None,
         is_locked=False,
+        interface_reboot_required=False,
         interface_pending_config=None,
         sample_rate=None,
         supported_sample_rates=None,
@@ -608,6 +609,37 @@ class TestMutationVerification:
 
         assert status == 409
         assert response["interfaces"] == [{"mode": "static"}]
+
+    @pytest.mark.asyncio
+    async def test_applied_interface_reports_no_reboot(self):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(relay, "/interface", {"device": "dev1", "mode": "dhcp"})
+
+        assert status == 200
+        assert response == {
+            "success": True,
+            "reboot_required": False,
+            "interfaces": [{"mode": "dynamic"}],
+        }
+
+    @pytest.mark.asyncio
+    async def test_pending_interface_reports_reboot(self):
+        device = make_device()
+        device.interface_reboot_required = True
+        device.interface_pending_config = {"mode": "dynamic"}
+        relay = make_relay({"dev1": device})
+        relay.application.set_interface_dhcp.return_value = [{"mode": "static"}]
+
+        status, response = await post(relay, "/interface", {"device": "dev1", "mode": "dhcp"})
+
+        assert status == 200
+        assert response == {
+            "success": True,
+            "reboot_required": True,
+            "interfaces": [{"mode": "static"}],
+        }
 
     @pytest.mark.asyncio
     async def test_failed_lock_result_uses_conflict_status(self, monkeypatch):
