@@ -1,5 +1,7 @@
 import asyncio
+import socket
 import struct
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -42,6 +44,30 @@ class TestUnicastService:
         # Should not raise when protocol is None
         service.send(b"\x00", "192.168.1.1", 4440)
 
+    def test_send_persists_fire_and_forget_request(self):
+        packet_store = MagicMock()
+        protocol = MagicMock()
+        protocol.transport.get_extra_info.return_value = ("192.168.1.10", 54321)
+        service = DanteUnicastService(packet_store=packet_store)
+        service._protocol = protocol
+        service.session_id = 18
+        packet = b"\x27\xff\x00\x13"
+
+        service.send(packet, "192.168.1.108", 8702)
+
+        packet_store.store_packet.assert_called_once_with(
+            payload=packet,
+            source_type="netaudio_request",
+            device_ip="192.168.1.108",
+            src_ip="192.168.1.10",
+            src_port=54321,
+            dst_ip="192.168.1.108",
+            dst_port=8702,
+            direction="request",
+            session_id=18,
+        )
+        protocol.send_fire_and_forget.assert_called_once_with(packet, ("192.168.1.108", 8702))
+
     @pytest.mark.asyncio
     async def test_start_stop(self):
         service = DanteUnicastService()
@@ -51,6 +77,21 @@ class TestUnicastService:
 
         await service.stop()
         assert service._protocol is None
+
+    @pytest.mark.asyncio
+    async def test_requested_source_port_falls_back_to_ephemeral_when_occupied(self):
+        occupied_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        occupied_socket.bind(("0.0.0.0", 0))
+        occupied_port = occupied_socket.getsockname()[1]
+        service = DanteUnicastService(local_port=occupied_port, fallback_to_ephemeral=True)
+
+        try:
+            await service.start()
+            assert service.local_port is not None
+            assert service.local_port != occupied_port
+        finally:
+            await service.stop()
+            occupied_socket.close()
 
 
 class TestMulticastService:
@@ -65,6 +106,8 @@ class TestMulticastService:
         service = DanteMulticastService("224.0.0.231", 8702)
         await service.start()
         assert service._protocol is not None
+        assert service._protocol.transport is not None
+        assert service._protocol.transport.get_extra_info("sockname") == ("224.0.0.231", 8702)
 
         await service.stop()
         assert service._protocol is None

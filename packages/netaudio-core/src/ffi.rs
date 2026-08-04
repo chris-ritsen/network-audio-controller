@@ -544,6 +544,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
                 out_capacity,
                 out_length,
             ),
+            "channel_audio_metadata" => write_optional_json(
+                crate::parser::parse_channel_audio_metadata(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
             "device_name" => write_optional_json(
                 responses::parse_device_name(bytes),
                 out_buffer,
@@ -618,6 +624,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
             ),
             "encoding_status" => write_optional_json(
                 responses::parse_encoding_status(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
+            "gain_status" => write_optional_json(
+                responses::parse_gain_status(bytes),
                 out_buffer,
                 out_capacity,
                 out_length,
@@ -1253,10 +1265,12 @@ mod tests {
         data[24] = 0x07;
         data[26..28]
             .copy_from_slice(&crate::responses::CONMON_OPCODE_INTERFACE_STATUS.to_be_bytes());
+        data[36..40].copy_from_slice(&1_000u32.to_be_bytes());
         let (status, output) = parse_response_call("interface_status", &data);
 
         assert_eq!(status, NetaudioStatus::Ok);
         let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(json["link_speed_mbps"], 1_000);
         assert_eq!(json["interfaces"], serde_json::json!([]));
         assert_eq!(json["reboot_required"], false);
         assert_eq!(json["pending_config"], serde_json::Value::Null);
@@ -1305,7 +1319,7 @@ mod tests {
     fn invalid_gain_device_type_is_reported_across_ffi() {
         assert_eq!(
             build_command_status(
-                r#"{"command":"set_gain_level","channel_number":1,"gain_level":2,"device_type":"outputs"}"#,
+                r#"{"command":"set_gain_level","channel_number":1,"gain_level":2,"device_type":"outputs","host_mac":"001122334455"}"#,
             ),
             NetaudioStatus::InvalidDeviceType
         );
@@ -1327,11 +1341,11 @@ mod tests {
                 NetaudioStatus::InvalidEncoding,
             ),
             (
-                r#"{"command":"set_gain_level","channel_number":0,"gain_level":1,"device_type":"input"}"#,
+                r#"{"command":"set_gain_level","channel_number":0,"gain_level":1,"device_type":"input","host_mac":"001122334455"}"#,
                 NetaudioStatus::InvalidChannel,
             ),
             (
-                r#"{"command":"set_gain_level","channel_number":1,"gain_level":6,"device_type":"input"}"#,
+                r#"{"command":"set_gain_level","channel_number":1,"gain_level":6,"device_type":"input","host_mac":"001122334455"}"#,
                 NetaudioStatus::InvalidGainLevel,
             ),
             (

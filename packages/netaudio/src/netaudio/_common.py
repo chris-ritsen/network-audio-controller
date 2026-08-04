@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from fnmatch import fnmatch
+from glob import has_magic
 from typing import Any, Awaitable, Callable, Optional
 
 import typer
@@ -59,7 +60,9 @@ class CoreCommandSender:
         self._session_id = session_id
         self._dispatcher = None
         self._notifications = None
+        self._settings_service = None
         self._notification_start_lock = asyncio.Lock()
+        self._settings_start_lock = asyncio.Lock()
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._client_request_locks: dict[str, asyncio.Lock] = {}
 
@@ -127,6 +130,24 @@ class CoreCommandSender:
             self._dispatcher = dispatcher
             self._notifications = notifications
             return notifications
+
+    async def _ensure_settings_service(self):
+        if self._settings_service is not None:
+            return self._settings_service
+        async with self._settings_start_lock:
+            if self._settings_service is not None:
+                return self._settings_service
+
+            from netaudio.dante.services.settings import DanteSettingsService
+
+            settings_service = DanteSettingsService(
+                packet_store=self._packet_store,
+                dissect=_get_state().dissect,
+            )
+            settings_service.session_id = self._session_id
+            await settings_service.start()
+            self._settings_service = settings_service
+            return settings_service
 
     async def send_and_wait_for_notification(
         self,
@@ -243,11 +264,61 @@ class CoreCommandSender:
             timeout,
         )
 
+    async def probe_gain_status(self, device_ip_address, timeout: float = 2.0):
+        from netaudio.dante.services.notification import send_and_wait_for_gain_status
+
+        address = str(device_ip_address)
+        probe_lock = self._capability_probe_locks.setdefault(("gain", address), asyncio.Lock())
+        async with probe_lock:
+            notifications = await self._ensure_notifications()
+            settings_service = await self._ensure_settings_service()
+            return await send_and_wait_for_gain_status(
+                notifications,
+                address,
+                lambda: settings_service.probe_gain_level(address, host_mac=self._host_mac),
+                timeout,
+            )
+
+    async def set_gain_level(
+        self,
+        device_ip_address,
+        channel_number: int,
+        gain_level: int,
+        device_type: str,
+        timeout: float = 4.0,
+    ):
+        from netaudio.dante.services.notification import send_and_wait_for_gain_status
+
+        address = str(device_ip_address)
+        probe_lock = self._capability_probe_locks.setdefault(("gain", address), asyncio.Lock())
+        async with probe_lock:
+            notifications = await self._ensure_notifications()
+            settings_service = await self._ensure_settings_service()
+            return await send_and_wait_for_gain_status(
+                notifications,
+                address,
+                lambda: settings_service.set_gain_level(
+                    address,
+                    channel_number,
+                    gain_level,
+                    device_type,
+                    host_mac=self._host_mac,
+                ),
+                timeout,
+                expected_device_type=device_type,
+                channel_number=channel_number,
+                expected_level=gain_level,
+            )
+
     async def close(self) -> None:
         notifications = self._notifications
         dispatcher = self._dispatcher
+        settings_service = self._settings_service
         self._notifications = None
         self._dispatcher = None
+        self._settings_service = None
+        if settings_service is not None:
+            await settings_service.stop()
         if notifications is not None:
             await notifications.stop()
         if dispatcher is not None:
@@ -344,6 +415,15 @@ def _get_state():
     return state
 
 
+def _make_dante_application(packet_store=None, session_id=None) -> DanteApplication:
+    application = DanteApplication(packet_store=packet_store, dissect=_get_state().dissect)
+    if packet_store and session_id:
+        application.capture_session_id = session_id
+        for service in (application.settings, application.cmc, application.notifications):
+            service.session_id = session_id
+    return application
+
+
 async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice]:
     devices = await get_devices_from_daemon()
 
@@ -354,11 +434,7 @@ async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice
 
             packet_store, session_id = open_capture_session()
             owns_store = packet_store is not None
-        application = DanteApplication(packet_store=packet_store, dissect=_get_state().dissect)
-        if packet_store and session_id:
-            application.capture_session_id = session_id
-            for service in (application.settings, application.cmc, application.notifications):
-                service.session_id = session_id
+        application = _make_dante_application(packet_store=packet_store, session_id=session_id)
         await application.startup()
         try:
             devices = await application.discover_and_populate(timeout=settings.mdns_timeout)
@@ -368,6 +444,58 @@ async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice
                 packet_store.close()
 
     return devices or {}
+
+
+async def _load_device_for_show(include_channels: bool) -> tuple[str, DanteDevice]:
+    devices = await get_devices_from_daemon()
+    if devices is not None:
+        selected_devices = filter_devices(devices)
+        server_name, device = _resolve_one(selected_devices)
+        if include_channels:
+            await _populate_controls({server_name: device})
+        return server_name, device
+
+    from netaudio._capture import open_capture_session
+
+    packet_store, session_id = open_capture_session()
+    application = _make_dante_application(packet_store=packet_store, session_id=session_id)
+    try:
+        await application.startup()
+        state = _get_state()
+        show_timeout = settings.mdns_timeout if state.timeout_explicit else min(settings.mdns_timeout, 2.0)
+        selected_devices = {}
+        literal_name = state.names[0] if len(state.names) == 1 and not has_magic(state.names[0]) else None
+        if literal_name is not None:
+            exact_devices = await application.discover_named_device(literal_name, timeout=show_timeout)
+            exact_candidates = filter_devices(exact_devices, include_names=False)
+            await application.populate_device_names(
+                exact_candidates,
+                request_timeout_milliseconds=500,
+                request_attempts=1,
+            )
+            selected_devices = filter_devices(exact_candidates)
+        if not selected_devices:
+            discovered_devices = await application.wait_for_discovery(timeout=show_timeout)
+            identity_candidates = filter_devices(discovered_devices, include_names=False)
+            await application.populate_device_names(
+                identity_candidates,
+                request_timeout_milliseconds=500,
+                request_attempts=1,
+            )
+            selected_devices = filter_devices(identity_candidates)
+
+        server_name, device = _resolve_one(selected_devices)
+        selected_devices = {server_name: device}
+        await application.populate_devices(
+            selected_devices,
+            timeout=show_timeout,
+            include_channels=include_channels,
+        )
+        return _resolve_one(filter_devices(selected_devices))
+    finally:
+        await application.shutdown()
+        if packet_store is not None:
+            packet_store.close()
 
 
 def discover() -> dict[str, DanteDevice]:
@@ -498,7 +626,7 @@ def _mac_matches(device_mac: str, pattern: str) -> bool:
     return _normalize_mac(device_mac) == _normalize_mac(pattern)
 
 
-def filter_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
+def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
     state = _get_state()
 
     if not state.names and not state.hosts and not state.server_names and not state.macs:
@@ -507,7 +635,7 @@ def filter_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
     filtered = {}
 
     for server_name, device in devices.items():
-        if state.names and not any(fnmatch(device.name or "", pat) for pat in state.names):
+        if include_names and state.names and not any(fnmatch(device.name or "", pat) for pat in state.names):
             continue
 
         if state.hosts and not any(str(device.ipv4) == h for h in state.hosts):

@@ -303,10 +303,24 @@ class TestSettingsCommandPacketFormat:
         self._check_header(packet, 0x00, 0x81)
 
     def test_set_gain_level_packet_format(self):
-        commands = DanteDeviceCommands()
-        packet, _, port = commands.command_set_gain_level(1, 5, "input")
+        host_mac = bytes.fromhex("842f5774e86d")
+        commands = DanteDeviceCommands(host_mac=host_mac)
+        packet, _, port = commands.command_set_gain_level(1, 5, "input", sequence=0xC006)
         assert port == 8700
-        self._check_header(packet, 0x10, 0x01)
+        self._check_header(packet, 0x10, 0x0A)
+        assert packet[4:6] == bytes.fromhex("c006")
+        assert packet[8:14] == host_mac
+        assert packet[40:42] == bytes.fromhex("0102")
+        assert packet[46:48] == bytes.fromhex("0001")
+        assert packet[48:52] == bytes.fromhex("00000005")
+
+    def test_probe_gain_level_packet_format(self):
+        host_mac = bytes.fromhex("842f5774e86d")
+        commands = DanteDeviceCommands(host_mac=host_mac)
+        packet, _, port = commands.command_probe_gain_level(sequence=0x045A)
+        assert port == 8700
+        self._check_header(packet, 0x10, 0x0A)
+        assert packet.hex() == "ffff0028045a0000842f5774e86d0000417564696e617465073a100a000000000000000000000000"
 
 
 class TestParserBluetoothStatus:

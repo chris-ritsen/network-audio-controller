@@ -225,5 +225,82 @@
     "hex": "2729008c006711000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110002030300048021007c00f000000000806000220001000000630000006400000065000002220212003000008321001e8480000f4240000f4240028b0aab0003d09000000000000000000000000000000000",
     "kind": "aes67_configured",
     "parsed": null
+  },
+  "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
+    "kind": "channel_audio_metadata",
+    "parsed": {
+      "sample_rate": 48000,
+      "current_encoding": 24,
+      "encoding_capability_bitmap": 4,
+      "supported_encodings": [
+        24
+      ]
+    }
+  },
+  "gain_status_input_packet_1528": {
+    "hex": "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000000000010008001001020002000400180000000500000001",
+    "kind": "gain_status",
+    "parsed": {
+      "device_type": "input",
+      "channel_levels": [
+        5,
+        1
+      ]
+    }
+  },
+  "gain_status_output_packet_1585": {
+    "hex": "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004",
+    "kind": "gain_status",
+    "parsed": {
+      "device_type": "output",
+      "channel_levels": [
+        4,
+        4
+      ]
+    }
+  },
+  "interface_status_lx_dante_packet_12362179": {
+    "hex": "ffff009412b70000001dc10812580000417564696e617465072400110000000000020000000003e80001001dc1081258c0a8016cffffff00c0a80101c0a801010000000a0000001dc1081259ac1fb93affff000000000000000000000018004c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "kind": "interface_status",
+    "parsed": {
+      "link_speed_mbps": 1000,
+      "interfaces": [
+        {
+          "mode": "dynamic",
+          "mac_address": "00:1D:C1:08:12:58",
+          "ip_address": "192.168.1.108",
+          "netmask": "255.255.255.0",
+          "gateway": "192.168.1.1",
+          "dns_server": "192.168.1.1"
+        },
+        {
+          "mode": "unknown(0x0000)",
+          "mac_address": "00:1D:C1:08:12:59",
+          "ip_address": "172.31.185.58",
+          "netmask": "255.255.0.0"
+        }
+      ],
+      "reboot_required": false,
+      "pending_config": null
+    }
+  },
+  "interface_status_avio_input_packet_12362180": {
+    "hex": "ffff0060d9f00000001dc1fffe50692e417564696e617465072700110000000000010000000000640003001dc150692ec0a8012affffff0008080808080804040018003000000000000000000000000000000000000000000000000000000000",
+    "kind": "interface_status",
+    "parsed": {
+      "link_speed_mbps": 100,
+      "interfaces": [
+        {
+          "mode": "static",
+          "mac_address": "00:1D:C1:50:69:2E",
+          "ip_address": "192.168.1.42",
+          "netmask": "255.255.255.0",
+          "gateway": "8.8.4.4",
+          "dns_server": "8.8.8.8"
+        }
+      ],
+      "reboot_required": false,
+      "pending_config": null
+    }
   }
 }
