@@ -411,5 +411,12 @@
       "sequence": 1114
     },
     "hex": "ffff0028045a0000842f5774e86d0000417564696e617465073a100a000000000000000000000000"
+  },
+  "property_directory_packet_548323": {
+    "spec": {
+      "command": "property_directory",
+      "transaction_id": 4660
+    },
+    "hex": "27ff000a123411020000"
   }
 }

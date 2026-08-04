@@ -425,6 +425,7 @@ async def test_summary_control_fetch_skips_channel_pages(monkeypatch):
     core_client.get_device_name.return_value = "lx-dante"
     core_client.get_channel_count.return_value = (128, 128, False)
     core_client.get_device_settings.return_value = {"sample_rate": 48_000}
+    core_client.get_property_directory.return_value = None
     core_client.get_aes67_configured.return_value = False
     monkeypatch.setattr(device, "_core_client", lambda: core_client)
 

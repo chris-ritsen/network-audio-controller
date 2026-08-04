@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
 
 from netaudio.core import binding
 from netaudio.dante.device import DanteDevice
@@ -64,6 +67,41 @@ def test_core_client_falls_back_from_tx_to_rx_inventory(monkeypatch):
 
     assert result == {"current_encoding": 24, "supported_encodings": [24]}
     assert requests == [(b"transmitters", 4440), (b"receivers", 4440)]
+
+
+@pytest.mark.asyncio
+async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_capabilities(monkeypatch):
+    device = DanteDevice()
+    core_client = MagicMock()
+    core_client.observer = None
+    core_client.get_channel_count.return_value = (2, 2, False)
+    core_client.get_rx_inventory.return_value = {
+        "channels": [],
+        "channel_audio_metadata": {
+            "sample_rate": 48_000,
+            "current_encoding": 24,
+            "encoding_capability_bitmap": 0x0004,
+            "supported_encodings": [24],
+        },
+    }
+    core_client.get_tx_channels.return_value = []
+    core_client.get_device_name.return_value = "avio-input"
+    core_client.get_device_settings.return_value = None
+    core_client.get_property_directory.return_value = {
+        "properties": [{"property_id": 0x8020, "flags": 0x0001}],
+        "aes67_supported": False,
+    }
+    monkeypatch.setattr(device, "_core_client_for_request", lambda *arguments: core_client)
+
+    controls = await device.fetch_controls_data()
+
+    assert controls["aes67_supported"] is False
+    assert controls["settings_properties"] == [{"property_id": 0x8020, "flags": 0x0001}]
+    assert controls["channel_metadata_supported_encodings"] == [24]
+    core_client.get_rx_inventory.assert_called_once_with(2)
+    core_client.get_rx_channels.assert_not_called()
+    core_client.get_channel_audio_metadata.assert_not_called()
+    core_client.get_aes67_configured.assert_not_called()
 
 
 def test_channel_metadata_populates_unknown_encoding_capability():

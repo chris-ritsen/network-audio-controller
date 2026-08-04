@@ -17,6 +17,11 @@ def make_device():
     device.supported_sample_rates = [44100, 48000]
     device.encoding = 24
     device.supported_encodings = [24, 16, 32]
+    device.aes67_supported = True
+    device.settings_properties = [
+        {"property_id": 0x8020, "flags": 0x0001},
+        {"property_id": 0x0063, "flags": 0x0001},
+    ]
     device.gain_device_type = "output"
     device.gain_levels = [4, 5]
     device.supported_gain_levels = [1, 2, 3, 4, 5]
@@ -87,6 +92,11 @@ class TestSerializerRoundtrip:
         assert restored.supported_sample_rates == [44100, 48000]
         assert restored.encoding == 24
         assert restored.supported_encodings == [24, 16, 32]
+        assert restored.aes67_supported is True
+        assert restored.settings_properties == [
+            {"property_id": 0x8020, "flags": 0x0001},
+            {"property_id": 0x0063, "flags": 0x0001},
+        ]
         assert restored.gain_device_type == "output"
         assert restored.gain_levels == [4, 5]
         assert restored.supported_gain_levels == [1, 2, 3, 4, 5]

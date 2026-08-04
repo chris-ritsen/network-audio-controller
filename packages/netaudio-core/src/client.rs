@@ -9,13 +9,15 @@ use serde::Serialize;
 
 use crate::commands;
 use crate::parser::{
-    parse_channel_count, parse_rx_page, parse_tx_friendly_page, parse_tx_info_page, ChannelCount,
-    RxChannel, TxChannel, RX_CHANNELS_PER_PAGE, TX_CHANNELS_PER_PAGE,
+    parse_channel_audio_metadata, parse_channel_count, parse_rx_page, parse_tx_friendly_page,
+    parse_tx_info_page, ChannelAudioMetadata, ChannelCount, RxChannel, TxChannel,
+    RX_CHANNELS_PER_PAGE, TX_CHANNELS_PER_PAGE,
 };
 use crate::protocol::{build_set_device_name, NetaudioError};
 use crate::responses::{
     parse_aes67_configured, parse_device_info, parse_device_name, parse_device_settings,
-    parse_result_code, DeviceInfo, DeviceSettings, RESULT_CODE_SUCCESS,
+    parse_property_directory, parse_result_code, DeviceInfo, DeviceSettings, PropertyDirectory,
+    RESULT_CODE_SUCCESS,
 };
 use crate::spec::{build_routed_command, IoMode, SpecError, Target};
 
@@ -34,6 +36,12 @@ pub struct WireCapture {
     pub port: u16,
     pub matched: Option<bool>,
     pub payload_hex: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RxInventory {
+    pub channels: Vec<RxChannel>,
+    pub channel_audio_metadata: Option<ChannelAudioMetadata>,
 }
 
 #[derive(Default)]
@@ -315,6 +323,13 @@ impl Client {
         parse_device_settings(&response).ok_or(ClientError::MalformedResponse)
     }
 
+    pub fn get_property_directory(&mut self) -> Result<PropertyDirectory, ClientError> {
+        let transaction_id = self.next_transaction_id();
+        let packet = commands::build_property_directory(transaction_id)?;
+        let response = self.request(&packet, transaction_id)?;
+        parse_property_directory(&response).ok_or(ClientError::MalformedResponse)
+    }
+
     pub fn get_aes67_configured(&mut self) -> Result<Option<bool>, ClientError> {
         let transaction_id = self.next_transaction_id();
         let packet = commands::build_query_latency_config(transaction_id)?;
@@ -331,13 +346,21 @@ impl Client {
 
     pub fn get_rx_channels(&mut self) -> Result<Vec<RxChannel>, ClientError> {
         let rx_count = self.get_channel_count()?.rx_count;
+        Ok(self.get_rx_inventory(rx_count)?.channels)
+    }
+
+    pub fn get_rx_inventory(&mut self, rx_count: u16) -> Result<RxInventory, ClientError> {
         let pages = page_count(rx_count, RX_CHANNELS_PER_PAGE);
         let mut channels = Vec::new();
+        let mut channel_audio_metadata = None;
 
         for page in 0..pages {
             let transaction_id = self.next_transaction_id();
             let packet = commands::build_receivers(page, transaction_id)?;
             let response = self.request(&packet, transaction_id)?;
+            if page == 0 {
+                channel_audio_metadata = parse_channel_audio_metadata(&response);
+            }
             let starting_channel = page * RX_CHANNELS_PER_PAGE + 1;
             let parsed =
                 parse_rx_page(&response, starting_channel).ok_or(ClientError::MalformedResponse)?;
@@ -352,7 +375,10 @@ impl Client {
             return Err(ClientError::MalformedResponse);
         }
 
-        Ok(channels)
+        Ok(RxInventory {
+            channels,
+            channel_audio_metadata,
+        })
     }
 
     pub fn get_tx_channels(&mut self) -> Result<Vec<TxChannel>, ClientError> {
