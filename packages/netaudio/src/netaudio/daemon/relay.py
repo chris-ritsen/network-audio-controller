@@ -1169,6 +1169,9 @@ class RelayServer:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
+        if device.aes67_supported is False:
+            await self._send_json(writer, {"error": "device does not support AES67 configuration"}, 409)
+            return
         expected = params.get("enabled")
         if not isinstance(expected, bool):
             await self._send_json(writer, {"error": "enabled must be a boolean"}, 400)
@@ -1260,13 +1263,14 @@ class RelayServer:
         if snapshot is None:
             return
 
-        device, flow_protocol_id, device_flows = snapshot
+        device, flow_protocol_id, flow_inventory = snapshot
         await self._send_json(
             writer,
             {
                 "device": device.server_name,
                 "flow_protocol_id": flow_protocol_id,
-                "flows": device_flows,
+                "max_flow_slots": flow_inventory["max_flow_slots"],
+                "flows": flow_inventory["flows"],
             },
         )
 
@@ -1286,10 +1290,12 @@ class RelayServer:
         snapshot = await self._tx_flow_snapshot(writer, device_name)
         if snapshot is None:
             return
-        device, flow_protocol_id, device_flows = snapshot
+        device, flow_protocol_id, flow_inventory = snapshot
+        device_flows = flow_inventory["flows"]
 
         available_channels = {int(number) for number in (device.tx_channels or {}).keys()}
         try:
+            flows.require_supported_flow_slot(flow_slot, flow_inventory["max_flow_slots"])
             flows.require_available_tx_channels(channel_numbers, available_channels)
             flows.require_available_flow_slot(device_flows, flow_slot)
         except flows.FlowValidationError as exception:
@@ -1337,7 +1343,8 @@ class RelayServer:
         snapshot = await self._tx_flow_snapshot(writer, params.get("device"))
         if snapshot is None:
             return
-        device, flow_protocol_id, device_flows = snapshot
+        device, flow_protocol_id, flow_inventory = snapshot
+        device_flows = flow_inventory["flows"]
 
         try:
             flows.require_multicast_flow(device_flows, flow_slot)
@@ -1390,11 +1397,13 @@ class RelayServer:
                 return None
             device.flow_protocol_id = flow_protocol_id
 
-        device_flows = await flows.query_tx_flows(str(device.ipv4), self._flow_arc_port(device), flow_protocol_id)
-        if device_flows is None:
+        flow_inventory = await flows.query_tx_flow_inventory(
+            str(device.ipv4), self._flow_arc_port(device), flow_protocol_id
+        )
+        if flow_inventory is None:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
             return None
-        return device, flow_protocol_id, device_flows
+        return device, flow_protocol_id, flow_inventory
 
     @staticmethod
     def _flow_arc_port(device) -> int:

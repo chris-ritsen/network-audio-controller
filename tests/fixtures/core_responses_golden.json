@@ -321,5 +321,247 @@
       "reboot_required": false,
       "pending_config": null
     }
+  },
+  "property_directory_lx_dante_packet_12358036": {
+    "hex": "272900700041110200010019802000018021000300220003002400018060000300f00003020100038204000382050003020a0001020b000102100003021100030212000302130001021400018301000383060001830200010310000303110001031200010303000383f0000106010001",
+    "kind": "property_directory",
+    "parsed": {
+      "properties": [
+        {
+          "property_id": 32800,
+          "flags": 1
+        },
+        {
+          "property_id": 32801,
+          "flags": 3
+        },
+        {
+          "property_id": 34,
+          "flags": 3
+        },
+        {
+          "property_id": 36,
+          "flags": 1
+        },
+        {
+          "property_id": 32864,
+          "flags": 3
+        },
+        {
+          "property_id": 240,
+          "flags": 3
+        },
+        {
+          "property_id": 513,
+          "flags": 3
+        },
+        {
+          "property_id": 33284,
+          "flags": 3
+        },
+        {
+          "property_id": 33285,
+          "flags": 3
+        },
+        {
+          "property_id": 522,
+          "flags": 1
+        },
+        {
+          "property_id": 523,
+          "flags": 1
+        },
+        {
+          "property_id": 528,
+          "flags": 3
+        },
+        {
+          "property_id": 529,
+          "flags": 3
+        },
+        {
+          "property_id": 530,
+          "flags": 3
+        },
+        {
+          "property_id": 531,
+          "flags": 1
+        },
+        {
+          "property_id": 532,
+          "flags": 1
+        },
+        {
+          "property_id": 33537,
+          "flags": 3
+        },
+        {
+          "property_id": 33542,
+          "flags": 1
+        },
+        {
+          "property_id": 33538,
+          "flags": 1
+        },
+        {
+          "property_id": 784,
+          "flags": 3
+        },
+        {
+          "property_id": 785,
+          "flags": 1
+        },
+        {
+          "property_id": 786,
+          "flags": 1
+        },
+        {
+          "property_id": 771,
+          "flags": 3
+        },
+        {
+          "property_id": 33776,
+          "flags": 1
+        },
+        {
+          "property_id": 1537,
+          "flags": 1
+        }
+      ],
+      "aes67_supported": false
+    }
+  },
+  "property_directory_avio_packet_12358133": {
+    "hex": "28090088006c11020001001f8020000180210003002200030023000300240001806000030062000300630001020100038204000382050003020a0001020b0001021000030211000302120003021300010214000102220003830100038306000183020001832100010310000103110001031200010303000383f00001060100010309000102090001",
+    "kind": "property_directory",
+    "parsed": {
+      "properties": [
+        {
+          "property_id": 32800,
+          "flags": 1
+        },
+        {
+          "property_id": 32801,
+          "flags": 3
+        },
+        {
+          "property_id": 34,
+          "flags": 3
+        },
+        {
+          "property_id": 35,
+          "flags": 3
+        },
+        {
+          "property_id": 36,
+          "flags": 1
+        },
+        {
+          "property_id": 32864,
+          "flags": 3
+        },
+        {
+          "property_id": 98,
+          "flags": 3
+        },
+        {
+          "property_id": 99,
+          "flags": 1
+        },
+        {
+          "property_id": 513,
+          "flags": 3
+        },
+        {
+          "property_id": 33284,
+          "flags": 3
+        },
+        {
+          "property_id": 33285,
+          "flags": 3
+        },
+        {
+          "property_id": 522,
+          "flags": 1
+        },
+        {
+          "property_id": 523,
+          "flags": 1
+        },
+        {
+          "property_id": 528,
+          "flags": 3
+        },
+        {
+          "property_id": 529,
+          "flags": 3
+        },
+        {
+          "property_id": 530,
+          "flags": 3
+        },
+        {
+          "property_id": 531,
+          "flags": 1
+        },
+        {
+          "property_id": 532,
+          "flags": 1
+        },
+        {
+          "property_id": 546,
+          "flags": 3
+        },
+        {
+          "property_id": 33537,
+          "flags": 3
+        },
+        {
+          "property_id": 33542,
+          "flags": 1
+        },
+        {
+          "property_id": 33538,
+          "flags": 1
+        },
+        {
+          "property_id": 33569,
+          "flags": 1
+        },
+        {
+          "property_id": 784,
+          "flags": 1
+        },
+        {
+          "property_id": 785,
+          "flags": 1
+        },
+        {
+          "property_id": 786,
+          "flags": 1
+        },
+        {
+          "property_id": 771,
+          "flags": 3
+        },
+        {
+          "property_id": 33776,
+          "flags": 1
+        },
+        {
+          "property_id": 1537,
+          "flags": 1
+        },
+        {
+          "property_id": 777,
+          "flags": 1
+        },
+        {
+          "property_id": 521,
+          "flags": 1
+        }
+      ],
+      "aes67_supported": true
+    }
   }
 }

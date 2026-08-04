@@ -95,9 +95,23 @@ def generate_systemd_unit(executable: str) -> str:
 
 def generate_launchd_plist(executable: str) -> str:
     log_path = str(spawn_log_path())
+    home_directory = Path.home()
+    executable_search_path = ":".join(
+        (
+            str(home_directory / ".cargo" / "bin"),
+            str(home_directory / ".local" / "bin"),
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        )
+    )
     payload = {
         "Label": LAUNCHD_LABEL,
         "ProgramArguments": [executable, "daemon", "run"],
+        "EnvironmentVariables": {"PATH": executable_search_path},
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": log_path,

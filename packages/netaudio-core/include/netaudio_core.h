@@ -84,6 +84,12 @@ NetaudioStatus netaudio_client_get_rx_channels_json(NetaudioClient *client,
                                                     uintptr_t out_capacity,
                                                     uintptr_t *out_length);
 
+NetaudioStatus netaudio_client_get_rx_inventory_json(NetaudioClient *client,
+                                                     uint16_t rx_count,
+                                                     uint8_t *out_buffer,
+                                                     uintptr_t out_capacity,
+                                                     uintptr_t *out_length);
+
 NetaudioStatus netaudio_client_get_tx_channels_json(NetaudioClient *client,
                                                     uint8_t *out_buffer,
                                                     uintptr_t out_capacity,
@@ -103,6 +109,11 @@ NetaudioStatus netaudio_client_get_device_settings_json(NetaudioClient *client,
                                                         uint8_t *out_buffer,
                                                         uintptr_t out_capacity,
                                                         uintptr_t *out_length);
+
+NetaudioStatus netaudio_client_get_property_directory_json(NetaudioClient *client,
+                                                           uint8_t *out_buffer,
+                                                           uintptr_t out_capacity,
+                                                           uintptr_t *out_length);
 
 NetaudioStatus netaudio_client_get_aes67_configured(NetaudioClient *client, int32_t *out_state);
 
