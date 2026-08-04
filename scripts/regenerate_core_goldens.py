@@ -129,6 +129,15 @@ CAPTURED_RESPONSE_CASES = {
         ),
         "kind": "interface_status",
     },
+    "interface_status_avio_applied_dhcp_packet_12362281": {
+        "hex": (
+            "ffff006c05920000001dc1fffe50692e417564696e6174650727001100000000"
+            "00010000000000640001001dc150692ec0a8018bffffff00c0a80101c0a80101"
+            "0018003000000000000400000000000000000000000000000000000000480000"
+            "6c6f63616c646f6d61696e00"
+        ),
+        "kind": "interface_status",
+    },
     "aes67_configured_packet_1479697": {
         "hex": (
             "28090094003611000001171702010001820400688205006c0210001002110010"

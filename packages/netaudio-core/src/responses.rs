@@ -779,6 +779,26 @@ pub struct PendingInterfaceConfig {
     pub dns_server: Option<String>,
 }
 
+fn pending_interface_config_matches_running(
+    pending_config: &PendingInterfaceConfig,
+    running_interface: &InterfaceStatusEntry,
+) -> bool {
+    if pending_config.mode != running_interface.mode {
+        return false;
+    }
+
+    match pending_config.mode.as_str() {
+        "dynamic" => true,
+        "static" => {
+            pending_config.ip_address.as_deref() == Some(running_interface.ip_address.as_str())
+                && pending_config.netmask.as_deref() == Some(running_interface.netmask.as_str())
+                && pending_config.gateway.as_deref() == running_interface.gateway.as_deref()
+                && pending_config.dns_server.as_deref() == running_interface.dns_server.as_deref()
+        }
+        _ => false,
+    }
+}
+
 pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     validate_conmon_envelope(data, CONMON_OPCODE_INTERFACE_STATUS)?;
     if data.len() < CONMON_INTERFACE_MINIMUM_SIZE {
@@ -851,7 +871,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     } else {
         0
     };
-    let pending_config = match reboot_flag {
+    let reported_pending_config = match reboot_flag {
         INTERFACE_REBOOT_PENDING_DYNAMIC => Some(PendingInterfaceConfig {
             mode: "dynamic".to_owned(),
             ip_address: None,
@@ -873,11 +893,16 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
         0 => None,
         _ => return None,
     };
+    let pending_config = reported_pending_config.filter(|pending_config| {
+        interfaces.first().is_none_or(|running_interface| {
+            !pending_interface_config_matches_running(pending_config, running_interface)
+        })
+    });
 
     Some(InterfaceStatus {
         link_speed_mbps,
         interfaces,
-        reboot_required: reboot_flag != 0,
+        reboot_required: pending_config.is_some(),
         pending_config,
     })
 }
@@ -1437,7 +1462,7 @@ mod tests {
         write_interface_record(
             &mut data,
             CONMON_INTERFACE_RECORDS_OFFSET,
-            INTERFACE_MODE_DYNAMIC,
+            INTERFACE_MODE_STATIC,
             [0x00, 0x1D, 0xC1, 0x12, 0x34, 0x56],
             [
                 [192, 168, 10, 20],
@@ -1454,17 +1479,17 @@ mod tests {
         assert_eq!(parsed.link_speed_mbps, 100);
         assert!(parsed.reboot_required);
         assert_eq!(parsed.interfaces.len(), 1);
-        assert_eq!(parsed.interfaces[0].mode, "dynamic");
+        assert_eq!(parsed.interfaces[0].mode, "static");
         assert_eq!(parsed.interfaces[0].mac_address, "00:1D:C1:12:34:56");
         assert_eq!(parsed.interfaces[0].ip_address, "192.168.10.20");
         assert_eq!(parsed.interfaces[0].netmask, "255.255.255.0");
         assert_eq!(
             parsed.interfaces[0].gateway.as_deref(),
-            Some("192.168.10.1")
+            Some("192.168.10.2")
         );
         assert_eq!(
             parsed.interfaces[0].dns_server.as_deref(),
-            Some("192.168.10.2")
+            Some("192.168.10.1")
         );
 
         let pending = parsed.pending_config.as_ref().unwrap();
@@ -1473,6 +1498,82 @@ mod tests {
         let json = serde_json::to_value(&parsed).unwrap();
         assert_eq!(json["reboot_required"], true);
         assert!(json["pending_config"].get("ip_address").is_none());
+    }
+
+    #[test]
+    fn interface_status_clears_applied_dynamic_target() {
+        let mut data = vec![0u8; 0x4A];
+        data[CONMON_INTERFACE_COUNT_OFFSET..CONMON_INTERFACE_COUNT_OFFSET + 2]
+            .copy_from_slice(&1u16.to_be_bytes());
+        data[CONMON_INTERFACE_LINK_SPEED_OFFSET..CONMON_INTERFACE_LINK_SPEED_OFFSET + 4]
+            .copy_from_slice(&100u32.to_be_bytes());
+        write_interface_record(
+            &mut data,
+            CONMON_INTERFACE_RECORDS_OFFSET,
+            INTERFACE_MODE_DYNAMIC,
+            [0x00, 0x1D, 0xC1, 0x50, 0x69, 0x2E],
+            [
+                [192, 168, 1, 139],
+                [255, 255, 255, 0],
+                [192, 168, 1, 1],
+                [192, 168, 1, 1],
+            ],
+        );
+        data[CONMON_INTERFACE_REBOOT_FLAG_OFFSET..CONMON_INTERFACE_REBOOT_FLAG_OFFSET + 2]
+            .copy_from_slice(&INTERFACE_REBOOT_PENDING_DYNAMIC.to_be_bytes());
+        stamp_conmon_response(&mut data, CONMON_OPCODE_INTERFACE_STATUS);
+
+        let parsed = parse_interface_status(&data).unwrap();
+        assert!(!parsed.reboot_required);
+        assert_eq!(parsed.pending_config, None);
+    }
+
+    #[test]
+    fn interface_status_keeps_static_target_when_dns_differs() {
+        let running_interface = InterfaceStatusEntry {
+            mode: "static".to_owned(),
+            mac_address: "00:1D:C1:50:69:2E".to_owned(),
+            ip_address: "192.168.1.42".to_owned(),
+            netmask: "255.255.255.0".to_owned(),
+            gateway: Some("192.168.1.1".to_owned()),
+            dns_server: Some("192.168.1.1".to_owned()),
+        };
+        let pending_config = PendingInterfaceConfig {
+            mode: "static".to_owned(),
+            ip_address: Some("192.168.1.42".to_owned()),
+            netmask: Some("255.255.255.0".to_owned()),
+            gateway: Some("192.168.1.1".to_owned()),
+            dns_server: Some("8.8.8.8".to_owned()),
+        };
+
+        assert!(!pending_interface_config_matches_running(
+            &pending_config,
+            &running_interface
+        ));
+    }
+
+    #[test]
+    fn interface_status_clears_fully_applied_static_target() {
+        let running_interface = InterfaceStatusEntry {
+            mode: "static".to_owned(),
+            mac_address: "00:1D:C1:50:69:2E".to_owned(),
+            ip_address: "192.168.1.42".to_owned(),
+            netmask: "255.255.255.0".to_owned(),
+            gateway: Some("192.168.1.1".to_owned()),
+            dns_server: Some("8.8.8.8".to_owned()),
+        };
+        let pending_config = PendingInterfaceConfig {
+            mode: "static".to_owned(),
+            ip_address: Some("192.168.1.42".to_owned()),
+            netmask: Some("255.255.255.0".to_owned()),
+            gateway: Some("192.168.1.1".to_owned()),
+            dns_server: Some("8.8.8.8".to_owned()),
+        };
+
+        assert!(pending_interface_config_matches_running(
+            &pending_config,
+            &running_interface
+        ));
     }
 
     #[test]
