@@ -6,10 +6,10 @@ use crate::bytes::{read_u16, read_u32, string_at_pointer, u16_at};
 use crate::commands::{
     FLOW_TYPE_MULTICAST, OPCODE_CREATE_TX_FLOW, OPCODE_CREATE_TX_FLOW_2809, OPCODE_DELETE_TX_FLOW,
     OPCODE_DELETE_TX_FLOW_2809, OPCODE_DEVICE_INFO, OPCODE_DEVICE_NAME, OPCODE_DEVICE_SETTINGS,
-    OPCODE_DEVICE_SETTINGS_SET, OPCODE_QUERY_TX_FLOWS, OPCODE_QUERY_TX_FLOWS_2809,
-    OPCODE_RX_CHANNEL_NAME_SET, OPCODE_SUBSCRIPTION_ADD, OPCODE_SUBSCRIPTION_REMOVE,
-    OPCODE_TX_CHANNEL_NAME_SET, PROTOCOL_AES67_CONFIG, PROTOCOL_DANTE_FLOW,
-    PROTOCOL_DANTE_FLOW_2801,
+    OPCODE_DEVICE_SETTINGS_SET, OPCODE_PROPERTY_DIRECTORY, OPCODE_QUERY_TX_FLOWS,
+    OPCODE_QUERY_TX_FLOWS_2809, OPCODE_RX_CHANNEL_NAME_SET, OPCODE_SUBSCRIPTION_ADD,
+    OPCODE_SUBSCRIPTION_REMOVE, OPCODE_TX_CHANNEL_NAME_SET, PROTOCOL_AES67_CONFIG,
+    PROTOCOL_DANTE_FLOW, PROTOCOL_DANTE_FLOW_2801,
 };
 use crate::protocol::{
     common_arc_protocol_opcodes, conmon_opcode, device_settings_arc_protocol_opcodes,
@@ -71,6 +71,18 @@ pub struct DeviceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PropertyDirectoryEntry {
+    pub property_id: u16,
+    pub flags: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PropertyDirectory {
+    pub properties: Vec<PropertyDirectoryEntry>,
+    pub aes67_supported: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MakeModel {
     pub manufacturer: String,
     pub product_name: String,
@@ -98,6 +110,12 @@ pub struct TxFlow {
     pub frames_per_packet: u16,
     pub channel_count: u16,
     pub channels: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TxFlowPage {
+    pub max_flow_slots: u8,
+    pub flows: Vec<TxFlow>,
 }
 
 impl BluetoothStatus {
@@ -231,6 +249,37 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
     Some(settings)
 }
 
+pub fn parse_property_directory(response: &[u8]) -> Option<PropertyDirectory> {
+    let body = validate_response_envelope(
+        response,
+        &device_settings_arc_protocol_opcodes(OPCODE_PROPERTY_DIRECTORY),
+        &[RESULT_CODE_SUCCESS],
+    )?
+    .body;
+    let property_count = usize::from(read_u16(body, 0)?);
+    let expected_length = 2usize.checked_add(property_count.checked_mul(4)?)?;
+    if body.len() != expected_length {
+        return None;
+    }
+
+    let mut properties = Vec::with_capacity(property_count);
+    let mut property_ids = HashSet::with_capacity(property_count);
+    for index in 0..property_count {
+        let offset = 2 + index * 4;
+        let property_id = read_u16(body, offset)?;
+        let flags = read_u16(body, offset + 2)?;
+        if !property_ids.insert(property_id) {
+            return None;
+        }
+        properties.push(PropertyDirectoryEntry { property_id, flags });
+    }
+
+    Some(PropertyDirectory {
+        aes67_supported: property_ids.contains(&DEVICE_SETTINGS_INFO_AES67_CONFIGURED),
+        properties,
+    })
+}
+
 pub fn parse_aes67_configured(response: &[u8]) -> Option<Option<bool>> {
     let body = validate_response_envelope(
         response,
@@ -319,6 +368,7 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
             | OPCODE_DEVICE_INFO
             | OPCODE_DEVICE_SETTINGS
             | OPCODE_DEVICE_SETTINGS_SET
+            | OPCODE_PROPERTY_DIRECTORY
             | OPCODE_TX_CHANNEL_INFO
             | OPCODE_TX_CHANNEL_NAMES
             | OPCODE_TX_CHANNEL_NAME_SET
@@ -342,7 +392,7 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     valid.then_some(envelope.result_code)
 }
 
-pub fn parse_tx_flows(response: &[u8]) -> Option<Vec<TxFlow>> {
+pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
     let envelope = validate_response_envelope(
         response,
         &[
@@ -391,7 +441,14 @@ pub fn parse_tx_flows(response: &[u8]) -> Option<Vec<TxFlow>> {
         }
         flows.push(flow);
     }
-    Some(flows)
+    Some(TxFlowPage {
+        max_flow_slots: u8::try_from(maximum_records).ok()?,
+        flows,
+    })
+}
+
+pub fn parse_tx_flows(response: &[u8]) -> Option<Vec<TxFlow>> {
+    Some(parse_tx_flow_page(response)?.flows)
 }
 
 fn parse_flow_record(body: &[u8], offset: usize, record_end: usize) -> Option<TxFlow> {
@@ -1060,6 +1117,61 @@ mod tests {
         assert_eq!(parse_device_settings(&response), None);
     }
 
+    fn property_directory_response(properties: &[(u16, u16)]) -> Vec<u8> {
+        let mut response = vec![0u8; RESPONSE_HEADER_SIZE];
+        response.extend_from_slice(&(properties.len() as u16).to_be_bytes());
+        for (property_id, flags) in properties {
+            response.extend_from_slice(&property_id.to_be_bytes());
+            response.extend_from_slice(&flags.to_be_bytes());
+        }
+        stamp_arc_response(
+            &mut response,
+            PROTOCOL_DANTE_FLOW,
+            OPCODE_PROPERTY_DIRECTORY,
+            RESULT_CODE_SUCCESS,
+        );
+        response
+    }
+
+    #[test]
+    fn property_directory_preserves_raw_records_and_derives_aes67_presence() {
+        let response = property_directory_response(&[(0x8020, 0x0001), (0x0063, 0x0003)]);
+        let directory = parse_property_directory(&response).unwrap();
+        assert_eq!(
+            directory.properties,
+            vec![
+                PropertyDirectoryEntry {
+                    property_id: 0x8020,
+                    flags: 0x0001,
+                },
+                PropertyDirectoryEntry {
+                    property_id: 0x0063,
+                    flags: 0x0003,
+                },
+            ]
+        );
+        assert!(directory.aes67_supported);
+
+        let unsupported = property_directory_response(&[(0x8020, 0x0001)]);
+        assert!(
+            !parse_property_directory(&unsupported)
+                .unwrap()
+                .aes67_supported
+        );
+    }
+
+    #[test]
+    fn property_directory_rejects_duplicate_or_misaligned_records() {
+        let duplicate = property_directory_response(&[(0x0063, 0x0001), (0x0063, 0x0003)]);
+        assert_eq!(parse_property_directory(&duplicate), None);
+
+        let mut trailing = property_directory_response(&[(0x0063, 0x0001)]);
+        trailing.push(0);
+        let length = trailing.len() as u16;
+        trailing[2..4].copy_from_slice(&length.to_be_bytes());
+        assert_eq!(parse_property_directory(&trailing), None);
+    }
+
     fn flow_query_response() -> Vec<u8> {
         let mut response = vec![0u8; RESPONSE_HEADER_SIZE];
         response.extend_from_slice(&[0x10, 0x02]);
@@ -1097,7 +1209,9 @@ mod tests {
 
     #[test]
     fn tx_flows_parser_decodes_multicast_record() {
-        let flows = parse_tx_flows(&flow_query_response()).unwrap();
+        let page = parse_tx_flow_page(&flow_query_response()).unwrap();
+        assert_eq!(page.max_flow_slots, 16);
+        let flows = page.flows;
         assert_eq!(flows.len(), 2);
         assert_eq!(flows[0].flow_number, 1);
         assert_eq!(flows[0].flow_type, "unicast");
