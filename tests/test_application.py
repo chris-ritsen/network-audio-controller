@@ -213,6 +213,8 @@ class TestDanteApplication:
         device = DanteDevice(server_name="test.local.")
         device.supported_sample_rates = [44_100, 48_000]
         device.supported_encodings = [16, 24, 32]
+        device.aes67_supported = True
+        device.settings_properties = [{"property_id": 0x0063, "flags": 0x0001}]
         application.register_device("test.local.", device)
 
         application.mark_device_offline("test.local.")
@@ -220,6 +222,8 @@ class TestDanteApplication:
         assert device.online is False
         assert device.supported_sample_rates is None
         assert device.supported_encodings is None
+        assert device.aes67_supported is None
+        assert device.settings_properties is None
 
     @pytest.mark.asyncio
     async def test_probe_sample_rates_all_probes_online_devices_and_applies_results(self):

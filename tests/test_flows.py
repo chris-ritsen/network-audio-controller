@@ -36,11 +36,17 @@ async def test_flow_query_follows_capture_backed_starting_flow(monkeypatch):
         b"second-page": RESULT_CODE_SUCCESS,
     }
     flow_pages = {
-        b"first-page": [
-            {"flow_number": 1, "flow_type": "unicast"},
-            {"flow_number": 28, "flow_type": "multicast"},
-        ],
-        b"second-page": [{"flow_number": 29, "flow_type": "multicast"}],
+        b"first-page": {
+            "max_flow_slots": 32,
+            "flows": [
+                {"flow_number": 1, "flow_type": "unicast"},
+                {"flow_number": 28, "flow_type": "multicast"},
+            ],
+        },
+        b"second-page": {
+            "max_flow_slots": 32,
+            "flows": [{"flow_number": 29, "flow_type": "multicast"}],
+        },
     }
 
     def parse_response(kind, response):
@@ -49,9 +55,10 @@ async def test_flow_query_follows_capture_backed_starting_flow(monkeypatch):
     monkeypatch.setattr(flows, "_request", request)
     monkeypatch.setattr(core, "parse_response", parse_response)
 
-    device_flows = await flows.query_tx_flows("192.0.2.10", 4440, 0x2729)
+    inventory = await flows.query_tx_flow_inventory("192.0.2.10", 4440, 0x2729)
 
-    assert [flow["flow_number"] for flow in device_flows] == [1, 28, 29]
+    assert inventory["max_flow_slots"] == 32
+    assert [flow["flow_number"] for flow in inventory["flows"]] == [1, 28, 29]
     assert [specification["starting_flow"] for specification in command_specifications] == [1, 29]
 
 
@@ -59,10 +66,20 @@ async def test_flow_query_follows_capture_backed_starting_flow(monkeypatch):
 @pytest.mark.parametrize(
     "flow_pages",
     [
-        ([],),
-        ([{"flow_number": 32}],),
-        ([{"flow_number": 1}], [{"flow_number": 1}]),
-        ([{"flow_number": 28}], [{"flow_number": 5}]),
+        ({"max_flow_slots": 32, "flows": []},),
+        ({"max_flow_slots": 32, "flows": [{"flow_number": 32}]},),
+        (
+            {"max_flow_slots": 32, "flows": [{"flow_number": 1}]},
+            {"max_flow_slots": 32, "flows": [{"flow_number": 1}]},
+        ),
+        (
+            {"max_flow_slots": 32, "flows": [{"flow_number": 28}]},
+            {"max_flow_slots": 32, "flows": [{"flow_number": 5}]},
+        ),
+        (
+            {"max_flow_slots": 32, "flows": [{"flow_number": 16}]},
+            {"max_flow_slots": 16, "flows": [{"flow_number": 17}]},
+        ),
     ],
 )
 async def test_flow_query_rejects_invalid_pagination(monkeypatch, flow_pages):
@@ -80,4 +97,16 @@ async def test_flow_query_rejects_invalid_pagination(monkeypatch, flow_pages):
     monkeypatch.setattr(flows, "_request", request)
     monkeypatch.setattr(core, "parse_response", parse_response)
 
-    assert await flows.query_tx_flows("192.0.2.10", 4440, 0x2729) is None
+    assert await flows.query_tx_flow_inventory("192.0.2.10", 4440, 0x2729) is None
+
+
+@pytest.mark.asyncio
+async def test_flow_list_compatibility_wrapper_returns_only_flows(monkeypatch):
+    inventory = {"max_flow_slots": 4, "flows": [{"flow_number": 1}]}
+
+    async def query(device_ip, arc_port, flow_protocol_id):
+        return inventory
+
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+
+    assert await flows.query_tx_flows("192.0.2.10", 4440, 0x2729) == inventory["flows"]

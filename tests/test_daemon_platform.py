@@ -110,5 +110,9 @@ def test_launchd_plist_uses_argument_array_and_failure_restart(monkeypatch):
     payload = plistlib.loads(service_install.generate_launchd_plist("/Applications/Net Audio/netaudio").encode())
 
     assert payload["ProgramArguments"] == ["/Applications/Net Audio/netaudio", "daemon", "run"]
+    assert payload["EnvironmentVariables"]["PATH"].split(":")[:2] == [
+        str(service_install.Path.home() / ".cargo" / "bin"),
+        str(service_install.Path.home() / ".local" / "bin"),
+    ]
     assert payload["KeepAlive"] == {"SuccessfulExit": False}
     assert payload["StandardOutPath"] == "/tmp/netaudio daemon.log"

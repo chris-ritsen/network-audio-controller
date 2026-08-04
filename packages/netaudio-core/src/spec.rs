@@ -47,6 +47,10 @@ enum CommandSpec {
         #[serde(default)]
         transaction_id: u16,
     },
+    PropertyDirectory {
+        #[serde(default)]
+        transaction_id: u16,
+    },
     SetName {
         name: String,
         #[serde(default)]
@@ -447,6 +451,9 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
         }
         CommandSpec::DeviceSettings { transaction_id } => {
             commands::build_device_settings(transaction_id)?
+        }
+        CommandSpec::PropertyDirectory { transaction_id } => {
+            commands::build_property_directory(transaction_id)?
         }
         CommandSpec::SetName {
             name,
