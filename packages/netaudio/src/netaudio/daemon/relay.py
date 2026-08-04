@@ -1246,7 +1246,14 @@ class RelayServer:
                 409,
             )
             return
-        await self._send_json(writer, {"success": True, "reboot_required": True, "interfaces": result})
+        await self._send_json(
+            writer,
+            {
+                "success": True,
+                "reboot_required": device.interface_reboot_required,
+                "interfaces": result,
+            },
+        )
 
     async def _handle_get_tx_flows(self, writer, device_name):
         snapshot = await self._tx_flow_snapshot(writer, device_name)

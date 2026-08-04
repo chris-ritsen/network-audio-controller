@@ -302,5 +302,24 @@
       "reboot_required": false,
       "pending_config": null
     }
+  },
+  "interface_status_avio_applied_dhcp_packet_12362281": {
+    "hex": "ffff006c05920000001dc1fffe50692e417564696e617465072700110000000000010000000000640001001dc150692ec0a8018bffffff00c0a80101c0a8010100180030000000000004000000000000000000000000000000000000004800006c6f63616c646f6d61696e00",
+    "kind": "interface_status",
+    "parsed": {
+      "link_speed_mbps": 100,
+      "interfaces": [
+        {
+          "mode": "dynamic",
+          "mac_address": "00:1D:C1:50:69:2E",
+          "ip_address": "192.168.1.139",
+          "netmask": "255.255.255.0",
+          "gateway": "192.168.1.1",
+          "dns_server": "192.168.1.1"
+        }
+      ],
+      "reboot_required": false,
+      "pending_config": null
+    }
   }
 }
