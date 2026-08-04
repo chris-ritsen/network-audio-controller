@@ -410,6 +410,8 @@ class DanteApplication:
             device.online = False
             device.supported_sample_rates = None
             device.supported_encodings = None
+            device.aes67_supported = None
+            device.settings_properties = None
             device.gain_device_type = None
             device.gain_levels = None
             device.supported_gain_levels = None

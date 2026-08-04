@@ -53,6 +53,7 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         interface_pending_config=None,
         sample_rate=None,
         supported_sample_rates=None,
+        aes67_supported=None,
         encoding=None,
         supported_encodings=None,
         gain_device_type=None,
@@ -587,6 +588,18 @@ class TestMutationVerification:
 
         assert status == 504
         assert response == {"error": "AES67 readback was unavailable"}
+
+    @pytest.mark.asyncio
+    async def test_aes67_rejects_device_without_directory_property(self):
+        device = make_device()
+        device.aes67_supported = False
+        relay = make_relay({"dev1": device})
+
+        status, response = await post(relay, "/set-aes67", {"device": "dev1", "enabled": True})
+
+        assert status == 409
+        assert response == {"error": "device does not support AES67 configuration"}
+        relay.application.set_aes67_state.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_reboot_is_reported_as_accepted_but_unverified(self):
@@ -1410,15 +1423,15 @@ class TestTxFlows:
         }
 
     @staticmethod
-    def _mock_api(monkeypatch, device_flows=None):
+    def _mock_api(monkeypatch, device_flows=None, max_flow_slots=32):
         import netaudio.daemon.relay as relay_module
 
         detect = AsyncMock(return_value=0x2729)
-        query = AsyncMock(return_value=device_flows or [])
+        query = AsyncMock(return_value={"max_flow_slots": max_flow_slots, "flows": device_flows or []})
         create = AsyncMock(return_value=0x0001)
         delete = AsyncMock(return_value=0x0001)
         monkeypatch.setattr(relay_module.flows, "detect_flow_protocol", detect)
-        monkeypatch.setattr(relay_module.flows, "query_tx_flows", query)
+        monkeypatch.setattr(relay_module.flows, "query_tx_flow_inventory", query)
         monkeypatch.setattr(relay_module.flows, "create_tx_flow", create)
         monkeypatch.setattr(relay_module.flows, "delete_tx_flow", delete)
         return detect, query, create, delete
@@ -1436,6 +1449,7 @@ class TestTxFlows:
         assert body == {
             "device": "dev1",
             "flow_protocol_id": 0x2729,
+            "max_flow_slots": 32,
             "flows": [flow],
         }
         detect.assert_awaited_once_with("192.168.1.50", 4440)
@@ -1473,6 +1487,21 @@ class TestTxFlows:
         )
         assert status == 409
         assert body == {"error": "flow slot 17 is already in use"}
+        create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_create_rejects_slot_above_device_capacity(self, monkeypatch):
+        device = make_device()
+        device.tx_channels = {1: SimpleNamespace(number=1)}
+        _, _, create, _ = self._mock_api(monkeypatch, max_flow_slots=4)
+        relay = make_relay({"dev1": device})
+
+        status, body = await post(
+            relay, "/flows/create", {"device": "dev1", "flow_slot": 5, "channels": [1], "confirmed": True}
+        )
+
+        assert status == 409
+        assert body == {"error": "flow slot 5 exceeds the device capacity of 4"}
         create.assert_not_awaited()
 
     @pytest.mark.asyncio

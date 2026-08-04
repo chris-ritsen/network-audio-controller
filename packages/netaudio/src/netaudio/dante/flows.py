@@ -39,6 +39,14 @@ def require_available_flow_slot(device_flows, flow_slot: int) -> None:
         raise FlowValidationError(f"flow slot {flow_slot} is already in use", status=409)
 
 
+def require_supported_flow_slot(flow_slot: int, max_flow_slots: int) -> None:
+    if flow_slot > max_flow_slots:
+        raise FlowValidationError(
+            f"flow slot {flow_slot} exceeds the device capacity of {max_flow_slots}",
+            status=409,
+        )
+
+
 def require_multicast_flow(device_flows, flow_slot: int) -> dict:
     flow = next(
         (entry for entry in device_flows if entry.get("flow_number") == flow_slot),
@@ -92,12 +100,13 @@ async def detect_flow_protocol(device_ip: str, arc_port: int) -> int | None:
     return None
 
 
-async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -> list[dict] | None:
+async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_id: int) -> dict | None:
     from netaudio import core
 
     device_flows = []
     seen_flow_numbers = set()
     starting_flow = 1
+    max_flow_slots = None
 
     while True:
         command_specification = {
@@ -112,14 +121,32 @@ async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -
         result_code = core.parse_response("result_code", response)
         if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
             return None
-        page_flows = core.parse_response("tx_flows", response)
+        flow_page = core.parse_response("tx_flow_page", response)
+        if not isinstance(flow_page, dict):
+            return None
+        page_max_flow_slots = flow_page.get("max_flow_slots")
+        if (
+            isinstance(page_max_flow_slots, bool)
+            or not isinstance(page_max_flow_slots, int)
+            or not 1 <= page_max_flow_slots <= 32
+        ):
+            return None
+        if max_flow_slots is None:
+            max_flow_slots = page_max_flow_slots
+        elif page_max_flow_slots != max_flow_slots:
+            return None
+        page_flows = flow_page.get("flows")
+        if not isinstance(page_flows, list):
+            return None
         page_flow_numbers = []
         for flow in page_flows:
+            if not isinstance(flow, dict):
+                return None
             flow_number = flow.get("flow_number")
             if (
                 isinstance(flow_number, bool)
                 or not isinstance(flow_number, int)
-                or not 1 <= flow_number <= 32
+                or not 1 <= flow_number <= max_flow_slots
                 or flow_number in seen_flow_numbers
             ):
                 return None
@@ -128,14 +155,19 @@ async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -
             device_flows.append(flow)
 
         if result_code == RESULT_CODE_SUCCESS:
-            return device_flows
+            return {"max_flow_slots": max_flow_slots, "flows": device_flows}
         if not page_flow_numbers:
             return None
 
         next_starting_flow = max(page_flow_numbers) + 1
-        if next_starting_flow <= starting_flow or next_starting_flow > 32:
+        if next_starting_flow <= starting_flow or next_starting_flow > max_flow_slots:
             return None
         starting_flow = next_starting_flow
+
+
+async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -> list[dict] | None:
+    inventory = await query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id)
+    return None if inventory is None else inventory["flows"]
 
 
 async def create_tx_flow(

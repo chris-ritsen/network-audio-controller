@@ -16,6 +16,7 @@ pub const OPCODE_DEVICE_NAME: u16 = 0x1002;
 pub const OPCODE_DEVICE_INFO: u16 = 0x1003;
 pub const OPCODE_DEVICE_SETTINGS: u16 = 0x1100;
 pub const OPCODE_DEVICE_SETTINGS_SET: u16 = 0x1101;
+pub const OPCODE_PROPERTY_DIRECTORY: u16 = 0x1102;
 pub const OPCODE_TX_CHANNEL_NAME_SET: u16 = 0x2013;
 pub const OPCODE_RX_CHANNEL_NAME_SET: u16 = 0x3001;
 pub const OPCODE_SUBSCRIPTION_ADD: u16 = 0x3010;
@@ -134,6 +135,10 @@ pub fn build_channel_count(transaction_id: u16) -> Result<Vec<u8>, NetaudioError
 
 pub fn build_device_settings(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
     build_control_packet(OPCODE_DEVICE_SETTINGS, &[0x00, 0x00], transaction_id)
+}
+
+pub fn build_property_directory(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_control_packet(OPCODE_PROPERTY_DIRECTORY, &[0x00, 0x00], transaction_id)
 }
 
 pub fn build_set_name(name: &str, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
