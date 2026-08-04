@@ -367,6 +367,27 @@ pub unsafe extern "C" fn netaudio_client_get_rx_channels_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn netaudio_client_get_rx_inventory_json(
+    client: *mut NetaudioClient,
+    rx_count: u16,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
+        Ok(client) => client,
+        Err(status) => return status,
+    };
+
+    let inventory = match lock_client(client).get_rx_inventory(rx_count) {
+        Ok(inventory) => inventory,
+        Err(error) => return error.into(),
+    };
+
+    unsafe { write_json(&inventory, out_buffer, out_capacity, out_length) }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn netaudio_client_get_tx_channels_json(
     client: *mut NetaudioClient,
     out_buffer: *mut u8,
@@ -435,6 +456,26 @@ pub unsafe extern "C" fn netaudio_client_get_device_settings_json(
         Ok(settings) => unsafe { write_json(&settings, out_buffer, out_capacity, out_length) },
         Err(error) => error.into(),
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_client_get_property_directory_json(
+    client: *mut NetaudioClient,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
+        Ok(client) => client,
+        Err(status) => return status,
+    };
+
+    let property_directory = match lock_client(client).get_property_directory() {
+        Ok(property_directory) => property_directory,
+        Err(error) => return error.into(),
+    };
+
+    unsafe { write_json(&property_directory, out_buffer, out_capacity, out_length) }
 }
 
 #[no_mangle]
@@ -568,6 +609,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
                 out_capacity,
                 out_length,
             ),
+            "property_directory" => write_optional_json(
+                responses::parse_property_directory(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
             "aes67_configured" => write_optional_json(
                 responses::parse_aes67_configured(bytes),
                 out_buffer,
@@ -642,6 +689,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
             ),
             "tx_flows" => write_optional_json(
                 responses::parse_tx_flows(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
+            "tx_flow_page" => write_optional_json(
+                responses::parse_tx_flow_page(bytes),
                 out_buffer,
                 out_capacity,
                 out_length,

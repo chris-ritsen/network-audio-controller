@@ -15,6 +15,8 @@ DEVICE_SCALAR_FIELDS = (
     "supported_sample_rates",
     "aes67_configured",
     "aes67_current",
+    "aes67_supported",
+    "settings_properties",
     "preferred_leader",
     "ptp_v1_role",
     "tx_flow_count",

@@ -4,6 +4,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tarfile
 import threading
 from pathlib import Path
 
@@ -104,7 +105,11 @@ def core():
         ctypes.POINTER(ctypes.c_int32),
     ]
     library.netaudio_client_get_channel_count.restype = ctypes.c_int
-    for name in ("netaudio_client_get_rx_channels_json", "netaudio_client_get_tx_channels_json"):
+    for name in (
+        "netaudio_client_get_rx_channels_json",
+        "netaudio_client_get_tx_channels_json",
+        "netaudio_client_get_property_directory_json",
+    ):
         function = getattr(library, name)
         function.argtypes = [
             ctypes.c_void_p,
@@ -113,6 +118,14 @@ def core():
             ctypes.POINTER(ctypes.c_size_t),
         ]
         function.restype = ctypes.c_int
+    library.netaudio_client_get_rx_inventory_json.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint16,
+        ctypes.POINTER(ctypes.c_uint8),
+        ctypes.c_size_t,
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    library.netaudio_client_get_rx_inventory_json.restype = ctypes.c_int
     library.netaudio_client_free.argtypes = [ctypes.c_void_p]
     library.netaudio_client_free.restype = None
     return library
@@ -122,6 +135,21 @@ def rust_client_json(core, function_name, client, capacity=65536):
     buffer = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = getattr(core, function_name)(client, buffer, capacity, ctypes.byref(length))
+    if status != NETAUDIO_OK:
+        return status, None
+    return status, json.loads(bytes(buffer[: length.value]))
+
+
+def rust_rx_inventory_json(core, client, rx_count, capacity=65536):
+    buffer = (ctypes.c_uint8 * capacity)()
+    length = ctypes.c_size_t(0)
+    status = core.netaudio_client_get_rx_inventory_json(
+        client,
+        rx_count,
+        buffer,
+        capacity,
+        ctypes.byref(length),
+    )
     if status != NETAUDIO_OK:
         return status, None
     return status, json.loads(bytes(buffer[: length.value]))
@@ -460,3 +488,38 @@ class TestRxChannelsGolden:
         commands = DanteDeviceCommands()
         assert device.requests[0] == commands.command_channel_count(transaction_id=1)[0]
         assert device.requests[1] == commands.command_receivers(0, transaction_id=2)[0]
+
+    def test_combined_inventory_uses_single_receivers_response(self, core, client_factory):
+        receivers_fixture = load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin")
+
+        with FakeReplayDevice([receivers_fixture]) as device:
+            client = client_factory(device.port)
+            status, inventory = rust_rx_inventory_json(core, client, 16)
+
+        assert status == NETAUDIO_OK
+        assert len(inventory["channels"]) == 16
+        assert inventory["channels"][0]["number"] == 1
+        assert inventory["channel_audio_metadata"] == {
+            "sample_rate": 48_000,
+            "current_encoding": 24,
+            "encoding_capability_bitmap": 4,
+            "supported_encodings": [24],
+        }
+        assert len(device.requests) == 1
+        assert device.requests[0] == DanteDeviceCommands().command_receivers(0, transaction_id=1)[0]
+
+
+def test_property_directory_getter_uses_capture_backed_empty_query(core, client_factory):
+    bundle_path = FIXTURES_DIR / "provenance" / "latency_capability_discovery.tar.gz"
+    member_name = "latency_capability_discovery/protocol_2729_opcode_1102_id_12358036.bin"
+    with tarfile.open(bundle_path, "r:gz") as bundle:
+        response = bundle.extractfile(member_name).read()
+
+    with FakeReplayDevice([response]) as device:
+        client = client_factory(device.port)
+        status, directory = rust_client_json(core, "netaudio_client_get_property_directory_json", client)
+
+    assert status == NETAUDIO_OK
+    assert directory["aes67_supported"] is False
+    assert directory["properties"][0] == {"property_id": 0x8020, "flags": 0x0001}
+    assert device.requests == [bytes.fromhex("27ff000a000111020000")]

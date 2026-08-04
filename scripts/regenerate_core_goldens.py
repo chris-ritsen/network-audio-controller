@@ -16,6 +16,12 @@ COMMAND_GOLDEN_PATH = FIXTURES_DIRECTORY / "core_commands_golden.json"
 RESPONSE_GOLDEN_PATH = FIXTURES_DIRECTORY / "core_responses_golden.json"
 
 CAPTURED_COMMAND_CASES = {
+    "property_directory_packet_548323": {
+        "spec": {
+            "command": "property_directory",
+            "transaction_id": 0x1234,
+        },
+    },
     "probe_sample_rate_packet_4170622": {
         "spec": {
             "command": "probe_sample_rate",
@@ -60,6 +66,25 @@ CAPTURED_COMMAND_CASES = {
 }
 
 CAPTURED_RESPONSE_CASES = {
+    "property_directory_lx_dante_packet_12358036": {
+        "hex": (
+            "2729007000411102000100198020000180210003002200030024000180600003"
+            "00f00003020100038204000382050003020a0001020b00010210000302110003"
+            "0212000302130001021400018301000383060001830200010310000303110001"
+            "031200010303000383f0000106010001"
+        ),
+        "kind": "property_directory",
+    },
+    "property_directory_avio_packet_12358133": {
+        "hex": (
+            "28090088006c11020001001f8020000180210003002200030023000300240001"
+            "806000030062000300630001020100038204000382050003020a0001020b0001"
+            "0210000302110003021200030213000102140001022200038301000383060001"
+            "83020001832100010310000103110001031200010303000383f0000106010001"
+            "0309000102090001"
+        ),
+        "kind": "property_directory",
+    },
     "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
         "kind": "channel_audio_metadata",
     },

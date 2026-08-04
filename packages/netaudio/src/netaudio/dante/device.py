@@ -50,6 +50,8 @@ class DanteDevice:
         self.supported_sample_rates: list[int] | None = None
         self.aes67_configured = None
         self.aes67_current = None
+        self.aes67_supported: bool | None = None
+        self.settings_properties: list[dict] | None = None
         self.preferred_leader = None
         self.ptp_v1_role = None
         self.server_name = server_name
@@ -341,24 +343,49 @@ class DanteDevice:
             return self.controls_data_from_core(raw)
 
         def _work():
+            counts = client.get_channel_count()
+            tx_count, rx_count, _ = counts
+            if include_channels:
+                rx_inventory = client.get_rx_inventory(rx_count)
+                rx_channels = rx_inventory["channels"]
+                tx_channels = client.get_tx_channels()
+                channel_audio_metadata = rx_inventory.get("channel_audio_metadata")
+                if channel_audio_metadata is None and tx_count > 0:
+                    channel_audio_metadata = client.get_channel_audio_metadata(tx_count, 0)
+            else:
+                rx_channels = []
+                tx_channels = []
+                channel_audio_metadata = client.get_channel_audio_metadata(tx_count, rx_count)
             result = {
                 "name": client.get_device_name(),
-                "counts": client.get_channel_count(),
-                "rx": client.get_rx_channels() if include_channels else [],
-                "tx": client.get_tx_channels() if include_channels else [],
+                "counts": counts,
+                "rx": rx_channels,
+                "tx": tx_channels,
+                "channel_audio_metadata": channel_audio_metadata,
             }
-            tx_count, rx_count, _ = result["counts"]
-            result["channel_audio_metadata"] = client.get_channel_audio_metadata(tx_count, rx_count)
             from netaudio.core import NetaudioCoreError
 
             try:
                 result["settings"] = client.get_device_settings()
             except NetaudioCoreError:
                 result["settings"] = None
-            try:
-                result["aes67"] = client.get_aes67_configured()
-            except NetaudioCoreError:
+            if self.settings_properties is None:
+                try:
+                    result["property_directory"] = client.get_property_directory()
+                except NetaudioCoreError:
+                    result["property_directory"] = None
+            else:
+                result["property_directory"] = None
+            aes67_supported = self.aes67_supported
+            if result["property_directory"] is not None:
+                aes67_supported = result["property_directory"]["aes67_supported"]
+            if aes67_supported is False:
                 result["aes67"] = None
+            else:
+                try:
+                    result["aes67"] = client.get_aes67_configured()
+                except NetaudioCoreError:
+                    result["aes67"] = None
             return result
 
         return self.controls_data_from_core(await asyncio.to_thread(_work))
@@ -374,6 +401,10 @@ class DanteDevice:
             controls["is_locked"] = locked
         if data.get("aes67") is not None:
             controls["aes67_configured"] = data["aes67"]
+        property_directory = data.get("property_directory")
+        if property_directory is not None:
+            controls["settings_properties"] = property_directory["properties"]
+            controls["aes67_supported"] = property_directory["aes67_supported"]
         settings_data = data.get("settings")
         if settings_data:
             if settings_data.get("sample_rate"):
@@ -436,6 +467,10 @@ class DanteDevice:
             self.is_locked = data["is_locked"]
         if "aes67_configured" in data:
             self.aes67_configured = data["aes67_configured"]
+        if "aes67_supported" in data:
+            self.aes67_supported = data["aes67_supported"]
+        if "settings_properties" in data:
+            self.settings_properties = data["settings_properties"]
         if self.supported_encodings is None and "channel_metadata_supported_encodings" in data:
             channel_metadata_encoding = data["channel_metadata_encoding"]
             if self.encoding is None or self.encoding == channel_metadata_encoding:
