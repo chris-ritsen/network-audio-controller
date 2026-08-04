@@ -9,7 +9,7 @@ from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
-from netaudio.dante.packet_store import PacketStore, _parse_header, _safe_name
+from netaudio.dante.packet_store import PacketStore, _parse_header, _safe_name, extract_evidence_packet_ids
 from netaudio.dante.service import DanteUnicastService
 
 logger = logging.getLogger("netaudio")
@@ -39,19 +39,19 @@ def export_session_bundle(
     if packet_ids is not None:
         evidence_packet_ids = set(packet_ids)
     else:
-        evidence_packet_ids = set()
-        for marker_row in markers:
-            if marker_row.get("marker_type") == "evidence":
-                marker_data = marker_row.get("data")
-                if marker_data and marker_data.get("packet_ids"):
-                    for pid in marker_data["packet_ids"]:
-                        evidence_packet_ids.add(pid)
+        evidence_packet_ids = extract_evidence_packet_ids(markers)
 
     evidence_packets = []
+    missing_packet_ids = []
     for packet_id in sorted(evidence_packet_ids):
         packet = store.get_packet(packet_id)
         if packet:
             evidence_packets.append(packet)
+        else:
+            missing_packet_ids.append(packet_id)
+    if missing_packet_ids:
+        missing_list = ", ".join(str(packet_id) for packet_id in missing_packet_ids)
+        raise ValueError(f"Evidence packets not found: {missing_list}")
     evidence_packets.sort(key=lambda p: (p["timestamp_ns"], p["id"]))
 
     if output_dir is None:
@@ -123,8 +123,12 @@ def export_session_bundle(
             "protocol_hex": protocol_hex,
             "opcode": opcode,
             "opcode_hex": opcode_hex,
+            "evidence": True,
             "session_id": packet_row.get("session_id"),
             "device_ip": packet_row.get("device_ip"),
+            "source_type": packet_row.get("source_type"),
+            "source_host": packet_row.get("source_host"),
+            "interface": packet_row.get("interface"),
         }
         return sample, filename
 
@@ -182,7 +186,6 @@ class ProtocolVerifier:
         self._service: DanteUnicastService | None = None
         self._session_id: int | None = None
         self._source_host: str | None = None
-        self._evidence_queries: list[dict] = []
         self._evidence_packet_ids: set[int] = set()
 
     @property
@@ -198,10 +201,7 @@ class ProtocolVerifier:
         return self._service
 
     async def __aenter__(self):
-        try:
-            self._source_host = socket.gethostname()
-        except Exception:
-            self._source_host = "unknown"
+        self._source_host = socket.gethostname()
 
         if self._record:
             profile_cfg, _ = load_capture_profile(self._config, self._profile)
@@ -239,10 +239,7 @@ class ProtocolVerifier:
             self._packet_store.end_session(self._session_id)
 
         if self._record:
-            try:
-                self.export_bundle()
-            except Exception as exception:
-                logger.error(f"Failed to export provenance bundle: {exception}")
+            self.export_bundle()
 
         if self._packet_store is not None:
             self._packet_store.close()
@@ -428,6 +425,9 @@ class ProtocolVerifier:
             "evidence": evidence,
             "session_id": packet_row.get("session_id"),
             "device_ip": packet_row.get("device_ip"),
+            "source_type": packet_row.get("source_type"),
+            "source_host": packet_row.get("source_host"),
+            "interface": packet_row.get("interface"),
         }
         return sample, filename
 

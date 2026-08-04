@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import socket
 import struct
 from collections.abc import Callable
 from dataclasses import dataclass, field as dataclass_field
@@ -12,6 +11,7 @@ from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
+from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
 from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
@@ -23,6 +23,7 @@ NOTIFICATION_VERSIONS_STATUS = 96
 NOTIFICATION_CLEAR_CONFIG_STATUS = 120
 NOTIFICATION_SAMPLE_RATE_STATUS = 128
 NOTIFICATION_ENCODING_STATUS = 130
+NOTIFICATION_GAIN_STATUS = 4107
 NOTIFICATION_DEVICE_REBOOT = 146
 NOTIFICATION_MANF_VERSIONS_STATUS = 192
 NOTIFICATION_ROUTING_READY = 256
@@ -45,6 +46,7 @@ NOTIFICATION_NAMES = {
     NOTIFICATION_CLEAR_CONFIG_STATUS: "Clear Config Status",
     NOTIFICATION_SAMPLE_RATE_STATUS: "Sample Rate Status",
     NOTIFICATION_ENCODING_STATUS: "Encoding Status",
+    NOTIFICATION_GAIN_STATUS: "Gain Status",
     NOTIFICATION_DEVICE_REBOOT: "Device Reboot",
     NOTIFICATION_MANF_VERSIONS_STATUS: "Manufacturer Versions Status",
     NOTIFICATION_ROUTING_READY: "Routing Ready",
@@ -64,6 +66,7 @@ CONMON_OPCODE_MAKE_MODEL_RESPONSE = 0x00C0
 CONMON_OPCODE_DANTE_MODEL_RESPONSE = 0x0060
 CONMON_OPCODE_SAMPLE_RATE_STATUS = 0x0080
 CONMON_OPCODE_ENCODING_STATUS = 0x0082
+CONMON_OPCODE_GAIN_STATUS = 0x100B
 CONMON_OPCODE_AES67_CURRENT_NEW = 0x1007
 CONMON_AES67_CURRENT_NEW_OFFSET = 0x21
 CONMON_OPCODE_PTP_CLOCK_STATUS = 0x0020
@@ -78,18 +81,6 @@ PTP_V1_ROLE_MAP = {
 }
 PROTOCOL_SETTINGS = 0xFFFF
 PROTOCOL_CONTROL = 0x27FF
-
-INTERFACE_MODE_DYNAMIC = 0x0001
-INTERFACE_MODE_STATIC = 0x0003
-
-INTERFACE_MODE_NAMES = {
-    INTERFACE_MODE_DYNAMIC: "dynamic",
-    INTERFACE_MODE_STATIC: "static",
-}
-
-INTERFACE_RECORD_SIZE = 20
-INTERFACE_CONFIGURED_RECORD_SIZE = 24
-INTERFACE_CONFIGURED_RECORD_STRIDE = 28
 
 AES67_CURRENT_NEW_MAP = {
     0x00: (False, False),
@@ -158,6 +149,67 @@ class CapabilityValueWaiter:
             self.event.set()
 
 
+@dataclass(eq=False)
+class GainStatusWaiter:
+    device_ip_address: str
+    expected_device_type: str | None = None
+    channel_number: int | None = None
+    expected_level: int | None = None
+    event: asyncio.Event = dataclass_field(default_factory=asyncio.Event)
+    latest_result: tuple[str, list[int]] | None = None
+
+    def observe(self, device_type: str, channel_levels: list[int]) -> None:
+        if self.event.is_set():
+            return
+        self.latest_result = (device_type, channel_levels)
+        if self.expected_device_type is not None and device_type != self.expected_device_type:
+            return
+        if self.channel_number is None or self.expected_level is None:
+            self.event.set()
+            return
+        channel_index = self.channel_number - 1
+        if 0 <= channel_index < len(channel_levels) and channel_levels[channel_index] == self.expected_level:
+            self.event.set()
+
+
+async def send_and_wait_for_gain_status(
+    notifications: DanteNotificationService,
+    device_ip_address: str,
+    send_operation: Callable[[], None],
+    timeout: float,
+    expected_device_type: str | None = None,
+    channel_number: int | None = None,
+    expected_level: int | None = None,
+) -> tuple[str, list[int]] | None:
+    waiter = notifications.register_gain_status_waiter(
+        device_ip_address,
+        expected_device_type=expected_device_type,
+        channel_number=channel_number,
+        expected_level=expected_level,
+    )
+    try:
+        event_loop = asyncio.get_running_loop()
+        deadline = event_loop.time() + timeout
+        attempt_count = 3
+        for attempt_number in range(attempt_count):
+            send_operation()
+            remaining_time = max(0.0, deadline - event_loop.time())
+            if remaining_time == 0:
+                break
+            if attempt_number == attempt_count - 1:
+                attempt_timeout = remaining_time
+            else:
+                attempt_timeout = min(remaining_time, timeout / 4)
+            try:
+                await asyncio.wait_for(waiter.event.wait(), timeout=attempt_timeout)
+            except asyncio.TimeoutError:
+                continue
+            return waiter.latest_result
+        return waiter.latest_result
+    finally:
+        notifications.unregister_gain_status_waiter(waiter)
+
+
 @dataclass(frozen=True)
 class _CapabilityStatusChanges:
     device_state_changed: bool = False
@@ -189,6 +241,7 @@ class DanteNotificationService(DanteMulticastService):
         self._conmon_expected_count: dict[str, int] = {}
         self._notification_waiters: dict[str, set[NotificationWaiter]] = {}
         self._capability_value_waiters: dict[tuple[str, str], set[CapabilityValueWaiter]] = {}
+        self._gain_status_waiters: dict[str, set[GainStatusWaiter]] = {}
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -248,6 +301,39 @@ class DanteNotificationService(DanteMulticastService):
         supported_encodings: list[int],
     ) -> None:
         self._waiters.notify("encoding", source_ip_address, (current_encoding, supported_encodings))
+
+    def register_gain_status_waiter(
+        self,
+        device_ip_address: str,
+        expected_device_type: str | None = None,
+        channel_number: int | None = None,
+        expected_level: int | None = None,
+    ) -> GainStatusWaiter:
+        waiter = GainStatusWaiter(
+            device_ip_address=device_ip_address,
+            expected_device_type=expected_device_type,
+            channel_number=channel_number,
+            expected_level=expected_level,
+        )
+        self._gain_status_waiters.setdefault(device_ip_address, set()).add(waiter)
+        return waiter
+
+    def unregister_gain_status_waiter(self, waiter: GainStatusWaiter) -> None:
+        waiters = self._gain_status_waiters.get(waiter.device_ip_address)
+        if waiters is None:
+            return
+        waiters.discard(waiter)
+        if not waiters:
+            self._gain_status_waiters.pop(waiter.device_ip_address, None)
+
+    def _notify_gain_status_waiters(
+        self,
+        source_ip_address: str,
+        device_type: str,
+        channel_levels: list[int],
+    ) -> None:
+        for waiter in tuple(self._gain_status_waiters.get(source_ip_address, ())):
+            waiter.observe(device_type, channel_levels)
 
     def register_capability_value_waiter(
         self,
@@ -496,6 +582,17 @@ class DanteNotificationService(DanteMulticastService):
                 supported_values_changed=changes.supported_values_changed,
             )
             return True
+        elif opcode == CONMON_OPCODE_GAIN_STATUS:
+            changes = self._handle_gain_status(data, source_ip)
+            self._handle_settings_notification(
+                data,
+                source_ip,
+                state_applied=changes.device_state_changed,
+                conmon_response=True,
+                current_value_changed=changes.current_value_changed,
+                supported_values_changed=changes.supported_values_changed,
+            )
+            return True
         elif opcode == CONMON_OPCODE_MAKE_MODEL_RESPONSE:
             self._handle_make_model_response(data, source_ip)
             self._notify_conmon_waiter(source_ip, opcode)
@@ -543,6 +640,56 @@ class DanteNotificationService(DanteMulticastService):
             self._notify_encoding_waiter,
             self._apply_encoding_status,
             defer_current_value_change=False,
+        )
+
+    def _handle_gain_status(self, data: bytes, source_ip: str) -> _CapabilityStatusChanges:
+        from netaudio import core
+
+        try:
+            parsed_response = core.parse_response("gain_status", data)
+        except core.NetaudioCoreError as exception:
+            logger.warning(f"Invalid gain status from {source_ip}: {exception}")
+            return _CapabilityStatusChanges()
+
+        device_type = parsed_response["device_type"]
+        channel_levels = parsed_response["channel_levels"]
+        supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
+        self._notify_gain_status_waiters(source_ip, device_type, channel_levels)
+
+        device = self._lookup_device(source_ip)
+        if device is None:
+            self._cache_pending(
+                source_ip,
+                {
+                    "gain_device_type": device_type,
+                    "gain_levels": channel_levels,
+                    "supported_gain_levels": supported_gain_levels,
+                },
+            )
+            return _CapabilityStatusChanges()
+        if not device.online:
+            return _CapabilityStatusChanges()
+
+        current_value_changed = device.gain_levels is not None and device.gain_levels != channel_levels
+        supported_values_changed = device.supported_gain_levels != supported_gain_levels
+        device_state_changed = (
+            device.gain_device_type != device_type or device.gain_levels != channel_levels or supported_values_changed
+        )
+        device.gain_device_type = device_type
+        device.gain_levels = channel_levels
+        device.supported_gain_levels = supported_gain_levels
+        if device_state_changed:
+            self._dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.DEVICE_UPDATED,
+                    device_name=device.name,
+                    server_name=device.server_name,
+                )
+            )
+        return _CapabilityStatusChanges(
+            device_state_changed=device_state_changed,
+            current_value_changed=current_value_changed,
+            supported_values_changed=supported_values_changed,
         )
 
     def _handle_capability_status(
@@ -760,77 +907,23 @@ class DanteNotificationService(DanteMulticastService):
         self._notify_preferred_leader_waiter(source_ip, preferred_leader)
 
     def _handle_interface_status(self, data: bytes, source_ip: str) -> None:
-        if len(data) < 0x40:
+        from netaudio import core
+
+        try:
+            parsed_response = core.parse_response("interface_status", data)
+        except core.NetaudioCoreError as exception:
+            logger.warning(f"Invalid interface status from {source_ip}: {exception}")
             return
 
-        interface_count = struct.unpack(">H", data[0x20:0x22])[0]
-        interfaces = []
-
-        offset = 0x28
-        for _ in range(interface_count):
-            if offset + INTERFACE_RECORD_SIZE > len(data):
-                break
-
-            mode_value = struct.unpack(">H", data[offset : offset + 2])[0]
-            mode = INTERFACE_MODE_NAMES.get(mode_value, f"unknown(0x{mode_value:04X})")
-            configured = mode in ("dynamic", "static")
-            record_size = INTERFACE_CONFIGURED_RECORD_SIZE if configured else INTERFACE_RECORD_SIZE
-            if offset + record_size > len(data):
-                break
-
-            mac_bytes = data[offset + 2 : offset + 8]
-            mac_address = ":".join(f"{byte:02X}" for byte in mac_bytes)
-            ip_address = socket.inet_ntoa(data[offset + 8 : offset + 12])
-            netmask = socket.inet_ntoa(data[offset + 12 : offset + 16])
-
-            interface_info = {
-                "mode": mode,
-                "mac_address": mac_address,
-                "ip_address": ip_address,
-                "netmask": netmask,
-            }
-
-            if mode == "dynamic":
-                gateway = socket.inet_ntoa(data[offset + 16 : offset + 20])
-                dns_server = socket.inet_ntoa(data[offset + 20 : offset + 24])
-                interface_info["gateway"] = gateway
-                interface_info["dns_server"] = dns_server
-                offset += INTERFACE_CONFIGURED_RECORD_STRIDE
-            elif mode == "static":
-                dns_server = socket.inet_ntoa(data[offset + 16 : offset + 20])
-                gateway = socket.inet_ntoa(data[offset + 20 : offset + 24])
-                interface_info["dns_server"] = dns_server
-                interface_info["gateway"] = gateway
-                offset += INTERFACE_CONFIGURED_RECORD_STRIDE
-            else:
-                offset += INTERFACE_RECORD_SIZE
-
-            interfaces.append(interface_info)
-
-        reboot_required = False
-        pending_config = None
-        if interface_count == 1 and len(data) > 0x49:
-            reboot_flag = struct.unpack(">H", data[0x48:0x4A])[0]
-            reboot_required = reboot_flag != 0
-
-            if reboot_flag == 0x0004:
-                pending_config = {"mode": "dynamic"}
-            elif reboot_flag == 0x0006 and len(data) >= 0x5C:
-                pending_ip = socket.inet_ntoa(data[0x4C:0x50])
-                pending_mask = socket.inet_ntoa(data[0x50:0x54])
-                pending_dns = socket.inet_ntoa(data[0x54:0x58])
-                pending_gw = socket.inet_ntoa(data[0x58:0x5C])
-                pending_config = {
-                    "mode": "static",
-                    "ip_address": pending_ip,
-                    "netmask": pending_mask,
-                    "dns_server": pending_dns,
-                    "gateway": pending_gw,
-                }
+        interfaces = parsed_response["interfaces"]
+        link_speed_mbps = parsed_response["link_speed_mbps"]
+        reboot_required = parsed_response["reboot_required"]
+        pending_config = parsed_response["pending_config"]
 
         logger.debug(
             f"Conmon interface_status from {source_ip} ({len(data)}B): "
-            f"interface_count={interface_count} reboot_required={reboot_required} "
+            f"interface_count={len(interfaces)} link_speed_mbps={link_speed_mbps} "
+            f"reboot_required={reboot_required} "
             f"pending_config={pending_config} interfaces={interfaces}"
         )
 
@@ -841,14 +934,30 @@ class DanteNotificationService(DanteMulticastService):
                 source_ip,
                 {
                     "interfaces": interfaces,
+                    "link_speed_mbps": link_speed_mbps,
                     "interface_reboot_required": reboot_required,
                     "interface_pending_config": pending_config,
                 },
             )
         else:
+            device_state_changed = (
+                device.interfaces != interfaces
+                or device.link_speed_mbps != link_speed_mbps
+                or device.interface_reboot_required != reboot_required
+                or device.interface_pending_config != pending_config
+            )
             device.interfaces = interfaces
+            device.link_speed_mbps = link_speed_mbps
             device.interface_reboot_required = reboot_required
             device.interface_pending_config = pending_config
+            if device_state_changed:
+                self._dispatcher.emit_nowait(
+                    DanteEvent(
+                        type=EventType.DEVICE_UPDATED,
+                        device_name=device.name,
+                        server_name=device.server_name,
+                    )
+                )
 
         self._notify_interface_waiter(source_ip, interfaces)
 
@@ -866,6 +975,9 @@ class DanteNotificationService(DanteMulticastService):
                 "supported_sample_rates",
                 "encoding",
                 "supported_encodings",
+                "gain_device_type",
+                "gain_levels",
+                "supported_gain_levels",
             ):
                 setattr(device, field, value)
             elif not getattr(device, field, None):
@@ -954,9 +1066,7 @@ async def mutate_and_wait_for_capability_value(
             try:
                 await asyncio.wait_for(waiter.event.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.debug(
-                    f"Timed out waiting for {capability_name}={expected_value} from {device_ip_address}"
-                )
+                logger.debug(f"Timed out waiting for {capability_name}={expected_value} from {device_ip_address}")
         return waiter.latest_result
     finally:
         notifications.unregister_capability_value_waiter(waiter)

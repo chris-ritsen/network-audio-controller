@@ -17,12 +17,16 @@ def make_device():
     device.supported_sample_rates = [44100, 48000]
     device.encoding = 24
     device.supported_encodings = [24, 16, 32]
+    device.gain_device_type = "output"
+    device.gain_levels = [4, 5]
+    device.supported_gain_levels = [1, 2, 3, 4, 5]
     device.latency = 0.15
     device.active_latency = 0.15
     device.configured_latency = 0.25
     device.default_latency = 1.0
     device.min_latency = 0.15
     device.max_latency = 21.333334
+    device.link_speed_mbps = 100
     device.is_locked = False
     device.tx_count = 2
     device.rx_count = 2
@@ -83,12 +87,23 @@ class TestSerializerRoundtrip:
         assert restored.supported_sample_rates == [44100, 48000]
         assert restored.encoding == 24
         assert restored.supported_encodings == [24, 16, 32]
+        assert restored.gain_device_type == "output"
+        assert restored.gain_levels == [4, 5]
+        assert restored.supported_gain_levels == [1, 2, 3, 4, 5]
+        assert restored.gain_level_choices == [
+            {"value": 1, "label": "+18 dBu"},
+            {"value": 2, "label": "+4 dBu"},
+            {"value": 3, "label": "0 dBu"},
+            {"value": 4, "label": "0 dBV"},
+            {"value": 5, "label": "-10 dBV"},
+        ]
         assert restored.latency == 0.15
         assert restored.active_latency == 0.15
         assert restored.configured_latency == 0.25
         assert restored.default_latency == 1.0
         assert restored.min_latency == 0.15
         assert restored.max_latency == 21.333334
+        assert restored.link_speed_mbps == 100
         assert restored.standard_latency_choices == [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
         assert restored.is_locked is False
         assert restored.tx_count == 2
@@ -109,6 +124,8 @@ class TestSerializerRoundtrip:
         assert set(restored.rx_channels.keys()) == {1, 2}
         assert restored.rx_channels[1].name == "ch1"
         assert restored.rx_channels[1].friendly_name == "Friendly 1"
+        assert restored.rx_channels[1].device.gain_level_for_channel(1, "rx") == 4
+        assert DanteDeviceSerializer.channel_to_json(restored.rx_channels[1])["gain_level_label"] == "0 dBV"
         assert restored.rx_channels[1].channel_type == "rx"
         assert restored.rx_channels[1].device is restored
         assert restored.tx_channels[1].name == "out1"

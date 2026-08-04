@@ -30,6 +30,27 @@ DEFAULT_DB_PATH = _default_db_path()
 TEMPORAL_CORRELATION_WINDOW = 0.1
 
 KNOWN_PROTOCOL_IDS = frozenset(PROTOCOL_NAMES.keys()) | {0x0008, 0x2729}
+SESSION_MEMBERSHIP_SQL = """id IN (
+    SELECT packet_id FROM packet_sessions WHERE session_id = ?
+    UNION
+    SELECT id FROM packets WHERE session_id = ?
+)"""
+
+
+def extract_evidence_packet_ids(markers: list[dict]) -> set[int]:
+    packet_ids = set()
+    for marker in markers:
+        if marker.get("marker_type") != "evidence":
+            continue
+        marker_data = marker.get("data")
+        if not marker_data:
+            continue
+        marker_packet_ids = marker_data.get("packet_ids")
+        if marker_packet_ids is None and marker_data.get("packet_id") is not None:
+            marker_packet_ids = [marker_data["packet_id"]]
+        for packet_id in marker_packet_ids or []:
+            packet_ids.add(int(packet_id))
+    return packet_ids
 
 
 def _decompress_payload(data):
@@ -390,6 +411,7 @@ class PacketStore:
             self._conn.commit()
         except sqlite3.Error:
             logger.exception(f"Failed to link packet {packet_id} to capture session {session_id}")
+            raise
 
     def get_latest_session(self, active_only: bool = False) -> dict | None:
         query = "SELECT * FROM capture_sessions"
@@ -608,9 +630,9 @@ class PacketStore:
                     ),
                 )
             self._conn.commit()
-        except sqlite3.Error as e:
-            logger.error(f"Failed to store packet: {e}")
-            return None
+        except sqlite3.Error:
+            logger.exception("Failed to store captured packet")
+            raise
 
         packet_id = cursor.lastrowid
 
@@ -623,6 +645,7 @@ class PacketStore:
                 self._conn.commit()
             except sqlite3.Error:
                 logger.exception(f"Failed to link packet {packet_id} to capture session {session_id}")
+                raise
 
         if header and header["transaction_id"] is not None:
             self._correlate_by_transaction_id(packet_id, header, device_ip, direction)
@@ -747,8 +770,8 @@ class PacketStore:
         return self._decode_packet_rows(rows)
 
     def get_session_packet_count(self, session_id: int, start_ns: int | None = None, end_ns: int | None = None) -> int:
-        query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
-        params: list = [session_id]
+        query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+        params: list = [session_id, session_id]
         if start_ns is not None:
             query += " AND timestamp_ns >= ?"
             params.append(start_ns)
@@ -760,13 +783,7 @@ class PacketStore:
 
     def get_session_evidence_count(self, session_id: int) -> int:
         markers = self.get_markers(session_id, marker_types=["evidence"])
-        packet_ids = set()
-        for marker in markers:
-            data = marker.get("data")
-            if data and data.get("packet_ids"):
-                for pid in data["packet_ids"]:
-                    packet_ids.add(pid)
-        return len(packet_ids)
+        return len(extract_evidence_packet_ids(markers))
 
     def _apply_packet_filters(
         self,
@@ -849,8 +866,8 @@ class PacketStore:
         dst_ip: str | None = None,
         port: int | None = None,
     ) -> int:
-        query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
-        params: list = [session_id]
+        query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+        params: list = [session_id, session_id]
         query, params = self._apply_packet_filters(
             query,
             params,
@@ -887,8 +904,8 @@ class PacketStore:
         offset: int = 0,
         ascending: bool = True,
     ) -> list[dict]:
-        query = "SELECT * FROM packets WHERE session_id = ?"
-        params: list = [session_id]
+        query = f"SELECT * FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+        params: list = [session_id, session_id]
         query, params = self._apply_packet_filters(
             query,
             params,
@@ -930,8 +947,8 @@ class PacketStore:
         ascending: bool = True,
     ) -> list[dict]:
         if session_id is not None:
-            query = "SELECT * FROM packets WHERE session_id = ?"
-            params: list = [session_id]
+            query = f"SELECT * FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+            params: list = [session_id, session_id]
         else:
             query = "SELECT * FROM packets WHERE 1=1"
             params = []
@@ -973,8 +990,8 @@ class PacketStore:
         port: int | None = None,
     ) -> int:
         if session_id is not None:
-            query = "SELECT COUNT(*) AS count FROM packets WHERE session_id = ?"
-            params: list = [session_id]
+            query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+            params: list = [session_id, session_id]
         else:
             query = "SELECT COUNT(*) AS count FROM packets WHERE 1=1"
             params = []
@@ -1101,7 +1118,7 @@ class PacketStore:
             params.append(source_type)
 
         if session_id is not None:
-            query += " AND (session_id = ? OR id IN (SELECT packet_id FROM packet_sessions WHERE session_id = ?))"
+            query += f" AND {SESSION_MEMBERSHIP_SQL}"
             params.append(session_id)
             params.append(session_id)
 

@@ -124,10 +124,20 @@ enum CommandSpec {
         #[serde(default = "default_encoding_sequence")]
         sequence: u16,
     },
+    ProbeGainLevel {
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default = "default_gain_sequence")]
+        sequence: u16,
+    },
     SetGainLevel {
-        channel_number: u8,
+        channel_number: u16,
         gain_level: u8,
         device_type: String,
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default = "default_gain_sequence")]
+        sequence: u16,
     },
     EnableAes67 {
         enabled: bool,
@@ -261,6 +271,10 @@ fn default_encoding_sequence() -> u16 {
     0x0083
 }
 
+fn default_gain_sequence() -> u16 {
+    0x100A
+}
+
 fn default_leader_sequence() -> u16 {
     0x0021
 }
@@ -350,8 +364,7 @@ fn route(command: &str) -> (Target, IoMode) {
     use IoMode::*;
     use Target::*;
     match command {
-        "set_gain_level" => (Settings, Request),
-        "set_encoding" | "set_sample_rate" => (
+        "set_encoding" | "set_sample_rate" | "set_gain_level" => (
             Settings,
             Fire {
                 repeat: 1,
@@ -376,6 +389,7 @@ fn route(command: &str) -> (Target, IoMode) {
         | "probe_interface_status"
         | "probe_sample_rate"
         | "probe_encoding"
+        | "probe_gain_level"
         | "set_interface_dhcp"
         | "set_interface_static"
         | "probe_aes67"
@@ -502,11 +516,18 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
         CommandSpec::ProbeEncoding { host_mac, sequence } => {
             commands::build_probe_encoding(parse_mac(&host_mac, default_host_mac)?, sequence)?
         }
+        CommandSpec::ProbeGainLevel { host_mac, sequence } => {
+            commands::build_probe_gain_level(parse_mac(&host_mac, default_host_mac)?, sequence)?
+        }
         CommandSpec::SetGainLevel {
             channel_number,
             gain_level,
             device_type,
+            host_mac,
+            sequence,
         } => commands::build_set_gain_level(
+            parse_mac(&host_mac, default_host_mac)?,
+            sequence,
             channel_number,
             gain_level,
             parse_gain_device_type(&device_type)?,
@@ -637,13 +658,8 @@ mod tests {
     }
 
     #[test]
-    fn routes_settings_request_commands() {
-        assert_eq!(route("set_gain_level"), (Target::Settings, IoMode::Request));
-    }
-
-    #[test]
     fn routes_unacknowledged_settings_writes_as_single_fire_commands() {
-        for command in ["set_encoding", "set_sample_rate"] {
+        for command in ["set_encoding", "set_sample_rate", "set_gain_level"] {
             assert_eq!(
                 route(command),
                 (
@@ -730,6 +746,16 @@ mod tests {
             )
         );
         assert_eq!(
+            route("probe_gain_level"),
+            (
+                Target::Settings,
+                IoMode::Fire {
+                    repeat: 1,
+                    interval_ms: 0
+                }
+            )
+        );
+        assert_eq!(
             route("metering_start"),
             (
                 Target::Control,
@@ -800,14 +826,14 @@ mod tests {
     fn gain_device_type_accepts_only_exact_wire_types() {
         for device_type in ["input", "output"] {
             let json = format!(
-                "{{\"command\":\"set_gain_level\",\"channel_number\":1,\"gain_level\":2,\"device_type\":\"{device_type}\"}}"
+                "{{\"command\":\"set_gain_level\",\"channel_number\":1,\"gain_level\":2,\"device_type\":\"{device_type}\",\"host_mac\":\"001122334455\"}}"
             );
             assert!(build_command_from_json(&json).is_ok(), "{device_type}");
         }
 
         for device_type in ["outputs", "Input", "", "speaker"] {
             let json = format!(
-                "{{\"command\":\"set_gain_level\",\"channel_number\":1,\"gain_level\":2,\"device_type\":\"{device_type}\"}}"
+                "{{\"command\":\"set_gain_level\",\"channel_number\":1,\"gain_level\":2,\"device_type\":\"{device_type}\",\"host_mac\":\"001122334455\"}}"
             );
             assert!(
                 matches!(

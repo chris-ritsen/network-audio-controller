@@ -2,11 +2,11 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::bytes::{read_u16, string_at_pointer, u16_at};
+use crate::bytes::{read_u16, read_u32, string_at_pointer, u16_at};
 use crate::protocol::{
-    common_arc_protocol_opcodes, validate_response_envelope, OPCODE_CHANNEL_COUNT,
-    OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES, RESULT_CODE_MORE_PAGES,
-    RESULT_CODE_SUCCESS,
+    common_arc_protocol_opcodes, is_common_arc_protocol, response_envelope,
+    validate_response_envelope, OPCODE_CHANNEL_COUNT, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO,
+    OPCODE_TX_CHANNEL_NAMES, RESULT_CODE_MORE_PAGES, RESULT_CODE_SUCCESS,
 };
 
 pub use crate::protocol::RESPONSE_HEADER_SIZE;
@@ -33,6 +33,16 @@ const TX_RECORD_NAME_POINTER: usize = 6;
 
 const TX_FRIENDLY_RECORD_CHANNEL_NUMBER: usize = 2;
 const TX_FRIENDLY_RECORD_NAME_POINTER: usize = 4;
+const CHANNEL_RECORD_METADATA_POINTER: usize = 4;
+const CHANNEL_AUDIO_METADATA_SIZE: usize = 16;
+const CHANNEL_AUDIO_SAMPLE_RATE_OFFSET: usize = 0;
+const CHANNEL_AUDIO_CURRENT_ENCODING_OFFSET: usize = 6;
+const CHANNEL_AUDIO_ENCODING_CAPABILITY_BITMAP_OFFSET: usize = 14;
+const PCM16_CAPABILITY_BIT: u16 = 0x0002;
+const PCM24_CAPABILITY_BIT: u16 = 0x0004;
+const PCM32_CAPABILITY_BIT: u16 = 0x0008;
+const KNOWN_PCM_CAPABILITY_BITS: u16 =
+    PCM16_CAPABILITY_BIT | PCM24_CAPABILITY_BIT | PCM32_CAPABILITY_BIT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChannelCount {
@@ -56,6 +66,87 @@ pub struct TxChannel {
     pub number: u16,
     pub name: Option<String>,
     pub friendly_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChannelAudioMetadata {
+    pub sample_rate: u32,
+    pub current_encoding: u16,
+    pub encoding_capability_bitmap: u16,
+    pub supported_encodings: Option<Vec<u16>>,
+}
+
+pub fn parse_channel_audio_metadata(response: &[u8]) -> Option<ChannelAudioMetadata> {
+    let envelope = response_envelope(response)?;
+    if !is_common_arc_protocol(envelope.protocol_id)
+        || ![OPCODE_TX_CHANNEL_INFO, OPCODE_RX_CHANNELS].contains(&envelope.opcode)
+        || ![RESULT_CODE_SUCCESS, RESULT_CODE_MORE_PAGES].contains(&envelope.result_code)
+    {
+        return None;
+    }
+
+    let record_size = match envelope.opcode {
+        OPCODE_TX_CHANNEL_INFO => TX_RECORD_SIZE,
+        OPCODE_RX_CHANNELS => RX_RECORD_SIZE,
+        _ => return None,
+    };
+    let first_record = envelope
+        .body
+        .get(BODY_HEADER_SIZE..BODY_HEADER_SIZE.checked_add(record_size)?)?;
+    let starting_channel = read_u16(first_record, 0)?;
+    if starting_channel == 0 {
+        return None;
+    }
+    let record_count = match envelope.opcode {
+        OPCODE_TX_CHANNEL_INFO => parse_tx_info_page(response, starting_channel)?.len(),
+        OPCODE_RX_CHANNELS => parse_rx_page(response, starting_channel)?.len(),
+        _ => return None,
+    };
+    if record_count == 0 {
+        return None;
+    }
+    let records_size = record_count.checked_mul(record_size)?;
+    let records_end = RESPONSE_HEADER_SIZE
+        .checked_add(BODY_HEADER_SIZE)?
+        .checked_add(records_size)?;
+    let metadata_pointer = usize::from(read_u16(first_record, CHANNEL_RECORD_METADATA_POINTER)?);
+    if metadata_pointer < records_end {
+        return None;
+    }
+    let metadata = response
+        .get(metadata_pointer..metadata_pointer.checked_add(CHANNEL_AUDIO_METADATA_SIZE)?)?;
+    let sample_rate = read_u32(metadata, CHANNEL_AUDIO_SAMPLE_RATE_OFFSET)?;
+    let current_encoding = read_u16(metadata, CHANNEL_AUDIO_CURRENT_ENCODING_OFFSET)?;
+    let encoding_capability_bitmap =
+        read_u16(metadata, CHANNEL_AUDIO_ENCODING_CAPABILITY_BITMAP_OFFSET)?;
+    if sample_rate == 0 || current_encoding == 0 {
+        return None;
+    }
+
+    let supported_encodings = if encoding_capability_bitmap != 0
+        && encoding_capability_bitmap & !KNOWN_PCM_CAPABILITY_BITS == 0
+    {
+        let mut encodings = Vec::new();
+        for (encoding, capability_bit) in [
+            (16, PCM16_CAPABILITY_BIT),
+            (24, PCM24_CAPABILITY_BIT),
+            (32, PCM32_CAPABILITY_BIT),
+        ] {
+            if encoding_capability_bitmap & capability_bit != 0 {
+                encodings.push(encoding);
+            }
+        }
+        encodings.contains(&current_encoding).then_some(encodings)
+    } else {
+        None
+    };
+
+    Some(ChannelAudioMetadata {
+        sample_rate,
+        current_encoding,
+        encoding_capability_bitmap,
+        supported_encodings,
+    })
 }
 
 pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
@@ -438,6 +529,83 @@ mod tests {
         response[8..10].copy_from_slice(&result.to_be_bytes());
     }
 
+    fn channel_audio_metadata_response(
+        sample_rate: u32,
+        current_encoding: u16,
+        encoding_capability_bitmap: u16,
+    ) -> Vec<u8> {
+        let metadata_pointer = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE + TX_RECORD_SIZE;
+        let name_pointer = metadata_pointer + CHANNEL_AUDIO_METADATA_SIZE;
+        let mut response = vec![0u8; name_pointer];
+        response.extend_from_slice(b"channel-1\0");
+        response[RESPONSE_HEADER_SIZE..RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE]
+            .copy_from_slice(&[1, 1]);
+        let record = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE;
+        response[record..record + 2].copy_from_slice(&1u16.to_be_bytes());
+        response[record + CHANNEL_RECORD_METADATA_POINTER
+            ..record + CHANNEL_RECORD_METADATA_POINTER + 2]
+            .copy_from_slice(&(metadata_pointer as u16).to_be_bytes());
+        response[record + TX_RECORD_NAME_POINTER..record + TX_RECORD_NAME_POINTER + 2]
+            .copy_from_slice(&(name_pointer as u16).to_be_bytes());
+        response[metadata_pointer + CHANNEL_AUDIO_SAMPLE_RATE_OFFSET
+            ..metadata_pointer + CHANNEL_AUDIO_SAMPLE_RATE_OFFSET + 4]
+            .copy_from_slice(&sample_rate.to_be_bytes());
+        response[metadata_pointer + CHANNEL_AUDIO_CURRENT_ENCODING_OFFSET
+            ..metadata_pointer + CHANNEL_AUDIO_CURRENT_ENCODING_OFFSET + 2]
+            .copy_from_slice(&current_encoding.to_be_bytes());
+        response[metadata_pointer + CHANNEL_AUDIO_ENCODING_CAPABILITY_BITMAP_OFFSET
+            ..metadata_pointer + CHANNEL_AUDIO_ENCODING_CAPABILITY_BITMAP_OFFSET + 2]
+            .copy_from_slice(&encoding_capability_bitmap.to_be_bytes());
+        stamp_response(&mut response, OPCODE_TX_CHANNEL_INFO, RESULT_CODE_SUCCESS);
+        response
+    }
+
+    #[test]
+    fn channel_audio_metadata_decodes_captured_lx_dante_rx_inventory() {
+        let response = include_bytes!(
+            "../../../tests/fixtures/20250517_200646_289003_lx-dante_get_receivers_response.bin"
+        );
+        assert_eq!(
+            parse_channel_audio_metadata(response),
+            Some(ChannelAudioMetadata {
+                sample_rate: 48_000,
+                current_encoding: 24,
+                encoding_capability_bitmap: PCM24_CAPABILITY_BIT,
+                supported_encodings: Some(vec![24]),
+            })
+        );
+    }
+
+    #[test]
+    fn channel_audio_metadata_decodes_known_pcm_capability_bits() {
+        let response = channel_audio_metadata_response(96_000, 24, KNOWN_PCM_CAPABILITY_BITS);
+        assert_eq!(
+            parse_channel_audio_metadata(&response),
+            Some(ChannelAudioMetadata {
+                sample_rate: 96_000,
+                current_encoding: 24,
+                encoding_capability_bitmap: KNOWN_PCM_CAPABILITY_BITS,
+                supported_encodings: Some(vec![16, 24, 32]),
+            })
+        );
+    }
+
+    #[test]
+    fn channel_audio_metadata_preserves_unknown_bitmap_without_inventing_capabilities() {
+        let response = channel_audio_metadata_response(48_000, 24, PCM24_CAPABILITY_BIT | 0x0010);
+        let parsed = parse_channel_audio_metadata(&response).unwrap();
+        assert_eq!(parsed.current_encoding, 24);
+        assert_eq!(parsed.encoding_capability_bitmap, 0x0014);
+        assert_eq!(parsed.supported_encodings, None);
+    }
+
+    #[test]
+    fn channel_audio_metadata_rejects_malformed_inventory_page() {
+        let mut response = channel_audio_metadata_response(48_000, 24, PCM24_CAPABILITY_BIT);
+        response[RESPONSE_HEADER_SIZE + 1] = 2;
+        assert_eq!(parse_channel_audio_metadata(&response), None);
+    }
+
     #[test]
     fn channel_count_parser_reads_counts_and_lock() {
         let mut response = channel_count_response(36);
@@ -657,6 +825,7 @@ mod tests {
                 .collect();
             let result = std::panic::catch_unwind(|| {
                 let _ = parse_channel_count(&data);
+                let _ = parse_channel_audio_metadata(&data);
                 let _ = parse_rx_page(&data, 1);
                 let _ = parse_tx_info_page(&data, 1);
                 let _ = parse_tx_friendly_page(&data, 1);

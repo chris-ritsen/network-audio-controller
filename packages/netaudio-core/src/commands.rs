@@ -38,6 +38,10 @@ const SETTINGS_SUFFIX_IDENTITY: u8 = 0x31;
 const SETTINGS_SUFFIX_AES67_WRITE: u8 = 0x34;
 const SETTINGS_SUFFIX_AUDIO_CONFIG: u8 = 0x27;
 
+const GAIN_MESSAGE_TYPE: u16 = 0x100A;
+const GAIN_INPUT_DIRECTION: u16 = 0x0102;
+const GAIN_OUTPUT_DIRECTION: u16 = 0x0201;
+
 const AUDIO_CONFIG_PSEUDO_MAC: [u8; 6] = [b'R', b'T', 0, 0, 0, 0];
 
 const LATENCY_SET_PREAMBLE: [u8; 22] = [
@@ -456,8 +460,19 @@ pub fn build_probe_encoding(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>,
     build_audio_config_probe(host_mac, sequence, 0x0083)
 }
 
+pub fn build_probe_gain_level(host_mac: [u8; 6], sequence: u16) -> Result<Vec<u8>, NetaudioError> {
+    let mut body = Vec::with_capacity(14);
+    body.extend_from_slice(&GAIN_MESSAGE_TYPE.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    settings_packet(sequence, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
+}
+
 pub fn build_set_gain_level(
-    channel_number: u8,
+    host_mac: [u8; 6],
+    sequence: u16,
+    channel_number: u16,
     gain_level: u8,
     is_input: bool,
 ) -> Result<Vec<u8>, NetaudioError> {
@@ -467,26 +482,23 @@ pub fn build_set_gain_level(
     if !(MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL).contains(&gain_level) {
         return Err(NetaudioError::InvalidGainLevel);
     }
-    let (command_id, type_byte) = if is_input {
-        (0x0344u16, 0x01u8)
+    let direction = if is_input {
+        GAIN_INPUT_DIRECTION
     } else {
-        (0x0326u16, 0x02u8)
+        GAIN_OUTPUT_DIRECTION
     };
-    let mut tail = Vec::new();
-    tail.extend_from_slice(&[0x10, type_byte]);
-    tail.extend_from_slice(&[0x0A, 0x00, 0x00, 0x00, 0x00, 0x00]);
-    tail.extend_from_slice(&[0x01, 0x00, 0x01, 0x00, 0x0C, 0x00]);
-    tail.extend_from_slice(&[0x10, type_byte]);
-    tail.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00]);
-    tail.push(channel_number);
-    tail.extend_from_slice(&[0x00, 0x00, 0x00]);
-    tail.push(gain_level);
-    settings_packet(
-        command_id,
-        AUDIO_CONFIG_PSEUDO_MAC,
-        SETTINGS_SUFFIX_AUDIO_CONFIG,
-        &tail,
-    )
+    let mut body = Vec::with_capacity(26);
+    body.extend_from_slice(&GAIN_MESSAGE_TYPE.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&1u16.to_be_bytes());
+    body.extend_from_slice(&1u16.to_be_bytes());
+    body.extend_from_slice(&12u16.to_be_bytes());
+    body.extend_from_slice(&16u16.to_be_bytes());
+    body.extend_from_slice(&direction.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&channel_number.to_be_bytes());
+    body.extend_from_slice(&u32::from(gain_level).to_be_bytes());
+    settings_packet(sequence, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
 }
 
 pub fn build_enable_aes67(enabled: bool, mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
@@ -1027,19 +1039,58 @@ mod tests {
         assert_eq!(build_set_encoding(0), Err(NetaudioError::InvalidEncoding));
 
         assert_eq!(
-            build_set_gain_level(0, 1, true),
+            build_set_gain_level([1, 2, 3, 4, 5, 6], 1, 0, 1, true),
             Err(NetaudioError::InvalidChannel)
         );
         for level in [0, 6, u8::MAX] {
             assert_eq!(
-                build_set_gain_level(1, level, true),
+                build_set_gain_level([1, 2, 3, 4, 5, 6], 1, 1, level, true),
                 Err(NetaudioError::InvalidGainLevel),
                 "{level}"
             );
         }
         for level in MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL {
-            assert!(build_set_gain_level(1, level, false).is_ok(), "{level}");
+            assert!(
+                build_set_gain_level([1, 2, 3, 4, 5, 6], 1, u16::MAX, level, false).is_ok(),
+                "{level}"
+            );
         }
+    }
+
+    #[test]
+    fn probe_gain_level_matches_captured_input_packet_716() {
+        let packet = build_probe_gain_level([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x045A).unwrap();
+        assert_eq!(
+            packet,
+            [
+                0xFF, 0xFF, 0x00, 0x28, 0x04, 0x5A, 0x00, 0x00, 0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D,
+                0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x3A, 0x10, 0x0A,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn set_gain_level_matches_captured_input_packet_1372() {
+        let packet =
+            build_set_gain_level([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0xC001, 1, 4, true).unwrap();
+        assert_eq!(
+            packet,
+            [
+                0xFF, 0xFF, 0x00, 0x34, 0xC0, 0x01, 0x00, 0x00, 0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D,
+                0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x3A, 0x10, 0x0A,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x0C, 0x00, 0x10, 0x01, 0x02,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04,
+            ]
+        );
+    }
+
+    #[test]
+    fn set_gain_level_encodes_output_direction_and_full_channel_number() {
+        let packet = build_set_gain_level([1, 2, 3, 4, 5, 6], 0x1234, 257, 5, false).unwrap();
+        assert_eq!(&packet[40..42], &0x0201u16.to_be_bytes());
+        assert_eq!(&packet[46..48], &257u16.to_be_bytes());
+        assert_eq!(&packet[48..52], &5u32.to_be_bytes());
     }
 
     #[test]

@@ -148,14 +148,15 @@ def fetch_tx_records(client, arc_port, channel_count):
     return tx
 
 
-def _fetch_instrumented(client, arc_port):
+def _fetch_instrumented(client, arc_port, include_channels=True):
     name = fetch_device_name(client, arc_port)
     counts = _query(client, {"command": "channel_count"}, arc_port, "channel_count")
     if counts is None:
         counts = {"tx_count": 0, "rx_count": 0, "locked": None}
 
-    rx = fetch_rx_records(client, arc_port)
-    tx = fetch_tx_records(client, arc_port, counts["tx_count"])
+    rx = fetch_rx_records(client, arc_port) if include_channels else []
+    tx = fetch_tx_records(client, arc_port, counts["tx_count"]) if include_channels else []
+    channel_audio_metadata = client.get_channel_audio_metadata(counts["tx_count"], counts["rx_count"])
 
     settings_data = _query(client, {"command": "device_settings"}, arc_port, "device_settings")
     aes67 = _query(client, {"command": "query_latency_config"}, arc_port, "aes67_configured")
@@ -165,6 +166,7 @@ def _fetch_instrumented(client, arc_port):
         "counts": (counts["tx_count"], counts["rx_count"], counts["locked"]),
         "rx": rx,
         "tx": tx,
+        "channel_audio_metadata": channel_audio_metadata,
         "settings": settings_data,
         "aes67": aes67,
     }

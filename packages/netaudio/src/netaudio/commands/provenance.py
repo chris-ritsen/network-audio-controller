@@ -196,14 +196,11 @@ def _resolve_provenance_scope(
 
 
 def _verify_single_bundle(bundle_path: Path) -> bool:
-    manifest_path = bundle_path / "manifest.json"
-
-    if not manifest_path.exists():
-        print(f"FAIL: No manifest.json in {bundle_path}")
+    try:
+        manifest, files = _load_bundle(bundle_path)
+    except (OSError, ValueError, json.JSONDecodeError, typer.Exit) as exception:
+        print(f"FAIL: {exception}")
         return False
-
-    with open(manifest_path) as manifest_file:
-        manifest = json.load(manifest_file)
 
     print(f"Bundle: {bundle_path.name}")
     print(f"  Session: {manifest.get('session_name', 'unknown')} (id={manifest.get('session_id')})")
@@ -228,14 +225,13 @@ def _verify_single_bundle(bundle_path: Path) -> bool:
             if data:
                 print(f"        data: {json.dumps(data, default=str)}")
 
-    files = {}
-    for bin_file in bundle_path.glob("*.bin"):
-        files[bin_file.name] = bin_file.read_bytes()
-
     all_ok = True
     verified_count = 0
 
     print(f"\n  Packets ({len(samples)}):")
+    if not samples:
+        print("    MISSING: bundle contains no packet samples")
+        all_ok = False
     for sample in samples:
         filename = sample["file"]
         direction = sample.get("direction", "?")
@@ -329,6 +325,7 @@ def _format_audit_packet(data: bytes, indent: str = "      ") -> str:
 
 def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
     import tarfile
+    import zipfile
 
     if bundle_path.suffix == ".gz" and bundle_path.stem.endswith(".tar"):
         with tarfile.open(bundle_path, "r:gz") as tar:
@@ -340,6 +337,23 @@ def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
                 if data is None:
                     continue
                 content = data.read()
+                if name == "manifest.json":
+                    manifest = json.loads(content)
+                else:
+                    files[name] = content
+            if manifest is None:
+                raise typer.Exit(f"No manifest.json in {bundle_path}")
+            return manifest, files
+
+    if bundle_path.suffix == ".zip":
+        with zipfile.ZipFile(bundle_path, "r") as archive:
+            manifest = None
+            files = {}
+            for member_name in archive.namelist():
+                name = Path(member_name).name
+                if not name:
+                    continue
+                content = archive.read(member_name)
                 if name == "manifest.json":
                     manifest = json.loads(content)
                 else:
@@ -365,8 +379,8 @@ def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
 def _audit_single_bundle(bundle_path: Path) -> bool:
     try:
         manifest, files = _load_bundle(bundle_path)
-    except SystemExit:
-        print(f"FAIL: No manifest.json in {bundle_path}")
+    except (OSError, ValueError, json.JSONDecodeError, typer.Exit) as exception:
+        print(f"FAIL: {exception}")
         return False
 
     scope = manifest.get("scope", {})
@@ -518,6 +532,10 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
     print(f"  Hypotheses:       {len(hypotheses)}")
     print(f"  Observations:     {len(observations)}")
     print(f"  Evidence queries: {len(evidence_markers)}")
+
+    if not samples:
+        print("\n  RESULT: FAIL — bundle contains no packet samples")
+        return False
 
     if verified_count == len(samples):
         print(f"\n  RESULT: PASS")
@@ -821,28 +839,36 @@ def provenance_check(
 
 @app.command("verify")
 def provenance_verify(
-    bundle: Optional[str] = typer.Argument(None, help="Path to a specific bundle directory. Omit to scan all bundles."),
+    bundle: Optional[str] = typer.Argument(
+        None, help="Path to a specific bundle directory, .tar.gz, or .zip. Omit to scan all bundles."
+    ),
     fixtures_root: Optional[str] = typer.Option(
         None, "--fixtures-root", help="Fixture root containing provenance session dirs."
     ),
 ):
     if bundle:
-        bundle_dirs = [Path(bundle).expanduser().resolve()]
+        bundle_paths = [Path(bundle).expanduser().resolve()]
     else:
         root = Path(fixtures_root).expanduser().resolve() if fixtures_root else _default_fixture_root().resolve()
         provenance_dir = root / "provenance" if root.name != "provenance" else root
         if not provenance_dir.exists():
             raise typer.Exit(f"Provenance directory not found: {provenance_dir}")
-        bundle_dirs = sorted(provenance_dir.glob("session_*"))
-        if not bundle_dirs:
+        bundle_paths = sorted(
+            [path for path in provenance_dir.iterdir() if path.is_dir() and (path / "manifest.json").exists()]
+            + list(provenance_dir.glob("*.tar.gz"))
+            + list(provenance_dir.glob("*.zip"))
+        )
+        if not bundle_paths:
             raise typer.Exit(f"No session bundles found in {provenance_dir}")
 
     results = {}
-    for bundle_dir in bundle_dirs:
-        if not bundle_dir.is_dir():
+    for bundle_path in bundle_paths:
+        if not bundle_path.exists():
+            print(f"FAIL: Bundle not found: {bundle_path}")
+            results[str(bundle_path)] = False
             continue
-        result = _verify_single_bundle(bundle_dir)
-        results[str(bundle_dir)] = result
+        result = _verify_single_bundle(bundle_path)
+        results[str(bundle_path)] = result
         print()
 
     total = len(results)
@@ -942,15 +968,19 @@ def provenance_audit(
         provenance_dir = root / "provenance" if root.name != "provenance" else root
         if not provenance_dir.exists():
             raise typer.Exit(f"Provenance directory not found: {provenance_dir}")
-        bundle_paths = sorted(list(provenance_dir.glob("session_*/")) + list(provenance_dir.glob("session_*.tar.gz")))
+        bundle_paths = sorted(
+            [path for path in provenance_dir.iterdir() if path.is_dir() and (path / "manifest.json").exists()]
+            + list(provenance_dir.glob("*.tar.gz"))
+            + list(provenance_dir.glob("*.zip"))
+        )
         if not bundle_paths:
             raise typer.Exit(f"No session bundles found in {provenance_dir}")
 
     results = {}
     for bundle_path in bundle_paths:
-        if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
-            pass
-        elif not bundle_path.is_dir():
+        if not bundle_path.exists():
+            print(f"FAIL: Bundle not found: {bundle_path}")
+            results[str(bundle_path)] = False
             continue
         result = _audit_single_bundle(bundle_path)
         results[str(bundle_path)] = result
@@ -997,6 +1027,11 @@ def provenance_export(
         )
         bundle_path = export_session_bundle(store, resolved_session_id, output_dir=out)
         print(f"Capture: Exported bundle: {bundle_path}")
+        if store.get_session_evidence_count(resolved_session_id) == 0:
+            print(
+                "Capture: Warning: no packet evidence was tagged; this is a local draft, not a promotable provenance bundle.",
+                file=sys.stderr,
+            )
     finally:
         store.close()
 
@@ -1087,8 +1122,9 @@ def provenance_evidence(
             if pkt:
                 payload = pkt.get("payload", b"")
                 opcode_hex = ""
-                if len(payload) >= 8:
-                    opcode_hex = f" opcode=0x{int.from_bytes(payload[6:8], 'big'):04X}"
+                header = _verify_parse_header(payload)
+                if header and header.get("opcode") is not None:
+                    opcode_hex = f" opcode=0x{header['opcode']:04X}"
                 pkt_direction = pkt.get("direction", "?")
                 print(f"  #{pid} {pkt_direction}{opcode_hex} {len(payload)}B")
         if len(resolved_packet_ids) > 20:

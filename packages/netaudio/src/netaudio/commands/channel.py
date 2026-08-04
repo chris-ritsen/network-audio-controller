@@ -6,6 +6,7 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, gain_level_label
 from netaudio.dante.services.notification import (
     NOTIFICATION_PROPERTY_CHANGE,
     NOTIFICATION_RX_CHANNEL_CHANGE,
@@ -104,7 +105,7 @@ def name(
     async def _run():
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
-            server_name, device = _resolve_one(filtered)
+            _, device = _resolve_one(filtered)
 
             if channel_type not in ("tx", "rx"):
                 typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
@@ -195,12 +196,10 @@ def gain(
 ):
     """Get or set channel gain level."""
 
-    commands = DanteDeviceCommands()
-
     async def _run():
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
-            server_name, device = _resolve_one(filtered)
+            _, device = _resolve_one(filtered)
 
             if channel_type not in ("tx", "rx"):
                 typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
@@ -211,21 +210,68 @@ def gain(
                 typer.echo(f"Error: channel '{channel}' not found.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
+            device_type = "input" if channel_type == "tx" else "output"
+
+            if device.gain_levels is None:
+                try:
+                    status = await send.probe_gain_status(device.ipv4)
+                except Exception as exception:
+                    typer.echo(f"Error: could not read gain status: {exception}", err=True)
+                    raise typer.Exit(code=ExitCode.ERROR)
+                if status is not None:
+                    device.gain_device_type, device.gain_levels = status
+                    device.supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
+
+            if device.gain_device_type is not None and device.gain_device_type != device_type:
+                typer.echo(
+                    f"Error: device reports {device.gain_device_type} reference controls, not {device_type} controls.",
+                    err=True,
+                )
+                raise typer.Exit(code=ExitCode.ERROR)
+
+            current_level = device.gain_level_for_channel(found_channel.number, channel_type)
             if level is None:
-                typer.echo(found_channel.volume if found_channel.volume is not None else "N/A")
+                if current_level is None or device.gain_device_type is None:
+                    typer.echo("N/A")
+                    return
+                typer.echo(f"{gain_level_label(device.gain_device_type, current_level)} (level {current_level})")
                 return
 
             if not (1 <= level <= 5):
                 typer.echo("Error: gain level must be between 1 and 5.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            device_type = "input" if channel_type == "tx" else "output"
-            packet, _, port = commands.command_set_gain_level(found_channel.number, level, device_type)
-            try:
-                await send(packet, device.ipv4, port)
-            except Exception as exception:
-                typer.echo(f"Error: could not request gain change: {exception}", err=True)
+            if device.supported_gain_levels is not None and level not in device.supported_gain_levels:
+                typer.echo(
+                    f"Error: gain level {level} is not supported; device reports {device.supported_gain_levels}.",
+                    err=True,
+                )
                 raise typer.Exit(code=ExitCode.ERROR)
-            typer.echo(f"{icon('gain')}Gain change requested: {level}; not verified.")
+
+            try:
+                status = await send.set_gain_level(device.ipv4, found_channel.number, level, device_type)
+            except Exception as exception:
+                typer.echo(f"Error: could not set gain level: {exception}", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            if status is None:
+                typer.echo("Error: gain change sent, but device readback was unavailable.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            observed_device_type, channel_levels = status
+            channel_index = found_channel.number - 1
+            observed_level = channel_levels[channel_index] if 0 <= channel_index < len(channel_levels) else None
+            if observed_device_type != device_type or observed_level != level:
+                typer.echo(
+                    "Error: gain change was not applied; "
+                    f"device reports {observed_device_type} channel {found_channel.number} level {observed_level}.",
+                    err=True,
+                )
+                raise typer.Exit(code=ExitCode.ERROR)
+            device.gain_device_type = observed_device_type
+            device.gain_levels = channel_levels
+            device.supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
+            typer.echo(
+                f"{icon('gain')}Set {device_type} reference level for channel {found_channel.number}: "
+                f"{gain_level_label(device_type, level)} (verified)"
+            )
 
     asyncio.run(_run())

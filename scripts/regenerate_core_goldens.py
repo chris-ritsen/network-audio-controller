@@ -30,9 +30,39 @@ CAPTURED_COMMAND_CASES = {
             "sequence": 0x985A,
         },
     },
+    "probe_gain_level_packet_716": {
+        "spec": {
+            "command": "probe_gain_level",
+            "host_mac": "842f5774e86d",
+            "sequence": 0x045A,
+        },
+    },
+    "set_gain_level:27": {
+        "spec": {
+            "command": "set_gain_level",
+            "channel_number": 1,
+            "gain_level": 4,
+            "device_type": "input",
+            "host_mac": "842f5774e86d",
+            "sequence": 0xC001,
+        },
+    },
+    "set_gain_level:28": {
+        "spec": {
+            "command": "set_gain_level",
+            "channel_number": 2,
+            "gain_level": 1,
+            "device_type": "output",
+            "host_mac": "842f5774e86d",
+            "sequence": 0xD101,
+        },
+    },
 }
 
 CAPTURED_RESPONSE_CASES = {
+    "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
+        "kind": "channel_audio_metadata",
+    },
     "sample_rate_status_lx-dante": {
         "hex": (
             "ffff004816310000001dc10812580000417564696e6174650724008000000000"
@@ -63,10 +93,41 @@ CAPTURED_RESPONSE_CASES = {
     },
     "encoding_status_packet_645566": {
         "hex": (
-            "ffff003479b20000001dc1fffe50cac5417564696e6174650738008200000000"
-            "0018000100000018000000180001000000000018"
+            "ffff003479b20000001dc1fffe50cac5417564696e61746507380082000000000018000100000018000000180001000000000018"
         ),
         "kind": "encoding_status",
+    },
+    "gain_status_input_packet_1528": {
+        "hex": (
+            "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000"
+            "000000010008001001020002000400180000000500000001"
+        ),
+        "kind": "gain_status",
+    },
+    "gain_status_output_packet_1585": {
+        "hex": (
+            "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000"
+            "000000010008001002010002000400180000000400000004"
+        ),
+        "kind": "gain_status",
+    },
+    "interface_status_lx_dante_packet_12362179": {
+        "hex": (
+            "ffff009412b70000001dc10812580000417564696e6174650724001100000000"
+            "00020000000003e80001001dc1081258c0a8016cffffff00c0a80101c0a80101"
+            "0000000a0000001dc1081259ac1fb93affff000000000000000000000018004c"
+            "0000000000000000000000000000000000000000000000000000000000000000"
+            "0000000000000000000000000000000000000000"
+        ),
+        "kind": "interface_status",
+    },
+    "interface_status_avio_input_packet_12362180": {
+        "hex": (
+            "ffff0060d9f00000001dc1fffe50692e417564696e6174650727001100000000"
+            "00010000000000640003001dc150692ec0a8012affffff000808080808080404"
+            "0018003000000000000000000000000000000000000000000000000000000000"
+        ),
+        "kind": "interface_status",
     },
     "aes67_configured_packet_1479697": {
         "hex": (
