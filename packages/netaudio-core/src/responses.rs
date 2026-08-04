@@ -546,6 +546,7 @@ pub const CONMON_OPCODE_MAKE_MODEL_RESPONSE: u16 = 0x00C0;
 pub const CONMON_OPCODE_DANTE_MODEL_RESPONSE: u16 = 0x0060;
 pub const CONMON_OPCODE_SAMPLE_RATE_STATUS: u16 = 0x0080;
 pub const CONMON_OPCODE_ENCODING_STATUS: u16 = 0x0082;
+pub const CONMON_OPCODE_GAIN_STATUS: u16 = 0x100B;
 pub const CONMON_OPCODE_AES67_CURRENT_NEW: u16 = 0x1007;
 pub const CONMON_OPCODE_PTP_CLOCK_STATUS: u16 = 0x0020;
 
@@ -555,10 +556,16 @@ const CONMON_SUPPORTED_SAMPLE_RATES_OFFSET: usize = 0x30;
 const CONMON_SUPPORTED_ENCODING_COUNT_OFFSET: usize = 0x22;
 const CONMON_CURRENT_ENCODING_OFFSET: usize = 0x24;
 const CONMON_SUPPORTED_ENCODINGS_OFFSET: usize = 0x30;
+const CONMON_GAIN_DIRECTION_OFFSET: usize = 0x28;
+const CONMON_GAIN_CHANNEL_COUNT_OFFSET: usize = 0x2A;
+const CONMON_GAIN_LEVELS_OFFSET: usize = 0x30;
+const CONMON_GAIN_INPUT_DIRECTION: u16 = 0x0102;
+const CONMON_GAIN_OUTPUT_DIRECTION: u16 = 0x0201;
 const CONMON_PREFERRED_LEADER_OFFSET: usize = 0x26;
 const CONMON_PTP_V1_ROLE_OFFSET: usize = 0x48;
 const CONMON_AES67_CURRENT_NEW_OFFSET: usize = 0x21;
 const CONMON_INTERFACE_COUNT_OFFSET: usize = 0x20;
+const CONMON_INTERFACE_LINK_SPEED_OFFSET: usize = 0x24;
 const CONMON_INTERFACE_RECORDS_OFFSET: usize = 0x28;
 const CONMON_INTERFACE_RECORD_SIZE: usize = 20;
 const CONMON_INTERFACE_CONFIGURED_RECORD_SIZE: usize = 24;
@@ -582,6 +589,12 @@ pub struct SampleRateStatus {
 pub struct EncodingStatus {
     pub current_encoding: u32,
     pub supported_encodings: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GainStatus {
+    pub device_type: String,
+    pub channel_levels: Vec<u32>,
 }
 
 fn parse_supported_u32_values(
@@ -635,6 +648,43 @@ pub fn parse_encoding_status(data: &[u8]) -> Option<EncodingStatus> {
     Some(EncodingStatus {
         current_encoding,
         supported_encodings,
+    })
+}
+
+pub fn parse_gain_status(data: &[u8]) -> Option<GainStatus> {
+    validate_conmon_envelope(data, CONMON_OPCODE_GAIN_STATUS)?;
+    if data.get(25).copied()? != 0x27
+        || data.get(28..40)?
+            != [
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10,
+            ]
+        || data.get(44..48)? != [0x00, 0x04, 0x00, 0x18]
+    {
+        return None;
+    }
+
+    let device_type = match read_u16(data, CONMON_GAIN_DIRECTION_OFFSET)? {
+        CONMON_GAIN_INPUT_DIRECTION => "input",
+        CONMON_GAIN_OUTPUT_DIRECTION => "output",
+        _ => return None,
+    };
+    let channel_count = usize::from(read_u16(data, CONMON_GAIN_CHANNEL_COUNT_OFFSET)?);
+    if channel_count == 0 {
+        return None;
+    }
+    let levels_byte_length = channel_count.checked_mul(4)?;
+    let levels_end = CONMON_GAIN_LEVELS_OFFSET.checked_add(levels_byte_length)?;
+    data.get(CONMON_GAIN_LEVELS_OFFSET..levels_end)?;
+
+    let mut channel_levels = Vec::with_capacity(channel_count);
+    for channel_index in 0..channel_count {
+        let level_offset = CONMON_GAIN_LEVELS_OFFSET.checked_add(channel_index.checked_mul(4)?)?;
+        channel_levels.push(read_u32(data, level_offset)?);
+    }
+
+    Some(GainStatus {
+        device_type: device_type.to_owned(),
+        channel_levels,
     })
 }
 
@@ -698,6 +748,7 @@ pub fn parse_aes67_status(data: &[u8]) -> Option<Aes67Status> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InterfaceStatus {
+    pub link_speed_mbps: u32,
     pub interfaces: Vec<InterfaceStatusEntry>,
     pub reboot_required: bool,
     pub pending_config: Option<PendingInterfaceConfig>,
@@ -738,6 +789,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     if interface_count > 8 {
         return None;
     }
+    let link_speed_mbps = read_u32(data, CONMON_INTERFACE_LINK_SPEED_OFFSET)?;
     let mut interfaces = Vec::with_capacity(usize::from(interface_count));
     let mut mac_addresses = HashSet::with_capacity(usize::from(interface_count));
     let mut offset = CONMON_INTERFACE_RECORDS_OFFSET;
@@ -823,6 +875,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     };
 
     Some(InterfaceStatus {
+        link_speed_mbps,
         interfaces,
         reboot_required: reboot_flag != 0,
         pending_config,
@@ -1281,6 +1334,56 @@ mod tests {
         assert_eq!(parse_encoding_status(&oversized_count), None);
     }
 
+    fn captured_input_gain_status_packet_1528() -> Vec<u8> {
+        vec![
+            0xFF, 0xFF, 0x00, 0x38, 0x06, 0x11, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50,
+            0x69, 0x2E, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x27, 0x10, 0x0B,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10, 0x01, 0x02,
+            0x00, 0x02, 0x00, 0x04, 0x00, 0x18, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x01,
+        ]
+    }
+
+    #[test]
+    fn gain_status_parses_captured_input_packet_1528() {
+        assert_eq!(
+            parse_gain_status(&captured_input_gain_status_packet_1528()),
+            Some(GainStatus {
+                device_type: "input".to_owned(),
+                channel_levels: vec![5, 1],
+            })
+        );
+    }
+
+    #[test]
+    fn gain_status_parses_captured_output_packet_1585() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x38, 0x08, 0x10, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50,
+            0x7B, 0x8D, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x27, 0x10, 0x0B,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10, 0x02, 0x01,
+            0x00, 0x02, 0x00, 0x04, 0x00, 0x18, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
+        ];
+        assert_eq!(
+            parse_gain_status(&data),
+            Some(GainStatus {
+                device_type: "output".to_owned(),
+                channel_levels: vec![4, 4],
+            })
+        );
+    }
+
+    #[test]
+    fn gain_status_rejects_unknown_direction_and_inconsistent_channel_count() {
+        let mut unknown_direction = captured_input_gain_status_packet_1528();
+        unknown_direction[CONMON_GAIN_DIRECTION_OFFSET..CONMON_GAIN_DIRECTION_OFFSET + 2]
+            .copy_from_slice(&0x0101u16.to_be_bytes());
+        assert_eq!(parse_gain_status(&unknown_direction), None);
+
+        let mut oversized_count = captured_input_gain_status_packet_1528();
+        oversized_count[CONMON_GAIN_CHANNEL_COUNT_OFFSET..CONMON_GAIN_CHANNEL_COUNT_OFFSET + 2]
+            .copy_from_slice(&3u16.to_be_bytes());
+        assert_eq!(parse_gain_status(&oversized_count), None);
+    }
+
     #[test]
     fn ptp_clock_status_parses_preferred_and_role() {
         let mut data = vec![0u8; 0x4A];
@@ -1329,6 +1432,8 @@ mod tests {
         let mut data = vec![0u8; 0x4A];
         data[CONMON_INTERFACE_COUNT_OFFSET..CONMON_INTERFACE_COUNT_OFFSET + 2]
             .copy_from_slice(&1u16.to_be_bytes());
+        data[CONMON_INTERFACE_LINK_SPEED_OFFSET..CONMON_INTERFACE_LINK_SPEED_OFFSET + 4]
+            .copy_from_slice(&100u32.to_be_bytes());
         write_interface_record(
             &mut data,
             CONMON_INTERFACE_RECORDS_OFFSET,
@@ -1346,6 +1451,7 @@ mod tests {
         stamp_conmon_response(&mut data, CONMON_OPCODE_INTERFACE_STATUS);
 
         let parsed = parse_interface_status(&data).unwrap();
+        assert_eq!(parsed.link_speed_mbps, 100);
         assert!(parsed.reboot_required);
         assert_eq!(parsed.interfaces.len(), 1);
         assert_eq!(parsed.interfaces[0].mode, "dynamic");
@@ -1374,6 +1480,8 @@ mod tests {
         let mut data = vec![0u8; 0x5C];
         data[CONMON_INTERFACE_COUNT_OFFSET..CONMON_INTERFACE_COUNT_OFFSET + 2]
             .copy_from_slice(&1u16.to_be_bytes());
+        data[CONMON_INTERFACE_LINK_SPEED_OFFSET..CONMON_INTERFACE_LINK_SPEED_OFFSET + 4]
+            .copy_from_slice(&1_000u32.to_be_bytes());
         write_interface_record(
             &mut data,
             CONMON_INTERFACE_RECORDS_OFFSET,
@@ -1402,6 +1510,7 @@ mod tests {
         stamp_conmon_response(&mut data, CONMON_OPCODE_INTERFACE_STATUS);
 
         let parsed = parse_interface_status(&data).unwrap();
+        assert_eq!(parsed.link_speed_mbps, 1_000);
         assert!(parsed.reboot_required);
         assert_eq!(parsed.interfaces[0].mode, "static");
         assert_eq!(
@@ -1423,6 +1532,8 @@ mod tests {
         let mut data = vec![0u8; 0x5C];
         data[CONMON_INTERFACE_COUNT_OFFSET..CONMON_INTERFACE_COUNT_OFFSET + 2]
             .copy_from_slice(&2u16.to_be_bytes());
+        data[CONMON_INTERFACE_LINK_SPEED_OFFSET..CONMON_INTERFACE_LINK_SPEED_OFFSET + 4]
+            .copy_from_slice(&10_000u32.to_be_bytes());
         write_interface_record(
             &mut data,
             CONMON_INTERFACE_RECORDS_OFFSET,
@@ -1450,6 +1561,7 @@ mod tests {
         stamp_conmon_response(&mut data, CONMON_OPCODE_INTERFACE_STATUS);
 
         let parsed = parse_interface_status(&data).unwrap();
+        assert_eq!(parsed.link_speed_mbps, 10_000);
         assert_eq!(parsed.interfaces.len(), 2);
         assert_eq!(parsed.interfaces[0].mode, "dynamic");
         assert_eq!(parsed.interfaces[1].mode, "static");
@@ -1491,6 +1603,11 @@ mod tests {
         let encoding_status = captured_encoding_status_packet_204720();
         for length in 0..encoding_status.len() {
             assert_eq!(parse_encoding_status(&encoding_status[..length]), None);
+        }
+
+        let gain_status = captured_input_gain_status_packet_1528();
+        for length in 0..gain_status.len() {
+            assert_eq!(parse_gain_status(&gain_status[..length]), None);
         }
 
         let device_settings = captured_selective_device_settings_packet_9084571();
@@ -1598,6 +1715,7 @@ mod tests {
                 let _ = parse_interface_status(&data);
                 let _ = parse_sample_rate_status(&data);
                 let _ = parse_encoding_status(&data);
+                let _ = parse_gain_status(&data);
             });
             assert!(result.is_ok(), "length={length}");
             assert_eq!(parse_device_name(&data), None);

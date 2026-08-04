@@ -227,18 +227,22 @@
       "command": "set_gain_level",
       "channel_number": 1,
       "gain_level": 4,
-      "device_type": "input"
+      "device_type": "input",
+      "host_mac": "842f5774e86d",
+      "sequence": 49153
     },
-    "hex": "ffff0034034400005254000000000000417564696e617465072710010a0000000000010001000c00100100000000000100000004"
+    "hex": "ffff0034c0010000842f5774e86d0000417564696e617465073a100a0000000000010001000c0010010200000000000100000004"
   },
   "set_gain_level:28": {
     "spec": {
       "command": "set_gain_level",
       "channel_number": 2,
       "gain_level": 1,
-      "device_type": "output"
+      "device_type": "output",
+      "host_mac": "842f5774e86d",
+      "sequence": 53505
     },
-    "hex": "ffff0034032600005254000000000000417564696e617465072710020a0000000000010001000c00100200000000000200000001"
+    "hex": "ffff0034d1010000842f5774e86d0000417564696e617465073a100a0000000000010001000c0010020100000000000200000001"
   },
   "enable_aes67:29": {
     "spec": {
@@ -399,5 +403,13 @@
       "sequence": 39002
     },
     "hex": "ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000"
+  },
+  "probe_gain_level_packet_716": {
+    "spec": {
+      "command": "probe_gain_level",
+      "host_mac": "842f5774e86d",
+      "sequence": 1114
+    },
+    "hex": "ffff0028045a0000842f5774e86d0000417564696e617465073a100a000000000000000000000000"
   }
 }

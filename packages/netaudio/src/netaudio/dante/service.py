@@ -10,12 +10,21 @@ logger = logging.getLogger("netaudio")
 
 
 class DanteUnicastService:
-    def __init__(self, packet_store=None, dissect=False):
+    def __init__(self, packet_store=None, dissect=False, local_port: int = 0, fallback_to_ephemeral: bool = False):
         self._protocol: DanteUnicastProtocol | None = None
         self._packet_store = packet_store
         self._dissect = dissect
         self._transaction_counter = 0
         self._session_id: int | None = None
+        self._requested_local_port = local_port
+        self._fallback_to_ephemeral = fallback_to_ephemeral
+
+    @property
+    def local_port(self) -> int | None:
+        if self._protocol is None or self._protocol.transport is None:
+            return None
+        local_address = self._protocol.transport.get_extra_info("sockname")
+        return local_address[1] if local_address else None
 
     @property
     def session_id(self) -> int | None:
@@ -31,11 +40,21 @@ class DanteUnicastService:
 
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
-        _, protocol = await loop.create_datagram_endpoint(
-            DanteUnicastProtocol,
-            local_addr=("0.0.0.0", 0),
-            family=socket.AF_INET,
-        )
+        try:
+            _, protocol = await loop.create_datagram_endpoint(
+                DanteUnicastProtocol,
+                local_addr=("0.0.0.0", self._requested_local_port),
+                family=socket.AF_INET,
+            )
+        except OSError:
+            if self._requested_local_port == 0 or not self._fallback_to_ephemeral:
+                raise
+            logger.debug(f"UDP port {self._requested_local_port} is unavailable; using an ephemeral source port")
+            _, protocol = await loop.create_datagram_endpoint(
+                DanteUnicastProtocol,
+                local_addr=("0.0.0.0", 0),
+                family=socket.AF_INET,
+            )
         self._protocol = protocol
 
     async def stop(self) -> None:
@@ -116,6 +135,24 @@ class DanteUnicastService:
         if self._protocol is None:
             logger.debug("Service not started, cannot send")
             return
+        local_address = self._protocol.transport.get_extra_info("sockname") if self._protocol.transport else None
+        source_ip = local_address[0] if local_address else None
+        source_port = local_address[1] if local_address else None
+        if self._packet_store:
+            try:
+                self._packet_store.store_packet(
+                    payload=packet,
+                    source_type="netaudio_request",
+                    device_ip=device_ip,
+                    src_ip=source_ip,
+                    src_port=source_port,
+                    dst_ip=device_ip,
+                    dst_port=port,
+                    direction="request",
+                    session_id=self._session_id,
+                )
+            except Exception as exception:
+                logger.debug(f"PacketStore error (send): {exception}")
         if self._dissect:
             self._log_dissected(packet, device_ip, port, direction="send")
         self._protocol.send_fire_and_forget(packet, (device_ip, port))
@@ -175,7 +212,7 @@ class DanteMulticastService:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if hasattr(socket, "SO_REUSEPORT"):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        sock.bind(("", self._multicast_port))
+        sock.bind((self._multicast_group, self._multicast_port))
 
         membership_request = struct.pack(
             "4s4s",

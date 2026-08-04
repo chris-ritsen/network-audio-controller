@@ -145,6 +145,7 @@ def _filter_device(device: dict, level: str) -> dict:
         filtered["ipv4"] = device.get("ipv4", "")
         filtered["mac_address"] = device.get("mac_address", "")
         filtered["manufacturer"] = device.get("manufacturer", "")
+        filtered["link_speed_mbps"] = device.get("link_speed_mbps")
         interfaces = device.get("interfaces")
         if interfaces:
             filtered["interfaces"] = interfaces
@@ -189,12 +190,15 @@ def _format_report(
         firmware = filtered.get("firmware_version", "")
         software = filtered.get("software_version", "")
         sample_rate = filtered.get("sample_rate", "")
+        link_speed_mbps = filtered.get("link_speed_mbps")
 
         header = f"**{name}**"
         if ip_address:
             header += f" ({ip_address})"
         lines.append(header)
         lines.append(f"  Model: {model} | FW: {firmware} | SW: {software} | Rate: {sample_rate}")
+        if link_speed_mbps is not None:
+            lines.append(f"  Link speed: {link_speed_mbps} Mbps")
 
         interfaces = filtered.get("interfaces")
         if interfaces:

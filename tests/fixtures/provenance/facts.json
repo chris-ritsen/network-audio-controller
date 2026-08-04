@@ -949,32 +949,6 @@
       "match_offset": 26,
       "match_size": 2
     },
-    "conmon_message:0x0344": {
-      "category": "conmon_message",
-      "key": "0x0344",
-      "name": "set_input_gain",
-      "note": "Sets input channel gain level. Unicast to port 8700.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "inferred",
-      "added_ns": 1772916090941680000,
-      "protocol_id": 65535,
-      "match_offset": 26,
-      "match_size": 2
-    },
-    "conmon_message:0x0326": {
-      "category": "conmon_message",
-      "key": "0x0326",
-      "name": "set_output_gain",
-      "note": "Sets output channel gain level. Unicast to port 8700.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "inferred",
-      "added_ns": 1772916091081355000,
-      "protocol_id": 65535,
-      "match_offset": 26,
-      "match_size": 2
-    },
     "conmon_message:0x22DC": {
       "category": "conmon_message",
       "key": "0x22DC",
@@ -1406,28 +1380,112 @@
     "conmon_message:0x0011": {
       "category": "conmon_message",
       "key": "0x0011",
-      "name": "unknown_0011",
-      "note": "Multicast on 8702. 96-148B variable. High frequency (3165 packets). Possibly device status announcement.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "interface_status_announcement",
+      "note": "Multicast interface-status announcement on 224.0.0.231:8702. The 0x0013 40-byte query triggers an immediate response. Absolute offset 0x20 is the interface count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records begin at 0x28. Verified across LX-DANTE at 1000 Mbps and eight AVIO adapters at 100 Mbps; existing captures also contain 10000 Mbps, so consumers must preserve the numeric value rather than use a fixed device or speed table.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0011"
+        },
+        {
+          "name": "interface_count",
+          "offset": 32,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "link_speed_mbps",
+          "offset": 36,
+          "length": 4,
+          "dtype": "uint32_be"
+        }
+      ],
+      "evidence": [
+        "interface_link_speed_discovery:12362179",
+        "interface_link_speed_discovery:12362180",
+        "interface_link_speed_discovery:12362181",
+        "interface_link_speed_discovery:12362182",
+        "interface_link_speed_discovery:12362183",
+        "interface_link_speed_discovery:12362184",
+        "interface_link_speed_discovery:12362185",
+        "interface_link_speed_discovery:12362186",
+        "interface_link_speed_discovery:12362187"
+      ],
       "added_ns": 1772988416775300000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988416775300000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785847777270144000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1785847777270137000,
+          "previous_name": "unknown_0011",
+          "previous_confidence": "observed",
+          "previous_note": "Multicast on 8702. 96-148B variable. High frequency (3165 packets). Possibly device status announcement.",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0013": {
       "category": "conmon_message",
       "key": "0x0013",
-      "name": "unknown_0013",
-      "note": "Unicast to 8700. 32-68B. Paired with multicast 0x0014 (344B).",
-      "fields": [],
-      "evidence": [],
-      "confidence": "observed",
+      "name": "interface_configuration",
+      "note": "Unicast Settings message to UDP 8700. A 40-byte packet with eight zero bytes after the 0x00000064 selector is a read-only interface-status query and triggers an immediate multicast 0x0011 response. Longer variants configure DHCP or static addressing.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0013"
+        }
+      ],
+      "evidence": [
+        "interface_link_speed_discovery:12362170",
+        "interface_link_speed_discovery:12362171",
+        "interface_link_speed_discovery:12362172",
+        "interface_link_speed_discovery:12362173",
+        "interface_link_speed_discovery:12362174",
+        "interface_link_speed_discovery:12362175",
+        "interface_link_speed_discovery:12362176",
+        "interface_link_speed_discovery:12362177",
+        "interface_link_speed_discovery:12362178"
+      ],
       "added_ns": 1772988416914006000,
       "protocol_id": 65535,
       "match_offset": 26,
-      "match_size": 2
+      "match_size": 2,
+      "confidence_log": [
+        {
+          "level": "observed",
+          "timestamp_ns": 1772988416914006000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785847780866061000
+        }
+      ],
+      "history": [
+        {
+          "replaced_ns": 1785847780866058000,
+          "previous_name": "unknown_0013",
+          "previous_confidence": "observed",
+          "previous_note": "Unicast to 8700. 32-68B. Paired with multicast 0x0014 (344B).",
+          "action": "updated"
+        }
+      ]
     },
     "conmon_message:0x0014": {
       "category": "conmon_message",
@@ -3946,8 +4004,8 @@
     "conmon_opcode:0x0013": {
       "category": "conmon_opcode",
       "key": "0x0013",
-      "name": "set_interface_address",
-      "note": "Set interface IP config on port 8700. Read counterpart is 0x0011 (multicast announcement). Dynamic mode (40B): body is [0x1c:0x20]=presence (0x00000064), [0x20:0x28]=all zeros (DHCP, no IP fields). Static mode (68B): [0x1c:0x20]=presence (0x00000064), [0x20:0x24]=mode_flags (011c0f10 for static), [0x24:0x28]=padding, [0x28:0x2c]=interface_index (0x00000002), [0x2c:0x30]=ipv4_address, [0x30:0x34]=netmask, [0x34:0x38]=dns_server, [0x38:0x3c]=gateway, [0x3c:0x40]=unknown (0x00020000), [0x40:0x44]=padding. All IP fields match preset XML exactly (verified against dc_preset_experiment_2026_03_30.xml).",
+      "name": "interface_configuration",
+      "note": "Unicast Settings message to UDP 8700. The 40-byte zero-tail variant queries interface status; longer variants set DHCP or static addressing. The query triggers an immediate multicast 0x0011 interface-status announcement.",
       "fields": [
         {
           "name": "message_type",
@@ -3962,7 +4020,16 @@
         "dc_preset_save_load:4497537",
         "dc_preset_save_load:4497538",
         "dc_preset_save_load:4497539",
-        "dc_preset_save_load:4497540"
+        "dc_preset_save_load:4497540",
+        "interface_link_speed_discovery:12362170",
+        "interface_link_speed_discovery:12362171",
+        "interface_link_speed_discovery:12362172",
+        "interface_link_speed_discovery:12362173",
+        "interface_link_speed_discovery:12362174",
+        "interface_link_speed_discovery:12362175",
+        "interface_link_speed_discovery:12362176",
+        "interface_link_speed_discovery:12362177",
+        "interface_link_speed_discovery:12362178"
       ],
       "confidence_log": [
         {
@@ -3976,6 +4043,10 @@
         {
           "level": "verified",
           "timestamp_ns": 1774898356248698000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785847782255821000
         }
       ],
       "added_ns": 1774897939550088000,
@@ -3993,8 +4064,18 @@
           "previous_confidence": "observed",
           "previous_note": "Set interface IP addresses on port 8700. 40B for single-NIC devices (dynamic DHCP), 68B for dual-NIC or static-IP devices. Observed during DC preset load 'Set Interface Addresses' phase. Sent twice during a preset load. The preset XML confirms avio-usb-2 (68B packet) has static IP config while others are dynamic \u2014 explaining the size difference. Preset file: tests/fixtures/provenance/dc_preset_experiment_2026_03_30.xml",
           "action": "updated"
+        },
+        {
+          "replaced_ns": 1785847782255814000,
+          "previous_name": "set_interface_address",
+          "previous_confidence": "verified",
+          "previous_note": "Set interface IP config on port 8700. Read counterpart is 0x0011 (multicast announcement). Dynamic mode (40B): body is [0x1c:0x20]=presence (0x00000064), [0x20:0x28]=all zeros (DHCP, no IP fields). Static mode (68B): [0x1c:0x20]=presence (0x00000064), [0x20:0x24]=mode_flags (011c0f10 for static), [0x24:0x28]=padding, [0x28:0x2c]=interface_index (0x00000002), [0x2c:0x30]=ipv4_address, [0x30:0x34]=netmask, [0x34:0x38]=dns_server, [0x38:0x3c]=gateway, [0x3c:0x40]=unknown (0x00020000), [0x40:0x44]=padding. All IP fields match preset XML exactly (verified against dc_preset_experiment_2026_03_30.xml).",
+          "action": "updated"
         }
-      ]
+      ],
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
     },
     "preset_operation:load_order": {
       "category": "preset_operation",
@@ -4017,7 +4098,7 @@
       "category": "conmon_opcode",
       "key": "0x0011",
       "name": "interface_status_announcement",
-      "note": "Multicast announcement on 224.0.0.231:8702 containing full interface configuration. Broadcast periodically by all devices. Body layout (after 28-byte conmon header): [0x20:0x22]=interface_count (uint16, 1=single NIC, 2=dual NIC), [0x24:0x28]=presence_flags, [0x28:0x2a]=mode (uint16, 0x0001=dynamic/DHCP, 0x0003=static), [0x2a:0x30]=mac_address (6 bytes), [0x30:0x34]=ipv4_address, [0x34:0x38]=netmask, [0x38:0x3c]=dns_or_gateway, [0x3c:0x40]=gateway_or_dns. For dual-NIC devices (lx-dante), secondary interface follows at 0x44 with same layout. Dynamic devices append DHCP domain name as null-terminated string. Packet sizes: 96B (static single-NIC), 108B (dynamic single-NIC with domain), 148B (dynamic dual-NIC).",
+      "note": "Multicast interface-status announcement on 224.0.0.231:8702. Absolute offset 0x20 is interface_count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records start at 0x28. Packet sizes vary with interface count and appended data.",
       "fields": [
         {
           "name": "message_type",
@@ -4025,6 +4106,18 @@
           "length": 2,
           "dtype": "uint16_be",
           "value": "0x0011"
+        },
+        {
+          "name": "interface_count",
+          "offset": 32,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "link_speed_mbps",
+          "offset": 36,
+          "length": 4,
+          "dtype": "uint32_be"
         }
       ],
       "evidence": [
@@ -4032,15 +4125,40 @@
         "interface_config_analysis:4525446",
         "interface_config_analysis:4525427",
         "interface_config_analysis:4525314",
-        "interface_config_analysis:4525429"
+        "interface_config_analysis:4525429",
+        "interface_link_speed_discovery:12362179",
+        "interface_link_speed_discovery:12362180",
+        "interface_link_speed_discovery:12362181",
+        "interface_link_speed_discovery:12362182",
+        "interface_link_speed_discovery:12362183",
+        "interface_link_speed_discovery:12362184",
+        "interface_link_speed_discovery:12362185",
+        "interface_link_speed_discovery:12362186",
+        "interface_link_speed_discovery:12362187"
       ],
       "confidence_log": [
         {
           "level": "verified",
           "timestamp_ns": 1774898342200219000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785847779456681000
         }
       ],
-      "added_ns": 1774898342200220000
+      "added_ns": 1774898342200220000,
+      "history": [
+        {
+          "replaced_ns": 1785847779456669000,
+          "previous_name": "interface_status_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast announcement on 224.0.0.231:8702 containing full interface configuration. Broadcast periodically by all devices. Body layout (after 28-byte conmon header): [0x20:0x22]=interface_count (uint16, 1=single NIC, 2=dual NIC), [0x24:0x28]=presence_flags, [0x28:0x2a]=mode (uint16, 0x0001=dynamic/DHCP, 0x0003=static), [0x2a:0x30]=mac_address (6 bytes), [0x30:0x34]=ipv4_address, [0x34:0x38]=netmask, [0x38:0x3c]=dns_or_gateway, [0x3c:0x40]=gateway_or_dns. For dual-NIC devices (lx-dante), secondary interface follows at 0x44 with same layout. Dynamic devices append DHCP domain name as null-terminated string. Packet sizes: 96B (static single-NIC), 108B (dynamic single-NIC with domain), 148B (dynamic dual-NIC).",
+          "action": "updated"
+        }
+      ],
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2
     },
     "arc_opcode:0x1102": {
       "category": "arc_opcode",
@@ -4121,10 +4239,136 @@
       ],
       "match_offset": 6,
       "match_size": 2
+    },
+    "conmon_message:0x100A": {
+      "category": "conmon_message",
+      "key": "0x100A",
+      "name": "gain_control",
+      "note": "Queries or sets analog reference levels on port 8700. Mode zero requests current levels. Write records carry direction 0x0102 for input or 0x0201 for output, a one-based uint16 channel, and a uint32 level from 1 through 5.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x100A"
+        }
+      ],
+      "evidence": [
+        "avio_gain_capability_wire_evidence:12361779",
+        "avio_gain_capability_wire_evidence:12361781",
+        "avio_gain_capability_wire_evidence:12361783",
+        "avio_gain_capability_wire_evidence:12361784",
+        "avio_gain_capability_wire_evidence:12361787",
+        "avio_gain_capability_wire_evidence:12361789",
+        "avio_gain_capability_wire_evidence:12361791",
+        "avio_gain_capability_wire_evidence:12361793",
+        "avio_gain_capability_wire_evidence:12361795",
+        "avio_gain_capability_wire_evidence:12361797",
+        "avio_gain_capability_wire_evidence:12361799",
+        "avio_gain_capability_wire_evidence:12361801",
+        "avio_gain_capability_wire_evidence:12361803",
+        "avio_gain_capability_wire_evidence:12361805"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1785799405746640000
+        }
+      ],
+      "added_ns": 1785799405746640000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1785809849358578000,
+          "previous_name": "gain_control",
+          "previous_confidence": "verified",
+          "previous_note": "Queries or sets analog reference levels on port 8700. Mode zero requests current levels. Write records carry direction 0x0102 for input or 0x0201 for output, a one-based uint16 channel, and a uint32 level from 1 through 5.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785809893384225000,
+          "previous_name": "gain_control",
+          "previous_confidence": "verified",
+          "previous_note": "Queries or sets analog reference levels on port 8700. Mode zero requests current levels. Write records carry direction 0x0102 for input or 0x0201 for output, a one-based uint16 channel, and a uint32 level from 1 through 5.",
+          "action": "updated"
+        }
+      ]
+    },
+    "conmon_message:0x100B": {
+      "category": "conmon_message",
+      "key": "0x100B",
+      "name": "gain_status",
+      "note": "Multicast analog reference-level status on 224.0.0.231:8702. Direction 0x0102 reports input channels and 0x0201 reports output channels; channel count is at offset 42 and uint32 levels begin at offset 48.",
+      "fields": [
+        {
+          "name": "message_type",
+          "offset": 26,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x100B"
+        },
+        {
+          "name": "direction",
+          "offset": 40,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "channel_count",
+          "offset": 42,
+          "length": 2,
+          "dtype": "uint16_be"
+        }
+      ],
+      "evidence": [
+        "avio_gain_capability_wire_evidence:12361780",
+        "avio_gain_capability_wire_evidence:12361782",
+        "avio_gain_capability_wire_evidence:12361785",
+        "avio_gain_capability_wire_evidence:12361786",
+        "avio_gain_capability_wire_evidence:12361788",
+        "avio_gain_capability_wire_evidence:12361790",
+        "avio_gain_capability_wire_evidence:12361792",
+        "avio_gain_capability_wire_evidence:12361794",
+        "avio_gain_capability_wire_evidence:12361796",
+        "avio_gain_capability_wire_evidence:12361798",
+        "avio_gain_capability_wire_evidence:12361800",
+        "avio_gain_capability_wire_evidence:12361802",
+        "avio_gain_capability_wire_evidence:12361804",
+        "avio_gain_capability_wire_evidence:12361806"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1785799406534821000
+        }
+      ],
+      "added_ns": 1785799406534822000,
+      "protocol_id": 65535,
+      "match_offset": 26,
+      "match_size": 2,
+      "history": [
+        {
+          "replaced_ns": 1785809850177649000,
+          "previous_name": "gain_status",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast analog reference-level status on 224.0.0.231:8702. Direction 0x0102 reports input channels and 0x0201 reports output channels; channel count is at offset 42 and uint32 levels begin at offset 48.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785809894160970000,
+          "previous_name": "gain_status",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast analog reference-level status on 224.0.0.231:8702. Direction 0x0102 reports input channels and 0x0201 reports output channels; channel count is at offset 42 and uint32 levels begin at offset 48.",
+          "action": "updated"
+        }
+      ]
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1784650681847593000
+    "updated_ns": 1785847782255841000
   }
 }

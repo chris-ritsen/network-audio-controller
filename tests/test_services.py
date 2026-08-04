@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
+    CONMON_OPCODE_GAIN_STATUS,
     CONMON_OPCODE_INTERFACE_STATUS,
     DanteNotificationService,
     NOTIFICATION_NAMES,
@@ -20,6 +21,14 @@ SAMPLE_RATE_STATUS_PACKET = bytes.fromhex(
 
 ENCODING_STATUS_PACKET = bytes.fromhex(
     "ffff003413870000001dc10812580000417564696e61746507240082000000000018000100000018000000000000000000000018"
+)
+
+INPUT_GAIN_STATUS_PACKET = bytes.fromhex(
+    "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000000000010008001001020002000400180000000500000001"
+)
+
+OUTPUT_GAIN_STATUS_PACKET = bytes.fromhex(
+    "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004"
 )
 
 
@@ -51,6 +60,37 @@ class TestDanteSettingsService:
 
         service._commands.command_probe_encoding.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
         service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
+
+    def test_probe_gain_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_probe_gain_level = MagicMock(return_value=(b"probe", None, 8700))
+        service.send = MagicMock()
+
+        service.probe_gain_level("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+
+        service._commands.command_probe_gain_level.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
+        service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
+
+    def test_set_gain_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_set_gain_level = MagicMock(return_value=(b"set", None, 8700))
+        service.send = MagicMock()
+
+        service.set_gain_level(
+            "192.168.1.108",
+            2,
+            5,
+            "output",
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+        )
+
+        service._commands.command_set_gain_level.assert_called_once_with(
+            2,
+            5,
+            "output",
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+        )
+        service.send.assert_called_once_with(b"set", "192.168.1.108", 8700)
 
 
 class TestDanteCMCService:
@@ -94,6 +134,7 @@ class TestDanteNotificationService:
         struct.pack_into(">H", packet, 0x18, 0x073A)
         struct.pack_into(">H", packet, 0x1A, CONMON_OPCODE_INTERFACE_STATUS)
         struct.pack_into(">H", packet, 0x20, 2)
+        struct.pack_into(">I", packet, 0x24, 1000)
 
         self._write_interface_record(
             packet,
@@ -147,6 +188,7 @@ class TestDanteNotificationService:
         assert NOTIFICATION_NAMES[257] == "TX Channel Change"
         assert NOTIFICATION_NAMES[258] == "RX Channel Change"
         assert NOTIFICATION_NAMES[4103] == "AES67 Status"
+        assert NOTIFICATION_NAMES[CONMON_OPCODE_GAIN_STATUS] == "Gain Status"
 
     def test_set_device_lookup(self):
         dispatcher = DanteEventDispatcher()
@@ -186,6 +228,7 @@ class TestDanteNotificationService:
         ]
         assert device.interface_reboot_required is False
         assert device.interface_pending_config is None
+        assert device.link_speed_mbps == 1000
 
     def test_dual_interface_mac_cannot_create_pending_dhcp_state(self):
         device = self._parse_dual_interface_packet(bytes.fromhex("02000004BBCC"))
@@ -389,6 +432,92 @@ class TestDanteNotificationService:
 
         assert device.encoding == 24
         assert device.supported_encodings == [24]
+
+    def test_input_gain_status_updates_device_and_exposes_protocol_levels(self):
+        device = DanteDevice(server_name="avio-input.local.")
+        device.name = "avio-input"
+        device.ipv4 = "192.168.1.108"
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
+
+        assert device.gain_device_type == "input"
+        assert device.gain_levels == [5, 1]
+        assert device.supported_gain_levels == [1, 2, 3, 4, 5]
+        assert device.gain_level_choices == [
+            {"value": 1, "label": "+24 dBu"},
+            {"value": 2, "label": "+4 dBu"},
+            {"value": 3, "label": "0 dBu"},
+            {"value": 4, "label": "0 dBV"},
+            {"value": 5, "label": "-10 dBV"},
+        ]
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        notification_event = next(event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED)
+        assert notification_event.data["notification_id"] == CONMON_OPCODE_GAIN_STATUS
+        assert notification_event.data["state_applied"] is True
+
+    def test_output_gain_status_notifies_only_matching_device_waiters(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        matching_waiter = service.register_gain_status_waiter(
+            "192.168.1.108",
+            channel_number=2,
+            expected_level=4,
+        )
+        unrelated_waiter = service.register_gain_status_waiter(
+            "192.168.1.109",
+            channel_number=2,
+            expected_level=4,
+        )
+
+        service._on_packet(OUTPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
+
+        assert matching_waiter.event.is_set()
+        assert matching_waiter.latest_result == ("output", [4, 4])
+        assert not unrelated_waiter.event.is_set()
+
+    def test_gain_write_waiter_ignores_nonmatching_level_but_retains_readback(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        waiter = service.register_gain_status_waiter(
+            "192.168.1.108",
+            channel_number=1,
+            expected_level=3,
+        )
+
+        service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
+
+        assert not waiter.event.is_set()
+        assert waiter.latest_result == ("input", [5, 1])
+
+    def test_gain_write_waiter_ignores_nonmatching_direction(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        waiter = service.register_gain_status_waiter(
+            "192.168.1.108",
+            expected_device_type="output",
+            channel_number=1,
+            expected_level=5,
+        )
+
+        service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
+
+        assert not waiter.event.is_set()
+        assert waiter.latest_result == ("input", [5, 1])
+
+    def test_gain_status_is_applied_when_device_appears(self):
+        service = DanteNotificationService(dispatcher=MagicMock())
+        service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
+        device = DanteDevice(server_name="avio-input.local.")
+        device.ipv4 = "192.168.1.108"
+
+        service.apply_pending_for_device(device)
+
+        assert device.gain_device_type == "input"
+        assert device.gain_levels == [5, 1]
+        assert device.supported_gain_levels == [1, 2, 3, 4, 5]
 
 
 class TestHeartbeatLockStateParsing:

@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional
 
 import typer
+from click.core import ParameterSource
 
 from netaudio import __version__
 from netaudio.common.app_config import settings
@@ -71,6 +72,7 @@ class State:
     sort_reverse: bool = False
     no_color: bool = False
     timeout: float = 5.0
+    timeout_explicit: bool = False
     verbose: bool = False
     capture: bool = False
     dissect: bool = False
@@ -184,6 +186,7 @@ def _global_options(
     state.sort_field, state.sort_reverse = _parse_sort(sort)
     state.no_color = no_color
     state.timeout = timeout
+    state.timeout_explicit = ctx.get_parameter_source("timeout") is not ParameterSource.DEFAULT
     state.verbose = verbose
     state.dissect = dissect
     state.capture = capture

@@ -22,6 +22,9 @@ DEVICE_SCALAR_FIELDS = (
     "num_networks",
     "encoding",
     "supported_encodings",
+    "gain_device_type",
+    "gain_levels",
+    "supported_gain_levels",
     "bit_depth",
     "software_version",
     "firmware_version",
@@ -32,6 +35,7 @@ DEVICE_SCALAR_FIELDS = (
     "product_version",
     "board_name",
     "interfaces",
+    "link_speed_mbps",
     "interface_pending_config",
     "last_seen",
     "tx_count",
@@ -71,6 +75,18 @@ class DanteDeviceSerializer:
         standard_latency_choices = device.standard_latency_choices
         if standard_latency_choices is not None:
             as_json["standard_latency_choices"] = standard_latency_choices
+
+        encoding_configurable = device.encoding_configurable
+        if encoding_configurable is not None:
+            as_json["encoding_configurable"] = encoding_configurable
+
+        gain_configurable = device.gain_configurable
+        if gain_configurable is not None:
+            as_json["gain_configurable"] = gain_configurable
+
+        gain_level_choices = device.gain_level_choices
+        if gain_level_choices is not None:
+            as_json["gain_level_choices"] = gain_level_choices
 
         if device.interface_reboot_required:
             as_json["interface_reboot_required"] = device.interface_reboot_required
@@ -153,6 +169,12 @@ class DanteDeviceSerializer:
     def channel_to_json(channel):
         as_json = {"name": channel.name}
 
+        gain_level = None
+        gain_level_label = None
+        if channel.device is not None:
+            gain_level = channel.device.gain_level_for_channel(channel.number, channel.channel_type)
+            gain_level_label = channel.device.gain_level_label_for_channel(channel.number, channel.channel_type)
+
         optional_fields = [
             ("friendly_name", channel.friendly_name),
             ("status_text", channel.status_text),
@@ -160,6 +182,8 @@ class DanteDeviceSerializer:
             ("muted", channel.muted),
             ("bit_depth", channel.bit_depth),
             ("samples_per_frame", channel.samples_per_frame),
+            ("gain_level", gain_level),
+            ("gain_level_label", gain_level_label),
         ]
 
         for field_name, field_value in optional_fields:
