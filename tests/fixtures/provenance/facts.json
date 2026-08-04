@@ -1381,7 +1381,7 @@
       "category": "conmon_message",
       "key": "0x0011",
       "name": "interface_status_announcement",
-      "note": "Multicast interface-status announcement on 224.0.0.231:8702. The 0x0013 40-byte query triggers an immediate response. Absolute offset 0x20 is the interface count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records begin at 0x28. Verified across LX-DANTE at 1000 Mbps and eight AVIO adapters at 100 Mbps; existing captures also contain 10000 Mbps, so consumers must preserve the numeric value rather than use a fixed device or speed table.",
+      "note": "Multicast interface-status announcement on 224.0.0.231:8702. The 0x0013 40-byte query triggers an immediate response. Absolute offset 0x20 is the interface count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records begin at 0x28. For single-interface records, offset 0x48 is a target configuration code: 0x0000 means no target, 0x0004 means dynamic, and 0x0006 means static with target addresses beginning at 0x4C. AVIO firmware can retain 0x0004 after DHCP becomes the running configuration, so effective reboot state requires comparing the target with the running interface rather than treating any nonzero code as an outstanding reboot. Verified across LX-DANTE at 1000 Mbps and eight AVIO adapters at 100 Mbps; existing captures also contain 10000 Mbps, so consumers must preserve the numeric value rather than use a fixed device or speed table.",
       "fields": [
         {
           "name": "message_type",
@@ -1412,7 +1412,9 @@
         "interface_link_speed_discovery:12362184",
         "interface_link_speed_discovery:12362185",
         "interface_link_speed_discovery:12362186",
-        "interface_link_speed_discovery:12362187"
+        "interface_link_speed_discovery:12362187",
+        "interface_reboot_flag_post_reboot_investigation:12362180",
+        "interface_reboot_flag_post_reboot_investigation:12362281"
       ],
       "added_ns": 1772988416775300000,
       "protocol_id": 65535,
@@ -1426,6 +1428,10 @@
         {
           "level": "verified",
           "timestamp_ns": 1785847777270144000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785864412521308000
         }
       ],
       "history": [
@@ -1434,6 +1440,20 @@
           "previous_name": "unknown_0011",
           "previous_confidence": "observed",
           "previous_note": "Multicast on 8702. 96-148B variable. High frequency (3165 packets). Possibly device status announcement.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785864412521240000,
+          "previous_name": "interface_status_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast interface-status announcement on 224.0.0.231:8702. The 0x0013 40-byte query triggers an immediate response. Absolute offset 0x20 is the interface count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records begin at 0x28. Verified across LX-DANTE at 1000 Mbps and eight AVIO adapters at 100 Mbps; existing captures also contain 10000 Mbps, so consumers must preserve the numeric value rather than use a fixed device or speed table.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785864477690145000,
+          "previous_name": "interface_status_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast interface-status announcement on 224.0.0.231:8702. The 0x0013 40-byte query triggers an immediate response. Absolute offset 0x20 is the interface count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records begin at 0x28. For single-interface records, offset 0x48 is a target configuration code: 0x0000 means no target, 0x0004 means dynamic, and 0x0006 means static with target addresses beginning at 0x4C. AVIO firmware can retain 0x0004 after DHCP becomes the running configuration, so effective reboot state requires comparing the target with the running interface rather than treating any nonzero code as an outstanding reboot. Verified across LX-DANTE at 1000 Mbps and eight AVIO adapters at 100 Mbps; existing captures also contain 10000 Mbps, so consumers must preserve the numeric value rather than use a fixed device or speed table.",
           "action": "updated"
         }
       ]
@@ -4098,7 +4118,7 @@
       "category": "conmon_opcode",
       "key": "0x0011",
       "name": "interface_status_announcement",
-      "note": "Multicast interface-status announcement on 224.0.0.231:8702. Absolute offset 0x20 is interface_count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records start at 0x28. Packet sizes vary with interface count and appended data.",
+      "note": "Multicast interface-status announcement on 224.0.0.231:8702. Absolute offset 0x20 is interface_count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records start at 0x28. For single-interface records, offset 0x48 is a target configuration code: 0x0000 means no target, 0x0004 means dynamic, and 0x0006 means static with target addresses beginning at 0x4C. AVIO firmware can retain 0x0004 after DHCP becomes the running configuration, so effective reboot state requires comparing the target with the running interface rather than treating any nonzero code as an outstanding reboot. Packet sizes vary with interface count and appended data.",
       "fields": [
         {
           "name": "message_type",
@@ -4134,7 +4154,9 @@
         "interface_link_speed_discovery:12362184",
         "interface_link_speed_discovery:12362185",
         "interface_link_speed_discovery:12362186",
-        "interface_link_speed_discovery:12362187"
+        "interface_link_speed_discovery:12362187",
+        "interface_reboot_flag_post_reboot_investigation:12362180",
+        "interface_reboot_flag_post_reboot_investigation:12362281"
       ],
       "confidence_log": [
         {
@@ -4144,6 +4166,10 @@
         {
           "level": "verified",
           "timestamp_ns": 1785847779456681000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1785864413473313000
         }
       ],
       "added_ns": 1774898342200220000,
@@ -4153,6 +4179,20 @@
           "previous_name": "interface_status_announcement",
           "previous_confidence": "verified",
           "previous_note": "Multicast announcement on 224.0.0.231:8702 containing full interface configuration. Broadcast periodically by all devices. Body layout (after 28-byte conmon header): [0x20:0x22]=interface_count (uint16, 1=single NIC, 2=dual NIC), [0x24:0x28]=presence_flags, [0x28:0x2a]=mode (uint16, 0x0001=dynamic/DHCP, 0x0003=static), [0x2a:0x30]=mac_address (6 bytes), [0x30:0x34]=ipv4_address, [0x34:0x38]=netmask, [0x38:0x3c]=dns_or_gateway, [0x3c:0x40]=gateway_or_dns. For dual-NIC devices (lx-dante), secondary interface follows at 0x44 with same layout. Dynamic devices append DHCP domain name as null-terminated string. Packet sizes: 96B (static single-NIC), 108B (dynamic single-NIC with domain), 148B (dynamic dual-NIC).",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785864413473308000,
+          "previous_name": "interface_status_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast interface-status announcement on 224.0.0.231:8702. Absolute offset 0x20 is interface_count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records start at 0x28. Packet sizes vary with interface count and appended data.",
+          "action": "updated"
+        },
+        {
+          "replaced_ns": 1785864478877802000,
+          "previous_name": "interface_status_announcement",
+          "previous_confidence": "verified",
+          "previous_note": "Multicast interface-status announcement on 224.0.0.231:8702. Absolute offset 0x20 is interface_count (uint16 big-endian), offset 0x24 is negotiated Ethernet link speed in Mbps (uint32 big-endian), and interface records start at 0x28. For single-interface records, offset 0x48 is a target configuration code: 0x0000 means no target, 0x0004 means dynamic, and 0x0006 means static with target addresses beginning at 0x4C. AVIO firmware can retain 0x0004 after DHCP becomes the running configuration, so effective reboot state requires comparing the target with the running interface rather than treating any nonzero code as an outstanding reboot. Packet sizes vary with interface count and appended data.",
           "action": "updated"
         }
       ],
@@ -4369,6 +4409,6 @@
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1785847782255841000
+    "updated_ns": 1785864478877806000
   }
 }
