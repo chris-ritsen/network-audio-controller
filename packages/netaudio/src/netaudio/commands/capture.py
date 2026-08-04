@@ -384,6 +384,7 @@ def live(
     except Exception as exception:
         print(f"Capture: Fatal error: {exception}", file=sys.stderr)
         traceback.print_exc()
+        raise typer.Exit(1)
     finally:
         signal.signal(signal.SIGINT, original_sigint)
         signal.signal(signal.SIGTERM, original_sigterm)
@@ -482,10 +483,13 @@ def session_stop(
 
         from netaudio.dante.protocol_verifier import export_session_bundle
 
-        session_row = store.get_session(resolved_session_id)
-        session_name = session_row["name"] if session_row else f"session_{resolved_session_id}"
         bundle_path = export_session_bundle(store, resolved_session_id)
         print(f"{icon('packet')}Capture: Exported bundle: {bundle_path}")
+        if store.get_session_evidence_count(resolved_session_id) == 0:
+            print(
+                "Capture: Warning: no packet evidence was tagged; this is a local draft, not a promotable provenance bundle.",
+                file=sys.stderr,
+            )
     finally:
         store.close()
 
@@ -1568,7 +1572,7 @@ def packet_list(
             end_ns = _parse_time_filter(before, store, session_id)
 
         total = store.search_packets_count(
-            session_id=None,
+            session_id=session_id,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,
@@ -1582,7 +1586,7 @@ def packet_list(
             port=port,
         )
         rows = store.search_packets(
-            session_id=None,
+            session_id=session_id,
             device_ip=device_ip,
             device_name=device_name,
             start_ns=start_ns,

@@ -16,6 +16,13 @@ def _mac_to_hex(value):
 class DanteDeviceCommands:
     def __init__(self, host_mac=None):
         self._host_mac = host_mac
+        self._settings_sequence = 0
+
+    def _next_settings_sequence(self):
+        self._settings_sequence = (self._settings_sequence + 1) & 0xFFFF
+        if self._settings_sequence == 0:
+            self._settings_sequence = 1
+        return self._settings_sequence
 
     def _resolve_host_mac(self, host_mac):
         resolved = host_mac if host_mac is not None else self._host_mac
@@ -158,15 +165,26 @@ class DanteDeviceCommands:
         )
         return self._settings(command_specification)
 
-    def command_set_gain_level(self, channel_number, gain_level, device_type):
-        return self._settings(
+    def command_probe_gain_level(self, host_mac=None, sequence=None):
+        command_specification = self._with_host_mac(
             {
-                "command": "set_gain_level",
-                "channel_number": channel_number,
-                "gain_level": gain_level,
-                "device_type": device_type,
-            }
+                "command": "probe_gain_level",
+                "sequence": self._next_settings_sequence() if sequence is None else sequence,
+            },
+            host_mac,
         )
+        return self._settings(command_specification)
+
+    def command_set_gain_level(self, channel_number, gain_level, device_type, host_mac=None, sequence=None):
+        command_specification = {
+            "command": "set_gain_level",
+            "channel_number": channel_number,
+            "gain_level": gain_level,
+            "device_type": device_type,
+            "sequence": self._next_settings_sequence() if sequence is None else sequence,
+        }
+        self._with_host_mac(command_specification, host_mac)
+        return self._settings(command_specification)
 
     def command_enable_aes67(self, is_enabled: bool, host_mac=None):
         spec = self._with_host_mac(

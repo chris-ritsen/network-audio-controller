@@ -11,7 +11,12 @@ SETTINGS_PORT = DEVICE_SETTINGS_PORT
 
 class DanteSettingsService(DanteUnicastService):
     def __init__(self, packet_store=None, dissect=False):
-        super().__init__(packet_store=packet_store, dissect=dissect)
+        super().__init__(
+            packet_store=packet_store,
+            dissect=dissect,
+            local_port=SETTINGS_PORT,
+            fallback_to_ephemeral=True,
+        )
         self._commands = DanteDeviceCommands()
 
     def identify(self, device_ip: str) -> None:
@@ -72,6 +77,30 @@ class DanteSettingsService(DanteUnicastService):
         command_args = self._commands.command_probe_encoding(host_mac=host_mac)
         packet = command_args[0]
         port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def probe_gain_level(self, device_ip_address: str, host_mac: bytes | None = None) -> None:
+        command_arguments = self._commands.command_probe_gain_level(host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def set_gain_level(
+        self,
+        device_ip_address: str,
+        channel_number: int,
+        gain_level: int,
+        device_type: str,
+        host_mac: bytes | None = None,
+    ) -> None:
+        command_arguments = self._commands.command_set_gain_level(
+            channel_number,
+            gain_level,
+            device_type,
+            host_mac=host_mac,
+        )
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
         self.send(packet, device_ip_address, port)
 
     def request_bluetooth_status(self, device_ip: str, host_mac: bytes = None) -> None:

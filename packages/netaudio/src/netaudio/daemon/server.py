@@ -298,6 +298,7 @@ class NetaudioDaemon:
             "supported_sample_rates": device.supported_sample_rates,
             "encoding": device.encoding,
             "supported_encodings": device.supported_encodings,
+            "encoding_configurable": device.encoding_configurable,
             "latency": device.latency,
             "active_latency": device.active_latency,
             "configured_latency": device.configured_latency,

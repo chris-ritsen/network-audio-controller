@@ -111,3 +111,84 @@ async def test_browser_close_is_safe_before_start_and_after_close():
     active_zeroconf.async_close.assert_awaited_once()
     assert browser.aio_browser is None
     assert browser.aio_zc is None
+
+
+@pytest.mark.asyncio
+async def test_browser_close_cancels_and_awaits_service_tasks():
+    browser = DanteBrowser(mdns_timeout=0)
+    cancelled = asyncio.Event()
+    started = asyncio.Event()
+
+    async def pending_service_resolution():
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    service_task = asyncio.create_task(pending_service_resolution())
+    browser.services.append(service_task)
+    await started.wait()
+
+    await browser.async_close()
+
+    assert cancelled.is_set()
+    assert service_task.done()
+    assert browser.services == []
+
+
+@pytest.mark.asyncio
+async def test_timed_async_run_closes_zeroconf_without_cancelling_service_results(monkeypatch):
+    browser = DanteBrowser(mdns_timeout=0.001)
+    browser._async_close = AsyncMock()
+    monkeypatch.setattr(browser_module, "AsyncZeroconf", MagicMock())
+    monkeypatch.setattr(browser_module, "AsyncServiceBrowser", MagicMock())
+
+    await browser.async_run()
+
+    browser._async_close.assert_awaited_once_with(cancel_service_tasks=False)
+
+
+@pytest.mark.asyncio
+async def test_assembling_services_logs_malformed_device_and_continues(caplog):
+    event_loop = asyncio.get_running_loop()
+    malformed_service = event_loop.create_future()
+    malformed_service.set_result(
+        {
+            "name": "malformed._netaudio-arc._udp.local.",
+            "server_name": "malformed.local.",
+        }
+    )
+    valid_service = event_loop.create_future()
+    valid_service.set_result(
+        {
+            "name": "valid._netaudio-arc._udp.local.",
+            "server_name": "valid.local.",
+        }
+    )
+    application = MagicMock()
+    valid_device = MagicMock()
+    application._apply_discovered_services.side_effect = [ValueError("invalid rate"), valid_device]
+    browser = DanteBrowser(mdns_timeout=0, app=application)
+    browser.services = [malformed_service, valid_service]
+
+    browser._assemble_completed_services()
+
+    assert browser.devices == {"valid.local.": valid_device}
+    assert "Failed to assemble discovered Dante device malformed.local." in caplog.text
+
+
+def test_assembling_services_ignores_resolution_added_after_wait_snapshot():
+    event_loop = asyncio.new_event_loop()
+    try:
+        pending_service = event_loop.create_future()
+        application = MagicMock()
+        browser = DanteBrowser(mdns_timeout=0, app=application)
+        browser.services = [pending_service]
+
+        browser._assemble_completed_services()
+
+        application._apply_discovered_services.assert_not_called()
+        assert browser.devices == {}
+    finally:
+        event_loop.close()

@@ -61,6 +61,9 @@ class FakeDevice:
         self.supported_sample_rates = supported_sample_rates
         self.encoding = encoding
         self.supported_encodings = supported_encodings
+        self.gain_device_type = None
+        self.gain_levels = None
+        self.supported_gain_levels = None
         self.min_latency = min_latency
         self.max_latency = max_latency
         self.aes67_current = None
@@ -75,16 +78,26 @@ class FakeDevice:
 
 
 class FakeChannelDevice(FakeDevice):
-    def __init__(self, *, channel_reads):
+    def __init__(self, *, channel_reads, gain_status=("input", [5]), gain_write_status="applied"):
         super().__init__("AVIO")
         self.tx_channels = {1: SimpleNamespace(number=1, name="Input-1", friendly_name="Old", volume=2)}
         self.rx_channels = {}
         self._channel_reads = channel_reads
         self.channel_read_calls = 0
+        self._gain_probe_status = gain_status
+        self._gain_write_status = gain_write_status
+        if gain_status is not None:
+            self.gain_device_type, self.gain_levels = gain_status
+            self.supported_gain_levels = [1, 2, 3, 4, 5]
 
     async def get_tx_channels(self):
         self.channel_read_calls += 1
         self.tx_channels[1].friendly_name = _next_value(self._channel_reads)
+
+    def gain_level_for_channel(self, channel_number, channel_type):
+        if self.gain_device_type != "input" or channel_type != "tx" or self.gain_levels is None:
+            return None
+        return self.gain_levels[channel_number - 1] if 0 < channel_number <= len(self.gain_levels) else None
 
 
 def _next_value(value):
@@ -126,8 +139,25 @@ def _install_context(monkeypatch, module, devices, *, send_error_for=None, notif
             raise RuntimeError("encoding status unavailable")
         return device.encoding, device.supported_encodings
 
+    async def probe_gain_status(ipv4):
+        device = next(device for device in devices.values() if str(device.ipv4) == str(ipv4))
+        return device._gain_probe_status
+
+    async def set_gain_level(ipv4, channel_number, gain_level, device_type):
+        device = next(device for device in devices.values() if str(device.ipv4) == str(ipv4))
+        if device._gain_write_status == "applied":
+            channel_levels = list(device.gain_levels or [gain_level])
+            channel_levels[channel_number - 1] = gain_level
+            device.gain_device_type = device_type
+            device.gain_levels = channel_levels
+            device.supported_gain_levels = [1, 2, 3, 4, 5]
+            return device_type, channel_levels
+        return device._gain_write_status
+
     send.probe_sample_rate_status = probe_sample_rate_status
     send.probe_encoding_status = probe_encoding_status
+    send.probe_gain_status = probe_gain_status
+    send.set_gain_level = set_gain_level
 
     async def send_and_wait_for_capability_value(
         packet,
@@ -615,19 +645,63 @@ def test_channel_name_mismatch_is_not_reported_as_success(monkeypatch):
     assert "Set channel name:" not in result.output
 
 
-def test_channel_name_reset_and_gain_use_unverified_requested_language(monkeypatch):
+def test_channel_name_reset_remains_explicitly_unverified(monkeypatch):
     device = FakeChannelDevice(channel_reads="unused")
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
     reset_result = runner.invoke(channel_commands.app, ["name", "1", "", "--type", "tx"])
-    gain_result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
 
     assert reset_result.exit_code == 0
     assert "Channel name reset requested" in reset_result.output
     assert "not verified" in reset_result.output
-    assert gain_result.exit_code == 0
-    assert "Gain change requested: 3; not verified" in gain_result.output
     assert device.channel_read_calls == 0
+
+
+def test_gain_getter_reports_configured_reference_level(monkeypatch):
+    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
+    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
+
+    result = runner.invoke(channel_commands.app, ["gain", "1", "--type", "tx"])
+
+    assert result.exit_code == 0
+    assert "-10 dBV (level 5)" in result.output
+    assert "level 2" not in result.output
+
+
+def test_gain_setter_reports_success_only_after_matching_readback(monkeypatch):
+    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
+    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
+
+    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+
+    assert result.exit_code == 0
+    assert "0 dBu (verified)" in result.output
+    assert device.gain_levels == [3]
+
+
+def test_gain_setter_rejects_mismatched_readback(monkeypatch):
+    device = FakeChannelDevice(
+        channel_reads="unused",
+        gain_status=("input", [5]),
+        gain_write_status=("input", [5]),
+    )
+    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
+
+    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+
+    assert result.exit_code == 1
+    assert "gain change was not applied" in result.output
+    assert "Set input reference level" not in result.output
+
+
+def test_gain_setter_rejects_missing_readback(monkeypatch):
+    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]), gain_write_status=None)
+    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
+
+    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+
+    assert result.exit_code == 1
+    assert "readback was unavailable" in result.output
 
 
 def test_gain_rejects_fractional_level_before_discovery(monkeypatch):
