@@ -170,8 +170,20 @@ class DanteDeviceInterface(ServiceInterface):
         return bool(self._device.is_locked)
 
     @dbus_property(access=RO)
+    def LockStateKnown(self) -> "b":
+        return self._device.is_locked is not None
+
+    @dbus_property(access=RO)
     def Aes67Enabled(self) -> "b":
         return aes67_enabled(self._device)
+
+    @dbus_property(access=RO)
+    def Aes67Supported(self) -> "b":
+        return self._device.aes67_supported is True
+
+    @dbus_property(access=RO)
+    def Aes67SupportKnown(self) -> "b":
+        return self._device.aes67_supported is not None
 
     @dbus_property(access=RO)
     def LastSeen(self) -> "d":
@@ -179,7 +191,7 @@ class DanteDeviceInterface(ServiceInterface):
 
     @dbus_property(access=RO)
     def ClockRole(self) -> "s":
-        return dbus_string(self._device.clock_role)
+        return dbus_string(self._device.ptp_v1_role or self._device.clock_role)
 
     @dbus_property(access=RO)
     def ClockMac(self) -> "s":

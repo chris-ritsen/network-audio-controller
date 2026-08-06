@@ -50,9 +50,9 @@ def _dante_row_from_device(device) -> list[str]:
         str(device.ipv4) if device.ipv4 else "",
         str(len(device.tx_channels) if device.tx_channels else (device.tx_count or 0)),
         str(len(device.rx_channels) if device.rx_channels else (device.rx_count or 0)),
-        getattr(device, "ptp_v1_role", None) or getattr(device, "clock_role", None) or "",
+        device.ptp_v1_role or device.clock_role or "",
         _lock_display(device.is_locked),
-        _format_timestamp(getattr(device, "last_seen", None)),
+        _format_timestamp(device.last_seen),
     ]
 
 

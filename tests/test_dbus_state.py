@@ -204,6 +204,9 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
+    device.aes67_supported = False
+    device.is_locked = None
+    device.ptp_v1_role = "Leader"
 
     snapshot = snapshot_dante_device(device)
 
@@ -216,6 +219,10 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["supported_sample_rates"] == [48_000, 96_000]
     assert snapshot["supported_encodings"] == [16, 24, 32]
     assert snapshot["aes67_current"] is False
+    assert snapshot["aes67_supported"] is False
+    assert snapshot["aes67_support_known"] is True
+    assert snapshot["lock_state_known"] is False
+    assert snapshot["clock_role"] == "Leader"
     assert "aes67_enabled" not in snapshot
     assert DANTE_PROPERTY_NAMES["min_latency"] == "MinLatency"
     assert DANTE_PROPERTY_NAMES["max_latency"] == "MaxLatency"
@@ -282,6 +289,9 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
+    device.aes67_supported = False
+    device.is_locked = None
+    device.ptp_v1_role = "Follower"
 
     interface = module.DanteDeviceInterface(device)
 
@@ -295,6 +305,10 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.SupportedEncodings() == [16, 24, 32]
     assert interface.LinkSpeedMbps() == 2500
     assert interface.Aes67Enabled() is False
+    assert interface.Aes67Supported() is False
+    assert interface.Aes67SupportKnown() is True
+    assert interface.LockStateKnown() is False
+    assert interface.ClockRole() == "Follower"
     assert module.DanteDeviceInterface.Latency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.SupportedSampleRates.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.SupportedEncodings.__annotations__["return"] == "au"
