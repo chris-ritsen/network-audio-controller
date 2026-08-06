@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use serde::Serialize;
 
@@ -21,6 +22,13 @@ use crate::protocol::{
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
 const CONMON_OPCODE_BLUETOOTH_STATUS: u16 = 0x100E;
+
+const METERING_HEADER_SIZE: usize = 28;
+const METERING_FAMILY_OFFSET: usize = 24;
+const METERING_TX_COUNT_OFFSET: usize = 25;
+const METERING_RX_COUNT_OFFSET: usize = 26;
+const METERING_SUFFIX_OFFSET: usize = 27;
+const METERING_LEVELS_OFFSET: usize = 28;
 
 const FLOW_RECORD_FIXED_SIZE: usize = 16;
 const FLOW_RECORD_FLOW_TYPE: usize = 2;
@@ -102,6 +110,16 @@ pub struct BluetoothStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MeteringFrame {
+    pub sequence: u16,
+    pub source_eui64: String,
+    pub tx_count: u8,
+    pub rx_count: u8,
+    pub tx_levels: Vec<u8>,
+    pub rx_levels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TxFlow {
     pub flow_number: u16,
     pub flow_type: String,
@@ -125,6 +143,41 @@ impl BluetoothStatus {
             device_name: None,
         }
     }
+}
+
+pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
+    if data.len() < METERING_HEADER_SIZE
+        || read_u16(data, 0)? != 0xFFFF
+        || usize::from(read_u16(data, 2)?) != data.len()
+        || read_u16(data, 6)? != 0
+        || data.get(16..24)? != b"Audinate"
+        || data.get(METERING_FAMILY_OFFSET).copied()? != 0x02
+        || data.get(METERING_SUFFIX_OFFSET).copied()? != 0xFE
+    {
+        return None;
+    }
+
+    let tx_count = data.get(METERING_TX_COUNT_OFFSET).copied()?;
+    let rx_count = data.get(METERING_RX_COUNT_OFFSET).copied()?;
+    let tx_levels_end = METERING_LEVELS_OFFSET.checked_add(usize::from(tx_count))?;
+    let rx_levels_end = tx_levels_end.checked_add(usize::from(rx_count))?;
+    if rx_levels_end != data.len() {
+        return None;
+    }
+
+    let mut source_eui64 = String::with_capacity(16);
+    for value in data.get(8..16)? {
+        write!(source_eui64, "{value:02x}").ok()?;
+    }
+
+    Some(MeteringFrame {
+        sequence: read_u16(data, 4)?,
+        source_eui64,
+        tx_count,
+        rx_count,
+        tx_levels: data.get(METERING_LEVELS_OFFSET..tx_levels_end)?.to_vec(),
+        rx_levels: data.get(tx_levels_end..rx_levels_end)?.to_vec(),
+    })
 }
 
 pub fn parse_device_name(response: &[u8]) -> Option<String> {
@@ -991,6 +1044,59 @@ mod tests {
         response[26..28].copy_from_slice(&opcode.to_be_bytes());
     }
 
+    fn metering_frame(tx_levels: &[u8], rx_levels: &[u8]) -> Vec<u8> {
+        let mut data = vec![0u8; METERING_HEADER_SIZE + tx_levels.len() + rx_levels.len()];
+        let length = data.len() as u16;
+        data[0..2].copy_from_slice(&0xFFFFu16.to_be_bytes());
+        data[2..4].copy_from_slice(&length.to_be_bytes());
+        data[4..6].copy_from_slice(&0x1F81u16.to_be_bytes());
+        data[8..16].copy_from_slice(&[0x00, 0x1D, 0xC1, 0x19, 0x24, 0x5C, 0x00, 0x00]);
+        data[16..24].copy_from_slice(b"Audinate");
+        data[METERING_FAMILY_OFFSET] = 0x02;
+        data[METERING_TX_COUNT_OFFSET] = u8::try_from(tx_levels.len()).unwrap();
+        data[METERING_RX_COUNT_OFFSET] = u8::try_from(rx_levels.len()).unwrap();
+        data[METERING_SUFFIX_OFFSET] = 0xFE;
+        let tx_levels_end = METERING_LEVELS_OFFSET + tx_levels.len();
+        data[METERING_LEVELS_OFFSET..tx_levels_end].copy_from_slice(tx_levels);
+        data[tx_levels_end..].copy_from_slice(rx_levels);
+        data
+    }
+
+    #[test]
+    fn metering_frame_parses_embedded_counts_and_level_order() {
+        let data = metering_frame(&[0xFE, 0x7D, 0xA0], &[0x88, 0x00]);
+        assert_eq!(
+            parse_metering_frame(&data),
+            Some(MeteringFrame {
+                sequence: 0x1F81,
+                source_eui64: "001dc119245c0000".to_owned(),
+                tx_count: 3,
+                rx_count: 2,
+                tx_levels: vec![0xFE, 0x7D, 0xA0],
+                rx_levels: vec![0x88, 0x00],
+            })
+        );
+    }
+
+    #[test]
+    fn metering_frame_rejects_invalid_envelope_and_count_mismatch() {
+        let original = metering_frame(&[0xFE, 0x7D], &[0x88]);
+
+        for (offset, value) in [(0, 0x12), (6, 0x01), (16, b'X'), (24, 0x07), (27, 0xFF)] {
+            let mut data = original.clone();
+            data[offset] = value;
+            assert_eq!(parse_metering_frame(&data), None);
+        }
+
+        let mut wrong_declared_length = original.clone();
+        wrong_declared_length[2..4].copy_from_slice(&(original.len() as u16 - 1).to_be_bytes());
+        assert_eq!(parse_metering_frame(&wrong_declared_length), None);
+
+        let mut wrong_count = original.clone();
+        wrong_count[METERING_TX_COUNT_OFFSET] += 1;
+        assert_eq!(parse_metering_frame(&wrong_count), None);
+    }
+
     #[test]
     fn device_name_strips_header_and_terminator() {
         let mut response = vec![0x27, 0xFF, 0x00, 0x16, 0x9e, 0x7f, 0x10, 0x02, 0x00, 0x01];
@@ -1825,6 +1931,11 @@ mod tests {
             assert_eq!(parse_gain_status(&gain_status[..length]), None);
         }
 
+        let metering = metering_frame(&[0xFE, 0x7D, 0xA0], &[0x88, 0x00]);
+        for length in 0..metering.len() {
+            assert_eq!(parse_metering_frame(&metering[..length]), None);
+        }
+
         let device_settings = captured_selective_device_settings_packet_9084571();
         for length in 0..device_settings.len() {
             assert_eq!(parse_device_settings(&device_settings[..length]), None);
@@ -1931,6 +2042,7 @@ mod tests {
                 let _ = parse_sample_rate_status(&data);
                 let _ = parse_encoding_status(&data);
                 let _ = parse_gain_status(&data);
+                let _ = parse_metering_frame(&data);
             });
             assert!(result.is_ok(), "length={length}");
             assert_eq!(parse_device_name(&data), None);

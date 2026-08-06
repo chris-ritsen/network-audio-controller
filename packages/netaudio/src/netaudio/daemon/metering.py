@@ -301,9 +301,9 @@ class MeteringManager:
             if not self._is_active(server_name):
                 self._send_stop(server_name)
 
-    def _on_metering_packet(self, data: bytes, addr: tuple):
-        src_ip = addr[0]
-        server_name = self._server_name_for_ip(src_ip)
+    def _on_metering_packet(self, data: bytes, source_address: tuple):
+        source_ip = source_address[0]
+        server_name = self._server_name_for_ip(source_ip)
         if not server_name:
             return
 
@@ -313,19 +313,20 @@ class MeteringManager:
 
         device.update_last_seen()
 
-        tx_count = device.tx_count_raw or device.tx_count or 0
-        rx_count = device.rx_count_raw or device.rx_count or 0
-        if not tx_count and not rx_count:
-            return
+        from netaudio import core
 
-        levels = parse_metering_levels(data, tx_count, rx_count)
+        try:
+            levels = parse_metering_levels(data)
+        except core.NetaudioCoreError as error:
+            logger.warning(f"Ignoring malformed metering packet from {source_ip}: {error}")
+            return
         now = time.monotonic()
         sample = {
             "tx": levels["tx"],
             "rx": levels["rx"],
             "timestamp": now,
             "wall_time": time.time(),
-            "source_ip": src_ip,
+            "source_ip": source_ip,
         }
         self._latest_levels[server_name] = sample
 
@@ -346,7 +347,8 @@ class _MeteringProtocol(asyncio.DatagramProtocol):
         self._callback = callback
 
     def datagram_received(self, data, addr):
-        self._callback(data, addr)
+        source_address = addr
+        self._callback(data, source_address)
 
 
 def _get_local_ip() -> ipaddress.IPv4Address:
