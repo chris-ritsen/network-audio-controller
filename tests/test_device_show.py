@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from typer.testing import CliRunner
@@ -22,6 +22,12 @@ runner = CliRunner()
 )
 def test_format_link_speed_preserves_generic_numeric_values(link_speed_mbps, expected):
     assert device_commands._format_link_speed(link_speed_mbps) == expected
+
+
+def test_format_channel_count_does_not_turn_unknown_into_zero():
+    assert device_commands._format_channel_count({}, None) == "unknown"
+    assert device_commands._format_channel_count({}, 0) == "0"
+    assert device_commands._format_channel_count({1: object()}, 64) == "1"
 
 
 def make_show_device() -> DanteDevice:
@@ -95,6 +101,7 @@ def reset_cli_state():
         state.output_format,
         state.no_color,
         state.timeout_explicit,
+        state.verbose,
     )
     state.names = []
     state.hosts = []
@@ -103,6 +110,7 @@ def reset_cli_state():
     state.output_format = OutputFormat.plain
     state.no_color = True
     state.timeout_explicit = False
+    state.verbose = False
     try:
         yield
     finally:
@@ -114,6 +122,7 @@ def reset_cli_state():
             state.output_format,
             state.no_color,
             state.timeout_explicit,
+            state.verbose,
         ) = original_state
 
 
@@ -158,6 +167,37 @@ def test_device_show_plain_labels_unknown_capabilities(monkeypatch):
     assert "Supported Sample Rates  unknown" in result.output
     assert "Encoding                unknown" in result.output
     assert "Supported Encodings     unknown" in result.output
+
+
+def test_device_show_plain_labels_known_unsupported_aes67(monkeypatch):
+    device = make_show_device()
+    device.aes67_supported = False
+
+    async def load_device(include_channels):
+        assert include_channels is False
+        return device.server_name, device
+
+    monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
+
+    result = runner.invoke(device_commands.app, ["show"])
+
+    assert result.exit_code == 0
+    assert "AES67                   unsupported" in result.output
+
+
+@pytest.mark.asyncio
+async def test_control_population_reports_failures_instead_of_discarding_them(caplog):
+    device = make_show_device()
+    device.tx_channels = {}
+    device.rx_channels = {}
+    device.populate_from_core = AsyncMock(side_effect=RuntimeError("synthetic population failure"))
+
+    with pytest.raises(RuntimeError, match="failed to populate controls"):
+        await common_module._populate_controls({device.server_name: device})
+
+    await common_module._populate_controls({device.server_name: device}, strict=False)
+
+    assert "synthetic population failure" in caplog.text
 
 
 def test_device_show_plain_formats_gain_capability_without_channel_inventory(monkeypatch):
@@ -234,6 +274,29 @@ def test_device_show_csv_is_a_two_column_summary(monkeypatch):
     assert result.output.startswith("Field,Value\n")
     assert "Name,lx-dante" in result.output
     assert "channels" not in result.output
+
+
+def test_device_list_verbose_labels_known_unsupported_aes67(monkeypatch):
+    from netaudio.cli import state
+
+    device = make_show_device()
+    device.aes67_supported = False
+
+    async def discover():
+        return {device.server_name: device}
+
+    async def populate_controls(_devices, strict):
+        assert strict is False
+
+    monkeypatch.setattr(device_commands, "_discover", discover)
+    monkeypatch.setattr(device_commands, "_populate_controls", populate_controls)
+    monkeypatch.setattr(device_commands, "_collect_lock_state", lambda _devices: None)
+    state.verbose = True
+
+    result = runner.invoke(device_commands.app, ["list"])
+
+    assert result.exit_code == 0
+    assert "unsupported" in result.output
 
 
 @pytest.mark.asyncio

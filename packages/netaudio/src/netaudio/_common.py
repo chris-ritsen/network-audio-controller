@@ -4,6 +4,7 @@ import asyncio
 import csv
 import io
 import json as json_module
+import logging
 import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from netaudio.dante.latency import milliseconds_to_microseconds
 
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
+
+logger = logging.getLogger("netaudio")
 
 
 @dataclass(frozen=True)
@@ -560,7 +563,7 @@ async def _command_context():
                 for device in devices.values():
                     device.rx_channels = {}
                     device.tx_channels = {}
-            await _populate_controls(devices, observer=observer)
+            await _populate_controls(devices, observer=observer, strict=False)
 
         devices = devices or {}
         sender = _make_core_sender(
@@ -580,7 +583,7 @@ async def _command_context():
             store.close()
 
 
-async def _populate_controls(devices: dict[str, DanteDevice], observer=None) -> None:
+async def _populate_controls(devices: dict[str, DanteDevice], observer=None, strict: bool = True) -> None:
     unpopulated = [
         device for device in devices.values() if not device.tx_channels and not device.rx_channels and device.ipv4
     ]
@@ -591,16 +594,29 @@ async def _populate_controls(devices: dict[str, DanteDevice], observer=None) -> 
     if observer is not None:
         from netaudio._capture import populate_instrumented
 
-        await asyncio.gather(
+        population_results = await asyncio.gather(
             *(populate_instrumented(device, observer) for device in unpopulated),
             return_exceptions=True,
         )
-        return
+    else:
+        population_results = await asyncio.gather(
+            *(device.populate_from_core() for device in unpopulated),
+            return_exceptions=True,
+        )
 
-    await asyncio.gather(
-        *(device.populate_from_core() for device in unpopulated),
-        return_exceptions=True,
-    )
+    failures = [
+        (device, result) for device, result in zip(unpopulated, population_results) if isinstance(result, BaseException)
+    ]
+    for device, exception in failures:
+        logger.error(
+            f"Failed to populate controls for {device.server_name or device.name}: {exception}",
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+    if strict and failures:
+        device, exception = failures[0]
+        raise RuntimeError(
+            f"failed to populate controls for {device.server_name or device.name}: {exception}"
+        ) from exception
 
 
 def _normalize_mac(mac: str) -> str:

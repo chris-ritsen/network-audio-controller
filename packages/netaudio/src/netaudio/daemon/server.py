@@ -249,19 +249,24 @@ class NetaudioDaemon:
             logger.warning(f"Redis delete error for {server_name}: {exception}")
 
     def _load_shure_correlations(self):
-        try:
-            from netaudio.common.config_loader import default_config_path
+        from netaudio.common.config_loader import default_config_path
 
-            path = default_config_path()
-            if not path.exists():
-                return {}
-            if sys.version_info >= (3, 11):
-                import tomllib
-            else:
-                import tomli as tomllib
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib
+
+        path = default_config_path()
+        if not path.exists():
+            return {}
+        try:
             data = tomllib.loads(path.read_text())
-            return data.get("shure", {}).get("correlations", {})
-        except Exception:
+            correlations = data.get("shure", {}).get("correlations", {})
+            if not isinstance(correlations, dict):
+                raise TypeError("shure.correlations must be a table")
+            return correlations
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError, AttributeError, TypeError) as exception:
+            logger.warning(f"Unable to load Shure correlations from {path}: {exception}")
             return {}
 
     @staticmethod
@@ -974,7 +979,7 @@ class NetaudioDaemon:
 
                 if not device.tx_channels and not device.rx_channels:
                     self._spawn_background(
-                        self.state.fetch_device_controls(server_name, delay=2),
+                        self.state.fetch_device_controls(server_name),
                         name=f"delayed-controls:{server_name}",
                     )
 
