@@ -83,16 +83,20 @@ def flow_list(
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            device_flows = await flows.query_tx_flows(device_ip, arc_port, flow_protocol_id)
-            if device_flows is None:
+            flow_inventory = await flows.query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id)
+            if flow_inventory is None:
                 typer.echo("Error: failed to query flows.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+            device_flows = flow_inventory["flows"]
+            headers = ["Slot", "Type", "Channels", "Sample Rate", "Encoding", "FPP"]
 
             if not device_flows:
-                typer.echo("No TX flows configured.")
-                return
+                from netaudio.cli import OutputFormat, state
 
-            headers = ["Slot", "Type", "Channels", "Sample Rate", "Encoding", "FPP"]
+                if state.output_format in (OutputFormat.plain, OutputFormat.table, OutputFormat.pretty):
+                    typer.echo(f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used).")
+                    return
+
             rows = []
             for flow in device_flows:
                 channel_list = ", ".join(str(channel_number) for channel_number in flow["channels"])
@@ -106,7 +110,7 @@ def flow_list(
                         str(flow["frames_per_packet"]),
                     ]
                 )
-            output_table(headers, rows, json_data=device_flows)
+            output_table(headers, rows, json_data=flow_inventory)
         finally:
             await application.shutdown()
 
@@ -116,7 +120,7 @@ def flow_list(
 @app.command("create")
 def flow_create(
     device_name: str = typer.Argument(..., help="Device name or IP."),
-    slot: int = typer.Option(..., "--slot", help="Flow slot number (1-32, multicast typically 17-32)."),
+    slot: int = typer.Option(..., "--slot", help="Flow slot number, limited by the device-reported capacity."),
     channels: str = typer.Option(..., "--channels", help="Comma-separated TX channel numbers."),
 ):
     """Create a TX multicast flow."""
@@ -137,7 +141,7 @@ def flow_create(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             try:
-                device_flows = await flows.query_tx_flows(
+                flow_inventory = await flows.query_tx_flow_inventory(
                     device_ip,
                     arc_port,
                     flow_protocol_id,
@@ -148,12 +152,14 @@ def flow_create(
                     err=True,
                 )
                 raise typer.Exit(code=ExitCode.ERROR) from exception
-            if device_flows is None:
+            if flow_inventory is None:
                 typer.echo("Error: failed to query existing flows; no change was sent.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+            device_flows = flow_inventory["flows"]
 
             available_channels = {int(number) for number in (device.tx_channels or {}).keys()}
             try:
+                flows.require_supported_flow_slot(flow_slot, flow_inventory["max_flow_slots"])
                 flows.require_available_tx_channels(channel_numbers, available_channels)
                 flows.require_available_flow_slot(device_flows, flow_slot)
             except flows.FlowValidationError as exception:
@@ -221,7 +227,7 @@ def flow_delete(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             try:
-                device_flows = await flows.query_tx_flows(
+                flow_inventory = await flows.query_tx_flow_inventory(
                     device_ip,
                     arc_port,
                     flow_protocol_id,
@@ -232,10 +238,12 @@ def flow_delete(
                     err=True,
                 )
                 raise typer.Exit(code=ExitCode.ERROR) from exception
-            if device_flows is None:
+            if flow_inventory is None:
                 typer.echo("Error: failed to query existing flows; no deletion was sent.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+            device_flows = flow_inventory["flows"]
             try:
+                flows.require_supported_flow_slot(flow_slot, flow_inventory["max_flow_slots"])
                 flows.require_multicast_flow(device_flows, flow_slot)
             except flows.FlowValidationError as exception:
                 _fail_validation(exception)

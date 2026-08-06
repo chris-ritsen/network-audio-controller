@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import xml.etree.ElementTree as ET
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
@@ -15,8 +17,6 @@ from netaudio.dante.latency import MICROSECONDS_PER_MILLISECOND
 app = typer.Typer(help="Save and load device presets (DC-compatible XML).", no_args_is_help=True)
 
 UNSUPPORTED_LOAD_FIELDS = {
-    "encoding": "encoding",
-    "latency": "latency",
     "additional_interfaces": "additional network interfaces",
     "tx_labels": "TX channel labels",
     "rx_subscriptions": "RX subscriptions",
@@ -232,6 +232,24 @@ def _validate_supported_config(device_name: str, config: dict, device) -> None:
                 f"{sample_rate} is not supported"
             )
 
+    encoding = config.get("encoding")
+    if encoding is not None:
+        if isinstance(encoding, bool) or not isinstance(encoding, int) or not 1 <= encoding <= 0xFFFFFFFF:
+            raise ValueError(f"{device_name}: encoding must be an integer from 1 through 4294967295")
+        supported_encodings = device.supported_encodings
+        if supported_encodings is None:
+            raise ValueError(f"{device_name}: encoding capabilities are unavailable")
+        if encoding not in supported_encodings:
+            raise ValueError(
+                f"{device_name}: device reports supported encodings {supported_encodings}; {encoding} is not supported"
+            )
+
+    latency = config.get("latency")
+    if latency is not None and (
+        isinstance(latency, bool) or not isinstance(latency, (int, float)) or not math.isfinite(latency) or latency < 0
+    ):
+        raise ValueError(f"{device_name}: latency must be a finite, nonnegative number")
+
     mode = config.get("interface_mode")
     if mode is not None and mode not in ("dynamic", "dhcp", "static"):
         raise ValueError(f"{device_name}: unsupported interface mode {mode!r}")
@@ -255,6 +273,30 @@ async def _read_sample_rate(device):
     if not isinstance(settings, dict) or settings.get("sample_rate") is None:
         raise RuntimeError("sample-rate readback was unavailable")
     return settings["sample_rate"]
+
+
+async def _read_encoding(send, device):
+    current_encoding, supported_encodings = await send.probe_encoding_status(device.ipv4)
+    device.encoding = current_encoding
+    device.supported_encodings = supported_encodings
+    return current_encoding
+
+
+async def _read_latency(device):
+    settings = await device.operations.get_device_settings()
+    if not isinstance(settings, dict) or settings.get("active_latency_ns") is None:
+        raise RuntimeError("active latency readback was unavailable")
+    return settings["active_latency_ns"]
+
+
+async def _read_audio_setting(action, send, device):
+    if action == "sample_rate":
+        return await _read_sample_rate(device)
+    if action == "encoding":
+        return await _read_encoding(send, device)
+    if action == "latency":
+        return await _read_latency(device)
+    raise ValueError(f"unsupported audio setting: {action}")
 
 
 @app.command("load")
@@ -283,9 +325,9 @@ def preset_load(
             if "sample_rate" in config:
                 typer.echo(f"  sample rate: {config['sample_rate']}")
             if "encoding" in config:
-                typer.echo(f"  encoding: {config['encoding']} (unsupported for load)")
+                typer.echo(f"  encoding: {config['encoding']}")
             if "latency" in config:
-                typer.echo(f"  latency: {config['latency']:g} ms (unsupported for load)")
+                typer.echo(f"  latency: {config['latency']:g} ms")
             if "interface_mode" in config:
                 mode = config["interface_mode"]
                 if mode == "static":
@@ -313,6 +355,7 @@ def preset_load(
     async def _apply():
         from netaudio._common import (
             _command_context,
+            _get_arc_port,
             filter_devices,
             readback_after_notification,
             send_and_wait_for_notification,
@@ -321,7 +364,9 @@ def preset_load(
         from netaudio.dante.device_commands import DanteDeviceCommands
         from netaudio.dante.services.notification import (
             NOTIFICATION_CLOCKING_STATUS,
+            NOTIFICATION_ENCODING_STATUS,
             NOTIFICATION_INTERFACE_STATUS,
+            NOTIFICATION_LATENCY_CHANGE,
             NOTIFICATION_SAMPLE_RATE_STATUS,
             NOTIFICATION_SETTINGS_CHANGE,
         )
@@ -390,6 +435,12 @@ def preset_load(
                     if "sample_rate" in config:
                         packet, _, port = commands.command_set_sample_rate(config["sample_rate"])
                         actions.append(("sample_rate", packet, port))
+                    if "encoding" in config:
+                        packet, _, port = commands.command_set_encoding(config["encoding"])
+                        actions.append(("encoding", packet, port))
+                    if "latency" in config:
+                        packet, _ = commands.command_set_latency(config["latency"])
+                        actions.append(("latency", packet, _get_arc_port(device)))
                     if "preferred_leader" in config:
                         packet, _, port = commands.command_set_preferred_leader(config["preferred_leader"])
                         actions.append(("preferred_leader", packet, port))
@@ -450,6 +501,14 @@ def preset_load(
                                     NOTIFICATION_SAMPLE_RATE_STATUS,
                                     NOTIFICATION_SETTINGS_CHANGE,
                                 ),
+                                "encoding": (
+                                    NOTIFICATION_ENCODING_STATUS,
+                                    NOTIFICATION_SETTINGS_CHANGE,
+                                ),
+                                "latency": (
+                                    NOTIFICATION_LATENCY_CHANGE,
+                                    NOTIFICATION_SETTINGS_CHANGE,
+                                ),
                                 "preferred_leader": (
                                     NOTIFICATION_CLOCKING_STATUS,
                                     NOTIFICATION_SETTINGS_CHANGE,
@@ -470,6 +529,15 @@ def preset_load(
                                     repeat=3,
                                     interval_ms=500,
                                 )
+                            elif action in ("sample_rate", "encoding"):
+                                await send_and_wait_for_notification(
+                                    send,
+                                    packet,
+                                    device.ipv4,
+                                    port,
+                                    notification_ids,
+                                    expect_response=False,
+                                )
                             else:
                                 await send_and_wait_for_notification(
                                     send,
@@ -489,19 +557,22 @@ def preset_load(
                             )
                             continue
 
-                        if action == "sample_rate":
-                            expected = config["sample_rate"]
+                        if action in ("sample_rate", "encoding", "latency"):
+                            if action == "sample_rate":
+                                expected = config["sample_rate"]
+                                success = f"sample rate {expected} Hz"
+                            elif action == "encoding":
+                                expected = config["encoding"]
+                                success = f"encoding {expected}-bit"
+                            else:
+                                expected = int(round(config["latency"] * 1_000_000))
+                                success = f"latency {config['latency']:g} ms"
                             result = await readback_after_notification(
-                                lambda device=device: _read_sample_rate(device),
+                                partial(_read_audio_setting, action, send, device),
                                 expected,
                             )
                             if result.matched:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate {expected} Hz (verified)",
-                                    )
-                                )
+                                action_results.append((device_name, f"{success} (verified)"))
                                 continue
 
                             failures += 1
@@ -512,7 +583,7 @@ def preset_load(
                             action_results.append(
                                 (
                                     device_name,
-                                    f"sample rate {expected} Hz: FAILED ({detail})",
+                                    f"{success}: FAILED ({detail})",
                                 )
                             )
                             continue
@@ -565,7 +636,6 @@ def preset_load(
                             continue
 
                         mode = config["interface_mode"]
-                        needs_reboot.append(device_name)
                         if readback_application is None:
                             reason = f" (readback unavailable: {readback_start_error})" if readback_start_error else ""
                             action_results.append(
@@ -583,6 +653,8 @@ def preset_load(
                             ),
                             expected,
                         )
+                        if device.interface_pending_config is not None:
+                            needs_reboot.append(device_name)
                         if result.matched:
                             action_results.append((device_name, f"interface {mode} (verified)"))
                         elif result.observed_available:

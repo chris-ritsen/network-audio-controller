@@ -286,6 +286,8 @@ def install(
             raise typer.Exit(code=1)
         return
 
+    launchd_was_loaded = platform == "launchd" and service_install.launchd_loaded()
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     typer.echo(f"Wrote {path}")
@@ -293,6 +295,16 @@ def install(
     if platform == "systemd":
         asyncio.run(service_install.systemd_enable(start_service))
         typer.echo(f"Enabled {service_install.SYSTEMD_UNIT_NAME}" + (" and started it." if start_service else "."))
+        return
+
+    if launchd_was_loaded:
+        result = service_install.launchd_bootout()
+        if result.returncode != 0:
+            typer.echo(f"launchctl bootout failed: {result.stderr.strip()}", err=True)
+            raise typer.Exit(code=1)
+
+    if not start_service:
+        typer.echo(f"Installed {service_install.LAUNCHD_LABEL} without loading it.")
         return
 
     result = service_install.launchd_bootstrap()
