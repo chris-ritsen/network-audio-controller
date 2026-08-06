@@ -326,7 +326,7 @@ class DanteStateService:
             if device.online:
                 self._populating.discard(server_name)
                 tasks.append(self.fetch_device_controls(server_name))
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks)
 
     async def refresh_affected_subscriptions(self, offline_device) -> None:
         offline_name = offline_device.name
@@ -353,7 +353,7 @@ class DanteStateService:
                     continue
             self._emit_device_updated(device)
 
-    async def fetch_device_controls(self, server_name: str, delay: float = 0) -> None:
+    async def fetch_device_controls(self, server_name: str) -> None:
         if server_name in self._populating:
             return
 
@@ -367,9 +367,6 @@ class DanteStateService:
         self._populating.add(server_name)
 
         try:
-            if delay > 0:
-                await asyncio.sleep(delay)
-
             async with self._lock_for(server_name):
                 retries = 3
                 for attempt in range(retries):
@@ -382,7 +379,6 @@ class DanteStateService:
 
                     if attempt < retries - 1:
                         logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
-                        await asyncio.sleep(2)
 
                 if device.bluetooth_device is None and device.model_id in BLUETOOTH_MODEL_IDS:
                     self.application.settings.request_bluetooth_status(str(device.ipv4))

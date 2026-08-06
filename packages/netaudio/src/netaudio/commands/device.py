@@ -175,6 +175,8 @@ def _format_show_standard_latencies(device) -> str:
 
 
 def _format_aes67(device) -> str:
+    if device.aes67_supported is False:
+        return "unsupported"
     current = device.aes67_current
     configured = device.aes67_configured
     if current is None and configured is None:
@@ -185,6 +187,14 @@ def _format_aes67(device) -> str:
         return f"{current_label}; configured {configured_label} (reboot required)"
     effective_state = configured if configured is not None else current
     return "enabled" if effective_state else "disabled"
+
+
+def _format_channel_count(channels: dict, reported_count: int | None) -> str:
+    if channels:
+        return str(len(channels))
+    if reported_count is not None:
+        return str(reported_count)
+    return "unknown"
 
 
 def _device_show_rows(device) -> list[list[str]]:
@@ -345,7 +355,7 @@ def device_list(
             state.output_format = OutputFormat.json
 
         devices = await _discover()
-        await _populate_controls(devices)
+        await _populate_controls(devices, strict=False)
         _collect_lock_state(devices)
         devices = filter_devices(devices)
 
@@ -370,7 +380,6 @@ def device_list(
             "Configured Latency",
             "Latency Range",
             "Standard Latencies",
-            "Flows",
             "AES67",
             "Preferred Leader",
             "PTP Role",
@@ -384,7 +393,7 @@ def device_list(
         json_data = {}
 
         for server_name, device in sorted_devices:
-            last_seen = getattr(device, "last_seen", None)
+            last_seen = device.last_seen
             name_display = device.name or ""
 
             if device.is_locked is True:
@@ -400,8 +409,8 @@ def device_list(
                 _format_mac(device.mac_address),
                 device.dante_model or device.model_id or "",
                 lock_display,
-                str(len(device.tx_channels) if device.tx_channels else (device.tx_count or 0)),
-                str(len(device.rx_channels) if device.rx_channels else (device.rx_count or 0)),
+                _format_channel_count(device.tx_channels, device.tx_count),
+                _format_channel_count(device.rx_channels, device.rx_count),
                 _format_last_seen(last_seen),
                 server_name,
             ]
@@ -416,13 +425,13 @@ def device_list(
                 row.append(str(device.sample_rate or ""))
                 row.append(", ".join(str(value) for value in device.supported_sample_rates or []))
 
-                encoding = getattr(device, "encoding", None)
+                encoding = device.encoding
                 row.append(f"PCM{encoding}" if encoding is not None else "")
 
                 supported_encodings = device.supported_encodings
                 row.append(", ".join(f"PCM{value}" for value in supported_encodings or []))
 
-                bit_depth = getattr(device, "bit_depth", None)
+                bit_depth = device.bit_depth
                 row.append(str(bit_depth) if bit_depth is not None else "")
 
                 latency = device.active_latency if device.active_latency is not None else device.latency
@@ -433,33 +442,15 @@ def device_list(
                 row.append(_format_latency_range(device.min_latency, device.max_latency))
                 row.append(_format_standard_latency_choices(device.min_latency, device.max_latency))
 
-                tx_flows = getattr(device, "tx_flow_count", None)
-                rx_flows = getattr(device, "rx_flow_count", None)
-                if tx_flows is not None or rx_flows is not None:
-                    row.append(f"{tx_flows or 0}/{rx_flows or 0}")
-                else:
-                    row.append("")
+                row.append(_format_aes67(device))
 
-                aes67_configured = getattr(device, "aes67_configured", None)
-                aes67_current = getattr(device, "aes67_current", None)
-                if aes67_current is not None and aes67_configured is not None and aes67_current != aes67_configured:
-                    current_label = "on" if aes67_current else "off"
-                    configured_label = "on" if aes67_configured else "off"
-                    row.append(f"{current_label}->{configured_label} (reboot required)")
-                elif aes67_configured is not None:
-                    row.append("on" if aes67_configured else "off")
-                elif aes67_current is not None:
-                    row.append("on" if aes67_current else "off")
-                else:
-                    row.append("")
-
-                preferred_leader = getattr(device, "preferred_leader", None)
+                preferred_leader = device.preferred_leader
                 if preferred_leader is not None:
                     row.append("on" if preferred_leader else "off")
                 else:
                     row.append("")
 
-                ptp_v1_role = getattr(device, "ptp_v1_role", None)
+                ptp_v1_role = device.ptp_v1_role
                 row.append(ptp_v1_role or "")
 
                 if any_bluetooth:
@@ -509,7 +500,7 @@ def identify():
 
             for server_name, device in filtered.items():
                 packet, _, port = commands.command_identify()
-                await send(packet, device.ipv4, port)
+                await send(packet, device.ipv4, port, expect_response=False)
                 typer.echo(f"{icon('identify')}Identified: {device.name}")
 
     asyncio.run(_run())

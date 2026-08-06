@@ -49,6 +49,7 @@ class FakeDevice:
         encoding=None,
         supported_sample_rates=None,
         supported_encodings=None,
+        aes67_supported=None,
         min_latency=None,
         max_latency=None,
     ):
@@ -68,6 +69,7 @@ class FakeDevice:
         self.max_latency = max_latency
         self.aes67_current = None
         self.aes67_configured = None
+        self.aes67_supported = aes67_supported
         self.operations = FakeOperations(settings=settings, aes67=aes67)
         self._name_reads = name_reads
         self.name_read_calls = 0
@@ -521,6 +523,19 @@ async def test_reboot_operation_uses_core_repeat_sender_when_discovery_applicati
     assert calls == [(b"reboot", 8700, False, 3, 100)]
 
 
+def test_identify_is_sent_without_waiting_for_a_response(monkeypatch):
+    device = FakeDevice("AVIO")
+    sent = _install_context(monkeypatch, device_commands, {"avio.local.": device})
+
+    result = runner.invoke(device_commands.app, ["identify"])
+
+    assert result.exit_code == 0
+    assert len(sent) == 1
+    assert sent[0][0:2] == ("192.0.2.10", 8700)
+    assert sent[0][3] == {"expect_response": False}
+    assert "Identified: AVIO" in result.output
+
+
 @pytest.mark.asyncio
 async def test_sample_rate_operation_rejects_known_unsupported_rate_without_sending():
     operations, commands, device = _make_sample_rate_operations([48_000])
@@ -885,6 +900,17 @@ def test_aes67_verifies_configured_state_not_current_state(monkeypatch):
     assert device.operations.aes67_calls == 1
     assert "AES67 configured state for AVIO: on (verified)" in result.output
     assert sent[0][3] == {"expect_response": False, "repeat": 3, "interval_ms": 100}
+
+
+def test_aes67_rejects_known_unsupported_device_without_sending(monkeypatch):
+    device = FakeDevice("LX-DANTE", aes67_supported=False)
+    sent = _install_context(monkeypatch, config_commands, {"lx.local.": device})
+
+    result = runner.invoke(config_commands.app, ["aes67", "on"])
+
+    assert result.exit_code == 1
+    assert "does not support AES67 configuration" in result.output
+    assert sent == []
 
 
 def test_encoding_is_verified_from_reported_status(monkeypatch):

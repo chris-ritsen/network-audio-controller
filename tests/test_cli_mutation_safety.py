@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -23,11 +24,15 @@ def reset_cli_state(monkeypatch):
         list(state.hosts),
         list(state.server_names),
         list(state.macs),
+        state.output_format,
     )
     state.names = []
     state.hosts = []
     state.server_names = []
     state.macs = []
+    from netaudio.cli import OutputFormat
+
+    state.output_format = OutputFormat.plain
 
     async def unavailable_preset_readback():
         raise RuntimeError("synthetic readback service unavailable")
@@ -40,7 +45,7 @@ def reset_cli_state(monkeypatch):
     try:
         yield state
     finally:
-        state.names, state.hosts, state.server_names, state.macs = original
+        state.names, state.hosts, state.server_names, state.macs, state.output_format = original
 
 
 def _channel(number, name):
@@ -380,6 +385,30 @@ def test_flow_create_rejects_malformed_channels_before_discovery(monkeypatch):
     assert calls == 0
 
 
+def test_empty_flow_list_preserves_structured_output(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    application = _FakeApplication()
+    device = _flow_device()
+    flow_inventory = {"max_flow_slots": 16, "flows": []}
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return flow_inventory
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+    state.output_format = OutputFormat.json
+
+    result = runner.invoke(flow_commands.app, ["list", "device"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == flow_inventory
+    assert application.shutdown_calls == 1
+
+
 def test_flow_create_refuses_occupied_slot(monkeypatch):
     application = _FakeApplication()
     device = _flow_device()
@@ -389,14 +418,14 @@ def test_flow_create_refuses_occupied_slot(monkeypatch):
         return application, device, 4440
 
     async def query(*_args):
-        return [{"flow_number": 17, "flow_type": "multicast"}]
+        return {"max_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "multicast"}]}
 
     async def create(*_args):
         nonlocal create_calls
         create_calls += 1
 
     monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
-    monkeypatch.setattr(flows, "query_tx_flows", query)
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
     monkeypatch.setattr(flows, "create_tx_flow", create)
 
     result = runner.invoke(
@@ -418,13 +447,13 @@ def test_flow_create_confirms_success(monkeypatch):
         return application, device, 4440
 
     async def query(*_args):
-        return []
+        return {"max_flow_slots": 32, "flows": []}
 
     async def create(*_args):
         return 1
 
     monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
-    monkeypatch.setattr(flows, "query_tx_flows", query)
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
     monkeypatch.setattr(flows, "create_tx_flow", create)
 
     result = runner.invoke(
@@ -435,6 +464,35 @@ def test_flow_create_confirms_success(monkeypatch):
     assert result.exit_code == 0
     assert "Created multicast TX flow" in result.output
     assert "device confirmed" in result.output
+
+
+def test_flow_create_refuses_slot_above_device_capacity(monkeypatch):
+    application = _FakeApplication()
+    device = _flow_device()
+    create_calls = 0
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return {"max_flow_slots": 16, "flows": []}
+
+    async def create(*_args):
+        nonlocal create_calls
+        create_calls += 1
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+    monkeypatch.setattr(flows, "create_tx_flow", create)
+
+    result = runner.invoke(
+        flow_commands.app,
+        ["create", "device", "--slot", "17", "--channels", "1"],
+    )
+
+    assert result.exit_code == 1
+    assert "exceeds the device capacity of 16" in result.output
+    assert create_calls == 0
 
 
 def test_flow_delete_requires_confirmation_before_discovery(monkeypatch):
@@ -465,14 +523,14 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
         return application, device, 4440
 
     async def query(*_args):
-        return [{"flow_number": 17, "flow_type": "unicast"}]
+        return {"max_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "unicast"}]}
 
     async def delete(*_args):
         nonlocal delete_calls
         delete_calls += 1
 
     monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
-    monkeypatch.setattr(flows, "query_tx_flows", query)
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
     monkeypatch.setattr(flows, "delete_tx_flow", delete)
 
     result = runner.invoke(
@@ -505,18 +563,28 @@ def _write_preset(path, devices):
     path.write_text(f'<?xml version="1.0"?><preset><name>test</name>{"".join(device_xml)}</preset>')
 
 
-def _preset_device(name, sample_rate=48000, supported_sample_rates=None):
+def _preset_device(
+    name,
+    sample_rate=48000,
+    supported_sample_rates=None,
+    encoding=24,
+    supported_encodings=None,
+    active_latency_ns=1_000_000,
+):
     operations = SimpleNamespace()
 
     async def get_device_settings():
-        return {"sample_rate": sample_rate}
+        return {"sample_rate": sample_rate, "active_latency_ns": active_latency_ns}
 
     operations.get_device_settings = get_device_settings
     return SimpleNamespace(
         name=name,
         server_name=f"{name.lower()}.local.",
         ipv4="192.0.2.40",
+        services={},
         supported_sample_rates=supported_sample_rates,
+        encoding=encoding,
+        supported_encodings=supported_encodings if supported_encodings is not None else [16, 24, 32],
         interface_pending_config=None,
         operations=operations,
     )
@@ -635,7 +703,8 @@ def test_preset_converts_dc_latency_microseconds_for_display(tmp_path):
     result = runner.invoke(preset_commands.app, ["load", str(preset), "--dry-run"])
 
     assert result.exit_code == 0
-    assert "latency: 0.15 ms (unsupported for load)" in result.output
+    assert "latency: 0.15 ms" in result.output
+    assert "unsupported for load" not in result.output
 
 
 def test_preset_rejects_duplicate_friendly_names(tmp_path):
@@ -702,7 +771,7 @@ def test_preset_preflights_all_matches_before_any_send(monkeypatch, tmp_path):
     )
     devices = {
         "first.local.": _preset_device("First"),
-        "second.local.": _preset_device("Second"),
+        "second.local.": _preset_device("Second", supported_encodings=[16]),
     }
     sends = []
 
@@ -715,8 +784,31 @@ def test_preset_preflights_all_matches_before_any_send(monkeypatch, tmp_path):
 
     assert result.exit_code == 1
     assert "refused before sending any changes" in result.output
-    assert "Second: unsupported fields: encoding" in result.output
+    assert "Second: device reports supported encodings [16]; 24 is not supported" in result.output
     assert sends == []
+
+
+def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_path):
+    preset = tmp_path / "audio-settings.xml"
+    _write_preset(preset, [{"name": "Device", "encoding": 24, "latency_us": 150}])
+    device = _preset_device("Device", encoding=24, active_latency_ns=150_000)
+    sends = []
+
+    async def send(*args, **kwargs):
+        sends.append((args, kwargs))
+
+    async def probe_encoding_status(_ipv4):
+        return device.encoding, device.supported_encodings
+
+    send.probe_encoding_status = probe_encoding_status
+    _install_preset_context(monkeypatch, {"device.local.": device}, send)
+
+    result = runner.invoke(preset_commands.app, ["load", str(preset)])
+
+    assert result.exit_code == 0
+    assert "encoding 24-bit (verified)" in result.output
+    assert "latency 0.15 ms (verified)" in result.output
+    assert len(sends) == 2
 
 
 def test_preset_refuses_unmatched_devices_without_explicit_filter(monkeypatch, tmp_path):
@@ -873,9 +965,18 @@ def test_preset_reports_unverified_requests_honestly(monkeypatch, tmp_path):
     assert "applied" not in result.output.lower()
 
 
+@pytest.mark.parametrize(
+    ("pending_interface_config", "expects_reboot"),
+    [
+        (None, False),
+        ({"mode": "dynamic"}, True),
+    ],
+)
 def test_preset_verifies_preferred_leader_and_interface_when_available(
     monkeypatch,
     tmp_path,
+    pending_interface_config,
+    expects_reboot,
 ):
     preset = tmp_path / "verified-state.xml"
     interface = '<interface><ipv4_address mode="dynamic" /></interface>'
@@ -883,7 +984,9 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
         preset,
         [{"name": "Device", "preferred": True, "interface": interface}],
     )
-    devices = {"device.local.": _preset_device("Device")}
+    device = _preset_device("Device")
+    device.interface_pending_config = pending_interface_config
+    devices = {"device.local.": device}
 
     class ReadbackApplication:
         shutdown_called = False
@@ -924,6 +1027,7 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
     assert "preferred leader on (verified)" in result.output
     assert "interface dynamic (verified)" in result.output
     assert "requested; not verified" not in result.output
+    assert ("Reboot required: Device" in result.output) is expects_reboot
     assert readback.shutdown_called
 
 
