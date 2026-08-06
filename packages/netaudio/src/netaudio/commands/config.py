@@ -499,6 +499,12 @@ def _aes67_state_label(value):
     return "on" if value else "off"
 
 
+def _aes67_support_label(value):
+    if value is None:
+        return "unknown"
+    return "yes" if value else "no"
+
+
 def _aes67_reboot_required(device):
     if device.aes67_current is not None and device.aes67_configured is not None:
         return device.aes67_current != device.aes67_configured
@@ -521,12 +527,13 @@ def aes67(
 
             if enabled is None:
                 if all_devices:
-                    headers = ["Name", "Current", "Configured", "Reboot Required"]
+                    headers = ["Name", "Supported", "Current", "Configured", "Reboot Required"]
                     rows = []
                     for server_name, device in targets:
                         rows.append(
                             [
                                 device.name or server_name,
+                                _aes67_support_label(device.aes67_supported),
                                 _aes67_state_label(device.aes67_current),
                                 _aes67_state_label(device.aes67_configured),
                                 "yes" if _aes67_reboot_required(device) else "no",
@@ -535,6 +542,9 @@ def aes67(
                     output_table(headers, rows)
                 else:
                     device = targets[0][1]
+                    if device.aes67_supported is False:
+                        output_single("unsupported")
+                        return
                     current_label = _aes67_state_label(device.aes67_current)
                     configured_label = _aes67_state_label(device.aes67_configured)
                     reboot = _aes67_reboot_required(device)
@@ -556,9 +566,21 @@ def aes67(
                 raise typer.Exit(code=ExitCode.ERROR)
 
             is_enabled = enabled.lower() == "on"
+            supported_targets = []
+            capability_failures = 0
+            for server_name, device in targets:
+                if device.aes67_supported is False:
+                    typer.echo(
+                        f"Error: {device.name or server_name} does not support AES67 configuration.",
+                        err=True,
+                    )
+                    capability_failures += 1
+                else:
+                    supported_targets.append((server_name, device))
+
             packet, _, port = commands.command_enable_aes67(is_enabled)
             failures = await _send_verified_change(
-                targets,
+                supported_targets,
                 send,
                 packet,
                 lambda _device: port,
@@ -569,7 +591,7 @@ def aes67(
                 (NOTIFICATION_AES67_STATUS, NOTIFICATION_SETTINGS_CHANGE),
                 send_kwargs={"expect_response": False, "repeat": 3, "interval_ms": 100},
             )
-            if failures:
+            if failures + capability_failures:
                 raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())

@@ -18,6 +18,21 @@ def _component(**methods):
     return SimpleNamespace(**methods)
 
 
+def test_invalid_shure_correlations_are_reported(monkeypatch, tmp_path, caplog):
+    from netaudio.common import config_loader
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[shure\n")
+    monkeypatch.setattr(config_loader, "default_config_path", lambda: config_path)
+    daemon = object.__new__(NetaudioDaemon)
+
+    with caplog.at_level("WARNING", logger="netaudio"):
+        correlations = daemon._load_shure_correlations()
+
+    assert correlations == {}
+    assert f"Unable to load Shure correlations from {config_path}" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon = object.__new__(NetaudioDaemon)
