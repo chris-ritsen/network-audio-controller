@@ -1918,11 +1918,64 @@
       "category": "conmon_message",
       "key": "0x01FE",
       "name": "metering_data",
-      "note": "Metering level data. Unicast to a port specified in the metering start command. Default port is 8751 (configurable). 93B fixed payload. High frequency. Triggered by a metering start command that includes the requester's MAC address and desired callback port in the payload. A corresponding stop command exists.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "verified",
-      "added_ns": 1773025355582891000,
+      "note": "Metering callback frame for a device reporting 64 TX and 1 RX metering channels. This is not a separate fixed-format opcode: byte 25 is tx_count, byte 26 is rx_count, byte 27 is the 0xFE metering suffix, TX levels begin at byte 28, and RX levels immediately follow. Exact length is 28 + tx_count + rx_count. Triggered by CMC 0x3010 with callback IP and port.",
+      "fields": [
+        {
+          "name": "metering_family",
+          "offset": 24,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x02"
+        },
+        {
+          "name": "tx_count",
+          "offset": 25,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x40"
+        },
+        {
+          "name": "rx_count",
+          "offset": 26,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x01"
+        },
+        {
+          "name": "metering_suffix",
+          "offset": 27,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0xFE"
+        },
+        {
+          "name": "tx_levels",
+          "offset": 28,
+          "length": 64,
+          "dtype": "bytes"
+        },
+        {
+          "name": "rx_levels",
+          "offset": 92,
+          "length": 1,
+          "dtype": "bytes"
+        }
+      ],
+      "evidence": [
+        "ios_direct_metering_core:7298186",
+        "ios_direct_metering_core:7298532"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773025355582891000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1786043314546721000
+        }
+      ],
+      "added_ns": 1786043314546722000,
       "protocol_id": 65535,
       "match_offset": 26,
       "match_size": 2,
@@ -1938,6 +1991,12 @@
           "previous_name": "metering_data",
           "previous_confidence": "verified",
           "previous_note": "Metering level data. Unicast to a port specified in the metering start command. Port 8751 is the default used by Dante Controller (configurable \u2014 DC complains at startup if the port is unavailable). 93B fixed payload. High frequency. Triggered by a metering start command that includes the requester's MAC address and desired callback port in the payload. A corresponding stop command exists."
+        },
+        {
+          "replaced_ns": 1786043314546761000,
+          "previous_name": "metering_data",
+          "previous_confidence": "verified",
+          "previous_note": "Metering level data. Unicast to a port specified in the metering start command. Default port is 8751 (configurable). 93B fixed payload. High frequency. Triggered by a metering start command that includes the requester's MAC address and desired callback port in the payload. A corresponding stop command exists."
         }
       ]
     },
@@ -2156,11 +2215,64 @@
       "category": "conmon_message",
       "key": "0x40FE",
       "name": "metering_data_extended",
-      "note": "Metering level data (extended format). Same delivery mechanism as 0x01FE \u2014 unicast to port specified in metering start command. Default port is 8751. 156B fixed payload. Very high frequency.",
-      "fields": [],
-      "evidence": [],
-      "confidence": "verified",
-      "added_ns": 1773025357101855000,
+      "note": "Metering callback frame for a device reporting 64 TX and 64 RX metering channels. It uses the same variable-count layout as 0x01FE: byte 25 is tx_count, byte 26 is rx_count, byte 27 is the 0xFE metering suffix, TX levels begin at byte 28, and RX levels immediately follow. Exact length is 28 + tx_count + rx_count. Triggered by CMC 0x3010 with callback IP and port.",
+      "fields": [
+        {
+          "name": "metering_family",
+          "offset": 24,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x02"
+        },
+        {
+          "name": "tx_count",
+          "offset": 25,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x40"
+        },
+        {
+          "name": "rx_count",
+          "offset": 26,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x40"
+        },
+        {
+          "name": "metering_suffix",
+          "offset": 27,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0xFE"
+        },
+        {
+          "name": "tx_levels",
+          "offset": 28,
+          "length": 64,
+          "dtype": "bytes"
+        },
+        {
+          "name": "rx_levels",
+          "offset": 92,
+          "length": 64,
+          "dtype": "bytes"
+        }
+      ],
+      "evidence": [
+        "ios_direct_metering_core:7298185",
+        "ios_direct_metering_core:7298422"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1773025357101855000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1786043315362950000
+        }
+      ],
+      "added_ns": 1786043315362951000,
       "protocol_id": 65535,
       "match_offset": 26,
       "match_size": 2,
@@ -2176,6 +2288,12 @@
           "previous_name": "metering_data_extended",
           "previous_confidence": "verified",
           "previous_note": "Metering level data (extended format). Same delivery mechanism as 0x01FE \u2014 unicast to port specified in metering start command. Port 8751 is the default used by Dante Controller. 156B fixed payload. Very high frequency."
+        },
+        {
+          "replaced_ns": 1786043315362959000,
+          "previous_name": "metering_data_extended",
+          "previous_confidence": "verified",
+          "previous_note": "Metering level data (extended format). Same delivery mechanism as 0x01FE \u2014 unicast to port specified in metering start command. Default port is 8751. 156B fixed payload. Very high frequency."
         }
       ]
     },
@@ -4405,10 +4523,114 @@
           "action": "updated"
         }
       ]
+    },
+    "protocol_structure:metering_frame": {
+      "category": "protocol_structure",
+      "key": "metering_frame",
+      "name": "Metering Callback Frame",
+      "note": "CMC 0x3010 requests a stream to a caller-specified IPv4 address and UDP port. Each callback datagram is an exact-length ConMon-style frame: 0xFFFF, declared length, sequence, reserved zero, eight-byte source identifier, Audinate, family 0x02, tx_count, rx_count, suffix 0xFE, then tx_count raw TX level bytes followed immediately by rx_count raw RX level bytes. Verified across AD4D 64-TX/1-RX and Ferrofish A32 64-TX/64-RX captures.",
+      "fields": [
+        {
+          "name": "magic",
+          "offset": 0,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0xFFFF"
+        },
+        {
+          "name": "declared_length",
+          "offset": 2,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "sequence",
+          "offset": 4,
+          "length": 2,
+          "dtype": "uint16_be"
+        },
+        {
+          "name": "reserved",
+          "offset": 6,
+          "length": 2,
+          "dtype": "uint16_be",
+          "value": "0x0000"
+        },
+        {
+          "name": "source_identifier",
+          "offset": 8,
+          "length": 8,
+          "dtype": "bytes"
+        },
+        {
+          "name": "vendor",
+          "offset": 16,
+          "length": 8,
+          "dtype": "string",
+          "value": "Audinate"
+        },
+        {
+          "name": "metering_family",
+          "offset": 24,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0x02"
+        },
+        {
+          "name": "tx_count",
+          "offset": 25,
+          "length": 1,
+          "dtype": "uint8"
+        },
+        {
+          "name": "rx_count",
+          "offset": 26,
+          "length": 1,
+          "dtype": "uint8"
+        },
+        {
+          "name": "metering_suffix",
+          "offset": 27,
+          "length": 1,
+          "dtype": "uint8",
+          "value": "0xFE"
+        },
+        {
+          "name": "levels",
+          "offset": 28,
+          "length": 0,
+          "dtype": "bytes"
+        }
+      ],
+      "evidence": [
+        "ios_direct_metering_core:7298186",
+        "ios_direct_metering_core:7298532",
+        "ios_direct_metering_core:7298185",
+        "ios_direct_metering_core:7298422"
+      ],
+      "confidence_log": [
+        {
+          "level": "verified",
+          "timestamp_ns": 1786043792163984000
+        },
+        {
+          "level": "verified",
+          "timestamp_ns": 1786044268328397000
+        }
+      ],
+      "added_ns": 1786044268328398000,
+      "history": [
+        {
+          "replaced_ns": 1786044268328406000,
+          "previous_name": "Metering Callback Frame",
+          "previous_confidence": "verified",
+          "previous_note": "CMC 0x3010 requests a stream to a caller-specified IPv4 address and UDP port. Each callback datagram is an exact-length ConMon-style frame: 0xFFFF, declared length, sequence, reserved zero, source EUI-64, reserved zero, Audinate, family 0x02, tx_count, rx_count, suffix 0xFE, then tx_count raw TX level bytes followed immediately by rx_count raw RX level bytes. Verified across AD4D 64-TX/1-RX and Ferrofish A32 64-TX/64-RX captures."
+        }
+      ]
     }
   },
   "meta": {
     "created_ns": 1772738113367763473,
-    "updated_ns": 1785864478877806000
+    "updated_ns": 1786044268328409000
   }
 }

@@ -47,6 +47,8 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
         rx_channels={},
         tx_channels={},
         online=True,
+        interfaces=[],
+        link_speed_mbps=None,
         flow_protocol_id=None,
         is_locked=False,
         interface_reboot_required=False,
@@ -111,6 +113,7 @@ def make_relay(devices=None, metering=None, on_shutdown=None):
         probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
         probe_encoding_status=AsyncMock(return_value=(24, [16, 24, 32])),
         probe_gain_status=AsyncMock(return_value=("input", [3])),
+        probe_interface_status=AsyncMock(return_value=[{"mode": "dynamic", "ip_address": "192.168.1.50"}]),
         set_preferred_leader_state=AsyncMock(side_effect=lambda _address, expected: expected),
         set_aes67_state=AsyncMock(side_effect=lambda _device, expected: (False, expected)),
         set_interface_dhcp=AsyncMock(return_value=[{"mode": "dynamic"}]),
@@ -668,6 +671,48 @@ class TestMutationVerification:
 
 
 class TestDeviceLookup:
+    @pytest.mark.asyncio
+    async def test_interface_status_is_probed_on_demand(self):
+        device = make_device()
+        device.link_speed_mbps = 100
+        relay = make_relay({"dev1": device})
+
+        status, body = await get(relay, "/interfaces/Device1")
+
+        assert status == 200
+        assert body == {
+            "device": "dev1",
+            "interfaces": [{"mode": "dynamic", "ip_address": "192.168.1.50"}],
+            "link_speed_mbps": 100,
+            "reboot_required": False,
+            "pending_config": None,
+        }
+        relay.application.probe_interface_status.assert_awaited_once_with("192.168.1.50")
+        assert device.interfaces == body["interfaces"]
+
+    @pytest.mark.asyncio
+    async def test_interface_status_refuses_offline_device_without_waiting(self):
+        device = make_device()
+        device.online = False
+        relay = make_relay({"dev1": device})
+
+        status, body = await get(relay, "/interfaces/dev1")
+
+        assert status == 409
+        assert body == {"error": "device is offline"}
+        relay.application.probe_interface_status.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_interface_status_timeout_is_not_reported_as_empty_success(self):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        relay.application.probe_interface_status.return_value = None
+
+        status, body = await get(relay, "/interfaces/dev1")
+
+        assert status == 504
+        assert body == {"error": "interface status was not reported"}
+
     @pytest.mark.asyncio
     async def test_unknown_device_returns_404(self):
         relay = make_relay()

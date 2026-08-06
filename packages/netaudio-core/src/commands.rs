@@ -824,6 +824,15 @@ pub fn build_volume_stop(device_name: &str, mac: [u8; 6]) -> Result<Vec<u8>, Net
 mod tests {
     use super::*;
 
+    fn bytes_from_hex(hexadecimal: &str) -> Vec<u8> {
+        assert!(hexadecimal.len().is_multiple_of(2));
+        hexadecimal
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect()
+    }
+
     #[test]
     fn cmc_register_builder_matches_wire_layout() {
         let packet = build_cmc_register(0x1234, [0x00, 0x1D, 0xC1, 0x50, 0x23, 0x68]).unwrap();
@@ -1252,6 +1261,42 @@ mod tests {
         assert_eq!(
             build_volume_start("dev\0name", [0; 4], [0; 6], 0, false, 0),
             Err(NetaudioError::NameInvalidChars)
+        );
+    }
+
+    #[test]
+    fn metering_start_matches_captured_ad4d_packet_7298186() {
+        assert_eq!(
+            build_volume_start(
+                "ad4d",
+                [192, 168, 1, 156],
+                [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
+                8752,
+                true,
+                0,
+            )
+            .unwrap(),
+            bytes_from_hex(
+                "1200004200003010000000003e42274cff2400000004001000020012000a6164346400000000000100160001223000010000c0a8019c223000000000000000000000"
+            )
+        );
+    }
+
+    #[test]
+    fn metering_start_matches_captured_a32_packet_7298185() {
+        assert_eq!(
+            build_volume_start(
+                "a32",
+                [192, 168, 1, 156],
+                [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
+                8752,
+                true,
+                0,
+            )
+            .unwrap(),
+            bytes_from_hex(
+                "1200004000003010000000003e42274cff2400000004000e00020010000a613332000000000100140001223000010000c0a8019c223000000000000000000000"
+            )
         );
     }
 

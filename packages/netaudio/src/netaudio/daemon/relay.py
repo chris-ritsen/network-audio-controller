@@ -539,6 +539,8 @@ class RelayServer:
                 await self._handle_get_devices(writer)
             elif path.startswith("/devices/"):
                 await self._handle_get_device(writer, unquote(path[len("/devices/") :]))
+            elif path.startswith("/interfaces/"):
+                await self._handle_get_interfaces(writer, unquote(path[len("/interfaces/") :]))
             elif path.startswith("/flows/"):
                 await self._handle_get_tx_flows(writer, unquote(path[len("/flows/") :]))
             elif path == "/metering/status":
@@ -687,6 +689,34 @@ class RelayServer:
             return
 
         await self._send_json(writer, DanteDeviceSerializer.to_json(device))
+
+    async def _handle_get_interfaces(self, writer, device_name):
+        device = await self._require_device(writer, device_name)
+        if not device:
+            return
+        if not device.online:
+            await self._send_json(writer, {"error": "device is offline"}, 409)
+            return
+        if device.ipv4 is None:
+            await self._send_json(writer, {"error": "device has no IP address"}, 409)
+            return
+
+        interfaces = await self.application.probe_interface_status(str(device.ipv4))
+        if interfaces is None:
+            await self._send_json(writer, {"error": "interface status was not reported"}, 504)
+            return
+
+        device.interfaces = interfaces
+        await self._send_json(
+            writer,
+            {
+                "device": device.server_name,
+                "interfaces": interfaces,
+                "link_speed_mbps": device.link_speed_mbps,
+                "reboot_required": device.interface_reboot_required,
+                "pending_config": device.interface_pending_config,
+            },
+        )
 
     async def _handle_subscribe(self, writer, params):
         rx_device_name = params.get("rx_device")
