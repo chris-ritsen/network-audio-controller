@@ -34,9 +34,7 @@ def latency_controls_from_settings(settings):
 
     if active_latency_present:
         controls["active_latency"] = (
-            nanoseconds_to_milliseconds(active_latency_nanoseconds)
-            if active_latency_nanoseconds is not None
-            else None
+            nanoseconds_to_milliseconds(active_latency_nanoseconds) if active_latency_nanoseconds is not None else None
         )
 
     if configured_latency_present:

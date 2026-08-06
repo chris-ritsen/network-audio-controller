@@ -8,8 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from typer.testing import CliRunner
 
+from netaudio.commands import server as server_commands
 from netaudio.daemon import server, service_install
+
+
+command_runner = CliRunner()
 
 
 class _FakeRedis:
@@ -116,3 +121,43 @@ def test_launchd_plist_uses_argument_array_and_failure_restart(monkeypatch):
     ]
     assert payload["KeepAlive"] == {"SuccessfulExit": False}
     assert payload["StandardOutPath"] == "/tmp/netaudio daemon.log"
+
+
+def test_launchd_force_install_reloads_running_job(monkeypatch, tmp_path):
+    service_path = tmp_path / "com.netaudio.daemon.plist"
+    service_path.write_text("old")
+    bootout = MagicMock(return_value=SimpleNamespace(returncode=0, stderr=""))
+    bootstrap = MagicMock(return_value=SimpleNamespace(returncode=0, stderr=""))
+    monkeypatch.setattr(service_install, "platform_name", lambda: "launchd")
+    monkeypatch.setattr(service_install, "service_file_path", lambda: service_path)
+    monkeypatch.setattr(service_install, "generate_service_file", lambda: "new")
+    monkeypatch.setattr(service_install, "launchd_loaded", lambda: True)
+    monkeypatch.setattr(service_install, "launchd_bootout", bootout)
+    monkeypatch.setattr(service_install, "launchd_bootstrap", bootstrap)
+
+    result = command_runner.invoke(server_commands.app, ["install", "--force"])
+
+    assert result.exit_code == 0
+    assert service_path.read_text() == "new"
+    bootout.assert_called_once_with()
+    bootstrap.assert_called_once_with()
+
+
+def test_launchd_no_start_unloads_existing_job_without_reloading(monkeypatch, tmp_path):
+    service_path = tmp_path / "com.netaudio.daemon.plist"
+    service_path.write_text("old")
+    bootout = MagicMock(return_value=SimpleNamespace(returncode=0, stderr=""))
+    bootstrap = MagicMock(return_value=SimpleNamespace(returncode=0, stderr=""))
+    monkeypatch.setattr(service_install, "platform_name", lambda: "launchd")
+    monkeypatch.setattr(service_install, "service_file_path", lambda: service_path)
+    monkeypatch.setattr(service_install, "generate_service_file", lambda: "new")
+    monkeypatch.setattr(service_install, "launchd_loaded", lambda: True)
+    monkeypatch.setattr(service_install, "launchd_bootout", bootout)
+    monkeypatch.setattr(service_install, "launchd_bootstrap", bootstrap)
+
+    result = command_runner.invoke(server_commands.app, ["install", "--force", "--no-start"])
+
+    assert result.exit_code == 0
+    assert "without loading it" in result.output
+    bootout.assert_called_once_with()
+    bootstrap.assert_not_called()
