@@ -16,6 +16,24 @@ COMMAND_GOLDEN_PATH = FIXTURES_DIRECTORY / "core_commands_golden.json"
 RESPONSE_GOLDEN_PATH = FIXTURES_DIRECTORY / "core_responses_golden.json"
 
 CAPTURED_COMMAND_CASES = {
+    "metering_start_ad4d_packet_7298186": {
+        "spec": {
+            "command": "metering_start",
+            "device_name": "ad4d",
+            "ipv4": "192.168.1.156",
+            "mac": "3e42274cff24",
+            "port": 8752,
+        },
+    },
+    "metering_start_a32_packet_7298185": {
+        "spec": {
+            "command": "metering_start",
+            "device_name": "a32",
+            "ipv4": "192.168.1.156",
+            "mac": "3e42274cff24",
+            "port": 8752,
+        },
+    },
     "property_directory_packet_548323": {
         "spec": {
             "command": "property_directory",
@@ -135,6 +153,24 @@ CAPTURED_RESPONSE_CASES = {
             "000000010008001002010002000400180000000400000004"
         ),
         "kind": "gain_status",
+    },
+    "metering_frame_ad4d_packet_7298532": {
+        "hex": (
+            "ffff005d1fad0000000eddfd4e130000417564696e617465024001fe"
+            "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe"
+            "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe00"
+        ),
+        "kind": "metering",
+    },
+    "metering_frame_a32_packet_7298422": {
+        "hex": (
+            "ffff009c1f810000001dc119245c0000417564696e617465024040fe"
+            "fefefefefefefefefefefefefefefe7d89a0a1a0a2a2a0fefefefefefefefefe"
+            "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe"
+            "fefefe7dfefefefefefefe7dfefefefefefefefefefefefefefefefefefefefe"
+            "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe00"
+        ),
+        "kind": "metering",
     },
     "interface_status_lx_dante_packet_12362179": {
         "hex": (

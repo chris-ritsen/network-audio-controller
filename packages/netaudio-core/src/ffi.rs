@@ -681,6 +681,12 @@ pub unsafe extern "C" fn netaudio_parse_response(
                 out_capacity,
                 out_length,
             ),
+            "metering" => write_optional_json(
+                responses::parse_metering_frame(bytes),
+                out_buffer,
+                out_capacity,
+                out_length,
+            ),
             "result_code" => write_optional_json(
                 responses::parse_result_code(bytes),
                 out_buffer,
@@ -1344,6 +1350,25 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(json["current_encoding"], 24);
         assert_eq!(json["supported_encodings"], serde_json::json!([24, 16, 32]));
+    }
+
+    #[test]
+    fn metering_response_kind_serializes_expected_schema() {
+        let data = [
+            0xFF, 0xFF, 0x00, 0x21, 0x1F, 0x81, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x19, 0x24, 0x5C,
+            0x00, 0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x02, 0x03, 0x02, 0xFE,
+            0xFE, 0x7D, 0xA0, 0x88, 0x00,
+        ];
+        let (status, output) = parse_response_call("metering", &data);
+
+        assert_eq!(status, NetaudioStatus::Ok);
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(json["sequence"], 0x1F81);
+        assert_eq!(json["source_eui64"], "001dc119245c0000");
+        assert_eq!(json["tx_count"], 3);
+        assert_eq!(json["rx_count"], 2);
+        assert_eq!(json["tx_levels"], serde_json::json!([0xFE, 0x7D, 0xA0]));
+        assert_eq!(json["rx_levels"], serde_json::json!([0x88, 0x00]));
     }
 
     #[test]
