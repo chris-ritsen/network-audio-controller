@@ -117,10 +117,7 @@ def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict,
     if selected_profile is not None:
         return selected_profile, config_path
 
-    if any(key in data for key in ("redis", "capture", "paths")):
-        return data, config_path
-
-    return {}, config_path
+    return data, config_path
 
 
 def set_config_value(key: str, value: str | None) -> Path:
