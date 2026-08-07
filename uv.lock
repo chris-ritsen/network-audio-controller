@@ -283,6 +283,18 @@ wheels = [
 ]
 
 [[package]]
+name = "importlib-metadata"
+version = "8.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "zipp", marker = "python_full_version < '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -358,6 +370,7 @@ dependencies = [
     { name = "redis", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "redis", version = "7.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "rich" },
+    { name = "segno" },
     { name = "sqlitedict" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typer", version = "0.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -399,6 +412,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.0.0" },
     { name = "redis", marker = "extra == 'capture'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
+    { name = "segno", specifier = ">=1.6.6" },
     { name = "sqlitedict", specifier = ">=1.7.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.0.0" },
     { name = "typer", specifier = ">=0.15.0" },
@@ -772,6 +786,18 @@ wheels = [
 ]
 
 [[package]]
+name = "segno"
+version = "1.6.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-metadata", marker = "python_full_version < '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/2e/b396f750c53f570055bf5a9fc1ace09bed2dff013c73b7afec5702a581ba/segno-1.6.6.tar.gz", hash = "sha256:e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3", size = 1628586, upload-time = "2025-03-12T22:12:53.324Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/02/12c73fd423eb9577b97fc1924966b929eff7074ae6b2e15dd3d30cb9e4ae/segno-1.6.6-py3-none-any.whl", hash = "sha256:28c7d081ed0cf935e0411293a465efd4d500704072cdb039778a2ab8736190c7", size = 76503, upload-time = "2025-03-12T22:12:48.106Z" },
+]
+
+[[package]]
 name = "shellingham"
 version = "1.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -965,4 +991,13 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/c3/b191110946bd59a999bc1aee2613b1669c1d1dbf161b0d182a56abfdbf6e/zeroconf-0.148.0-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:2545561551a9ba684897785e6678f3c67fee8e13b09f9f88d0f69e570b540d5b", size = 2299045, upload-time = "2025-10-05T01:09:43.167Z" },
     { url = "https://files.pythonhosted.org/packages/51/51/ada823f1515da3abbd24d136879980da890fad4508f17ee2b0238bff948e/zeroconf-0.148.0-cp39-cp39-win32.whl", hash = "sha256:d78e200a3830074c79c0a014595ace49a24afa6a8a2d903326f44751107afbfd", size = 1315239, upload-time = "2025-10-05T01:09:45.213Z" },
     { url = "https://files.pythonhosted.org/packages/6f/25/8d8a05b445adb3e7302c8f74f2f8f0a1e6b30a134a25ca0eb38af6c8db24/zeroconf-0.148.0-cp39-cp39-win_amd64.whl", hash = "sha256:0800443953f9b490ded275a84008631f441879e9164635a62a4f1c6e71f28bd0", size = 1532475, upload-time = "2025-10-05T01:09:47.516Z" },
+]
+
+[[package]]
+name = "zipp"
+version = "3.23.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/21/093488dfc7cc8964ded15ab726fad40f25fd3d788fd741cc1c5a17d78ee8/zipp-3.23.1.tar.gz", hash = "sha256:32120e378d32cd9714ad503c1d024619063ec28aad2248dc6672ad13edfa5110", size = 25965, upload-time = "2026-04-13T23:21:46.6Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/8a/0861bec20485572fbddf3dfba2910e38fe249796cb73ecdeb74e07eeb8d3/zipp-3.23.1-py3-none-any.whl", hash = "sha256:0b3596c50a5c700c9cb40ba8d86d9f2cc4807e9bedb06bcdf7fac85633e444dc", size = 10378, upload-time = "2026-04-13T23:21:45.386Z" },
 ]
