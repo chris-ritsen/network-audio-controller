@@ -13,6 +13,7 @@ dependencies = [
     "sqlitedict>=1.7.0",
     "typer>=0.15.0",
     "rich>=13.0.0",
+    "segno>=1.6.6",
     "pyyaml>=6.0",
     "redis>=5.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
