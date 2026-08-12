@@ -22,6 +22,11 @@ RAW_PACKET_MODULES = {
     "dante/virtual_device.py",
 }
 
+NON_PACKET_BINARY_CALLS = {
+    ("commands/firmware.py", "_load_brooklyn2_board_information_descriptor", "bytes.fromhex"),
+    ("commands/firmware.py", "_build_brooklyn2_board_information_partition", "struct.pack_into"),
+}
+
 CMC_EXCEPTIONS = {
     ("_get_host_mac", "bytes.fromhex"),
     ("_get_host_mac", "uuid.getnode().to_bytes"),
@@ -76,7 +81,7 @@ def test_production_wire_builders_are_owned_by_netaudio_core():
                 if call not in {"struct.pack", "struct.pack_into", "bytes.fromhex"} and not call.endswith(".to_bytes"):
                     continue
 
-                if relative in RAW_PACKET_MODULES:
+                if relative in RAW_PACKET_MODULES or (relative, function, call) in NON_PACKET_BINARY_CALLS:
                     continue
                 if call == "struct.pack" and _is_os_structure_pack(node):
                     continue
@@ -90,7 +95,10 @@ def test_production_wire_builders_are_owned_by_netaudio_core():
             parent = parents.get(node)
             if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add):
                 continue
-            if relative in RAW_PACKET_MODULES or (relative, function) in NON_PACKET_BINARY_CONCATENATION:
+            if (
+                relative in RAW_PACKET_MODULES
+                or (relative, function) in NON_PACKET_BINARY_CONCATENATION
+            ):
                 continue
             violations.append(f"{relative}:{node.lineno}: {function} manually concatenates binary data")
 
