@@ -948,3 +948,22 @@ def test_commands_without_readback_use_requested_language(monkeypatch, arguments
     assert result.exit_code == 0
     assert expected in result.output
     assert sent[0][3] == send_kwargs
+
+
+@pytest.mark.parametrize(
+    ("command", "action"),
+    [("set", "lock"), ("clear", "unlock")],
+)
+def test_relay_lock_failure_reports_protocol_status(monkeypatch, command, action):
+    async def failed_relay_request(pin, requested_action):
+        assert pin == "1234"
+        assert requested_action == action
+        return {"success": False, "status": 0x1101}
+
+    monkeypatch.setattr(device_commands, "_lock_via_relay", failed_relay_request)
+
+    result = runner.invoke(device_commands.lock_app, [command, "1234"])
+
+    assert result.exit_code == 1
+    assert f"Error: {action} failed (status 0x1101)" in result.output
+    assert "unknown" not in result.output
