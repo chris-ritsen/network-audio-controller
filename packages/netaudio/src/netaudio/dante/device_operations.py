@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import math
 import re
 
 from netaudio.dante.latency import latency_controls_from_settings
-
-logger = logging.getLogger("netaudio")
 
 DANTE_NAME_MAX_LENGTH = 31
 DANTE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")
@@ -174,12 +171,18 @@ class DanteDeviceOperations:
         return response
 
     async def lock_device(self, pin: str, key: bytes) -> dict:
-        result = await _device_lock_operation(str(self.device.ipv4), pin, key, operation=LOCK_OPERATION_LOCK)
+        key_error = _validate_lock_key(key)
+        if key_error:
+            return key_error
+        result = await core_lock_device(str(self.device.ipv4), pin, key)
         self._apply_lock_result(result)
         return result
 
     async def unlock_device(self, pin: str, key: bytes) -> dict:
-        result = await _device_lock_operation(str(self.device.ipv4), pin, key, operation=LOCK_OPERATION_UNLOCK)
+        key_error = _validate_lock_key(key)
+        if key_error:
+            return key_error
+        result = await core_unlock_device(str(self.device.ipv4), pin, key)
         self._apply_lock_result(result)
         return result
 
@@ -220,11 +223,12 @@ class DanteDeviceOperations:
             self.device.aes67_configured = configured
         return configured
 
-
 LOCK_OPERATION_LOCK = 1
 LOCK_OPERATION_UNLOCK = 2
 
-LOCK_STATE_UNLOCKED = 0x0000
+LOCK_STATUS_SUCCESS = 0x0000
+LOCK_STATUS_ALREADY = 0x1102
+
 LOCK_STATE_LOCKED = 0x0001
 
 
@@ -236,16 +240,78 @@ def validate_pin(pin: str) -> str | None:
     return None
 
 
+def _lock_key_not_configured() -> dict:
+    return {
+        "status": None,
+        "lock_state": None,
+        "success": False,
+        "already": False,
+        "error": "device_lock_key not configured",
+        "not_configured": True,
+    }
+
+
+def _lock_key_invalid(actual_length: int, expected_length: int) -> dict:
+    return {
+        "status": None,
+        "lock_state": None,
+        "success": False,
+        "already": False,
+        "error": f"device_lock_key must be {expected_length} bytes, got {actual_length}",
+        "not_configured": False,
+    }
+
+
+def _validate_lock_key(key: bytes) -> dict | None:
+    if not key:
+        return _lock_key_not_configured()
+    from netaudio.core.binding import LOCK_KEY_LENGTH
+    if len(key) != LOCK_KEY_LENGTH:
+        return _lock_key_invalid(len(key), LOCK_KEY_LENGTH)
+    return None
+
+
+async def core_lock_device(device_ip: str, pin: str, key: bytes) -> dict:
+    key_error = _validate_lock_key(key)
+    if key_error:
+        return key_error
+    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_LOCK)
+
+
+async def core_unlock_device(device_ip: str, pin: str, key: bytes) -> dict:
+    key_error = _validate_lock_key(key)
+    if key_error:
+        return key_error
+    return await _device_lock_operation(device_ip, pin, key, LOCK_OPERATION_UNLOCK)
+
+
 async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation: int) -> dict:
     from netaudio import core
 
     if operation not in (LOCK_OPERATION_LOCK, LOCK_OPERATION_UNLOCK):
         raise ValueError(f"unknown lock operation: {operation}")
 
-    def run() -> dict:
+    def _run():
         with core.CoreClient(device_ip) as client:
             if operation == LOCK_OPERATION_LOCK:
                 return client.lock(pin, key)
             return client.unlock(pin, key)
 
-    return await asyncio.to_thread(run)
+    try:
+        result = await asyncio.to_thread(_run)
+    except core.NetaudioCoreError as error:
+        return _lock_core_error(error)
+    result.setdefault("success", result.get("status") in (LOCK_STATUS_SUCCESS, LOCK_STATUS_ALREADY))
+    result.setdefault("already", result.get("status") == LOCK_STATUS_ALREADY)
+    return result
+
+
+def _lock_core_error(error: Exception) -> dict:
+    return {
+        "status": getattr(error, "status", None),
+        "lock_state": None,
+        "success": False,
+        "already": False,
+        "error": str(error),
+        "not_configured": False,
+    }

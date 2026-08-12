@@ -79,6 +79,9 @@ line-length = 120
 select = ["E", "F", "I", "W", "RUF006"]
 ignore = ["E402", "E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
 
+[tool.ruff.lint.per-file-ignores]
+"packages/netaudio/src/netaudio/daemon/dbus_interfaces.py" = ["F722"]
+
 [tool.ruff.format]
 quote-style = "double"
 
