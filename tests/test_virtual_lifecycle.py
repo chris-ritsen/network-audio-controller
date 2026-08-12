@@ -313,18 +313,42 @@ def test_follow_logs_uses_platform_wait_command(monkeypatch):
         assert command == ["tail", "-f", "-n", "17", virtual.LOGFILE]
 
 
-def test_process_exit_waiter_uses_process_event():
+def test_process_exit_waiter_detects_process_exit():
     process = subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
         stdin=subprocess.PIPE,
     )
+    reaper = threading.Thread(target=process.wait)
     try:
         with virtual._process_exit_waiter(process.pid) as wait_for_exit:
             assert process.stdin is not None
             process.stdin.close()
+            reaper.start()
             assert wait_for_exit(2.0) is True
-        assert process.wait(timeout=2.0) == 0
+        reaper.join(timeout=2.0)
+        assert process.returncode == 0
     finally:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=2.0)
+
+
+def test_process_exit_waiter_falls_back_without_pidfd(monkeypatch):
+    fallback_calls = []
+    monkeypatch.setattr(virtual.sys, "platform", "linux")
+    monkeypatch.delattr(virtual.os, "pidfd_open", raising=False)
+    monkeypatch.setattr(
+        virtual,
+        "_linux_process_exit_waiter",
+        lambda _pid: pytest.fail("pidfd waiter used without os.pidfd_open"),
+    )
+    monkeypatch.setattr(
+        virtual,
+        "_fallback_process_exit_waiter",
+        lambda pid: nullcontext(lambda timeout: fallback_calls.append((pid, timeout)) or True),
+    )
+
+    with virtual._process_exit_waiter(4242) as wait_for_exit:
+        assert wait_for_exit(0.25) is True
+
+    assert fallback_calls == [(4242, 0.25)]
