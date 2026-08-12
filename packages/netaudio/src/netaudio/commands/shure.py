@@ -1315,7 +1315,7 @@ async def _correlate_async(host, device, port, dante_name, timeout, consecutive,
 
     all_dante_devices = await get_devices_from_daemon()
     if not all_dante_devices:
-        typer.echo("Daemon not running. Start the daemon first: netaudio server start", err=True)
+        typer.echo("Daemon not running. Start the daemon first: netaudio daemon start", err=True)
         raise typer.Exit(code=1)
 
     if dante_name:
