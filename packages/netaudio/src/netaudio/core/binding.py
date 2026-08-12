@@ -27,6 +27,7 @@ def _library_names():
 
 
 STATUS_OK = 0
+STATUS_TIMEOUT = 9
 
 _STATUS_NAMES = {
     1: "null pointer",
