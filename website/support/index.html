@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support | NetAudio</title>
+<meta name="description" content="Get help with NetAudio, report an app or Dante device compatibility issue, or request a feature.">
+<meta name="robots" content="index, follow">
+<meta name="author" content="Christopher Michael Ritsen">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NetAudio">
+<meta property="og:title" content="NetAudio Support">
+<meta property="og:description" content="Get help with NetAudio, submit feedback, report an issue, or request a feature.">
+<meta property="og:url" content="https://netaudio.app/support">
+<link rel="canonical" href="https://netaudio.app/support">
+<link rel="home" href="https://netaudio.app/">
+<link rel="privacy-policy" href="https://netaudio.app/privacy">
+<style>
+:root {
+	color-scheme: light dark;
+	background: #ffffff;
+	color: #000000;
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		background: #000000;
+		color: #ffffff;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	scroll-behavior: smooth;
+}
+
+body {
+	margin: 0;
+	background: inherit;
+	color: inherit;
+}
+
+a {
+	color: inherit;
+	font-weight: 750;
+	text-decoration-thickness: 0.12em;
+	text-underline-offset: 0.18em;
+	overflow-wrap: anywhere;
+}
+
+a:focus-visible {
+	outline: 3px solid currentColor;
+	outline-offset: 4px;
+}
+
+.skip-link {
+	position: absolute;
+	left: 1rem;
+	top: 1rem;
+	background: #000000;
+	color: #ffffff;
+	padding: 0.75rem 1rem;
+	transform: translateY(-220%);
+	z-index: 10;
+}
+
+@media (prefers-color-scheme: dark) {
+	.skip-link {
+		background: #ffffff;
+		color: #000000;
+	}
+}
+
+.skip-link:focus {
+	transform: translateY(0);
+}
+
+.site-header,
+main,
+.site-footer {
+	width: min(100% - 2rem, 72rem);
+	margin-inline: auto;
+}
+
+.site-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1.5rem;
+	padding: 1.25rem 0;
+	border-bottom: 1px solid currentColor;
+}
+
+.brand {
+	font-size: 1.15rem;
+	font-weight: 850;
+	letter-spacing: -0.02em;
+	text-decoration: none;
+}
+
+nav {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.75rem 1.25rem;
+}
+
+main {
+	padding: clamp(3rem, 8vw, 7rem) 0 5rem;
+}
+
+.hero {
+	display: grid;
+	grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.75fr);
+	gap: clamp(2rem, 6vw, 5rem);
+	align-items: end;
+	padding-bottom: clamp(3rem, 7vw, 5rem);
+}
+
+.eyebrow {
+	font-size: 0.85rem;
+	font-weight: 850;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	margin: 0 0 1rem;
+}
+
+h1,
+h2,
+h3 {
+	line-height: 1.08;
+	letter-spacing: -0.035em;
+}
+
+h1 {
+	font-size: clamp(3rem, 10vw, 6.5rem);
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+h2 {
+	font-size: clamp(2rem, 5vw, 3.6rem);
+	margin: 0 0 1.5rem;
+}
+
+h3 {
+	font-size: 1.35rem;
+	margin: 0 0 0.8rem;
+}
+
+p,
+li {
+	font-size: 1.05rem;
+	line-height: 1.65;
+}
+
+p {
+	margin: 0.8rem 0;
+}
+
+.introduction {
+	font-size: clamp(1.25rem, 2.5vw, 1.65rem);
+	line-height: 1.45;
+	margin-top: 1.5rem;
+}
+
+.contact-card {
+	border: 2px solid currentColor;
+	padding: clamp(1.4rem, 4vw, 2rem);
+}
+
+.contact-card p:first-of-type {
+	margin-top: 0;
+}
+
+.primary-link {
+	display: inline-block;
+	background: #000000;
+	color: #ffffff;
+	border: 2px solid #000000;
+	padding: 0.9rem 1.15rem;
+	margin: 0 0 0.75rem;
+	text-decoration: none;
+}
+
+@media (prefers-color-scheme: dark) {
+	.primary-link {
+		background: #ffffff;
+		color: #000000;
+		border-color: #ffffff;
+	}
+}
+
+.content-section {
+	border-top: 1px solid currentColor;
+	padding: clamp(2.4rem, 5.6vw, 4rem) 0;
+}
+
+.section-introduction {
+	font-size: 1.2rem;
+	max-width: 52rem;
+	margin-bottom: 0;
+}
+
+.site-footer {
+	display: flex;
+	justify-content: flex-end;
+	align-items: flex-start;
+	gap: 2rem;
+	border-top: 1px solid currentColor;
+	padding: 2rem 0 3rem;
+}
+
+.site-footer p {
+	margin: 0;
+}
+
+.footer-links {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.75rem 1.25rem;
+}
+
+@media (max-width: 46rem) {
+	.site-header,
+	.site-footer {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	nav,
+	.footer-links {
+		justify-content: flex-start;
+	}
+
+	.hero {
+		grid-template-columns: 1fr;
+	}
+
+	.hero {
+		align-items: start;
+	}
+}
+
+@media print {
+	.site-header,
+	main,
+	.site-footer {
+		width: 100%;
+	}
+
+	.skip-link {
+		display: none;
+	}
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to support content</a>
+<header class="site-header">
+<a class="brand" href="https://netaudio.app/">NetAudio</a>
+<nav aria-label="Site navigation">
+<a href="#contact">Contact</a>
+<a href="https://netaudio.app/privacy">Privacy</a>
+</nav>
+</header>
+
+<main id="main-content">
+<section class="hero">
+<div>
+<p class="eyebrow">App support</p>
+<h1>NetAudio Support</h1>
+<p class="introduction">Get help with NetAudio, report an app or Dante device compatibility issue, or suggest an improvement.</p>
+</div>
+<aside class="contact-card" id="contact" aria-labelledby="contact-heading">
+<h2 id="contact-heading">Email support</h2>
+<a class="primary-link" href="mailto:support@netaudio.app?subject=NetAudio%20Support">support@netaudio.app</a>
+<p>When relevant, include the app version and build, your iOS version and device model, the affected Dante device and firmware version, what happened, what you expected, and any screenshots or diagnostics you choose to share.</p>
+</aside>
+</section>
+
+<section class="content-section" aria-labelledby="in-app-heading">
+<h2 id="in-app-heading">Send feedback from the app</h2>
+<p class="section-introduction">Open <strong>Settings → Support → Feedback &amp; Feature Requests</strong>. Reports can include additional app and device information that may help diagnose the issue.</p>
+<p>To report a particular device, open that device and choose <strong>Support → Report a Device Problem</strong>. NetAudio will automatically include the affected device in the report. If you want a reply, include your email address in the message or contact support by email.</p>
+</section>
+
+<section class="content-section" aria-labelledby="diagnostics-heading">
+<h2 id="diagnostics-heading">Diagnostics and privacy</h2>
+<p class="section-introduction">Diagnostics are optional. Before submitting, you can omit them, choose a Redacted, Standard, or Full privacy level, and decide whether to include recent activity or exact device responses.</p>
+<p>Full diagnostics may contain device names, IP addresses, MAC addresses, and unredacted information returned by a device. Diagnostics are not uploaded merely because you generate or view them; they are sent only when you include them in a submitted report. See the <a href="https://netaudio.app/privacy">Privacy Policy</a> for details.</p>
+</section>
+
+<section class="content-section" aria-labelledby="testflight-heading">
+<h2 id="testflight-heading">TestFlight feedback</h2>
+<p class="section-introduction">If you installed NetAudio through TestFlight, you can also open NetAudio in the TestFlight app and choose <strong>Send Beta Feedback</strong> to send comments and an optional screenshot.</p>
+</section>
+</main>
+
+<footer class="site-footer">
+<div class="footer-links">
+<a href="https://netaudio.app/privacy">Privacy Policy</a>
+<a href="https://netaudio.app/">netaudio.app</a>
+</div>
+</footer>
+</body>
+</html>
