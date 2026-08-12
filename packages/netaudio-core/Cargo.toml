@@ -17,3 +17,5 @@ libc = "0.2"
 
 [profile.release]
 lto = true
+panic = "abort"
+overflow-checks = true

@@ -18,6 +18,8 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - AVIO input/output gain control
 - Add/remove subscriptions
 - CLI
+- Cross-platform foreground daemon plus installable boot service
+- Device lock/unlock through the native Rust protocol core
 - Display active subscriptions, Rx and Tx channels, devices names and
   addresses, subscription status
 - JSON output
@@ -39,7 +41,8 @@ Or with pip/pipx:
 pip install netaudio
 ```
 
-To install from a clone:
+To install from a clone (requires Python 3.9+ and a Rust toolchain, since the
+native core is compiled from source):
 
 ```bash
 uv sync
@@ -49,7 +52,7 @@ uv run netaudio
 #### Arch Linux
 
 To install from AUR, build the package with
-[aur/python-netaudio](https://aur.archlinux.org/packages/python-netaudio).
+[aur/netaudio](https://aur.archlinux.org/packages/netaudio).
 
 ### Usage
 
@@ -58,7 +61,10 @@ Run `netaudio` if installed globally, or `uv run netaudio` from a clone.
 Run tests:
 
 ```bash
-uv run pytest
+uv lock --check
+uv run --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
+cargo test --manifest-path packages/netaudio-core/Cargo.toml
+uv run pytest -q
 ```
 
 Lint and format:
