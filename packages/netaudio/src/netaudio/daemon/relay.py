@@ -14,6 +14,7 @@ from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.common.app_config import settings as app_settings
+from netaudio.core.binding import STATUS_TIMEOUT
 from netaudio.dante import flows
 from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.device_operations import validate_pin
@@ -929,7 +930,8 @@ class RelayServer:
             await self._send_json(writer, {"error": "invalid device response"}, 500)
             return
         if result.get("success") is not True:
-            await self._send_json(writer, result, 409)
+            status = 504 if result.get("status") == STATUS_TIMEOUT else 409
+            await self._send_json(writer, result, status)
             return
         await self._send_json(writer, result)
 
