@@ -44,6 +44,7 @@ START_LOCKFILE = os.path.join(RUNTIME_DIRECTORY, "virtual-start.lock")
 START_TIMEOUT_SECONDS = 10.0
 STOP_TIMEOUT_SECONDS = 5.0
 KILL_TIMEOUT_SECONDS = 1.0
+PROCESS_EXIT_POLL_INTERVAL_SECONDS = 0.05
 MAX_READINESS_MESSAGE_BYTES = 65_536
 READINESS_HOST = "127.0.0.1"
 
@@ -841,9 +842,16 @@ def _kqueue_process_exit_waiter(pid: int) -> Iterator[Callable[[float], bool]]:
 
 @contextmanager
 def _fallback_process_exit_waiter(pid: int) -> Iterator[Callable[[float], bool]]:
+    process_exit_poll = threading.Event()
+
     def wait_for_exit(timeout: float) -> bool:
-        threading.Event().wait(timeout)
-        return not _pid_exists(pid)
+        deadline = time.monotonic() + max(0.0, timeout)
+        while _pid_exists(pid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            process_exit_poll.wait(min(PROCESS_EXIT_POLL_INTERVAL_SECONDS, remaining))
+        return True
 
     yield wait_for_exit
 
@@ -854,7 +862,7 @@ def _process_exit_waiter(pid: int) -> Iterator[Callable[[float], bool]]:
         with _windows_process_exit_waiter(pid) as wait_for_exit:
             yield wait_for_exit
         return
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") and callable(getattr(os, "pidfd_open", None)):
         with _linux_process_exit_waiter(pid) as wait_for_exit:
             yield wait_for_exit
         return

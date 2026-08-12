@@ -589,8 +589,7 @@ def lock_set(
             if result.get("already"):
                 typer.echo("already locked", err=True)
             elif not result.get("success"):
-                typer.echo(f"Error: lock failed: {result.get('error', 'unknown')}", err=True)
-                raise typer.Exit(code=1)
+                _report_lock_failure("lock", result)
             return
 
         lock_key = _get_lock_key()
@@ -622,8 +621,7 @@ def lock_clear(
             if result.get("already"):
                 typer.echo("already unlocked", err=True)
             elif not result.get("success"):
-                typer.echo(f"Error: unlock failed: {result.get('error', 'unknown')}", err=True)
-                raise typer.Exit(code=1)
+                _report_lock_failure("unlock", result)
             return
 
         lock_key = _get_lock_key()
