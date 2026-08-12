@@ -764,7 +764,7 @@ pub fn build_volume_start(
     validate_dante_name(device_name)?;
     let mut name_bytes = device_name.as_bytes().to_vec();
     name_bytes.push(0);
-    if !name_bytes.len().is_multiple_of(2) {
+    if name_bytes.len() % 2 != 0 {
         name_bytes.push(0);
     }
     let padded_name_len = name_bytes.len();
@@ -825,7 +825,7 @@ mod tests {
     use super::*;
 
     fn bytes_from_hex(hexadecimal: &str) -> Vec<u8> {
-        assert!(hexadecimal.len().is_multiple_of(2));
+        assert_eq!(hexadecimal.len() % 2, 0);
         hexadecimal
             .as_bytes()
             .chunks_exact(2)
