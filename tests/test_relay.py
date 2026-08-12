@@ -669,6 +669,28 @@ class TestMutationVerification:
         assert status == 409
         assert response == {"success": False, "error": "locked"}
 
+    @pytest.mark.asyncio
+    async def test_lock_timeout_uses_gateway_timeout_status(self, monkeypatch):
+        device = make_device()
+        device.operations.lock_device.return_value = {
+            "success": False,
+            "status": 9,
+            "error": "netaudio_client_lock: device did not respond",
+        }
+        relay = make_relay({"dev1": device})
+        monkeypatch.setattr(relay, "_get_lock_key", lambda: b"key")
+
+        status, response = await post(
+            relay, "/lock", {"device": "dev1", "pin": "1234"}
+        )
+
+        assert status == 504
+        assert response == {
+            "success": False,
+            "status": 9,
+            "error": "netaudio_client_lock: device did not respond",
+        }
+
 
 class TestDeviceLookup:
     @pytest.mark.asyncio
