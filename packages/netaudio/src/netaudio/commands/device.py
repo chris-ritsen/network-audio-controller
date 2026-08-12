@@ -13,9 +13,8 @@ logger = logging.getLogger("netaudio")
 from netaudio.dante.const import BLUETOOTH_MODEL_IDS, HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import (
-    _device_lock_operation,
-    LOCK_OPERATION_LOCK,
-    LOCK_OPERATION_UNLOCK,
+    core_lock_device,
+    core_unlock_device,
     validate_dante_name,
     validate_pin,
 )
@@ -342,6 +341,17 @@ def _get_lock_key() -> bytes:
     raise typer.Exit(code=1)
 
 
+def _report_lock_failure(action: str, result: dict) -> None:
+    error = result.get("error")
+    if error:
+        typer.echo(f"Error: {action} failed: {error}", err=True)
+    elif result.get("status") is not None:
+        typer.echo(f"Error: {action} failed (status 0x{result['status']:04x})", err=True)
+    else:
+        typer.echo(f"Error: {action} failed: unknown", err=True)
+    raise typer.Exit(code=1)
+
+
 @app.command("list")
 def device_list(
     json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
@@ -592,13 +602,12 @@ def lock_set(
 
         device_ip = await _resolve_lock_ip()
 
-        result = await _device_lock_operation(device_ip, pin, lock_key, LOCK_OPERATION_LOCK)
+        result = await core_lock_device(device_ip, pin, lock_key)
 
         if result["already"]:
             typer.echo("already locked", err=True)
         elif not result["success"]:
-            typer.echo(f"Error: lock failed (status 0x{result['status']:04x})", err=True)
-            raise typer.Exit(code=1)
+            _report_lock_failure("lock", result)
 
     asyncio.run(_run())
 
@@ -626,13 +635,12 @@ def lock_clear(
 
         device_ip = await _resolve_lock_ip()
 
-        result = await _device_lock_operation(device_ip, pin, lock_key, LOCK_OPERATION_UNLOCK)
+        result = await core_unlock_device(device_ip, pin, lock_key)
 
         if result["already"]:
             typer.echo("already unlocked", err=True)
         elif not result["success"]:
-            typer.echo(f"Error: unlock failed (status 0x{result['status']:04x})", err=True)
-            raise typer.Exit(code=1)
+            _report_lock_failure("unlock", result)
 
     asyncio.run(_run())
 
@@ -1058,7 +1066,7 @@ def meter_callback(
 
         devices = await get_devices_from_daemon()
         if not devices:
-            typer.echo("Daemon not running. Start the daemon first: netaudio server start", err=True)
+            typer.echo("Daemon not running. Start the daemon first: netaudio daemon start", err=True)
             raise typer.Exit(code=1)
 
         filtered = filter_devices(devices)

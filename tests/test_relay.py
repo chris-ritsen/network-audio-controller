@@ -811,6 +811,41 @@ class TestRenameReset:
         assert "invalid device response" in body["error"]
 
 
+class TestRename:
+    @pytest.mark.asyncio
+    async def test_rename_device_sets_name(self):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        status, body = await post(relay, "/rename-device", {"device": "dev1", "name": "Desk-IO"})
+        assert status == 200
+        assert body == {"success": True}
+        device.operations.set_name.assert_awaited_once_with("Desk-IO")
+        device.operations.reset_name.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rename_device_with_empty_name_resets_name(self):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        status, response = await post(
+            relay, "/rename-device", {"device": "dev1", "name": ""}
+        )
+        assert status == 200
+        assert response == {"success": True}
+        device.operations.reset_name.assert_awaited_once()
+        device.operations.set_name.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", [{"device": "dev1"}, {"device": "dev1", "name": None}])
+    async def test_rename_device_requires_string_name(self, body):
+        device = make_device()
+        relay = make_relay({"dev1": device})
+        status, response = await post(relay, "/rename-device", body)
+        assert status == 400
+        assert response == {"error": "name must be a string"}
+        device.operations.reset_name.assert_not_awaited()
+        device.operations.set_name.assert_not_awaited()
+
+
 class TestSubscribe:
     @pytest.mark.asyncio
     async def test_single_subscription(self):
