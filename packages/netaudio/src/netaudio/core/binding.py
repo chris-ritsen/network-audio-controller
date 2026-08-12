@@ -114,8 +114,9 @@ def _load():
 
 
 def _configure(lib):
+    u8p = ctypes.POINTER(ctypes.c_uint8)
     buffer_out = [
-        ctypes.POINTER(ctypes.c_uint8),
+        u8p,
         ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_size_t),
     ]
@@ -146,7 +147,6 @@ def _configure(lib):
     ]
     lib.netaudio_lock_token.restype = ctypes.c_int
 
-    u8p = ctypes.POINTER(ctypes.c_uint8)
     lib.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
         ctypes.c_uint16,
