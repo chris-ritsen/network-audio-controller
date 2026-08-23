@@ -53,7 +53,7 @@ async def test_core_lock_device_rejects_bad_key_length_before_client(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_lock_device_uses_core_helper_and_updates_state(monkeypatch):
+async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_state(monkeypatch):
     async def fake_core_lock_device(device_ip, pin, key):
         assert device_ip == "192.0.2.10"
         assert pin == "1234"
@@ -66,11 +66,11 @@ async def test_lock_device_uses_core_helper_and_updates_state(monkeypatch):
     result = await DanteDeviceOperations(device).lock_device("1234", b"x" * 32)
 
     assert result["success"] is True
-    assert device.is_locked is True
+    assert device.is_locked is False
 
 
 @pytest.mark.asyncio
-async def test_unlock_device_uses_core_helper_and_updates_state(monkeypatch):
+async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_state(monkeypatch):
     async def fake_core_unlock_device(device_ip, pin, key):
         assert device_ip == "192.0.2.10"
         assert pin == "1234"
@@ -83,7 +83,7 @@ async def test_unlock_device_uses_core_helper_and_updates_state(monkeypatch):
     result = await DanteDeviceOperations(device).unlock_device("1234", b"x" * 32)
 
     assert result["success"] is True
-    assert device.is_locked is False
+    assert device.is_locked is True
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ class DanteSubscription:
         self._error = None
         self._rx_channel = None
         self._rx_channel_name = None
+        self._rx_channel_status_code = None
         self._rx_device = None
         self._rx_device_name = None
         self._status_code = None
@@ -16,6 +17,10 @@ class DanteSubscription:
         self._tx_channel_name = None
         self._tx_device = None
         self._tx_device_name = None
+
+    @property
+    def has_configured_source(self) -> bool:
+        return bool(self.tx_device_name)
 
     def __str__(self):
         return self.format(verbose=True)
@@ -28,10 +33,6 @@ class DanteSubscription:
 
         if verbose:
             status_text = self.status_text()
-
-            if self.rx_channel_status_code in SUBSCRIPTION_STATUS_LABELS:
-                status_text = list(status_text)
-                status_text.extend(self.rx_channel_status_text())
             status_text = ", ".join(status_text)
             text = f"{text} [{status_text}]"
 
@@ -47,11 +48,8 @@ class DanteSubscription:
 
     def rx_channel_status_text(self):
         if self.rx_channel_status_code is None:
-            return ("status:unknown",)
-        return SUBSCRIPTION_STATUS_LABELS.get(
-            self.rx_channel_status_code,
-            (f"status:{self.rx_channel_status_code}",),
-        )
+            return ("receiver-status:unknown",)
+        return (f"receiver-status:0x{self.rx_channel_status_code:04X}",)
 
     def to_json(self):
         from netaudio.dante.device_serializer import DanteDeviceSerializer

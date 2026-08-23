@@ -409,7 +409,7 @@ impl Client {
             }
         }
 
-        if channels.len() != usize::from(tx_count) {
+        if channels.len() > usize::from(tx_count) {
             return Err(ClientError::MalformedResponse);
         }
 
@@ -527,7 +527,7 @@ mod tests {
         ) {
             let response_length = u16::try_from(10 + body.len()).unwrap();
             let mut response = Vec::with_capacity(usize::from(response_length));
-            response.extend_from_slice(&0x27FFu16.to_be_bytes());
+            response.extend_from_slice(&request[0..2]);
             response.extend_from_slice(&response_length.to_be_bytes());
             response.extend_from_slice(&request[4..6]);
             response.extend_from_slice(&request[6..8]);
@@ -631,7 +631,9 @@ mod tests {
         )
         .unwrap();
         let started = Instant::now();
-        let response = client.execute("{\"command\":\"identify\"}").unwrap();
+        let response = client
+            .execute("{\"command\":\"identify\",\"sequence\":1}")
+            .unwrap();
         assert!(response.is_empty());
         assert!(started.elapsed() < Duration::from_millis(500));
     }
@@ -802,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn tx_inventory_rejects_page_count_mismatch() {
+    fn tx_inventory_uses_primary_metadata_group_with_larger_capacity() {
         let device = FakeDevice::new();
         let mut client = test_client(device.port());
 
@@ -812,13 +814,13 @@ mod tests {
                 &count_request,
                 count_source,
                 crate::protocol::RESULT_CODE_SUCCESS,
-                &[0, 0, 0, 1, 0, 0],
+                &[0, 0, 0, 64, 0, 1],
             );
 
             let (friendly_request, friendly_source) = device.receive();
             assert_eq!(
                 &friendly_request[10..],
-                &[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]
+                &[0x00, 0x01, 0x00, 0x01, 0x00, 0x40]
             );
             device.reply_with_arc_body(
                 &friendly_request,
@@ -828,28 +830,43 @@ mod tests {
             );
 
             let (page_request, page_source) = device.receive();
-            let mut body = vec![0, 0];
-            for (channel_number, name_pointer) in [(1u16, 32u16), (2u16, 34u16)] {
+            let mut body = vec![3, 3];
+            for (channel_number, metadata_pointer, name_pointer) in
+                [(1u16, 36u16, 52u16), (2, 36, 54), (3, 56, 72)]
+            {
                 let mut record = [0u8; crate::parser::TX_RECORD_SIZE];
                 record[0..2].copy_from_slice(&channel_number.to_be_bytes());
-                record[4..6].copy_from_slice(&0x002Cu16.to_be_bytes());
+                record[4..6].copy_from_slice(&metadata_pointer.to_be_bytes());
                 record[6..8].copy_from_slice(&name_pointer.to_be_bytes());
                 body.extend_from_slice(&record);
             }
-            body.extend_from_slice(&[0, 0, 0xBB, 0x80]);
+            body.extend_from_slice(&[0, 0, 0xBB, 0x80, 2, 2, 0, 24, 0, 0, 0, 0, 0, 0, 0, 4]);
             body.extend_from_slice(b"a\0b\0");
+            body.extend_from_slice(&[0, 0, 0xBB, 0x80, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            body.extend_from_slice(b"c\0");
             device.reply_with_arc_body(
                 &page_request,
                 page_source,
-                crate::protocol::RESULT_CODE_SUCCESS,
+                crate::protocol::RESULT_CODE_MORE_PAGES,
                 &body,
             );
         });
 
-        assert!(matches!(
-            client.get_tx_channels(),
-            Err(ClientError::MalformedResponse)
-        ));
+        assert_eq!(
+            client.get_tx_channels().unwrap(),
+            vec![
+                TxChannel {
+                    number: 1,
+                    name: Some("a".to_string()),
+                    friendly_name: None,
+                },
+                TxChannel {
+                    number: 2,
+                    name: Some("b".to_string()),
+                    friendly_name: None,
+                },
+            ]
+        );
         device_thread.join().unwrap();
     }
 
