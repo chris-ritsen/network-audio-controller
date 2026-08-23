@@ -37,7 +37,9 @@ def _load_build_hook(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "hatchling.builders.hooks.plugin.interface", interface)
 
-    spec = importlib.util.spec_from_file_location("netaudio_test_hatch_build_core", REPO_ROOT / "hatch_build_core.py")
+    spec = importlib.util.spec_from_file_location(
+        "netaudio_test_hatch_build_core", REPO_ROOT / "scripts" / "hatch_build_core.py"
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -84,10 +86,23 @@ def test_build_hook_rebuilds_before_including_the_library(monkeypatch, tmp_path)
 
     hook.initialize("0.0.0", build_data)
 
+    installed_library = tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "core" / library_path.name
     assert calls == [crate_dir]
-    assert build_data["force_include"] == {str(library_path): f"netaudio/core/{library_path.name}"}
+    assert installed_library.is_file()
+    assert build_data["force_include"] == {str(installed_library): f"netaudio/core/{library_path.name}"}
     assert build_data["pure_python"] is False
     assert build_data["tag"] == "py3-none-test_platform"
+
+
+def test_install_built_library_copies_into_the_python_package(monkeypatch, tmp_path):
+    module = _load_build_hook(monkeypatch)
+    built_library = tmp_path / "libnetaudio_core.so"
+    built_library.write_bytes(b"core")
+
+    installed = module.install_built_library(tmp_path, built_library)
+
+    assert installed == tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "core" / "libnetaudio_core.so"
+    assert installed.read_bytes() == b"core"
 
 
 class _Object:

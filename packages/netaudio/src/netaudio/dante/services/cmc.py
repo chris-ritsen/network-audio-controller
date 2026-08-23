@@ -101,22 +101,60 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
 
 
 class DanteCMCService(DanteUnicastService):
-    def __init__(self, packet_store=None, interface_name: str | None = None, dissect=False):
+    def __init__(
+        self,
+        packet_store=None,
+        interface_name: str | None = None,
+        dissect=False,
+        host_media_access_control_address: bytes | None = None,
+    ):
         super().__init__(packet_store=packet_store, dissect=dissect)
         self._commands = DanteDeviceCommands()
         self._sequence_counter = 0
         self._registered_devices: set[str] = set()
         self._heartbeat_task: asyncio.Task | None = None
-        self._host_mac = _get_host_mac(interface_name)
+        self._host_media_access_control_address = (
+            host_media_access_control_address
+            if host_media_access_control_address is not None
+            else _get_host_mac(interface_name)
+        )
 
-    def _build_registration_packet(self, sequence: int) -> bytes:
-        return self._commands.command_cmc_register(sequence, self._host_mac)
+    @property
+    def host_media_access_control_address(self) -> bytes:
+        """Return the host address used in CMC registration and metering commands."""
+        return self._host_media_access_control_address
 
-    async def register_device(self, device_ip: str) -> bytes | None:
+    def _build_registration_packet(
+        self,
+        sequence: int,
+        host_media_access_control_address: bytes | None = None,
+    ) -> bytes:
+        return self._commands.command_cmc_register(
+            sequence,
+            host_media_access_control_address or self._host_media_access_control_address,
+        )
+
+    @staticmethod
+    def _registration_response_is_successful(sequence: int, response: bytes | None) -> bool:
+        if response is None:
+            return False
+        from netaudio import core
+
+        try:
+            parsed = core.parse_response("cmc_registration", response)
+        except core.NetaudioCoreError:
+            return False
+        return parsed == {"sequence": sequence, "status": 1}
+
+    async def register_device(
+        self,
+        device_ip: str,
+        host_media_access_control_address: bytes | None = None,
+    ) -> bytes | None:
         sequence = self._sequence_counter
         self._sequence_counter = (self._sequence_counter + 1) & 0xFFFF
 
-        packet = self._build_registration_packet(sequence)
+        packet = self._build_registration_packet(sequence, host_media_access_control_address)
         response = await self.request(
             packet,
             device_ip,
@@ -125,10 +163,24 @@ class DanteCMCService(DanteUnicastService):
             logical_command_name="cmc_register",
         )
 
-        if response:
+        if self._registration_response_is_successful(sequence, response):
             self._registered_devices.add(device_ip)
             logger.debug(f"CMC registered with {device_ip}")
+            return response
 
+        self._registered_devices.discard(device_ip)
+        if response is not None:
+            logger.warning(f"CMC registration returned an invalid response from {device_ip}")
+        return None
+
+    async def require_registration(
+        self,
+        device_ip: str,
+        host_media_access_control_address: bytes | None = None,
+    ) -> bytes:
+        response = await self.register_device(device_ip, host_media_access_control_address)
+        if response is None:
+            raise RuntimeError(f"CMC registration failed for {device_ip}")
         return response
 
     async def register_all(self, device_ips: list[str]) -> None:

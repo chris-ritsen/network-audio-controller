@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 
+from netaudio.asynchronous_primitives import DeferredAsyncioEvent
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio.shure.device import (
     BatteryType,
@@ -278,7 +280,7 @@ class ShureManager:
         self._scan_task: asyncio.Task[None] | None = None
         self._connect_tasks: dict[str, asyncio.Task[None]] = {}
         self._reconnect_tasks: dict[str, asyncio.Task[None]] = {}
-        self._stop_event = asyncio.Event()
+        self._stop_event = DeferredAsyncioEvent()
         self._running = False
 
     async def start(self):
@@ -385,16 +387,7 @@ class ShureManager:
                 logger.info(f"Shure device gone from neighbor table: {ip_address}")
                 await connection.close()
                 self._connections.pop(ip_address, None)
-                normalized_mac_address = _normalize_mac(connection.mac)
-                if normalized_mac_address in self.devices:
-                    del self.devices[normalized_mac_address]
-                    self._raw_reports.pop(normalized_mac_address, None)
-                    self.dispatcher.emit_nowait(
-                        DanteEvent(
-                            type=EventType.SHURE_DEVICE_REMOVED,
-                            device_name=normalized_mac_address,
-                        )
-                    )
+                self._mark_device_offline(connection.mac)
 
         for ip_address, mac_address in entries:
             if ip_address not in self._connections and ip_address not in self._reconnect_tasks:
@@ -450,6 +443,7 @@ class ShureManager:
                     normalized_mac_address,
                 )
 
+            device.mark_seen()
             self.devices[normalized_mac_address] = device
             logger.info(f"Shure device connected: {ip_address} ({connection.model})")
 
@@ -513,9 +507,23 @@ class ShureManager:
                 exc_info=(type(exception), exception, exception.__traceback__),
             )
 
+    def _mark_device_offline(self, mac_address: str) -> None:
+        normalized_mac_address = _normalize_mac(mac_address)
+        device = self.devices.get(normalized_mac_address)
+        if device is None or not device.mark_offline():
+            return
+        self.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.SHURE_DEVICE_UPDATED,
+                device_name=normalized_mac_address,
+                data={"online": False, "last_seen": device.last_seen},
+            )
+        )
+
     def _on_connection_lost(self, connection, *, reconnect):
         if self._connections.get(connection.ip) is connection:
             self._connections.pop(connection.ip, None)
+        self._mark_device_offline(connection.mac)
         if self._running and reconnect and connection.ip not in self._connections:
             self._schedule_reconnect(connection.ip, connection.mac)
 
@@ -540,7 +548,11 @@ class ShureManager:
         if not device:
             return
 
+        device.last_seen = time.time()
         changed = False
+        if not device.online:
+            device.online = True
+            changed = True
 
         if channel is None:
             if protocol == "ad4d":

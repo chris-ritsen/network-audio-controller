@@ -43,7 +43,7 @@ xcodebuild -create-xcframework \
     -output "$root/dist/netaudio_core.xcframework"
 
 framework_path="$root/dist/netaudio_core.xcframework"
-application_binary_interface_version="$(sed -nE 's/^pub const NETAUDIO_ABI_VERSION: u32 = ([0-9]+);$/\1/p' "$crate/src/ffi.rs")"
+application_binary_interface_version="$(sed -nE 's/^pub const NETAUDIO_ABI_VERSION: u32 = ([0-9]+);$/\1/p' "$crate/src/ffi/mod.rs")"
 crate_version="$(sed -nE 's/^version = "([^"]+)"$/\1/p' "$crate/Cargo.toml" | head -n 1)"
 if [[ -z "$application_binary_interface_version" || -z "$crate_version" ]]; then
     echo "could not determine the core version and ABI for XCFramework provenance" >&2

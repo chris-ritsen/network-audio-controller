@@ -214,7 +214,13 @@ class TestDanteApplication:
         device.supported_sample_rates = [44_100, 48_000]
         device.supported_encodings = [16, 24, 32]
         device.aes67_supported = True
+        device.aes67_multicast_prefix = "239.69.0.0"
         device.settings_properties = [{"property_id": 0x0063, "flags": 0x0001}]
+        device.sample_rate_pullup_raw_value = 0
+        device.requested_sample_rate_pullup_raw_value = 0
+        device.supported_sample_rate_pullup_raw_values = [0, 1, 2, 3, 4]
+        device.transmitter_flows = [{"flow_number": 1}]
+        device.tx_flow_count = 1
         application.register_device("test.local.", device)
 
         application.mark_device_offline("test.local.")
@@ -223,7 +229,13 @@ class TestDanteApplication:
         assert device.supported_sample_rates is None
         assert device.supported_encodings is None
         assert device.aes67_supported is None
+        assert device.aes67_multicast_prefix is None
         assert device.settings_properties is None
+        assert device.sample_rate_pullup_raw_value is None
+        assert device.requested_sample_rate_pullup_raw_value is None
+        assert device.supported_sample_rate_pullup_raw_values is None
+        assert device.transmitter_flows is None
+        assert device.tx_flow_count is None
 
     @pytest.mark.asyncio
     async def test_probe_sample_rates_all_probes_online_devices_and_applies_results(self):
@@ -643,6 +655,7 @@ class TestDanteApplication:
         application._probe_aes67_all = AsyncMock()
         application._probe_sample_rates_all = AsyncMock()
         application._probe_encodings_all = AsyncMock()
+        application._probe_sample_rate_pullups_all = AsyncMock()
         application._populate_device_controls = AsyncMock()
 
         await application.populate_devices(selected_devices, timeout=0.1, include_channels=False)
@@ -655,6 +668,7 @@ class TestDanteApplication:
         application._probe_aes67_all.assert_awaited_once_with(timeout=0.1, devices=selected_devices)
         application._probe_sample_rates_all.assert_awaited_once_with(timeout=0.1, devices=selected_devices)
         application._probe_encodings_all.assert_awaited_once_with(timeout=0.1, devices=selected_devices)
+        application._probe_sample_rate_pullups_all.assert_awaited_once_with(timeout=0.1, devices=selected_devices)
         application._populate_device_controls.assert_awaited_once_with(
             selected_device,
             include_channels=False,
@@ -681,6 +695,8 @@ class TestDanteApplication:
             "AES67",
             "sample rates",
             "encodings",
+            "gain levels",
+            "sample rate pull-ups",
             "controls",
             "CMC registration",
         }
@@ -704,6 +720,8 @@ class TestDanteApplication:
         application._probe_aes67_all = make_phase("AES67")
         application._probe_sample_rates_all = make_phase("sample rates")
         application._probe_encodings_all = make_phase("encodings")
+        application._probe_gain_levels_all = make_phase("gain levels")
+        application._probe_sample_rate_pullups_all = make_phase("sample rate pull-ups")
         application._populate_device_controls = make_phase("controls")
         application.cmc.register_all = make_phase("CMC registration")
 

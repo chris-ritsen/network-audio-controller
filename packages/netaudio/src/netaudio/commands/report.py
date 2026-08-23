@@ -136,7 +136,13 @@ def _filter_device(device: dict, level: str) -> dict:
         filtered["encoding"] = device.get("encoding")
         filtered["aes67_current"] = device.get("aes67_current")
         filtered["aes67_configured"] = device.get("aes67_configured")
+        filtered["aes67_multicast_prefix"] = device.get("aes67_multicast_prefix")
+        filtered["sample_rate_pullup_raw_value"] = device.get("sample_rate_pullup_raw_value")
+        filtered["requested_sample_rate_pullup_raw_value"] = device.get("requested_sample_rate_pullup_raw_value")
+        filtered["supported_sample_rate_pullup_raw_values"] = device.get("supported_sample_rate_pullup_raw_values")
         filtered["preferred_leader"] = device.get("preferred_leader")
+        filtered["clock_source_code"] = device.get("clock_source_code")
+        filtered["clock_subdomain"] = device.get("clock_subdomain")
         filtered["is_locked"] = device.get("is_locked")
         return filtered
 
@@ -229,12 +235,12 @@ def _format_report(
 
             subscriptions = device.get("subscriptions", [])
             if subscriptions:
-                active = [s for s in subscriptions if s.get("tx_channel_name") and s.get("tx_device_name")]
+                active = [s for s in subscriptions if s.get("tx_device")]
                 if active:
                     lines.append(f"  Subscriptions: {len(active)} active")
                     for subscription in active:
                         lines.append(
-                            f"    {subscription.get('rx_channel_name', '')}@{subscription.get('rx_device_name', '')} <- {subscription.get('tx_channel_name', '')}@{subscription.get('tx_device_name', '')}"
+                            f"    {subscription.get('rx_channel', '')}@{subscription.get('rx_device', '')} <- {subscription.get('tx_channel', '')}@{subscription.get('tx_device', '')}"
                         )
 
         lines.append("")

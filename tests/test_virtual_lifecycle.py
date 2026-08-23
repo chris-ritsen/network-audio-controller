@@ -7,7 +7,7 @@ from subprocess import CompletedProcess
 import pytest
 from typer.testing import CliRunner
 
-from netaudio.commands import virtual
+from netaudio.commands import virtual, virtual_process
 
 
 runner = CliRunner()
@@ -199,45 +199,45 @@ def test_process_command_uses_untruncated_ps_output_for_token(monkeypatch):
         recorded_calls.append(command)
         return CompletedProcess(command, 0, stdout=long_command, stderr="")
 
-    monkeypatch.setattr(virtual.os.path, "exists", lambda path: False)
-    monkeypatch.setattr(virtual.subprocess, "run", run)
-    monkeypatch.setattr(virtual, "_pid_exists", lambda pid: True)
+    monkeypatch.setattr(virtual_process.os.path, "exists", lambda path: False)
+    monkeypatch.setattr(virtual_process.subprocess, "run", run)
+    monkeypatch.setattr(virtual_process, "_pid_exists", lambda pid: True)
 
     record = virtual.ProcessRecord(pid=1234, token=token)
-    assert virtual._ownership_state(record) == "owned"
-    if virtual.os.name != "nt":
+    assert virtual_process._ownership_state(record) == "owned"
+    if virtual_process.os.name != "nt":
         assert recorded_calls[0][:2] == ["ps", "-ww"]
 
 
 def test_windows_pid_probe_never_uses_os_kill(monkeypatch):
     probed_process_ids = []
-    monkeypatch.setattr(virtual.os, "name", "nt")
+    monkeypatch.setattr(virtual_process.os, "name", "nt")
     monkeypatch.setattr(
-        virtual,
+        virtual_process,
         "_windows_pid_exists",
         lambda pid: probed_process_ids.append(pid) or True,
     )
     monkeypatch.setattr(
-        virtual.os,
+        virtual_process.os,
         "kill",
         lambda *_arguments: pytest.fail("os.kill(pid, 0) is destructive on Windows"),
     )
 
-    assert virtual._pid_exists(1234) is True
+    assert virtual_process._pid_exists(1234) is True
     assert probed_process_ids == [1234]
 
 
 def test_windows_stop_requests_ctrl_break_before_forceful_termination(monkeypatch):
     sent_signals = []
-    monkeypatch.setattr(virtual.os, "name", "nt")
-    monkeypatch.setattr(virtual.signal, "CTRL_BREAK_EVENT", 123, raising=False)
+    monkeypatch.setattr(virtual_process.os, "name", "nt")
+    monkeypatch.setattr(virtual_process.signal, "CTRL_BREAK_EVENT", 123, raising=False)
     monkeypatch.setattr(
-        virtual.os,
+        virtual_process.os,
         "kill",
         lambda pid, sent_signal: sent_signals.append((pid, sent_signal)),
     )
 
-    virtual._request_process_stop(4321)
+    virtual_process._request_process_stop(4321)
 
     assert sent_signals == [(4321, 123)]
 
@@ -246,8 +246,8 @@ def test_stop_never_signals_a_reused_pid(monkeypatch, tmp_path):
     _use_runtime(monkeypatch, tmp_path)
     record = virtual.ProcessRecord(pid=1234, token="a" * 32, name="old")
     virtual._write_process_record(record)
-    monkeypatch.setattr(virtual, "_pid_exists", lambda pid: True)
-    monkeypatch.setattr(virtual, "_process_command", lambda pid: "/usr/bin/unrelated-service")
+    monkeypatch.setattr(virtual_process, "_pid_exists", lambda pid: True)
+    monkeypatch.setattr(virtual_process, "_process_command", lambda pid: "/usr/bin/unrelated-service")
     monkeypatch.setattr(
         virtual.os,
         "kill",
@@ -275,7 +275,8 @@ def test_stop_waits_for_exit_before_reporting_success(monkeypatch, tmp_path, cap
 
     assert virtual._stop_virtual() is True
 
-    assert sent_signals == [(1234, virtual.signal.SIGTERM)]
+    expected_signal = virtual.signal.CTRL_BREAK_EVENT if virtual.os.name == "nt" else virtual.signal.SIGTERM
+    assert sent_signals == [(1234, expected_signal)]
     assert not (tmp_path / "virtual.pid").exists()
     assert "Stopped virtual device (PID 1234)" in capsys.readouterr().out
 
@@ -320,7 +321,7 @@ def test_process_exit_waiter_detects_process_exit():
     )
     reaper = threading.Thread(target=process.wait)
     try:
-        with virtual._process_exit_waiter(process.pid) as wait_for_exit:
+        with virtual_process._process_exit_waiter(process.pid) as wait_for_exit:
             assert process.stdin is not None
             process.stdin.close()
             reaper.start()
@@ -333,22 +334,23 @@ def test_process_exit_waiter_detects_process_exit():
             process.wait(timeout=2.0)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfd selection is Linux-specific")
 def test_process_exit_waiter_falls_back_without_pidfd(monkeypatch):
     fallback_calls = []
-    monkeypatch.setattr(virtual.sys, "platform", "linux")
-    monkeypatch.delattr(virtual.os, "pidfd_open", raising=False)
+    monkeypatch.setattr(virtual_process.sys, "platform", "linux")
+    monkeypatch.delattr(virtual_process.os, "pidfd_open", raising=False)
     monkeypatch.setattr(
-        virtual,
+        virtual_process,
         "_linux_process_exit_waiter",
         lambda _pid: pytest.fail("pidfd waiter used without os.pidfd_open"),
     )
     monkeypatch.setattr(
-        virtual,
+        virtual_process,
         "_fallback_process_exit_waiter",
         lambda pid: nullcontext(lambda timeout: fallback_calls.append((pid, timeout)) or True),
     )
 
-    with virtual._process_exit_waiter(4242) as wait_for_exit:
+    with virtual_process._process_exit_waiter(4242) as wait_for_exit:
         assert wait_for_exit(0.25) is True
 
     assert fallback_calls == [(4242, 0.25)]

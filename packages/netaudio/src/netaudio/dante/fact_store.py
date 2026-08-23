@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 
 
-DEFAULT_FACTS_PATH = Path("tests/fixtures/provenance/facts.json")
+DEFAULT_PROVENANCE_DIRECTORY = Path.home() / ".local" / "share" / "netaudio" / "provenance"
+DEFAULT_FACTS_PATH = DEFAULT_PROVENANCE_DIRECTORY / "facts.json"
+FIELD_DIRECTIONS = frozenset({"multicast", "request", "response"})
 
 
 def _load_facts(path: Path) -> dict:
@@ -33,6 +35,14 @@ def get_confidence(fact: dict) -> str:
     if confidence_log:
         return confidence_log[-1]["level"]
     return fact.get("confidence", "unknown")
+
+
+def fact_status(fact: dict) -> str:
+    if get_confidence(fact) == "disproved":
+        return "disproved"
+    if fact.get("quarantine"):
+        return "quarantined"
+    return "active"
 
 
 def _append_confidence(fact: dict, level: str):
@@ -317,6 +327,66 @@ def reinstate_fact(
     return fact
 
 
+def quarantine_fact(
+    path: Path,
+    category: str,
+    key: str,
+    reason: str,
+) -> dict | None:
+    data = _load_facts(path)
+    fk = _fact_key(category, key)
+    fact = data["facts"].get(fk)
+
+    if fact is None:
+        return None
+
+    _migrate_confidence(fact)
+
+    fact.setdefault("history", []).append(
+        {
+            "replaced_ns": time.time_ns(),
+            "previous_confidence": get_confidence(fact),
+            "previous_note": fact.get("note"),
+            "action": "quarantined",
+        }
+    )
+    fact["quarantine"] = {
+        "reason": reason,
+        "timestamp_ns": time.time_ns(),
+    }
+    fact["confidence"] = get_confidence(fact)
+
+    data["facts"][fk] = fact
+    _save_facts(data, path)
+    return fact
+
+
+def clear_quarantine(path: Path, category: str, key: str) -> dict | None:
+    data = _load_facts(path)
+    fk = _fact_key(category, key)
+    fact = data["facts"].get(fk)
+
+    if fact is None or "quarantine" not in fact:
+        return None
+
+    _migrate_confidence(fact)
+
+    fact.setdefault("history", []).append(
+        {
+            "replaced_ns": time.time_ns(),
+            "previous_confidence": get_confidence(fact),
+            "previous_note": fact.get("note"),
+            "action": "quarantine_cleared",
+        }
+    )
+    fact.pop("quarantine", None)
+    fact["confidence"] = get_confidence(fact)
+
+    data["facts"][fk] = fact
+    _save_facts(data, path)
+    return fact
+
+
 def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
     if provenance_dir is None:
         provenance_dir = path.parent
@@ -335,6 +405,28 @@ def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
             "errors": [],
             "verified_fields": [],
         }
+        if get_confidence(fact) == "disproved":
+            result["status"] = "disproved"
+            results.append(result)
+            continue
+        if fact.get("quarantine"):
+            result["status"] = "quarantined"
+            result["quarantine_reason"] = fact["quarantine"].get("reason")
+            results.append(result)
+            continue
+
+        fields = fact.get("fields", [])
+        invalid_field_directions = sorted(
+            {
+                repr(field.get("direction"))
+                for field in fields
+                if field.get("direction") is not None
+                and (not isinstance(field.get("direction"), str) or field.get("direction") not in FIELD_DIRECTIONS)
+            }
+        )
+        for direction in invalid_field_directions:
+            result["errors"].append(f"invalid field direction: {direction}")
+        scoped_field_match_counts = [0] * len(fields)
 
         evidence_refs = fact.get("evidence", [])
         if not evidence_refs:
@@ -375,12 +467,21 @@ def check_facts(path: Path, provenance_dir: Path | None = None) -> list[dict]:
                 result["errors"].append(f"payload file missing for packet #{packet_id}")
                 continue
 
-            for field in fact.get("fields", []):
+            direction = sample.get("direction") or "multicast"
+            for field_index, field in enumerate(fields):
+                if not _field_applies_to_direction(field, direction):
+                    continue
+                scoped_field_match_counts[field_index] += 1
                 field_result = _verify_field(payload, field)
                 if field_result["ok"]:
                     result["verified_fields"].append(field_result)
                 else:
                     result["errors"].append(field_result["error"])
+
+        for field_index, field in enumerate(fields):
+            direction = field.get("direction")
+            if direction in FIELD_DIRECTIONS and scoped_field_match_counts[field_index] == 0:
+                result["errors"].append(f"field {field.get('name', '?')}: no {direction} evidence packet")
 
         results.append(result)
 
@@ -486,6 +587,11 @@ def _extract_field_value(payload: bytes, field: dict) -> tuple[object, str]:
         display = str(value)
 
     return value, display
+
+
+def _field_applies_to_direction(field: dict, direction: str) -> bool:
+    field_direction = field.get("direction")
+    return field_direction is None or field_direction == direction
 
 
 def _verify_field(payload: bytes, field: dict) -> dict:

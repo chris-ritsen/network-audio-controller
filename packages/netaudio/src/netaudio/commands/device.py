@@ -3,14 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from enum import Enum
 from fnmatch import fnmatch
+from pathlib import Path
 from typing import Optional
 
 import typer
 
 logger = logging.getLogger("netaudio")
 
-from netaudio.dante.const import BLUETOOTH_MODEL_IDS, HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS
+from netaudio.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import (
     core_lock_device,
@@ -20,17 +22,24 @@ from netaudio.dante.device_operations import (
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.latency import standard_latency_choices_for_range
+from netaudio.dante.clock_config import format_clock_subdomain
+from netaudio.dante.sample_rate_pullup import (
+    format_supported_sample_rate_pullup_values,
+    sample_rate_pullup_label,
+)
 from netaudio.dante.services.notification import (
     NOTIFICATION_ROUTING_DEVICE_CHANGE,
     NOTIFICATION_SETTINGS_CHANGE,
 )
 
 from netaudio._common import (
+    CapabilityProbeTimeout,
     _command_context,
     _discover,
     _get_arc_port,
     _load_device_for_show,
     _populate_controls,
+    _probe_lock_status_once,
     _resolve_one,
     filter_devices,
     output_single,
@@ -44,234 +53,38 @@ from netaudio.icons import icon, icon_only
 app = typer.Typer(help="Manage Dante devices.", no_args_is_help=True)
 
 
-def _format_mac(mac: str) -> str:
-    if not mac:
-        return ""
-    raw = mac.replace(":", "").replace("-", "").upper()
-    if len(raw) == 16 and raw[6:10] == "FFFE":
-        raw = raw[:6] + raw[10:]
-    elif len(raw) == 16 and raw.endswith("0000"):
-        raw = raw[:12]
-    return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
+class ClearConfigurationMode(str, Enum):
+    ALL = "all"
+    PRESERVE_INTERNET_PROTOCOL_SETTINGS = "preserve-network"
 
 
-def _format_latency_milliseconds(latency_milliseconds: float) -> str:
-    if latency_milliseconds == int(latency_milliseconds):
-        return str(int(latency_milliseconds))
-    return f"{latency_milliseconds:g}"
-
-
-def _format_standard_latency_choices(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    choices = standard_latency_choices_for_range(
-        minimum_latency_milliseconds,
-        maximum_latency_milliseconds,
-    )
-    if choices is None:
-        return ""
-    if not choices:
-        return ""
-    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + "ms"
-
-
-def _format_latency_range(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
-        return ""
-    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
-    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
-    return f"{minimum_label}-{maximum_label}ms"
-
-
-def _format_last_seen(last_seen: float | None) -> str:
-    if last_seen is None:
-        return ""
-    from datetime import datetime, timezone
-
-    return datetime.fromtimestamp(last_seen, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _format_sample_rate(sample_rate_hertz: int | None) -> str:
-    if sample_rate_hertz is None:
-        return "unknown"
-    return f"{sample_rate_hertz / 1000:g} kHz"
-
-
-def _format_link_speed(link_speed_mbps: int | None) -> str:
-    if link_speed_mbps is None:
-        return "unknown"
-    if link_speed_mbps >= 1_000:
-        return f"{link_speed_mbps / 1_000:g} Gbps"
-    return f"{link_speed_mbps} Mbps"
-
-
-def _format_supported_sample_rates(supported_sample_rates: list[int] | None) -> str:
-    if supported_sample_rates is None:
-        return "unknown"
-    if not supported_sample_rates:
-        return "none advertised"
-    return ", ".join(f"{sample_rate_hertz / 1000:g}" for sample_rate_hertz in supported_sample_rates) + " kHz"
-
-
-def _format_encoding(encoding: int | None) -> str:
-    return f"PCM{encoding}" if encoding is not None else "unknown"
-
-
-def _format_supported_encodings(supported_encodings: list[int] | None) -> str:
-    if supported_encodings is None:
-        return "unknown"
-    if not supported_encodings:
-        return "none advertised"
-    return ", ".join(f"PCM{encoding}" for encoding in supported_encodings)
-
-
-def _format_reference_levels(device) -> str:
-    if device.gain_device_type is None or device.gain_levels is None:
-        return "unknown"
-    return ", ".join(
-        f"{channel_number}: {device.gain_level_label_for_channel(channel_number, 'tx' if device.gain_device_type == 'input' else 'rx')}"
-        for channel_number in range(1, len(device.gain_levels) + 1)
-    )
-
-
-def _format_reference_options(device) -> str:
-    choices = device.gain_level_choices
-    if choices is None:
-        return "unknown"
-    if not choices:
-        return "none advertised"
-    return ", ".join(choice["label"] for choice in choices)
-
-
-def _format_latency(latency_milliseconds: float | None) -> str:
-    if latency_milliseconds is None:
-        return "unknown"
-    return f"{_format_latency_milliseconds(latency_milliseconds)} ms"
-
-
-def _format_show_latency_range(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
-        return "unknown"
-    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
-    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
-    return f"{minimum_label}-{maximum_label} ms"
-
-
-def _format_show_standard_latencies(device) -> str:
-    choices = device.standard_latency_choices
-    if choices is None:
-        return "unknown"
-    if not choices:
-        return "none advertised"
-    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + " ms"
-
-
-def _format_aes67(device) -> str:
-    if device.aes67_supported is False:
-        return "unsupported"
-    current = device.aes67_current
-    configured = device.aes67_configured
-    if current is None and configured is None:
-        return "unknown"
-    if current is not None and configured is not None and current != configured:
-        current_label = "enabled" if current else "disabled"
-        configured_label = "enabled" if configured else "disabled"
-        return f"{current_label}; configured {configured_label} (reboot required)"
-    effective_state = configured if configured is not None else current
-    return "enabled" if effective_state else "disabled"
-
-
-def _format_channel_count(channels: dict, reported_count: int | None) -> str:
-    if channels:
-        return str(len(channels))
-    if reported_count is not None:
-        return str(reported_count)
-    return "unknown"
-
-
-def _device_show_rows(device) -> list[list[str]]:
-    tx_count = device.tx_count
-    if tx_count is None and device.tx_channels:
-        tx_count = len(device.tx_channels)
-    rx_count = device.rx_count
-    if rx_count is None and device.rx_channels:
-        rx_count = len(device.rx_channels)
-    tx_count_label = str(tx_count) if tx_count is not None else "unknown"
-    rx_count_label = str(rx_count) if rx_count is not None else "unknown"
-    active_latency = device.active_latency if device.active_latency is not None else device.latency
-    model = device.dante_model or device.model_id or device.model
-    manufacturer = device.manufacturer or device.manufacturer_mdns
-    rows = [
-        ["Name", device.name or "unknown"],
-        ["Status", "online" if device.online else "offline"],
-        ["Model", model or "unknown"],
-        ["Manufacturer", manufacturer or "unknown"],
-        ["IP Address", str(device.ipv4) if device.ipv4 else "unknown"],
-        ["MAC Address", _format_mac(device.mac_address) if device.mac_address else "unknown"],
-        ["Link Speed", _format_link_speed(device.link_speed_mbps)],
-    ]
-    if device.firmware_version:
-        rows.append(["Firmware", device.firmware_version])
-    if device.software_version:
-        rows.append(["Software", device.software_version])
-    rows.extend(
-        [
-            ["Channels", f"{tx_count_label} TX / {rx_count_label} RX"],
-            ["Sample Rate", _format_sample_rate(device.sample_rate)],
-            ["Supported Sample Rates", _format_supported_sample_rates(device.supported_sample_rates)],
-            ["Encoding", _format_encoding(device.encoding)],
-            ["Supported Encodings", _format_supported_encodings(device.supported_encodings)],
-            ["Active Latency", _format_latency(active_latency)],
-            ["Configured Latency", _format_latency(device.configured_latency)],
-            ["Default Latency", _format_latency(device.default_latency)],
-            ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
-            ["Standard Latencies", _format_show_standard_latencies(device)],
-            ["AES67", _format_aes67(device)],
-            [
-                "Lock",
-                "unknown" if device.is_locked is None else ("locked" if device.is_locked else "unlocked"),
-            ],
-            [
-                "Preferred Leader",
-                "unknown"
-                if device.preferred_leader is None
-                else ("enabled" if device.preferred_leader else "disabled"),
-            ],
-        ]
-    )
-    if device.gain_device_type is not None:
-        rows.extend(
-            [
-                ["Reference Controls", device.gain_device_type],
-                ["Reference Levels", _format_reference_levels(device)],
-                ["Reference Options", _format_reference_options(device)],
-            ]
-        )
-    if device.ptp_v1_role:
-        rows.append(["PTP Role", device.ptp_v1_role])
-    rows.append(["Server Name", device.server_name or "unknown"])
-    if device.interface_reboot_required:
-        rows.append(["Network Reboot Required", "yes"])
-    return rows
-
-
-def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -> bool:
-    for pat in patterns:
-        try:
-            if int(pat) == channel_key:
-                return True
-        except ValueError:
-            pass
-        if fnmatch(channel_name.lower(), pat.lower()):
-            return True
-    return False
+from netaudio.commands.device_display import (
+    _channel_matches,
+    _device_show_rows,
+    _diagnostic_audio_capabilities_data,
+    _diagnostic_audio_capability_rows,
+    _format_aes67,
+    _format_bluetooth,
+    _format_channel_count,
+    _format_clock_frequency_offset,
+    _format_clock_port_record,
+    _format_encoding,
+    _format_last_seen,
+    _format_latency,
+    _format_latency_milliseconds,
+    _format_latency_range,
+    _format_link_speed,
+    _format_mac,
+    _format_reference_levels,
+    _format_reference_options,
+    _format_sample_rate,
+    _format_show_latency_range,
+    _format_show_standard_latencies,
+    _format_standard_latency_choices,
+    _format_supported_encodings,
+    _format_supported_sample_rates,
+    _format_transmitter_flow,
+)
 
 
 async def _lock_via_relay(pin: str, action: str) -> dict | None:
@@ -352,6 +165,36 @@ def _report_lock_failure(action: str, result: dict) -> None:
     raise typer.Exit(code=1)
 
 
+async def _standalone_lock_operation(device_ip: str, pin: str, lock_key: bytes, *, locking: bool) -> dict:
+    operation = core_lock_device if locking else core_unlock_device
+    result = await operation(device_ip, pin, lock_key)
+    if result.get("success") is not True:
+        return result
+
+    observation = await _probe_lock_status_once(device_ip)
+    if observation is None:
+        return {
+            **result,
+            "success": False,
+            "is_locked": None,
+            "error": "lock status readback was not reported",
+        }
+    if observation.is_locked is not locking:
+        return {
+            **result,
+            "success": False,
+            "is_locked": observation.is_locked,
+            "lock_state_code": observation.lock_state_code,
+            "error": "lock operation did not reach the requested state",
+        }
+    return {
+        **result,
+        "is_locked": observation.is_locked,
+        "lock_state_code": observation.lock_state_code,
+        "observation_source": "observed_after_0x1008",
+    }
+
+
 @app.command("list")
 def device_list(
     json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
@@ -366,14 +209,37 @@ def device_list(
 
         devices = await _discover()
         await _populate_controls(devices, strict=False)
-        _collect_lock_state(devices)
         devices = filter_devices(devices)
+        from netaudio._common import _enrich_clock_fields, _enrich_lock_states
+
+        await _enrich_clock_fields(devices)
+        await _enrich_lock_states(devices)
+        if state.verbose:
+            await asyncio.gather(
+                *[
+                    device.operations.get_aes67_configured()
+                    for device in devices.values()
+                    if device.aes67_multicast_prefix is None and device.aes67_supported is not False
+                ],
+                return_exceptions=True,
+            )
 
         sorted_devices = list(sort_devices(devices))
 
         any_bluetooth = any(device.model_id in BLUETOOTH_MODEL_IDS for _, device in sorted_devices)
 
-        compact_headers = ["Name", "IP Address", "MAC Address", "Model", "Lock", "TX", "RX", "Last Seen", "Server Name"]
+        compact_headers = [
+            "Name",
+            "Status",
+            "IP Address",
+            "MAC Address",
+            "Model",
+            "Lock",
+            "TX",
+            "RX",
+            "Last Seen",
+            "Server Name",
+        ]
         verbose_extras = [
             "Manufacturer",
             "Product Version",
@@ -391,7 +257,9 @@ def device_list(
             "Latency Range",
             "Standard Latencies",
             "AES67",
+            "Sample Rate Pull-Up",
             "Preferred Leader",
+            "Clock Subdomain",
             "PTP Role",
         ]
         if any_bluetooth:
@@ -409,12 +277,13 @@ def device_list(
             if device.is_locked is True:
                 lock_display = icon("lock") or "locked"
             elif device.is_locked is False:
-                lock_display = ""
+                lock_display = icon("unlock") or "unlocked"
             else:
                 lock_display = ""
 
             row = [
                 name_display,
+                "online" if device.online else "offline",
                 str(device.ipv4) if device.ipv4 else "",
                 _format_mac(device.mac_address),
                 device.dante_model or device.model_id or "",
@@ -453,18 +322,22 @@ def device_list(
                 row.append(_format_standard_latency_choices(device.min_latency, device.max_latency))
 
                 row.append(_format_aes67(device))
+                if device.sample_rate_pullup_raw_value is not None:
+                    row.append(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
+                else:
+                    row.append("")
 
                 preferred_leader = device.preferred_leader
                 if preferred_leader is not None:
                     row.append("on" if preferred_leader else "off")
                 else:
                     row.append("")
+                row.append(format_clock_subdomain(device.clock_subdomain) if device.clock_subdomain is not None else "")
 
-                ptp_v1_role = device.ptp_v1_role
-                row.append(ptp_v1_role or "")
+                row.append(device.clock_role or "")
 
                 if any_bluetooth:
-                    row.append(device.bluetooth_device or "")
+                    row.append(_format_bluetooth(device) if device.model_id in BLUETOOTH_MODEL_IDS else "")
 
             rows.append(row)
             json_data[server_name] = DanteDeviceSerializer.to_json(device)
@@ -483,6 +356,9 @@ def device_show():
 
         include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
         server_name, device = await _load_device_for_show(include_channels=include_channels)
+        from netaudio._common import _enrich_lock_states
+
+        await _enrich_lock_states({server_name: device})
         data = DanteDeviceSerializer.to_json(device)
         output_table(
             ["Field", "Value"],
@@ -495,8 +371,61 @@ def device_show():
     asyncio.run(_run())
 
 
+@app.command("capabilities")
+def device_capabilities(
+    timeout: float = typer.Option(15.0, "--timeout", min=0.1, help="Diagnostic response timeout in seconds."),
+):
+    """Inspect licensed and sample-rate-dependent audio capabilities."""
+
+    async def _run():
+        from netaudio.dante.diagnostic_logs import DeviceLogExportError
+
+        async with _command_context() as (devices, send):
+            filtered = filter_devices(devices)
+            if not filtered:
+                typer.echo("Error: no devices matched.", err=True)
+                raise typer.Exit(code=1)
+            if len(filtered) > 1:
+                typer.echo(
+                    "Error: multiple devices matched. Narrow the selection to exactly one device.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            server_name, device = _resolve_one(filtered)
+            device_name = device.name or server_name
+            if device.ipv4 is None:
+                typer.echo(f"Error: {device_name} has no control address.", err=True)
+                raise typer.Exit(code=1)
+            try:
+                result = await send.export_device_logs(device.ipv4, timeout=timeout)
+            except (CapabilityProbeTimeout, DeviceLogExportError) as exception:
+                typer.echo(f"Error: {exception}", err=True)
+                raise typer.Exit(code=1) from None
+            capabilities = result.audio_capabilities
+            if capabilities is None:
+                typer.echo(
+                    f"Error: {device_name} returned diagnostic logs without recognized audio capability records.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            output_table(
+                ["Capability", "Value"],
+                _diagnostic_audio_capability_rows(capabilities),
+                json_data=_diagnostic_audio_capabilities_data(capabilities),
+                title=device_name,
+            )
+
+    asyncio.run(_run())
+
+
 @app.command()
-def identify():
+def identify(
+    all_devices: bool = typer.Option(
+        False,
+        "--all",
+        help="Identify every matched device. Required when more than one device matches.",
+    ),
+):
     """Blink the identify LED on a device."""
 
     commands = DanteDeviceCommands()
@@ -508,7 +437,19 @@ def identify():
                 typer.echo("Error: device not found.", err=True)
                 raise typer.Exit(code=1)
 
-            for server_name, device in filtered.items():
+            if all_devices:
+                targets = list(filtered.items())
+            else:
+                if len(filtered) > 1:
+                    typer.echo(
+                        "Error: multiple devices matched. Narrow the selection with a device "
+                        "filter, or pass --all to identify every match.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=1)
+                targets = [_resolve_one(filtered)]
+
+            for server_name, device in targets:
                 packet, _, port = commands.command_identify()
                 await send(packet, device.ipv4, port, expect_response=False)
                 typer.echo(f"{icon('identify')}Identified: {device.name}")
@@ -554,21 +495,103 @@ def reboot(
 
 
 @app.command("factory-reset")
-def factory_reset():
-    """Factory reset a device (clears name, channels, routes, config)."""
+def factory_reset(
+    confirm: str = typer.Option(
+        ...,
+        "--confirm",
+        help="Exact device name required to authorize erasing all retained configuration.",
+    ),
+):
+    """Erase all retained configuration and request a factory reset."""
 
     async def _run():
         devices = await _discover()
         await _populate_controls(devices)
         filtered = filter_devices(devices)
-        _, device = _resolve_one(filtered)
-        if not hasattr(device.commands, "command_factory_reset"):
-            typer.echo("Error: factory-reset is not available in this build.", err=True)
+        if not filtered:
+            typer.echo("Error: no devices matched.", err=True)
             raise typer.Exit(code=1)
+        if len(filtered) > 1:
+            typer.echo(
+                "Error: multiple devices matched. Narrow the selection to exactly one device.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        server_name, device = _resolve_one(filtered)
+        device_name = device.name or server_name
+        if confirm != device_name:
+            typer.echo(
+                f"Error: --confirm must exactly match {device_name!r}.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
         await device.operations.factory_reset()
-        typer.echo(f"{icon('factory_reset')}Factory reset: {device.name}")
+        typer.echo(f"Factory reset requested: {device_name}")
 
     asyncio.run(_run())
+
+
+@app.command("clear-configuration")
+def clear_configuration(
+    mode: ClearConfigurationMode = typer.Option(
+        ...,
+        "--mode",
+        help="Configuration to clear: all, or preserve-network.",
+    ),
+    confirm: str = typer.Option(
+        ...,
+        "--confirm",
+        help="Exact device name required to authorize clearing retained configuration.",
+    ),
+):
+    """Clear retained configuration with verified device acknowledgement."""
+
+    async def _run():
+        async with _command_context() as (devices, send):
+            filtered = filter_devices(devices)
+            if not filtered:
+                typer.echo("Error: no devices matched.", err=True)
+                raise typer.Exit(code=1)
+            if len(filtered) > 1:
+                typer.echo(
+                    "Error: multiple devices matched. Narrow the selection to exactly one device.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+
+            server_name, device = _resolve_one(filtered)
+            device_name = device.name or server_name
+            if confirm != device_name:
+                typer.echo(
+                    f"Error: --confirm must exactly match {device_name!r}.",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+            if device.ipv4 is None:
+                typer.echo(f"Error: {device_name} has no control address.", err=True)
+                raise typer.Exit(code=1)
+
+            preserve_internet_protocol_settings = mode is ClearConfigurationMode.PRESERVE_INTERNET_PROTOCOL_SETTINGS
+            status = await send.clear_configuration(
+                device.ipv4,
+                preserve_internet_protocol_settings,
+            )
+            typer.echo(
+                f"Clear-configuration accepted: {device_name} "
+                f"(result {status['action_result_code']}, mode {mode.value})"
+            )
+
+    asyncio.run(_run())
+
+
+from netaudio.commands.device_exports import export_capability, export_logs
+from netaudio.commands.device_network_status import network_status
+
+app.command("export-logs")(export_logs)
+app.command("export-capability")(export_capability)
+app.command("network-status")(network_status)
 
 
 from netaudio.commands.config import app as device_config_app
@@ -586,10 +609,10 @@ def lock_set(
     async def _run():
         result = await _lock_via_relay(pin, "lock")
         if result is not None:
-            if result.get("already"):
-                typer.echo("already locked", err=True)
-            elif not result.get("success"):
+            if not result.get("success"):
                 _report_lock_failure("lock", result)
+            elif result.get("already"):
+                typer.echo("already locked", err=True)
             return
 
         lock_key = _get_lock_key()
@@ -601,12 +624,12 @@ def lock_set(
 
         device_ip = await _resolve_lock_ip()
 
-        result = await core_lock_device(device_ip, pin, lock_key)
+        result = await _standalone_lock_operation(device_ip, pin, lock_key, locking=True)
 
-        if result["already"]:
-            typer.echo("already locked", err=True)
-        elif not result["success"]:
+        if not result["success"]:
             _report_lock_failure("lock", result)
+        elif result["already"]:
+            typer.echo("already locked", err=True)
 
     asyncio.run(_run())
 
@@ -618,10 +641,10 @@ def lock_clear(
     async def _run():
         result = await _lock_via_relay(pin, "unlock")
         if result is not None:
-            if result.get("already"):
-                typer.echo("already unlocked", err=True)
-            elif not result.get("success"):
+            if not result.get("success"):
                 _report_lock_failure("unlock", result)
+            elif result.get("already"):
+                typer.echo("already unlocked", err=True)
             return
 
         lock_key = _get_lock_key()
@@ -633,12 +656,12 @@ def lock_clear(
 
         device_ip = await _resolve_lock_ip()
 
-        result = await core_unlock_device(device_ip, pin, lock_key)
+        result = await _standalone_lock_operation(device_ip, pin, lock_key, locking=False)
 
-        if result["already"]:
-            typer.echo("already unlocked", err=True)
-        elif not result["success"]:
+        if not result["success"]:
             _report_lock_failure("unlock", result)
+        elif result["already"]:
+            typer.echo("already unlocked", err=True)
 
     asyncio.run(_run())
 
@@ -648,56 +671,17 @@ def lock_status():
     """Show device lock status."""
 
     async def _run():
-        from netaudio.dante.services.heartbeat import _parse_lock_state
-        import socket
-        import struct
-        import time
-
-        from netaudio.common.app_config import settings as app_settings
-        from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
-
         devices = await _discover()
+        await _populate_controls(devices, strict=False)
         filtered = filter_devices(devices)
+
+        from netaudio._common import _enrich_lock_states
+
+        await _enrich_lock_states(filtered)
 
         if not filtered:
             typer.echo("Error: no devices found.", err=True)
             raise typer.Exit(code=1)
-
-        device_ips = {}
-        for server_name, device in filtered.items():
-            if device.ipv4 and device.online:
-                device_ips[str(device.ipv4)] = (server_name, device)
-
-        multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        multicast_socket.bind(("", DEVICE_HEARTBEAT_PORT))
-        membership = struct.pack(
-            "4s4s",
-            socket.inet_aton(MULTICAST_GROUP_HEARTBEAT),
-            socket.inet_aton("0.0.0.0"),
-        )
-        multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-        multicast_socket.settimeout(0.5)
-
-        deadline = time.monotonic() + app_settings.lock_state_timeout
-        seen = set()
-        try:
-            while len(seen) < len(device_ips) and time.monotonic() < deadline:
-                try:
-                    data, addr = multicast_socket.recvfrom(4096)
-                except TimeoutError:
-                    break
-                source_ip = addr[0]
-                if source_ip in device_ips and source_ip not in seen:
-                    seen.add(source_ip)
-                    server_name, device = device_ips[source_ip]
-                    if getattr(device, "model_id", None) not in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
-                        lock_state = _parse_lock_state(data)
-                        device.is_locked = lock_state if lock_state is not None else False
-        finally:
-            multicast_socket.close()
 
         from netaudio.cli import state as cli_state
 
@@ -729,59 +713,6 @@ def lock_status():
         output_table(headers, rows, json_data=json_data)
 
     asyncio.run(_run())
-
-
-def _collect_lock_state(devices: dict) -> None:
-    import socket
-    import struct
-    import time
-    from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
-    from netaudio.dante.services.heartbeat import _parse_lock_state
-
-    device_ips = {}
-    for server_name, device in devices.items():
-        if device.ipv4 and device.online:
-            device_ips[str(device.ipv4)] = device
-
-    if not device_ips:
-        return
-
-    multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):
-        multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    multicast_socket.bind(("", DEVICE_HEARTBEAT_PORT))
-    membership = struct.pack(
-        "4s4s",
-        socket.inet_aton(MULTICAST_GROUP_HEARTBEAT),
-        socket.inet_aton("0.0.0.0"),
-    )
-    multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-    multicast_socket.settimeout(0.5)
-
-    from netaudio.common.app_config import settings as app_settings
-
-    deadline = time.monotonic() + app_settings.lock_state_timeout
-    seen = set()
-    try:
-        while len(seen) < len(device_ips) and time.monotonic() < deadline:
-            try:
-                data, addr = multicast_socket.recvfrom(4096)
-            except TimeoutError:
-                break
-            source_ip = addr[0]
-            if source_ip in device_ips and source_ip not in seen:
-                seen.add(source_ip)
-                device = device_ips[source_ip]
-                if getattr(device, "model_id", None) in HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS:
-                    continue
-                lock_state = _parse_lock_state(data)
-                if lock_state is not None:
-                    device.is_locked = lock_state
-                else:
-                    device.is_locked = False
-    finally:
-        multicast_socket.close()
 
 
 async def _resolve_lock_ip() -> str:
@@ -885,501 +816,24 @@ def name(
     asyncio.run(_run())
 
 
-@app.command()
-def clock():
-    """Show PTP clock status (leader, followers, preferred leader)."""
+from netaudio.commands.device_clock import clock
 
-    async def _run():
-        from netaudio.daemon.client import daemon_is_accessible, get_device_summaries_from_daemon
-
-        summaries = None
-        if daemon_is_accessible():
-            summaries = await get_device_summaries_from_daemon()
-
-        if summaries is not None:
-            entries = [dict(entry, server_name=server_name) for server_name, entry in summaries.items()]
-            entries.sort(key=lambda entry: (entry.get("name") or "").lower())
-        else:
-            from netaudio.dante.device_serializer import DanteDeviceSerializer
-
-            devices = await _discover()
-            await _populate_controls(devices)
-            devices = filter_devices(devices)
-            entries = [
-                dict(DanteDeviceSerializer.to_json(device), server_name=server_name)
-                for server_name, device in sort_devices(devices)
-            ]
-
-        if not entries:
-            typer.echo("No device found.", err=True)
-            raise typer.Exit(code=1)
-
-        leader_names = [
-            entry.get("name") or ""
-            for entry in entries
-            if (entry.get("ptp_v1_role") or entry.get("clock_role") or "").lower() == "leader"
-        ]
-
-        headers = ["Name", "Role", "Preferred Leader", "Sync to Leader", "Server Name"]
-        rows = []
-        json_data = {}
-
-        for entry in entries:
-            name = entry.get("name") or ""
-            role = entry.get("ptp_v1_role") or entry.get("clock_role") or ""
-            preferred = "yes" if entry.get("preferred_leader") else ""
-            sync_display = ""
-            if role.lower() == "follower" and leader_names:
-                sync_display = leader_names[0]
-            rows.append([name, role, preferred, sync_display, entry.get("server_name") or ""])
-            json_data[entry.get("server_name") or name] = {
-                "name": name,
-                "role": role,
-                "preferred_leader": bool(entry.get("preferred_leader")),
-                "leader": leader_names[0] if leader_names else None,
-            }
-
-        output_table(headers, rows, json_data=json_data)
-
-    asyncio.run(_run())
+app.command()(clock)
 
 
 from netaudio.commands.flow import app as flow_app
 
 app.add_typer(flow_app, name="flow", hidden=True)
 
-meter_app = typer.Typer(help="Device metering.", no_args_is_help=False, invoke_without_command=True)
+from netaudio.commands.device_meter import (
+    _render_meter_bar,
+    _render_meter_display,
+    measure_timeout,
+    meter_app,
+    meter_callback,
+    start,
+    status,
+    stop,
+)
+
 app.add_typer(meter_app, name="meter", hidden=True)
-
-
-def _render_meter_bar(level: int, bar_width: int = 32, no_color: bool = False) -> str:
-    from netaudio._common import ansi
-
-    if level >= 254:
-        return ansi("90", "░" * bar_width + "  --")
-
-    amplitude = 254 - level
-    filled = round(amplitude / 254 * bar_width)
-    filled = max(0, min(bar_width, filled))
-    empty = bar_width - filled
-
-    if amplitude > 220:
-        color_code = "31"
-    elif amplitude > 180:
-        color_code = "33"
-    else:
-        color_code = "32"
-
-    return f"{ansi(color_code, '█' * filled)}{ansi('90', '░' * empty)} {level:>3}"
-
-
-def _render_meter_display(
-    device_levels: list[tuple[str, str, dict]],
-    show_tx: bool,
-    show_rx: bool,
-    channel_patterns: list[str] | None,
-    no_color: bool,
-) -> str:
-    from netaudio._common import ansi
-
-    lines = []
-    bar_width = 32
-
-    max_name_width = 2
-    for _, _, levels in device_levels:
-        for key in ("tx", "rx"):
-            if key == "tx" and not show_tx:
-                continue
-            if key == "rx" and not show_rx:
-                continue
-            for channel_key, info in levels.get(key, {}).items():
-                channel_number = int(channel_key)
-                channel_name = info.get("name", "")
-                if channel_patterns and not _channel_matches(channel_number, channel_name, channel_patterns):
-                    continue
-                display_name = channel_name or f"Ch {channel_number}"
-                max_name_width = max(max_name_width, len(display_name))
-
-    for device_name, source_ip, levels in device_levels:
-        lines.append(f"{ansi('1', device_name)} {ansi('90', f'({source_ip})')}")
-
-        for direction, key, color_code in [("TX", "tx", "36"), ("RX", "rx", "35")]:
-            if key == "tx" and not show_tx:
-                continue
-            if key == "rx" and not show_rx:
-                continue
-
-            channels = levels.get(key, {})
-            if not channels:
-                continue
-
-            sorted_channels = sorted(channels.items(), key=lambda x: int(x[0]))
-
-            for channel_key, info in sorted_channels:
-                channel_number = int(channel_key)
-                channel_name = info.get("name", "")
-
-                if channel_patterns and not _channel_matches(channel_number, channel_name, channel_patterns):
-                    continue
-
-                level = info.get("level", 254)
-                bar = _render_meter_bar(level, bar_width, no_color)
-                display_name = channel_name or f"Ch {channel_number}"
-
-                lines.append(
-                    f"  {ansi(color_code, direction)} {channel_number:>3} {ansi('90', f'{display_name:<{max_name_width}}')} {bar}"
-                )
-
-    return "\n".join(lines)
-
-
-@meter_app.callback(invoke_without_command=True)
-def meter_callback(
-    ctx: typer.Context,
-    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Seconds to wait for initial metering response."),
-    tx: bool = typer.Option(False, "--tx", help="Show only TX channels."),
-    rx: bool = typer.Option(False, "--rx", help="Show only RX channels."),
-    channel: Optional[list[str]] = typer.Option(
-        None, "--channel", "-c", help="Filter by channel number or name (fnmatch glob). Repeatable."
-    ),
-    snapshot: bool = typer.Option(False, "--snapshot", help="Take a single snapshot instead of live display."),
-):
-    if ctx.invoked_subcommand is not None:
-        return
-
-    from netaudio.cli import OutputFormat, state as cli_state
-
-    show_tx = tx or not rx
-    show_rx = rx or not tx
-    use_json = cli_state.output_format == OutputFormat.json
-    no_color = cli_state.no_color
-
-    async def _run():
-        from netaudio.daemon.client import (
-            get_devices_from_daemon,
-            meter_snapshot_from_daemon,
-            meter_start_on_daemon,
-            meter_stop_on_daemon,
-        )
-
-        devices = await get_devices_from_daemon()
-        if not devices:
-            typer.echo("Daemon not running. Start the daemon first: netaudio daemon start", err=True)
-            raise typer.Exit(code=1)
-
-        filtered = filter_devices(devices)
-        if not filtered:
-            typer.echo("No device found.", err=True)
-            raise typer.Exit(code=1)
-
-        ordered = list(filtered.keys())
-        client_id = "meter_cli"
-
-        for server_name in ordered:
-            await meter_start_on_daemon(server_name, client_id)
-
-        try:
-            first_levels = None
-            for _ in range(int(timeout * 10)):
-                for server_name in ordered:
-                    result = await meter_snapshot_from_daemon(server_name)
-                    if result and (result.get("tx") or result.get("rx")):
-                        first_levels = result
-                        break
-                if first_levels:
-                    break
-                await asyncio.sleep(0.1)
-
-            if not first_levels:
-                typer.echo("No metering response received.", err=True)
-                raise typer.Exit(code=1)
-
-            if snapshot or use_json:
-                device_levels = []
-                all_json = {}
-                for server_name in sorted(
-                    ordered,
-                    key=lambda candidate_server_name: filtered[candidate_server_name].name or candidate_server_name,
-                ):
-                    target = filtered[server_name]
-                    levels = await meter_snapshot_from_daemon(server_name)
-                    if levels is None:
-                        continue
-                    source_ip = levels.get("source_ip", "")
-                    device_levels.append((target.name or server_name, source_ip, levels))
-                    all_json[server_name] = {"tx": levels.get("tx", {}), "rx": levels.get("rx", {})}
-
-                if use_json:
-                    import json as json_module
-
-                    typer.echo(json_module.dumps(all_json, indent=2))
-                else:
-                    typer.echo(_render_meter_display(device_levels, show_tx, show_rx, channel, no_color))
-                return
-
-            import sys
-
-            prev_line_count = 0
-
-            try:
-                while True:
-                    device_levels = []
-                    for server_name in sorted(
-                        ordered,
-                        key=lambda candidate_server_name: filtered[candidate_server_name].name or candidate_server_name,
-                    ):
-                        target = filtered[server_name]
-                        levels = await meter_snapshot_from_daemon(server_name)
-                        if levels is None:
-                            continue
-                        source_ip = levels.get("source_ip", "")
-                        device_levels.append((target.name or server_name, source_ip, levels))
-
-                    if device_levels:
-                        output = _render_meter_display(device_levels, show_tx, show_rx, channel, no_color)
-                        line_count = output.count("\n") + 1
-
-                        if prev_line_count > 0:
-                            sys.stdout.write(f"\033[{prev_line_count}A\033[J")
-
-                        sys.stdout.write(output + "\n")
-                        sys.stdout.flush()
-                        prev_line_count = line_count
-
-                    await asyncio.sleep(0.1)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                pass
-
-        finally:
-            for server_name in ordered:
-                await meter_stop_on_daemon(server_name, client_id)
-
-    asyncio.run(_run())
-
-
-@meter_app.command()
-def start():
-    """Start persistent metering (requires daemon)."""
-    from netaudio.daemon.client import meter_start_on_daemon
-
-    async def _run():
-        devices = await _discover()
-        filtered = filter_devices(devices)
-        if not filtered:
-            typer.echo("No device found.", err=True)
-            raise typer.Exit(code=1)
-
-        for server_name in filtered:
-            await meter_start_on_daemon(server_name, "cli")
-
-    asyncio.run(_run())
-
-
-@meter_app.command()
-def stop():
-    """Stop persistent metering (requires daemon)."""
-    from netaudio.daemon.client import meter_stop_on_daemon
-
-    async def _run():
-        devices = await _discover()
-        filtered = filter_devices(devices)
-        if not filtered:
-            typer.echo("No device found.", err=True)
-            raise typer.Exit(code=1)
-
-        for server_name in filtered:
-            await meter_stop_on_daemon(server_name, "cli")
-
-    asyncio.run(_run())
-
-
-@meter_app.command(name="measure-timeout")
-def measure_timeout(
-    gap: float = typer.Option(15.0, "--gap", "-g", help="Seconds of silence before declaring stream ended."),
-    max_wait: float = typer.Option(120.0, "--max-wait", help="Maximum seconds to listen."),
-):
-    """Measure how long a device streams metering after a single start command."""
-    import socket
-    import struct
-
-    from netaudio.common.app_config import settings as app_settings
-    from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
-    from netaudio.dante.application import DanteApplication
-
-    async def _run():
-        application = DanteApplication()
-        await application.startup()
-
-        try:
-            devices = await application.discover_and_populate(timeout=app_settings.mdns_timeout)
-            filtered = filter_devices(devices)
-            if not filtered:
-                typer.echo("No device found.", err=True)
-                raise typer.Exit(code=1)
-
-            metering_port = app_settings.metering_port
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            if hasattr(socket, "SO_REUSEPORT"):
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            sock.bind(("", metering_port))
-
-            mreq = struct.pack(
-                "4s4s",
-                socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
-                socket.inet_aton("0.0.0.0"),
-            )
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-            loop = asyncio.get_running_loop()
-            timestamps_by_ip: dict[str, list[float]] = {}
-            device_names: dict[str, str] = {}
-
-            class TimingProtocol(asyncio.DatagramProtocol):
-                def datagram_received(self, data, addr):
-                    source_ip = addr[0]
-                    now = time.monotonic()
-                    if source_ip not in timestamps_by_ip:
-                        timestamps_by_ip[source_ip] = []
-                    timestamps_by_ip[source_ip].append(now)
-
-            transport, _ = await loop.create_datagram_endpoint(
-                TimingProtocol,
-                sock=sock,
-            )
-
-            try:
-                host_ip_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                try:
-                    host_ip_sock.connect(("224.0.0.231", 1))
-                    host_ip = host_ip_sock.getsockname()[0]
-                finally:
-                    host_ip_sock.close()
-
-                host_mac = application.cmc._host_mac
-
-                for server_name, device in filtered.items():
-                    device_ip = str(device.ipv4)
-                    device_name = device.name or server_name
-                    device_names[device_ip] = device_name
-                    typer.echo(f"Sending single metering start to {device_name} ({device_ip})")
-                    application.cmc.start_metering(
-                        device_ip,
-                        device_name,
-                        host_ip,
-                        host_mac,
-                        metering_port,
-                    )
-
-                start_time = time.monotonic()
-                last_any_packet = start_time
-
-                while True:
-                    await asyncio.sleep(0.5)
-                    elapsed = time.monotonic() - start_time
-                    now = time.monotonic()
-
-                    all_timestamps = []
-                    for timestamps in timestamps_by_ip.values():
-                        all_timestamps.extend(timestamps)
-
-                    if all_timestamps:
-                        last_any_packet = max(all_timestamps)
-
-                    silence = now - last_any_packet
-                    total_packets = sum(len(timestamps) for timestamps in timestamps_by_ip.values())
-
-                    if all_timestamps and silence >= gap:
-                        typer.echo(f"\nNo packets for {silence:.1f}s — stream ended.")
-                        break
-
-                    if elapsed >= max_wait:
-                        if all_timestamps:
-                            typer.echo(f"\nMax wait reached ({max_wait}s) — still receiving packets.")
-                        else:
-                            typer.echo(f"\nMax wait reached ({max_wait}s) — no packets received.")
-                        break
-
-                    if int(elapsed) % 5 == 0 and elapsed > 0 and abs(elapsed - int(elapsed)) < 0.5:
-                        typer.echo(f"  {elapsed:.0f}s elapsed, {total_packets} packets, last packet {silence:.1f}s ago")
-
-                typer.echo("")
-                for source_ip, timestamps in sorted(timestamps_by_ip.items()):
-                    device_name = device_names.get(source_ip, source_ip)
-                    count = len(timestamps)
-                    if count == 0:
-                        continue
-
-                    duration = timestamps[-1] - timestamps[0]
-                    first_offset = timestamps[0] - start_time
-
-                    gaps = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
-                    average_gap = sum(gaps) / len(gaps) if gaps else 0
-                    max_gap = max(gaps) if gaps else 0
-                    min_gap = min(gaps) if gaps else 0
-
-                    typer.echo(f"{device_name} ({source_ip}):")
-                    typer.echo(f"  Packets:       {count}")
-                    typer.echo(f"  First packet:  {first_offset:.2f}s after start")
-                    typer.echo(f"  Duration:      {duration:.2f}s")
-                    typer.echo(f"  Avg interval:  {average_gap * 1000:.1f}ms")
-                    typer.echo(f"  Min interval:  {min_gap * 1000:.1f}ms")
-                    typer.echo(f"  Max interval:  {max_gap * 1000:.1f}ms")
-                    typer.echo(f"  Rate:          {count / duration:.1f} packets/sec" if duration > 0 else "")
-                    typer.echo("")
-
-                for server_name, device in filtered.items():
-                    device_ip = str(device.ipv4)
-                    device_name = device.name or server_name
-                    application.cmc.stop_metering(
-                        device_ip,
-                        device_name,
-                        host_ip,
-                        host_mac,
-                        metering_port,
-                    )
-
-            finally:
-                transport.close()
-        finally:
-            await application.shutdown()
-
-    asyncio.run(_run())
-
-
-@meter_app.command()
-def status():
-    """Show which devices have persistent metering active."""
-    from netaudio.daemon.client import meter_status_from_daemon
-
-    async def _run():
-        result = await meter_status_from_daemon()
-        if result is None:
-            typer.echo(f"{icon('offline')}Daemon is not running.", err=True)
-            raise typer.Exit(code=1)
-
-        if not result:
-            typer.echo(f"{icon('meter')}No devices are being metered.")
-            return
-
-        headers = ["Name", "Server Name", "Online", "Receiving"]
-        rows = []
-        json_data = {}
-
-        for server_name, info in sorted(result.items(), key=lambda x: x[1].get("name", "")):
-            receiving = info.get("receiving", False)
-            online = info.get("online", False)
-            rows.append(
-                [
-                    info.get("name", ""),
-                    server_name,
-                    "yes" if online else "no",
-                    "yes" if receiving else "no",
-                ]
-            )
-            json_data[server_name] = info
-
-        output_table(headers, rows, json_data=json_data)
-
-    asyncio.run(_run())

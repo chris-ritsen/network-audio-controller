@@ -2,7 +2,6 @@ import struct
 
 import pytest
 
-from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, get_fact
 from netaudio.dante.packet_dissector import dissect
 
 
@@ -36,6 +35,45 @@ def test_sample_rate_fields_are_rendered_as_frequency():
     assert target_sample_rate.value == "44,100 (44.1 kHz)"
 
 
+def test_direction_scoped_fact_fields_are_dissected_only_at_matching_boundaries():
+    facts = [
+        {
+            "category": "arc_opcode",
+            "key": "0x2202",
+            "name": "delete_tx_flow",
+            "fields": [
+                {
+                    "name": "delete_flow_slot",
+                    "offset": 14,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "direction": "request",
+                },
+                {
+                    "name": "delete_result",
+                    "offset": 8,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "direction": "response",
+                },
+            ],
+        }
+    ]
+    request = bytes.fromhex("2729001016c122020000000100000020")
+    response = bytes.fromhex("2729000a16c122020001")
+
+    request_result = dissect(request, facts=facts, direction="request")
+    response_result = dissect(response, facts=facts, direction="response")
+    unspecified_result = dissect(request, facts=facts)
+
+    assert {span.name for span in request_result.spans} >= {"delete_flow_slot"}
+    assert "delete_result" not in {span.name for span in request_result.spans}
+    assert {span.name for span in response_result.spans} >= {"delete_result"}
+    assert "delete_flow_slot" not in {span.name for span in response_result.spans}
+    assert "delete_flow_slot" not in {span.name for span in unspecified_result.spans}
+    assert "delete_result" not in {span.name for span in unspecified_result.spans}
+
+
 def test_rx_subscription_status_uses_capture_backed_labels():
     payload = bytearray(32)
     payload[0:2] = (0x27FF).to_bytes(2, "big")
@@ -50,7 +88,7 @@ def test_rx_subscription_status_uses_capture_backed_labels():
     result = dissect(bytes(payload), facts=[])
 
     subscription_status = next(span for span in result.spans if span.name == "subscription_status")
-    assert subscription_status.detail == "Subscription connected (self)"
+    assert subscription_status.detail == "Subscribed (self)"
 
 
 def test_encoding_status_dissects_current_and_supported_encodings():
@@ -89,7 +127,46 @@ def test_encoding_control_distinguishes_read_operand_from_set_target():
 def test_encoding_control_dynamic_fields_replace_generic_fact_spans():
     payload = bytes.fromhex("ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000")
 
-    result = dissect(payload)
+    facts = [
+        {
+            "category": "conmon_message",
+            "key": "0x0083",
+            "name": "encoding_control",
+            "protocol_id": 0xFFFF,
+            "match_offset": 26,
+            "match_size": 2,
+            "fields": [
+                {
+                    "name": "message_type",
+                    "offset": 26,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "value": "0x0083",
+                },
+                {
+                    "name": "control_constant",
+                    "offset": 28,
+                    "length": 4,
+                    "dtype": "uint32_be",
+                    "value": "0x00000064",
+                },
+                {
+                    "name": "operation_mode",
+                    "offset": 32,
+                    "length": 4,
+                    "dtype": "uint32_be",
+                },
+                {
+                    "name": "encoding_operand",
+                    "offset": 36,
+                    "length": 4,
+                    "dtype": "uint32_be",
+                },
+            ],
+        }
+    ]
+
+    result = dissect(payload, facts=facts)
 
     assert len([span for span in result.spans if span.offset == 28 and span.length == 4]) == 1
     assert len([span for span in result.spans if span.offset == 32 and span.length == 4]) == 1
@@ -105,7 +182,39 @@ def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact
         "0018003000000000000000000000000000000000000000000000000000000000"
     )
 
-    result = dissect(payload)
+    facts = [
+        {
+            "category": "conmon_message",
+            "key": "0x0011",
+            "name": "interface_status_announcement",
+            "protocol_id": 0xFFFF,
+            "match_offset": 26,
+            "match_size": 2,
+            "fields": [
+                {
+                    "name": "message_type",
+                    "offset": 26,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "value": "0x0011",
+                },
+                {
+                    "name": "interface_count",
+                    "offset": 32,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                },
+                {
+                    "name": "link_speed_mbps",
+                    "offset": 36,
+                    "length": 4,
+                    "dtype": "uint32_be",
+                },
+            ],
+        }
+    ]
+
+    result = dissect(payload, facts=facts)
     spans_by_name = {span.name: span for span in result.spans if span.name}
 
     assert spans_by_name["message_type"].detail == "interface_status_announcement"
@@ -135,6 +244,34 @@ def test_device_settings_resolves_latency_values_through_absolute_pointers():
     assert spans_by_name["active_latency"].value == "1,000,000 ns (1 ms)"
     assert spans_by_name["max_latency"].value == "42,666,667 ns (42.67 ms)"
     assert spans_by_name["min_latency"].value == "250,000 ns (250 us)"
+
+
+@pytest.mark.parametrize(
+    ("value_hexadecimal", "payload_hexadecimal"),
+    [
+        (
+            "00000000000000000000000000000000",
+            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000000000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
+        ),
+        (
+            "00000001000000000000000000000000",
+            "27ff00a80000110000011b18802000788021007c0022b000002300000024000100f00000020100018204008c82050090020a0000020b0000021000000211000002120030021300000214000083010094830600988302009c03100010031100020303000483f000a0060100000000000000000000000000000000000000000001000000000000000000000000000f4240000f4240000000000003d090000000000000000500000000",
+        ),
+    ],
+)
+def test_device_settings_preserves_variable_width_property_values(value_hexadecimal, payload_hexadecimal):
+    result = dissect(bytes.fromhex(payload_hexadecimal), facts=[])
+    property_value = next(span for span in result.spans if span.name == "property_0x8021")
+    property_pointer = next(span for span in result.spans if span.offset == 18 and span.name == "value_pointer")
+    trailing_value = next(span for span in result.spans if span.name == "property_0x83f0")
+
+    assert property_pointer.value == "0x007C"
+    assert property_pointer.detail == "@0x007C, 16 bytes"
+    assert (property_value.offset, property_value.length) == (124, 16)
+    assert property_value.value == value_hexadecimal
+    assert property_value.dtype == "hex"
+    assert (trailing_value.offset, trailing_value.length) == (160, 8)
+    assert trailing_value.value == "0000000500000000"
 
 
 def test_device_settings_preserves_unsupported_property_placeholders():
@@ -186,27 +323,41 @@ def test_property_directory_dissects_captured_arc_protocol_variants(protocol_ide
     assert [span.value for span in property_flags] == ["0x0003", "0x0001"]
 
 
-def test_protocol_facts_use_capability_and_property_table_meanings():
-    encoding_status = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0082")
-    encoding_control = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0083")
-    device_settings = get_fact(DEFAULT_FACTS_PATH, "arc_opcode", "0x1100")
-    property_directory = get_fact(DEFAULT_FACTS_PATH, "arc_opcode", "0x1102")
-    interface_status = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0011")
-    interface_configuration = get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x0013")
+def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):
+    from netaudio.capture import packets as capture_packets
+    from netaudio.dante import fact_store
+    from netaudio.dante.fact_store import add_fact
+    from netaudio.dante.packet_dissector import _load_facts_for_packet
 
-    assert encoding_status["name"] == "encoding_status"
-    assert encoding_control["name"] == "encoding_control"
-    assert device_settings["name"] == "query_device_settings"
-    assert property_directory["name"] == "query_property_directory"
-    assert interface_status["name"] == "interface_status_announcement"
-    assert interface_configuration["name"] == "interface_configuration"
-    assert next(field for field in interface_status["fields"] if field["name"] == "link_speed_mbps") == {
-        "name": "link_speed_mbps",
-        "offset": 36,
-        "length": 4,
-        "dtype": "uint32_be",
-    }
-    assert all(field["name"] != "aes67_mode" for field in device_settings["fields"])
-    assert get_fact(DEFAULT_FACTS_PATH, "conmon_message", "0x03D7") is None
-    assert get_fact(DEFAULT_FACTS_PATH, "conmon_opcode", "0x0083") is None
-    assert get_fact(DEFAULT_FACTS_PATH, "ddp_notification", "0x0082") is None
+    facts_path = tmp_path / "facts.json"
+    add_fact(
+        facts_path,
+        "conmon_message",
+        "0x03D7",
+        "invalid_interpretation",
+        confidence="disproved",
+        protocol_id=0xFFFF,
+        match_offset=26,
+    )
+    add_fact(
+        facts_path,
+        "conmon_message",
+        "0x03D8",
+        "active_interpretation",
+        protocol_id=0xFFFF,
+        match_offset=26,
+    )
+    payload = bytearray(28)
+    payload[0:2] = (0xFFFF).to_bytes(2, "big")
+    payload[26:28] = (0x03D7).to_bytes(2, "big")
+
+    assert _load_facts_for_packet(bytes(payload), facts_path) == []
+
+    monkeypatch.setattr(fact_store, "DEFAULT_FACTS_PATH", facts_path)
+    capture_packets._FACT_LABEL_CACHE = None
+    try:
+        labels = capture_packets._load_fact_labels()
+        assert labels["conmon:0x03D8"] == "active_interpretation"
+        assert "conmon:0x03D7" not in labels
+    finally:
+        capture_packets._FACT_LABEL_CACHE = None

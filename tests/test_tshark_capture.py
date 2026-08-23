@@ -1,8 +1,10 @@
 import struct
+from types import SimpleNamespace
 
 import pytest
 
 from netaudio.dante.tshark_capture import TsharkCapture, _build_bpf_filter
+from netaudio.dante.packet_store import PacketStore
 
 
 class TestBpfFilter:
@@ -110,3 +112,66 @@ class TestBuildCommand:
         assert "fields" in cmd
         assert "-l" in cmd
         assert "-e" in cmd
+
+
+class TestReadPcapFrames:
+    def test_imports_only_selected_udp_payloads(self, tmp_path, monkeypatch):
+        capture_path = tmp_path / "capture.pcap"
+        capture_path.write_bytes(b"pcap")
+        request = struct.pack(">HHHH", 0x2729, 8, 0x0042, 0x3000)
+        response = struct.pack(">HHHHH", 0x2729, 10, 0x0042, 0x3000, 0x0001)
+        tshark_output = "\n".join(
+            [
+                f"10\t1716000000.0\t10.0.0.1\t50000\t10.0.0.2\t4440\t{request.hex()}",
+                f"11\t1716000000.1\t10.0.0.2\t4440\t10.0.0.1\t50000\t{response.hex()}",
+            ]
+        )
+        monkeypatch.setattr(TsharkCapture, "_find_tshark", classmethod(lambda cls: "/usr/bin/tshark"))
+        monkeypatch.setattr(
+            "netaudio.dante.tshark_capture.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=tshark_output, stderr=""),
+        )
+
+        store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
+        session_id = store.start_session(name="pcap")
+        imported = TsharkCapture.read_pcap_frames(
+            packet_store=store,
+            pcap_path=capture_path,
+            frame_numbers=[11, 10, 11],
+            device_ip="10.0.0.2",
+            session_id=session_id,
+            source_host="lab",
+        )
+        packets = store.get_session_packets(session_id, ascending=True)
+        store.close()
+
+        assert [entry["frame_number"] for entry in imported] == [10, 11]
+        assert [packet["direction"] for packet in packets] == ["request", "response"]
+        assert [packet["payload"] for packet in packets] == [request, response]
+        assert all(packet["source_type"] == "pcap_import" for packet in packets)
+
+    def test_missing_selected_frame_does_not_partially_import(self, tmp_path, monkeypatch):
+        capture_path = tmp_path / "capture.pcap"
+        capture_path.write_bytes(b"pcap")
+        request = struct.pack(">HHHH", 0x2729, 8, 0x0042, 0x3000)
+        tshark_output = f"10\t1716000000.0\t10.0.0.1\t50000\t10.0.0.2\t4440\t{request.hex()}"
+        monkeypatch.setattr(TsharkCapture, "_find_tshark", classmethod(lambda cls: "/usr/bin/tshark"))
+        monkeypatch.setattr(
+            "netaudio.dante.tshark_capture.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=tshark_output, stderr=""),
+        )
+
+        store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
+        session_id = store.start_session(name="pcap")
+
+        with pytest.raises(ValueError, match="11"):
+            TsharkCapture.read_pcap_frames(
+                packet_store=store,
+                pcap_path=capture_path,
+                frame_numbers=[10, 11],
+                device_ip="10.0.0.2",
+                session_id=session_id,
+            )
+
+        assert store.get_session_packet_count(session_id) == 0
+        store.close()

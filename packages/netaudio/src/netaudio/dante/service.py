@@ -27,6 +27,10 @@ class DanteUnicastService:
         return local_address[1] if local_address else None
 
     @property
+    def is_started(self) -> bool:
+        return self._protocol is not None
+
+    @property
     def session_id(self) -> int | None:
         return self._session_id
 
@@ -209,22 +213,26 @@ class DanteMulticastService:
         local_ip = self._interface_ip or self._detect_interface_ip()
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        sock.bind((self._multicast_group, self._multicast_port))
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            sock.bind(("0.0.0.0", self._multicast_port))
 
-        membership_request = struct.pack(
-            "4s4s",
-            socket.inet_aton(self._multicast_group),
-            socket.inet_aton(local_ip),
-        )
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership_request)
+            membership_request = struct.pack(
+                "4s4s",
+                socket.inet_aton(self._multicast_group),
+                socket.inet_aton(local_ip),
+            )
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership_request)
 
-        _, protocol = await loop.create_datagram_endpoint(
-            lambda: DanteMulticastProtocol(self._on_packet),
-            sock=sock,
-        )
+            _, protocol = await loop.create_datagram_endpoint(
+                lambda: DanteMulticastProtocol(self._on_packet),
+                sock=sock,
+            )
+        except BaseException:
+            sock.close()
+            raise
         self._protocol = protocol
         logger.info(
             f"Multicast service started on {self._multicast_group}:{self._multicast_port} (interface {local_ip})"
