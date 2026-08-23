@@ -5,6 +5,9 @@ dist/
 __pycache__
 debug.log
 .hypothesis/
-tests/fixtures/provenance/.local/
+docs/reference/dante-controller-subscription-status-labels.txt
 packages/netaudio/man/
 packages/netaudio-core/target/
+packages/netaudio/src/netaudio/core/libnetaudio_core.so
+packages/netaudio/src/netaudio/core/libnetaudio_core.dylib
+packages/netaudio/src/netaudio/core/netaudio_core.dll
