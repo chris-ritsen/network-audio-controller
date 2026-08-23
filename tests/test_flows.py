@@ -110,3 +110,77 @@ async def test_flow_list_compatibility_wrapper_returns_only_flows(monkeypatch):
     monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
 
     assert await flows.query_tx_flows("192.0.2.10", 4440, 0x2729) == inventory["flows"]
+
+
+@pytest.mark.asyncio
+async def test_preferred_inventory_uses_2809_status_page_when_present(monkeypatch):
+    queried = []
+
+    async def query(device_ip, arc_port, flow_protocol_id):
+        queried.append(flow_protocol_id)
+        if flow_protocol_id == 0x2809:
+            return {
+                "max_flow_slots": 2,
+                "reported_flow_count": 1,
+                "flows": [
+                    {
+                        "flow_number": 1,
+                        "flow_type": "unicast",
+                        "subscriber_device_name": "lx-dante",
+                    }
+                ],
+            }
+        raise AssertionError("Brooklyn inventory should not be queried when 0x2809 succeeds")
+
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+
+    inventory = await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729)
+    assert queried == [0x2809]
+    assert inventory["flows"][0]["subscriber_device_name"] == "lx-dante"
+
+
+@pytest.mark.asyncio
+async def test_preferred_inventory_falls_back_to_mutation_protocol(monkeypatch):
+    queried = []
+
+    async def query(device_ip, arc_port, flow_protocol_id):
+        queried.append(flow_protocol_id)
+        if flow_protocol_id == 0x2809:
+            return None
+        return {"max_flow_slots": 16, "flows": [{"flow_number": 32, "flow_type": "multicast"}]}
+
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+
+    inventory = await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729)
+    assert queried == [0x2809, 0x2729]
+    assert inventory["flows"][0]["flow_number"] == 32
+
+
+def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
+    page = {
+        "maximum_flow_slots": 4,
+        "flows": [
+            {
+                "flow_number": 2,
+                "flow_type_code": 0x0002,
+                "local_receiver_channel_count": 2,
+                "receiver_mapping_descriptor_hexadecimal": "00010002",
+                "status_code_at_record_offset_62": 0x0009,
+                "destination_internet_protocol_version_four_address": "192.0.2.20",
+                "destination_user_datagram_port": 14336,
+                "sample_rate": 48000,
+                "encoding": 24,
+                "latency_nanoseconds": 1000000,
+            }
+        ],
+    }
+
+    inventory = flows.inventory_from_receiver_flow_status_page(page)
+
+    flow = inventory["flows"][0]
+    assert "receiver_channel_numbers_by_flow_channel" not in flow
+    assert "subscription_status_code" not in flow
+    assert flow["receiver_mapping_descriptor_hexadecimal"] == "00010002"
+    assert flow["status_code_at_record_offset_62"] == 0x0009
+    assert flow["local_receiver_channel_count"] == 2
+    assert flow["flow_type"] == "0x0002"

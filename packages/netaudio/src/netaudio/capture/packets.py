@@ -28,15 +28,24 @@ def _load_fact_labels() -> dict[str, str]:
 
     _FACT_LABEL_CACHE = {}
     try:
-        from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, list_facts
+        from netaudio.dante.fact_store import DEFAULT_FACTS_PATH, fact_status, list_facts
 
         if DEFAULT_FACTS_PATH.exists():
             for fact in list_facts(DEFAULT_FACTS_PATH):
+                if fact_status(fact) == "disproved":
+                    continue
                 category = fact["category"]
                 key = fact["key"]
                 name = fact["name"]
                 if category == "arc_opcode":
-                    _FACT_LABEL_CACHE[f"arc:{key}"] = name
+                    fact_protocols = fact.get("protocol_id")
+                    if fact_protocols is None:
+                        _FACT_LABEL_CACHE[f"arc:{key}"] = name
+                    else:
+                        if not isinstance(fact_protocols, list):
+                            fact_protocols = [fact_protocols]
+                        for fact_protocol in fact_protocols:
+                            _FACT_LABEL_CACHE[f"arc:0x{fact_protocol:04X}:{key}"] = name
                 elif category == "conmon_message":
                     _FACT_LABEL_CACHE[f"conmon:{key}"] = name
                 elif category == "multicast_announcement":
@@ -64,7 +73,7 @@ def _label_packet(payload: bytes, *, include_code: bool = False):
         opcode_str = f"0x{opcode:04X}"
         fact_labels = _load_fact_labels()
         if protocol_id in ARC_PROTOCOLS:
-            fact_name = fact_labels.get(f"arc:{opcode_str}")
+            fact_name = fact_labels.get(f"arc:0x{protocol_id:04X}:{opcode_str}") or fact_labels.get(f"arc:{opcode_str}")
             if fact_name:
                 return f"{opcode_str} {fact_name}" if include_code else fact_name
 

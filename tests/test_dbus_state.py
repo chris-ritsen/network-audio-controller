@@ -10,6 +10,7 @@ from netaudio.daemon.dbus_state import (
     DANTE_PROPERTY_NAMES,
     SHURE_PROPERTY_NAMES,
     aes67_enabled,
+    clock_port_rows,
     dbus_double,
     dbus_int32,
     dbus_string,
@@ -19,6 +20,7 @@ from netaudio.daemon.dbus_state import (
     snapshot_dante_device,
     snapshot_shure_device,
     subscription_rows,
+    transmitter_flow_rows,
 )
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
@@ -205,8 +207,47 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.aes67_current = False
     device.aes67_configured = True
     device.aes67_supported = False
+    device.aes67_multicast_prefix = "239.69.0.0"
+    device.sample_rate_pullup_raw_value = 1
+    device.requested_sample_rate_pullup_raw_value = 1
+    device.supported_sample_rate_pullup_raw_values = [0, 1, 2, 3, 4]
+    device.transmitter_flows = [
+        {
+            "flow_number": 1,
+            "flow_type": "unicast",
+            "channel_count": 1,
+            "sample_rate": 48000,
+            "encoding": 24,
+            "destination_internet_protocol_version_four_address": "192.168.1.108",
+            "destination_user_datagram_port": 14355,
+            "subscriber_device_name": "lx-dante",
+            "subscriber_flow_name": "1",
+        }
+    ]
     device.is_locked = None
-    device.ptp_v1_role = "Leader"
+    device.clock_frequency_offset_parts_per_billion = -25_473
+    device.clock_source_code = 57044
+    device.clock_subdomain = b"_DFLT" + bytes(11)
+    device.clock_port_state_code = 0x0006
+    device.clock_role = "Leader"
+    device.clock_identity = "001dc150692e"
+    device.leader_clock_identity = "001dc150692e"
+    device.clock_port_records = [
+        {
+            "record_flags": 0,
+            "link_down": False,
+            "record_number": 1,
+            "ptp_version": 1,
+            "record_format_code": 2,
+            "transport_path_code": 1,
+            "transport_path": "multicast",
+            "reserved_byte": 0,
+            "network_interface_index": 2,
+            "state_code": 6,
+            "role": "Leader",
+            "status_flags": 7,
+        }
+    ]
 
     snapshot = snapshot_dante_device(device)
 
@@ -221,12 +262,33 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["aes67_current"] is False
     assert snapshot["aes67_supported"] is False
     assert snapshot["aes67_support_known"] is True
+    assert snapshot["aes67_multicast_prefix"] == "239.69.0.0"
+    assert snapshot["sample_rate_pullup_raw_value"] == 1
+    assert snapshot["requested_sample_rate_pullup_raw_value"] == 1
+    assert snapshot["supported_sample_rate_pullup_raw_values"] == [0, 1, 2, 3, 4]
+    assert snapshot["sample_rate_pullup_known"] is True
+    assert snapshot["transmitter_flows"] == [(1, 1, "unicast", 48000, 24, "192.168.1.108", 14355, "lx-dante", "1")]
+    assert transmitter_flow_rows(device) == snapshot["transmitter_flows"]
     assert snapshot["lock_state_known"] is False
+    assert snapshot["clock_frequency_offset_parts_per_billion"] == -25_473
+    assert snapshot["clock_source_code"] == 57044
+    assert snapshot["clock_subdomain"] == "_DFLT"
     assert snapshot["clock_role"] == "Leader"
+    assert snapshot["clock_identity"] == "001dc150692e"
+    assert snapshot["leader_clock_identity"] == "001dc150692e"
+    assert snapshot["clock_port_records"] == [(0, False, 1, 1, 2, 1, "multicast", 0, 2, 6, 7, "Leader")]
+    assert clock_port_rows(device) == snapshot["clock_port_records"]
     assert "aes67_enabled" not in snapshot
     assert DANTE_PROPERTY_NAMES["min_latency"] == "MinLatency"
     assert DANTE_PROPERTY_NAMES["max_latency"] == "MaxLatency"
     assert DANTE_PROPERTY_NAMES["aes67_current"] == "Aes67Enabled"
+    assert DANTE_PROPERTY_NAMES["aes67_multicast_prefix"] == "Aes67MulticastPrefix"
+    assert DANTE_PROPERTY_NAMES["sample_rate_pullup_known"] == "SampleRatePullupKnown"
+    assert DANTE_PROPERTY_NAMES["transmitter_flows"] == "TransmitterFlows"
+    assert DANTE_PROPERTY_NAMES["clock_source_code"] == "ClockSourceCode"
+    assert DANTE_PROPERTY_NAMES["clock_subdomain"] == "ClockSubdomain"
+    assert DANTE_PROPERTY_NAMES["clock_identity"] == "ClockIdentity"
+    assert DANTE_PROPERTY_NAMES["leader_clock_identity"] == "LeaderClockIdentity"
     assert set(snapshot) == set(DANTE_PROPERTY_NAMES)
 
 
@@ -291,7 +353,27 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.aes67_configured = True
     device.aes67_supported = False
     device.is_locked = None
-    device.ptp_v1_role = "Follower"
+    device.clock_frequency_offset_parts_per_billion = -1_601
+    device.clock_port_state_code = 0x0009
+    device.clock_role = "Follower"
+    device.clock_identity = "001dc1510295"
+    device.leader_clock_identity = "001dc150692e"
+    device.clock_port_records = [
+        {
+            "record_flags": 1,
+            "link_down": False,
+            "record_number": 2,
+            "ptp_version": 2,
+            "record_format_code": 2,
+            "transport_path_code": 1,
+            "transport_path": "multicast",
+            "reserved_byte": 0,
+            "network_interface_index": 2,
+            "state_code": 9,
+            "role": "Follower",
+            "status_flags": 7,
+        }
+    ]
 
     interface = module.DanteDeviceInterface(device)
 
@@ -307,14 +389,36 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.Aes67Enabled() is False
     assert interface.Aes67Supported() is False
     assert interface.Aes67SupportKnown() is True
+    assert interface.Aes67MulticastPrefix() == ""
+    assert interface.SampleRatePullupKnown() is False
+    assert interface.TransmitterFlows() == []
     assert interface.LockStateKnown() is False
+    assert interface.ClockFrequencyOffsetPartsPerBillion() == -1_601
     assert interface.ClockRole() == "Follower"
+    assert interface.ClockPortRecords() == [(1, False, 2, 2, 2, 1, "multicast", 0, 2, 9, 7, "Follower")]
+    assert interface.ClockIdentity() == "001dc1510295"
+    assert interface.LeaderClockIdentity() == "001dc150692e"
     assert module.DanteDeviceInterface.Latency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.SupportedSampleRates.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.SupportedEncodings.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.LinkSpeedMbps.__annotations__["return"] == "u"
     assert module.DanteDeviceInterface.MinLatency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.MaxLatency.__annotations__["return"] == "d"
+    assert module.DanteDeviceInterface.ClockFrequencyOffsetPartsPerBillion.__annotations__["return"] == "i"
+    assert module.DanteDeviceInterface.ClockPortRecords.__annotations__["return"] == "a(qbqyyysyuqqs)"
+    assert module.DanteDeviceInterface.ClockSourceCode.__annotations__["return"] == "q"
+    assert module.DanteDeviceInterface.ClockSubdomain.__annotations__["return"] == "s"
+    assert module.DanteDeviceInterface.Aes67MulticastPrefix.__annotations__["return"] == "s"
+    assert module.DanteDeviceInterface.SupportedSampleRatePullupRawValues.__annotations__["return"] == "au"
+    assert module.DanteDeviceInterface.TransmitterFlows.__annotations__["return"] == "a(uusuususs)"
+    assert module.DanteChannelInterface.FactoryName.__annotations__["return"] == "s"
+
+
+def test_channel_interface_exposes_factory_name(dbus_interfaces_without_dependency):
+    module = dbus_interfaces_without_dependency
+    channel = SimpleNamespace(factory_name="CH1", number=1, name="01", friendly_name="01")
+    interface = module.DanteChannelInterface(channel)
+    assert interface.FactoryName() == "CH1"
 
 
 def test_shure_p10t_channel_optional_fields_are_schema_safe(dbus_interfaces_without_dependency):
@@ -441,6 +545,27 @@ async def test_dbus_dante_update_rebinds_device_and_emits_full_schema_changes(
     assert changed["MinLatency"] == 0.125
     assert changed["MaxLatency"] == 21.333334
     assert changed["LastSeen"] == 1234.5
+
+
+@pytest.mark.asyncio
+async def test_dbus_dante_update_publishes_known_lock_state_becoming_unknown(
+    dbus_service_without_dependency,
+):
+    module = dbus_service_without_dependency
+    device = DanteDevice(server_name="rack.local.")
+    device.is_locked = True
+    daemon = _daemon({device.server_name: device})
+    service = module.DBusService(daemon)
+    service._bus = FakeBus()
+    assert service._export_dante_device(device.server_name, device) is True
+    interface = service._dante_interfaces[device.server_name]
+
+    device.is_locked = None
+    await service._on_dante_updated(DanteEvent(type=EventType.DEVICE_UPDATED, server_name=device.server_name))
+
+    changed = interface.emitted[-1]
+    assert changed["IsLocked"] is False
+    assert changed["LockStateKnown"] is False
 
 
 @pytest.mark.asyncio

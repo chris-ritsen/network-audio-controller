@@ -1,4 +1,5 @@
 pub const PROTOCOL_ID: u16 = 0x27FF;
+pub const PROTOCOL_ARC_2809: u16 = 0x2809;
 pub const OPCODE_CHANNEL_COUNT: u16 = 0x1000;
 pub const OPCODE_DEVICE_NAME_SET: u16 = 0x1001;
 pub const OPCODE_TX_CHANNEL_INFO: u16 = 0x2000;
@@ -9,8 +10,9 @@ pub const DANTE_NAME_MAX_LENGTH: usize = 31;
 pub const RESPONSE_HEADER_SIZE: usize = 10;
 pub const RESULT_CODE_SUCCESS: u16 = 0x0001;
 pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
-pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, 0x2809];
-pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] = [PROTOCOL_ID, 0x2729, 0x2801, 0x2809];
+pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, PROTOCOL_ARC_2809];
+pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] =
+    [PROTOCOL_ID, 0x2729, 0x2801, PROTOCOL_ARC_2809];
 
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
 const CONMON_MINIMUM_SIZE: usize = 28;
@@ -99,11 +101,14 @@ pub enum NetaudioError {
     InvalidGainLevel,
     InvalidFlowSlot,
     InvalidFlowProtocol,
+    InvalidSequence,
+    UnsupportedProtocolOperation,
 }
 
-fn validate_dante_name_with_colon_policy(
+fn validate_dante_name_with_character_policy(
     name: &str,
     allow_colon: bool,
+    allow_underscore: bool,
 ) -> Result<(), NetaudioError> {
     if name.chars().count() > DANTE_NAME_MAX_LENGTH {
         return Err(NetaudioError::NameTooLong);
@@ -114,6 +119,7 @@ fn validate_dante_name_with_colon_policy(
             character.is_ascii_alphanumeric()
                 || character == '-'
                 || (allow_colon && character == ':')
+                || (allow_underscore && character == '_')
         })
         && !name.starts_with('-')
         && !name.ends_with('-')
@@ -132,14 +138,37 @@ fn validate_dante_name_with_colon_policy(
 }
 
 pub fn validate_dante_name(name: &str) -> Result<(), NetaudioError> {
-    validate_dante_name_with_colon_policy(name, false)
+    validate_dante_name_with_character_policy(name, false, false)
 }
 
 pub fn validate_dante_channel_name(name: &str) -> Result<(), NetaudioError> {
-    validate_dante_name_with_colon_policy(name, true)
+    validate_dante_name_with_character_policy(name, true, true)
+}
+
+pub fn validate_dante_channel_reference(name: &str) -> Result<(), NetaudioError> {
+    if name.chars().count() > DANTE_NAME_MAX_LENGTH {
+        return Err(NetaudioError::NameTooLong);
+    }
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_graphic() || character == ' ')
+    {
+        return Err(NetaudioError::NameInvalidChars);
+    }
+    Ok(())
 }
 
 pub fn build_control_packet(
+    opcode: u16,
+    payload: &[u8],
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    build_control_packet_for_protocol(PROTOCOL_ID, opcode, payload, transaction_id)
+}
+
+pub fn build_control_packet_for_protocol(
+    protocol_id: u16,
     opcode: u16,
     payload: &[u8],
     transaction_id: u16,
@@ -149,7 +178,7 @@ pub fn build_control_packet(
         .ok_or(NetaudioError::PacketTooLarge)?;
     let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
     let mut packet = Vec::with_capacity(length);
-    packet.extend_from_slice(&PROTOCOL_ID.to_be_bytes());
+    packet.extend_from_slice(&protocol_id.to_be_bytes());
     packet.extend_from_slice(&encoded_length.to_be_bytes());
     packet.extend_from_slice(&transaction_id.to_be_bytes());
     packet.extend_from_slice(&opcode.to_be_bytes());
@@ -166,7 +195,12 @@ pub fn build_set_device_name(name: &str, transaction_id: u16) -> Result<Vec<u8>,
     payload.extend_from_slice(name_bytes);
     payload.push(0);
 
-    build_control_packet(OPCODE_DEVICE_NAME_SET, &payload, transaction_id)
+    build_control_packet_for_protocol(
+        PROTOCOL_ARC_2809,
+        OPCODE_DEVICE_NAME_SET,
+        &payload,
+        transaction_id,
+    )
 }
 
 #[cfg(test)]
@@ -177,7 +211,7 @@ mod tests {
     fn set_device_name_known_bytes() {
         let packet = build_set_device_name("AVIO", 0).unwrap();
         let expected = [
-            0x27, 0xFF, 0x00, 0x0F, 0x00, 0x00, 0x10, 0x01, 0x00, 0x00, 0x41, 0x56, 0x49, 0x4F,
+            0x28, 0x09, 0x00, 0x0F, 0x00, 0x00, 0x10, 0x01, 0x00, 0x00, 0x41, 0x56, 0x49, 0x4F,
             0x00,
         ];
         assert_eq!(packet, expected);
@@ -187,7 +221,17 @@ mod tests {
     fn set_device_name_transaction_id() {
         let packet = build_set_device_name("AVIO", 0xBEEF).unwrap();
         assert_eq!(&packet[4..6], &[0xBE, 0xEF]);
-        assert_eq!(&packet[0..4], &[0x27, 0xFF, 0x00, 0x0F]);
+        assert_eq!(&packet[0..4], &[0x28, 0x09, 0x00, 0x0F]);
+    }
+
+    #[test]
+    fn set_device_name_matches_controller_request() {
+        let packet = build_set_device_name("avio-bt-11", 0x261B).unwrap();
+        let expected = [
+            0x28, 0x09, 0x00, 0x15, 0x26, 0x1B, 0x10, 0x01, 0x00, 0x00, 0x61, 0x76, 0x69, 0x6F,
+            0x2D, 0x62, 0x74, 0x2D, 0x31, 0x31, 0x00,
+        ];
+        assert_eq!(packet, expected);
     }
 
     #[test]
@@ -217,13 +261,32 @@ mod tests {
     }
 
     #[test]
-    fn validate_channel_name_accepts_colon_labels() {
+    fn validate_channel_name_accepts_controller_labels() {
         for name in [
             "windows-gaming:left",
             "main-mix:right",
             "shelford-channel:0dB",
+            "system:capture_13",
         ] {
             assert_eq!(validate_dante_channel_name(name), Ok(()), "{name}");
+        }
+    }
+
+    #[test]
+    fn validate_channel_reference_accepts_firmware_reported_labels() {
+        for name in ["Output 01", "Main Mix Left", "windows-gaming:left"] {
+            assert_eq!(validate_dante_channel_reference(name), Ok(()), "{name}");
+        }
+    }
+
+    #[test]
+    fn validate_channel_reference_rejects_non_wire_characters() {
+        for name in ["", "tx\0a", "tx\na", "über"] {
+            assert_eq!(
+                validate_dante_channel_reference(name),
+                Err(NetaudioError::NameInvalidChars),
+                "{name:?}"
+            );
         }
     }
 
