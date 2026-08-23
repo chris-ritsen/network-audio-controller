@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import shutil
+import subprocess
+from pathlib import Path
 
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import (
@@ -85,6 +87,103 @@ class TsharkCapture:
     @classmethod
     def is_available(cls):
         return cls._find_tshark() is not None
+
+    @classmethod
+    def read_pcap_frames(
+        cls,
+        packet_store,
+        pcap_path: str | Path,
+        frame_numbers: list[int],
+        device_ip: str,
+        session_id: int,
+        source_host: str | None = None,
+    ) -> list[dict]:
+        resolved_path = Path(pcap_path).expanduser().resolve()
+        if not resolved_path.is_file():
+            raise ValueError(f"capture file not found: {resolved_path}")
+
+        selected_frames = sorted(set(frame_numbers))
+        if not selected_frames or any(frame_number <= 0 for frame_number in selected_frames):
+            raise ValueError("at least one positive frame number is required")
+
+        tshark_path = cls._find_tshark()
+        if tshark_path is None:
+            raise RuntimeError("tshark is required to ingest a capture file")
+
+        display_filter = " || ".join(f"frame.number == {frame_number}" for frame_number in selected_frames)
+        fields = ["frame.number", *cls.UDP_FIELDS]
+        field_arguments = []
+        for field in fields:
+            field_arguments.extend(["-e", field])
+
+        completed = subprocess.run(
+            [
+                tshark_path,
+                "-r",
+                str(resolved_path),
+                "-Y",
+                display_filter,
+                "-T",
+                "fields",
+                *field_arguments,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or f"exit status {completed.returncode}"
+            raise RuntimeError(f"tshark could not read {resolved_path}: {detail}")
+
+        parser = cls(packet_store=packet_store, known_device_ips=[device_ip])
+        parsed_frames = []
+        observed_frames = set()
+        for line in completed.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            try:
+                frame_number = int(parts[0])
+            except ValueError:
+                continue
+            parsed = parser._parse_line("\t".join(parts[1:]))
+            if parsed is None:
+                continue
+            observed_frames.add(frame_number)
+            parsed_frames.append((frame_number, parsed))
+
+        missing_frames = [frame_number for frame_number in selected_frames if frame_number not in observed_frames]
+        if missing_frames:
+            missing = ", ".join(str(frame_number) for frame_number in missing_frames)
+            raise ValueError(f"selected frames did not contain importable UDP payloads: {missing}")
+
+        imported = []
+        for frame_number, parsed in parsed_frames:
+            packet_id = packet_store.store_packet(
+                payload=parsed["payload"],
+                source_type="pcap_import",
+                src_ip=parsed["src_ip"],
+                src_port=parsed["src_port"],
+                dst_ip=parsed["dst_ip"],
+                dst_port=parsed["dst_port"],
+                device_ip=parsed["device_ip"],
+                direction=parsed["direction"],
+                session_id=session_id,
+                timestamp_ns=parsed["timestamp_ns"],
+                source_host=source_host,
+                interface=f"pcap:{resolved_path.name}",
+            )
+            if packet_id is None:
+                raise RuntimeError(f"failed to store frame {frame_number}")
+            imported.append(
+                {
+                    "frame_number": frame_number,
+                    "packet_id": packet_id,
+                    "direction": parsed["direction"],
+                    "payload_size": len(parsed["payload"]),
+                }
+            )
+        return imported
 
     def _build_command(self):
         tshark_path = self._find_tshark() or "tshark"

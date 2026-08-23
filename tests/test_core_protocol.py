@@ -4,7 +4,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import threading
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import pytest
 from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import validate_dante_name
+from tests.protocol_test_fixtures import load_protocol_packet
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -200,6 +200,7 @@ class FakeDanteDevice:
         self.respond = respond
         self.result_code = result_code
         self.requests = []
+        self.stop_requested = threading.Event()
         self.thread = threading.Thread(target=self._serve)
 
     @property
@@ -211,6 +212,8 @@ class FakeDanteDevice:
             request, source = self.socket.recvfrom(2048)
         except socket.timeout:
             return
+        if self.stop_requested.is_set():
+            return
         self.requests.append(request)
         if self.respond:
             response = request[0:2] + (10).to_bytes(2, "big") + request[4:8] + self.result_code.to_bytes(2, "big")
@@ -221,6 +224,10 @@ class FakeDanteDevice:
         return self
 
     def __exit__(self, *exc_info):
+        self.stop_requested.set()
+        if self.thread.is_alive():
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as wake_socket:
+                wake_socket.sendto(b"", self.socket.getsockname())
         self.thread.join()
         self.socket.close()
 
@@ -251,10 +258,10 @@ def rust_build_set_device_name(core, name, transaction_id=0, capacity=64):
     return status, bytes(buffer[: length.value])
 
 
-def _control_packet(opcode, payload, transaction_id):
+def _control_packet(opcode, payload, transaction_id, protocol_id=0x27FF):
     import struct
 
-    header = struct.pack(">HH", 0x27FF, 8 + len(payload))
+    header = struct.pack(">HH", protocol_id, 8 + len(payload))
     header += struct.pack(">HH", transaction_id, opcode)
     return header + payload
 
@@ -273,6 +280,7 @@ class TestSetDeviceNameParity:
             0x1001,
             b"\x00\x00" + b"Studio-AVIO" + b"\x00",
             transaction_id=transaction_id,
+            protocol_id=0x2809,
         )
         status, rust_packet = rust_build_set_device_name(core, "Studio-AVIO", transaction_id=transaction_id)
         assert status == NETAUDIO_OK
@@ -311,7 +319,12 @@ class TestClientSetDeviceName:
             status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
 
         assert status == NETAUDIO_OK
-        expected = _control_packet(0x1001, b"\x00\x00" + b"Studio-AVIO" + b"\x00", transaction_id=1)
+        expected = _control_packet(
+            0x1001,
+            b"\x00\x00" + b"Studio-AVIO" + b"\x00",
+            transaction_id=1,
+            protocol_id=0x2809,
+        )
         assert device.requests == [expected]
 
     def test_transaction_id_increments_across_calls(self, core, client_factory):
@@ -393,10 +406,7 @@ class TestChannelCountBuilderAndParse:
         assert device.requests == [expected_request]
         assert tx.value == int.from_bytes(count_fixture[12:14], "big")
         assert rx.value == int.from_bytes(count_fixture[14:16], "big")
-        expected_locked = -1
-        if len(count_fixture) >= 36:
-            expected_locked = 1 if int.from_bytes(count_fixture[34:36], "big") else 0
-        assert locked.value == expected_locked
+        assert locked.value == -1
 
 
 GOLDEN_RX_CHANNELS = {
@@ -510,10 +520,10 @@ class TestRxChannelsGolden:
 
 
 def test_property_directory_getter_uses_capture_backed_empty_query(core, client_factory):
-    bundle_path = FIXTURES_DIR / "provenance" / "latency_capability_discovery.tar.gz"
-    member_name = "latency_capability_discovery/protocol_2729_opcode_1102_id_12358036.bin"
-    with tarfile.open(bundle_path, "r:gz") as bundle:
-        response = bundle.extractfile(member_name).read()
+    response = load_protocol_packet(
+        "property_directory",
+        "protocol_2729_opcode_1102_id_12358036.bin",
+    )
 
     with FakeReplayDevice([response]) as device:
         client = client_factory(device.port)

@@ -6,6 +6,7 @@ from dbus_fast.service import ServiceInterface, dbus_property, signal
 
 from netaudio.daemon.dbus_state import (
     aes67_enabled,
+    clock_port_rows,
     dbus_double,
     dbus_int32,
     dbus_string,
@@ -13,6 +14,7 @@ from netaudio.daemon.dbus_state import (
     dbus_uint_list,
     latency_milliseconds,
     subscription_rows,
+    transmitter_flow_rows,
 )
 from netaudio.shure.device import ShureChannel, ShureP10TChannel
 
@@ -35,7 +37,7 @@ class ManagerInterface(ServiceInterface):
     def ShureDeviceCount(self) -> "u":
         if not self._daemon.shure:
             return 0
-        return len(self._daemon.shure.devices)
+        return sum(1 for device in self._daemon.shure.devices.values() if device.online)
 
     @dbus_property(access=RO)
     def DanteDevices(self) -> DBUS_STRING_ARRAY_SIGNATURE:
@@ -186,16 +188,64 @@ class DanteDeviceInterface(ServiceInterface):
         return self._device.aes67_supported is not None
 
     @dbus_property(access=RO)
+    def Aes67MulticastPrefix(self) -> "s":
+        return dbus_string(self._device.aes67_multicast_prefix)
+
+    @dbus_property(access=RO)
+    def SampleRatePullupRawValue(self) -> "u":
+        return dbus_uint(self._device.sample_rate_pullup_raw_value)
+
+    @dbus_property(access=RO)
+    def RequestedSampleRatePullupRawValue(self) -> "u":
+        return dbus_uint(self._device.requested_sample_rate_pullup_raw_value)
+
+    @dbus_property(access=RO)
+    def SupportedSampleRatePullupRawValues(self) -> "au":
+        return dbus_uint_list(self._device.supported_sample_rate_pullup_raw_values)
+
+    @dbus_property(access=RO)
+    def SampleRatePullupKnown(self) -> "b":
+        return self._device.supported_sample_rate_pullup_raw_values is not None
+
+    @dbus_property(access=RO)
+    def TransmitterFlows(self) -> "a(uusuususs)":
+        return transmitter_flow_rows(self._device)
+
+    @dbus_property(access=RO)
     def LastSeen(self) -> "d":
         return dbus_double(self._device.last_seen)
 
     @dbus_property(access=RO)
-    def ClockRole(self) -> "s":
-        return dbus_string(self._device.ptp_v1_role or self._device.clock_role)
+    def ClockFrequencyOffsetPartsPerBillion(self) -> "i":
+        return dbus_int32(self._device.clock_frequency_offset_parts_per_billion)
 
     @dbus_property(access=RO)
-    def ClockMac(self) -> "s":
-        return dbus_string(self._device.clock_mac)
+    def ClockSourceCode(self) -> "q":
+        return dbus_uint(self._device.clock_source_code, bits=16)
+
+    @dbus_property(access=RO)
+    def ClockSubdomain(self) -> "s":
+        from netaudio.dante.clock_config import format_clock_subdomain
+
+        if self._device.clock_subdomain is None:
+            return ""
+        return format_clock_subdomain(self._device.clock_subdomain)
+
+    @dbus_property(access=RO)
+    def ClockRole(self) -> "s":
+        return dbus_string(self._device.clock_role)
+
+    @dbus_property(access=RO)
+    def ClockPortRecords(self) -> "a(qbqyyysyuqqs)":
+        return clock_port_rows(self._device)
+
+    @dbus_property(access=RO)
+    def ClockIdentity(self) -> "s":
+        return dbus_string(self._device.clock_identity)
+
+    @dbus_property(access=RO)
+    def LeaderClockIdentity(self) -> "s":
+        return dbus_string(self._device.leader_clock_identity)
 
     @dbus_property(access=RO)
     def SoftwareVersion(self) -> "s":
@@ -226,6 +276,10 @@ class DanteChannelInterface(ServiceInterface):
     @dbus_property(access=RO)
     def FriendlyName(self) -> "s":
         return dbus_string(self._channel.friendly_name)
+
+    @dbus_property(access=RO)
+    def FactoryName(self) -> "s":
+        return dbus_string(self._channel.factory_name)
 
     @dbus_property(access=RO)
     def StatusText(self) -> "s":
@@ -292,6 +346,14 @@ class ShureDeviceInterface(ServiceInterface):
     @dbus_property(access=RO)
     def EncryptionMode(self) -> "s":
         return dbus_string(self._device.encryption_mode)
+
+    @dbus_property(access=RO)
+    def Online(self) -> "b":
+        return bool(self._device.online)
+
+    @dbus_property(access=RO)
+    def LastSeen(self) -> "d":
+        return dbus_double(self._device.last_seen)
 
 
 class ShureChannelInterface(ServiceInterface):
