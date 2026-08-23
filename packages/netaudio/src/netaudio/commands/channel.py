@@ -6,7 +6,14 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, gain_level_label
+from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, gain_channel_type, gain_level_label
+from netaudio.dante.channel_frontend import (
+    ChannelFrontendError,
+    channel_result_code,
+    receiver_channel_name_protocol_identifier_from_probe,
+    transmitter_channel_name_protocol_identifier_from_probe,
+)
 from netaudio.dante.services.notification import (
     NOTIFICATION_PROPERTY_CHANGE,
     NOTIFICATION_RX_CHANNEL_CHANGE,
@@ -40,8 +47,14 @@ def channel_list():
 
     async def _run():
         devices = await _discover()
-        await _populate_controls(devices)
+        await _populate_controls(devices, strict=False)
         devices = filter_devices(devices)
+        from netaudio._common import _apply_avio_status_pages
+
+        await asyncio.gather(
+            *[_apply_avio_status_pages(device) for device in devices.values()],
+            return_exceptions=True,
+        )
 
         from netaudio.cli import OutputFormat, state
 
@@ -55,6 +68,7 @@ def channel_list():
                             "number": channel.number,
                             "name": channel.name,
                             "friendly_name": channel.friendly_name,
+                            "factory_name": channel.factory_name,
                         }
                         for channel in sorted(device.tx_channels.values(), key=lambda channel: channel.number)
                     },
@@ -63,6 +77,7 @@ def channel_list():
                             "number": channel.number,
                             "name": channel.name,
                             "friendly_name": channel.friendly_name,
+                            "factory_name": channel.factory_name,
                         }
                         for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number)
                     },
@@ -74,19 +89,29 @@ def channel_list():
             device_label = device.name or server_name
 
             if device.tx_channels:
+                include_factory_name = any(channel.factory_name for channel in device.tx_channels.values())
                 headers = ["#", "Name", "Friendly Name"]
-                rows = [
-                    [str(channel.number), channel.name, channel.friendly_name or ""]
-                    for channel in sorted(device.tx_channels.values(), key=lambda channel: channel.number)
-                ]
+                if include_factory_name:
+                    headers.append("Factory Name")
+                rows = []
+                for channel in sorted(device.tx_channels.values(), key=lambda channel: channel.number):
+                    row = [str(channel.number), channel.name, channel.friendly_name or ""]
+                    if include_factory_name:
+                        row.append(channel.factory_name or "")
+                    rows.append(row)
                 output_table(headers, rows, title=f"{device_label} TX Channels")
 
             if device.rx_channels:
+                include_factory_name = any(channel.factory_name for channel in device.rx_channels.values())
                 headers = ["#", "Name", "Friendly Name"]
-                rows = [
-                    [str(channel.number), channel.name, channel.friendly_name or ""]
-                    for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number)
-                ]
+                if include_factory_name:
+                    headers.append("Factory Name")
+                rows = []
+                for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number):
+                    row = [str(channel.number), channel.name, channel.friendly_name or ""]
+                    if include_factory_name:
+                        row.append(channel.factory_name or "")
+                    rows.append(row)
                 output_table(headers, rows, title=f"{device_label} RX Channels")
 
     asyncio.run(_run())
@@ -131,7 +156,36 @@ def name(
                     raise typer.Exit(code=ExitCode.ERROR)
                 typer.echo(f"{icon('name')}Channel name reset requested for {found_channel.name}; not verified.")
             else:
-                packet, _ = commands.command_set_channel_name(channel_type, found_channel.number, new_name)
+                protocol_identifier = None
+                if channel_type in ("rx", "tx"):
+                    attribute_name = (
+                        "receiver_channel_name_protocol_identifier"
+                        if channel_type == "rx"
+                        else "transmitter_channel_name_protocol_identifier"
+                    )
+                    protocol_identifier = getattr(device, attribute_name, None)
+                    if protocol_identifier is None:
+                        if channel_type == "rx":
+                            probe_packet, _ = commands.command_query_receiver_channel_status_2809()
+                            resolve_protocol_identifier = receiver_channel_name_protocol_identifier_from_probe
+                        else:
+                            probe_packet, _ = commands.command_query_transmitter_channel_status_2809()
+                            resolve_protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe
+                        try:
+                            probe_response = await send(probe_packet, device.ipv4, arc_port)
+                            protocol_identifier = resolve_protocol_identifier(probe_response)
+                        except Exception as exception:
+                            typer.echo(
+                                f"Error: could not determine {channel_type} channel frontend: {exception}", err=True
+                            )
+                            raise typer.Exit(code=ExitCode.ERROR)
+                        setattr(device, attribute_name, protocol_identifier)
+                packet, _ = commands.command_set_channel_name(
+                    channel_type,
+                    found_channel.number,
+                    new_name,
+                    protocol_id=protocol_identifier,
+                )
                 try:
                     notification_ids = (
                         (NOTIFICATION_RX_CHANNEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE)
@@ -142,13 +196,16 @@ def name(
                             NOTIFICATION_PROPERTY_CHANGE,
                         )
                     )
-                    await send_and_wait_for_notification(
+                    response = await send_and_wait_for_notification(
                         send,
                         packet,
                         device.ipv4,
                         arc_port,
                         notification_ids,
                     )
+                    result_code = channel_result_code(response, "channel name change")
+                    if result_code != RESULT_CODE_SUCCESS:
+                        raise ChannelFrontendError(f"channel name change failed with result 0x{result_code:04X}")
                 except Exception as exception:
                     typer.echo(f"Error: could not send channel name change: {exception}", err=True)
                     raise typer.Exit(code=ExitCode.ERROR)
@@ -192,7 +249,12 @@ def name(
 def gain(
     channel: str = typer.Argument(help="Channel number or name."),
     level: Optional[int] = typer.Argument(None, help="Gain level (1-5)."),
-    channel_type: str = typer.Option("rx", "--type", "-t", help="Channel type: tx or rx."),
+    channel_type: Optional[str] = typer.Option(
+        None,
+        "--type",
+        "-t",
+        help="Channel type: tx or rx. Defaults to the side that reports gain.",
+    ),
 ):
     """Get or set channel gain level."""
 
@@ -201,16 +263,9 @@ def gain(
             filtered = filter_devices(devices)
             _, device = _resolve_one(filtered)
 
-            if channel_type not in ("tx", "rx"):
+            if channel_type is not None and channel_type not in ("tx", "rx"):
                 typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
-
-            found_channel = find_channel(device, channel, channel_type)
-            if found_channel is None:
-                typer.echo(f"Error: channel '{channel}' not found.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            device_type = "input" if channel_type == "tx" else "output"
 
             if device.gain_levels is None:
                 try:
@@ -222,17 +277,36 @@ def gain(
                     device.gain_device_type, device.gain_levels = status
                     device.supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
 
-            if device.gain_device_type is not None and device.gain_device_type != device_type:
-                typer.echo(
-                    f"Error: device reports {device.gain_device_type} reference controls, not {device_type} controls.",
-                    err=True,
-                )
+            inferred_channel_type = gain_channel_type(device.gain_device_type or "")
+            if device.gain_device_type is None or inferred_channel_type is None:
+                if level is None:
+                    typer.echo("unsupported")
+                    return
+                if channel_type is None:
+                    typer.echo("Error: this device does not report gain controls.", err=True)
+                    raise typer.Exit(code=ExitCode.ERROR)
+                selected_channel_type = channel_type
+                device_type = "input" if selected_channel_type == "tx" else "output"
+            else:
+                if channel_type is not None and channel_type != inferred_channel_type:
+                    typer.echo(
+                        f"Error: device reports {device.gain_device_type} reference controls, not "
+                        f"{'input' if channel_type == 'tx' else 'output'} controls.",
+                        err=True,
+                    )
+                    raise typer.Exit(code=ExitCode.ERROR)
+                selected_channel_type = inferred_channel_type
+                device_type = device.gain_device_type
+
+            found_channel = find_channel(device, channel, selected_channel_type)
+            if found_channel is None:
+                typer.echo(f"Error: channel '{channel}' not found.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            current_level = device.gain_level_for_channel(found_channel.number, channel_type)
+            current_level = device.gain_level_for_channel(found_channel.number, selected_channel_type)
             if level is None:
                 if current_level is None or device.gain_device_type is None:
-                    typer.echo("N/A")
+                    typer.echo("unsupported")
                     return
                 typer.echo(f"{gain_level_label(device.gain_device_type, current_level)} (level {current_level})")
                 return

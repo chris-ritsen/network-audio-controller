@@ -13,9 +13,12 @@ from netaudio._common import (
 )
 from netaudio._exit_codes import ExitCode
 from netaudio.dante import flows
-from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
 
-app = typer.Typer(help="Manage TX multicast flows.", no_args_is_help=True)
+app = typer.Typer(
+    help="Inspect receiver flows and manage transmitter multicast flows.",
+    no_args_is_help=True,
+)
 
 
 def _fail_validation(exception: flows.FlowValidationError) -> NoReturn:
@@ -48,31 +51,42 @@ async def _detect_flow_protocol(application, device, arc_port):
 
 
 async def _get_device_and_app(device_name: str):
-    from netaudio.dante.application import DanteApplication
     from netaudio.common.app_config import settings
+    from netaudio.daemon.client import get_devices_from_daemon
+    from netaudio.dante.application import DanteApplication
 
-    application = DanteApplication()
-    await application.startup()
-    devices = await application.discover_and_populate(timeout=settings.mdns_timeout)
-    devices = devices or {}
-    devices = filter_devices(devices)
+    application = None
+    devices = await get_devices_from_daemon()
+    if devices is None:
+        application = DanteApplication()
+        await application.startup()
+        try:
+            named_devices = await application.discover_named_device(device_name, timeout=settings.mdns_timeout)
+            devices = named_devices or await application.wait_for_discovery(timeout=settings.mdns_timeout) or {}
+            await application.populate_device_names(
+                devices,
+                request_timeout_milliseconds=500,
+                request_attempts=1,
+            )
+        except BaseException:
+            await application.shutdown()
+            raise
 
-    device = find_device(devices, device_name)
+    device = find_device(filter_devices(devices or {}), device_name)
     if device is None:
+        if application is not None:
+            await application.shutdown()
         typer.echo(f"Error: device not found: {device_name}", err=True)
-        await application.shutdown()
         raise typer.Exit(code=ExitCode.ERROR)
 
-    arc_port = _get_arc_port(device)
-
-    return application, device, arc_port
+    return application, device, _get_arc_port(device)
 
 
 @app.command("list")
 def flow_list(
     device_name: str = typer.Argument(..., help="Device name or IP."),
 ):
-    """List TX multicast flows on a device."""
+    """List transmitter flow records reported by a device."""
 
     async def _run():
         application, device, arc_port = await _get_device_and_app(device_name)
@@ -83,36 +97,254 @@ def flow_list(
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
-            flow_inventory = await flows.query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id)
+            flow_inventory = await flows.query_preferred_tx_flow_inventory(
+                device_ip,
+                arc_port,
+                flow_protocol_id,
+            )
             if flow_inventory is None:
                 typer.echo("Error: failed to query flows.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
             device_flows = flow_inventory["flows"]
-            headers = ["Slot", "Type", "Channels", "Sample Rate", "Encoding", "FPP"]
+            include_status_endpoint = any(
+                flow.get("destination_internet_protocol_version_four_address") or flow.get("subscriber_device_name")
+                for flow in device_flows
+            )
+            headers = ["Slot", "Type", "Channels", "Sample Rate", "Encoding"]
+            if include_status_endpoint:
+                headers.extend(["Destination", "Subscriber"])
+            else:
+                headers.append("FPP")
 
             if not device_flows:
                 from netaudio.cli import OutputFormat, state
 
                 if state.output_format in (OutputFormat.plain, OutputFormat.table, OutputFormat.pretty):
-                    typer.echo(f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used).")
+                    if flow_protocol_id == PROTOCOL_ARC_2809 or include_status_endpoint:
+                        typer.echo(
+                            f"No transmitter flow records reported (capacity {flow_inventory['max_flow_slots']})."
+                        )
+                    else:
+                        typer.echo(f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used).")
                     return
 
             rows = []
             for flow in device_flows:
-                channel_list = ", ".join(str(channel_number) for channel_number in flow["channels"])
+                channel_numbers = flow.get("channels")
+                channel_list = (
+                    ", ".join(str(channel_number) for channel_number in channel_numbers)
+                    if isinstance(channel_numbers, list)
+                    else ""
+                )
+                flow_type = flow.get("flow_type")
+                if flow_type is None:
+                    flow_type_code = flow.get("flow_type_code")
+                    flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown"
+                row = [
+                    str(flow["flow_number"]),
+                    flow_type,
+                    channel_list or str(flow.get("channel_count") or ""),
+                    str(flow["sample_rate"]),
+                    str(flow["encoding"]),
+                ]
+                if include_status_endpoint:
+                    destination_address = flow.get("destination_internet_protocol_version_four_address")
+                    destination_port = flow.get("destination_user_datagram_port")
+                    if destination_address and destination_port:
+                        destination = f"{destination_address}:{destination_port}"
+                    else:
+                        destination = destination_address or ""
+                    subscriber_device = flow.get("subscriber_device_name") or ""
+                    subscriber_flow = flow.get("subscriber_flow_name") or ""
+                    if subscriber_device and subscriber_flow:
+                        subscriber = f"{subscriber_device}/{subscriber_flow}"
+                    else:
+                        subscriber = subscriber_device
+                    row.extend([destination, subscriber])
+                else:
+                    frames_per_packet = flow.get("frames_per_packet")
+                    row.append(str(frames_per_packet) if frames_per_packet is not None else "unknown")
+                rows.append(row)
+            output_table(headers, rows, json_data=flow_inventory)
+        finally:
+            if application is not None:
+                await application.shutdown()
+
+    asyncio.run(_run())
+
+
+@app.command("receiver-list")
+def receiver_flow_list(
+    device_name: str = typer.Argument(..., help="Device name or IP."),
+):
+    """List receiver flows and their local channel mappings."""
+
+    async def _run():
+        application, device, arc_port = await _get_device_and_app(device_name)
+        try:
+            flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+            if flow_inventory is None:
+                typer.echo("Error: failed to query receiver flows.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            receiver_flows = flow_inventory["flows"]
+            headers = [
+                "Slot",
+                "Type",
+                "Receiver Channels",
+                "Status",
+                "Destination",
+                "Port",
+                "Sample Rate",
+                "Encoding",
+                "Frames/Packet",
+                "Latency (ns)",
+            ]
+
+            if not receiver_flows:
+                from netaudio.cli import OutputFormat, state
+
+                if state.output_format in (
+                    OutputFormat.plain,
+                    OutputFormat.table,
+                    OutputFormat.pretty,
+                ):
+                    typer.echo(f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used).")
+                    return
+
+            rows = []
+            for receiver_flow in receiver_flows:
+                channel_lists = receiver_flow.get("receiver_channel_numbers_by_flow_channel")
+                if channel_lists is not None:
+                    receiver_channel_mapping = " / ".join(
+                        "+".join(str(number) for number in receiver_channel_numbers) or "-"
+                        for receiver_channel_numbers in channel_lists
+                    )
+                else:
+                    descriptor = receiver_flow.get("receiver_mapping_descriptor_hexadecimal")
+                    receiver_channel_mapping = f"raw {descriptor}" if descriptor else "unknown"
+                subscription_status_code = receiver_flow.get("subscription_status_code")
+                if subscription_status_code is not None:
+                    status_display = f"0x{subscription_status_code:04X}"
+                else:
+                    offset_62_word = receiver_flow.get("status_code_at_record_offset_62")
+                    status_display = f"raw 0x{offset_62_word:04X}" if offset_62_word is not None else "unknown"
                 rows.append(
                     [
-                        str(flow["flow_number"]),
-                        flow["flow_type"],
-                        channel_list or str(flow["channel_count"]),
-                        str(flow["sample_rate"]),
-                        str(flow["encoding"]),
-                        str(flow["frames_per_packet"]),
+                        str(receiver_flow["flow_number"]),
+                        receiver_flow["flow_type"] or "unknown",
+                        receiver_channel_mapping,
+                        status_display,
+                        receiver_flow["destination_internet_protocol_version_four_address"],
+                        (
+                            str(receiver_flow["destination_user_datagram_port"])
+                            if receiver_flow["destination_user_datagram_port"] is not None
+                            else "unknown"
+                        ),
+                        str(
+                            receiver_flow["sample_rate"] if receiver_flow.get("sample_rate") is not None else "unknown"
+                        ),
+                        str(receiver_flow["encoding"] if receiver_flow.get("encoding") is not None else "unknown"),
+                        (
+                            str(receiver_flow["frames_per_packet"])
+                            if receiver_flow.get("frames_per_packet") is not None
+                            else "unknown"
+                        ),
+                        (
+                            str(receiver_flow["latency_nanoseconds"])
+                            if receiver_flow.get("latency_nanoseconds") is not None
+                            else "unknown"
+                        ),
                     ]
                 )
             output_table(headers, rows, json_data=flow_inventory)
         finally:
-            await application.shutdown()
+            if application is not None:
+                await application.shutdown()
+
+    asyncio.run(_run())
+
+
+@app.command("receiver-port-ranges")
+def receiver_port_ranges(
+    device_name: str = typer.Argument(..., help="Device name or IP."),
+):
+    """Show the receiver port ranges reported by a device."""
+
+    async def _run():
+        application, device, arc_port = await _get_device_and_app(device_name)
+        try:
+            port_ranges = await flows.query_receiver_port_ranges(
+                str(device.ipv4),
+                arc_port,
+            )
+            if port_ranges is None:
+                typer.echo("Error: failed to query receiver port ranges.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+            rows = [
+                [
+                    "First",
+                    str(port_ranges["first_port_range_start"]),
+                    str(port_ranges["first_port_range_end"]),
+                ],
+                [
+                    "Second",
+                    str(port_ranges["second_port_range_start"]),
+                    str(port_ranges["second_port_range_end"]),
+                ],
+            ]
+            output_table(["Range", "Start", "End"], rows, json_data=port_ranges)
+        finally:
+            if application is not None:
+                await application.shutdown()
+
+    asyncio.run(_run())
+
+
+@app.command("transmit-channel-capabilities")
+def transmit_channel_capabilities(
+    device_name: str = typer.Argument(..., help="Device name or IP."),
+    starting_channel_identifier: int = typer.Option(
+        1,
+        "--starting-channel",
+        min=1,
+        max=65535,
+        help="First transmitter channel identifier to query.",
+    ),
+    maximum_channel_count: int = typer.Option(
+        0,
+        "--maximum-count",
+        min=0,
+        max=65535,
+        help="Maximum channels to return; zero requests all available channels.",
+    ),
+):
+    """Show the transmitter channel capacity and raw capability flags reported by a device."""
+
+    async def _run():
+        application, device, arc_port = await _get_device_and_app(device_name)
+        try:
+            capabilities = await flows.query_transmit_channel_capabilities(
+                str(device.ipv4),
+                arc_port,
+                starting_channel_identifier,
+                maximum_channel_count,
+            )
+            if capabilities is None:
+                typer.echo(
+                    "Error: this device does not report transmitter channel capabilities.",
+                    err=True,
+                )
+                raise typer.Exit(code=ExitCode.ERROR)
+            rows = [
+                ["Format identifier", str(capabilities["format_identifier"])],
+                ["Starting channel", str(capabilities["starting_channel_identifier"])],
+                ["Channel count", str(capabilities["channel_count"])],
+                ["Capability flags", f"0x{capabilities['capability_flags']:04X}"],
+            ]
+            output_table(["Field", "Value"], rows, json_data=capabilities)
+        finally:
+            if application is not None:
+                await application.shutdown()
 
     asyncio.run(_run())
 
@@ -139,6 +371,10 @@ def flow_create(
             if flow_protocol_id is None:
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+            try:
+                flows.require_creatable_flow_protocol(flow_protocol_id)
+            except flows.FlowValidationError as exception:
+                _fail_validation(exception)
 
             try:
                 flow_inventory = await flows.query_tx_flow_inventory(
@@ -166,13 +402,14 @@ def flow_create(
                 _fail_validation(exception)
 
             try:
-                result_code = await flows.create_tx_flow(
-                    device_ip,
-                    arc_port,
-                    flow_protocol_id,
-                    flow_slot,
-                    channel_numbers,
-                )
+                async with device.topology_mutation_lock:
+                    result_code = await flows.create_tx_flow(
+                        device_ip,
+                        arc_port,
+                        flow_protocol_id,
+                        flow_slot,
+                        channel_numbers,
+                    )
             except Exception as exception:
                 typer.echo(f"Error: flow creation failed: {exception}", err=True)
                 raise typer.Exit(code=ExitCode.ERROR) from exception
@@ -188,7 +425,8 @@ def flow_create(
                 f"{device.name or device_name}: channels {channel_label} (device confirmed)."
             )
         finally:
-            await application.shutdown()
+            if application is not None:
+                await application.shutdown()
 
     asyncio.run(_run())
 
@@ -225,6 +463,10 @@ def flow_delete(
             if flow_protocol_id is None:
                 typer.echo("Error: could not detect flow protocol for this device.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
+            try:
+                flows.require_deletable_flow_protocol(flow_protocol_id, flow_slot)
+            except flows.FlowValidationError as exception:
+                _fail_validation(exception)
 
             try:
                 flow_inventory = await flows.query_tx_flow_inventory(
@@ -249,12 +491,13 @@ def flow_delete(
                 _fail_validation(exception)
 
             try:
-                result_code = await flows.delete_tx_flow(
-                    device_ip,
-                    arc_port,
-                    flow_protocol_id,
-                    flow_slot,
-                )
+                async with device.topology_mutation_lock:
+                    result_code = await flows.delete_tx_flow(
+                        device_ip,
+                        arc_port,
+                        flow_protocol_id,
+                        flow_slot,
+                    )
             except Exception as exception:
                 typer.echo(f"Error: flow deletion failed: {exception}", err=True)
                 raise typer.Exit(code=ExitCode.ERROR) from exception
@@ -268,6 +511,7 @@ def flow_delete(
                 f"Deleted multicast TX flow from slot {flow_slot} on {device.name or device_name} (device confirmed)."
             )
         finally:
-            await application.shutdown()
+            if application is not None:
+                await application.shutdown()
 
     asyncio.run(_run())

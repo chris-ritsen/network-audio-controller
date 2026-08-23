@@ -220,10 +220,11 @@ class TestSettingsCommandPacketFormat:
         assert packet[27] == expected_msg_type_byte1
 
     def test_identify_packet_format(self):
-        commands = DanteDeviceCommands()
+        commands = DanteDeviceCommands(settings_sequence=0x0BC8)
         packet, _, port = commands.command_identify()
         assert port == 8700
         assert len(packet) == 32
+        assert packet[4:6] == b"\x0b\xc9"
         self._check_header(packet, 0x00, 0x63)
         assert packet[8:14] == b"\x00" * 6
 
@@ -236,22 +237,57 @@ class TestSettingsCommandPacketFormat:
         self._check_header(packet, 0x10, 0x0D)
         assert packet[8:14] == host_mac
 
+    def test_reboot_uses_incrementing_nonzero_sequence(self):
+        commands = DanteDeviceCommands(settings_sequence=0)
+        first, _, first_port = commands.command_reboot(host_mac=b"\xaa\xbb\xcc\xdd\xee\xff")
+        second, _, second_port = commands.command_reboot(host_mac=b"\xaa\xbb\xcc\xdd\xee\xff")
+        assert first_port == second_port == 8700
+        assert first[4:6] == bytes.fromhex("0001")
+        assert second[4:6] == bytes.fromhex("0002")
+
+    def test_factory_reset_matches_authentic_selector_one_request(self):
+        commands = DanteDeviceCommands(settings_sequence=0x18A3)
+        packet, _, port = commands.command_factory_reset(host_mac=b">B'L\xff$")
+        assert port == 8700
+        assert packet.hex() == ("ffff002418a400003e42274cff240000417564696e617465073a00900000006400010001")
+
+    def test_interface_writes_use_incrementing_nonzero_sequence(self):
+        commands = DanteDeviceCommands(settings_sequence=0)
+        host_mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        dhcp, _, dhcp_port = commands.command_set_interface_dhcp(host_mac=host_mac)
+        static, _, static_port = commands.command_set_interface_static(
+            "192.0.2.10",
+            "255.255.255.0",
+            "192.0.2.53",
+            "192.0.2.1",
+            host_mac=host_mac,
+        )
+        assert dhcp_port == static_port == 8700
+        assert dhcp[4:6] == bytes.fromhex("0001")
+        assert static[4:6] == bytes.fromhex("0002")
+        assert len(dhcp) == len(static) == 68
+
     @pytest.mark.parametrize(
         ("method", "args"),
         [
             ("command_reboot", ()),
+            ("command_factory_reset", ()),
             ("command_enable_aes67", (True,)),
             ("command_probe_interface_status", ()),
+            ("command_probe_link_status", ()),
             ("command_set_interface_dhcp", ()),
             (
                 "command_set_interface_static",
                 ("192.0.2.10", "255.255.255.0", "192.0.2.53", "192.0.2.1"),
             ),
             ("command_probe_aes67", ()),
+            ("command_probe_lock_reset_status", ()),
             ("command_probe_sample_rate", ()),
             ("command_probe_encoding", ()),
+            ("command_probe_sample_rate_pullup", ()),
             ("command_set_preferred_leader", (True,)),
             ("command_probe_preferred_leader", ()),
+            ("command_refresh_clock_status", ()),
             ("command_bluetooth_status", ()),
         ],
     )
@@ -297,10 +333,28 @@ class TestSettingsCommandPacketFormat:
         self._check_header(packet, 0x00, 0x83)
 
     def test_set_sample_rate_packet_format(self):
-        commands = DanteDeviceCommands()
+        commands = DanteDeviceCommands(settings_sequence=0x18AF)
         packet, _, port = commands.command_set_sample_rate(48000)
+        next_packet, _, _ = commands.command_set_sample_rate(192000)
         assert port == 8700
         self._check_header(packet, 0x00, 0x81)
+        assert packet[4:6] == bytes.fromhex("18b0")
+        assert next_packet[4:6] == bytes.fromhex("18b1")
+
+    def test_sample_rate_pullup_packet_format(self):
+        host_mac = bytes.fromhex("52550a000202")
+        commands = DanteDeviceCommands(host_mac=host_mac, settings_sequence=0x0046)
+        probe, _, probe_port = commands.command_probe_sample_rate_pullup(sequence=0x0047)
+        write, _, write_port = commands.command_set_sample_rate_pullup(1)
+        assert probe_port == write_port == 8700
+        assert probe == bytes.fromhex(
+            "ffff00380047000052550a0002020000417564696e617465073a0085"
+            "00000000000000000000000000000000000000000000000000000000"
+        )
+        assert write == bytes.fromhex(
+            "ffff00380047000052550a0002020000417564696e617465073a0085"
+            "00000000000000010000000100000000000000000000000000000000"
+        )
 
     def test_set_gain_level_packet_format(self):
         host_mac = bytes.fromhex("842f5774e86d")

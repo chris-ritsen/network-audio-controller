@@ -19,7 +19,6 @@ pub const TX_CHANNELS_PER_PAGE: u16 = 32;
 
 const CHANNEL_COUNT_TX_OFFSET: usize = 12;
 const CHANNEL_COUNT_RX_OFFSET: usize = 14;
-const CHANNEL_COUNT_LOCK_OFFSET: usize = 34;
 const RX_RECORD_CHANNEL_NUMBER: usize = 0;
 const RX_RECORD_TX_CHANNEL_POINTER: usize = 6;
 const RX_RECORD_TX_DEVICE_POINTER: usize = 8;
@@ -161,7 +160,7 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
     Some(ChannelCount {
         tx_count: read_u16(response, CHANNEL_COUNT_TX_OFFSET)?,
         rx_count: read_u16(response, CHANNEL_COUNT_RX_OFFSET)?,
-        locked: read_u16(response, CHANNEL_COUNT_LOCK_OFFSET).map(|flags| flags != 0),
+        locked: None,
     })
 }
 
@@ -196,8 +195,27 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
     )?;
     let body = envelope.body;
     let body_header = body.get(..BODY_HEADER_SIZE)?;
+    let maximum_records = usize::from(body_header[0]);
     let record_count = usize::from(body_header[1]);
-    if body_header[0] != body_header[1] || record_count > usize::from(RX_CHANNELS_PER_PAGE) {
+    if maximum_records > usize::from(RX_CHANNELS_PER_PAGE) || record_count > maximum_records {
+        return None;
+    }
+    if record_count == 0 {
+        if envelope.result_code != RESULT_CODE_SUCCESS {
+            return None;
+        }
+        if maximum_records == 0 {
+            return (body.len() == BODY_HEADER_SIZE).then(Vec::new);
+        }
+        let padded_records_size = maximum_records.checked_mul(RX_RECORD_SIZE)?;
+        let padded_records_end = BODY_HEADER_SIZE.checked_add(padded_records_size)?;
+        return (body.len() == padded_records_end
+            && body[BODY_HEADER_SIZE..padded_records_end]
+                .iter()
+                .all(|byte| *byte == 0))
+        .then(Vec::new);
+    }
+    if maximum_records != record_count {
         return None;
     }
     let records_size = record_count.checked_mul(RX_RECORD_SIZE)?;
@@ -482,32 +500,34 @@ fn parse_counted_tx_info_page(
     body.get(records_end..metadata_body_end)?;
 
     let mut channels = Vec::with_capacity(channel_count);
-    let mut name_pointers = Vec::with_capacity(channel_count);
+    let mut primary_metadata_group_ended = false;
     for index in 0..channel_count {
         let record_offset = BODY_HEADER_SIZE + index * TX_RECORD_SIZE;
         let record = body.get(record_offset..record_offset + TX_RECORD_SIZE)?;
         let channel_number = u16_at(record, TX_RECORD_CHANNEL_NUMBER);
-        if channel_number != expected_channel_number(starting_channel, index)?
-            || u16_at(record, TX_RECORD_CHANNEL_GROUP) != metadata_pointer
-        {
+        if channel_number != expected_channel_number(starting_channel, index)? {
             return None;
         }
+        let channel_metadata_pointer = usize::from(u16_at(record, TX_RECORD_CHANNEL_GROUP));
+        let channel_metadata_end = channel_metadata_pointer.checked_add(16)?;
+        response.get(channel_metadata_pointer..channel_metadata_end)?;
         let name_pointer = u16_at(record, TX_RECORD_NAME_POINTER);
-        if usize::from(name_pointer) < metadata_end {
+        let name = pointed_string(response, name_pointer, channel_metadata_end)?;
+        if channel_metadata_pointer != usize::from(metadata_pointer) {
+            primary_metadata_group_ended = true;
+            continue;
+        }
+        if primary_metadata_group_ended {
             return None;
         }
-        name_pointers.push(name_pointer);
         channels.push(TxChannel {
             number: channel_number,
-            name: None,
+            name: Some(name),
             friendly_name: None,
         });
     }
 
-    for (channel, name_pointer) in channels.iter_mut().zip(name_pointers) {
-        channel.name = Some(pointed_string(response, name_pointer, metadata_end)?);
-    }
-    Some(channels)
+    (!channels.is_empty()).then_some(channels)
 }
 
 #[cfg(test)]
@@ -607,7 +627,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_count_parser_reads_counts_and_lock() {
+    fn channel_count_parser_does_not_infer_lock_state() {
         let mut response = channel_count_response(36);
         response[12..14].copy_from_slice(&260u16.to_be_bytes());
         response[14..16].copy_from_slice(&520u16.to_be_bytes());
@@ -616,7 +636,7 @@ mod tests {
         let parsed = parse_channel_count(&response).unwrap();
         assert_eq!(parsed.tx_count, 260);
         assert_eq!(parsed.rx_count, 520);
-        assert_eq!(parsed.locked, Some(true));
+        assert_eq!(parsed.locked, None);
     }
 
     #[test]
@@ -706,6 +726,38 @@ mod tests {
         response[10..12].copy_from_slice(&[1, 1]);
         stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_SUCCESS);
         assert_eq!(parse_rx_page(&response, 1), None);
+    }
+
+    #[test]
+    fn rx_parser_accepts_zero_count_padded_final_page() {
+        let mut response = vec![
+            0u8;
+            RESPONSE_HEADER_SIZE
+                + BODY_HEADER_SIZE
+                + RX_RECORD_SIZE * RX_CHANNELS_PER_PAGE as usize
+        ];
+        response[10..12].copy_from_slice(&[RX_CHANNELS_PER_PAGE as u8, 0]);
+        stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_SUCCESS);
+
+        assert_eq!(parse_rx_page(&response, 49), Some(Vec::new()));
+
+        let last = response.len() - 1;
+        response[last] = 1;
+        assert_eq!(parse_rx_page(&response, 49), None);
+    }
+
+    #[test]
+    fn rx_parser_rejects_zero_count_padded_intermediate_page() {
+        let mut response = vec![
+            0u8;
+            RESPONSE_HEADER_SIZE
+                + BODY_HEADER_SIZE
+                + RX_RECORD_SIZE * RX_CHANNELS_PER_PAGE as usize
+        ];
+        response[10..12].copy_from_slice(&[RX_CHANNELS_PER_PAGE as u8, 0]);
+        stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_MORE_PAGES);
+
+        assert_eq!(parse_rx_page(&response, 49), None);
     }
 
     #[test]
