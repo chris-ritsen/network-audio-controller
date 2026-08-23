@@ -13,7 +13,7 @@ from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.metering import parse_metering_levels
+from netaudio.dante.metering import classify_signal_presence, parse_metering_levels
 
 logger = logging.getLogger("netaudio")
 
@@ -27,6 +27,8 @@ class MeteringManager:
         self._application = application
         self._persistent_refs: dict[str, set[str]] = {}
         self._snapshot_count: dict[str, int] = {}
+        self._detailed_levels: dict[str, dict] = {}
+        self._signal_presence_levels: dict[str, dict] = {}
         self._latest_levels: dict[str, dict] = {}
         self._history: dict[str, collections.deque] = {}
         self._events: dict[str, asyncio.Event] = {}
@@ -37,7 +39,6 @@ class MeteringManager:
         self._broadcast_task = None
         self._active_port: int | None = None
         self._dirty_devices: set[str] = set()
-        self._last_broadcast: dict[str, float] = {}
 
     @staticmethod
     def _probe_port(port: int) -> bool:
@@ -58,12 +59,55 @@ class MeteringManager:
 
     @staticmethod
     def _cached_result(cached: dict) -> dict:
-        return {
-            "tx": cached["tx"],
-            "rx": cached["rx"],
+        result = {
+            "tx": dict(cached["tx"]),
+            "rx": dict(cached["rx"]),
             "wall_time": cached.get("wall_time"),
             "source_ip": cached.get("source_ip"),
+            "source_port": cached.get("source_port"),
+            "metering_source": cached.get("metering_source"),
         }
+        for key in (
+            "sequence",
+            "tx_count",
+            "rx_count",
+            "tx_first_channel_index",
+            "rx_first_channel_index",
+            "level_vector_offset",
+            "padding_length",
+            "tx_raw",
+            "rx_raw",
+            "tx_signal_presence",
+            "rx_signal_presence",
+        ):
+            if key in cached:
+                value = cached[key]
+                if isinstance(value, dict):
+                    result[key] = dict(value)
+                elif isinstance(value, list):
+                    result[key] = list(value)
+                else:
+                    result[key] = value
+        return result
+
+    @staticmethod
+    def _is_fresh(sample: dict | None, now: float) -> bool:
+        return bool(sample and now - sample.get("timestamp", 0) < CACHE_MAX_AGE)
+
+    def _selected_sample(self, server_name: str, now: float | None = None) -> dict | None:
+        now = time.monotonic() if now is None else now
+        detailed = self._detailed_levels.get(server_name)
+        if self._is_fresh(detailed, now):
+            return detailed
+        passive = self._signal_presence_levels.get(server_name)
+        if self._is_fresh(passive, now):
+            return passive
+        return None
+
+    def _append_history(self, server_name: str, sample: dict) -> None:
+        if server_name not in self._history:
+            self._history[server_name] = collections.deque(maxlen=HISTORY_MAX_SAMPLES)
+        self._history[server_name].append(sample)
 
     def _server_name_for_ip(self, ip: str) -> str | None:
         for device in self._application.devices.values():
@@ -103,7 +147,7 @@ class MeteringManager:
 
     async def start(self):
         self._host_ip = _get_local_ip()
-        self._host_mac = self._application.cmc._host_mac
+        self._host_mac = self._application.cmc.host_media_access_control_address
 
         preferred_port = app_settings.metering_port
         if self._probe_port(preferred_port):
@@ -145,26 +189,25 @@ class MeteringManager:
     async def _broadcast_loop(self):
         while True:
             await asyncio.sleep(BROADCAST_INTERVAL)
-            if not self._dirty_devices:
+            self._broadcast_pending()
+
+    def _broadcast_pending(self) -> None:
+        if not self._dirty_devices:
+            return
+        devices_to_broadcast = list(self._dirty_devices)
+        self._dirty_devices.clear()
+        for server_name in devices_to_broadcast:
+            cached = self._selected_sample(server_name)
+            if not cached:
                 continue
-            devices_to_broadcast = list(self._dirty_devices)
-            self._dirty_devices.clear()
-            for server_name in devices_to_broadcast:
-                cached = self._latest_levels.get(server_name)
-                if not cached:
-                    continue
-                self._application.dispatcher.emit_nowait(
-                    DanteEvent(
-                        type=EventType.METER_VALUES,
-                        server_name=server_name,
-                        data={
-                            "tx": cached["tx"],
-                            "rx": cached["rx"],
-                            "wall_time": cached.get("wall_time"),
-                            "source_ip": cached.get("source_ip"),
-                        },
-                    )
+            self._latest_levels[server_name] = cached
+            self._application.dispatcher.emit_nowait(
+                DanteEvent(
+                    type=EventType.METER_VALUES,
+                    server_name=server_name,
+                    data=self._cached_result(cached),
                 )
+            )
 
     async def stop(self):
         if self._broadcast_task:
@@ -183,6 +226,8 @@ class MeteringManager:
 
         self._persistent_refs.clear()
         self._snapshot_count.clear()
+        self._detailed_levels.clear()
+        self._signal_presence_levels.clear()
         self._latest_levels.clear()
         self._history.clear()
         self._events.clear()
@@ -195,6 +240,8 @@ class MeteringManager:
 
     def cleanup_device(self, server_name: str):
         self._snapshot_count.pop(server_name, None)
+        self._detailed_levels.pop(server_name, None)
+        self._signal_presence_levels.pop(server_name, None)
         self._latest_levels.pop(server_name, None)
         self._events.pop(server_name, None)
 
@@ -208,28 +255,30 @@ class MeteringManager:
         result = {}
         for server_name, refs in self._persistent_refs.items():
             device = self._get_device(server_name)
-            cached = self._latest_levels.get(server_name)
-            receiving = False
-            if cached:
-                age = now - cached.get("timestamp", 0)
-                receiving = age < 10.0
+            cached = self._selected_sample(server_name, now)
             result[server_name] = {
                 "name": device.name if device else "",
                 "server_name": server_name,
                 "online": device.online if device else False,
-                "receiving": receiving,
+                "receiving": cached is not None,
+                "metering_source": cached.get("metering_source") if cached else None,
             }
         return result
 
     def get_cached_levels(self, server_name: str) -> dict | None:
-        cached = self._latest_levels.get(server_name)
+        cached = self._selected_sample(server_name)
         if not cached:
             return None
+        self._latest_levels[server_name] = cached
+        return self._cached_result(cached)
+
+    def get_cached_levels_by_server(self) -> dict[str, dict]:
+        now = time.monotonic()
+        server_names = self._detailed_levels.keys() | self._signal_presence_levels.keys()
         return {
-            "tx": cached["tx"],
-            "rx": cached["rx"],
-            "wall_time": cached.get("wall_time"),
-            "source_ip": cached.get("source_ip"),
+            server_name: self._cached_result(cached)
+            for server_name in server_names
+            if (cached := self._selected_sample(server_name, now)) is not None
         }
 
     def get_history(self, server_name: str, max_samples: int | None = None) -> list[dict]:
@@ -261,13 +310,12 @@ class MeteringManager:
         if device and not device.online:
             return None
 
-        cached = self._latest_levels.get(server_name)
-        if cached and self._persistent_refs.get(server_name):
-            return self._cached_result(cached)
-        if cached and (time.monotonic() - cached.get("timestamp", 0)) < CACHE_MAX_AGE:
+        cached = self._selected_sample(server_name)
+        if cached:
+            self._latest_levels[server_name] = cached
             return self._cached_result(cached)
 
-        if self._persistent_refs.get(server_name) and not cached:
+        if self._persistent_refs.get(server_name):
             return None
 
         was_active = self._is_active(server_name)
@@ -285,8 +333,9 @@ class MeteringManager:
 
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
-            cached = self._latest_levels.get(server_name)
+            cached = self._selected_sample(server_name)
             if cached:
+                self._latest_levels[server_name] = cached
                 return self._cached_result(cached)
             return None
         except asyncio.TimeoutError:
@@ -327,15 +376,77 @@ class MeteringManager:
             "timestamp": now,
             "wall_time": time.time(),
             "source_ip": source_ip,
+            "source_port": source_address[1],
+            "metering_source": "detailed",
         }
+        self._detailed_levels[server_name] = sample
         self._latest_levels[server_name] = sample
-
-        if server_name not in self._history:
-            self._history[server_name] = collections.deque(maxlen=HISTORY_MAX_SAMPLES)
-        self._history[server_name].append(sample)
+        self._append_history(server_name, sample)
 
         if self._persistent_refs.get(server_name):
             self._dirty_devices.add(server_name)
+
+        event = self._events.get(server_name)
+        if event:
+            event.set()
+
+    def record_signal_presence(self, record: dict, source_address: tuple) -> None:
+        try:
+            source_ip = source_address[0]
+            source_port = source_address[1]
+            server_name = self._server_name_for_ip(source_ip)
+            if not server_name:
+                return
+
+            tx_levels = list(record["tx_levels"])
+            rx_levels = list(record["rx_levels"])
+            tx_count = int(record["tx_count"])
+            rx_count = int(record["rx_count"])
+            tx_first_channel_index = int(record["tx_first_channel_index"])
+            rx_first_channel_index = int(record["rx_first_channel_index"])
+            if len(tx_levels) != tx_count or len(rx_levels) != rx_count:
+                return
+            if any(not isinstance(value, int) or not 0 <= value <= 0xFF for value in tx_levels + rx_levels):
+                return
+
+            tx = {tx_first_channel_index + offset + 1: value for offset, value in enumerate(tx_levels)}
+            rx = {rx_first_channel_index + offset + 1: value for offset, value in enumerate(rx_levels)}
+            tx_indications = {channel: classify_signal_presence(value) for channel, value in tx.items()}
+            rx_indications = {channel: classify_signal_presence(value) for channel, value in rx.items()}
+            now = time.monotonic()
+            sample = {
+                "tx": tx,
+                "rx": rx,
+                "tx_raw": tx_levels,
+                "rx_raw": rx_levels,
+                "tx_signal_presence": tx_indications,
+                "rx_signal_presence": rx_indications,
+                "timestamp": now,
+                "wall_time": time.time(),
+                "source_ip": source_ip,
+                "source_port": source_port,
+                "metering_source": "signal_presence",
+                "sequence": int(record["sequence"]),
+                "tx_count": tx_count,
+                "rx_count": rx_count,
+                "tx_first_channel_index": tx_first_channel_index,
+                "rx_first_channel_index": rx_first_channel_index,
+                "level_vector_offset": int(record["level_vector_offset"]),
+                "padding_length": int(record["padding_length"]),
+            }
+        except (KeyError, TypeError, ValueError, IndexError) as exception:
+            logger.debug(f"Discarding malformed signal-presence record from {source_address}: {exception}")
+            return
+
+        self._signal_presence_levels[server_name] = sample
+        selected = self._selected_sample(server_name, now)
+        if selected is not sample:
+            return
+
+        self._latest_levels[server_name] = sample
+        self._append_history(server_name, sample)
+
+        self._dirty_devices.add(server_name)
 
         event = self._events.get(server_name)
         if event:

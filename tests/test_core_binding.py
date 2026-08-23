@@ -3,10 +3,12 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
-from netaudio.core.binding import CoreClient, lock_token
+from netaudio.core import binding
+from netaudio.core.binding import CoreClient, NetaudioCoreLibraryMissing, lock_token
 
 
 class ExecuteLibrary:
@@ -109,3 +111,20 @@ def test_client_serializes_concurrent_native_calls_per_instance():
 
     assert results == [(260, 520, True)] * 32
     assert library.maximum_active_calls == 1
+
+
+def test_require_reports_missing_library_without_io_error_status(monkeypatch):
+    missing = Path("/tmp/netaudio-core-missing.so")
+    monkeypatch.setattr(binding, "_library", None)
+    monkeypatch.setattr(binding, "_load_attempted", False)
+    monkeypatch.setattr(binding, "_load_failures", [])
+    monkeypatch.setattr(binding, "_candidate_paths", lambda: (missing,))
+
+    with pytest.raises(NetaudioCoreLibraryMissing) as exception:
+        binding.require()
+
+    message = str(exception.value)
+    assert "io error" not in message
+    assert "ABI-incompatible" not in message
+    assert "make core" in message
+    assert f"{missing}: not found" in message

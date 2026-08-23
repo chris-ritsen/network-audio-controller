@@ -43,7 +43,8 @@ def test_write_lock_key_qr_creates_private_png(tmp_path):
 
     assert result_path == output_path.resolve()
     assert output_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
 
 
 def test_write_lock_key_qr_uses_png_for_temporary_output(monkeypatch, tmp_path):
@@ -61,7 +62,8 @@ def test_write_lock_key_qr_uses_png_for_temporary_output(monkeypatch, tmp_path):
 
     assert output_path.suffix == ".png"
     assert output_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
 
 
 def test_write_lock_key_qr_allows_explicit_svg(tmp_path):

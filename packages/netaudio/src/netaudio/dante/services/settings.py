@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
@@ -35,14 +37,44 @@ class DanteSettingsService(DanteUnicastService):
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
+    async def set_clock_source(self, device_ip: str, clock_source: int, host_mac: bytes = None) -> None:
+        command_args = self._commands.command_set_clock_source(clock_source, host_mac=host_mac)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
+    async def set_clock_subdomain(self, device_ip: str, subdomain, host_mac: bytes = None) -> None:
+        command_args = self._commands.command_set_clock_subdomain(subdomain, host_mac=host_mac)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
     def probe_preferred_leader(self, device_ip: str, clock_source: int = 0, host_mac: bytes = None) -> None:
         command_args = self._commands.command_probe_preferred_leader(clock_source=clock_source, host_mac=host_mac)
         packet = command_args[0]
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
+    def refresh_clock_status(self, device_ip: str, host_mac: bytes = None, sequence: int = 0x0021) -> None:
+        command_args = self._commands.command_refresh_clock_status(host_mac=host_mac, sequence=sequence)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
     def probe_interface_status(self, device_ip: str) -> None:
         command_args = self._commands.command_probe_interface_status()
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
+    def probe_link_status(self, device_ip: str, host_mac: bytes | None = None) -> None:
+        command_args = self._commands.command_probe_link_status(host_mac=host_mac)
+        packet = command_args[0]
+        port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip, port)
+
+    def probe_switch_configuration(self, device_ip: str, host_mac: bytes | None = None) -> None:
+        command_args = self._commands.command_probe_switch_configuration(host_mac=host_mac)
         packet = command_args[0]
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
@@ -67,6 +99,74 @@ class DanteSettingsService(DanteUnicastService):
         port = command_args[2] or SETTINGS_PORT
         self.send(packet, device_ip, port)
 
+    def probe_lock_reset_status(
+        self,
+        device_ip_address: str,
+        host_mac: bytes | None = None,
+        request_value: int = 100,
+    ) -> None:
+        command_arguments = self._commands.command_probe_lock_reset_status(
+            host_mac=host_mac,
+            request_value=request_value,
+        )
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def request_device_log_export(
+        self,
+        device_ip_address: str,
+        host_mac=None,
+    ) -> None:
+        command_arguments = self._commands.command_device_log_export(host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def request_capability_partition_export(
+        self,
+        device_ip_address: str,
+        host_mac=None,
+    ) -> None:
+        command_arguments = self._commands.command_capability_partition_export(host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def probe_clear_configuration_status(
+        self,
+        device_ip_address: str,
+        host_mac: bytes | None = None,
+    ) -> None:
+        command_arguments = self._commands.command_probe_clear_configuration_status(
+            host_mac=host_mac,
+        )
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def clear_all_configuration(
+        self,
+        device_ip_address: str,
+        host_mac: bytes | None = None,
+    ) -> None:
+        command_arguments = self._commands.command_clear_all_configuration(host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def clear_all_configuration_preserving_internet_protocol_settings(
+        self,
+        device_ip_address: str,
+        host_mac: bytes | None = None,
+    ) -> None:
+        command_arguments = self._commands.command_clear_all_configuration_preserving_internet_protocol_settings(
+            host_mac=host_mac,
+        )
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
     def probe_sample_rate(self, device_ip_address: str, host_mac: bytes | None = None) -> None:
         command_args = self._commands.command_probe_sample_rate(host_mac=host_mac)
         packet = command_args[0]
@@ -77,6 +177,23 @@ class DanteSettingsService(DanteUnicastService):
         command_args = self._commands.command_probe_encoding(host_mac=host_mac)
         packet = command_args[0]
         port = command_args[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def probe_sample_rate_pullup(self, device_ip_address: str, host_mac: bytes | None = None) -> None:
+        command_arguments = self._commands.command_probe_sample_rate_pullup(host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
+        self.send(packet, device_ip_address, port)
+
+    def set_sample_rate_pullup(
+        self,
+        device_ip_address: str,
+        raw_value: int,
+        host_mac: bytes | None = None,
+    ) -> None:
+        command_arguments = self._commands.command_set_sample_rate_pullup(raw_value, host_mac=host_mac)
+        packet = command_arguments[0]
+        port = command_arguments[2] or SETTINGS_PORT
         self.send(packet, device_ip_address, port)
 
     def probe_gain_level(self, device_ip_address: str, host_mac: bytes | None = None) -> None:
