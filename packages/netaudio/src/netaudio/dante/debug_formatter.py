@@ -64,6 +64,18 @@ PROTOCOL_NAMES = {
 
 OPCODE_NAMES_BY_PROTOCOL = {}
 SETTINGS_MESSAGE_TYPE_NAMES = {}
+BUILTIN_ARC_OPCODE_NAMES = {
+    0x1000: "channel_count",
+    0x1002: "device_name",
+    0x2000: "transmitter_channels",
+    0x2010: "transmitter_channel_names",
+    0x3000: "receiver_channels",
+}
+BUILTIN_OPCODE_NAMES = {
+    (0x2809, 0x1001): "set_device_name",
+    (0x2809, 0x3400): "receiver_channel_status",
+    (0x2809, 0x3600): "receiver_flow_status",
+}
 
 
 @lru_cache(maxsize=1)
@@ -88,7 +100,11 @@ def get_opcode_name(protocol, opcode):
             if fallback_protocol != protocol:
                 external_label = opcode_labels.get((fallback_protocol, opcode))
                 if external_label:
-                    return external_label
+                    return f"{external_label} [0x{fallback_protocol:04X} label]"
+
+        builtin_label = BUILTIN_OPCODE_NAMES.get((protocol, opcode)) or BUILTIN_ARC_OPCODE_NAMES.get(opcode)
+        if builtin_label:
+            return builtin_label
 
     return f"0x{opcode:04X}"
 
@@ -115,15 +131,21 @@ def get_subscription_status_name(status_code):
     if isinstance(entry, dict):
         label = entry.get("label")
         if isinstance(label, str) and label.strip():
-            return label.strip()
+            from netaudio.i18n import translate
+
+            return translate(label.strip())
 
         labels = entry.get("labels")
         if isinstance(labels, list):
             for value in labels:
                 if isinstance(value, str) and value.strip():
-                    return value.strip()
+                    from netaudio.i18n import translate
 
-    return f"status:{status_code}"
+                    return translate(value.strip())
+
+    from netaudio.dante.const import subscription_status_label
+
+    return subscription_status_label(status_code)
 
 
 def get_subscription_status_state(status_code):
@@ -136,7 +158,6 @@ def get_subscription_status_state(status_code):
 
     if status_code == 0:
         return "none"
-
     return "unknown"
 
 

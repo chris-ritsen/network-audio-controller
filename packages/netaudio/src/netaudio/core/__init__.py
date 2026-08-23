@@ -1,6 +1,7 @@
 from netaudio.core.binding import (
     CoreClient,
     NetaudioCoreError,
+    NetaudioCoreLibraryMissing,
     available,
     build_command,
     host_mac,
@@ -13,6 +14,7 @@ from netaudio.core.binding import (
 __all__ = [
     "CoreClient",
     "NetaudioCoreError",
+    "NetaudioCoreLibraryMissing",
     "available",
     "build_command",
     "host_mac",

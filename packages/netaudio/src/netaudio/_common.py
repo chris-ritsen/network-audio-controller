@@ -15,16 +15,33 @@ from typing import Any, Awaitable, Callable, Optional
 import typer
 
 from netaudio import DanteDevice
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import settings
 from netaudio.daemon.client import get_devices_from_daemon
 from netaudio.dante.application import DanteApplication
+from netaudio.dante.capability_partition import (
+    CapabilityPartitionExport,
+    parse_capability_partition_export,
+)
+from netaudio.dante.conmon_export import ConmonExport, ConmonExportUnavailableError
 from netaudio.dante.const import SERVICE_ARC
+from netaudio.dante.core_capability_probe_operations import CoreCapabilityProbeOperations
+from netaudio.dante.diagnostic_logs import (
+    DeviceLogExport,
+    apply_device_audio_capabilities,
+    parse_device_log_export,
+)
 from netaudio.dante.latency import milliseconds_to_microseconds
+from netaudio.dante.lock_status import LockStatusObservation
 
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
 
 logger = logging.getLogger("netaudio")
+
+
+class CapabilityProbeTimeout(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -50,7 +67,7 @@ async def readback_after_notification(
     )
 
 
-class CoreCommandSender:
+class CoreCommandSender(CoreCapabilityProbeOperations):
     def __init__(self, observer=None, devices=None, packet_store=None, session_id=None):
         from netaudio import core
 
@@ -64,8 +81,8 @@ class CoreCommandSender:
         self._dispatcher = None
         self._notifications = None
         self._settings_service = None
-        self._notification_start_lock = asyncio.Lock()
-        self._settings_start_lock = asyncio.Lock()
+        self._notification_start_lock = DeferredAsyncioLock()
+        self._settings_start_lock = DeferredAsyncioLock()
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._client_request_locks: dict[str, asyncio.Lock] = {}
 
@@ -204,6 +221,110 @@ class CoreCommandSender:
             capability_timeout,
         )
 
+    async def probe_clocking_status(self, device, timeout: float = 3.0) -> dict:
+        notifications = await self._ensure_notifications()
+        settings_service = await self._ensure_settings_service()
+        device_ip_address = str(device.ipv4)
+        waiter = notifications.register_preferred_leader_waiter(device_ip_address)
+        try:
+            settings_service.refresh_clock_status(device_ip_address)
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+        finally:
+            notifications.unregister_preferred_leader_waiter(device_ip_address)
+        if device.clock_source_code is None:
+            raise RuntimeError("clock status readback was unavailable")
+        return {
+            "clock_source_code": device.clock_source_code,
+            "clock_subdomain": device.clock_subdomain,
+            "preferred_leader": device.preferred_leader,
+            "clock_role": device.clock_role,
+            "clock_identity": device.clock_identity,
+            "leader_clock_identity": device.leader_clock_identity,
+            "clock_port_state_code": device.clock_port_state_code,
+            "clock_port_records": device.clock_port_records,
+            "clock_frequency_offset_parts_per_billion": device.clock_frequency_offset_parts_per_billion,
+        }
+
+    async def export_device_logs(self, device_ip_address, timeout: float = 15.0) -> DeviceLogExport:
+        address = str(device_ip_address)
+        settings_service = await self._ensure_settings_service()
+
+        async def request() -> None:
+            settings_service.request_device_log_export(address)
+
+        try:
+            export = await self._export_conmon_data(
+                address,
+                b"LOGS",
+                1,
+                request,
+                timeout,
+                "device log export",
+            )
+        except ConmonExportUnavailableError:
+            for device in self._devices.values():
+                if device.ipv4 and str(device.ipv4) == address:
+                    device.diagnostic_log_export_supported = False
+            raise
+        result = parse_device_log_export(export)
+        for device in self._devices.values():
+            if device.ipv4 and str(device.ipv4) == address:
+                apply_device_audio_capabilities(device, result.audio_capabilities)
+        return result
+
+    async def export_capability_partition(
+        self,
+        device_ip_address,
+        timeout: float = 15.0,
+    ) -> CapabilityPartitionExport:
+        address = str(device_ip_address)
+        settings_service = await self._ensure_settings_service()
+
+        async def request() -> None:
+            settings_service.request_capability_partition_export(address)
+
+        export = await self._export_conmon_data(
+            address,
+            b"CAP1",
+            2,
+            request,
+            timeout,
+            "CAP1 partition export",
+        )
+        return parse_capability_partition_export(export)
+
+    async def _export_conmon_data(
+        self,
+        device_ip_address: str,
+        expected_echoed_tag: bytes,
+        expected_selector_value: int,
+        request,
+        timeout: float,
+        operation_name: str,
+    ) -> ConmonExport:
+        from netaudio.dante.services.notification import request_and_wait_for_conmon_export
+
+        operation_lock = self._capability_probe_locks.setdefault(
+            ("conmon_export", device_ip_address),
+            asyncio.Lock(),
+        )
+        async with operation_lock:
+            notifications = await self._ensure_notifications()
+            result = await request_and_wait_for_conmon_export(
+                notifications,
+                device_ip_address,
+                expected_echoed_tag,
+                expected_selector_value,
+                request,
+                timeout,
+            )
+        if result is None:
+            raise CapabilityProbeTimeout(f"{operation_name} timed out for {device_ip_address}")
+        return result
+
     async def _probe_audio_capability(
         self,
         capability_name: str,
@@ -228,7 +349,7 @@ class CoreCommandSender:
                 except asyncio.TimeoutError:
                     result = getattr(notifications, get_result_name)(address)
                     if result is None:
-                        raise RuntimeError(f"{capability_description} readback timed out for {address}")
+                        raise CapabilityProbeTimeout(f"{capability_description} readback timed out for {address}")
                     return result
                 result = getattr(notifications, get_result_name)(address)
                 if result is None:
@@ -236,36 +357,6 @@ class CoreCommandSender:
                 return result
             finally:
                 getattr(notifications, unregister_waiter_name)(address)
-
-    async def probe_sample_rate_status(self, device_ip_address, timeout: float = 2.0):
-        from netaudio.dante.device_commands import DanteDeviceCommands
-
-        commands = DanteDeviceCommands(host_mac=self._host_mac)
-        return await self._probe_audio_capability(
-            "sample_rate",
-            device_ip_address,
-            commands.command_probe_sample_rate,
-            "register_sample_rate_waiter",
-            "get_sample_rate_result",
-            "unregister_sample_rate_waiter",
-            "sample rate",
-            timeout,
-        )
-
-    async def probe_encoding_status(self, device_ip_address, timeout: float = 2.0):
-        from netaudio.dante.device_commands import DanteDeviceCommands
-
-        commands = DanteDeviceCommands(host_mac=self._host_mac)
-        return await self._probe_audio_capability(
-            "encoding",
-            device_ip_address,
-            commands.command_probe_encoding,
-            "register_encoding_waiter",
-            "get_encoding_result",
-            "unregister_encoding_waiter",
-            "encoding",
-            timeout,
-        )
 
     async def probe_gain_status(self, device_ip_address, timeout: float = 2.0):
         from netaudio.dante.services.notification import send_and_wait_for_gain_status
@@ -312,6 +403,49 @@ class CoreCommandSender:
                 channel_number=channel_number,
                 expected_level=gain_level,
             )
+
+    async def clear_configuration(
+        self,
+        device_ip_address,
+        preserve_internet_protocol_settings: bool,
+        timeout: float = 2.0,
+    ) -> dict:
+        from netaudio.dante.device_commands import DanteDeviceCommands
+        from netaudio.dante.services.notification import mutate_and_wait_for_clear_configuration_status
+
+        address = str(device_ip_address)
+        commands = DanteDeviceCommands(host_mac=self._host_mac)
+        command_builder = (
+            commands.command_clear_all_configuration_preserving_internet_protocol_settings
+            if preserve_internet_protocol_settings
+            else commands.command_clear_all_configuration
+        )
+        packet, _, port = command_builder()
+        expected_action_result_code = 2 if preserve_internet_protocol_settings else 1
+        notifications = await self._ensure_notifications()
+        operation_lock = self._capability_probe_locks.setdefault(
+            ("clear_configuration_action", address), asyncio.Lock()
+        )
+
+        async def mutate() -> None:
+            await self(packet, address, port, expect_response=False)
+
+        async with operation_lock:
+            status = await mutate_and_wait_for_clear_configuration_status(
+                notifications,
+                address,
+                expected_action_result_code,
+                mutate,
+                timeout,
+            )
+        if status is None:
+            raise CapabilityProbeTimeout(f"clear-configuration status timed out for {address}")
+        if status["action_result_code"] != expected_action_result_code:
+            raise RuntimeError(
+                f"clear-configuration returned result {status['action_result_code']} "
+                f"instead of {expected_action_result_code} for {address}"
+            )
+        return status
 
     async def close(self) -> None:
         notifications = self._notifications
@@ -360,62 +494,7 @@ def ansi(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
-HEADER_ICONS = {
-    "Name": "name",
-    "IP Address": "ip",
-    "IP": "ip",
-    "MAC Address": "mac",
-    "Clock MAC": "mac",
-    "Model": "model",
-    "TX": "tx",
-    "RX": "rx",
-    "Last Seen": "last_seen",
-    "Server Name": "server",
-    "Manufacturer": "manufacturer",
-    "Product Version": "version",
-    "Board": "board",
-    "Firmware": "firmware",
-    "Software": "software",
-    "Sample Rate": "sample_rate",
-    "Encoding": "encoding",
-    "Bit Depth": "bit_depth",
-    "Latency": "latency",
-    "Flows": "flow",
-    "Bluetooth": "bluetooth",
-    "Status": "status",
-    "Label": "label",
-    "Summary": "summary",
-    "Reported": "reported",
-    "Updated": "updated",
-    "Sessions": "session",
-    "Tags": "tag",
-    "Context": "context",
-    "RX Channel": "rx",
-    "RX Device": "device",
-    "TX Channel": "tx",
-    "TX Device": "device",
-    "#": "number",
-    "Friendly Name": "friendly_name",
-    "Role": "role",
-    "Grandmaster": "grandmaster",
-    "Direction": "direction",
-    "Channel": "channel",
-    "Channel Name": "channel",
-    "Level": "level",
-    "Timestamp": "wall_time",
-    "Online": "online",
-    "Receiving": "receiving",
-}
-
-
-def _iconize_headers(headers: list[str]) -> list[str]:
-    return [f"{icon(HEADER_ICONS[header])}{header}" if header in HEADER_ICONS else header for header in headers]
-
-
-def _get_state():
-    from netaudio.cli import state
-
-    return state
+from netaudio._common_cli import HEADER_ICONS, _get_state, _iconize_headers
 
 
 def _make_dante_application(packet_store=None, session_id=None) -> DanteApplication:
@@ -425,6 +504,28 @@ def _make_dante_application(packet_store=None, session_id=None) -> DanteApplicat
         for service in (application.settings, application.cmc, application.notifications):
             service.session_id = session_id
     return application
+
+
+async def _probe_lock_status_once(
+    device_ip_address: str,
+    timeout: float | None = None,
+) -> LockStatusObservation | None:
+    """Return a valid lock-status publication observed after sending 0x1008."""
+    application = _make_dante_application()
+    try:
+        await application.startup()
+        return await application.probe_lock_status(
+            str(device_ip_address),
+            timeout=settings.lock_state_timeout if timeout is None else timeout,
+        )
+    except Exception as exception:
+        logger.debug(f"Lock status unavailable for {device_ip_address}: {exception}")
+        return None
+    finally:
+        try:
+            await application.shutdown()
+        except Exception as exception:
+            logger.debug(f"Lock status application shutdown failed for {device_ip_address}: {exception}")
 
 
 async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice]:
@@ -449,6 +550,48 @@ async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice
     return devices or {}
 
 
+async def _apply_avio_status_pages(device) -> None:
+    try:
+        receiver_flow_page = await device.operations.query_receiver_flow_status_2809()
+    except RuntimeError:
+        receiver_flow_page = None
+    if receiver_flow_page is not None:
+        device.apply_receiver_flow_status_page(receiver_flow_page)
+    try:
+        transmitter_channel_page = await device.operations.query_transmitter_channel_status_2809()
+    except RuntimeError:
+        transmitter_channel_page = None
+    if transmitter_channel_page is not None:
+        device.apply_transmitter_channel_status_page(transmitter_channel_page)
+    try:
+        transmitter_flow_page = await device.operations.query_transmitter_flow_status_2809()
+    except RuntimeError:
+        transmitter_flow_page = None
+    if transmitter_flow_page is not None:
+        device.apply_transmitter_flow_status_page(transmitter_flow_page)
+    try:
+        receiver_channel_page = await device.operations.query_receiver_channel_status_2809()
+    except RuntimeError:
+        receiver_channel_page = None
+    if receiver_channel_page is not None:
+        device.apply_receiver_channel_status_page(receiver_channel_page)
+
+
+async def _populate_show_details(device, include_channels: bool) -> None:
+    if device.clock_source_code is None or device.clock_subdomain is None:
+        try:
+            await device.get_clocking_status()
+        except Exception as exception:
+            logger.debug(f"Clock status unavailable for {device.server_name or device.name}: {exception}")
+    if device.aes67_multicast_prefix is None and device.aes67_supported is not False:
+        try:
+            await device.operations.get_aes67_configured()
+        except Exception as exception:
+            logger.debug(f"AES67 multicast prefix unavailable for {device.server_name or device.name}: {exception}")
+    if include_channels or device.transmitter_flows is None:
+        await _apply_avio_status_pages(device)
+
+
 async def _load_device_for_show(include_channels: bool) -> tuple[str, DanteDevice]:
     devices = await get_devices_from_daemon()
     if devices is not None:
@@ -456,6 +599,7 @@ async def _load_device_for_show(include_channels: bool) -> tuple[str, DanteDevic
         server_name, device = _resolve_one(selected_devices)
         if include_channels:
             await _populate_controls({server_name: device})
+        await _populate_show_details(device, include_channels=include_channels)
         return server_name, device
 
     from netaudio._capture import open_capture_session
@@ -494,7 +638,9 @@ async def _load_device_for_show(include_channels: bool) -> tuple[str, DanteDevic
             timeout=show_timeout,
             include_channels=include_channels,
         )
-        return _resolve_one(filter_devices(selected_devices))
+        server_name, device = _resolve_one(filter_devices(selected_devices))
+        await _populate_show_details(device, include_channels=include_channels)
+        return server_name, device
     finally:
         await application.shutdown()
         if packet_store is not None:
@@ -619,324 +765,90 @@ async def _populate_controls(devices: dict[str, DanteDevice], observer=None, str
         ) from exception
 
 
-def _normalize_mac(mac: str) -> str:
-    raw = mac.replace(":", "").replace("-", "").replace(".", "").lower()
-    if len(raw) == 16 and raw[6:10] == "fffe":
-        raw = raw[:6] + raw[10:]
-    elif len(raw) == 16 and raw.endswith("0000"):
-        raw = raw[:12]
-    return raw
+async def _enrich_clock_fields(devices: dict[str, DanteDevice]) -> None:
+    missing = [
+        device
+        for device in devices.values()
+        if device.ipv4 is not None and (device.clock_role is None or device.clock_source_code is None)
+    ]
+    if not missing:
+        return
+    sender = _make_core_sender(devices=devices)
+    try:
+        await asyncio.gather(
+            *[sender.probe_clocking_status(device) for device in missing],
+            return_exceptions=True,
+        )
+    finally:
+        await sender.close()
 
 
-def _strip_separators(mac: str) -> str:
-    return mac.replace(":", "").replace("-", "").replace(".", "").lower()
+async def _enrich_lock_states(devices: dict[str, DanteDevice]) -> None:
+    candidates = {server_name: device for server_name, device in devices.items() if device.ipv4 is not None}
+    if not candidates:
+        return
 
-
-def _mac_matches(device_mac: str, pattern: str) -> bool:
-    raw_device = _strip_separators(device_mac)
-    raw_pattern = _strip_separators(pattern)
-
-    if raw_device == raw_pattern:
-        return True
-
-    return _normalize_mac(device_mac) == _normalize_mac(pattern)
-
-
-def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
-    state = _get_state()
-
-    if not state.names and not state.hosts and not state.server_names and not state.macs:
-        return devices
-
-    filtered = {}
-
-    for server_name, device in devices.items():
-        if include_names and state.names and not any(fnmatch(device.name or "", pat) for pat in state.names):
-            continue
-
-        if state.hosts and not any(str(device.ipv4) == h for h in state.hosts):
-            continue
-
-        if state.server_names and not any(fnmatch(server_name, pat) for pat in state.server_names):
-            continue
-
-        if state.macs and not any(_mac_matches(device.mac_address or "", pat) for pat in state.macs):
-            continue
-
-        filtered[server_name] = device
-
-    return filtered
-
-
-def sort_devices(devices: dict[str, DanteDevice]) -> list[tuple[str, DanteDevice]]:
-    state = _get_state()
-
-    sort_keys = {
-        "mac": lambda item: item[1].mac_address or "",
-        "name": lambda item: item[1].name or "",
-        "ip": lambda item: tuple(int(part) for part in str(item[1].ipv4).split(".")) if item[1].ipv4 else (0,),
-        "model": lambda item: item[1].model_id or "",
-        "server-name": lambda item: item[0],
-    }
-
-    return sorted(devices.items(), key=sort_keys[state.sort_field], reverse=state.sort_reverse)
-
-
-def set_device_filter(device_arg: str) -> None:
-    state = _get_state()
-    state.names = [device_arg]
-
-
-def parse_qualified_name(s: str) -> tuple[str, str]:
-    if "@" not in s:
-        typer.echo(f"Error: expected channel@device format, got: {s}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    channel, device = s.rsplit("@", 1)
-    return channel, device
-
-
-def _format_text(headers: list[str], rows: list[list[str]]) -> str:
-    all_rows = [headers] + [[str(value) for value in row] for row in rows]
-    widths = [max(len(row[i]) for row in all_rows) for i in range(len(headers))]
-    numeric = [all(row[i].isdigit() for row in all_rows[1:] if row[i]) for i in range(len(headers))]
-    lines = []
-    for row in all_rows:
-        parts = [
-            row[i].rjust(widths[i]) if numeric[i] and row is not all_rows[0] else row[i].ljust(widths[i])
-            for i in range(len(row))
-        ]
-        lines.append("  ".join(parts).rstrip())
-    return "\n".join(lines)
-
-
-def _format_csv(headers: list[str], rows: list[list[str]]) -> str:
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(headers)
-    writer.writerows(rows)
-    return buffer.getvalue().rstrip("\n")
-
-
-def _format_json(data: Any) -> str:
-    return json_module.dumps(data, indent=2, default=str)
-
-
-def _hex_encode(text: str, pad_to: int = 16) -> str:
-    import binascii
-
-    encoded = binascii.hexlify(text.encode()).decode().upper()
-    return encoded.ljust(pad_to, "0")
-
-
-def _device_to_preset_xml(device: DanteDevice) -> ET.Element:
-    element = ET.Element("device")
-
-    _sub_text(element, "name", device.name or "")
-    _sub_text(element, "default_name", device.server_name.replace(".local.", "") if device.server_name else "")
-
-    instance_id = ET.SubElement(element, "instance_id")
-    mac = (device.mac_address or "").replace(":", "").upper()
-    if mac:
-        if len(mac) == 12:
-            mac = mac[:6] + "FFFE" + mac[6:]
-        _sub_text(instance_id, "device_id", mac)
-    _sub_text(instance_id, "process_id", "0")
-
-    if device.manufacturer:
-        _sub_text(element, "manufacturer_id", _hex_encode(device.manufacturer))
-        _sub_text(element, "manufacturer_name", device.manufacturer)
-
-    dante_model = device.dante_model or device.model_id or ""
-    model_id = device.model_id or ""
-
-    if model_id:
-        model_id_hex = _hex_encode(model_id)
-        _sub_text(element, "model_id", model_id_hex)
-        _sub_text(element, "model_name", dante_model or model_id)
-        if device.product_version:
-            _sub_text(element, "model_version", device.product_version)
-        _sub_text(element, "device_type", model_id_hex)
-        _sub_text(element, "device_type_string", model_id)
-
-    _sub_text(element, "friendly_name", device.name or "")
-
-    if device.preferred_leader is not None:
-        ET.SubElement(element, "preferred_master", value=str(device.preferred_leader).lower())
-
-    if device.sample_rate:
-        _sub_text(element, "samplerate", str(device.sample_rate))
-
-    if device.encoding:
-        _sub_text(element, "encoding", str(device.encoding))
-
-    latency = device.configured_latency
-    if latency is None and device.active_latency is None:
-        latency = device.latency
-    if latency:
-        _sub_text(element, "unicast_latency", str(milliseconds_to_microseconds(latency)))
-
-    if device.interfaces:
-        for index, iface in enumerate(device.interfaces):
-            iface_element = ET.SubElement(element, "interface", network=str(index))
-            mode = iface.get("mode", "")
-            if mode == "static":
-                ip_element = ET.SubElement(iface_element, "ipv4_address", mode="static")
-                _sub_text(ip_element, "ip_address", iface.get("ip_address", ""))
-                _sub_text(ip_element, "subnet_mask", iface.get("netmask", ""))
-                _sub_text(ip_element, "gateway", iface.get("gateway", ""))
-                _sub_text(ip_element, "dns_server", iface.get("dns_server", ""))
+    application = _make_dante_application()
+    application.devices.update(candidates)
+    await application.startup()
+    try:
+        results = await asyncio.gather(
+            *[
+                application.probe_lock_status(
+                    str(device.ipv4),
+                    timeout=settings.lock_state_timeout,
+                )
+                for device in candidates.values()
+            ],
+            return_exceptions=True,
+        )
+        for device, result in zip(candidates.values(), results):
+            if isinstance(result, BaseException):
+                logger.debug(f"Lock status unavailable for {device.server_name or device.name}: {result}")
+                device.is_locked = None
+            elif result is None:
+                device.is_locked = None
             else:
-                ET.SubElement(iface_element, "ipv4_address", mode="dynamic")
-
-    for channel in sorted(device.tx_channels.values(), key=lambda channel: channel.number):
-        tx_element = ET.SubElement(element, "txchannel", danteId=str(channel.number), mediaType="audio")
-        _sub_text(tx_element, "label", channel.friendly_name or channel.name)
-
-    for channel in sorted(device.rx_channels.values(), key=lambda channel: channel.number):
-        rx_element = ET.SubElement(element, "rxchannel", danteId=str(channel.number), mediaType="audio")
-        _sub_text(rx_element, "name", channel.friendly_name or channel.name)
-
-        for subscription in device.subscriptions:
-            if subscription.rx_channel_name == channel.name or subscription.rx_channel_name == channel.friendly_name:
-                if subscription.tx_channel_name:
-                    _sub_text(rx_element, "subscribed_channel", subscription.tx_channel_name)
-                if subscription.tx_device_name:
-                    _sub_text(rx_element, "subscribed_device", subscription.tx_device_name)
-                break
-
-    return element
+                device.is_locked = result.is_locked
+    finally:
+        await application.shutdown()
 
 
-def _sub_text(parent: ET.Element, tag: str, text: str) -> ET.Element:
-    child = ET.SubElement(parent, tag)
-    child.text = text
-    return child
+async def _load_display_devices(include_channels: bool = False) -> dict[str, DanteDevice]:
+    devices = await get_devices_from_daemon()
+    if devices is None:
+        devices = await _discover()
+        await _populate_controls(devices, strict=False)
+    devices = filter_devices(devices or {})
+    if include_channels:
+        for device in devices.values():
+            await _populate_show_details(device, include_channels=True)
+    await _enrich_clock_fields(devices)
+    await _enrich_lock_states(devices)
+    return devices
 
 
-def format_devices_xml(devices: dict[str, DanteDevice], preset_name: str = "netaudio") -> str:
-    root = ET.Element("preset", version="2.1.0")
-    _sub_text(root, "name", preset_name)
-    _sub_text(root, "description", "Dante Controller preset")
-
-    for server_name, device in sorted(devices.items(), key=lambda item: item[1].name or item[0]):
-        root.append(_device_to_preset_xml(device))
-
-    ET.indent(root, space="    ")
-    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ET.tostring(root, encoding="unicode")
-
-
-def _format_yaml(data: Any) -> str:
-    try:
-        import yaml
-    except ImportError:
-        typer.echo("Error: pyyaml not installed. Run: uv add pyyaml", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    return yaml.dump(data, default_flow_style=False, sort_keys=False).rstrip("\n")
-
-
-def _format_table(headers: list[str], rows: list[list[str]], title: Optional[str] = None) -> str:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.text import Text
-
-    state = _get_state()
-    table = Table(title=title)
-
-    for header in headers:
-        table.add_column(header)
-
-    for row in rows:
-        table.add_row(*[Text.from_ansi(str(value)) for value in row])
-
-    console = Console(no_color=state.no_color)
-    with console.capture() as capture:
-        console.print(table)
-    return capture.get().rstrip("\n")
-
-
-def output_table(
-    headers: list[str],
-    rows: list[list[str]],
-    json_data: Any = None,
-    title: Optional[str] = None,
-    devices: Optional[dict[str, DanteDevice]] = None,
-) -> None:
-    from netaudio.cli import OutputFormat
-
-    state = _get_state()
-    output_format = state.output_format
-
-    if json_data is None:
-        json_data = [dict(zip(headers, row)) for row in rows]
-
-    display_headers = _iconize_headers(headers)
-
-    if output_format == OutputFormat.plain:
-        typer.echo(_format_text(display_headers, rows))
-    elif output_format == OutputFormat.table:
-        typer.echo(_format_text(display_headers, rows))
-    elif output_format == OutputFormat.pretty:
-        typer.echo(_format_table(display_headers, rows, title=title))
-    elif output_format == OutputFormat.json:
-        typer.echo(_format_json(json_data))
-    elif output_format == OutputFormat.xml:
-        if devices:
-            typer.echo(format_devices_xml(devices))
-        else:
-            typer.echo(_format_json(json_data))
-    elif output_format == OutputFormat.csv:
-        typer.echo(_format_csv(headers, rows))
-    elif output_format == OutputFormat.yaml:
-        typer.echo(_format_yaml(json_data))
-
-
-def output_single(data: Any, device: Optional[DanteDevice] = None) -> None:
-    from netaudio.cli import OutputFormat
-
-    state = _get_state()
-    output_format = state.output_format
-
-    if output_format == OutputFormat.json:
-        typer.echo(_format_json(data))
-    elif output_format == OutputFormat.xml:
-        if device:
-            devices = {device.server_name or "device": device}
-            typer.echo(format_devices_xml(devices))
-        else:
-            typer.echo(_format_json(data))
-    elif output_format == OutputFormat.yaml:
-        typer.echo(_format_yaml(data))
-    else:
-        typer.echo(data)
-
-
-def find_device(devices: dict[str, DanteDevice], identifier: str) -> Optional[DanteDevice]:
-    for server_name, device in devices.items():
-        if device.name == identifier:
-            return device
-        if device.ipv4 and str(device.ipv4) == identifier:
-            return device
-        if server_name == identifier or server_name.startswith(identifier + "."):
-            return device
-
-    return None
-
-
-def find_channel(device: DanteDevice, channel_id: str, channel_type: str):
-    channels = device.rx_channels if channel_type == "rx" else device.tx_channels
-
-    try:
-        number = int(channel_id)
-        for channel in channels.values():
-            if channel.number == number:
-                return channel
-    except ValueError:
-        pass
-
-    for channel in channels.values():
-        if channel.name == channel_id or channel.friendly_name == channel_id:
-            return channel
-
-    return None
+from netaudio._common_output import (
+    _device_to_preset_xml,
+    _format_csv,
+    _format_json,
+    _format_table,
+    _format_text,
+    _format_yaml,
+    _hex_encode,
+    _sub_text,
+    format_devices_xml,
+    output_single,
+    output_table,
+)
+from netaudio._common_selection import (
+    _mac_matches,
+    _normalize_mac,
+    _strip_separators,
+    filter_devices,
+    find_channel,
+    find_device,
+    parse_qualified_name,
+    set_device_filter,
+    sort_devices,
+)

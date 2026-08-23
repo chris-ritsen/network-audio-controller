@@ -88,7 +88,7 @@ def main() -> None:
     parser.add_argument(
         "--rust-source",
         type=Path,
-        default=Path("packages/netaudio-core/src/ffi.rs"),
+        default=Path("packages/netaudio-core/src/ffi/mod.rs"),
     )
     args = parser.parse_args()
     python_abi = _source_abi(args.python_binding, r"(?m)^ABI_VERSION\s*=\s*(\d+)\s*$")

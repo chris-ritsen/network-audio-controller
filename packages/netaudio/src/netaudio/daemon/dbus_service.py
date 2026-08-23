@@ -8,6 +8,7 @@ import re
 from dbus_fast.aio import MessageBus
 from dbus_fast import BusType
 
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.daemon.dbus_interfaces import (
     DanteChannelInterface,
     DanteDeviceInterface,
@@ -57,7 +58,7 @@ class DBusService:
         self._prop_snapshots: dict[str, dict] = {}
         self._shure_prop_snapshots: dict[str, dict] = {}
         self._listeners_registered = False
-        self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_lock = DeferredAsyncioLock()
 
     async def start(self):
         async with self._lifecycle_lock:

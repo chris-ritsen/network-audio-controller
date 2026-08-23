@@ -26,11 +26,23 @@ def _category_sort_key(category: str) -> tuple[int, str]:
 
 def _format_field_table(fields: list[dict]) -> str:
     lines = []
-    lines.append("| Offset | Length | Type | Field | Value |")
-    lines.append("|--------|--------|------|-------|-------|")
+    has_direction = any(field.get("direction") for field in fields)
+    if has_direction:
+        lines.append("| Direction | Offset | Length | Type | Field | Value |")
+        lines.append("|-----------|--------|--------|------|-------|-------|")
+    else:
+        lines.append("| Offset | Length | Type | Field | Value |")
+        lines.append("|--------|--------|------|-------|-------|")
     for field in sorted(fields, key=lambda f: f.get("offset", 0)):
         value = field.get("value", "")
-        lines.append(f"| {field['offset']} | {field['length']} | {field['dtype']} | {field['name']} | {value} |")
+        if has_direction:
+            direction = field.get("direction") or "both"
+            lines.append(
+                f"| {direction} | {field['offset']} | {field['length']} | {field['dtype']} | "
+                f"{field['name']} | {value} |"
+            )
+        else:
+            lines.append(f"| {field['offset']} | {field['length']} | {field['dtype']} | {field['name']} | {value} |")
     return "\n".join(lines)
 
 
@@ -151,6 +163,7 @@ def _build_spec_data(
                         "dtype": field["dtype"],
                         "name": field["name"],
                         "value": field.get("value", ""),
+                        **({"direction": field["direction"]} if field.get("direction") else {}),
                     }
                     for field in sorted(fields, key=lambda f: f.get("offset", 0))
                 ]
@@ -327,10 +340,11 @@ def _spec_to_plain(spec_data: dict, terminal_width: int = 120, facts_path: Path 
                 for field in fields:
                     value_str = f"  {ansi('36', field['value'])}" if field.get("value") else ""
                     offset_str = f"{field['offset']:3d}:{field['offset'] + field['length']:<3d}"
+                    direction_str = f"[{field['direction']}] " if field.get("direction") else ""
                     lines.append(
                         f"    {ansi('90', offset_str)}"
                         f"  {field['dtype']:<{max_type_len}s}"
-                        f"  {field['name']:<{max_name_len}s}"
+                        f"  {direction_str}{field['name']:<{max_name_len}s}"
                         f"{value_str}"
                     )
 

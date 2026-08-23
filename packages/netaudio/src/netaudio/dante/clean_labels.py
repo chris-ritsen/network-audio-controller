@@ -28,10 +28,6 @@ def _default_labels_path() -> Path:
     if env_path:
         return Path(env_path).expanduser()
 
-    cwd = Path.cwd()
-    if (cwd / "pyproject.toml").exists() and (cwd / "tests" / "fixtures").exists():
-        return cwd / "tests" / "fixtures" / "provenance" / "labels.json"
-
     return Path.home() / ".local" / "share" / "netaudio" / "clean_labels.json"
 
 
