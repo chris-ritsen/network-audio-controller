@@ -37,6 +37,8 @@ typedef enum {
   NETAUDIO_STATUS_INVALID_GAIN_LEVEL = 28,
   NETAUDIO_STATUS_INVALID_FLOW_SLOT = 29,
   NETAUDIO_STATUS_INVALID_FLOW_PROTOCOL = 30,
+  NETAUDIO_STATUS_INVALID_SEQUENCE = 31,
+  NETAUDIO_STATUS_UNSUPPORTED_PROTOCOL_OPERATION = 32,
 } NetaudioStatus;
 
 typedef struct NetaudioClient NetaudioClient;
@@ -45,26 +47,60 @@ typedef struct NetaudioClient NetaudioClient;
 extern "C" {
 #endif // __cplusplus
 
-uint32_t netaudio_abi_version(void);
+NetaudioStatus netaudio_client_execute(NetaudioClient *client,
+                                       const char *json,
+                                       uint8_t *out_buffer,
+                                       uintptr_t out_capacity,
+                                       uintptr_t *out_length);
 
-const char *netaudio_service_arc(void);
+NetaudioStatus netaudio_lock_token(const char *pin,
+                                   const uint8_t *nonce,
+                                   uintptr_t nonce_len,
+                                   const uint8_t *key,
+                                   uintptr_t key_len,
+                                   uint8_t *out_buffer,
+                                   uintptr_t out_capacity,
+                                   uintptr_t *out_length);
 
-const char *netaudio_status_name(int32_t status);
+NetaudioStatus netaudio_client_lock(NetaudioClient *client,
+                                    const char *pin,
+                                    const uint8_t *key,
+                                    uintptr_t key_len,
+                                    uint8_t *out_buffer,
+                                    uintptr_t out_capacity,
+                                    uintptr_t *out_length);
 
-uintptr_t netaudio_lock_nonce_length(void);
-
-uintptr_t netaudio_lock_key_length(void);
-
-NetaudioStatus netaudio_build_set_device_name(const char *name,
-                                              uint16_t transaction_id,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
-
-NetaudioStatus netaudio_build_command(const char *json,
+NetaudioStatus netaudio_client_unlock(NetaudioClient *client,
+                                      const char *pin,
+                                      const uint8_t *key,
+                                      uintptr_t key_len,
                                       uint8_t *out_buffer,
                                       uintptr_t out_capacity,
                                       uintptr_t *out_length);
+
+NetaudioStatus netaudio_client_request(NetaudioClient *client,
+                                       const uint8_t *packet,
+                                       uintptr_t packet_len,
+                                       uint16_t target_port,
+                                       bool expect_response,
+                                       uint32_t repeat,
+                                       uint64_t interval_ms,
+                                       uint8_t *out_buffer,
+                                       uintptr_t out_capacity,
+                                       uintptr_t *out_length);
+
+NetaudioStatus netaudio_client_clear_wire_captures(NetaudioClient *client);
+
+NetaudioStatus netaudio_client_get_wire_captures_json(NetaudioClient *client,
+                                                      uint8_t *out_buffer,
+                                                      uintptr_t out_capacity,
+                                                      uintptr_t *out_length);
+
+NetaudioStatus netaudio_client_set_host_mac(NetaudioClient *client, const uint8_t *host_mac);
+
+NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
+
+void netaudio_client_free(NetaudioClient *client);
 
 NetaudioStatus netaudio_client_new(const char *device_ip,
                                    uint16_t arc_port,
@@ -125,67 +161,33 @@ NetaudioStatus netaudio_parse_page(const char *kind,
                                    uintptr_t out_capacity,
                                    uintptr_t *out_length);
 
+uint32_t netaudio_abi_version(void);
+
+const char *netaudio_service_arc(void);
+
+const char *netaudio_status_name(int32_t status);
+
+uintptr_t netaudio_lock_nonce_length(void);
+
+uintptr_t netaudio_lock_key_length(void);
+
+NetaudioStatus netaudio_build_set_device_name(const char *name,
+                                              uint16_t transaction_id,
+                                              uint8_t *out_buffer,
+                                              uintptr_t out_capacity,
+                                              uintptr_t *out_length);
+
+NetaudioStatus netaudio_build_command(const char *json,
+                                      uint8_t *out_buffer,
+                                      uintptr_t out_capacity,
+                                      uintptr_t *out_length);
+
 NetaudioStatus netaudio_parse_response(const char *kind,
                                        const uint8_t *data,
                                        uintptr_t data_len,
                                        uint8_t *out_buffer,
                                        uintptr_t out_capacity,
                                        uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_execute(NetaudioClient *client,
-                                       const char *json,
-                                       uint8_t *out_buffer,
-                                       uintptr_t out_capacity,
-                                       uintptr_t *out_length);
-
-NetaudioStatus netaudio_lock_token(const char *pin,
-                                   const uint8_t *nonce,
-                                   uintptr_t nonce_len,
-                                   const uint8_t *key,
-                                   uintptr_t key_len,
-                                   uint8_t *out_buffer,
-                                   uintptr_t out_capacity,
-                                   uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_lock(NetaudioClient *client,
-                                    const char *pin,
-                                    const uint8_t *key,
-                                    uintptr_t key_len,
-                                    uint8_t *out_buffer,
-                                    uintptr_t out_capacity,
-                                    uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_unlock(NetaudioClient *client,
-                                      const char *pin,
-                                      const uint8_t *key,
-                                      uintptr_t key_len,
-                                      uint8_t *out_buffer,
-                                      uintptr_t out_capacity,
-                                      uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_request(NetaudioClient *client,
-                                       const uint8_t *packet,
-                                       uintptr_t packet_len,
-                                       uint16_t target_port,
-                                       bool expect_response,
-                                       uint32_t repeat,
-                                       uint64_t interval_ms,
-                                       uint8_t *out_buffer,
-                                       uintptr_t out_capacity,
-                                       uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_clear_wire_captures(NetaudioClient *client);
-
-NetaudioStatus netaudio_client_get_wire_captures_json(NetaudioClient *client,
-                                                      uint8_t *out_buffer,
-                                                      uintptr_t out_capacity,
-                                                      uintptr_t *out_length);
-
-NetaudioStatus netaudio_client_set_host_mac(NetaudioClient *client, const uint8_t *host_mac);
-
-NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
-
-void netaudio_client_free(NetaudioClient *client);
 
 #ifdef __cplusplus
 }  // extern "C"

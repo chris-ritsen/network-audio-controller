@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
-from netaudio.dante.const import FLOW_PROTOCOL_IDS, RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED
+from netaudio.dante.const import (
+    FLOW_CREATE_PROTOCOL_IDS,
+    FLOW_DELETE_PROTOCOL_IDS,
+    FLOW_QUERY_PROTOCOL_IDS,
+    PROTOCOL_ARC_2809,
+    RESULT_CODE_SUCCESS,
+    RESULT_CODE_SUCCESS_EXTENDED,
+)
+
+logger = logging.getLogger("netaudio")
 
 
 class FlowValidationError(ValueError):
@@ -59,6 +69,37 @@ def require_multicast_flow(device_flows, flow_slot: int) -> dict:
     return flow
 
 
+def require_creatable_flow_protocol(flow_protocol_id: int) -> None:
+    if flow_protocol_id not in FLOW_CREATE_PROTOCOL_IDS:
+        raise FlowValidationError(
+            f"flow protocol 0x{flow_protocol_id:04X} has no verified create format",
+            status=409,
+        )
+
+
+def require_deletable_flow_protocol(flow_protocol_id: int, flow_slot: int) -> None:
+    if flow_protocol_id not in FLOW_DELETE_PROTOCOL_IDS:
+        raise FlowValidationError(
+            f"flow protocol 0x{flow_protocol_id:04X} has no verified delete format",
+            status=409,
+        )
+    if flow_protocol_id == PROTOCOL_ARC_2809 and flow_slot != 2:
+        raise FlowValidationError(
+            "flow protocol 0x2809 has a verified delete format only for flow slot 2",
+            status=409,
+        )
+
+
+def _parsed_response(kind: str, response: bytes):
+    from netaudio import core
+
+    try:
+        return core.parse_response(kind, response)
+    except core.NetaudioCoreError as exception:
+        logger.debug(f"Discarding unparseable {kind} response: {exception}")
+        return None
+
+
 async def _request(
     device_ip: str,
     arc_port: int,
@@ -83,16 +124,14 @@ async def _request(
 
 
 async def detect_flow_protocol(device_ip: str, arc_port: int) -> int | None:
-    from netaudio import core
-
-    for flow_protocol_id in FLOW_PROTOCOL_IDS:
+    for flow_protocol_id in FLOW_QUERY_PROTOCOL_IDS:
         command_specification = {
             "command": "query_tx_flows",
             "flow_protocol_id": flow_protocol_id,
             "starting_flow": 1,
         }
         response = await _request(device_ip, arc_port, command_specification, timeout_ms=500, attempts=1)
-        if response and core.parse_response("result_code", response) in (
+        if response and _parsed_response("result_code", response) in (
             RESULT_CODE_SUCCESS,
             RESULT_CODE_SUCCESS_EXTENDED,
         ):
@@ -101,7 +140,58 @@ async def detect_flow_protocol(device_ip: str, arc_port: int) -> int | None:
 
 
 async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_id: int) -> dict | None:
-    from netaudio import core
+    if flow_protocol_id == PROTOCOL_ARC_2809:
+        response = await _request(
+            device_ip,
+            arc_port,
+            {
+                "command": "query_tx_flows",
+                "flow_protocol_id": flow_protocol_id,
+                "starting_flow": 1,
+            },
+            timeout_ms=1000,
+            attempts=2,
+        )
+        if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
+            return None
+        flow_page = _parsed_response("transmitter_flow_status_page", response)
+        if not isinstance(flow_page, dict):
+            return None
+        maximum_flow_slots = flow_page.get("maximum_flow_slots")
+        reported_flow_count = flow_page.get("reported_flow_count")
+        status_flows = flow_page.get("flows")
+        if (
+            isinstance(maximum_flow_slots, bool)
+            or not isinstance(maximum_flow_slots, int)
+            or not 1 <= maximum_flow_slots <= 32
+            or isinstance(reported_flow_count, bool)
+            or not isinstance(reported_flow_count, int)
+            or not isinstance(status_flows, list)
+            or reported_flow_count != len(status_flows)
+            or reported_flow_count > maximum_flow_slots
+        ):
+            return None
+        flow_numbers = set()
+        for status_flow in status_flows:
+            if not isinstance(status_flow, dict):
+                return None
+            flow_number = status_flow.get("flow_number")
+            if (
+                isinstance(flow_number, bool)
+                or not isinstance(flow_number, int)
+                or not 1 <= flow_number <= maximum_flow_slots
+                or flow_number in flow_numbers
+            ):
+                return None
+            flow_numbers.add(flow_number)
+        return {
+            "max_flow_slots": maximum_flow_slots,
+            "reported_flow_count": reported_flow_count,
+            "flows": status_flows,
+        }
+
+    if flow_protocol_id not in FLOW_CREATE_PROTOCOL_IDS:
+        return None
 
     device_flows = []
     seen_flow_numbers = set()
@@ -118,10 +208,10 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
         if not response:
             return None
 
-        result_code = core.parse_response("result_code", response)
+        result_code = _parsed_response("result_code", response)
         if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
             return None
-        flow_page = core.parse_response("tx_flow_page", response)
+        flow_page = _parsed_response("tx_flow_page", response)
         if not isinstance(flow_page, dict):
             return None
         page_max_flow_slots = flow_page.get("max_flow_slots")
@@ -170,6 +260,141 @@ async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -
     return None if inventory is None else inventory["flows"]
 
 
+async def query_preferred_tx_flow_inventory(
+    device_ip: str,
+    arc_port: int,
+    mutation_protocol_id: int,
+) -> dict | None:
+    status_inventory = await query_tx_flow_inventory(device_ip, arc_port, PROTOCOL_ARC_2809)
+    if status_inventory is not None:
+        return status_inventory
+    if mutation_protocol_id == PROTOCOL_ARC_2809:
+        return None
+    return await query_tx_flow_inventory(device_ip, arc_port, mutation_protocol_id)
+
+
+def inventory_from_receiver_flow_status_page(page: dict) -> dict:
+    receiver_flows = []
+    for flow in page.get("flows") or []:
+        if not isinstance(flow, dict):
+            continue
+        local_receiver_channel_count = flow.get("local_receiver_channel_count") or 0
+        flow_type = flow.get("flow_type")
+        if flow_type is None:
+            flow_type_code = flow.get("flow_type_code")
+            flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else None
+        receiver_flows.append(
+            {
+                "flow_number": flow.get("flow_number"),
+                "flow_type": flow_type,
+                "local_receiver_channel_count": local_receiver_channel_count,
+                "receiver_mapping_descriptor_hexadecimal": flow.get("receiver_mapping_descriptor_hexadecimal"),
+                "status_code_at_record_offset_62": flow.get("status_code_at_record_offset_62"),
+                "destination_internet_protocol_version_four_address": flow.get(
+                    "destination_internet_protocol_version_four_address"
+                )
+                or "",
+                "destination_user_datagram_port": flow.get("destination_user_datagram_port"),
+                "sample_rate": flow.get("sample_rate"),
+                "encoding": flow.get("encoding"),
+                "frames_per_packet": flow.get("frames_per_packet"),
+                "latency_nanoseconds": flow.get("latency_nanoseconds"),
+            }
+        )
+    return {
+        "maximum_flow_slots": page.get("maximum_flow_slots"),
+        "flows": receiver_flows,
+    }
+
+
+async def query_preferred_receiver_flow_inventory(device) -> dict | None:
+    try:
+        status_page = await device.operations.query_receiver_flow_status_2809()
+    except RuntimeError:
+        status_page = None
+    if status_page is not None:
+        return inventory_from_receiver_flow_status_page(status_page)
+    from netaudio._common import _get_arc_port
+
+    return await query_receiver_flow_inventory(str(device.ipv4), _get_arc_port(device))
+
+
+async def query_receiver_flow_inventory(device_ip: str, arc_port: int) -> dict | None:
+    response = await _request(
+        device_ip,
+        arc_port,
+        {"command": "query_receiver_flows", "starting_flow": 1},
+        timeout_ms=1000,
+        attempts=2,
+    )
+    if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
+        return None
+    flow_page = _parsed_response("receiver_flow_page", response)
+    if not isinstance(flow_page, dict):
+        return None
+    maximum_flow_slots = flow_page.get("maximum_flow_slots")
+    if (
+        isinstance(maximum_flow_slots, bool)
+        or not isinstance(maximum_flow_slots, int)
+        or not 1 <= maximum_flow_slots <= 32
+    ):
+        return None
+    receiver_flows = flow_page.get("flows")
+    if not isinstance(receiver_flows, list) or len(receiver_flows) > maximum_flow_slots:
+        return None
+    flow_numbers = set()
+    for receiver_flow in receiver_flows:
+        if not isinstance(receiver_flow, dict):
+            return None
+        flow_number = receiver_flow.get("flow_number")
+        if (
+            isinstance(flow_number, bool)
+            or not isinstance(flow_number, int)
+            or not 1 <= flow_number <= maximum_flow_slots
+            or flow_number in flow_numbers
+        ):
+            return None
+        flow_numbers.add(flow_number)
+    return flow_page
+
+
+async def query_receiver_port_ranges(device_ip: str, arc_port: int) -> dict | None:
+    response = await _request(
+        device_ip,
+        arc_port,
+        {"command": "query_receiver_port_ranges"},
+        timeout_ms=1000,
+        attempts=2,
+    )
+    if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
+        return None
+    port_ranges = _parsed_response("receiver_port_ranges", response)
+    return port_ranges if isinstance(port_ranges, dict) else None
+
+
+async def query_transmit_channel_capabilities(
+    device_ip: str,
+    arc_port: int,
+    starting_channel_identifier: int = 1,
+    maximum_channel_count: int = 0,
+) -> dict | None:
+    response = await _request(
+        device_ip,
+        arc_port,
+        {
+            "command": "query_transmit_channel_capabilities",
+            "starting_channel_identifier": starting_channel_identifier,
+            "maximum_channel_count": maximum_channel_count,
+        },
+        timeout_ms=1000,
+        attempts=2,
+    )
+    if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
+        return None
+    capabilities = _parsed_response("transmit_channel_capabilities", response)
+    return capabilities if isinstance(capabilities, dict) else None
+
+
 async def create_tx_flow(
     device_ip: str,
     arc_port: int,
@@ -177,6 +402,7 @@ async def create_tx_flow(
     flow_slot: int,
     channels: list[int],
 ) -> int | None:
+    require_creatable_flow_protocol(flow_protocol_id)
     command_specification = {
         "command": "create_tx_flow",
         "flow_protocol_id": flow_protocol_id,
@@ -192,6 +418,7 @@ async def delete_tx_flow(
     flow_protocol_id: int,
     flow_slot: int,
 ) -> int | None:
+    require_deletable_flow_protocol(flow_protocol_id, flow_slot)
     command_specification = {
         "command": "delete_tx_flow",
         "flow_protocol_id": flow_protocol_id,
@@ -201,9 +428,7 @@ async def delete_tx_flow(
 
 
 async def _result_code(device_ip: str, arc_port: int, command_specification: dict) -> int | None:
-    from netaudio import core
-
     response = await _request(device_ip, arc_port, command_specification, timeout_ms=2000, attempts=2)
     if not response:
         return None
-    return core.parse_response("result_code", response)
+    return _parsed_response("result_code", response)

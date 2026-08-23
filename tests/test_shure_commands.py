@@ -2,6 +2,7 @@ import pytest
 from typer.testing import CliRunner
 
 from netaudio.commands import shure
+from netaudio.commands import shure_transport
 
 
 runner = CliRunner()
@@ -57,7 +58,7 @@ def test_response_parsers_preserve_values_with_spaces():
 def test_p10t_probe_preserves_device_names_with_spaces(monkeypatch):
     connection_socket = FakeSocket([b"< REPORT DEVICE_NAME Studio Rack A >\r\n", b""])
     monkeypatch.setattr(
-        shure.socket,
+        shure_transport.socket,
         "create_connection",
         lambda *args, **kwargs: connection_socket,
     )
@@ -72,7 +73,7 @@ def test_p10t_probe_preserves_device_names_with_spaces(monkeypatch):
 def test_strict_send_raises_for_explicit_device_error(monkeypatch):
     connection_socket = FakeSocket([b"< REP ERR INVALID_VALUE >\r\n", b""])
     monkeypatch.setattr(
-        shure.socket,
+        shure_transport.socket,
         "create_connection",
         lambda *args, **kwargs: connection_socket,
     )
@@ -92,7 +93,7 @@ def test_strict_send_raises_for_explicit_device_error(monkeypatch):
 def test_required_get_raises_when_no_matching_response(monkeypatch):
     connection_socket = FakeSocket([b""])
     monkeypatch.setattr(
-        shure.socket,
+        shure_transport.socket,
         "create_connection",
         lambda *args, **kwargs: connection_socket,
     )
@@ -111,7 +112,7 @@ def test_required_get_raises_when_no_matching_response(monkeypatch):
 def test_required_bulk_query_raises_when_no_usable_response(monkeypatch):
     connection_socket = FakeSocket([b""])
     monkeypatch.setattr(
-        shure.socket,
+        shure_transport.socket,
         "create_connection",
         lambda *args, **kwargs: connection_socket,
     )
@@ -129,7 +130,7 @@ def test_required_bulk_query_raises_when_no_usable_response(monkeypatch):
 def test_silent_set_response_is_allowed_before_readback(monkeypatch):
     connection_socket = FakeSocket([b""])
     monkeypatch.setattr(
-        shure.socket,
+        shure_transport.socket,
         "create_connection",
         lambda *args, **kwargs: connection_socket,
     )
@@ -256,7 +257,7 @@ def _reset_shure_cli_state(monkeypatch):
 
 def test_discovery_contains_probe_worker_exceptions(monkeypatch):
     monkeypatch.setattr(
-        shure,
+        shure_transport,
         "get_shure_neighbor_entries",
         lambda: [("192.0.2.10", "00:0e:dd:00:00:01"), ("192.0.2.11", "00:0e:dd:00:00:02")],
     )
@@ -266,7 +267,7 @@ def test_discovery_contains_probe_worker_exceptions(monkeypatch):
             raise RuntimeError("synthetic worker failure")
         return shure.Protocol.rep, "AD4D", "Healthy"
 
-    monkeypatch.setattr(shure, "_probe_device", probe)
+    monkeypatch.setattr(shure_transport, "_probe_device", probe)
 
     devices = shure._discover_shure_devices()
 

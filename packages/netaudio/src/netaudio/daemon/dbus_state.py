@@ -1,5 +1,7 @@
 import math
 
+from netaudio.dante.clock_config import format_clock_subdomain
+
 
 DANTE_PROPERTY_NAMES = {
     "name": "Name",
@@ -30,9 +32,20 @@ DANTE_PROPERTY_NAMES = {
     "aes67_current": "Aes67Enabled",
     "aes67_supported": "Aes67Supported",
     "aes67_support_known": "Aes67SupportKnown",
+    "aes67_multicast_prefix": "Aes67MulticastPrefix",
+    "sample_rate_pullup_raw_value": "SampleRatePullupRawValue",
+    "requested_sample_rate_pullup_raw_value": "RequestedSampleRatePullupRawValue",
+    "supported_sample_rate_pullup_raw_values": "SupportedSampleRatePullupRawValues",
+    "sample_rate_pullup_known": "SampleRatePullupKnown",
+    "transmitter_flows": "TransmitterFlows",
     "last_seen": "LastSeen",
+    "clock_frequency_offset_parts_per_billion": "ClockFrequencyOffsetPartsPerBillion",
+    "clock_source_code": "ClockSourceCode",
+    "clock_subdomain": "ClockSubdomain",
     "clock_role": "ClockRole",
-    "clock_mac": "ClockMac",
+    "clock_port_records": "ClockPortRecords",
+    "clock_identity": "ClockIdentity",
+    "leader_clock_identity": "LeaderClockIdentity",
     "software_version": "SoftwareVersion",
     "firmware_version": "FirmwareVersion",
     "subscriptions": "Subscriptions",
@@ -49,6 +62,8 @@ SHURE_PROPERTY_NAMES = {
     "transmission_mode": "TransmissionMode",
     "quadversity_mode": "QuadversityMode",
     "encryption_mode": "EncryptionMode",
+    "online": "Online",
+    "last_seen": "LastSeen",
 }
 
 
@@ -110,6 +125,53 @@ def subscription_rows(device) -> list[tuple[str, str, str, str, int]]:
     return rows
 
 
+def transmitter_flow_rows(device) -> list[tuple[int, int, str, int, int, str, int, str, str]]:
+    rows = []
+    for flow in device.transmitter_flows or []:
+        flow_type = flow.get("flow_type")
+        if not flow_type:
+            flow_type_code = flow.get("flow_type_code")
+            flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else ""
+        channel_count = flow.get("channel_count")
+        if channel_count is None:
+            channel_numbers = flow.get("channels")
+            channel_count = len(channel_numbers) if isinstance(channel_numbers, list) else 0
+        rows.append(
+            (
+                dbus_uint(flow.get("flow_number")),
+                dbus_uint(channel_count),
+                dbus_string(flow_type),
+                dbus_uint(flow.get("sample_rate")),
+                dbus_uint(flow.get("encoding")),
+                dbus_string(flow.get("destination_internet_protocol_version_four_address")),
+                dbus_uint(flow.get("destination_user_datagram_port"), bits=16),
+                dbus_string(flow.get("subscriber_device_name")),
+                dbus_string(flow.get("subscriber_flow_name")),
+            )
+        )
+    return rows
+
+
+def clock_port_rows(device) -> list[tuple[int, bool, int, int, int, int, str, int, int, int, int, str]]:
+    return [
+        (
+            dbus_uint(record.get("record_flags"), bits=16),
+            bool(record.get("link_down")),
+            dbus_uint(record.get("record_number"), bits=16),
+            dbus_uint(record.get("ptp_version"), bits=8),
+            dbus_uint(record.get("record_format_code"), bits=8),
+            dbus_uint(record.get("transport_path_code"), bits=8),
+            dbus_string(record.get("transport_path")),
+            dbus_uint(record.get("reserved_byte"), bits=8),
+            dbus_uint(record.get("network_interface_index")),
+            dbus_uint(record.get("state_code"), bits=16),
+            dbus_uint(record.get("status_flags"), bits=16),
+            dbus_string(record.get("role")),
+        )
+        for record in device.clock_port_records or []
+    ]
+
+
 def snapshot_dante_device(device):
     return {
         "name": dbus_string(device.name),
@@ -140,9 +202,22 @@ def snapshot_dante_device(device):
         "aes67_current": aes67_enabled(device),
         "aes67_supported": device.aes67_supported is True,
         "aes67_support_known": device.aes67_supported is not None,
+        "aes67_multicast_prefix": dbus_string(device.aes67_multicast_prefix),
+        "sample_rate_pullup_raw_value": dbus_uint(device.sample_rate_pullup_raw_value),
+        "requested_sample_rate_pullup_raw_value": dbus_uint(device.requested_sample_rate_pullup_raw_value),
+        "supported_sample_rate_pullup_raw_values": dbus_uint_list(device.supported_sample_rate_pullup_raw_values),
+        "sample_rate_pullup_known": device.supported_sample_rate_pullup_raw_values is not None,
+        "transmitter_flows": transmitter_flow_rows(device),
         "last_seen": dbus_double(device.last_seen),
-        "clock_role": dbus_string(device.ptp_v1_role or device.clock_role),
-        "clock_mac": dbus_string(device.clock_mac),
+        "clock_frequency_offset_parts_per_billion": dbus_int32(device.clock_frequency_offset_parts_per_billion),
+        "clock_source_code": dbus_uint(device.clock_source_code, bits=16),
+        "clock_subdomain": dbus_string(
+            None if device.clock_subdomain is None else format_clock_subdomain(device.clock_subdomain)
+        ),
+        "clock_role": dbus_string(device.clock_role),
+        "clock_port_records": clock_port_rows(device),
+        "clock_identity": dbus_string(device.clock_identity),
+        "leader_clock_identity": dbus_string(device.leader_clock_identity),
         "software_version": dbus_string(device.software_version),
         "firmware_version": dbus_string(device.firmware_version),
         "subscriptions": subscription_rows(device),
@@ -161,4 +236,6 @@ def snapshot_shure_device(device):
         "transmission_mode": dbus_string(device.transmission_mode),
         "quadversity_mode": dbus_string(device.quadversity_mode),
         "encryption_mode": dbus_string(device.encryption_mode),
+        "online": bool(device.online),
+        "last_seen": dbus_double(device.last_seen),
     }

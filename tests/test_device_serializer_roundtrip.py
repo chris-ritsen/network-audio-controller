@@ -13,6 +13,7 @@ def make_device():
     device.online = True
     device.mac_address = "001dc1aabbcc"
     device.model_id = "DAI2"
+    device.bluetooth_connected = False
     device.sample_rate = 48000
     device.supported_sample_rates = [44100, 48000]
     device.encoding = 24
@@ -88,6 +89,8 @@ class TestSerializerRoundtrip:
         assert restored.online is True
         assert restored.mac_address == "001dc1aabbcc"
         assert restored.model_id == "DAI2"
+        assert restored.bluetooth_connected is False
+        assert restored.bluetooth_device is None
         assert restored.sample_rate == 48000
         assert restored.supported_sample_rates == [44100, 48000]
         assert restored.encoding == 24
@@ -155,6 +158,17 @@ class TestSerializerRoundtrip:
         device.is_locked = True
         restored = roundtrip(device)
         assert restored.is_locked is True
+
+    def test_unknown_lock_state_is_explicit_in_serialized_state(self):
+        device = make_device()
+        device.is_locked = None
+
+        serialized = DanteDeviceSerializer.to_json(device)
+        restored = DanteDeviceSerializer.device_from_json(serialized)
+
+        assert "is_locked" in serialized
+        assert serialized["is_locked"] is None
+        assert restored.is_locked is None
 
     def test_offline_device_survives(self):
         device = make_device()

@@ -362,6 +362,8 @@ name = "netaudio"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "click", version = "8.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "dbus-fast", version = "2.45.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10' and sys_platform == 'linux'" },
     { name = "dbus-fast", version = "4.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and sys_platform == 'linux'" },
     { name = "ifaddr" },
@@ -375,6 +377,7 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "typer", version = "0.23.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "typer", version = "0.24.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "typing-extensions" },
     { name = "zeroconf" },
 ]
 
@@ -404,6 +407,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.1.7" },
     { name = "dbus-fast", marker = "sys_platform == 'linux'", specifier = ">=2.0.0" },
     { name = "dbus-fast", marker = "extra == 'dbus'", specifier = ">=2.0.0" },
     { name = "ifaddr", specifier = ">=0.2.0" },
@@ -416,6 +420,7 @@ requires-dist = [
     { name = "sqlitedict", specifier = ">=1.7.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.0.0" },
     { name = "typer", specifier = ">=0.15.0" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
     { name = "zeroconf", specifier = ">=0.38.3" },
 ]
 provides-extras = ["capture", "dbus"]

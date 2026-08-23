@@ -1,0 +1,52 @@
+@netaudio_alias host www.netaudio.app netaudio.org www.netaudio.org
+handle @netaudio_alias {
+	header Cache-Control "no-store"
+	redir https://netaudio.app{uri} permanent
+}
+
+@netaudio_insecure {
+	host netaudio.app
+	header X-Forwarded-Proto http
+}
+handle @netaudio_insecure {
+	header Cache-Control "no-store"
+	redir https://netaudio.app{uri} permanent
+}
+
+@netaudio_canonical host netaudio.app
+handle @netaudio_canonical {
+	encode zstd gzip
+	header {
+		Cache-Control "no-cache, no-transform"
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	handle /api/v1/* {
+		header Cache-Control "no-store"
+		request_body {
+			max_size 25MB
+		}
+		reverse_proxy 127.0.0.1:8931
+	}
+
+	@netaudio_trailing_slash path_regexp netaudio_trailing_slash ^(.+)/$
+	handle @netaudio_trailing_slash {
+		redir {re.netaudio_trailing_slash.1} permanent
+	}
+
+	@netaudio_direct_html path *.html
+	handle @netaudio_direct_html {
+		respond 404
+	}
+
+	handle {
+		root * /srv/http/netaudio/current
+		try_files {path} {path}.html
+		file_server
+	}
+}

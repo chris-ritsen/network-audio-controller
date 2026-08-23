@@ -94,7 +94,14 @@ jobs:
               uv build --wheel
               wheel=(dist/*.whl)
               test "${#wheel[@]}" -eq 1
-              auditwheel show "${wheel[0]}"
+              original_wheel="${wheel[0]}"
+              mkdir -p dist/unrepaired
+              mv "$original_wheel" dist/unrepaired/
+              auditwheel repair --plat "manylinux_2_28_$(uname -m)" \
+                --wheel-dir dist "dist/unrepaired/${original_wheel##*/}"
+              repaired_wheel=(dist/*.whl)
+              test "${#repaired_wheel[@]}" -eq 1
+              auditwheel show "${repaired_wheel[0]}"
             '
       - if: matrix.platform != 'linux'
         run: uv build --wheel
@@ -135,9 +142,11 @@ jobs:
             "/Fe:$env:RUNNER_TEMP/netaudio-c-example.exe" `
             /link "/LIBPATH:packages/netaudio-core/target/release" netaudio_core.dll.lib
           $env:PATH = "$(Resolve-Path packages/netaudio-core/target/release);$env:PATH"
-          & "$env:RUNNER_TEMP/netaudio-c-example.exe"
-          if ($LASTEXITCODE -ne 2) {
-            throw "C example returned $LASTEXITCODE, expected its no-arguments status 2"
+          $process = Start-Process `
+            -FilePath "$env:RUNNER_TEMP/netaudio-c-example.exe" `
+            -NoNewWindow -Wait -PassThru
+          if ($process.ExitCode -ne 2) {
+            throw "C example returned $($process.ExitCode), expected its no-arguments status 2"
           }
       - if: matrix.platform == 'macos'
         name: Compile and link the public Swift example

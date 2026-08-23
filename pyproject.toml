@@ -8,6 +8,7 @@ requires-python = ">=3.9"
 authors = [{ name = "Christopher Ritsen", email = "chris.ritsen@gmail.com" }]
 keywords = ["audinate", "audio", "cli", "dante", "network"]
 dependencies = [
+    "click>=8.1.7",
     "zeroconf>=0.38.3",
     "ifaddr>=0.2.0",
     "sqlitedict>=1.7.0",
@@ -17,6 +18,7 @@ dependencies = [
     "pyyaml>=6.0",
     "redis>=5.0.0",
     "tomli>=1.0.0; python_version < '3.11'",
+    "typing-extensions>=4.0.0",
     "dbus-fast>=2.0.0; sys_platform == 'linux'",
     "pywin32>=306; sys_platform == 'win32'",
 ]
@@ -70,6 +72,7 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
+testpaths = ["tests", "website/tests"]
 
 [tool.ruff]
 target-version = "py39"
@@ -89,10 +92,12 @@ quote-style = "double"
 include = [
     "packages/netaudio/src/netaudio/core/binding.py",
     "packages/netaudio/src/netaudio/cli.py",
+    "packages/netaudio/src/netaudio/commands/meter_tui.py",
     "packages/netaudio/src/netaudio/commands/preset.py",
     "packages/netaudio/src/netaudio/commands/report.py",
     "packages/netaudio/src/netaudio/commands/shure.py",
     "packages/netaudio/src/netaudio/commands/subscription.py",
+    "packages/netaudio/src/netaudio/daemon/client.py",
     "packages/netaudio/src/netaudio/daemon/dbus_state.py",
     "packages/netaudio/src/netaudio/daemon/enforcement.py",
     "packages/netaudio/src/netaudio/daemon/metering.py",

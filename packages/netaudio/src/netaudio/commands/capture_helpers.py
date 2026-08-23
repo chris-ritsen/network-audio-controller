@@ -28,6 +28,7 @@ from netaudio.capture.packets import (
     _print_packet_table_header,
 )
 from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.fact_store import DEFAULT_PROVENANCE_DIRECTORY
 
 
 def _normalize_marker_type(marker_type: str | None, *, strict: bool = True) -> str:
@@ -45,26 +46,22 @@ def _normalize_marker_label(label: str) -> str:
 
 
 def _default_provenance_output_dir() -> Path:
-    cwd = Path.cwd()
-    if (cwd / "pyproject.toml").exists() and (cwd / "tests" / "fixtures").exists():
-        return cwd / "tests" / "fixtures" / "provenance"
-    return Path.home() / ".local" / "share" / "netaudio" / "provenance" / "fixtures"
+    return DEFAULT_PROVENANCE_DIRECTORY / "fixtures"
 
 
 def _default_fixture_root() -> Path:
-    cwd = Path.cwd()
-    candidate = cwd / "tests" / "fixtures"
-    if candidate.exists():
-        return candidate
     return _default_provenance_output_dir().parent
 
 
 def _default_label_overrides_path() -> Path:
-    cwd = Path.cwd()
-    default = cwd / "tests" / "fixtures" / "label_provenance_overrides.json"
-    if default.exists():
-        return default
-    return Path.home() / ".local" / "share" / "netaudio" / "provenance" / "label_provenance_overrides.json"
+    return DEFAULT_PROVENANCE_DIRECTORY / "label_provenance_overrides.json"
+
+
+def _resolve_provenance_bundle_path(bundle: str) -> Path:
+    direct_path = Path(bundle).expanduser()
+    if direct_path.exists():
+        return direct_path
+    return _default_provenance_output_dir() / bundle
 
 
 def _parse_u16_token(token: str) -> int:
@@ -128,22 +125,40 @@ def _valid_label(label: str) -> bool:
     return True
 
 
+FIELD_DIRECTIONS = frozenset({"multicast", "request", "response"})
+
+
 def _parse_field_spec(spec: str) -> dict:
     parts = spec.split(":")
-    if len(parts) < 4:
+    direction = None
+    if parts and parts[0].lower() in FIELD_DIRECTIONS:
+        direction = parts.pop(0).lower()
+    if len(parts) not in (4, 5):
         print(
-            f"Invalid --field format: {spec!r}. Expected name:offset:length:type[:value]",
+            f"Invalid --field format: {spec!r}. Expected [direction:]name:offset:length:type[:value]",
             file=sys.stderr,
         )
         raise typer.Exit(1)
-    result = {
-        "name": parts[0],
-        "offset": int(parts[1]),
-        "length": int(parts[2]),
-        "dtype": parts[3],
-    }
-    if len(parts) >= 5:
+    try:
+        result = {
+            "name": parts[0],
+            "offset": int(parts[1]),
+            "length": int(parts[2]),
+            "dtype": parts[3],
+        }
+    except ValueError:
+        print(
+            f"Invalid --field format: {spec!r}. Offset and length must be decimal integers",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+    if not result["name"] or not result["dtype"] or result["offset"] < 0 or result["length"] <= 0:
+        print(f"Invalid --field definition: {spec!r}", file=sys.stderr)
+        raise typer.Exit(1)
+    if len(parts) == 5:
         result["value"] = parts[4]
+    if direction is not None:
+        result["direction"] = direction
     return result
 
 
@@ -165,7 +180,7 @@ def _parse_config_int(value, field_name: str) -> int | None:
         raise typer.Exit(f"Invalid integer for {field_name} in capture config: {value!r}")
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         raise typer.Exit(f"Invalid integer for {field_name} in capture config: {value!r}")
 
 
@@ -361,7 +376,7 @@ def _parse_optional_int(value):
         return None
     try:
         return int(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

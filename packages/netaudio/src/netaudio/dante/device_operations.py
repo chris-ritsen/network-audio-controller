@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import math
 import re
 
+from netaudio.dante.channel_frontend import (
+    channel_result_code,
+    receiver_channel_name_protocol_identifier_from_probe,
+    transmitter_channel_name_protocol_identifier_from_probe,
+)
+from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
 from netaudio.dante.latency import latency_controls_from_settings
 
 DANTE_NAME_MAX_LENGTH = 31
@@ -26,31 +33,193 @@ class DanteDeviceOperations:
     def __init__(self, device):
         self.device = device
 
-    async def set_channel_name(self, channel_type, channel_number, new_channel_name):
-        cmd_args = self.device.commands.command_set_channel_name(channel_type, channel_number, new_channel_name)
+    async def set_channel_name(
+        self,
+        channel_type,
+        channel_number,
+        new_channel_name,
+        protocol_id=None,
+    ):
+        if protocol_id is None:
+            if channel_type == "rx":
+                protocol_id = await self._resolve_receiver_channel_name_protocol_identifier()
+            elif channel_type == "tx":
+                protocol_id = await self._resolve_transmitter_channel_name_protocol_identifier()
+        cmd_args = self.device.commands.command_set_channel_name(
+            channel_type,
+            channel_number,
+            new_channel_name,
+            protocol_id=protocol_id,
+        )
         response = await self.device.dante_command(*cmd_args, logical_command_name="set_channel_name")
 
         return response
 
-    async def factory_reset(self):
-        if not hasattr(self.device.commands, "command_factory_reset"):
-            raise RuntimeError("factory-reset is not available in this build")
-        cmd_args = self.device.commands.command_factory_reset()
-        response = await self.device.dante_command(*cmd_args, logical_command_name="factory_reset")
+    async def _request_receiver_channel_status_2809(self):
+        command_arguments = self.device.commands.command_query_receiver_channel_status_2809()
+        return await self.device.dante_command(
+            *command_arguments,
+            logical_command_name="query_receiver_channel_status_2809",
+        )
 
-        return response
+    async def _request_transmitter_channel_status_2809(self):
+        command_arguments = self.device.commands.command_query_transmitter_channel_status_2809()
+        return await self.device.dante_command(
+            *command_arguments,
+            logical_command_name="query_transmitter_channel_status_2809",
+        )
+
+    async def _resolve_receiver_channel_name_protocol_identifier(self):
+        cached_protocol_identifier = getattr(
+            self.device,
+            "receiver_channel_name_protocol_identifier",
+            None,
+        )
+        if cached_protocol_identifier is not None:
+            return cached_protocol_identifier
+
+        response = await self._request_receiver_channel_status_2809()
+        protocol_identifier = receiver_channel_name_protocol_identifier_from_probe(response)
+        self.device.receiver_channel_name_protocol_identifier = protocol_identifier
+        return protocol_identifier
+
+    async def _resolve_transmitter_channel_name_protocol_identifier(self):
+        cached_protocol_identifier = getattr(
+            self.device,
+            "transmitter_channel_name_protocol_identifier",
+            None,
+        )
+        if cached_protocol_identifier is not None:
+            return cached_protocol_identifier
+
+        response = await self._request_transmitter_channel_status_2809()
+        protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe(response)
+        self.device.transmitter_channel_name_protocol_identifier = protocol_identifier
+        return protocol_identifier
+
+    def _parse_status_page(self, response, description, page_kind):
+        from netaudio import core
+
+        try:
+            page = core.parse_response(page_kind, response)
+        except core.NetaudioCoreError as exception:
+            raise RuntimeError(f"{description} returned an invalid status page") from exception
+        if not isinstance(page, dict):
+            raise RuntimeError(f"{description} returned an invalid status page")
+        return page
+
+    async def _query_status_page_2809(self, command_arguments, logical_command_name, description, page_kind):
+        from netaudio import core
+
+        response = await self.device.dante_command(
+            *command_arguments,
+            logical_command_name=logical_command_name,
+        )
+        if response is None:
+            raise RuntimeError(f"{description} did not receive a response")
+        try:
+            result_code = core.parse_response("result_code", response)
+        except core.NetaudioCoreError as exception:
+            raise RuntimeError(f"{description} returned an invalid response") from exception
+        if not isinstance(result_code, int):
+            raise RuntimeError(f"{description} returned an invalid response")
+        if result_code != RESULT_CODE_SUCCESS:
+            raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
+        return self._parse_status_page(response, description, page_kind)
+
+    async def query_receiver_channel_status_2809(self):
+        response = await self._request_receiver_channel_status_2809()
+        result_code = channel_result_code(response, "receiver channel status query")
+        if result_code != RESULT_CODE_SUCCESS:
+            raise RuntimeError(f"receiver channel status query failed with result 0x{result_code:04X}")
+        return self._parse_status_page(
+            response,
+            "receiver channel status query",
+            "receiver_channel_status_page_2809",
+        )
+
+    async def query_transmitter_channel_status_2809(self):
+        response = await self._request_transmitter_channel_status_2809()
+        protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe(response)
+        if protocol_identifier != PROTOCOL_ARC_2809:
+            raise RuntimeError("transmitter channel status query failed with result 0x0030")
+        self.device.transmitter_channel_name_protocol_identifier = protocol_identifier
+        return self._parse_status_page(
+            response,
+            "transmitter channel status query",
+            "transmitter_channel_status_page_2809",
+        )
+
+    async def query_receiver_flow_status_2809(self):
+        return await self._query_status_page_2809(
+            self.device.commands.command_query_receiver_flow_status_2809(),
+            "query_receiver_flow_status_2809",
+            "receiver flow status query",
+            "receiver_flow_status_page_2809",
+        )
+
+    async def query_transmitter_flow_status_2809(self):
+        return await self._query_status_page_2809(
+            self.device.commands.command_query_transmitter_flow_status_2809(),
+            "query_transmitter_flow_status_2809",
+            "transmitter flow status query",
+            "transmitter_flow_status_page",
+        )
 
     async def identify(self):
         command_arguments = self.device.commands.command_identify()
         await self._send_without_response(command_arguments)
 
-    async def reboot(self, host_mac=None, retries=3, retry_delay=0.1):
+    async def reboot(self, host_mac=None):
+        await self._send_registered_system_reset(self.device.commands.command_reboot, host_mac)
+
+    async def factory_reset(self, host_mac=None):
+        await self._send_registered_system_reset(self.device.commands.command_factory_reset, host_mac)
+
+    async def clear_configuration(
+        self,
+        preserve_internet_protocol_settings: bool,
+        timeout: float = 2.0,
+    ) -> dict:
+        application = getattr(self.device, "_app", None)
+        if application is None:
+            raise RuntimeError("verified clear-configuration requires an active Dante application")
+        device_ip_address = str(self.device.ipv4) if self.device.ipv4 else None
+        if device_ip_address is None:
+            raise RuntimeError("device has no control address")
+        return await application.clear_configuration(
+            device_ip_address,
+            preserve_internet_protocol_settings,
+            timeout,
+        )
+
+    async def _send_registered_system_reset(self, command_builder, host_mac):
         if host_mac is None:
             from netaudio.dante.services.cmc import _get_host_mac
 
             host_mac = _get_host_mac()
-        packet, _, port = self.device.commands.command_reboot(host_mac=host_mac)
-        await self._send_repeated_settings_command(packet, port, retries, retry_delay)
+        device_ip_address = str(self.device.ipv4) if self.device.ipv4 else None
+        if device_ip_address is None:
+            raise RuntimeError("device has no control address")
+        await self._register_controller_for_system_reset(device_ip_address, host_mac)
+        packet, _, port = command_builder(host_mac=host_mac)
+        await self._send_repeated_settings_command(packet, port, 1, 0)
+
+    async def _register_controller_for_system_reset(self, device_ip_address: str, host_mac: bytes) -> None:
+        application = getattr(self.device, "_app", None)
+        application_service = getattr(application, "cmc", None)
+        if application_service is not None and application_service.is_started:
+            await application_service.require_registration(device_ip_address, host_mac)
+            return
+
+        from netaudio.dante.services.cmc import DanteCMCService
+
+        operation_service = DanteCMCService(host_media_access_control_address=host_mac)
+        await operation_service.start()
+        try:
+            await operation_service.require_registration(device_ip_address, host_mac)
+        finally:
+            await operation_service.stop()
 
     async def set_latency(self, latency):
         latency_milliseconds = float(latency)
@@ -79,6 +248,17 @@ class DanteDeviceOperations:
         packet, _, port = self.device.commands.command_enable_aes67(is_enabled=is_enabled, host_mac=host_mac)
         await self._send_repeated_settings_command(packet, port, retries, retry_delay)
 
+    async def set_aes67_multicast_prefix(self, prefix: str):
+        try:
+            normalized_prefix = str(ipaddress.IPv4Address(prefix))
+        except (ipaddress.AddressValueError, ValueError) as exception:
+            raise ValueError("AES67 multicast prefix must be an IPv4 address") from exception
+        command_arguments = self.device.commands.command_set_aes67_multicast_prefix(normalized_prefix)
+        return await self.device.dante_command(
+            *command_arguments,
+            logical_command_name="set_aes67_multicast_prefix",
+        )
+
     async def _send_repeated_settings_command(self, packet, port, retries, retry_delay):
         client = self.device._core_client()
         if client is None:
@@ -103,14 +283,23 @@ class DanteDeviceOperations:
         command_arguments = self.device.commands.command_set_encoding(encoding)
         await self._send_without_response(command_arguments)
 
-    async def set_sample_rate(self, sample_rate):
-        supported_sample_rates = self.device.supported_sample_rates
-        if supported_sample_rates is not None and sample_rate not in supported_sample_rates:
-            raise ValueError(
-                f"requested sample rate {sample_rate} is not supported; device reports {supported_sample_rates}"
-            )
+    async def _request_sample_rate_change(self, sample_rate):
         command_arguments = self.device.commands.command_set_sample_rate(sample_rate)
         await self._send_without_response(command_arguments)
+
+    async def set_sample_rate(self, sample_rate, confirm_destructive=False):
+        if self.device._app is None:
+            raise RuntimeError("topology-safe sample-rate control requires an active Dante application")
+        return await self.device._app.set_sample_rate_state(
+            self.device,
+            sample_rate,
+            confirm_destructive=confirm_destructive,
+        )
+
+    async def set_sample_rate_pullup(self, raw_value):
+        if self.device._app is None:
+            raise RuntimeError("verified sample rate pull-up control requires an active Dante application")
+        return await self.device._app.set_sample_rate_pullup_state(self.device, raw_value)
 
     async def add_subscription(self, rx_channel, tx_channel, tx_device):
         tx_channel_name = tx_channel.friendly_name if tx_channel.friendly_name else tx_channel.name
@@ -118,7 +307,8 @@ class DanteDeviceOperations:
 
     async def add_subscription_by_name(self, rx_channel_number, tx_channel_name, tx_device_name):
         cmd_args = self.device.commands.command_add_subscription(rx_channel_number, tx_channel_name, tx_device_name)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="add_subscription")
+        async with self.device.topology_mutation_lock:
+            response = await self.device.dante_command(*cmd_args, logical_command_name="add_subscription")
 
         return response
 
@@ -131,20 +321,23 @@ class DanteDeviceOperations:
 
     async def add_subscriptions_by_name(self, records):
         cmd_args = self.device.commands.command_add_subscriptions(records)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="add_subscriptions")
+        async with self.device.topology_mutation_lock:
+            response = await self.device.dante_command(*cmd_args, logical_command_name="add_subscriptions")
 
         return response
 
     async def remove_subscription(self, rx_channel):
         cmd_args = self.device.commands.command_remove_subscription(rx_channel.number)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="remove_subscription")
+        async with self.device.topology_mutation_lock:
+            response = await self.device.dante_command(*cmd_args, logical_command_name="remove_subscription")
 
         return response
 
     async def remove_subscriptions(self, rx_channels):
         channel_numbers = [channel.number for channel in rx_channels]
         cmd_args = self.device.commands.command_remove_subscriptions(channel_numbers)
-        response = await self.device.dante_command(*cmd_args, logical_command_name="remove_subscriptions")
+        async with self.device.topology_mutation_lock:
+            response = await self.device.dante_command(*cmd_args, logical_command_name="remove_subscriptions")
 
         return response
 
@@ -174,32 +367,13 @@ class DanteDeviceOperations:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
-        result = await core_lock_device(str(self.device.ipv4), pin, key)
-        self._apply_lock_result(result)
-        return result
+        return await core_lock_device(str(self.device.ipv4), pin, key)
 
     async def unlock_device(self, pin: str, key: bytes) -> dict:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
-        result = await core_unlock_device(str(self.device.ipv4), pin, key)
-        self._apply_lock_result(result)
-        return result
-
-    def _apply_lock_result(self, result: dict) -> None:
-        if not result.get("success"):
-            return
-        self.device.is_locked = result.get("lock_state") == LOCK_STATE_LOCKED
-        if self.device._app is not None:
-            from netaudio.dante.events import DanteEvent, EventType
-
-            self.device._app.dispatcher.emit_nowait(
-                DanteEvent(
-                    type=EventType.DEVICE_UPDATED,
-                    device_name=self.device.name,
-                    server_name=self.device.server_name,
-                )
-            )
+        return await core_unlock_device(str(self.device.ipv4), pin, key)
 
     async def get_device_settings(self):
         client = self.device._core_client()
@@ -218,18 +392,30 @@ class DanteDeviceOperations:
         client = self.device._core_client()
         if client is None:
             return None
-        configured = await asyncio.to_thread(client.get_aes67_configured)
+        from netaudio import core
+
+        def _query():
+            packet = core.build_command({"command": "query_latency_config"})
+            return client.request(packet, client._arc_port)
+
+        response = await asyncio.to_thread(_query)
+        if not response:
+            return None
+        configured = core.parse_response("aes67_configured", response)
+        settings = core.parse_response("device_settings", response)
         if configured is not None:
             self.device.aes67_configured = configured
+        prefix = settings.get("aes67_multicast_prefix") if isinstance(settings, dict) else None
+        if prefix is not None:
+            self.device.aes67_multicast_prefix = prefix
         return configured
+
 
 LOCK_OPERATION_LOCK = 1
 LOCK_OPERATION_UNLOCK = 2
 
 LOCK_STATUS_SUCCESS = 0x0000
 LOCK_STATUS_ALREADY = 0x1102
-
-LOCK_STATE_LOCKED = 0x0001
 
 
 def validate_pin(pin: str) -> str | None:
@@ -266,6 +452,7 @@ def _validate_lock_key(key: bytes) -> dict | None:
     if not key:
         return _lock_key_not_configured()
     from netaudio.core.binding import LOCK_KEY_LENGTH
+
     if len(key) != LOCK_KEY_LENGTH:
         return _lock_key_invalid(len(key), LOCK_KEY_LENGTH)
     return None

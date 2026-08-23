@@ -9,21 +9,19 @@ import time
 from collections.abc import Coroutine
 from typing import Any, Awaitable, cast
 
-from zeroconf import ServiceStateChange
-from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
+from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsyncioLock
 from netaudio.daemon.metering import MeteringManager
+from netaudio.daemon.correlation import dante_device_correlation_view
+from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.relay import RelayServer
+from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.shure.manager import ShureManager
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.const import (
-    SERVICE_CMC,
-    SERVICES,
-)
-from netaudio.dante.device import DanteDevice
+from netaudio.dante.const import SERVICES
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.state import DanteStateService
 
 
@@ -57,22 +55,7 @@ def _probe_device(device_ip: str) -> bool:
         return False
 
 
-def _sd_notify(state):
-    addr = os.environ.get("NOTIFY_SOCKET")
-    if not addr:
-        return
-    import socket as _socket
-
-    sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_DGRAM)
-    try:
-        if addr[0] == "@":
-            addr = "\0" + addr[1:]
-        sock.sendto(state.encode(), addr)
-    finally:
-        sock.close()
-
-
-class NetaudioDaemon:
+class NetaudioDaemon(DanteDiscoveryMixin):
     def __init__(self, dissect=False, capture=False, relay_port=None):
         from netaudio import core
 
@@ -125,11 +108,11 @@ class NetaudioDaemon:
         self.browser = None
         self.running = False
         self._redis = None
-        self._stop_event = asyncio.Event()
-        self._start_lock = asyncio.Lock()
+        self._stop_event = DeferredAsyncioEvent()
+        self._start_lock = DeferredAsyncioLock()
         self._startup_task: asyncio.Task | None = None
         self._startup_waiters = 0
-        self._stop_lock = asyncio.Lock()
+        self._stop_lock = DeferredAsyncioLock()
         self._stop_complete = False
         self.metering = MeteringManager(self.application)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
@@ -230,6 +213,9 @@ class NetaudioDaemon:
                         "ipv4": str(device.ipv4) if device.ipv4 else "",
                         "model_id": device.model_id or "",
                         "bluetooth_device": device.bluetooth_device or "",
+                        "bluetooth_connected": (
+                            "" if device.bluetooth_connected is None else "1" if device.bluetooth_connected else "0"
+                        ),
                         "online": "1" if device.online else "0",
                         "last_seen": str(device.last_seen) if device.last_seen else "",
                     },
@@ -294,53 +280,7 @@ class NetaudioDaemon:
         return None
 
     def _dante_device_to_dict(self, device):
-        result = {
-            "server_name": device.server_name or "",
-            "name": device.name or "",
-            "ip": str(device.ipv4) if device.ipv4 else "",
-            "mac": device.mac_address or "",
-            "sample_rate": device.sample_rate,
-            "supported_sample_rates": device.supported_sample_rates,
-            "encoding": device.encoding,
-            "supported_encodings": device.supported_encodings,
-            "encoding_configurable": device.encoding_configurable,
-            "latency": device.latency,
-            "active_latency": device.active_latency,
-            "configured_latency": device.configured_latency,
-            "default_latency": device.default_latency,
-            "min_latency": device.min_latency,
-            "max_latency": device.max_latency,
-            "standard_latency_choices": device.standard_latency_choices,
-        }
-
-        if device.tx_channels:
-            result["tx_channels"] = {
-                str(num): {"name": ch.name or "", "friendly_name": ch.friendly_name or ""}
-                for num, ch in sorted(device.tx_channels.items())
-                if ch.name
-            }
-
-        if device.rx_channels:
-            result["rx_channels"] = {
-                str(num): {"name": ch.name or "", "friendly_name": ch.friendly_name or ""}
-                for num, ch in sorted(device.rx_channels.items())
-                if ch.name
-            }
-
-        if device.subscriptions:
-            subs = []
-            for sub in device.subscriptions:
-                subs.append(
-                    {
-                        "rx_channel_name": sub.rx_channel_name or "",
-                        "tx_device_name": sub.tx_device_name or "",
-                        "tx_channel_name": sub.tx_channel_name or "",
-                        "status": ", ".join(sub.status_text()) if sub.status_code is not None else "",
-                    }
-                )
-            result["subscriptions"] = subs
-
-        return result
+        return dante_device_correlation_view(device)
 
     async def _publish_shure_to_redis(self, mac):
         if not self._redis or not self.shure:
@@ -392,6 +332,15 @@ class NetaudioDaemon:
 
     async def _on_shure_meters(self, event: DanteEvent):
         await self._publish_shure_meters_to_redis(event.device_name, event.data)
+
+    def _emit_heartbeat_device_updated(self, device) -> None:
+        self.application.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.DEVICE_UPDATED,
+                device_name=device.name,
+                server_name=device.server_name,
+            )
+        )
 
     def _register_event_listeners(self):
         if self._event_listeners_registered:
@@ -511,6 +460,8 @@ class NetaudioDaemon:
             get_devices=lambda: self.application.devices,
             mark_offline=self.mark_device_offline,
             interface_ip=app_settings.interface_ip,
+            on_signal_presence=self.metering.record_signal_presence,
+            on_device_updated=self._emit_heartbeat_device_updated,
         )
         await self.heartbeat.start()
 
@@ -830,170 +781,6 @@ class NetaudioDaemon:
                 break
             except Exception as exception:
                 logger.debug(f"Revalidation loop error: {exception}")
-
-    def on_service_state_change(self, zeroconf, service_type, name, state_change):
-        if service_type == "_netaudio-chan._udp.local.":
-            return
-
-        logger.debug(f"mDNS event: {state_change.name} - {service_type} - {name}")
-
-        self._spawn_background(
-            self.handle_service_change(zeroconf, service_type, name, state_change),
-            name=f"mdns-change:{name}",
-        )
-
-    async def handle_service_change(self, zeroconf, service_type, name, state_change):
-        try:
-            info = AsyncServiceInfo(service_type, name)
-
-            if state_change == ServiceStateChange.Removed:
-                for server_name in list(self.devices.keys()):
-                    if name.startswith(server_name.replace(".local.", "")):
-                        logger.info(f"Device offline candidate (mDNS removed): {server_name}")
-                        self.mark_device_offline(server_name)
-
-                return
-
-            if not await info.async_request(zeroconf, 3000):
-                return
-
-            addresses = info.parsed_addresses()
-
-            if not addresses:
-                return
-
-            server_name = None
-
-            for record in zeroconf.cache.entries_with_name(name):
-                if hasattr(record, "server"):
-                    server_name = record.server
-                    break
-
-            if not server_name:
-                return
-
-            service_properties = {}
-
-            for key, value in info.properties.items():
-                key = key.decode("utf-8") if isinstance(key, bytes) else key
-
-                if not key:
-                    continue
-
-                if isinstance(value, bytes):
-                    value = value.decode("utf-8")
-
-                service_properties[key] = value
-
-            service_data = {
-                "ipv4": addresses[0],
-                "name": name,
-                "port": info.port,
-                "properties": service_properties,
-                "server_name": server_name,
-                "type": service_type,
-            }
-
-            self.clear_offline_candidate(server_name)
-
-            existing = self.devices.get(server_name)
-            was_offline = existing is not None and not existing.online
-            is_new = existing is None
-
-            if is_new or was_offline:
-                new_device = DanteDevice(server_name=server_name)
-                new_device.ipv4 = addresses[0]
-                self.application.register_device(server_name, new_device)
-                if is_new:
-                    logger.info(f"Device discovered: {server_name}")
-                else:
-                    logger.info(f"Device back online: {server_name}")
-                online = sum(1 for d in self.devices.values() if d.online)
-                _sd_notify(f"STATUS={online} device(s) online")
-                if addresses[0]:
-                    await self.application.cmc.register_device(addresses[0])
-                if was_offline and self.metering:
-                    self.metering.reactivate_device(server_name)
-
-            device = self.devices[server_name]
-            device.update_last_seen()
-
-            old_ip = str(device.ipv4) if device.ipv4 else None
-            new_ip = addresses[0]
-
-            device_changed = bool(old_ip and old_ip != new_ip)
-            if device_changed:
-                logger.info(f"Device {server_name} IP changed: {old_ip} -> {new_ip}")
-
-            device.ipv4 = new_ip
-
-            if not device.services:
-                device.services = {}
-
-            device.services[name] = service_data
-
-            if "id" in service_properties and service_type == SERVICE_CMC:
-                device.mac_address = service_properties["id"]
-
-                if device.ipv4 and device.mac_address:
-                    if not device.dante_model:
-                        self.application._send_conmon_query_for_device(device, "make_model")
-
-                    if not device.dante_model_id:
-                        self.application._send_conmon_query_for_device(device, "dante_model")
-                        self._spawn_background(
-                            self.state.retry_conmon_query(server_name),
-                            name=f"retry-conmon:{server_name}",
-                        )
-
-            if "model" in service_properties:
-                device.model_id = service_properties["model"]
-
-            if "mf" in service_properties:
-                device.manufacturer_mdns = service_properties["mf"]
-                if not device.manufacturer:
-                    device.manufacturer = service_properties["mf"]
-
-            if "server_vers" in service_properties and service_type == SERVICE_CMC:
-                device.software_version = service_properties["server_vers"]
-
-            if "router_vers" in service_properties:
-                device.firmware_version = service_properties["router_vers"]
-
-            if "rate" in service_properties:
-                device.sample_rate = int(service_properties["rate"])
-
-            if "latency_ns" in service_properties:
-                device.latency = nanoseconds_to_milliseconds(service_properties["latency_ns"])
-
-            await self._publish_device_to_redis(device)
-
-            arc_port = self.application.get_arc_port(device)
-            if arc_port:
-                if not is_new:
-                    new_name = await device.fetch_device_name()
-                    if new_name and new_name != device.name:
-                        logger.info(f"Device name changed for {server_name}: {device.name!r} -> {new_name!r}")
-                        device.name = new_name
-                        device_changed = True
-
-                if not device.tx_channels and not device.rx_channels:
-                    self._spawn_background(
-                        self.state.fetch_device_controls(server_name),
-                        name=f"delayed-controls:{server_name}",
-                    )
-
-            if device_changed:
-                self.application.dispatcher.emit_nowait(
-                    DanteEvent(
-                        type=EventType.DEVICE_UPDATED,
-                        device_name=device.name,
-                        server_name=server_name,
-                    )
-                )
-
-        except Exception:
-            logger.exception(f"Service change error for {name}")
 
 
 async def run_daemon(dissect=False, capture=False, relay_port=None):

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import struct
 
+from netaudio.dante import flows
 from netaudio.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.events import DanteEvent, EventType
@@ -47,17 +48,17 @@ class DanteStateService:
         if self._registered:
             return
         app = self.application
-        app.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_channel_name_changed)
-        app.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_channel_name_changed)
-        app.on_notification(NOTIFICATION_TX_LABEL_CHANGE, self._on_channel_name_changed)
+        app.on_notification(NOTIFICATION_TX_CHANNEL_CHANGE, self._on_transmitter_channel_changed)
+        app.on_notification(NOTIFICATION_RX_CHANNEL_CHANGE, self._on_receiver_channel_changed)
+        app.on_notification(NOTIFICATION_TX_LABEL_CHANGE, self._on_transmitter_channel_changed)
         app.on_notification(NOTIFICATION_SAMPLE_RATE_STATUS, self._on_sample_rate_status)
         app.on_notification(NOTIFICATION_ENCODING_STATUS, self._on_encoding_status)
         app.on_notification(NOTIFICATION_INTERFACE_STATUS, self._on_controls_changed)
         app.on_notification(NOTIFICATION_PROPERTY_CHANGE, self._on_controls_changed)
         app.on_notification(NOTIFICATION_DEVICE_REBOOT, self._on_device_reboot)
         app.on_notification(NOTIFICATION_AES67_STATUS, self._on_aes67_status)
-        app.on_notification(NOTIFICATION_TX_FLOW_CHANGE, self._on_flow_changed)
-        app.on_notification(NOTIFICATION_RX_FLOW_CHANGE, self._on_flow_changed)
+        app.on_notification(NOTIFICATION_TX_FLOW_CHANGE, self._on_transmitter_flow_changed)
+        app.on_notification(NOTIFICATION_RX_FLOW_CHANGE, self._on_receiver_flow_changed)
         app.on_notification(NOTIFICATION_SETTINGS_CHANGE, self._on_settings_change)
         app.on_notification(NOTIFICATION_CLOCKING_STATUS, self._on_device_state_changed)
         app.on_notification(NOTIFICATION_VERSIONS_STATUS, self._on_device_state_changed)
@@ -90,7 +91,7 @@ class DanteStateService:
         device.update_last_seen()
         return device
 
-    async def _on_channel_name_changed(self, event: DanteEvent) -> None:
+    async def _on_transmitter_channel_changed(self, event: DanteEvent) -> None:
         server_name = event.server_name
         device = self._online_device(server_name)
         if not device:
@@ -99,17 +100,16 @@ class DanteStateService:
         if not self.application.get_arc_port(device):
             return
 
-        logger.info(f"Re-fetching channels for {server_name} (channel name changed)")
+        logger.info(f"Re-fetching transmitter channels for {server_name} (transmitter channel changed)")
         async with self._lock_for(server_name):
             try:
                 await device.get_tx_channels()
-                await device.get_rx_channels()
             except Exception as exception:
-                logger.warning(f"Error re-fetching channels for {server_name}: {exception}")
+                logger.warning(f"Error re-fetching transmitter channels for {server_name}: {exception}")
                 return
         self._emit_device_updated(device)
 
-    async def _on_flow_changed(self, event: DanteEvent) -> None:
+    async def _on_receiver_channel_changed(self, event: DanteEvent) -> None:
         server_name = event.server_name
         device = self._online_device(server_name)
         if not device:
@@ -118,13 +118,91 @@ class DanteStateService:
         if not self.application.get_arc_port(device):
             return
 
-        logger.info(f"Re-fetching subscriptions for {server_name} (flow changed)")
+        logger.info(f"Re-fetching receiver channels for {server_name} (receiver channel changed)")
         async with self._lock_for(server_name):
             try:
                 await device.get_rx_channels()
             except Exception as exception:
-                logger.warning(f"Error re-fetching flows for {server_name}: {exception}")
+                logger.warning(f"Error re-fetching receiver channels for {server_name}: {exception}")
                 return
+        self._emit_device_updated(device)
+
+    async def _on_transmitter_flow_changed(self, event: DanteEvent) -> None:
+        server_name = event.server_name
+        device = self._online_device(server_name)
+        if not device or not device.ipv4:
+            return
+
+        arc_port = self.application.get_arc_port(device)
+        if not arc_port:
+            return
+
+        logger.info(f"Re-fetching transmitter flows for {server_name} (transmitter flow changed)")
+        async with self._lock_for(server_name):
+            try:
+                flow_protocol_identifier = device.flow_protocol_id
+                if flow_protocol_identifier is None:
+                    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), arc_port)
+                    if flow_protocol_identifier is None:
+                        logger.warning(f"No supported transmitter flow frontend for {server_name}")
+                        return
+                    device.flow_protocol_id = flow_protocol_identifier
+                flow_inventory = await flows.query_preferred_tx_flow_inventory(
+                    str(device.ipv4),
+                    arc_port,
+                    flow_protocol_identifier,
+                )
+                if flow_inventory is None:
+                    logger.warning(f"Transmitter flow inventory unavailable for {server_name}")
+                    return
+                flow_records = flow_inventory.get("flows")
+                if not isinstance(flow_records, list):
+                    logger.warning(f"Malformed transmitter flow inventory for {server_name}")
+                    return
+                device.apply_transmitter_flow_status_page(
+                    {
+                        "reported_flow_count": len(flow_records),
+                        "flows": flow_records,
+                    }
+                )
+            except Exception as exception:
+                logger.warning(f"Error re-fetching transmitter flows for {server_name}: {exception}")
+                return
+        self._emit_device_updated(device)
+
+    async def _on_receiver_flow_changed(self, event: DanteEvent) -> None:
+        server_name = event.server_name
+        device = self._online_device(server_name)
+        if not device:
+            return
+
+        if not self.application.get_arc_port(device):
+            return
+
+        logger.info(f"Re-fetching receiver flows for {server_name} (receiver flow changed)")
+        async with self._lock_for(server_name):
+            try:
+                await device.get_rx_channels()
+            except Exception as exception:
+                logger.warning(f"Error re-fetching receiver channels for {server_name}: {exception}")
+                return
+            try:
+                flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+                if flow_inventory is None:
+                    logger.warning(f"Receiver flow inventory unavailable for {server_name}")
+                else:
+                    flow_records = flow_inventory.get("flows")
+                    if isinstance(flow_records, list):
+                        device.apply_receiver_flow_status_page(
+                            {
+                                "reported_flow_count": len(flow_records),
+                                "flows": flow_records,
+                            }
+                        )
+                    else:
+                        logger.warning(f"Malformed receiver flow inventory for {server_name}")
+            except Exception as exception:
+                logger.warning(f"Error re-fetching receiver flow inventory for {server_name}: {exception}")
         self._emit_device_updated(device)
 
     async def _on_routing_changed(self, event: DanteEvent) -> None:
@@ -149,6 +227,12 @@ class DanteStateService:
         device = self._online_device(event.server_name)
         if not device:
             return
+        if (
+            event.data.get("notification_id") == NOTIFICATION_ROUTING_READY
+            and event.data.get("conmon_response")
+            and device.routing_ready is not True
+        ):
+            return
         await self.fetch_device_controls(event.server_name)
         if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and device.ipv4:
             await asyncio.gather(
@@ -168,7 +252,7 @@ class DanteStateService:
             if event.data.get("current_value_changed"):
                 device = self._online_device(event.server_name)
                 if device:
-                    await self._refresh_settings_after_sample_rate_change(device)
+                    await self._refresh_controls_after_sample_rate_change(device)
             return
         if event.data.get("state_applied"):
             return
@@ -177,16 +261,18 @@ class DanteStateService:
             return
         await self._refresh_sample_rate_status(device, "sample rate changed")
 
-    async def _refresh_settings_after_sample_rate_change(self, device) -> None:
-        logger.info(f"Re-fetching device settings for {device.server_name} (sample rate changed)")
+    async def _refresh_controls_after_sample_rate_change(self, device) -> None:
+        logger.info(f"Re-fetching channels and device settings for {device.server_name} (sample rate changed)")
         async with self._lock_for(device.server_name):
             device.apply_controls(unavailable_latency_controls())
             try:
-                settings = await device.operations.get_device_settings()
-                if settings is None:
-                    logger.warning(f"Device settings unavailable for {device.server_name} after sample rate changed")
+                controls = await device.fetch_controls_data(include_channels=True)
+                if controls is None:
+                    logger.warning(f"Device controls unavailable for {device.server_name} after sample rate changed")
+                else:
+                    device.apply_controls(controls)
             except Exception as exception:
-                logger.warning(f"Error re-fetching device settings for {device.server_name}: {exception}")
+                logger.warning(f"Error re-fetching device controls for {device.server_name}: {exception}")
         self._emit_device_updated(device)
 
     async def _refresh_sample_rate_status(self, device, reason: str) -> None:
@@ -283,16 +369,23 @@ class DanteStateService:
             logger.debug(f"Unhandled settings subtype 0x{settings_subtype:04X} from {event.server_name}: {raw.hex()}")
 
     def _handle_bluetooth(self, data: bytes, device) -> bool:
-        name = DanteDeviceParser.parse_bluetooth_status(data)
+        status = DanteDeviceParser.parse_bluetooth_status_state(data)
 
-        if name is False:
+        if not isinstance(status, dict):
             return False
 
+        connected = status["connected"]
+        name = status["device_name"]
+        old_connected = device.bluetooth_connected
         old_name = device.bluetooth_device
 
-        if name != old_name:
+        if connected != old_connected or name != old_name:
+            device.bluetooth_connected = connected
             device.bluetooth_device = name
-            logger.info(f"Bluetooth status changed for {device.server_name}: {old_name!r} -> {name!r}")
+            logger.info(
+                f"Bluetooth status changed for {device.server_name}: "
+                f"{old_connected!r}/{old_name!r} -> {connected!r}/{name!r}"
+            )
             self._emit_device_updated(device)
 
         return True
@@ -380,7 +473,7 @@ class DanteStateService:
                     if attempt < retries - 1:
                         logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
 
-                if device.bluetooth_device is None and device.model_id in BLUETOOTH_MODEL_IDS:
+                if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
                     self.application.settings.request_bluetooth_status(str(device.ipv4))
 
                 try:

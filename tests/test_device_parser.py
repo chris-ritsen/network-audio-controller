@@ -237,6 +237,17 @@ class TestParseBluetoothStatus:
         result = DanteDeviceParser.parse_bluetooth_status(response)
         assert result is None
 
+    def test_connected_state_preserves_connection_and_device_name(self, load_fixture):
+        response = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
+        result = DanteDeviceParser.parse_bluetooth_status_state(response)
+        assert result == {"connected": True, "device_name": "s00pcan-iphone-17"}
+
+    def test_disconnected_state_is_distinct_from_invalid_input(self, load_fixture):
+        response = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
+        result = DanteDeviceParser.parse_bluetooth_status_state(response)
+        assert result == {"connected": False, "device_name": None}
+        assert DanteDeviceParser.parse_bluetooth_status_state(b"not a status publication") is False
+
     def test_returns_none_for_none(self):
         assert DanteDeviceParser.parse_bluetooth_status(None) is None
 

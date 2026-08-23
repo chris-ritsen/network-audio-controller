@@ -9,6 +9,17 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 from packaging.tags import platform_tags
 
 
+def package_library_destination(root: Path, library_name: str) -> Path:
+    return Path(root) / "packages" / "netaudio" / "src" / "netaudio" / "core" / library_name
+
+
+def install_built_library(root: Path, built_library: Path) -> Path:
+    destination = package_library_destination(root, built_library.name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(built_library, destination)
+    return destination
+
+
 class CoreLibraryBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
 
@@ -27,7 +38,8 @@ class CoreLibraryBuildHook(BuildHookInterface):
             raise RuntimeError(
                 f"netaudio-core library not found in {crate_dir / 'target' / 'release'} after cargo build"
             )
-        build_data["force_include"][str(library_path)] = f"netaudio/core/{library_path.name}"
+        installed_library = install_built_library(self.root, library_path)
+        build_data["force_include"][str(installed_library)] = f"netaudio/core/{installed_library.name}"
         build_data["pure_python"] = False
         build_data["tag"] = f"py3-none-{self._platform_tag()}"
 

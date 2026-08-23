@@ -1,10 +1,23 @@
-.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
 
+CORE_PACKAGE_DIR := packages/netaudio/src/netaudio/core
+CORE_RELEASE_DIR := packages/netaudio-core/target/release
+
 core: header
 	cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
+	@if [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.so ]; then \
+		cp -f $(CORE_RELEASE_DIR)/libnetaudio_core.so $(CORE_PACKAGE_DIR)/libnetaudio_core.so; \
+	elif [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.dylib ]; then \
+		cp -f $(CORE_RELEASE_DIR)/libnetaudio_core.dylib $(CORE_PACKAGE_DIR)/libnetaudio_core.dylib; \
+	elif [ -f $(CORE_RELEASE_DIR)/netaudio_core.dll ]; then \
+		cp -f $(CORE_RELEASE_DIR)/netaudio_core.dll $(CORE_PACKAGE_DIR)/netaudio_core.dll; \
+	else \
+		echo "netaudio-core library missing after cargo build" >&2; \
+		exit 1; \
+	fi
 
 example: core
 	gcc -o packages/netaudio-core/examples/rename_channel packages/netaudio-core/examples/rename_channel.c \
@@ -42,6 +55,7 @@ quality:
 
 wheel-smoke:
 	@tmp=$$(mktemp -d) || exit 1; \
+		set -eu; \
 		trap 'rm -rf "$$tmp"' 0; \
 		uv build --wheel --out-dir "$$tmp"; \
 		set -- "$$tmp"/netaudio-*.whl; \
@@ -49,7 +63,12 @@ wheel-smoke:
 			echo "expected exactly one wheel, found $$#" >&2; \
 			exit 1; \
 		fi; \
-		uv run --isolated --no-project python scripts/verify_wheel_artifact.py "$$1"; \
+		case "$$1" in \
+			*-manylinux_2_28_*.whl|*-macosx_11_0_*.whl|*-win_amd64.whl) \
+				uv run --isolated --no-project python scripts/verify_wheel_artifact.py "$$1" ;; \
+			*) \
+				echo "local wheel tag is not a release-policy tag; CI verifies release artifacts" ;; \
+		esac; \
 		uv run --isolated --no-project python scripts/smoke_wheel_install.py "$$1"
 
 check-label-provenance:
@@ -69,3 +88,13 @@ man:
 install-man: man
 	install -d $(HOME)/.local/share/man/man1
 	install -m644 packages/netaudio/man/*.1 $(HOME)/.local/share/man/man1/
+
+site-check:
+	python3 website/validate.py
+	uv run pytest -q website/tests
+
+site-preview:
+	python3 -m http.server 8765 --directory website/public
+
+site-publish: site-check
+	sudo /usr/bin/python3 website/publish.py --source website/public

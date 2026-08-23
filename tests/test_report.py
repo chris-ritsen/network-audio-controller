@@ -74,11 +74,17 @@ SAMPLE_DIAGNOSTICS = {
             },
             "subscriptions": [
                 {
-                    "rx_channel_name": "Bravo RX 1",
-                    "rx_device_name": "Bravo Unit",
-                    "tx_channel_name": "Alpha TX 1",
-                    "tx_device_name": "Alpha Box",
-                }
+                    "rx_channel": "Bravo RX 1",
+                    "rx_device": "Bravo Unit",
+                    "tx_channel": "Alpha TX 1",
+                    "tx_device": "Alpha Box",
+                },
+                {
+                    "rx_channel": "unused-rx",
+                    "rx_device": "Bravo Unit",
+                    "tx_channel": "unused-rx",
+                    "tx_device": "",
+                },
             ],
         },
     ],
@@ -110,6 +116,9 @@ def test_format_report_applies_device_filter_to_body_and_json():
     assert "**Alpha Box**" not in body
     assert '"name": "Bravo Unit"' in body
     assert '"name": "Alpha Box"' not in body
+    assert "Subscriptions: 1 active" in body
+    assert "Bravo RX 1@Bravo Unit <- Alpha TX 1@Alpha Box" in body
+    assert "unused-rx@Bravo Unit" not in body
 
 
 def test_report_create_rejects_empty_description(capsys):

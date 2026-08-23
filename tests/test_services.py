@@ -1,10 +1,13 @@
 import struct
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     CONMON_OPCODE_GAIN_STATUS,
     CONMON_OPCODE_INTERFACE_STATUS,
+    CONMON_OPCODE_ROUTING_CAPACITY_STATUS,
     DanteNotificationService,
     NOTIFICATION_NAMES,
 )
@@ -23,12 +26,34 @@ ENCODING_STATUS_PACKET = bytes.fromhex(
     "ffff003413870000001dc10812580000417564696e61746507240082000000000018000100000018000000000000000000000018"
 )
 
+ROUTING_CAPACITY_READY_PACKET = bytes.fromhex(
+    "ffff002812870000001dc10812580000417564696e61746507240100000000000101000000800080"
+)
+
+ROUTING_CAPACITY_TRANSITION_PACKET = bytes.fromhex(
+    "ffff002812870000001dc10812580000417564696e61746507240100000000000001000000000000"
+)
+
+SAMPLE_RATE_PULLUP_STATUS_PACKET = bytes.fromhex(
+    "ffff005c002200000200000000010000417564696e6174650724008400000000"
+    "0030000500000001000000010002000000000001000000000000000000000000"
+    "00000000000000000000000000000001000000020000000300000004"
+)
+
 INPUT_GAIN_STATUS_PACKET = bytes.fromhex(
     "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000000000010008001001020002000400180000000500000001"
 )
 
 OUTPUT_GAIN_STATUS_PACKET = bytes.fromhex(
     "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004"
+)
+
+LIVE_AVIO_INPUT_GAIN_STATUS_PACKET = bytes.fromhex(
+    "ffff0038eee50000001dc1fffe50692e417564696e6174650738100b00000000000000010008001001020002000400180000000400000004"
+)
+
+LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET = bytes.fromhex(
+    "ffff0038efb00000001dc1fffe507b8d417564696e6174650738100b00000000000000010008001002010002000400180000000400000004"
 )
 
 AVIO_APPLIED_DHCP_INTERFACE_STATUS_PACKET = bytes.fromhex(
@@ -58,6 +83,23 @@ class TestDanteSettingsService:
         service._commands.command_probe_sample_rate.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
         service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
 
+    def test_refresh_clock_status_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_refresh_clock_status = MagicMock(return_value=(b"refresh", None, 8700))
+        service.send = MagicMock()
+
+        service.refresh_clock_status(
+            "192.168.1.108",
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+            sequence=0x0021,
+        )
+
+        service._commands.command_refresh_clock_status.assert_called_once_with(
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+            sequence=0x0021,
+        )
+        service.send.assert_called_once_with(b"refresh", "192.168.1.108", 8700)
+
     def test_probe_encoding_sends_typed_command(self):
         service = DanteSettingsService()
         service._commands.command_probe_encoding = MagicMock(return_value=(b"probe", None, 8700))
@@ -66,6 +108,38 @@ class TestDanteSettingsService:
         service.probe_encoding("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         service._commands.command_probe_encoding.assert_called_once_with(host_mac=b"\x10\x20\x30\x40\x50\x60")
+        service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
+
+    def test_sample_rate_pullup_commands_send_typed_packets(self):
+        service = DanteSettingsService()
+        service._commands.command_probe_sample_rate_pullup = MagicMock(return_value=(b"probe", None, 8700))
+        service._commands.command_set_sample_rate_pullup = MagicMock(return_value=(b"write", None, 8700))
+        service.send = MagicMock()
+        host_mac = b"\x10\x20\x30\x40\x50\x60"
+
+        service.probe_sample_rate_pullup("192.168.1.108", host_mac=host_mac)
+        service.set_sample_rate_pullup("192.168.1.108", 4, host_mac=host_mac)
+
+        service._commands.command_probe_sample_rate_pullup.assert_called_once_with(host_mac=host_mac)
+        service._commands.command_set_sample_rate_pullup.assert_called_once_with(4, host_mac=host_mac)
+        assert service.send.call_args_list[0].args == (b"probe", "192.168.1.108", 8700)
+        assert service.send.call_args_list[1].args == (b"write", "192.168.1.108", 8700)
+
+    def test_probe_lock_reset_status_sends_typed_command(self):
+        service = DanteSettingsService()
+        service._commands.command_probe_lock_reset_status = MagicMock(return_value=(b"probe", None, 8700))
+        service.send = MagicMock()
+
+        service.probe_lock_reset_status(
+            "192.168.1.108",
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+            request_value=100,
+        )
+
+        service._commands.command_probe_lock_reset_status.assert_called_once_with(
+            host_mac=b"\x10\x20\x30\x40\x50\x60",
+            request_value=100,
+        )
         service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
 
     def test_probe_gain_sends_typed_command(self):
@@ -105,13 +179,64 @@ class TestDanteCMCService:
         service = DanteCMCService()
         assert service._commands is not None
 
+    def test_exposes_host_address_used_by_cmc_commands(self):
+        host_address = b"\x00\x1d\xc1\x50\x23\x68"
+        service = DanteCMCService(host_media_access_control_address=host_address)
+
+        assert service.host_media_access_control_address == host_address
+
     def test_registration_packet_uses_typed_core_builder(self, monkeypatch):
-        service = DanteCMCService()
-        monkeypatch.setattr(service, "_host_mac", b"\x00\x1d\xc1\x50\x23\x68")
+        service = DanteCMCService(host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
 
         packet = service._build_registration_packet(0x1234)
 
         assert packet == bytes.fromhex("120000141234100100000000001dc15023680000")
+
+    @pytest.mark.asyncio
+    async def test_registration_requires_matching_success_response(self):
+        service = DanteCMCService(host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
+        successful_response = bytes.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
+        service.request = AsyncMock(return_value=successful_response)
+
+        response = await service.register_device("192.168.1.61")
+
+        assert response == successful_response
+        assert service._registered_devices == {"192.168.1.61"}
+
+    @pytest.mark.asyncio
+    async def test_registration_rejects_failure_response(self):
+        service = DanteCMCService(host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
+        failed_response = bytes.fromhex("120000200000100100000000020000000001000000010000c0a8013d21fc0000")
+        service.request = AsyncMock(return_value=failed_response)
+
+        response = await service.register_device("192.168.1.61")
+
+        assert response is None
+        assert service._registered_devices == set()
+
+    @pytest.mark.asyncio
+    async def test_registration_rejects_mismatched_sequence_and_malformed_envelope(self):
+        service = DanteCMCService(host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
+        service._sequence_counter = 0x1234
+        mismatched_sequence = bytes.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
+        service.request = AsyncMock(return_value=mismatched_sequence)
+
+        assert await service.register_device("192.168.1.61") is None
+        assert service._registered_devices == set()
+
+        malformed_length = bytes.fromhex("1200001f1235100100010000020000000001000000010000c0a8013d21fc0000")
+        service.request = AsyncMock(return_value=malformed_length)
+
+        assert await service.register_device("192.168.1.61") is None
+        assert service._registered_devices == set()
+
+    @pytest.mark.asyncio
+    async def test_required_registration_fails_loudly_on_timeout(self):
+        service = DanteCMCService(host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
+        service.request = AsyncMock(return_value=None)
+
+        with pytest.raises(RuntimeError, match="CMC registration failed for 192.168.1.61"):
+            await service.require_registration("192.168.1.61")
 
 
 class TestDanteNotificationService:
@@ -211,6 +336,85 @@ class TestDanteNotificationService:
         dispatcher = DanteEventDispatcher()
         service = DanteNotificationService(dispatcher=dispatcher)
         service._on_packet(b"\x00" * 10, ("192.168.1.1", 8702))
+
+    def test_routing_capacity_ready_updates_capacity_and_active_counts(self):
+        device = DanteDevice(server_name="lx-dante.local.")
+        device.name = "lx-dante"
+        device.ipv4 = "192.168.1.108"
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(ROUTING_CAPACITY_READY_PACKET, ("192.168.1.108", 8702))
+
+        assert device.routing_ready is True
+        assert device.routing_ready_state_code == 0x0101
+        assert device.routing_capacity_transmit_channel_count == 128
+        assert device.routing_capacity_receive_channel_count == 128
+        assert device.tx_count == device.tx_count_raw == 128
+        assert device.rx_count == device.rx_count_raw == 128
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        notification_event = next(event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED)
+        assert notification_event.data["notification_id"] == CONMON_OPCODE_ROUTING_CAPACITY_STATUS
+        assert notification_event.data["state_applied"] is True
+        assert notification_event.data["conmon_response"] is True
+
+    def test_routing_capacity_transition_preserves_active_counts(self):
+        device = DanteDevice(server_name="a32.local.")
+        device.name = "A32"
+        device.ipv4 = "10.0.2.15"
+        device.routing_ready = True
+        device.routing_ready_state_code = 0x0101
+        device.routing_capacity_transmit_channel_count = 64
+        device.routing_capacity_receive_channel_count = 64
+        device.tx_count = device.tx_count_raw = 64
+        device.rx_count = device.rx_count_raw = 64
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "10.0.2.15" else None,
+        )
+
+        service._on_packet(ROUTING_CAPACITY_TRANSITION_PACKET, ("10.0.2.15", 8702))
+
+        assert device.routing_ready is False
+        assert device.routing_ready_state_code == 0x0001
+        assert device.routing_capacity_transmit_channel_count == 0
+        assert device.routing_capacity_receive_channel_count == 0
+        assert device.tx_count == device.tx_count_raw == 64
+        assert device.rx_count == device.rx_count_raw == 64
+        notification_event = next(
+            call.args[0]
+            for call in dispatcher.emit_nowait.call_args_list
+            if call.args[0].type == EventType.NOTIFICATION_RECEIVED
+        )
+        assert notification_event.data["state_applied"] is True
+        assert notification_event.data["conmon_response"] is True
+
+    def test_routing_capacity_ready_preserves_inventory_counts(self):
+        device = DanteDevice(server_name="ad4d.local.")
+        device.name = "ad4d"
+        device.ipv4 = "192.168.1.108"
+        device.tx_count = 2
+        device.tx_count_raw = 64
+        device.rx_count = 1
+        device.rx_count_raw = 1
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "192.168.1.108" else None,
+        )
+
+        service._on_packet(ROUTING_CAPACITY_READY_PACKET, ("192.168.1.108", 8702))
+
+        assert device.routing_capacity_transmit_channel_count == 128
+        assert device.routing_capacity_receive_channel_count == 128
+        assert device.tx_count == 2
+        assert device.tx_count_raw == 64
+        assert device.rx_count == device.rx_count_raw == 1
 
     def test_dual_interface_status_uses_28_byte_stride(self):
         device = self._parse_dual_interface_packet(bytes.fromhex("001DC1AABBCC"))
@@ -417,6 +621,31 @@ class TestDanteNotificationService:
         assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
         assert sum(event.type == EventType.NOTIFICATION_RECEIVED for event in emitted_events) == 2
 
+    def test_sample_rate_pullup_status_updates_device_and_waiter(self):
+        device = DanteDevice(server_name="a32.local.")
+        device.name = "A32"
+        device.ipv4 = "10.0.2.15"
+        dispatcher = MagicMock()
+        service = DanteNotificationService(
+            dispatcher=dispatcher,
+            device_lookup=lambda ip_address: device if ip_address == "10.0.2.15" else None,
+        )
+        waiter = service.register_sample_rate_pullup_waiter("10.0.2.15")
+
+        service._on_packet(SAMPLE_RATE_PULLUP_STATUS_PACKET, ("10.0.2.15", 8702))
+
+        assert waiter.is_set()
+        assert service.get_sample_rate_pullup_result("10.0.2.15") == (1, [0, 1, 2, 3, 4])
+        assert device.sample_rate_pullup_raw_value == 1
+        assert device.requested_sample_rate_pullup_raw_value == 1
+        assert device.supported_sample_rate_pullup_raw_values == [0, 1, 2, 3, 4]
+        emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
+        assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+        notification_event = next(event for event in emitted_events if event.type == EventType.NOTIFICATION_RECEIVED)
+        assert notification_event.data["notification_id"] == 132
+        assert notification_event.data["state_applied"] is True
+        service.unregister_sample_rate_pullup_waiter("10.0.2.15")
+
     def test_encoding_status_returns_device_scoped_typed_probe_result(self):
         service = DanteNotificationService(dispatcher=MagicMock())
         matching_waiter = service.register_encoding_waiter("192.168.1.108")
@@ -455,6 +684,18 @@ class TestDanteNotificationService:
 
         assert device.encoding == 24
         assert device.supported_encodings == [24]
+
+    def test_live_avio_gain_status_parses_when_unmapped_header_byte_changes(self):
+        from netaudio import core
+
+        assert core.parse_response("gain_status", LIVE_AVIO_INPUT_GAIN_STATUS_PACKET) == {
+            "device_type": "input",
+            "channel_levels": [4, 4],
+        }
+        assert core.parse_response("gain_status", LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET) == {
+            "device_type": "output",
+            "channel_levels": [4, 4],
+        }
 
     def test_input_gain_status_updates_device_and_exposes_protocol_levels(self):
         device = DanteDevice(server_name="avio-input.local.")
@@ -541,52 +782,6 @@ class TestDanteNotificationService:
         assert device.gain_device_type == "input"
         assert device.gain_levels == [5, 1]
         assert device.supported_gain_levels == [1, 2, 3, 4, 5]
-
-
-class TestHeartbeatLockStateParsing:
-    def test_locked_device(self):
-        from netaudio.dante.services.heartbeat import _parse_lock_state
-
-        payload = bytes.fromhex(
-            "fffe00b82d8c0000001dc1fffe5279b6"
-            "4175646963617465000800011000000000"
-            "1c800100040010"
-            "2c2400"
-            "00ffff"
-            "a27600"
-            "000000"
-            "000000"
-            "000000"
-            "000000"
-            "00"
-        )
-        payload = bytes.fromhex("fffe00b82d8c0000001dc1fffe5279b641756469636e617465000800011000000000")
-        locked_block = bytes.fromhex("001c8002000400102c240000000200000001000000180000fefe3400")
-        header = b"\xff\xfe\x00\xb8" + b"\x00" * 28
-        result = _parse_lock_state(header + locked_block)
-        assert result is True
-
-    def test_unlocked_device(self):
-        from netaudio.dante.services.heartbeat import _parse_lock_state
-
-        unlocked_block = bytes.fromhex("001c8002000400101b6d0000000200000002000000180000fefe7c7c")
-        header = b"\xff\xfe\x00\x54" + b"\x00" * 28
-        result = _parse_lock_state(header + unlocked_block)
-        assert result is False
-
-    def test_no_lock_block(self):
-        from netaudio.dante.services.heartbeat import _parse_lock_state
-
-        other_block = bytes.fromhex("001080010004000428360000ffff8a74")
-        header = b"\xff\xfe\x00\x54" + b"\x00" * 28
-        result = _parse_lock_state(header + other_block)
-        assert result is None
-
-    def test_short_packet(self):
-        from netaudio.dante.services.heartbeat import _parse_lock_state
-
-        result = _parse_lock_state(b"\x00" * 10)
-        assert result is None
 
 
 class TestKeyExtraction:

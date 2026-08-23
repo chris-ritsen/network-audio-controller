@@ -87,7 +87,7 @@ def main():
     restored = rx_channels(lib, handle)
     print(f"rx channel 1 name after restore: {restored[0]['rx_channel_name']!r}")
 
-    status, _ = execute(lib, handle, {"command": "identify"})
+    status, _ = execute(lib, handle, {"command": "identify", "sequence": 1})
     print(f"identify -> status {status} (LED should blink)")
 
     lib.netaudio_client_free(handle)

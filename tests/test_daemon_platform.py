@@ -109,6 +109,7 @@ def test_systemd_unit_quotes_exec_path_and_escapes_specifiers():
     assert f"{service_install.MANAGED_MARKER}=true" in unit
 
 
+@pytest.mark.skipif(os.name == "nt", reason="launchd paths use POSIX syntax")
 def test_launchd_plist_uses_argument_array_and_failure_restart(monkeypatch):
     monkeypatch.setattr(service_install, "spawn_log_path", lambda: service_install.Path("/tmp/netaudio daemon.log"))
 
