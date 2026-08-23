@@ -1,11 +1,13 @@
-"""Tests for subscription add/remove command building and the captured
-Dante Controller protocol variant (0x2809/0x3410) for reference.
+"""Tests for subscription add/remove command building plus header mechanics of
+captured Controller 0x2809/0x3410 frames.
 
-The device accepts two protocol variants for subscription management:
-  - netaudio: protocol 0x27FF, opcodes 0x3010 (add) / 0x3014 (remove)
-  - Dante Controller: protocol 0x2809, opcode 0x3410 (both add and remove)
+netaudio subscribes via protocol 0x27FF, opcodes 0x3010 (add, causally
+verified) and 0x3014 (remove). The captured Controller frames on
+0x2809/0x3410 were taken during subscription changes, but the fact registry
+records that form as subscription_clear_prep (quarantined): its causal effect
+is not established, and these tests assert wire structure only.
 
-Both are sent to the ARC service port (dynamic, discovered via mDNS).
+Both protocols are sent to the ARC service port (dynamic, discovered via mDNS).
 """
 
 import struct

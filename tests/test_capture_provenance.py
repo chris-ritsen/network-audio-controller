@@ -5,11 +5,19 @@ import zlib
 
 from netaudio.capture import provenance
 from netaudio.capture.provenance import (
+    _decode_packet_payload,
+    _extract_subscription_status_codes,
     _extract_seed_samples,
     _query_observed_subscription_statuses,
     _write_seed_samples,
 )
 from netaudio.capture.packets import ARC_PROTOCOLS, TARGET_PROTOCOLS
+
+
+def test_arc_extended_success_is_not_reported_as_failure():
+    payload = struct.pack(">HHHHH", 0x2729, 10, 1, 0x3000, 0x8112)
+
+    assert _decode_packet_payload(payload)["status_ok"] is True
 
 
 def _subscription_status_packet(status_code: int) -> bytes:
@@ -68,6 +76,19 @@ def test_query_observed_subscription_statuses_decompresses_payload():
         connection.close()
 
     assert rows == [{"status_code": 0x0004, "seen": 1, "sample_id": 41}]
+
+
+def test_subscription_status_extraction_stops_at_declared_record_count():
+    payload = _subscription_status_packet(0x0004) + struct.pack(">HHHHHHHHI", 2, 0, 0, 0, 0, 0, 0, 0x9999, 0)
+
+    assert _extract_subscription_status_codes(payload) == {0x0004}
+
+
+def test_subscription_status_extraction_rejects_invalid_record_header():
+    payload = bytearray(_subscription_status_packet(0x0004))
+    payload[10] = 2
+
+    assert _extract_subscription_status_codes(bytes(payload)) == set()
 
 
 def test_seed_samples_write_decompressed_packet_bytes(tmp_path):

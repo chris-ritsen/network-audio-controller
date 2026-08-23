@@ -1,5 +1,6 @@
 DEVICE_SCALAR_FIELDS = (
     "bluetooth_device",
+    "bluetooth_connected",
     "is_locked",
     "dante_model",
     "dante_model_id",
@@ -13,14 +14,22 @@ DEVICE_SCALAR_FIELDS = (
     "model_id",
     "sample_rate",
     "supported_sample_rates",
+    "sample_rate_pullup_raw_value",
+    "requested_sample_rate_pullup_raw_value",
+    "supported_sample_rate_pullup_raw_values",
     "aes67_configured",
     "aes67_current",
     "aes67_supported",
+    "aes67_multicast_prefix",
     "settings_properties",
     "preferred_leader",
-    "ptp_v1_role",
+    "clock_source_code",
+    "clock_subdomain",
     "tx_flow_count",
+    "transmitter_flows",
     "rx_flow_count",
+    "receiver_flow_latency_nanoseconds",
+    "receiver_flows",
     "num_networks",
     "encoding",
     "supported_encodings",
@@ -30,20 +39,38 @@ DEVICE_SCALAR_FIELDS = (
     "bit_depth",
     "software_version",
     "firmware_version",
+    "clock_frequency_offset_parts_per_billion",
+    "clock_port_state_code",
     "clock_role",
-    "clock_mac",
+    "clock_port_records",
+    "clock_identity",
+    "leader_clock_identity",
     "min_latency",
     "max_latency",
     "product_version",
     "board_name",
     "interfaces",
+    "network_interface_traffic",
+    "receiver_flow_connection_health",
     "link_speed_mbps",
     "interface_pending_config",
+    "lock_reset_status",
+    "clear_configuration_status",
+    "diagnostic_log_export_supported",
+    "license_signature_length_bytes",
+    "licensed_receive_channel_count",
+    "licensed_transmit_channel_count",
+    "licensed_redundancy_enabled",
+    "sample_rate_channel_capacities",
     "last_seen",
     "tx_count",
     "rx_count",
     "tx_count_raw",
     "rx_count_raw",
+    "routing_capacity_receive_channel_count",
+    "routing_capacity_transmit_channel_count",
+    "routing_ready",
+    "routing_ready_state_code",
 )
 
 
@@ -71,8 +98,15 @@ class DanteDeviceSerializer:
 
         for field_name in DEVICE_SCALAR_FIELDS:
             field_value = getattr(device, field_name)
-            if field_value is not None:
+            if field_value is None and field_name != "is_locked":
+                continue
+            if isinstance(field_value, (bytes, bytearray)):
+                as_json[field_name] = list(field_value)
+            else:
                 as_json[field_name] = field_value
+
+        if device.is_licensed is not None:
+            as_json["is_licensed"] = device.is_licensed
 
         standard_latency_choices = device.standard_latency_choices
         if standard_latency_choices is not None:
@@ -136,6 +170,7 @@ class DanteDeviceSerializer:
             channel.number = int(number_key)
             channel.name = channel_json.get("name")
             channel.friendly_name = channel_json.get("friendly_name")
+            channel.factory_name = channel_json.get("factory_name")
             channel.status_text = channel_json.get("status_text")
             channel.volume = channel_json.get("volume")
             channel.muted = channel_json.get("muted")
@@ -179,6 +214,7 @@ class DanteDeviceSerializer:
 
         optional_fields = [
             ("friendly_name", channel.friendly_name),
+            ("factory_name", channel.factory_name),
             ("status_text", channel.status_text),
             ("volume", channel.volume),
             ("muted", channel.muted),
@@ -196,17 +232,38 @@ class DanteDeviceSerializer:
 
     @staticmethod
     def _status_to_json(code):
-        from netaudio.dante.const import SUBSCRIPTION_STATUS_INFO
+        from netaudio.dante.const import (
+            subscription_status_detail,
+            subscription_status_entry,
+            subscription_status_label,
+        )
+        from netaudio.icons import severity_icon
 
         if code is None:
             return None
 
-        info = SUBSCRIPTION_STATUS_INFO.get(code)
-        if info is None:
-            return {"code": code, "state": "unknown", "label": f"Unknown ({code})", "detail": None}
+        entry = subscription_status_entry(code)
+        severity = entry["severity"]
+        return {
+            "code": code,
+            "status": entry.get("status"),
+            "state": entry["state"],
+            "severity": severity,
+            "label": subscription_status_label(code),
+            "detail": subscription_status_detail(code),
+            "icon": severity_icon(severity),
+        }
 
-        state, label, detail = info
-        return {"code": code, "state": state, "label": label, "detail": detail}
+    @staticmethod
+    def _receiver_status_to_json(code):
+        if code is None:
+            return None
+        return {
+            "code": code,
+            "state": "uncharacterized",
+            "label": f"Receiver status 0x{code:04X}",
+            "detail": None,
+        }
 
     @staticmethod
     def subscription_to_json(subscription):
@@ -222,7 +279,9 @@ class DanteDeviceSerializer:
             subscription.rx_channel_status_code is not None
             and subscription.rx_channel_status_code != subscription.status_code
         ):
-            as_json["rx_channel_status"] = DanteDeviceSerializer._status_to_json(subscription.rx_channel_status_code)
+            as_json["rx_channel_status"] = DanteDeviceSerializer._receiver_status_to_json(
+                subscription.rx_channel_status_code
+            )
 
         return as_json
 

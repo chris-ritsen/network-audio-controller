@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -14,13 +15,17 @@ runner = CliRunner()
 class RebootRecorder:
     def __init__(self):
         self.calls = 0
+        self.factory_reset_calls = 0
 
     async def reboot(self):
         self.calls += 1
 
+    async def factory_reset(self):
+        self.factory_reset_calls += 1
+
 
 def _fake_device(name):
-    return SimpleNamespace(name=name, operations=RebootRecorder())
+    return SimpleNamespace(name=name, ipv4="192.0.2.10", operations=RebootRecorder())
 
 
 def _install_fake_discovery(monkeypatch, devices):
@@ -32,6 +37,29 @@ def _install_fake_discovery(monkeypatch, devices):
 
     monkeypatch.setattr(device_commands, "_discover", discover)
     monkeypatch.setattr(device_commands, "_populate_controls", populate)
+
+
+class ClearConfigurationSender:
+    def __init__(self):
+        self.calls = []
+
+    async def clear_configuration(self, device_ip_address, preserve_internet_protocol_settings):
+        self.calls.append((str(device_ip_address), preserve_internet_protocol_settings))
+        return {
+            "available_actions_mask": 3,
+            "action_result_code": 2 if preserve_internet_protocol_settings else 1,
+        }
+
+
+def _install_fake_command_context(monkeypatch, devices):
+    sender = ClearConfigurationSender()
+
+    @asynccontextmanager
+    async def command_context():
+        yield devices, sender
+
+    monkeypatch.setattr(device_commands, "_command_context", command_context)
+    return sender
 
 
 @pytest.fixture(autouse=True)
@@ -81,6 +109,90 @@ def test_reboot_all_is_explicit_and_reboots_every_match(monkeypatch):
     assert all(device.operations.calls == 1 for device in devices.values())
     assert "Reboot requested: One" in result.output
     assert "Reboot requested: Two" in result.output
+
+
+def test_factory_reset_requires_exact_device_name_confirmation(monkeypatch):
+    device = _fake_device("One")
+    _install_fake_discovery(monkeypatch, {"one.local.": device})
+
+    result = runner.invoke(device_commands.app, ["factory-reset", "--confirm", "one"])
+
+    assert result.exit_code == 1
+    assert "must exactly match 'One'" in result.output
+    assert device.operations.factory_reset_calls == 0
+
+
+def test_factory_reset_refuses_multiple_matches(monkeypatch):
+    devices = {"one.local.": _fake_device("One"), "two.local.": _fake_device("Two")}
+    _install_fake_discovery(monkeypatch, devices)
+
+    result = runner.invoke(device_commands.app, ["factory-reset", "--confirm", "One"])
+
+    assert result.exit_code == 1
+    assert "multiple devices matched" in result.output
+    assert all(device.operations.factory_reset_calls == 0 for device in devices.values())
+
+
+def test_factory_reset_sends_after_exact_confirmation(monkeypatch):
+    device = _fake_device("One")
+    _install_fake_discovery(monkeypatch, {"one.local.": device})
+
+    result = runner.invoke(device_commands.app, ["factory-reset", "--confirm", "One"])
+
+    assert result.exit_code == 0
+    assert "Factory reset requested: One" in result.output
+    assert device.operations.factory_reset_calls == 1
+
+
+def test_clear_configuration_requires_exact_device_name_confirmation(monkeypatch):
+    sender = _install_fake_command_context(monkeypatch, {"one.local.": _fake_device("One")})
+
+    result = runner.invoke(
+        device_commands.app,
+        ["clear-configuration", "--mode", "all", "--confirm", "one"],
+    )
+
+    assert result.exit_code == 1
+    assert "must exactly match 'One'" in result.output
+    assert sender.calls == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "preserve_internet_protocol_settings", "result_code"),
+    [("all", False, 1), ("preserve-network", True, 2)],
+)
+def test_clear_configuration_sends_one_verified_mode(
+    monkeypatch,
+    mode,
+    preserve_internet_protocol_settings,
+    result_code,
+):
+    sender = _install_fake_command_context(monkeypatch, {"one.local.": _fake_device("One")})
+
+    result = runner.invoke(
+        device_commands.app,
+        ["clear-configuration", "--mode", mode, "--confirm", "One"],
+    )
+
+    assert result.exit_code == 0
+    assert f"result {result_code}, mode {mode}" in result.output
+    assert sender.calls == [("192.0.2.10", preserve_internet_protocol_settings)]
+
+
+def test_clear_configuration_refuses_multiple_matches(monkeypatch):
+    sender = _install_fake_command_context(
+        monkeypatch,
+        {"one.local.": _fake_device("One"), "two.local.": _fake_device("Two")},
+    )
+
+    result = runner.invoke(
+        device_commands.app,
+        ["clear-configuration", "--mode", "all", "--confirm", "One"],
+    )
+
+    assert result.exit_code == 1
+    assert "multiple devices matched" in result.output
+    assert sender.calls == []
 
 
 def test_rootfs_output_refuses_existing_path_without_force(tmp_path):

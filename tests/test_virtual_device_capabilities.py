@@ -2,6 +2,7 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.services.heartbeat import parse_signal_presence_records
 from netaudio.dante.virtual_device import _McastInfoProtocol, VirtualDevice, VirtualDeviceConfig
 
 
@@ -67,8 +68,8 @@ def test_virtual_device_does_not_invent_legacy_metadata_for_unknown_encodings():
 
     assert device._pcm_capability_property() is None
     assert device._build_channel_metadata() is None
-    assert int.from_bytes(device._handle_tx_channels(1, b"")[8:10]) == 0x0030
-    assert int.from_bytes(device._handle_rx_channels(1, b"")[8:10]) == 0x0030
+    assert int.from_bytes(device._handle_tx_channels(1, b"")[8:10], "big") == 0x0030
+    assert int.from_bytes(device._handle_rx_channels(1, b"")[8:10], "big") == 0x0030
 
 
 def test_virtual_device_reports_configured_sample_rate_capabilities():
@@ -124,3 +125,32 @@ def test_same_host_encoding_probe_receives_status_response():
     response, destination = recording_transport.sent[0]
     assert destination == ("224.0.0.231", 8702)
     assert core.parse_response("encoding_status", response)["supported_encodings"] == [24, 16, 32]
+
+
+def test_virtual_device_heartbeat_round_trips_odd_signal_presence_count():
+    device = VirtualDevice(
+        VirtualDeviceConfig(
+            tx_channels=["TX 1", "TX 2"],
+            rx_channels=["RX 1"],
+        )
+    )
+    recording_transport = RecordingTransport()
+    device._mcast_transport = recording_transport
+
+    device._send_heartbeat()
+
+    assert len(recording_transport.sent) == 1
+    packet, destination = recording_transport.sent[0]
+    assert destination == ("224.0.0.233", 8708)
+
+    signal_record = packet[0x20 + 0x10 :]
+    assert len(signal_record) == 0x1C
+    assert signal_record[:8] == bytes.fromhex("001c800200040010")
+    assert signal_record[0x18:] == bytes.fromhex("ffffff00")
+
+    [parsed] = parse_signal_presence_records(packet)
+    assert parsed["tx_count"] == 2
+    assert parsed["rx_count"] == 1
+    assert parsed["tx_levels"] == [0xFF, 0xFF]
+    assert parsed["rx_levels"] == [0xFF]
+    assert parsed["padding_length"] == 1

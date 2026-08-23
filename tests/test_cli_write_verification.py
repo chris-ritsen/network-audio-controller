@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from typer.testing import CliRunner
 
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio._common import CoreCommandSender, _make_core_sender, readback_after_notification
 from netaudio.commands import channel as channel_commands
 from netaudio.commands import config as config_commands
@@ -62,6 +63,7 @@ class FakeDevice:
         self.supported_sample_rates = supported_sample_rates
         self.encoding = encoding
         self.supported_encodings = supported_encodings
+        self.topology_mutation_lock = DeferredAsyncioLock()
         self.gain_device_type = None
         self.gain_levels = None
         self.supported_gain_levels = None
@@ -80,10 +82,20 @@ class FakeDevice:
 
 
 class FakeChannelDevice(FakeDevice):
-    def __init__(self, *, channel_reads, gain_status=("input", [5]), gain_write_status="applied"):
+    def __init__(
+        self,
+        *,
+        channel_reads,
+        channel_type="tx",
+        gain_status=("input", [5]),
+        gain_write_status="applied",
+    ):
         super().__init__("AVIO")
-        self.tx_channels = {1: SimpleNamespace(number=1, name="Input-1", friendly_name="Old", volume=2)}
-        self.rx_channels = {}
+        channel = SimpleNamespace(number=1, name="Input-1", friendly_name="Old", volume=2)
+        self.tx_channels = {1: channel} if channel_type == "tx" else {}
+        self.rx_channels = {1: channel} if channel_type == "rx" else {}
+        self.receiver_channel_name_protocol_identifier = None
+        self.transmitter_channel_name_protocol_identifier = 0x2729
         self._channel_reads = channel_reads
         self.channel_read_calls = 0
         self._gain_probe_status = gain_status
@@ -95,6 +107,10 @@ class FakeChannelDevice(FakeDevice):
     async def get_tx_channels(self):
         self.channel_read_calls += 1
         self.tx_channels[1].friendly_name = _next_value(self._channel_reads)
+
+    async def get_rx_channels(self):
+        self.channel_read_calls += 1
+        self.rx_channels[1].name = _next_value(self._channel_reads)
 
     def gain_level_for_channel(self, channel_number, channel_type):
         if self.gain_device_type != "input" or channel_type != "tx" or self.gain_levels is None:
@@ -117,13 +133,27 @@ def _next_value(value):
     return item
 
 
-def _install_context(monkeypatch, module, devices, *, send_error_for=None, notification_timeout=False):
+def _install_context(
+    monkeypatch,
+    module,
+    devices,
+    *,
+    send_error_for=None,
+    notification_timeout=False,
+    send_responses=None,
+):
     sent = []
 
     async def send(packet, ipv4, port, **kwargs):
         sent.append((str(ipv4), port, packet, kwargs))
         if str(ipv4) == send_error_for:
             raise OSError("send failed")
+        if send_responses is not None:
+            return _next_value(send_responses)
+        if len(packet) >= 10 and int.from_bytes(packet[0:2], "big") in {0x2729, 0x27FF, 0x2801, 0x2809}:
+            response = bytearray(packet)
+            response[8:10] = b"\x00\x01"
+            return bytes(response)
         return b"an ACK is deliberately not authoritative"
 
     async def probe_sample_rate_status(ipv4):
@@ -187,6 +217,14 @@ def _install_context(monkeypatch, module, devices, *, send_error_for=None, notif
         yield devices, send
 
     monkeypatch.setattr(module, "_command_context", command_context)
+    if hasattr(module, "change_sample_rate_with_command_sender"):
+        from tests.sample_rate_test_support import make_fake_sample_rate_change
+
+        monkeypatch.setattr(
+            module,
+            "change_sample_rate_with_command_sender",
+            make_fake_sample_rate_change(send, probe_sample_rate_status),
+        )
     return sent
 
 
@@ -201,15 +239,6 @@ def _make_audio_capability_operations(command_method_name, packet, supported_val
     return DanteDeviceOperations(device), commands, device
 
 
-def _make_sample_rate_operations(supported_sample_rates):
-    return _make_audio_capability_operations(
-        "command_set_sample_rate",
-        b"sample-rate",
-        "supported_sample_rates",
-        supported_sample_rates,
-    )
-
-
 def _make_encoding_operations(supported_encodings):
     return _make_audio_capability_operations(
         "command_set_encoding",
@@ -217,16 +246,6 @@ def _make_encoding_operations(supported_encodings):
         "supported_encodings",
         supported_encodings,
     )
-
-
-async def _assert_sample_rate_operation_sends(supported_sample_rates):
-    operations, commands, device = _make_sample_rate_operations(supported_sample_rates)
-
-    result = await operations.set_sample_rate(96_000)
-
-    assert result is None
-    commands.command_set_sample_rate.assert_called_once_with(96_000)
-    device.dante_send_command.assert_awaited_once_with(b"sample-rate", None, 8700)
 
 
 async def _assert_encoding_operation_sends(supported_encodings):
@@ -477,11 +496,16 @@ async def test_capability_value_waiter_unregisters_after_timeout():
 @pytest.mark.asyncio
 async def test_operations_aes67_getter_updates_configured_state():
     class FakeClient:
-        def get_aes67_configured(self):
-            return True
+        _arc_port = 4440
+
+        def request(self, packet, port):
+            return bytes.fromhex(
+                "28090094180011000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000300000064000000650222138c0212003083210090000f4240000f4240000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480"
+            )
 
     class Device:
         aes67_configured = None
+        aes67_multicast_prefix = None
 
         def _core_client(self):
             return FakeClient()
@@ -491,15 +515,16 @@ async def test_operations_aes67_getter_updates_configured_state():
 
     assert await operations.get_aes67_configured() is True
     assert device.aes67_configured is True
+    assert device.aes67_multicast_prefix == "239.69.0.0"
 
 
 @pytest.mark.asyncio
-async def test_reboot_operation_uses_core_repeat_sender_when_discovery_application_is_stopped():
+async def test_reboot_operation_registers_with_active_application_before_sending():
     calls = []
 
     class FakeClient:
         def request(self, packet, port, expect_response, repeat, interval_milliseconds):
-            calls.append((packet, port, expect_response, repeat, interval_milliseconds))
+            calls.append(("reboot", packet, port, expect_response, repeat, interval_milliseconds))
 
     class Commands:
         def command_reboot(self, host_mac):
@@ -508,19 +533,139 @@ async def test_reboot_operation_uses_core_repeat_sender_when_discovery_applicati
 
     class Device:
         commands = Commands()
+        ipv4 = "192.168.1.61"
 
         def _core_client(self):
             return FakeClient()
 
+    application_service = SimpleNamespace(is_started=True)
+
+    async def require_registration(device_ip_address, host_media_access_control_address):
+        calls.append(("registration", device_ip_address, host_media_access_control_address))
+
+    application_service.require_registration = require_registration
+    device = Device()
+    device._app = SimpleNamespace(cmc=application_service)
+    operations = DanteDeviceOperations(device)
+
+    await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
+
+    assert calls == [
+        ("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06"),
+        ("reboot", b"reboot", 8700, False, 1, 0),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_factory_reset_operation_registers_before_sending():
+    calls = []
+
+    class FakeClient:
+        def request(self, packet, port, expect_response, repeat, interval_milliseconds):
+            calls.append(("factory_reset", packet, port, expect_response, repeat, interval_milliseconds))
+
+    class Commands:
+        def command_factory_reset(self, host_mac):
+            assert host_mac == b"\x01\x02\x03\x04\x05\x06"
+            return b"factory-reset", None, 8700
+
+    class Device:
+        commands = Commands()
+        ipv4 = "192.168.1.61"
+
+        def _core_client(self):
+            return FakeClient()
+
+    application_service = SimpleNamespace(is_started=True)
+
+    async def require_registration(device_ip_address, host_media_access_control_address):
+        calls.append(("registration", device_ip_address, host_media_access_control_address))
+
+    application_service.require_registration = require_registration
+    device = Device()
+    device._app = SimpleNamespace(cmc=application_service)
+    operations = DanteDeviceOperations(device)
+
+    await operations.factory_reset(host_mac=b"\x01\x02\x03\x04\x05\x06")
+
+    assert calls == [
+        ("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06"),
+        ("factory_reset", b"factory-reset", 8700, False, 1, 0),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reboot_operation_owns_temporary_registration_service_without_active_application(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        def request(self, packet, port, expect_response, repeat, interval_milliseconds):
+            calls.append(("reboot", packet, port, expect_response, repeat, interval_milliseconds))
+
+    class Commands:
+        def command_reboot(self, host_mac):
+            return b"reboot", None, 8700
+
+    class Device:
+        commands = Commands()
+        ipv4 = "192.168.1.61"
+        _app = None
+
+        def _core_client(self):
+            return FakeClient()
+
+    class OperationService:
+        def __init__(self, host_media_access_control_address):
+            calls.append(("created", host_media_access_control_address))
+
+        async def start(self):
+            calls.append(("started",))
+
+        async def require_registration(self, device_ip_address, host_media_access_control_address):
+            calls.append(("registration", device_ip_address, host_media_access_control_address))
+
+        async def stop(self):
+            calls.append(("stopped",))
+
+    from netaudio.dante.services import cmc as control_monitoring_module
+
+    monkeypatch.setattr(control_monitoring_module, "DanteCMCService", OperationService)
     operations = DanteDeviceOperations(Device())
 
-    await operations.reboot(
-        host_mac=b"\x01\x02\x03\x04\x05\x06",
-        retries=3,
-        retry_delay=0.1,
-    )
+    await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
 
-    assert calls == [(b"reboot", 8700, False, 3, 100)]
+    assert calls == [
+        ("created", b"\x01\x02\x03\x04\x05\x06"),
+        ("started",),
+        ("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06"),
+        ("stopped",),
+        ("reboot", b"reboot", 8700, False, 1, 0),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reboot_operation_does_not_send_when_registration_fails():
+    class Commands:
+        def command_reboot(self, host_mac):
+            raise AssertionError("reboot command must not be built after failed registration")
+
+    class Device:
+        commands = Commands()
+        ipv4 = "192.168.1.61"
+
+        def _core_client(self):
+            raise AssertionError("reboot command must not be sent after failed registration")
+
+    application_service = SimpleNamespace(
+        is_started=True,
+        require_registration=AsyncMock(side_effect=RuntimeError("CMC registration failed for 192.168.1.61")),
+    )
+    device = Device()
+    device._app = SimpleNamespace(cmc=application_service)
+    operations = DanteDeviceOperations(device)
+
+    with pytest.raises(RuntimeError, match="CMC registration failed for 192.168.1.61"):
+        await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
 
 
 def test_identify_is_sent_without_waiting_for_a_response(monkeypatch):
@@ -536,25 +681,37 @@ def test_identify_is_sent_without_waiting_for_a_response(monkeypatch):
     assert "Identified: AVIO" in result.output
 
 
-@pytest.mark.asyncio
-async def test_sample_rate_operation_rejects_known_unsupported_rate_without_sending():
-    operations, commands, device = _make_sample_rate_operations([48_000])
+def test_identify_refuses_multiple_devices_without_all(monkeypatch):
+    first = FakeDevice("One")
+    second = FakeDevice("Two")
+    sent = _install_context(
+        monkeypatch,
+        device_commands,
+        {"one.local.": first, "two.local.": second},
+    )
 
-    with pytest.raises(ValueError, match="requested sample rate 96000 is not supported"):
-        await operations.set_sample_rate(96_000)
+    result = runner.invoke(device_commands.app, ["identify"])
 
-    commands.command_set_sample_rate.assert_not_called()
-    device.dante_send_command.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_sample_rate_operation_sends_known_supported_rate():
-    await _assert_sample_rate_operation_sends([48_000, 96_000])
+    assert result.exit_code == 1
+    assert sent == []
+    assert "multiple devices matched" in result.output
 
 
-@pytest.mark.asyncio
-async def test_sample_rate_operation_preserves_send_when_capabilities_are_unknown():
-    await _assert_sample_rate_operation_sends(None)
+def test_identify_all_sends_to_every_matched_device(monkeypatch):
+    first = FakeDevice("One")
+    second = FakeDevice("Two")
+    sent = _install_context(
+        monkeypatch,
+        device_commands,
+        {"one.local.": first, "two.local.": second},
+    )
+
+    result = runner.invoke(device_commands.app, ["identify", "--all"])
+
+    assert result.exit_code == 0
+    assert len(sent) == 2
+    assert "Identified: One" in result.output
+    assert "Identified: Two" in result.output
 
 
 @pytest.mark.asyncio
@@ -670,300 +827,3 @@ def test_channel_name_reset_remains_explicitly_unverified(monkeypatch):
     assert "Channel name reset requested" in reset_result.output
     assert "not verified" in reset_result.output
     assert device.channel_read_calls == 0
-
-
-def test_gain_getter_reports_configured_reference_level(monkeypatch):
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
-    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
-
-    result = runner.invoke(channel_commands.app, ["gain", "1", "--type", "tx"])
-
-    assert result.exit_code == 0
-    assert "-10 dBV (level 5)" in result.output
-    assert "level 2" not in result.output
-
-
-def test_gain_setter_reports_success_only_after_matching_readback(monkeypatch):
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
-    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
-
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
-
-    assert result.exit_code == 0
-    assert "0 dBu (verified)" in result.output
-    assert device.gain_levels == [3]
-
-
-def test_gain_setter_rejects_mismatched_readback(monkeypatch):
-    device = FakeChannelDevice(
-        channel_reads="unused",
-        gain_status=("input", [5]),
-        gain_write_status=("input", [5]),
-    )
-    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
-
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
-
-    assert result.exit_code == 1
-    assert "gain change was not applied" in result.output
-    assert "Set input reference level" not in result.output
-
-
-def test_gain_setter_rejects_missing_readback(monkeypatch):
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]), gain_write_status=None)
-    _install_context(monkeypatch, channel_commands, {"avio.local.": device})
-
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
-
-    assert result.exit_code == 1
-    assert "readback was unavailable" in result.output
-
-
-def test_gain_rejects_fractional_level_before_discovery(monkeypatch):
-    async def should_not_run():
-        raise AssertionError("fractional gain must be rejected before command execution")
-
-    monkeypatch.setattr(channel_commands, "_command_context", should_not_run)
-
-    result = runner.invoke(channel_commands.app, ["gain", "1", "1.9", "--type", "tx"])
-
-    assert result.exit_code != 0
-    assert "not a valid integer" in result.output
-
-
-def test_channel_commands_reject_unknown_channel_type_before_sending(monkeypatch):
-    device = FakeChannelDevice(channel_reads="unused")
-    sent = _install_context(monkeypatch, channel_commands, {"avio.local.": device})
-
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "banana"])
-
-    assert result.exit_code == 1
-    assert "channel type must be 'tx' or 'rx'" in result.output
-    assert sent == []
-
-
-def test_sample_rate_all_aggregates_readback_failures(monkeypatch):
-    good = FakeDevice("Good", settings={"sample_rate": 48000}, ipv4="192.0.2.10")
-    stale = FakeDevice("Stale", settings={"sample_rate": 44100}, ipv4="192.0.2.11")
-    sent = _install_context(
-        monkeypatch,
-        config_commands,
-        {"good.local.": good, "stale.local.": stale},
-    )
-    result = runner.invoke(config_commands.app, ["sample-rate", "48000", "--all"])
-
-    assert result.exit_code == 1
-    assert len(sent) == 2
-    assert "Set sample rate for Good: 48000 Hz (verified)" in result.output
-    assert "sample rate change sent to Stale" in result.output
-    assert "44100 instead of 48000" in result.output
-
-
-def test_sample_rate_uses_advertised_capabilities_for_nonstandard_future_rate(monkeypatch):
-    device = FakeDevice(
-        "Future",
-        settings={"sample_rate": 384_000},
-        supported_sample_rates=[48_000, 384_000],
-    )
-    sent = _install_context(monkeypatch, config_commands, {"future.local.": device})
-
-    result = runner.invoke(config_commands.app, ["sample-rate", "384000"])
-
-    assert result.exit_code == 0
-    assert "384000 Hz (verified)" in result.output
-    assert sent[0][3] == {"expect_response": False}
-
-
-def test_sample_rate_uses_active_readback_when_mutation_notification_is_absent(monkeypatch):
-    device = FakeDevice(
-        "Quiet Device",
-        settings={"sample_rate": 96000},
-        supported_sample_rates=[48000, 96000],
-    )
-    sent = _install_context(
-        monkeypatch,
-        config_commands,
-        {"quiet.local.": device},
-        notification_timeout=True,
-    )
-
-    result = runner.invoke(config_commands.app, ["sample-rate", "96000"])
-
-    assert result.exit_code == 0
-    assert "96000 Hz (verified)" in result.output
-    assert len(sent) == 1
-
-
-def test_encoding_rejects_value_missing_from_advertised_capabilities(monkeypatch):
-    device = FakeDevice("AVIO", encoding=24, supported_encodings=[24])
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["encoding", "16"])
-
-    assert result.exit_code == 1
-    assert "reports supported encoding values [24]" in result.output
-    assert sent == []
-
-
-def test_encoding_uses_advertised_nonstandard_future_value(monkeypatch):
-    device = FakeDevice("Future", encoding=20, supported_encodings=[20, 24])
-    sent = _install_context(monkeypatch, config_commands, {"future.local.": device})
-
-    result = runner.invoke(config_commands.app, ["encoding", "20"])
-
-    assert result.exit_code == 0
-    assert "20-bit (verified)" in result.output
-    assert sent[0][3] == {"expect_response": False}
-
-
-def test_fractional_latency_verifies_rounded_nanoseconds(monkeypatch):
-    device = FakeDevice("AVIO", settings={"active_latency_ns": 150_000})
-    _install_context(monkeypatch, config_commands, {"avio.local.": device})
-    result = runner.invoke(config_commands.app, ["latency", "0.15"])
-
-    assert result.exit_code == 0
-    assert "Set latency for AVIO: 0.15 ms (verified)" in result.output
-
-
-def test_latency_get_uses_active_device_readback(monkeypatch):
-    device = FakeDevice(
-        "AVIO",
-        settings={
-            "configured_latency_ns": 250_000,
-            "active_latency_ns": 150_000,
-            "latency_ns": 150_000,
-        },
-    )
-    device.latency = 99.0
-    _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["latency"])
-
-    assert result.exit_code == 0
-    assert result.output.strip() == "0.15"
-    assert device.operations.settings_calls == 1
-
-
-def test_latency_does_not_treat_configured_value_as_applied(monkeypatch):
-    device = FakeDevice(
-        "AVIO",
-        settings={
-            "configured_latency_ns": 150_000,
-            "active_latency_ns": 1_000_000,
-            "latency_ns": 1_000_000,
-        },
-    )
-    _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["latency", "0.15"])
-
-    assert result.exit_code == 1
-    assert "1000000 instead of 150000" in result.output
-    assert "Set latency for AVIO" not in result.output
-
-
-def test_latency_range_does_not_block_device_verified_nonstandard_value(monkeypatch):
-    device = FakeDevice(
-        "AVIO",
-        min_latency=1.0,
-        max_latency=5.0,
-        settings={"active_latency_ns": 250_000},
-    )
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["latency", "0.25"])
-
-    assert result.exit_code == 0
-    assert "Set latency for AVIO: 0.25 ms (verified)" in result.output
-    assert len(sent) == 1
-
-
-@pytest.mark.parametrize("value", ["-0.1", "nan", "inf"])
-def test_latency_rejects_nonfinite_or_negative_values_before_sending(monkeypatch, value):
-    device = FakeDevice("AVIO", settings={"active_latency_ns": 0})
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["latency", "--", value])
-
-    assert result.exit_code == 1
-    assert "finite, nonnegative" in result.output
-    assert sent == []
-
-
-def test_aes67_verifies_configured_state_not_current_state(monkeypatch):
-    device = FakeDevice("AVIO", aes67=True)
-    device.aes67_current = False
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-    result = runner.invoke(config_commands.app, ["aes67", "on"])
-
-    assert result.exit_code == 0
-    assert device.operations.aes67_calls == 1
-    assert "AES67 configured state for AVIO: on (verified)" in result.output
-    assert sent[0][3] == {"expect_response": False, "repeat": 3, "interval_ms": 100}
-
-
-def test_aes67_rejects_known_unsupported_device_without_sending(monkeypatch):
-    device = FakeDevice("LX-DANTE", aes67_supported=False)
-    sent = _install_context(monkeypatch, config_commands, {"lx.local.": device})
-
-    result = runner.invoke(config_commands.app, ["aes67", "on"])
-
-    assert result.exit_code == 1
-    assert "does not support AES67 configuration" in result.output
-    assert sent == []
-
-
-def test_encoding_is_verified_from_reported_status(monkeypatch):
-    device = FakeDevice("AVIO", encoding=24, supported_encodings=[24])
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, ["encoding", "24"])
-
-    assert result.exit_code == 0
-    assert "Set encoding for AVIO: 24-bit (verified)" in result.output
-    assert sent[0][3] == {"expect_response": False}
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected", "send_kwargs"),
-    [
-        (
-            ["preferred-leader", "on"],
-            "Preferred leader change requested for AVIO: on; not verified",
-            {"expect_response": False, "repeat": 3, "interval_ms": 500},
-        ),
-        (
-            ["interface", "dhcp"],
-            "Interface change requested for AVIO: dhcp; not verified",
-            {"expect_response": False},
-        ),
-    ],
-)
-def test_commands_without_readback_use_requested_language(monkeypatch, arguments, expected, send_kwargs):
-    device = FakeDevice("AVIO")
-    sent = _install_context(monkeypatch, config_commands, {"avio.local.": device})
-
-    result = runner.invoke(config_commands.app, arguments)
-
-    assert result.exit_code == 0
-    assert expected in result.output
-    assert sent[0][3] == send_kwargs
-
-
-@pytest.mark.parametrize(
-    ("command", "action"),
-    [("set", "lock"), ("clear", "unlock")],
-)
-def test_relay_lock_failure_reports_protocol_status(monkeypatch, command, action):
-    async def failed_relay_request(pin, requested_action):
-        assert pin == "1234"
-        assert requested_action == action
-        return {"success": False, "status": 0x1101}
-
-    monkeypatch.setattr(device_commands, "_lock_via_relay", failed_relay_request)
-
-    result = runner.invoke(device_commands.lock_app, [command, "1234"])
-
-    assert result.exit_code == 1
-    assert f"Error: {action} failed (status 0x1101)" in result.output
-    assert "unknown" not in result.output

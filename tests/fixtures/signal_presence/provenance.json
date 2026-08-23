@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "evidence_boundary": {
+    "description": "Minimal UDP payloads extracted only from the two physical-interface captures authorized for passive AVIO signal-presence work.",
+    "allowed_source_ipv4": [
+      "192.168.1.18",
+      "192.168.1.35",
+      "192.168.1.61",
+      "192.168.1.139"
+    ],
+    "explicitly_excluded_source_ipv4": [
+      "192.168.1.228"
+    ],
+    "excluded_evidence": [
+      "emulated or virtual A32 traffic",
+      "QEMU-derived observations",
+      "Dante Controller binaries, resources, decompilation, or disassembly",
+      "firmware disassembly"
+    ]
+  },
+  "captures": {
+    "controller_readonly_physical_lan": {
+      "path": "/home/chris/projects/netaudio/emulation/runs/controller-readonly-reference-20260811-01/controller-en0.pcap",
+      "sha256": "b5e135bbcbc630b3a32b34eded7cc7688b9334b11972ad34afda201c73fb47ce"
+    },
+    "updater_shipping_physical_lan": {
+      "path": "/home/chris/projects/netaudio/emulation/runs/updater-shipping-sequence-20260723-01/updater-en0-reference.pcap",
+      "sha256": "eee75b3418dede520d6bfb48fa2c772d1f33a1ecdadeef49545b5f944363439b"
+    }
+  },
+  "transport": {
+    "source_udp_port": 8700,
+    "destination_ipv4": "224.0.0.233",
+    "destination_udp_port": 8708,
+    "outer_protocol": "0xFFFE",
+    "signal_presence_record_type": "0x8002",
+    "signal_presence_record_offset": 96
+  },
+  "fixtures": [
+    {
+      "file": "avio_input_frame_1_udp.bin",
+      "adapter": "Dante AVIO Analog Input",
+      "capture": "controller_readonly_physical_lan",
+      "frame_number": 1,
+      "frame_time_epoch": "1786471788.951725000",
+      "source_ipv4": "192.168.1.139",
+      "source_mac": "00:1d:c1:50:69:2e",
+      "udp_payload_length": 124,
+      "udp_payload_sha256": "fad2f5e7c4250c80dc7ccdeaadf907a5a69419b5361b33747b431bb5620f5886",
+      "record_sha256": "f19565067ba4cfbe9518ed027039bc2e906ec6c38b0be2817539ce5660b59942",
+      "record_hex": "001c800200040010473d0000000200000000000000180000a3a40000"
+    },
+    {
+      "file": "avio_output_frame_6_udp.bin",
+      "adapter": "Dante AVIO Analog Output",
+      "capture": "controller_readonly_physical_lan",
+      "frame_number": 6,
+      "frame_time_epoch": "1786471789.358422000",
+      "source_ipv4": "192.168.1.35",
+      "source_mac": "00:1d:c1:50:7b:8d",
+      "udp_payload_length": 184,
+      "udp_payload_sha256": "9fb99890845205b32d8308c4b24e61951596c66010f100c2b87b265147f1e916",
+      "record_sha256": "274950213dc96f827991f5d97209d43c2239231ae9a20f86ec1cbd15c17f5b56",
+      "record_hex": "001c80020004001047360000000000000002000000180000fdfd0000"
+    },
+    {
+      "file": "avio_aes3_frame_9_udp.bin",
+      "adapter": "Dante AVIO AES3",
+      "capture": "controller_readonly_physical_lan",
+      "frame_number": 9,
+      "frame_time_epoch": "1786471789.563206000",
+      "source_ipv4": "192.168.1.18",
+      "source_mac": "00:1d:c1:53:ef:37",
+      "udp_payload_length": 184,
+      "udp_payload_sha256": "69d24ee0ce3c20bb2371017885a7113f064c32b902f4fce97955bd1fb834f922",
+      "record_sha256": "4e849eeb5770d38ac67c285e8a611bc3c31625a331e749cc38701b7057776e53",
+      "record_hex": "001c8002000400107bb20000000200000002000000180000c1c1fdfd"
+    },
+    {
+      "file": "avio_bluetooth_frame_1367_udp.bin",
+      "adapter": "Dante AVIO Bluetooth",
+      "capture": "updater_shipping_physical_lan",
+      "frame_number": 1367,
+      "frame_time_epoch": "1784817738.945196000",
+      "source_ipv4": "192.168.1.61",
+      "source_mac": "00:1d:c1:52:79:b6",
+      "udp_payload_length": 184,
+      "udp_payload_sha256": "ad519d21b80152919873f1aa1ae6b500d7adac3ad1e904b573b56fba63b6f892",
+      "record_sha256": "2e87a73458d88d2bed17f089017057568893ba9b36fa9f8a7d1284af03ff2062",
+      "record_hex": "001c8002000400104dec0000000200000001000000180000fefe6d00"
+    }
+  ],
+  "public_semantic_references": [
+    "/media/backup/software/audio/audinate/archives/Audinate-API-demo_D-master/extracted/conmon/conmon_metering.h",
+    "https://dev.audinate.com/GA/dante-controller/userguide/webhelp/content/transmit_tab.htm"
+  ]
+}

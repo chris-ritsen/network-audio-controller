@@ -34,7 +34,7 @@ _STATUS_NAMES = {
     2: "invalid utf-8",
     3: "name too long",
     4: "name cannot begin or end with a hyphen",
-    5: "name must contain only A-Z, a-z, 0-9, and hyphens",
+    5: "name contains unsupported characters",
     6: "buffer too small",
     7: "invalid address",
     8: "io error",
@@ -60,6 +60,8 @@ _STATUS_NAMES = {
     28: "gain level must be an integer from 1 through 5",
     29: "flow slot must be from 1 through 32",
     30: "flow protocol must be 0x2729, 0x2801, or 0x2809",
+    31: "sequence must be nonzero",
+    32: "the selected protocol does not support this operation",
 }
 
 
@@ -68,6 +70,10 @@ class NetaudioCoreError(Exception):
         self.status = status
         message = _STATUS_NAMES.get(status, f"status {status}")
         super().__init__(f"{context}: {message}" if context else message)
+
+
+class NetaudioCoreLibraryMissing(RuntimeError):
+    pass
 
 
 def _candidate_paths():
@@ -82,35 +88,46 @@ def _candidate_paths():
 
 _library = None
 _load_attempted = False
+_load_failures: list[tuple[Path, str]] = []
 
 
-def _abi_compatible(lib, path):
+def _abi_compatibility_failure(lib, path) -> str | None:
     try:
         version_function = lib.netaudio_abi_version
     except AttributeError:
-        logger.warning(f"netaudio-core at {path} predates ABI versioning, skipping")
-        return False
+        return "predates ABI versioning"
     version_function.argtypes = []
     version_function.restype = ctypes.c_uint32
     found = version_function()
     if found != ABI_VERSION:
-        logger.warning(f"netaudio-core at {path} has ABI {found}, expected {ABI_VERSION}, skipping")
-        return False
-    return True
+        return f"ABI {found}, expected {ABI_VERSION}"
+    return None
 
 
 def _load():
-    global _library, _load_attempted
+    global _library, _load_attempted, _load_failures
     if _load_attempted:
         return _library
     _load_attempted = True
+    _load_failures = []
     for path in _candidate_paths():
-        if path and path.exists():
+        if not path:
+            continue
+        if not path.exists():
+            _load_failures.append((path, "not found"))
+            continue
+        try:
             lib = ctypes.CDLL(str(path))
-            if not _abi_compatible(lib, path):
-                continue
-            _library = _configure(lib)
-            return _library
+        except OSError as exception:
+            _load_failures.append((path, str(exception)))
+            continue
+        compatibility_failure = _abi_compatibility_failure(lib, path)
+        if compatibility_failure is not None:
+            logger.warning(f"netaudio-core at {path} {compatibility_failure}, skipping")
+            _load_failures.append((path, compatibility_failure))
+            continue
+        _library = _configure(lib)
+        return _library
     return None
 
 
@@ -226,19 +243,22 @@ def available() -> bool:
 
 def require():
     library = _load()
-    if library is None:
-        searched = "\n  ".join(str(path) for path in _candidate_paths())
-        raise NetaudioCoreError(
-            8,
-            f"netaudio-core library not found or ABI-incompatible (expected ABI {ABI_VERSION}); searched:\n  {searched}",
-        )
-    return library
+    if library is not None:
+        return library
+    lines = [
+        f"netaudio-core library not found (expected ABI {ABI_VERSION}).",
+        "Build it with `make core`.",
+        "Searched:",
+    ]
+    if _load_failures:
+        lines.extend(f"  {path}: {reason}" for path, reason in _load_failures)
+    else:
+        lines.extend(f"  {path}" for path in _candidate_paths())
+    raise NetaudioCoreLibraryMissing("\n".join(lines))
 
 
 def _call_buffer(function, *leading_args, capacity=8192):
-    lib = _load()
-    if lib is None:
-        raise NetaudioCoreError(8, "netaudio-core library not found")
+    lib = require()
     out = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = function(*leading_args, out, capacity, ctypes.byref(length))
@@ -250,9 +270,7 @@ def _call_buffer(function, *leading_args, capacity=8192):
 
 
 def build_command(spec: dict) -> bytes:
-    lib = _load()
-    if lib is None:
-        raise NetaudioCoreError(8, "netaudio-core library not found")
+    lib = require()
     payload = json.dumps(spec).encode("utf-8")
     status, data = _call_buffer(lib.netaudio_build_command, payload)
     if status != STATUS_OK:
@@ -261,9 +279,7 @@ def build_command(spec: dict) -> bytes:
 
 
 def parse_response(kind: str, data: bytes):
-    lib = _load()
-    if lib is None:
-        raise NetaudioCoreError(8, "netaudio-core library not found")
+    lib = require()
     in_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
     status, out = _call_buffer(lib.netaudio_parse_response, kind.encode("utf-8"), in_buffer, len(data))
     if status != STATUS_OK:
@@ -272,9 +288,7 @@ def parse_response(kind: str, data: bytes):
 
 
 def parse_page(kind: str, data: bytes, starting_channel: int):
-    lib = _load()
-    if lib is None:
-        raise NetaudioCoreError(8, "netaudio-core library not found")
+    lib = require()
     in_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
     status, out = _call_buffer(lib.netaudio_parse_page, kind.encode("utf-8"), in_buffer, len(data), starting_channel)
     if status != STATUS_OK:
@@ -287,9 +301,7 @@ def lock_token(pin: str, nonce: bytes, key: bytes) -> bytes:
         raise ValueError(f"nonce must be exactly {LOCK_NONCE_LENGTH} bytes")
     if len(key) != LOCK_KEY_LENGTH:
         raise ValueError(f"key must be exactly {LOCK_KEY_LENGTH} bytes")
-    lib = _load()
-    if lib is None:
-        raise NetaudioCoreError(8, "netaudio-core library not found")
+    lib = require()
     nonce_buffer = (ctypes.c_uint8 * len(nonce)).from_buffer_copy(nonce)
     key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
     status, token = _call_buffer(
@@ -325,9 +337,7 @@ class CoreClient:
         self._native_lock = threading.RLock()
         self._handle = ctypes.c_void_p()
         self._lib = None
-        library = _load()
-        if library is None:
-            raise NetaudioCoreError(8, "netaudio-core library not found")
+        library = require()
         self._lib = library
         self._device_ip = device_ip
         self._arc_port = arc_port

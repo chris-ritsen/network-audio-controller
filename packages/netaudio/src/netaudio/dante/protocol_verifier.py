@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gzip
 import json
+import hashlib
 import logging
 import os
 import socket
@@ -17,6 +19,36 @@ logger = logging.getLogger("netaudio")
 SERVICE_PORT_MAP = {
     SERVICE_ARC: DEVICE_ARC_PORT,
 }
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _artifact_bundle_filename(artifact: dict) -> str:
+    source_name = Path(str(artifact["filename"])).name
+    source_path = Path(source_name)
+    safe_stem = _safe_name(source_path.stem) or "artifact"
+    safe_suffix = "".join(character for character in source_path.suffix if character.isalnum() or character == ".")
+    return f"artifact_{artifact['id']}_{safe_stem}{safe_suffix}"
+
+
+def _artifact_manifest_entry(artifact: dict, filename: str) -> dict:
+    return {
+        "artifact_id": artifact["id"],
+        "file": filename,
+        "label": artifact["label"],
+        "role": artifact["role"],
+        "media_type": artifact["media_type"],
+        "note": artifact.get("note"),
+        "source_path": artifact.get("source_path"),
+        "source_host": artifact.get("source_host"),
+        "source_modified_ns": artifact.get("source_modified_ns"),
+        "timestamp_iso": artifact["timestamp_iso"],
+        "timestamp_ns": artifact["timestamp_ns"],
+        "size": artifact["size"],
+        "sha256": artifact["sha256"],
+    }
 
 
 def export_session_bundle(
@@ -71,8 +103,10 @@ def export_session_bundle(
         }
 
     session_packet_count = store.get_session_packet_count(session_id)
+    artifacts = store.get_session_artifacts(session_id)
 
     manifest = {
+        "format_version": 2,
         "session_id": session_id,
         "session_name": session_name,
         "scope": scope,
@@ -81,8 +115,10 @@ def export_session_bundle(
         "count": len(evidence_packets),
         "session_packet_count": session_packet_count,
         "evidence_packet_count": len(evidence_packets),
+        "artifact_count": len(artifacts),
         "markers": [],
         "samples": [],
+        "artifacts": [],
     }
 
     for marker_row in markers:
@@ -129,6 +165,8 @@ def export_session_bundle(
             "source_type": packet_row.get("source_type"),
             "source_host": packet_row.get("source_host"),
             "interface": packet_row.get("interface"),
+            "size": len(packet_row["payload"]),
+            "sha256": _sha256(packet_row["payload"]),
         }
         return sample, filename
 
@@ -138,6 +176,11 @@ def export_session_bundle(
         manifest["samples"].append(sample)
         file_entries[filename] = packet_row["payload"]
 
+    for artifact in artifacts:
+        filename = _artifact_bundle_filename(artifact)
+        manifest["artifacts"].append(_artifact_manifest_entry(artifact, filename))
+        file_entries[filename] = artifact["content"]
+
     manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8") + b"\n"
     file_entries["manifest.json"] = manifest_bytes
 
@@ -145,17 +188,23 @@ def export_session_bundle(
         bundle_path = output_path / f"{bundle_name}.zip"
         with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for filename, data in file_entries.items():
-                zf.writestr(f"{bundle_name}/{filename}", data)
+                info = zipfile.ZipInfo(f"{bundle_name}/{filename}", date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o100644 << 16
+                zf.writestr(info, data)
     else:
         bundle_path = output_path / f"{bundle_name}.tar.gz"
-        with tarfile.open(bundle_path, "w:gz") as tar:
-            for filename, data in file_entries.items():
-                info = tarfile.TarInfo(name=f"{bundle_name}/{filename}")
-                info.size = len(data)
-                tar.addfile(info, io.BytesIO(data))
+        with bundle_path.open("wb") as raw_bundle:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw_bundle, mtime=0) as compressed_bundle:
+                with tarfile.open(fileobj=compressed_bundle, mode="w") as tar:
+                    for filename, data in file_entries.items():
+                        info = tarfile.TarInfo(name=f"{bundle_name}/{filename}")
+                        info.size = len(data)
+                        tar.addfile(info, io.BytesIO(data))
 
     logger.info(
-        f"Exported provenance bundle: {bundle_path} ({len(evidence_packets)} evidence packets, {len(markers)} markers)"
+        f"Exported provenance bundle: {bundle_path} "
+        f"({len(evidence_packets)} evidence packets, {len(artifacts)} artifacts, {len(markers)} markers)"
     )
     return bundle_path
 
@@ -428,6 +477,8 @@ class ProtocolVerifier:
             "source_type": packet_row.get("source_type"),
             "source_host": packet_row.get("source_host"),
             "interface": packet_row.get("interface"),
+            "size": len(packet_row["payload"]),
+            "sha256": _sha256(packet_row["payload"]),
         }
         return sample, filename
 
@@ -464,8 +515,10 @@ class ProtocolVerifier:
         evidence_packets.sort(key=lambda p: (p["timestamp_ns"], p["id"]))
 
         markers = self._packet_store.get_markers(self._session_id)
+        artifacts = self._packet_store.get_session_artifacts(self._session_id)
 
         manifest = {
+            "format_version": 2,
             "db_path": self._packet_store._db_path,
             "session_id": self._session_id,
             "session_name": self._session_name,
@@ -476,8 +529,10 @@ class ProtocolVerifier:
             "count": len(session_packets) + len(evidence_packets),
             "session_packet_count": len(session_packets),
             "evidence_packet_count": len(evidence_packets),
+            "artifact_count": len(artifacts),
             "markers": [],
             "samples": [],
+            "artifacts": [],
         }
 
         for marker_row in markers:
@@ -507,6 +562,13 @@ class ProtocolVerifier:
                 bin_file.write(packet_row["payload"])
             manifest["samples"].append(sample)
 
+        for artifact in artifacts:
+            filename = _artifact_bundle_filename(artifact)
+            artifact_path = target_path / filename
+            with open(artifact_path, "wb") as artifact_file:
+                artifact_file.write(artifact["content"])
+            manifest["artifacts"].append(_artifact_manifest_entry(artifact, filename))
+
         manifest_path = target_path / "manifest.json"
         with open(manifest_path, "w") as manifest_file:
             json.dump(manifest, manifest_file, indent=2)
@@ -514,6 +576,7 @@ class ProtocolVerifier:
 
         total = len(session_packets) + len(evidence_packets)
         logger.info(
-            f"Exported provenance bundle: {target_path} ({total} packets, {len(evidence_packets)} evidence, {len(markers)} markers)"
+            f"Exported provenance bundle: {target_path} "
+            f"({total} packets, {len(evidence_packets)} evidence, {len(artifacts)} artifacts, {len(markers)} markers)"
         )
         return target_path

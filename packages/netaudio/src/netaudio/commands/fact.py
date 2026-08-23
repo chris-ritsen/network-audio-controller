@@ -21,124 +21,16 @@ from netaudio.commands.capture_helpers import (
 
 from netaudio.icons import icon
 
+from netaudio.commands.fact_support import (
+    _create_evidence_markers,
+    _open_evidence_store,
+    _resolve_evidence_sessions,
+    _run_fact_verify,
+    _validate_evidence_references,
+)
+
+
 app = typer.Typer(help="Protocol fact registry — what we know and how we proved it.", no_args_is_help=True)
-
-SESSION_SELECTORS = {"active", "latest"}
-
-
-def _open_evidence_store():
-    from netaudio.capture.sessions import open_packet_store
-
-    try:
-        return open_packet_store()
-    except Exception as exception:
-        print(f"Capture: unable to open the packet database: {exception}", file=sys.stderr)
-        raise typer.Exit(1)
-
-
-def _resolve_evidence_sessions(evidence_refs: list[str]) -> list[str]:
-    if not any(reference.split(":", 1)[0] in SESSION_SELECTORS for reference in evidence_refs):
-        return evidence_refs
-
-    store = _open_evidence_store()
-    try:
-        resolved = []
-        for reference in evidence_refs:
-            parts = reference.split(":")
-            if len(parts) != 2:
-                resolved.append(reference)
-                continue
-
-            session_selector, packet_id_string = parts
-            if session_selector not in SESSION_SELECTORS:
-                resolved.append(reference)
-                continue
-
-            if session_selector == "active":
-                session = store.get_latest_session(active_only=True)
-            else:
-                session = store.get_latest_session(active_only=False)
-
-            if not session or not session.get("name"):
-                print(f"Capture: no {session_selector} session found for evidence reference.", file=sys.stderr)
-                raise typer.Exit(1)
-
-            resolved.append(f"{session['name']}:{packet_id_string}")
-            print(f"  Resolved {session_selector} -> {session['name']}")
-        return resolved
-    finally:
-        store.close()
-
-
-def _validate_evidence_references(evidence_refs: list[str]) -> list[tuple[int, int]]:
-    store = _open_evidence_store()
-    try:
-        evidence_targets = []
-        for reference in evidence_refs:
-            parts = reference.split(":")
-            if len(parts) != 2:
-                print(
-                    f"Capture: invalid evidence reference '{reference}'; expected session_name:packet_id.",
-                    file=sys.stderr,
-                )
-                raise typer.Exit(1)
-
-            session_name, packet_id_string = parts
-            try:
-                packet_id = int(packet_id_string)
-            except ValueError:
-                print(f"Capture: invalid packet ID in evidence reference '{reference}'.", file=sys.stderr)
-                raise typer.Exit(1)
-            if packet_id <= 0:
-                print(f"Capture: packet ID must be positive in evidence reference '{reference}'.", file=sys.stderr)
-                raise typer.Exit(1)
-
-            session = store.find_session_by_name(session_name, active_only=False)
-            if not session:
-                print(f"Capture: evidence session '{session_name}' was not found.", file=sys.stderr)
-                raise typer.Exit(1)
-            if not store.get_packet(packet_id):
-                print(f"Capture: evidence packet #{packet_id} was not found.", file=sys.stderr)
-                raise typer.Exit(1)
-
-            evidence_targets.append((int(session["id"]), packet_id))
-        return evidence_targets
-    finally:
-        store.close()
-
-
-def _create_evidence_markers(evidence_targets: list[tuple[int, int]], category: str, key: str, name: str):
-    store = _open_evidence_store()
-    try:
-        packet_ids_by_session = {}
-        for session_id, packet_id in evidence_targets:
-            packet_ids_by_session.setdefault(session_id, [])
-            if packet_id not in packet_ids_by_session[session_id]:
-                packet_ids_by_session[session_id].append(packet_id)
-
-        for session_id, packet_ids in packet_ids_by_session.items():
-            label = f"evidence_{category}_{key}"
-            summary = f"{category}:{key} ({name}) — {len(packet_ids)} packet(s)"
-            existing_markers = store.get_markers(session_id, marker_types=["evidence"])
-            marker_exists = any(
-                marker.get("label") == label
-                and marker.get("data", {}).get("fact") == f"{category}:{key}"
-                and marker.get("data", {}).get("packet_ids") == packet_ids
-                for marker in existing_markers
-            )
-            if marker_exists:
-                print(f"  Marker: #{session_id} {label} already exists")
-                continue
-            store.add_marker(
-                session_id=session_id,
-                label=label,
-                marker_type="evidence",
-                summary=summary,
-                data={"packet_ids": packet_ids, "fact": f"{category}:{key}"},
-            )
-            print(f"  Marker: #{session_id} {label}")
-    finally:
-        store.close()
 
 
 @app.command("add")
@@ -156,7 +48,7 @@ def fact_add(
     field: Optional[list[str]] = typer.Option(
         None,
         "--field",
-        help="Field definition: name:offset:length:type[:expected_value]. Repeatable.",
+        help="Field definition: direction:name:offset:length:type:value; direction and value are optional. Repeatable.",
     ),
     evidence: Optional[list[str]] = typer.Option(
         None,
@@ -174,6 +66,9 @@ def fact_add(
     match: Optional[str] = typer.Option(
         None, "--match", help="Payload offset:size where the key value is found (e.g. 6:2). Enables auto-dissection."
     ),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database containing evidence sessions."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     from netaudio.dante.fact_store import add_fact
 
@@ -182,8 +77,8 @@ def fact_add(
 
     evidence_targets = []
     if evidence:
-        evidence = _resolve_evidence_sessions(evidence)
-        evidence_targets = _validate_evidence_references(evidence)
+        evidence = _resolve_evidence_sessions(evidence, db=db, config=config, profile=profile)
+        evidence_targets = _validate_evidence_references(evidence, db=db, config=config, profile=profile)
     if confidence == "verified" and not evidence:
         print(
             "Capture: verified facts require at least one session_name:packet_id evidence reference.", file=sys.stderr
@@ -246,11 +141,20 @@ def fact_add(
     if fields_parsed:
         for f in fields_parsed:
             value_str = f" = {f['value']}" if "value" in f else ""
-            print(f"  Field: {f['name']} @ offset {f['offset']}, {f['length']}B {f['dtype']}{value_str}")
+            direction_str = f" [{f['direction']}]" if f.get("direction") else ""
+            print(f"  Field{direction_str}: {f['name']} @ offset {f['offset']}, {f['length']}B {f['dtype']}{value_str}")
     if evidence:
         for ref in evidence:
             print(f"  Evidence: {ref}")
-        _create_evidence_markers(evidence_targets, category, key, name)
+        _create_evidence_markers(
+            evidence_targets,
+            category,
+            key,
+            name,
+            db=db,
+            config=config,
+            profile=profile,
+        )
     if "history" in fact:
         print(f"  (updated existing fact, {len(fact['history'])} previous version(s))")
 
@@ -266,7 +170,12 @@ def fact_update(
     field: Optional[list[str]] = typer.Option(
         None,
         "--field",
-        help="Replace field definitions: name:offset:length:type[:expected_value]. Repeatable.",
+        help="Replace field definitions: direction:name:offset:length:type:value; direction and value are optional. Repeatable.",
+    ),
+    clear_fields: bool = typer.Option(
+        False,
+        "--clear-fields",
+        help="Remove packet field definitions from this fact.",
     ),
     evidence: Optional[list[str]] = typer.Option(
         None,
@@ -285,16 +194,22 @@ def fact_update(
     supersedes: Optional[str] = typer.Option(None, "--supersedes", help="Fact key this replaces (category:key)."),
     protocol: Optional[str] = typer.Option(None, "--protocol", help="Protocol ID (e.g. 0xFFFF, 0x2729)."),
     match: Optional[str] = typer.Option(None, "--match", help="Payload offset:size for auto-dissection (e.g. 6:2)."),
+    db: Optional[str] = typer.Option(None, "--db", help="SQLite database containing evidence sessions."),
+    config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     from netaudio.dante.fact_store import get_confidence, get_fact, update_fact
 
     facts_path = _resolve_facts_path()
-    fields_parsed = [_parse_field_spec(f) for f in field] if field else None
+    if clear_fields and field:
+        print("Capture: --clear-fields cannot be combined with --field.", file=sys.stderr)
+        raise typer.Exit(1)
+    fields_parsed = [] if clear_fields else [_parse_field_spec(f) for f in field] if field else None
 
     evidence_targets = []
     if evidence:
-        evidence = _resolve_evidence_sessions(evidence)
-        evidence_targets = _validate_evidence_references(evidence)
+        evidence = _resolve_evidence_sessions(evidence, db=db, config=config, profile=profile)
+        evidence_targets = _validate_evidence_references(evidence, db=db, config=config, profile=profile)
     if confidence == "verified":
         existing_fact = get_fact(facts_path, category, key)
         existing_evidence = existing_fact.get("evidence", []) if existing_fact else []
@@ -359,7 +274,15 @@ def fact_update(
     if evidence:
         for ref in evidence:
             print(f"  Evidence: {ref}")
-        _create_evidence_markers(evidence_targets, category, key, fact["name"])
+        _create_evidence_markers(
+            evidence_targets,
+            category,
+            key,
+            fact["name"],
+            db=db,
+            config=config,
+            profile=profile,
+        )
     if "history" in fact:
         print(f"  ({len(fact['history'])} revision(s))")
 
@@ -419,7 +342,8 @@ def fact_list(
                     print(f"    {line}")
             for f in fact.get("fields", []):
                 value_str = f" = {f['value']}" if "value" in f else ""
-                print(f"    field: {f['name']} @ {f['offset']}+{f['length']} {f['dtype']}{value_str}")
+                direction_str = f" [{f['direction']}]" if f.get("direction") else ""
+                print(f"    field{direction_str}: {f['name']} @ {f['offset']}+{f['length']} {f['dtype']}{value_str}")
             for ref in fact.get("evidence", []):
                 print(f"    evidence: {ref}")
             print()
@@ -443,6 +367,7 @@ def fact_show(
         get_confidence,
         _parse_evidence_ref,
         _find_bundle,
+        _field_applies_to_direction,
         _load_bundle,
         _verify_field,
     )
@@ -472,7 +397,10 @@ def fact_show(
         print(f"  Fields:")
         for f in fact["fields"]:
             value_str = f" = {f['value']}" if "value" in f else ""
-            print(f"    {f['name']:20s} offset {f['offset']:>4d}  {f['length']}B  {f['dtype']}{value_str}")
+            direction_str = f"[{f['direction']}] " if f.get("direction") else ""
+            print(
+                f"    {direction_str}{f['name']:20s} offset {f['offset']:>4d}  {f['length']}B  {f['dtype']}{value_str}"
+            )
 
     if fact.get("evidence"):
         print(f"  Evidence:")
@@ -562,12 +490,14 @@ def fact_show(
             print(f"      Payload:")
             from netaudio.dante.packet_dissector import dissect_and_render
 
-            print(dissect_and_render(payload, indent="        "))
+            print(dissect_and_render(payload, indent="        ", direction=direction))
 
             if fact.get("fields"):
                 print()
                 print(f"      Field verification:")
                 for field_def in fact["fields"]:
+                    if not _field_applies_to_direction(field_def, direction):
+                        continue
                     result = _verify_field(payload, field_def)
                     if result["ok"]:
                         print(f"        [PASS] {result['name']}: {result['expected']} == {result['actual']}")
@@ -594,6 +524,7 @@ def fact_check(
         get_fact,
         _parse_evidence_ref,
         _find_bundle,
+        _field_applies_to_direction,
         _load_bundle,
         _verify_field,
     )
@@ -614,13 +545,23 @@ def fact_check(
 
     passed = 0
     warned = 0
+    quarantined = 0
+    disproved = 0
     failed = 0
 
     for result in results:
         errors = result["errors"]
         verified = result["verified_fields"]
 
-        if not errors and verified:
+        if result.get("status") == "disproved":
+            status = "DISP"
+            status_icon = icon("fail")
+            disproved += 1
+        elif result.get("status") == "quarantined":
+            status = "QUAR"
+            status_icon = icon("warning")
+            quarantined += 1
+        elif not errors and verified:
             status = "PASS"
             status_icon = icon("success")
             passed += 1
@@ -633,10 +574,12 @@ def fact_check(
             status_icon = icon("fail")
             failed += 1
 
-        confidence_marker = {"verified": "+", "observed": "○", "inferred": "~", "uncertain": "?"}.get(
+        confidence_marker = {"verified": "+", "observed": "○", "inferred": "~", "uncertain": "?", "disproved": "x"}.get(
             result.get("confidence", ""), " "
         )
         print(f"  {status_icon}[{status}] {confidence_marker} {result['fact_key']:30s} {result['name']}")
+        if result.get("quarantine_reason"):
+            print(f"         quarantine: {result['quarantine_reason']}")
 
         for v in verified:
             if v.get("expected") is not None:
@@ -691,10 +634,12 @@ def fact_check(
                     print(f"         {src} -> {dst}")
                     from netaudio.dante.packet_dissector import dissect_and_render
 
-                    print(dissect_and_render(payload, indent="           "))
+                    print(dissect_and_render(payload, indent="           ", direction=direction))
 
                     if fact.get("fields"):
                         for field_def in fact["fields"]:
+                            if not _field_applies_to_direction(field_def, direction):
+                                continue
                             field_result = _verify_field(payload, field_def)
                             if field_result["ok"]:
                                 print(
@@ -706,8 +651,11 @@ def fact_check(
             print()
 
     print()
-    total = passed + warned + failed
-    print(f"{total} facts checked: {passed} passed, {warned} no fields to verify, {failed} failed")
+    total = passed + warned + quarantined + disproved + failed
+    print(
+        f"{total} facts checked: {passed} passed, {warned} no fields to verify, "
+        f"{quarantined} quarantined, {disproved} disproved, {failed} failed"
+    )
 
     if failed > 0:
         raise typer.Exit(1)
@@ -764,6 +712,7 @@ def fact_verify(
         list_facts,
         _parse_evidence_ref,
         _find_bundle,
+        _field_applies_to_direction,
         _load_bundle,
     )
 
@@ -858,8 +807,11 @@ def fact_verify(
             for line in _compact_hexdump(packet, max_lines=2):
                 print(line)
             if fact.get("fields"):
-                field_names = [f["name"] for f in fact["fields"]]
-                print(f"    verify: {', '.join(field_names)}")
+                field_names = [
+                    field["name"] for field in fact["fields"] if _field_applies_to_direction(field, "response")
+                ]
+                if field_names:
+                    print(f"    verify: {', '.join(field_names)}")
         print(f"\nDry run: {len(verify_plan)} packets would be sent.")
         return
 
@@ -875,148 +827,6 @@ def fact_verify(
             auto_disprove=auto_disprove,
         )
     )
-
-
-async def _run_fact_verify(
-    verify_plan: list[dict],
-    device_ip: str,
-    timeout: float,
-    session_name: str,
-    config: str | None,
-    profile: str | None,
-    db_override: str | None,
-    auto_disprove: bool = False,
-):
-    import struct
-    from netaudio.dante.fact_store import _verify_field, disprove_fact
-    from netaudio.dante.protocol_verifier import ProtocolVerifier
-
-    async with ProtocolVerifier(
-        device_ip=device_ip,
-        session_name=session_name,
-        config=config,
-        profile=profile,
-        db=db_override,
-        record=False,
-    ) as verifier:
-        verifier.marker(
-            "fact_verify_started",
-            marker_type="system",
-            note=f"Verifying {len(verify_plan)} facts against {device_ip}",
-        )
-
-        passed = 0
-        failed = 0
-        timed_out = 0
-
-        for entry in verify_plan:
-            fact = entry["fact"]
-            fk = entry["fact_key"]
-            packet = entry["request_packet"]
-            port = entry["port"]
-
-            if len(packet) >= 6:
-                original_txn = struct.unpack(">H", packet[4:6])[0]
-                new_txn = (original_txn + 0x4000) & 0xFFFF
-                packet = packet[:4] + struct.pack(">H", new_txn) + packet[6:]
-
-            label = f"verify_{fk.replace(':', '_')}"
-            response = await verifier.send(packet, port=port, timeout=timeout, label=label)
-
-            if response is None:
-                print(f"  {icon('timeout')}[TIMEOUT] {fk:30s} {fact['name']}")
-                timed_out += 1
-                verifier.observation(
-                    f"{label}_timeout",
-                    note=f"No response for {fk}",
-                )
-                continue
-
-            fields = fact.get("fields", [])
-            all_ok = True
-            has_bounds = False
-            field_results = []
-
-            for field_def in fields:
-                result = _verify_field(response, field_def)
-                field_results.append(result)
-                if not result["ok"]:
-                    if result.get("bounds"):
-                        has_bounds = True
-                    all_ok = False
-
-            if all_ok:
-                status_str = "PASS"
-                passed += 1
-            elif has_bounds and not any(not r["ok"] and not r.get("bounds") for r in field_results):
-                status_str = "BOUNDS"
-                failed += 1
-            else:
-                status_str = "FAIL"
-                failed += 1
-
-            print(f"  [{status_str:6s}] {fk:30s} {fact['name']}  ({len(response)}B)")
-
-            for result in field_results:
-                field_name = result["name"]
-                if not result["ok"]:
-                    if result.get("bounds"):
-                        print(f"           {field_name:24s} BOUNDS  {result['error']}")
-                    else:
-                        print(f"           {field_name:24s} FAIL    {result.get('error', '')}")
-                elif result.get("expected") is not None:
-                    print(f"           {field_name:24s} {result['actual']:>16s} == {result['expected']}")
-                else:
-                    print(f"           {field_name:24s} {result['actual']:>16s}")
-
-            verifier.observation(
-                f"{label}_result",
-                note=f"{fk}: {status_str}",
-                data={
-                    "status": status_str.lower(),
-                    "response_len": len(response),
-                    "fields": field_results,
-                },
-            )
-
-            if auto_disprove and status_str in ("FAIL", "BOUNDS"):
-                mismatches = [r for r in field_results if not r["ok"]]
-                reasons = []
-                for mismatch in mismatches:
-                    if mismatch.get("bounds"):
-                        reasons.append(f"{mismatch['name']}: out of bounds")
-                    else:
-                        reasons.append(f"{mismatch['name']}: {mismatch.get('error', 'mismatch')}")
-                reason = f"Verification failed on {device_ip} ({len(response)}B response): {'; '.join(reasons)}"
-                facts_path = _resolve_facts_path()
-                disprove_fact(
-                    facts_path,
-                    category=fact["category"],
-                    key=fact["key"],
-                    reason=reason,
-                    device_ip=device_ip,
-                    response_size=len(response),
-                    field_mismatches=mismatches,
-                )
-                print(f"           -> auto-disproved {fk}")
-
-        print()
-        total = passed + failed + timed_out
-        parts = []
-        if passed:
-            parts.append(f"{passed} passed")
-        if failed:
-            parts.append(f"{failed} failed")
-        if timed_out:
-            parts.append(f"{timed_out} timed out")
-        print(f"Verification complete: {total} facts — {', '.join(parts)}")
-
-        verifier.marker(
-            "fact_verify_finished",
-            marker_type="system",
-            note=f"Verification complete: {', '.join(parts)}",
-            data={"passed": passed, "failed": failed, "timed_out": timed_out},
-        )
 
 
 @app.command("spec")
@@ -1064,71 +874,16 @@ def fact_spec(
         print(text)
 
 
-@app.command("remove")
-def fact_remove(
-    category: str = typer.Option(..., "--category", "-c", help="Fact category."),
-    key: str = typer.Option(..., "--key", "-k", help="Fact key."),
-):
-    from netaudio.dante.fact_store import remove_fact
+from netaudio.commands.fact_lifecycle import (
+    fact_disprove,
+    fact_quarantine,
+    fact_reinstate,
+    fact_remove,
+    fact_unquarantine,
+)
 
-    facts_path = _resolve_facts_path()
-    removed = remove_fact(facts_path, category, key)
-
-    if removed:
-        print(f"{icon('remove')}Removed: {category}:{key}")
-    else:
-        print(f"Fact not found: {category}:{key}", file=sys.stderr)
-        raise typer.Exit(1)
-
-
-@app.command("disprove")
-def fact_disprove(
-    category: str = typer.Option(..., "--category", "-c", help="Fact category."),
-    key: str = typer.Option(..., "--key", "-k", help="Fact key."),
-    reason: str = typer.Option(..., "--reason", help="Why this fact is wrong."),
-    device_ip: Optional[str] = typer.Option(None, "--device-ip", "-d", help="Device that disproved it."),
-):
-    from netaudio.dante.fact_store import disprove_fact
-
-    facts_path = _resolve_facts_path()
-    result = disprove_fact(
-        facts_path,
-        category=category,
-        key=key,
-        reason=reason,
-        device_ip=device_ip,
-    )
-
-    if result:
-        print(f"{icon('fail')}Disproved: {category}:{key}")
-        print(f"  Reason: {reason}")
-        if device_ip:
-            print(f"  Device: {device_ip}")
-    else:
-        print(f"Fact not found: {category}:{key}", file=sys.stderr)
-        raise typer.Exit(1)
-
-
-@app.command("reinstate")
-def fact_reinstate(
-    category: str = typer.Option(..., "--category", "-c", help="Fact category."),
-    key: str = typer.Option(..., "--key", "-k", help="Fact key."),
-    confidence: str = typer.Option("verified", "--confidence", help="New confidence level."),
-    note: Optional[str] = typer.Option(None, "--note", help="Updated note."),
-):
-    from netaudio.dante.fact_store import reinstate_fact
-
-    facts_path = _resolve_facts_path()
-    result = reinstate_fact(
-        facts_path,
-        category=category,
-        key=key,
-        confidence=confidence,
-        note=note,
-    )
-
-    if result:
-        print(f"{icon('success')}Reinstated: {category}:{key} (confidence={confidence})")
-    else:
-        print(f"Fact not found: {category}:{key}", file=sys.stderr)
-        raise typer.Exit(1)
+app.command("remove")(fact_remove)
+app.command("disprove")(fact_disprove)
+app.command("reinstate")(fact_reinstate)
+app.command("quarantine")(fact_quarantine)
+app.command("unquarantine")(fact_unquarantine)
