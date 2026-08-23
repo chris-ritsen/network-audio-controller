@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -94,6 +95,18 @@ class ShureDeviceInfo:
     encryption_mode: str | None = None
     channels: dict[int, ShureChannel | ShureP10TChannel] = field(default_factory=dict)
     dante_mac: str | None = None
+    online: bool = True
+    last_seen: float | None = None
+
+    def mark_seen(self, timestamp: float | None = None) -> None:
+        self.last_seen = time.time() if timestamp is None else timestamp
+        self.online = True
+
+    def mark_offline(self) -> bool:
+        if not self.online:
+            return False
+        self.online = False
+        return True
 
     def to_json(self) -> dict:
         result: dict = {
@@ -101,6 +114,7 @@ class ShureDeviceInfo:
             "mac": self.mac,
             "device_type": self.device_type.value,
             "name": self.name,
+            "online": self.online,
         }
 
         optional_values = {
@@ -111,6 +125,7 @@ class ShureDeviceInfo:
             "quadversity_mode": self.quadversity_mode,
             "encryption_mode": self.encryption_mode,
             "dante_mac": self.dante_mac,
+            "last_seen": self.last_seen,
         }
         for field_name, field_value in optional_values.items():
             if field_value is not None:

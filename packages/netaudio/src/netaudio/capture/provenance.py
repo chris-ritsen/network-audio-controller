@@ -14,6 +14,7 @@ from netaudio.dante.debug_formatter import (
 from netaudio.dante.packet_store import _decompress_payload
 
 logger = logging.getLogger("netaudio")
+ARC_SUCCESS_RESULTS = frozenset({0x0001, 0x8112})
 
 
 def _extract_subscription_status_codes(payload: bytes) -> set[int]:
@@ -29,19 +30,23 @@ def _extract_subscription_status_codes(payload: bytes) -> set[int]:
         return set()
 
     body = payload[10:]
-    if len(body) < 4:
+    if len(body) < 2:
         return set()
 
     record_size = 20
-    record_start = 2
-    record_index = 0
+    record_count = body[1]
+    if body[0] != record_count or record_count > 16:
+        return set()
+
+    records_end = 2 + record_count * record_size
+    if len(body) < records_end:
+        return set()
+
     statuses: set[int] = set()
 
-    while record_start + record_size <= len(body):
+    for record_index in range(record_count):
+        record_start = 2 + record_index * record_size
         record = body[record_start : record_start + record_size]
-        if len(record) < record_size:
-            break
-
         (
             channel_number,
             _flags,
@@ -53,14 +58,10 @@ def _extract_subscription_status_codes(payload: bytes) -> set[int]:
             subscription_status_code,
         ) = struct.unpack(">HHHHHHHH", record[:16])
 
-        if channel_number == 0 or rx_channel_offset > len(body) + 100:
-            break
+        if channel_number == 0 or rx_channel_offset >= len(payload):
+            return set()
 
         statuses.add(subscription_status_code)
-        record_start += record_size
-        record_index += 1
-        if record_index > 64:
-            break
 
     return statuses
 
@@ -514,7 +515,7 @@ def _decode_packet_payload(data: bytes) -> dict:
     if len(data) >= 10:
         status = struct.unpack(">H", data[8:10])[0]
         result["status"] = f"0x{status:04X}"
-        result["status_ok"] = status == 0x0001
+        result["status_ok"] = status in ARC_SUCCESS_RESULTS
 
     result["raw_hex"] = data.hex()
 

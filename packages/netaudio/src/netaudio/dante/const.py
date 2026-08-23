@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 from netaudio.dante.clean_labels import load_clean_subscription_status_labels
+from netaudio.dante.subscription_status import (
+    SUBSCRIPTION_STATUS_DEFINITIONS,
+    SubscriptionSeverity,
+    SubscriptionState,
+    SubscriptionStatus,
+    default_status_entry as _builtin_status_entry,
+)
 
 
 SERVICE_ARC: str = "_netaudio-arc._udp.local."
@@ -15,9 +22,8 @@ SERVICES = [SERVICE_ARC, SERVICE_CHAN, SERVICE_CMC, SERVICE_DBC]
 
 BLUETOOTH_MODEL_IDS = {"DIOBT"}
 
-HEARTBEAT_LOCK_UNRELIABLE_MODEL_IDS = {"DIOBT"}
-
 RESULT_CODE_LOCK_REJECTION = 0x0600
+RESULT_CODE_FRONTEND_UNAVAILABLE = 0x0030
 
 DANTE_CONTROLLER_METERING_PORT = 8751
 DEFAULT_MULTICAST_METERING_PORT = 8752
@@ -39,7 +45,8 @@ DEVICE_SETTINGS_INFO_LATENCY = 0x8204
 PROTOCOL_ID = 0x27FF
 PROTOCOL_SETTINGS = 0xFFFF
 PROTOCOL_CMC = 0x1200
-PROTOCOL_AES67_CONFIG = 0x2809
+PROTOCOL_ARC_2729 = 0x2729
+PROTOCOL_ARC_2809 = 0x2809
 
 RESULT_CODE_SUCCESS = 0x0001
 RESULT_CODE_SUCCESS_EXTENDED = 0x8112
@@ -58,7 +65,9 @@ OPCODE_RX_CHANNEL_NAME_SET = 0x3001
 OPCODE_SUBSCRIPTION_ADD = 0x3010
 OPCODE_SUBSCRIPTION_REMOVE = 0x3014
 
-FLOW_PROTOCOL_IDS = (0x2729, 0x2801)
+FLOW_QUERY_PROTOCOL_IDS = (0x2729, 0x2801, PROTOCOL_ARC_2809)
+FLOW_CREATE_PROTOCOL_IDS = (0x2729, 0x2801)
+FLOW_DELETE_PROTOCOL_IDS = (0x2729, 0x2801, PROTOCOL_ARC_2809)
 
 OPCODE_QUERY_TX_FLOWS = 0x2200
 OPCODE_CREATE_TX_FLOW = 0x2201
@@ -67,6 +76,9 @@ OPCODE_DELETE_TX_FLOW = 0x2202
 OPCODE_QUERY_TX_FLOWS_2809 = 0x2600
 OPCODE_CREATE_TX_FLOW_2809 = 0x2601
 OPCODE_DELETE_TX_FLOW_2809 = 0x2602
+OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809 = 0x2400
+OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809 = 0x3400
+OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809 = 0x3600
 
 FLOW_TYPE_MULTICAST = 0x0002
 
@@ -76,18 +88,15 @@ _CLEAN_SUBSCRIPTION_STATUS_LABELS = load_clean_subscription_status_labels()
 
 
 def _default_status_entry(code: int) -> dict[str, object]:
-    if code == SUBSCRIPTION_STATUS_NONE:
-        return {
-            "state": "none",
-            "label": "status:none",
-            "detail": None,
-            "labels": ("status:none",),
-        }
+    entry = _builtin_status_entry(code)
+    label = entry["label"]
     return {
-        "state": "unknown",
-        "label": f"status:{code}",
-        "detail": None,
-        "labels": (f"status:{code}",),
+        "status": entry["status"],
+        "state": entry["state"],
+        "severity": entry["severity"],
+        "label": label,
+        "detail": entry["detail"],
+        "labels": (label,),
     }
 
 
@@ -102,6 +111,12 @@ def _normalize_status_entry(code: int, entry: dict[str, object] | None) -> dict[
     else:
         state = default["state"]
 
+    severity = entry.get("severity")
+    if isinstance(severity, str) and severity.strip():
+        severity = severity.strip()
+    else:
+        severity = default["severity"]
+
     label = entry.get("label")
     if isinstance(label, str) and label.strip():
         label = label.strip()
@@ -110,7 +125,7 @@ def _normalize_status_entry(code: int, entry: dict[str, object] | None) -> dict[
 
     detail = entry.get("detail")
     if not isinstance(detail, str) or not detail:
-        detail = None
+        detail = default["detail"]
 
     labels_value = entry.get("labels")
     labels: tuple[str, ...] = ()
@@ -120,7 +135,9 @@ def _normalize_status_entry(code: int, entry: dict[str, object] | None) -> dict[
         labels = (label,)
 
     return {
+        "status": default["status"],
         "state": state,
+        "severity": severity,
         "label": label,
         "detail": detail,
         "labels": labels,
@@ -128,9 +145,9 @@ def _normalize_status_entry(code: int, entry: dict[str, object] | None) -> dict[
 
 
 def _load_status_catalog() -> dict[int, dict[str, object]]:
-    catalog = {
-        code: _normalize_status_entry(code, entry) for code, entry in sorted(_CLEAN_SUBSCRIPTION_STATUS_LABELS.items())
-    }
+    catalog = {code: _default_status_entry(code) for code in sorted(SUBSCRIPTION_STATUS_DEFINITIONS)}
+    for code, entry in sorted(_CLEAN_SUBSCRIPTION_STATUS_LABELS.items()):
+        catalog[code] = _normalize_status_entry(code, entry)
     if SUBSCRIPTION_STATUS_NONE not in catalog:
         catalog[SUBSCRIPTION_STATUS_NONE] = _default_status_entry(SUBSCRIPTION_STATUS_NONE)
     return catalog
@@ -146,3 +163,25 @@ SUBSCRIPTION_STATUS_INFO = {
     code: (entry["state"], entry["label"], entry["detail"]) for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()
 }
 SUBSCRIPTION_STATUS_LABELS = {code: entry["labels"] for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()}
+SUBSCRIPTION_STATUS_SEVERITY = {code: entry["severity"] for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()}
+
+
+def subscription_status_entry(code: int) -> dict[str, object]:
+    entry = _SUBSCRIPTION_STATUS_CATALOG.get(code)
+    if entry is not None:
+        return entry
+    fallback = _default_status_entry(code)
+    return fallback
+
+
+def subscription_status_label(code: int) -> str:
+    from netaudio.i18n import translate
+
+    return translate(subscription_status_entry(code)["label"])
+
+
+def subscription_status_detail(code: int) -> str | None:
+    from netaudio.i18n import translate
+
+    detail = subscription_status_entry(code)["detail"]
+    return translate(detail) if detail else None

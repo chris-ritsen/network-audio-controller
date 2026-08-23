@@ -12,14 +12,18 @@ from typing import Any, Optional
 import typer
 
 from netaudio._exit_codes import ExitCode
+from netaudio.commands.preset_display import show_preset_dry_run
 from netaudio.dante.latency import MICROSECONDS_PER_MILLISECOND
+from netaudio.dante.sample_rate_topology import (
+    SampleRateTopologyChangedButUnverifiedError,
+    SampleRateTopologyMutationOutcomeUnknownError,
+    change_sample_rate_with_command_sender,
+)
 
 app = typer.Typer(help="Save and load device presets (DC-compatible XML).", no_args_is_help=True)
 
 UNSUPPORTED_LOAD_FIELDS = {
     "additional_interfaces": "additional network interfaces",
-    "tx_labels": "TX channel labels",
-    "rx_subscriptions": "RX subscriptions",
 }
 
 
@@ -179,28 +183,46 @@ def _parse_preset(preset_path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
                     device_config["gateway"] = ip_elem.findtext("gateway", "")
                     device_config["dns_server"] = ip_elem.findtext("dns_server", "")
 
-        tx_labels = {}
+        transmitter_channel_names = {}
         for tx_elem in device_element.findall("txchannel"):
             dante_id = tx_elem.get("danteId")
             label = tx_elem.findtext("label", "")
             if dante_id and label:
-                tx_labels[int(dante_id)] = label
+                transmitter_channel_names[int(dante_id)] = label
 
-        rx_subscriptions = {}
-        for rx_elem in device_element.findall("rxchannel"):
-            dante_id = rx_elem.get("danteId")
-            subscribed_channel = rx_elem.findtext("subscribed_channel")
-            subscribed_device = rx_elem.findtext("subscribed_device")
-            if dante_id and subscribed_channel:
-                rx_subscriptions[int(dante_id)] = {
+        receiver_subscriptions = {}
+        receiver_channel_elements = device_element.findall("rxchannel")
+        for receiver_channel_element in receiver_channel_elements:
+            dante_identifier = receiver_channel_element.get("danteId")
+            if dante_identifier is None:
+                raise ValueError(f"{device_name}: receiver channel is missing danteId")
+            try:
+                receiver_channel_number = int(dante_identifier)
+            except ValueError as exception:
+                raise ValueError(f"{device_name}: receiver channel danteId must be an integer") from exception
+            if not 1 <= receiver_channel_number <= 0xFFFF:
+                raise ValueError(f"{device_name}: receiver channel danteId must be from 1 through 65535")
+            if receiver_channel_number in receiver_subscriptions:
+                raise ValueError(f"{device_name}: duplicate receiver channel danteId {receiver_channel_number}")
+
+            subscribed_channel = (receiver_channel_element.findtext("subscribed_channel") or "").strip()
+            subscribed_device = (receiver_channel_element.findtext("subscribed_device") or "").strip()
+            if subscribed_device and not subscribed_channel:
+                raise ValueError(
+                    f"{device_name}: receiver channel {receiver_channel_number} has a subscribed device without a channel"
+                )
+            if subscribed_channel:
+                receiver_subscriptions[receiver_channel_number] = {
                     "tx_channel": subscribed_channel,
                     "tx_device": subscribed_device or ".",
                 }
+            else:
+                receiver_subscriptions[receiver_channel_number] = None
 
-        if tx_labels:
-            device_config["tx_labels"] = tx_labels
-        if rx_subscriptions:
-            device_config["rx_subscriptions"] = rx_subscriptions
+        if transmitter_channel_names:
+            device_config["transmitter_channel_names"] = transmitter_channel_names
+        if receiver_channel_elements:
+            device_config["rx_subscriptions"] = receiver_subscriptions
 
         if device_name in preset_devices:
             raise ValueError(f"duplicate preset device name: {device_name!r}")
@@ -303,6 +325,11 @@ async def _read_audio_setting(action, send, device):
 def preset_load(
     input_file: str = typer.Argument(..., help="Input preset file (.xml)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be applied without making changes."),
+    confirm_destructive: bool = typer.Option(
+        False,
+        "--confirm-destructive",
+        help="Confirm permanent transmitter-flow membership loss caused by sample-rate restoration.",
+    ),
 ):
     preset_path = Path(input_file)
     if not preset_path.exists():
@@ -318,38 +345,7 @@ def preset_load(
     typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
 
     if dry_run:
-        for device_name, config in preset_devices.items():
-            typer.echo(f"\n{device_name}:")
-            if "preferred_leader" in config:
-                typer.echo(f"  preferred leader: {'on' if config['preferred_leader'] else 'off'}")
-            if "sample_rate" in config:
-                typer.echo(f"  sample rate: {config['sample_rate']}")
-            if "encoding" in config:
-                typer.echo(f"  encoding: {config['encoding']}")
-            if "latency" in config:
-                typer.echo(f"  latency: {config['latency']:g} ms")
-            if "interface_mode" in config:
-                mode = config["interface_mode"]
-                if mode == "static":
-                    typer.echo(
-                        f"  interface: static {config.get('ip_address', '')} mask={config.get('netmask', '')} gw={config.get('gateway', '')} dns={config.get('dns_server', '')}"
-                    )
-                else:
-                    typer.echo(f"  interface: {mode}")
-            if "additional_interfaces" in config:
-                count = config["additional_interfaces"]
-                typer.echo(f"  additional interfaces: {count} (unsupported for load)")
-            if "tx_labels" in config:
-                for channel_number, label in sorted(config["tx_labels"].items()):
-                    typer.echo(f"  tx {channel_number}: {label} (unsupported for load)")
-            if "rx_subscriptions" in config:
-                for channel_number, subscription in sorted(config["rx_subscriptions"].items()):
-                    tx_device = subscription["tx_device"]
-                    if tx_device == ".":
-                        tx_device = device_name
-                    typer.echo(
-                        f"  rx {channel_number}: {subscription['tx_channel']}@{tx_device} (unsupported for load)"
-                    )
+        show_preset_dry_run(preset_devices)
         return
 
     async def _apply():
@@ -361,13 +357,16 @@ def preset_load(
             send_and_wait_for_notification,
         )
         from netaudio.cli import state as cli_state
+        from netaudio.commands.subscription import reconcile_receiver_subscriptions
         from netaudio.dante.device_commands import DanteDeviceCommands
+        from netaudio.dante.transmitter_channel_name_reconciliation import (
+            reconcile_transmitter_channel_names,
+        )
         from netaudio.dante.services.notification import (
             NOTIFICATION_CLOCKING_STATUS,
             NOTIFICATION_ENCODING_STATUS,
             NOTIFICATION_INTERFACE_STATUS,
             NOTIFICATION_LATENCY_CHANGE,
-            NOTIFICATION_SAMPLE_RATE_STATUS,
             NOTIFICATION_SETTINGS_CHANGE,
         )
 
@@ -433,8 +432,7 @@ def preset_load(
                     _validate_supported_config(device_name, config, device)
                     actions = []
                     if "sample_rate" in config:
-                        packet, _, port = commands.command_set_sample_rate(config["sample_rate"])
-                        actions.append(("sample_rate", packet, port))
+                        actions.append(("sample_rate", config["sample_rate"], None))
                     if "encoding" in config:
                         packet, _, port = commands.command_set_encoding(config["encoding"])
                         actions.append(("encoding", packet, port))
@@ -444,6 +442,61 @@ def preset_load(
                     if "preferred_leader" in config:
                         packet, _, port = commands.command_set_preferred_leader(config["preferred_leader"])
                         actions.append(("preferred_leader", packet, port))
+                    if "transmitter_channel_names" in config:
+                        await device.get_tx_channels()
+                        available_transmitter_channels = {
+                            channel.number for channel in (device.tx_channels or {}).values()
+                        }
+                        for transmitter_channel_number, channel_name in config["transmitter_channel_names"].items():
+                            if transmitter_channel_number not in available_transmitter_channels:
+                                raise ValueError(f"transmitter channel {transmitter_channel_number} is unavailable")
+                            commands.command_set_channel_name(
+                                "tx",
+                                transmitter_channel_number,
+                                channel_name,
+                            )
+                        actions.append(
+                            (
+                                "transmitter_channel_names",
+                                config["transmitter_channel_names"],
+                                None,
+                            )
+                        )
+                    if "rx_subscriptions" in config:
+                        await device.get_rx_channels()
+                        available_receiver_channels = {
+                            channel.number for channel in (device.rx_channels or {}).values()
+                        }
+                        desired_sources = {}
+                        for receiver_channel_number, subscription in config["rx_subscriptions"].items():
+                            if receiver_channel_number not in available_receiver_channels:
+                                raise ValueError(f"receiver channel {receiver_channel_number} is unavailable")
+                            if subscription is None:
+                                desired_sources[receiver_channel_number] = None
+                            else:
+                                transmitter_device_name = subscription["tx_device"]
+                                if transmitter_device_name == ".":
+                                    transmitter_device_name = device_name
+                                desired_sources[receiver_channel_number] = (
+                                    subscription["tx_channel"],
+                                    transmitter_device_name,
+                                )
+
+                        removals = [
+                            receiver_channel_number
+                            for receiver_channel_number, desired_source in desired_sources.items()
+                            if desired_source is None
+                        ]
+                        additions = [
+                            (receiver_channel_number, desired_source[0], desired_source[1])
+                            for receiver_channel_number, desired_source in desired_sources.items()
+                            if desired_source is not None
+                        ]
+                        for batch_start in range(0, len(removals), 16):
+                            commands.command_remove_subscriptions(removals[batch_start : batch_start + 16])
+                        for batch_start in range(0, len(additions), 16):
+                            commands.command_add_subscriptions(additions[batch_start : batch_start + 16])
+                        actions.append(("receiver_subscriptions", desired_sources, None))
                     if "interface_mode" in config:
                         mode = config["interface_mode"]
                         if mode in ("dynamic", "dhcp"):
@@ -493,14 +546,145 @@ def preset_load(
                         action_results.append((device_name, "no supported changes"))
                         continue
 
-                    for action, packet, port in actions:
+                    for action, payload, port in actions:
                         action_label = action.replace("_", " ")
+                        if action == "sample_rate":
+                            try:
+                                result = await change_sample_rate_with_command_sender(
+                                    send,
+                                    device,
+                                    payload,
+                                    confirm_destructive=confirm_destructive,
+                                )
+                            except SampleRateTopologyChangedButUnverifiedError as exception:
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"sample rate: CHANGED BUT UNVERIFIED ({exception})",
+                                    )
+                                )
+                                continue
+                            except SampleRateTopologyMutationOutcomeUnknownError as exception:
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"sample rate: MUTATION OUTCOME UNKNOWN ({exception})",
+                                    )
+                                )
+                                continue
+                            except Exception as exception:
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"sample rate: REFUSED ({exception})",
+                                    )
+                                )
+                                continue
+                            if result.changed:
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"sample rate {result.observed_sample_rate_hertz} Hz and topology (verified)",
+                                    )
+                                )
+                            else:
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"sample rate already {result.observed_sample_rate_hertz} Hz "
+                                        "(verified; no write sent)",
+                                    )
+                                )
+                            continue
+                        if action == "receiver_subscriptions":
+                            try:
+                                result = await reconcile_receiver_subscriptions(
+                                    send,
+                                    device,
+                                    payload,
+                                )
+                            except Exception as exception:
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"receiver subscriptions: FAILED ({exception})",
+                                    )
+                                )
+                                continue
+
+                            if result.unchanged and not result.verified and not result.failures:
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"receiver subscriptions already match ({len(result.unchanged)} channels)",
+                                    )
+                                )
+                            for receiver_channel_number, desired_source in sorted(result.verified.items()):
+                                if desired_source is None:
+                                    description = f"receiver channel {receiver_channel_number} unsubscribed"
+                                else:
+                                    description = (
+                                        f"receiver channel {receiver_channel_number} <- "
+                                        f"{desired_source[0]}@{desired_source[1]}"
+                                    )
+                                action_results.append((device_name, f"{description} (verified)"))
+                            for receiver_channel_number, detail in sorted(result.failures.items()):
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"receiver channel {receiver_channel_number}: FAILED ({detail})",
+                                    )
+                                )
+                            continue
+                        if action == "transmitter_channel_names":
+                            try:
+                                result = await reconcile_transmitter_channel_names(
+                                    send,
+                                    device,
+                                    payload,
+                                )
+                            except Exception as exception:
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"transmitter channel names: FAILED ({exception})",
+                                    )
+                                )
+                                continue
+
+                            if result.unchanged and not result.verified and not result.failures:
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"transmitter channel names already match ({len(result.unchanged)} channels)",
+                                    )
+                                )
+                            for transmitter_channel_number, channel_name in sorted(result.verified.items()):
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"transmitter channel {transmitter_channel_number}: {channel_name} (verified)",
+                                    )
+                                )
+                            for transmitter_channel_number, detail in sorted(result.failures.items()):
+                                failures += 1
+                                action_results.append(
+                                    (
+                                        device_name,
+                                        f"transmitter channel {transmitter_channel_number}: FAILED ({detail})",
+                                    )
+                                )
+                            continue
+
+                        packet = payload
                         try:
                             notification_ids = {
-                                "sample_rate": (
-                                    NOTIFICATION_SAMPLE_RATE_STATUS,
-                                    NOTIFICATION_SETTINGS_CHANGE,
-                                ),
                                 "encoding": (
                                     NOTIFICATION_ENCODING_STATUS,
                                     NOTIFICATION_SETTINGS_CHANGE,
@@ -529,7 +713,7 @@ def preset_load(
                                     repeat=3,
                                     interval_ms=500,
                                 )
-                            elif action in ("sample_rate", "encoding"):
+                            elif action == "encoding":
                                 await send_and_wait_for_notification(
                                     send,
                                     packet,
@@ -557,11 +741,8 @@ def preset_load(
                             )
                             continue
 
-                        if action in ("sample_rate", "encoding", "latency"):
-                            if action == "sample_rate":
-                                expected = config["sample_rate"]
-                                success = f"sample rate {expected} Hz"
-                            elif action == "encoding":
+                        if action in ("encoding", "latency"):
+                            if action == "encoding":
                                 expected = config["encoding"]
                                 success = f"encoding {expected}-bit"
                             else:

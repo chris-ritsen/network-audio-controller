@@ -107,7 +107,7 @@ class TestMulticastService:
         await service.start()
         assert service._protocol is not None
         assert service._protocol.transport is not None
-        assert service._protocol.transport.get_extra_info("sockname") == ("224.0.0.231", 8702)
+        assert service._protocol.transport.get_extra_info("sockname") == ("0.0.0.0", 8702)
 
         await service.stop()
         assert service._protocol is None

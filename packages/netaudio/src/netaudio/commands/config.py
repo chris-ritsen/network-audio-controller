@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import math
 import os
 import subprocess
@@ -10,16 +11,34 @@ from typing import Optional
 import typer
 
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.clock_config import (
+    format_clock_subdomain,
+    parse_clock_subdomain_selection,
+)
 from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.sample_rate_pullup import (
+    format_supported_sample_rate_pullup_values,
+    parse_sample_rate_pullup_selection,
+    sample_rate_pullup_label,
+)
+from netaudio.dante.sample_rate_topology import (
+    SampleRateTopologyChangedButUnverifiedError,
+    SampleRateTopologyError,
+    SampleRateTopologyMutationOutcomeUnknownError,
+    change_sample_rate_with_command_sender,
+)
 from netaudio.dante.services.notification import (
     NOTIFICATION_AES67_STATUS,
+    NOTIFICATION_CLOCKING_STATUS,
     NOTIFICATION_ENCODING_STATUS,
     NOTIFICATION_LATENCY_CHANGE,
+    NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS,
     NOTIFICATION_SAMPLE_RATE_STATUS,
     NOTIFICATION_SETTINGS_CHANGE,
 )
 
 from netaudio._common import (
+    CapabilityProbeTimeout,
     ReadbackResult,
     _command_context,
     _discover,
@@ -96,224 +115,39 @@ def config_path():
     typer.echo(str(default_config_path()))
 
 
-def _resolve_targets(filtered, all_devices):
-    if all_devices:
-        if not filtered:
-            typer.echo("Error: no devices found.", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-        return list(sort_devices(filtered))
-
-    if len(filtered) == 0:
-        typer.echo("Error: device not found.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    if len(filtered) > 1:
-        names = ", ".join(device.name or server_name for server_name, device in filtered.items())
-        typer.echo(f"Error: multiple devices matched: {names}", err=True)
-        typer.echo("Use -n to select a device or --all for all devices.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    return [next(iter(filtered.items()))]
-
-
-async def _read_settings_value(device, key):
-    settings = await device.operations.get_device_settings()
-    if not isinstance(settings, dict) or settings.get(key) is None:
-        raise RuntimeError(f"{key} readback was unavailable")
-    return settings[key]
-
-
-async def _read_aes67_configured(device):
-    configured = await device.operations.get_aes67_configured()
-    if configured is None:
-        raise RuntimeError("AES67 configured-state readback was unavailable")
-    return configured
-
-
-async def _read_latency_milliseconds(device):
-    settings = await device.operations.get_device_settings()
-    if not isinstance(settings, dict):
-        raise RuntimeError("active latency readback was unavailable")
-    latency_nanoseconds = settings.get("active_latency_ns")
-    if latency_nanoseconds is None:
-        raise RuntimeError("active latency readback was unavailable")
-    return nanoseconds_to_milliseconds(latency_nanoseconds)
-
-
-async def _read_sample_rate_status_result(send, device):
-    current_sample_rate, supported_sample_rates = await send.probe_sample_rate_status(device.ipv4)
-    device.sample_rate = current_sample_rate
-    device.supported_sample_rates = supported_sample_rates
-    return current_sample_rate, supported_sample_rates
-
-
-async def _read_sample_rate_status(send, device):
-    current_sample_rate, _ = await _read_sample_rate_status_result(send, device)
-    return current_sample_rate
-
-
-async def _read_encoding_status_result(send, device):
-    current_encoding, supported_encodings = await send.probe_encoding_status(device.ipv4)
-    device.encoding = current_encoding
-    device.supported_encodings = supported_encodings
-    return current_encoding, supported_encodings
-
-
-async def _read_encoding_status(send, device):
-    current_encoding, _ = await _read_encoding_status_result(send, device)
-    return current_encoding
-
-
-def _targets_supporting_value(
-    targets,
-    requested_value,
-    supported_values_field,
-    fallback_values,
-    capability_description,
-):
-    supported_targets = []
-    failures = 0
-    for server_name, device in targets:
-        label = device.name or server_name
-        supported_values = getattr(device, supported_values_field)
-        if supported_values is None:
-            if requested_value in fallback_values:
-                supported_targets.append((server_name, device))
-                continue
-            typer.echo(
-                f"Error: {capability_description} capabilities are unavailable for {label}; "
-                f"cannot verify that {requested_value} is supported.",
-                err=True,
-            )
-            failures += 1
-            continue
-        if requested_value not in supported_values:
-            typer.echo(
-                f"Error: {label} reports supported {capability_description} values {supported_values}; "
-                f"{requested_value} is not supported.",
-                err=True,
-            )
-            failures += 1
-            continue
-        supported_targets.append((server_name, device))
-    return supported_targets, failures
-
-
-async def _send_verified_change(
-    targets,
-    send,
-    packet,
-    port_for,
-    expected,
-    read_for,
-    action,
-    success_message,
-    notification_ids,
-    send_kwargs=None,
-    capability_name=None,
-    probe_status_for=None,
-):
-    send_kwargs = send_kwargs or {}
-
-    async def _send_and_read(server_name, device):
-        label = device.name or server_name
-        try:
-            capability_sender = getattr(send, "send_and_wait_for_capability_value", None)
-            if capability_name is not None and probe_status_for is not None and capability_sender is not None:
-                status = await capability_sender(
-                    packet,
-                    device.ipv4,
-                    port_for(device),
-                    capability_name,
-                    expected,
-                    lambda: probe_status_for(device),
-                    **send_kwargs,
-                )
-                if status is None:
-                    return label, ReadbackResult(matched=False), None
-                observed_value, _ = status
-                return (
-                    label,
-                    ReadbackResult(
-                        matched=observed_value == expected,
-                        observed=observed_value,
-                        observed_available=True,
-                    ),
-                    None,
-                )
-            await send_and_wait_for_notification(
-                send,
-                packet,
-                device.ipv4,
-                port_for(device),
-                notification_ids,
-                **send_kwargs,
-            )
-        except TimeoutError:
-            result = await readback_after_notification(lambda: read_for(device), expected)
-            return label, result, None
-        except Exception as exception:
-            return label, None, exception
-
-        result = await readback_after_notification(lambda: read_for(device), expected)
-        return label, result, None
-
-    results = await asyncio.gather(*(_send_and_read(server_name, device) for server_name, device in targets))
-
-    failures = 0
-    for label, result, send_error in results:
-        if send_error is not None:
-            typer.echo(f"Error: could not send {action} to {label}: {send_error}", err=True)
-            failures += 1
-            continue
-        if result.matched:
-            typer.echo(success_message(label))
-            continue
-
-        failures += 1
-        if result.observed_available:
-            typer.echo(
-                f"Error: {action} sent to {label}, but the device reports {result.observed!r} instead of {expected!r}.",
-                err=True,
-            )
-        else:
-            detail = f": {result.error}" if result.error is not None else ""
-            typer.echo(
-                f"Error: {action} sent to {label}, but readback was unavailable{detail}; the change was not verified.",
-                err=True,
-            )
-    return failures
-
-
-async def _send_requested_change(targets, request_for, action, success_message):
-    async def _request(server_name, device):
-        label = device.name or server_name
-        try:
-            await request_for(device)
-            return label, None
-        except Exception as exception:
-            return label, exception
-
-    results = await asyncio.gather(*(_request(server_name, device) for server_name, device in targets))
-
-    failures = 0
-    for label, error in results:
-        if error is not None:
-            typer.echo(f"Error: could not request {action} for {label}: {error}", err=True)
-            failures += 1
-        else:
-            typer.echo(success_message(label))
-    return failures
+from netaudio.commands.config_readback import (
+    _collect_target_readings,
+    _device_advertises_aes67_multicast_prefix,
+    _read_aes67_configured,
+    _read_aes67_multicast_prefix,
+    _read_encoding_status,
+    _read_encoding_status_result,
+    _read_latency_milliseconds,
+    _read_sample_rate_pullup_status,
+    _read_sample_rate_pullup_status_result,
+    _read_sample_rate_status,
+    _read_sample_rate_status_result,
+    _read_settings_value,
+    _render_cached_reading,
+    _report_reading_failures,
+    _resolve_targets,
+    _send_requested_change,
+    _send_verified_change,
+    _targets_supporting_value,
+)
 
 
 @app.command("sample-rate")
 def sample_rate(
     rate: Optional[int] = typer.Argument(None, help=f"Sample rate: {VALID_SAMPLE_RATES}"),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+    confirm_destructive: bool = typer.Option(
+        False,
+        "--confirm-destructive",
+        help="Confirm permanent removal of out-of-capacity transmitter flow members.",
+    ),
 ):
     """Get or set the sample rate."""
-
-    commands = DanteDeviceCommands()
 
     async def _run():
         async with _command_context() as (devices, send):
@@ -334,28 +168,226 @@ def sample_rate(
                 typer.echo("Error: sample rate must be between 1 and 4294967295 Hz.", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
 
+            async def change_target(server_name, device):
+                try:
+                    result = await change_sample_rate_with_command_sender(
+                        send,
+                        device,
+                        rate,
+                        confirm_destructive=confirm_destructive,
+                    )
+                    return server_name, device, result, None
+                except Exception as exception:
+                    return server_name, device, None, exception
+
+            outcomes = await asyncio.gather(*(change_target(server_name, device) for server_name, device in targets))
+            rows = []
+            json_data = {}
+            failures = 0
+            for server_name, device, result, exception in outcomes:
+                label = device.name or server_name
+                if result is not None:
+                    result_data = result.to_dict()
+                    json_data[server_name] = result_data
+                    preflight = result.preflight
+                    if result.changed:
+                        rows.append(
+                            [
+                                label,
+                                "Verified",
+                                f"{preflight.current_sample_rate_hertz} -> {result.observed_sample_rate_hertz} Hz; "
+                                f"{result.resulting_snapshot.capacity.transmit_channel_count} TX / "
+                                f"{result.resulting_snapshot.capacity.receive_channel_count} RX",
+                            ]
+                        )
+                    else:
+                        rows.append(
+                            [
+                                label,
+                                "Unchanged",
+                                f"fresh readback already reports {result.observed_sample_rate_hertz} Hz; no write sent",
+                            ]
+                        )
+                else:
+                    failures += 1
+                    preflight = exception.preflight if isinstance(exception, SampleRateTopologyError) else None
+                    error_data = {"success": False, "error": str(exception)}
+                    if isinstance(exception, SampleRateTopologyChangedButUnverifiedError):
+                        outcome = "Changed but unverified"
+                        error_data["change_sent"] = True
+                        error_data["state_verified"] = False
+                        error_data["observed_sample_rate_hertz"] = exception.observed_sample_rate_hertz
+                    elif isinstance(exception, SampleRateTopologyMutationOutcomeUnknownError):
+                        outcome = "Outcome unknown"
+                        error_data["mutation_attempted"] = True
+                        error_data["state_verified"] = False
+                    else:
+                        outcome = "Refused"
+                    if preflight is not None:
+                        error_data["preflight"] = preflight.to_dict()
+                    json_data[server_name] = error_data
+                    rows.append([label, outcome, str(exception)])
+                if preflight is None:
+                    continue
+                if preflight.target_capacity is not None:
+                    rows.append(
+                        [
+                            label,
+                            "Target capacity",
+                            f"{preflight.target_capacity.transmit_channel_count} TX / "
+                            f"{preflight.target_capacity.receive_channel_count} RX at "
+                            f"{preflight.target_sample_rate_hertz} Hz",
+                        ]
+                    )
+                for subscription in preflight.reversible_receiver_clipping:
+                    rows.append(
+                        [
+                            label,
+                            "Reversible RX clipping",
+                            f"RX {subscription.receiver_channel_number} {subscription.receiver_channel_name} <- "
+                            f"{subscription.transmitter_channel_name}@{subscription.transmitter_device_name}",
+                        ]
+                    )
+                for membership_loss in preflight.destructive_transmitter_membership_loss:
+                    removed = ",".join(str(value) for value in membership_loss.removed_channel_members)
+                    retained = ",".join(str(value) for value in membership_loss.retained_channel_members)
+                    rows.append(
+                        [
+                            label,
+                            "Destructive TX membership loss",
+                            f"flow {membership_loss.flow_number}: remove {removed}; retain {retained}",
+                        ]
+                    )
+                for uncharacterized_flow in preflight.uncharacterized_transmitter_flows:
+                    rows.append(
+                        [
+                            label,
+                            "Uncharacterized TX flow",
+                            f"flow {uncharacterized_flow.flow_number}: {uncharacterized_flow.reason}",
+                        ]
+                    )
+                if (
+                    preflight.topology_characterized
+                    and not preflight.reversible_receiver_clipping
+                    and not preflight.destructive_transmitter_membership_loss
+                    and not preflight.uncharacterized_transmitter_flows
+                ):
+                    rows.append([label, "Topology", "no active subscription or flow member is out of range"])
+            output_table(["Device", "Result", "Detail"], rows, json_data=json_data)
+            if failures:
+                raise typer.Exit(code=ExitCode.ERROR)
+
+    asyncio.run(_run())
+
+
+@app.command("sample-rate-pullup")
+def sample_rate_pullup(
+    selection: Optional[str] = typer.Argument(
+        None,
+        help="none, +4.1667%, +0.1%, -0.1%, -4.0%, or a raw integer.",
+    ),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+):
+    """Get or set sample-rate pull-up/down."""
+
+    commands = DanteDeviceCommands()
+
+    async def _run():
+        async with _command_context() as (devices, send):
+            filtered = filter_devices(devices)
+            targets = _resolve_targets(filtered, all_devices)
+
+            if selection is None:
+                readings = await _collect_target_readings(
+                    targets,
+                    lambda server_name, device: _read_sample_rate_pullup_status_result(send, device),
+                )
+                hard_failures = [
+                    reading
+                    for reading in readings
+                    if reading[2] is not None and not isinstance(reading[2], CapabilityProbeTimeout)
+                ]
+                if hard_failures and len(hard_failures) == len(readings):
+                    _report_reading_failures("sample-rate pull-up", hard_failures)
+
+                def cell(exception, value):
+                    if exception is None:
+                        return value
+                    if isinstance(exception, CapabilityProbeTimeout):
+                        return "unsupported"
+                    return "unavailable"
+
+                if all_devices:
+                    output_table(
+                        ["Name", "Applied", "Requested", "Supported"],
+                        [
+                            [
+                                device.name or server_name,
+                                cell(exception, sample_rate_pullup_label(device.sample_rate_pullup_raw_value)),
+                                cell(
+                                    exception,
+                                    sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
+                                ),
+                                cell(
+                                    exception,
+                                    format_supported_sample_rate_pullup_values(
+                                        device.supported_sample_rate_pullup_raw_values
+                                    ),
+                                ),
+                            ]
+                            for server_name, device, exception in readings
+                        ],
+                    )
+                else:
+                    device = readings[0][1]
+                    exception = readings[0][2]
+                    if exception is not None:
+                        if isinstance(exception, CapabilityProbeTimeout):
+                            output_single("unsupported")
+                            return
+                        _report_reading_failures("sample-rate pull-up", readings[:1])
+                    output_single(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
+                return
+
+            try:
+                raw_value = parse_sample_rate_pullup_selection(selection)
+            except ValueError as exception:
+                typer.echo(f"Error: {exception}.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+
+            for server_name, device in targets:
+                if device.supported_sample_rate_pullup_raw_values is None:
+                    try:
+                        await _read_sample_rate_pullup_status_result(send, device)
+                    except Exception as exception:
+                        typer.echo(
+                            f"Error: sample-rate pull-up capabilities are unavailable for {device.name or server_name}: {exception}",
+                            err=True,
+                        )
+                        raise typer.Exit(code=ExitCode.ERROR)
+
             supported_targets, capability_failures = _targets_supporting_value(
                 targets,
-                rate,
-                "supported_sample_rates",
-                VALID_SAMPLE_RATES,
-                "sample rate",
+                raw_value,
+                "supported_sample_rate_pullup_raw_values",
+                (),
+                "sample-rate pull-up",
             )
+            if not supported_targets:
+                raise typer.Exit(code=ExitCode.ERROR)
 
-            packet, _, port = commands.command_set_sample_rate(rate)
+            packet, _, port = commands.command_set_sample_rate_pullup(raw_value)
             failures = await _send_verified_change(
                 supported_targets,
                 send,
                 packet,
                 lambda _device: port,
-                rate,
-                lambda device: _read_sample_rate_status(send, device),
-                "sample rate change",
-                lambda label: f"Set sample rate for {label}: {rate} Hz (verified)",
-                (NOTIFICATION_SAMPLE_RATE_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+                raw_value,
+                lambda device: _read_sample_rate_pullup_status(send, device),
+                "sample-rate pull-up change",
+                lambda label: f"Set sample-rate pull-up for {label}: {sample_rate_pullup_label(raw_value)} (verified)",
+                (NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS, NOTIFICATION_SETTINGS_CHANGE),
                 send_kwargs={"expect_response": False},
-                capability_name="sample_rate",
-                probe_status_for=lambda device: _read_sample_rate_status_result(send, device),
             )
             if failures + capability_failures:
                 raise typer.Exit(code=ExitCode.ERROR)
@@ -514,6 +546,11 @@ def _aes67_reboot_required(device):
 @app.command()
 def aes67(
     enabled: Optional[str] = typer.Argument(None, help="on or off"),
+    multicast_prefix: Optional[str] = typer.Option(
+        None,
+        "--multicast-prefix",
+        help="AES67 RTP multicast prefix, for example 239.69.0.0.",
+    ),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
     """Get or set AES67 mode."""
@@ -525,9 +562,50 @@ def aes67(
             filtered = filter_devices(devices)
             targets = _resolve_targets(filtered, all_devices)
 
+            if multicast_prefix is not None:
+                try:
+                    requested_multicast_prefix = str(ipaddress.IPv4Address(multicast_prefix))
+                except (ipaddress.AddressValueError, ValueError):
+                    typer.echo("Error: AES67 multicast prefix must be an IPv4 address.", err=True)
+                    raise typer.Exit(code=ExitCode.ERROR)
+                prefix_targets = []
+                capability_failures = 0
+                for server_name, device in targets:
+                    if not _device_advertises_aes67_multicast_prefix(device):
+                        typer.echo(
+                            f"Error: {device.name or server_name} does not advertise an AES67 multicast prefix.",
+                            err=True,
+                        )
+                        capability_failures += 1
+                    else:
+                        prefix_targets.append((server_name, device))
+                packet, _, port = commands.command_set_aes67_multicast_prefix(requested_multicast_prefix)
+                failures = await _send_verified_change(
+                    prefix_targets,
+                    send,
+                    packet,
+                    lambda device: port if port is not None else _get_arc_port(device),
+                    requested_multicast_prefix,
+                    _read_aes67_multicast_prefix,
+                    "AES67 multicast prefix change",
+                    lambda label: f"Set AES67 multicast prefix for {label}: {requested_multicast_prefix} (verified)",
+                    (NOTIFICATION_SETTINGS_CHANGE,),
+                )
+                if failures + capability_failures:
+                    raise typer.Exit(code=ExitCode.ERROR)
+                if enabled is None:
+                    return
+
             if enabled is None:
                 if all_devices:
-                    headers = ["Name", "Supported", "Current", "Configured", "Reboot Required"]
+                    headers = [
+                        "Name",
+                        "Supported",
+                        "Current",
+                        "Configured",
+                        "Multicast Prefix",
+                        "Reboot Required",
+                    ]
                     rows = []
                     for server_name, device in targets:
                         rows.append(
@@ -536,6 +614,7 @@ def aes67(
                                 _aes67_support_label(device.aes67_supported),
                                 _aes67_state_label(device.aes67_current),
                                 _aes67_state_label(device.aes67_configured),
+                                device.aes67_multicast_prefix or "",
                                 "yes" if _aes67_reboot_required(device) else "no",
                             ]
                         )
@@ -545,9 +624,19 @@ def aes67(
                     if device.aes67_supported is False:
                         output_single("unsupported")
                         return
+                    if device.aes67_multicast_prefix is None:
+                        try:
+                            await device.operations.get_aes67_configured()
+                        except Exception as exception:
+                            typer.echo(
+                                f"Warning: could not read AES67 configuration from {device.name or targets[0][0]}: {exception}",
+                                err=True,
+                            )
                     current_label = _aes67_state_label(device.aes67_current)
                     configured_label = _aes67_state_label(device.aes67_configured)
                     reboot = _aes67_reboot_required(device)
+                    if device.aes67_multicast_prefix:
+                        typer.echo(f"multicast prefix: {device.aes67_multicast_prefix}")
                     if device.aes67_current is None and device.aes67_configured is not None:
                         output_single(configured_label)
                     elif device.aes67_current is not None and device.aes67_current == device.aes67_configured:
@@ -660,125 +749,128 @@ def preferred_leader(
     asyncio.run(_run())
 
 
-@app.command("interface")
-def interface(
-    mode: Optional[str] = typer.Argument(None, help="dhcp or static"),
-    ip_address: Optional[str] = typer.Option(None, "--ip", help="IP address (static only)."),
-    netmask: Optional[str] = typer.Option(None, "--netmask", help="Subnet mask (static only)."),
-    dns_server: Optional[str] = typer.Option(None, "--dns", help="DNS server (static only)."),
-    gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway (static only)."),
+async def _apply_clocking_status(device, parsed):
+    if parsed.get("clock_source_code") is not None:
+        device.clock_source_code = parsed["clock_source_code"]
+    if parsed.get("clock_subdomain") is not None:
+        device.clock_subdomain = bytes(parsed["clock_subdomain"])
+    if parsed.get("preferred_leader") is not None:
+        device.preferred_leader = parsed["preferred_leader"]
+    if parsed.get("clock_role") is not None:
+        device.clock_role = parsed["clock_role"]
+    device.clock_identity = parsed.get("clock_identity")
+    device.leader_clock_identity = parsed.get("leader_clock_identity")
+    if parsed.get("clock_port_state_code") is not None:
+        device.clock_port_state_code = parsed["clock_port_state_code"]
+    if parsed.get("clock_port_records") is not None:
+        device.clock_port_records = parsed["clock_port_records"]
+    if parsed.get("clock_frequency_offset_parts_per_billion") is not None:
+        device.clock_frequency_offset_parts_per_billion = parsed["clock_frequency_offset_parts_per_billion"]
+    return parsed
+
+
+async def _read_clocking_status(device, send=None):
+    if send is not None:
+        return await send.probe_clocking_status(device)
+
+    from netaudio.daemon.client import daemon_is_accessible, refresh_clock_on_daemon
+
+    if daemon_is_accessible():
+        data = await refresh_clock_on_daemon(device.name or device.server_name)
+        if data is not None and data.get("clock_source_code") is not None:
+            return await _apply_clocking_status(device, data)
+
+    parsed = await device.get_clocking_status()
+    if parsed is None:
+        raise RuntimeError("clock status readback was unavailable")
+    return parsed
+
+
+async def _read_clock_subdomain(device, send=None):
+    parsed = await _read_clocking_status(device, send)
+    clock_subdomain = parsed.get("clock_subdomain")
+    if clock_subdomain is None:
+        raise RuntimeError("clock subdomain readback was unavailable")
+    return bytes(clock_subdomain)
+
+
+@app.command("clock-source")
+def clock_source(
+    selection: Optional[str] = typer.Argument(None, help="Not implemented."),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
 ):
-    """Get or set interface configuration."""
+    """Get or set clock source."""
+
+    if selection is None:
+        output_single("not implemented")
+        return
+    typer.echo(
+        "Error: clock source is not implemented; Controller labels for this field are unnamed.",
+        err=True,
+    )
+    raise typer.Exit(code=ExitCode.ERROR)
+
+
+@app.command("clock-subdomain")
+def clock_subdomain(
+    selection: Optional[str] = typer.Argument(
+        None,
+        help="ASCII name, hex:<bytes>, or unset.",
+    ),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+):
+    """Get or set the PTP subdomain name."""
 
     commands = DanteDeviceCommands()
 
     async def _run():
-        if mode is None:
-            from netaudio.daemon.client import get_devices_from_daemon
-
-            devices = await get_devices_from_daemon()
-
-            if devices is not None:
-                devices = filter_devices(devices)
-            else:
-                from netaudio.dante.application import DanteApplication
-                from netaudio.common.app_config import settings
-
-                application = DanteApplication()
-                await application.startup()
-                try:
-                    devices = await application.discover_and_populate(timeout=settings.mdns_timeout)
-                    devices = filter_devices(devices or {})
-                finally:
-                    await application.shutdown()
-
-            headers = ["Name", "Interface", "Mode", "IP Address", "Netmask", "Gateway", "DNS", "Pending"]
-            rows = []
-            json_data = {}
-
-            for server_name, device in sort_devices(devices):
-                interfaces = device.interfaces
-                pending_config = device.interface_pending_config
-                pending_label = ""
-                if pending_config:
-                    pending_mode = pending_config.get("mode", "")
-                    if pending_mode == "static":
-                        pending_label = f"static {pending_config.get('ip_address', '')}"
-                    else:
-                        pending_label = pending_mode
-
-                if not interfaces:
-                    rows.append(
-                        [
-                            device.name or server_name,
-                            "0",
-                            "",
-                            str(device.ipv4) if device.ipv4 else "",
-                            "",
-                            "",
-                            "",
-                            pending_label,
-                        ]
-                    )
-                    continue
-
-                for index, iface in enumerate(interfaces):
-                    rows.append(
-                        [
-                            device.name or server_name,
-                            str(index),
-                            iface.get("mode", ""),
-                            iface.get("ip_address", ""),
-                            iface.get("netmask", ""),
-                            iface.get("gateway", ""),
-                            iface.get("dns_server", ""),
-                            pending_label if index == 0 else "",
-                        ]
-                    )
-
-                device_json = {
-                    "name": device.name,
-                    "interfaces": interfaces,
-                }
-                if pending_config:
-                    device_json["pending_config"] = pending_config
-                json_data[server_name] = device_json
-
-            output_table(headers, rows, json_data=json_data)
-            return
-
-        if mode not in ("dhcp", "static"):
-            typer.echo("Error: mode must be 'dhcp' or 'static'.", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-
-        if mode == "static":
-            if not all([ip_address, netmask, dns_server, gateway]):
-                typer.echo("Error: --ip, --netmask, --dns, and --gateway are required for static mode.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
             targets = _resolve_targets(filtered, all_devices)
 
-            if mode == "dhcp":
-                packet, _, port = commands.command_set_interface_dhcp()
-            else:
-                packet, _, port = commands.command_set_interface_static(ip_address, netmask, dns_server, gateway)
-            failures = await _send_requested_change(
-                targets,
-                lambda device: send(
-                    packet,
-                    str(device.ipv4),
-                    port,
-                    expect_response=False,
-                ),
-                "interface change",
-                lambda label: f"Interface change requested for {label}: {mode}; not verified.",
-            )
+            if selection is None:
 
-            typer.echo("Reboot required for changes to take effect.", err=True)
+                async def _read_target(server_name, device):
+                    if device.clock_subdomain is None:
+                        await _read_clock_subdomain(device, send)
+
+                await _render_cached_reading(
+                    targets,
+                    all_devices,
+                    "clock subdomain",
+                    "Clock Subdomain",
+                    _read_target,
+                    lambda device: format_clock_subdomain(device.clock_subdomain),
+                )
+                return
+
+            try:
+                requested_subdomain = parse_clock_subdomain_selection(selection)
+            except ValueError as exception:
+                typer.echo(f"Error: {exception}.", err=True)
+                raise typer.Exit(code=ExitCode.ERROR)
+
+            packet, _, port = commands.command_set_clock_subdomain(requested_subdomain)
+            failures = await _send_verified_change(
+                targets,
+                send,
+                packet,
+                lambda _device: port,
+                requested_subdomain,
+                lambda device: _read_clock_subdomain(device, send),
+                "clock subdomain change",
+                lambda label: (
+                    f"Set clock subdomain for {label}: {format_clock_subdomain(requested_subdomain)} (verified)"
+                ),
+                (NOTIFICATION_CLOCKING_STATUS, NOTIFICATION_SETTINGS_CHANGE),
+                send_kwargs={"expect_response": False},
+            )
             if failures:
                 raise typer.Exit(code=ExitCode.ERROR)
 
     asyncio.run(_run())
+
+
+from netaudio.commands.config_network import interface
+
+app.command("interface")(interface)

@@ -1,4 +1,25 @@
 {
+  "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
+    "kind": "channel_audio_metadata",
+    "parsed": {
+      "sample_rate": 48000,
+      "current_encoding": 24,
+      "encoding_capability_bitmap": 4,
+      "supported_encodings": [
+        24
+      ]
+    }
+  },
+  "aes67_configured_packet_1479697": {
+    "hex": "28090094003611000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f42400f424000000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480",
+    "kind": "aes67_configured",
+    "parsed": false
+  },
+  "aes67_unsupported_placeholder_packet_9088832": {
+    "hex": "2729008c006711000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110002030300048021007c00f000000000806000220001000000630000006400000065000002220212003000008321001e8480000f4240000f4240028b0aab0003d09000000000000000000000000000000000",
+    "kind": "aes67_configured",
+    "parsed": null
+  },
   "avio-bt-1_bluetooth_status_connected.bin": {
     "kind": "bluetooth_status",
     "parsed": {
@@ -45,48 +66,146 @@
       "default_latency_ns": 1000000,
       "min_latency_ns": 1000000,
       "max_latency_ns": 20312500,
-      "info_codes": [
-        [
-          32800,
-          48000
-        ],
-        [
-          32801,
-          0
-        ],
-        [
-          32864,
-          4014276608
-        ],
-        [
-          33284,
-          1000000
-        ],
-        [
-          33285,
-          1000000
-        ],
-        [
-          33537,
-          1000000
-        ],
-        [
-          33542,
-          1000000
-        ],
-        [
-          33538,
-          20312500
-        ],
-        [
-          33569,
-          2000000
-        ],
-        [
-          33776,
-          5
-        ]
-      ]
+      "aes67_multicast_prefix": "239.69.0.0",
+      "inline_values": [
+        {
+          "info_code": 34,
+          "value": 1
+        },
+        {
+          "info_code": 35,
+          "value": 24
+        },
+        {
+          "info_code": 36,
+          "value": 1
+        },
+        {
+          "info_code": 98,
+          "value": 1
+        },
+        {
+          "info_code": 99,
+          "value": 1
+        },
+        {
+          "info_code": 513,
+          "value": 1
+        },
+        {
+          "info_code": 522,
+          "value": 0
+        },
+        {
+          "info_code": 523,
+          "value": 0
+        },
+        {
+          "info_code": 528,
+          "value": 16
+        },
+        {
+          "info_code": 529,
+          "value": 16
+        },
+        {
+          "info_code": 530,
+          "value": 48
+        },
+        {
+          "info_code": 531,
+          "value": 16
+        },
+        {
+          "info_code": 532,
+          "value": 16
+        },
+        {
+          "info_code": 546,
+          "value": 5004
+        },
+        {
+          "info_code": 784,
+          "value": 16
+        },
+        {
+          "info_code": 785,
+          "value": 16
+        },
+        {
+          "info_code": 786,
+          "value": 48
+        },
+        {
+          "info_code": 771,
+          "value": 2
+        },
+        {
+          "info_code": 1537,
+          "value": 0
+        },
+        {
+          "info_code": 777,
+          "value": 3
+        },
+        {
+          "info_code": 521,
+          "value": 1
+        }
+      ],
+      "referenced_values": [
+        {
+          "info_code": 32800,
+          "pointer": 156,
+          "value_hexadecimal": "0000bb80"
+        },
+        {
+          "info_code": 32801,
+          "pointer": 160,
+          "value_hexadecimal": "00000000000000000000000000000000"
+        },
+        {
+          "info_code": 32864,
+          "pointer": 176,
+          "value_hexadecimal": "ef450000"
+        },
+        {
+          "info_code": 33284,
+          "pointer": 180,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33285,
+          "pointer": 184,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33537,
+          "pointer": 188,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33542,
+          "pointer": 192,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33538,
+          "pointer": 196,
+          "value_hexadecimal": "0135f1b4"
+        },
+        {
+          "info_code": 33569,
+          "pointer": 200,
+          "value_hexadecimal": "001e8480"
+        },
+        {
+          "info_code": 33776,
+          "pointer": 204,
+          "value_hexadecimal": "0000000500000000"
+        }
+      ],
+      "unavailable_property_ids": []
     }
   },
   "core_device_settings_lx-dante.bin": {
@@ -99,100 +218,117 @@
       "default_latency_ns": 1000000,
       "min_latency_ns": 150000,
       "max_latency_ns": 21333334,
-      "info_codes": [
-        [
-          32800,
-          48000
-        ],
-        [
-          32801,
-          0
-        ],
-        [
-          33284,
-          1000000
-        ],
-        [
-          33285,
-          1000000
-        ],
-        [
-          33537,
-          1000000
-        ],
-        [
-          33542,
-          150000
-        ],
-        [
-          33538,
-          21333334
-        ],
-        [
-          33776,
-          5
-        ]
-      ]
+      "aes67_multicast_prefix": null,
+      "inline_values": [
+        {
+          "info_code": 34,
+          "value": 1
+        },
+        {
+          "info_code": 36,
+          "value": 1
+        },
+        {
+          "info_code": 240,
+          "value": 0
+        },
+        {
+          "info_code": 513,
+          "value": 1
+        },
+        {
+          "info_code": 522,
+          "value": 0
+        },
+        {
+          "info_code": 523,
+          "value": 0
+        },
+        {
+          "info_code": 528,
+          "value": 16
+        },
+        {
+          "info_code": 529,
+          "value": 16
+        },
+        {
+          "info_code": 530,
+          "value": 48
+        },
+        {
+          "info_code": 531,
+          "value": 2
+        },
+        {
+          "info_code": 532,
+          "value": 52
+        },
+        {
+          "info_code": 784,
+          "value": 16
+        },
+        {
+          "info_code": 785,
+          "value": 2
+        },
+        {
+          "info_code": 771,
+          "value": 4
+        },
+        {
+          "info_code": 1537,
+          "value": 0
+        }
+      ],
+      "referenced_values": [
+        {
+          "info_code": 32800,
+          "pointer": 120,
+          "value_hexadecimal": "0000bb80"
+        },
+        {
+          "info_code": 32801,
+          "pointer": 124,
+          "value_hexadecimal": "00000000000000000000000000000000"
+        },
+        {
+          "info_code": 33284,
+          "pointer": 140,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33285,
+          "pointer": 144,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33537,
+          "pointer": 148,
+          "value_hexadecimal": "000f4240"
+        },
+        {
+          "info_code": 33542,
+          "pointer": 152,
+          "value_hexadecimal": "000249f0"
+        },
+        {
+          "info_code": 33538,
+          "pointer": 156,
+          "value_hexadecimal": "01458556"
+        },
+        {
+          "info_code": 33776,
+          "pointer": 160,
+          "value_hexadecimal": "0000000500000000"
+        }
+      ],
+      "unavailable_property_ids": []
     }
   },
   "core_latency_config_avio-aes3-1.bin": {
     "kind": "aes67_configured",
     "parsed": false
-  },
-  "synthetic_dante_model": {
-    "hex": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042726f6f6b6c796e49490000000000000000000000000000000000000000000000000000000000000000000042726f6f6b6c796e204949000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-    "kind": "dante_model",
-    "parsed": {
-      "board_codename": "BrooklynII",
-      "board_name": "Brooklyn II"
-    }
-  },
-  "synthetic_make_model": {
-    "hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000417564696e6174650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004156494f2d4145533300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000205",
-    "kind": "make_model",
-    "parsed": {
-      "manufacturer": "Audinate",
-      "product_name": "AVIO-AES3",
-      "product_version": ""
-    }
-  },
-  "sample_rate_status_lx-dante": {
-    "hex": "ffff004816310000001dc10812580000417564696e6174650724008000000000001800060000ac4400000000000200000000ac440000bb8000015888000177000002b1100002ee00",
-    "kind": "sample_rate_status",
-    "parsed": {
-      "current_sample_rate": 44100,
-      "supported_sample_rates": [
-        44100,
-        48000,
-        88200,
-        96000,
-        176400,
-        192000
-      ]
-    }
-  },
-  "sample_rate_status_packet_4170820": {
-    "hex": "ffff0034061a0000001dc10812580000417564696e6174650724008000000000001800010000bb8000000000000200000000bb80",
-    "kind": "sample_rate_status",
-    "parsed": {
-      "current_sample_rate": 48000,
-      "supported_sample_rates": [
-        48000
-      ]
-    }
-  },
-  "sample_rate_status_packet_9695783": {
-    "hex": "ffff0040fd2a0000001dc1fffe53ef37417564696e6174650738008000000000001800040000bb800000bb80000200000000ac440000bb800001588800017700",
-    "kind": "sample_rate_status",
-    "parsed": {
-      "current_sample_rate": 48000,
-      "supported_sample_rates": [
-        44100,
-        48000,
-        88200,
-        96000
-      ]
-    }
   },
   "encoding_status_packet_204720": {
     "hex": "ffff003c21020000001dc11073320000417564696e617465072400820000000000180003000000180000000000020000000000180000001000000020",
@@ -211,27 +347,6 @@
     "kind": "encoding_status",
     "parsed": {
       "current_encoding": 24,
-      "supported_encodings": [
-        24
-      ]
-    }
-  },
-  "aes67_configured_packet_1479697": {
-    "hex": "28090094003611000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f42400f424000000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480",
-    "kind": "aes67_configured",
-    "parsed": false
-  },
-  "aes67_unsupported_placeholder_packet_9088832": {
-    "hex": "2729008c006711000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110002030300048021007c00f000000000806000220001000000630000006400000065000002220212003000008321001e8480000f4240000f4240028b0aab0003d09000000000000000000000000000000000",
-    "kind": "aes67_configured",
-    "parsed": null
-  },
-  "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
-    "kind": "channel_audio_metadata",
-    "parsed": {
-      "sample_rate": 48000,
-      "current_encoding": 24,
-      "encoding_capability_bitmap": 4,
       "supported_encodings": [
         24
       ]
@@ -259,25 +374,19 @@
       ]
     }
   },
-  "interface_status_lx_dante_packet_12362179": {
-    "hex": "ffff009412b70000001dc10812580000417564696e617465072400110000000000020000000003e80001001dc1081258c0a8016cffffff00c0a80101c0a801010000000a0000001dc1081259ac1fb93affff000000000000000000000018004c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "interface_status_avio_applied_dhcp_packet_12362281": {
+    "hex": "ffff006c05920000001dc1fffe50692e417564696e617465072700110000000000010000000000640001001dc150692ec0a8018bffffff00c0a80101c0a8010100180030000000000004000000000000000000000000000000000000004800006c6f63616c646f6d61696e00",
     "kind": "interface_status",
     "parsed": {
-      "link_speed_mbps": 1000,
+      "link_speed_mbps": 100,
       "interfaces": [
         {
           "mode": "dynamic",
-          "mac_address": "00:1D:C1:08:12:58",
-          "ip_address": "192.168.1.108",
+          "mac_address": "00:1D:C1:50:69:2E",
+          "ip_address": "192.168.1.139",
           "netmask": "255.255.255.0",
           "gateway": "192.168.1.1",
           "dns_server": "192.168.1.1"
-        },
-        {
-          "mode": "unknown(0x0000)",
-          "mac_address": "00:1D:C1:08:12:59",
-          "ip_address": "172.31.185.58",
-          "netmask": "255.255.0.0"
         }
       ],
       "reboot_required": false,
@@ -303,344 +412,29 @@
       "pending_config": null
     }
   },
-  "interface_status_avio_applied_dhcp_packet_12362281": {
-    "hex": "ffff006c05920000001dc1fffe50692e417564696e617465072700110000000000010000000000640001001dc150692ec0a8018bffffff00c0a80101c0a8010100180030000000000004000000000000000000000000000000000000004800006c6f63616c646f6d61696e00",
+  "interface_status_lx_dante_packet_12362179": {
+    "hex": "ffff009412b70000001dc10812580000417564696e617465072400110000000000020000000003e80001001dc1081258c0a8016cffffff00c0a80101c0a801010000000a0000001dc1081259ac1fb93affff000000000000000000000018004c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
     "kind": "interface_status",
     "parsed": {
-      "link_speed_mbps": 100,
+      "link_speed_mbps": 1000,
       "interfaces": [
         {
           "mode": "dynamic",
-          "mac_address": "00:1D:C1:50:69:2E",
-          "ip_address": "192.168.1.139",
+          "mac_address": "00:1D:C1:08:12:58",
+          "ip_address": "192.168.1.108",
           "netmask": "255.255.255.0",
           "gateway": "192.168.1.1",
           "dns_server": "192.168.1.1"
+        },
+        {
+          "mode": "unknown(0x0000)",
+          "mac_address": "00:1D:C1:08:12:59",
+          "ip_address": "172.31.185.58",
+          "netmask": "255.255.0.0"
         }
       ],
       "reboot_required": false,
       "pending_config": null
-    }
-  },
-  "property_directory_lx_dante_packet_12358036": {
-    "hex": "272900700041110200010019802000018021000300220003002400018060000300f00003020100038204000382050003020a0001020b000102100003021100030212000302130001021400018301000383060001830200010310000303110001031200010303000383f0000106010001",
-    "kind": "property_directory",
-    "parsed": {
-      "properties": [
-        {
-          "property_id": 32800,
-          "flags": 1
-        },
-        {
-          "property_id": 32801,
-          "flags": 3
-        },
-        {
-          "property_id": 34,
-          "flags": 3
-        },
-        {
-          "property_id": 36,
-          "flags": 1
-        },
-        {
-          "property_id": 32864,
-          "flags": 3
-        },
-        {
-          "property_id": 240,
-          "flags": 3
-        },
-        {
-          "property_id": 513,
-          "flags": 3
-        },
-        {
-          "property_id": 33284,
-          "flags": 3
-        },
-        {
-          "property_id": 33285,
-          "flags": 3
-        },
-        {
-          "property_id": 522,
-          "flags": 1
-        },
-        {
-          "property_id": 523,
-          "flags": 1
-        },
-        {
-          "property_id": 528,
-          "flags": 3
-        },
-        {
-          "property_id": 529,
-          "flags": 3
-        },
-        {
-          "property_id": 530,
-          "flags": 3
-        },
-        {
-          "property_id": 531,
-          "flags": 1
-        },
-        {
-          "property_id": 532,
-          "flags": 1
-        },
-        {
-          "property_id": 33537,
-          "flags": 3
-        },
-        {
-          "property_id": 33542,
-          "flags": 1
-        },
-        {
-          "property_id": 33538,
-          "flags": 1
-        },
-        {
-          "property_id": 784,
-          "flags": 3
-        },
-        {
-          "property_id": 785,
-          "flags": 1
-        },
-        {
-          "property_id": 786,
-          "flags": 1
-        },
-        {
-          "property_id": 771,
-          "flags": 3
-        },
-        {
-          "property_id": 33776,
-          "flags": 1
-        },
-        {
-          "property_id": 1537,
-          "flags": 1
-        }
-      ],
-      "aes67_supported": false
-    }
-  },
-  "property_directory_avio_packet_12358133": {
-    "hex": "28090088006c11020001001f8020000180210003002200030023000300240001806000030062000300630001020100038204000382050003020a0001020b0001021000030211000302120003021300010214000102220003830100038306000183020001832100010310000103110001031200010303000383f00001060100010309000102090001",
-    "kind": "property_directory",
-    "parsed": {
-      "properties": [
-        {
-          "property_id": 32800,
-          "flags": 1
-        },
-        {
-          "property_id": 32801,
-          "flags": 3
-        },
-        {
-          "property_id": 34,
-          "flags": 3
-        },
-        {
-          "property_id": 35,
-          "flags": 3
-        },
-        {
-          "property_id": 36,
-          "flags": 1
-        },
-        {
-          "property_id": 32864,
-          "flags": 3
-        },
-        {
-          "property_id": 98,
-          "flags": 3
-        },
-        {
-          "property_id": 99,
-          "flags": 1
-        },
-        {
-          "property_id": 513,
-          "flags": 3
-        },
-        {
-          "property_id": 33284,
-          "flags": 3
-        },
-        {
-          "property_id": 33285,
-          "flags": 3
-        },
-        {
-          "property_id": 522,
-          "flags": 1
-        },
-        {
-          "property_id": 523,
-          "flags": 1
-        },
-        {
-          "property_id": 528,
-          "flags": 3
-        },
-        {
-          "property_id": 529,
-          "flags": 3
-        },
-        {
-          "property_id": 530,
-          "flags": 3
-        },
-        {
-          "property_id": 531,
-          "flags": 1
-        },
-        {
-          "property_id": 532,
-          "flags": 1
-        },
-        {
-          "property_id": 546,
-          "flags": 3
-        },
-        {
-          "property_id": 33537,
-          "flags": 3
-        },
-        {
-          "property_id": 33542,
-          "flags": 1
-        },
-        {
-          "property_id": 33538,
-          "flags": 1
-        },
-        {
-          "property_id": 33569,
-          "flags": 1
-        },
-        {
-          "property_id": 784,
-          "flags": 1
-        },
-        {
-          "property_id": 785,
-          "flags": 1
-        },
-        {
-          "property_id": 786,
-          "flags": 1
-        },
-        {
-          "property_id": 771,
-          "flags": 3
-        },
-        {
-          "property_id": 33776,
-          "flags": 1
-        },
-        {
-          "property_id": 1537,
-          "flags": 1
-        },
-        {
-          "property_id": 777,
-          "flags": 1
-        },
-        {
-          "property_id": 521,
-          "flags": 1
-        }
-      ],
-      "aes67_supported": true
-    }
-  },
-  "metering_frame_ad4d_packet_7298532": {
-    "hex": "ffff005d1fad0000000eddfd4e130000417564696e617465024001fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe00",
-    "kind": "metering",
-    "parsed": {
-      "sequence": 8109,
-      "source_eui64": "000eddfd4e130000",
-      "tx_count": 64,
-      "rx_count": 1,
-      "tx_levels": [
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254,
-        254
-      ],
-      "rx_levels": [
-        0
-      ]
     }
   },
   "metering_frame_a32_packet_7298422": {
@@ -781,6 +575,390 @@
         254,
         254,
         254,
+        0
+      ]
+    }
+  },
+  "metering_frame_ad4d_packet_7298532": {
+    "hex": "ffff005d1fad0000000eddfd4e130000417564696e617465024001fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe00",
+    "kind": "metering",
+    "parsed": {
+      "sequence": 8109,
+      "source_eui64": "000eddfd4e130000",
+      "tx_count": 64,
+      "rx_count": 1,
+      "tx_levels": [
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254,
+        254
+      ],
+      "rx_levels": [
+        0
+      ]
+    }
+  },
+  "property_directory_avio_packet_12358133": {
+    "hex": "28090088006c11020001001f8020000180210003002200030023000300240001806000030062000300630001020100038204000382050003020a0001020b0001021000030211000302120003021300010214000102220003830100038306000183020001832100010310000103110001031200010303000383f00001060100010309000102090001",
+    "kind": "property_directory",
+    "parsed": {
+      "properties": [
+        {
+          "property_id": 32800,
+          "flags": 1
+        },
+        {
+          "property_id": 32801,
+          "flags": 3
+        },
+        {
+          "property_id": 34,
+          "flags": 3
+        },
+        {
+          "property_id": 35,
+          "flags": 3
+        },
+        {
+          "property_id": 36,
+          "flags": 1
+        },
+        {
+          "property_id": 32864,
+          "flags": 3
+        },
+        {
+          "property_id": 98,
+          "flags": 3
+        },
+        {
+          "property_id": 99,
+          "flags": 1
+        },
+        {
+          "property_id": 513,
+          "flags": 3
+        },
+        {
+          "property_id": 33284,
+          "flags": 3
+        },
+        {
+          "property_id": 33285,
+          "flags": 3
+        },
+        {
+          "property_id": 522,
+          "flags": 1
+        },
+        {
+          "property_id": 523,
+          "flags": 1
+        },
+        {
+          "property_id": 528,
+          "flags": 3
+        },
+        {
+          "property_id": 529,
+          "flags": 3
+        },
+        {
+          "property_id": 530,
+          "flags": 3
+        },
+        {
+          "property_id": 531,
+          "flags": 1
+        },
+        {
+          "property_id": 532,
+          "flags": 1
+        },
+        {
+          "property_id": 546,
+          "flags": 3
+        },
+        {
+          "property_id": 33537,
+          "flags": 3
+        },
+        {
+          "property_id": 33542,
+          "flags": 1
+        },
+        {
+          "property_id": 33538,
+          "flags": 1
+        },
+        {
+          "property_id": 33569,
+          "flags": 1
+        },
+        {
+          "property_id": 784,
+          "flags": 1
+        },
+        {
+          "property_id": 785,
+          "flags": 1
+        },
+        {
+          "property_id": 786,
+          "flags": 1
+        },
+        {
+          "property_id": 771,
+          "flags": 3
+        },
+        {
+          "property_id": 33776,
+          "flags": 1
+        },
+        {
+          "property_id": 1537,
+          "flags": 1
+        },
+        {
+          "property_id": 777,
+          "flags": 1
+        },
+        {
+          "property_id": 521,
+          "flags": 1
+        }
+      ],
+      "aes67_supported": true
+    }
+  },
+  "property_directory_lx_dante_packet_12358036": {
+    "hex": "272900700041110200010019802000018021000300220003002400018060000300f00003020100038204000382050003020a0001020b000102100003021100030212000302130001021400018301000383060001830200010310000303110001031200010303000383f0000106010001",
+    "kind": "property_directory",
+    "parsed": {
+      "properties": [
+        {
+          "property_id": 32800,
+          "flags": 1
+        },
+        {
+          "property_id": 32801,
+          "flags": 3
+        },
+        {
+          "property_id": 34,
+          "flags": 3
+        },
+        {
+          "property_id": 36,
+          "flags": 1
+        },
+        {
+          "property_id": 32864,
+          "flags": 3
+        },
+        {
+          "property_id": 240,
+          "flags": 3
+        },
+        {
+          "property_id": 513,
+          "flags": 3
+        },
+        {
+          "property_id": 33284,
+          "flags": 3
+        },
+        {
+          "property_id": 33285,
+          "flags": 3
+        },
+        {
+          "property_id": 522,
+          "flags": 1
+        },
+        {
+          "property_id": 523,
+          "flags": 1
+        },
+        {
+          "property_id": 528,
+          "flags": 3
+        },
+        {
+          "property_id": 529,
+          "flags": 3
+        },
+        {
+          "property_id": 530,
+          "flags": 3
+        },
+        {
+          "property_id": 531,
+          "flags": 1
+        },
+        {
+          "property_id": 532,
+          "flags": 1
+        },
+        {
+          "property_id": 33537,
+          "flags": 3
+        },
+        {
+          "property_id": 33542,
+          "flags": 1
+        },
+        {
+          "property_id": 33538,
+          "flags": 1
+        },
+        {
+          "property_id": 784,
+          "flags": 3
+        },
+        {
+          "property_id": 785,
+          "flags": 1
+        },
+        {
+          "property_id": 786,
+          "flags": 1
+        },
+        {
+          "property_id": 771,
+          "flags": 3
+        },
+        {
+          "property_id": 33776,
+          "flags": 1
+        },
+        {
+          "property_id": 1537,
+          "flags": 1
+        }
+      ],
+      "aes67_supported": false
+    }
+  },
+  "sample_rate_status_lx-dante": {
+    "hex": "ffff004816310000001dc10812580000417564696e6174650724008000000000001800060000ac4400000000000200000000ac440000bb8000015888000177000002b1100002ee00",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 44100,
+      "supported_sample_rates": [
+        44100,
+        48000,
+        88200,
+        96000,
+        176400,
+        192000
+      ]
+    }
+  },
+  "sample_rate_status_packet_4170820": {
+    "hex": "ffff0034061a0000001dc10812580000417564696e6174650724008000000000001800010000bb8000000000000200000000bb80",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 48000,
+      "supported_sample_rates": [
+        48000
+      ]
+    }
+  },
+  "sample_rate_status_packet_9695783": {
+    "hex": "ffff0040fd2a0000001dc1fffe53ef37417564696e6174650738008000000000001800040000bb800000bb80000200000000ac440000bb800001588800017700",
+    "kind": "sample_rate_status",
+    "parsed": {
+      "current_sample_rate": 48000,
+      "supported_sample_rates": [
+        44100,
+        48000,
+        88200,
+        96000
+      ]
+    }
+  },
+  "synthetic_dante_model": {
+    "hex": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042726f6f6b6c796e49490000000000000000000000000000000000000000000000000000000000000000000042726f6f6b6c796e204949000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "kind": "dante_model",
+    "parsed": {
+      "board_codename": "BrooklynII",
+      "board_name": "Brooklyn II"
+    }
+  },
+  "synthetic_make_model": {
+    "hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000417564696e6174650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004156494f2d4145533300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000205",
+    "kind": "make_model",
+    "parsed": {
+      "manufacturer": "Audinate",
+      "manufacturer_field_hexadecimal": "417564696e617465000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "unmapped_field_at_byte_offset_74": 0,
+      "product_name": "AVIO-AES3",
+      "product_version": "",
+      "product_version_components": [
+        0,
+        0,
+        0,
         0
       ]
     }

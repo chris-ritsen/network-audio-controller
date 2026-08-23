@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import json
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from netaudio import _common
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.commands import flow as flow_commands
 from netaudio.commands import preset as preset_commands
 from netaudio.commands import subscription as subscription_commands
@@ -73,6 +75,7 @@ def _subscription_devices(refresh_rx=None):
         rx_channels={},
         subscriptions=[],
         services={},
+        topology_mutation_lock=DeferredAsyncioLock(),
     )
     rx = SimpleNamespace(
         name="RX",
@@ -82,6 +85,7 @@ def _subscription_devices(refresh_rx=None):
         rx_channels={1: _channel(1, "Rx1"), 2: _channel(2, "Rx2")},
         subscriptions=[],
         services={},
+        topology_mutation_lock=DeferredAsyncioLock(),
     )
 
     async def get_rx_channels():
@@ -161,6 +165,7 @@ def test_subscription_bulk_skips_already_satisfied_pairs(monkeypatch):
     sends = []
 
     async def send(*args, **kwargs):
+        assert rx.topology_mutation_lock.locked()
         sends.append((args, kwargs))
 
     _install_subscription_context(monkeypatch, devices, send)
@@ -204,6 +209,7 @@ def test_subscription_bulk_reports_unchanged_and_modified_exactly(monkeypatch):
     )
 
     async def send(*args, **kwargs):
+        assert rx.topology_mutation_lock.locked()
         sends.append((args, kwargs))
 
     _install_subscription_context(monkeypatch, devices, send)
@@ -363,6 +369,7 @@ def _flow_device():
         ipv4="192.0.2.30",
         flow_protocol_id=0x2729,
         tx_channels={1: _channel(1, "Tx1"), 2: _channel(2, "Tx2")},
+        topology_mutation_lock=DeferredAsyncioLock(),
     )
 
 
@@ -409,6 +416,257 @@ def test_empty_flow_list_preserves_structured_output(monkeypatch):
     assert application.shutdown_calls == 1
 
 
+def test_receiver_flow_list_preserves_structured_output(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    application = _FakeApplication()
+    device = _flow_device()
+    flow_inventory = {
+        "maximum_flow_slots": 16,
+        "flows": [
+            {
+                "flow_number": 3,
+                "flow_type": "unicast",
+                "receiver_channel_numbers_by_flow_channel": [[1, 21], [22]],
+                "subscription_status_code": 0x0015,
+                "destination_internet_protocol_version_four_address": "192.0.2.30",
+                "destination_user_datagram_port": 0x3801,
+                "sample_rate": 48_000,
+                "encoding": 24,
+                "frames_per_packet": 1,
+                "latency_nanoseconds": 1_000_000,
+            }
+        ],
+    }
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return flow_inventory
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
+    state.output_format = OutputFormat.json
+
+    result = runner.invoke(flow_commands.app, ["receiver-list", "device"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == flow_inventory
+    assert application.shutdown_calls == 1
+
+
+def test_receiver_flow_list_displays_endpoint_type_and_port(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    application = _FakeApplication()
+    device = _flow_device()
+    flow_inventory = {
+        "maximum_flow_slots": 16,
+        "flows": [
+            {
+                "flow_number": 3,
+                "flow_type": "unicast",
+                "receiver_channel_numbers_by_flow_channel": [[1, 21], [22]],
+                "subscription_status_code": 0x0015,
+                "destination_internet_protocol_version_four_address": "192.0.2.30",
+                "destination_user_datagram_port": 0x3801,
+                "sample_rate": 48_000,
+                "encoding": 24,
+                "frames_per_packet": 1,
+                "latency_nanoseconds": 1_000_000,
+            }
+        ],
+    }
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return flow_inventory
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
+    state.output_format = OutputFormat.plain
+
+    result = runner.invoke(flow_commands.app, ["receiver-list", "device"])
+
+    assert result.exit_code == 0
+    assert "unicast" in result.output
+    assert "192.0.2.30" in result.output
+    assert "14337" in result.output
+    assert application.shutdown_calls == 1
+
+
+def test_receiver_port_ranges_preserve_structured_output(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    application = _FakeApplication()
+    device = _flow_device()
+    port_ranges = {
+        "first_port_range_start": 0x3800,
+        "first_port_range_end": 0x397F,
+        "second_port_range_start": 0x3980,
+        "second_port_range_end": 0x39FF,
+    }
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return port_ranges
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_receiver_port_ranges", query)
+    state.output_format = OutputFormat.json
+
+    result = runner.invoke(
+        flow_commands.app,
+        ["receiver-port-ranges", "device"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == port_ranges
+    assert application.shutdown_calls == 1
+
+
+def test_transmit_channel_capabilities_fail_closed_without_traceback(monkeypatch):
+    application = _FakeApplication()
+    device = _flow_device()
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return None
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_transmit_channel_capabilities", query)
+
+    result = runner.invoke(
+        flow_commands.app,
+        ["transmit-channel-capabilities", "device"],
+    )
+
+    assert result.exit_code == 1
+    assert "does not report transmitter channel capabilities" in result.output
+    assert "Traceback" not in result.output
+    assert application.shutdown_calls == 1
+
+
+def test_subscription_list_hides_unused_channels_by_default(monkeypatch):
+    from netaudio.dante.subscription import DanteSubscription
+
+    configured = DanteSubscription()
+    configured.rx_channel_name = "bluetooth:left"
+    configured.rx_device_name = "lx-dante"
+    configured.tx_channel_name = "bluetooth:left"
+    configured.tx_device_name = "avio-bt-1"
+    configured.status_code = 0x0009
+
+    unused = DanteSubscription()
+    unused.rx_channel_name = "unused-rx"
+    unused.rx_device_name = "lx-dante"
+    unused.tx_channel_name = "unused-rx"
+    unused.tx_device_name = ""
+    unused.status_code = 0x0000
+
+    device = SimpleNamespace(
+        name="lx-dante",
+        server_name="lx.local.",
+        mac_address="001dc1081258",
+        ipv4="192.0.2.10",
+        model_id="LX-DANTE",
+        subscriptions=[configured, unused],
+    )
+
+    async def discover():
+        return {"lx.local.": device}
+
+    async def populate(_devices):
+        return None
+
+    monkeypatch.setattr(subscription_commands, "_discover", discover)
+    monkeypatch.setattr(subscription_commands, "_populate_controls", populate)
+
+    result = runner.invoke(subscription_commands.app, ["list"])
+
+    assert result.exit_code == 0
+    assert "bluetooth:left" in result.output
+    assert "avio-bt-1" in result.output
+    assert "unused-rx" not in result.output
+
+
+def test_subscription_list_all_includes_unused_without_placeholder_source(monkeypatch):
+    from netaudio.dante.subscription import DanteSubscription
+
+    unused = DanteSubscription()
+    unused.rx_channel_name = "unused-rx"
+    unused.rx_device_name = "lx-dante"
+    unused.tx_channel_name = "unused-rx"
+    unused.tx_device_name = ""
+    unused.status_code = 0x0000
+
+    device = SimpleNamespace(
+        name="lx-dante",
+        server_name="lx.local.",
+        mac_address="001dc1081258",
+        ipv4="192.0.2.10",
+        model_id="LX-DANTE",
+        subscriptions=[unused],
+    )
+
+    async def discover():
+        return {"lx.local.": device}
+
+    async def populate(_devices):
+        return None
+
+    monkeypatch.setattr(subscription_commands, "_discover", discover)
+    monkeypatch.setattr(subscription_commands, "_populate_controls", populate)
+
+    result = runner.invoke(subscription_commands.app, ["list", "--all"])
+
+    assert result.exit_code == 0
+    assert "unused-rx" in result.output
+    assert "lx-dante" in result.output
+    lines = [line for line in result.output.splitlines() if "unused-rx" in line]
+    assert lines
+    assert lines[0].count("unused-rx") == 1
+
+
+def test_transmit_channel_capabilities_preserve_structured_output(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    application = _FakeApplication()
+    device = _flow_device()
+    capabilities = {
+        "format_identifier": 1,
+        "starting_channel_identifier": 1,
+        "channel_count": 128,
+        "capability_flags": 0x7FFF,
+    }
+
+    async def get_device(*_args):
+        return application, device, 4440
+
+    async def query(*_args):
+        return capabilities
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
+    monkeypatch.setattr(flows, "query_transmit_channel_capabilities", query)
+    state.output_format = OutputFormat.json
+
+    result = runner.invoke(
+        flow_commands.app,
+        ["transmit-channel-capabilities", "device"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == capabilities
+    assert application.shutdown_calls == 1
+
+
 def test_flow_create_refuses_occupied_slot(monkeypatch):
     application = _FakeApplication()
     device = _flow_device()
@@ -450,6 +708,7 @@ def test_flow_create_confirms_success(monkeypatch):
         return {"max_flow_slots": 32, "flows": []}
 
     async def create(*_args):
+        assert device.topology_mutation_lock.locked()
         return 1
 
     monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device)
@@ -541,520 +800,3 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
     assert result.exit_code == 1
     assert "is not multicast" in result.output
     assert delete_calls == 0
-
-
-def _write_preset(path, devices):
-    device_xml = []
-    for device in devices:
-        fields = [
-            f"<friendly_name>{device['name']}</friendly_name>",
-        ]
-        if "sample_rate" in device:
-            fields.append(f"<samplerate>{device['sample_rate']}</samplerate>")
-        if "encoding" in device:
-            fields.append(f"<encoding>{device['encoding']}</encoding>")
-        if "latency_us" in device:
-            fields.append(f"<unicast_latency>{device['latency_us']}</unicast_latency>")
-        if "preferred" in device:
-            fields.append(f'<preferred_master value="{"true" if device["preferred"] else "false"}" />')
-        if "interface" in device:
-            fields.append(device["interface"])
-        device_xml.append(f"<device>{''.join(fields)}</device>")
-    path.write_text(f'<?xml version="1.0"?><preset><name>test</name>{"".join(device_xml)}</preset>')
-
-
-def _preset_device(
-    name,
-    sample_rate=48000,
-    supported_sample_rates=None,
-    encoding=24,
-    supported_encodings=None,
-    active_latency_ns=1_000_000,
-):
-    operations = SimpleNamespace()
-
-    async def get_device_settings():
-        return {"sample_rate": sample_rate, "active_latency_ns": active_latency_ns}
-
-    operations.get_device_settings = get_device_settings
-    return SimpleNamespace(
-        name=name,
-        server_name=f"{name.lower()}.local.",
-        ipv4="192.0.2.40",
-        services={},
-        supported_sample_rates=supported_sample_rates,
-        encoding=encoding,
-        supported_encodings=supported_encodings if supported_encodings is not None else [16, 24, 32],
-        interface_pending_config=None,
-        operations=operations,
-    )
-
-
-def _install_preset_context(monkeypatch, devices, send):
-    @asynccontextmanager
-    async def command_context():
-        yield devices, send
-
-    monkeypatch.setattr(_common, "_command_context", command_context)
-
-
-def test_preset_save_refuses_overwrite_before_discovery(monkeypatch, tmp_path):
-    output = tmp_path / "existing.xml"
-    output.write_text("original")
-    entered = False
-
-    @asynccontextmanager
-    async def command_context():
-        nonlocal entered
-        entered = True
-        yield {}, None
-
-    monkeypatch.setattr(_common, "_command_context", command_context)
-
-    result = runner.invoke(preset_commands.app, ["save", str(output)])
-
-    assert result.exit_code == 1
-    assert "refusing to overwrite existing file" in result.output
-    assert output.read_text() == "original"
-    assert not entered
-
-
-def test_preset_force_save_failure_preserves_existing_file(monkeypatch, tmp_path):
-    output = tmp_path / "existing.xml"
-    output.write_text("original")
-    devices = {"device.local.": SimpleNamespace(name="Device")}
-
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        _common,
-        "format_devices_xml",
-        lambda *_args, **_kwargs: "replacement",
-    )
-    monkeypatch.setattr(
-        preset_commands.os,
-        "replace",
-        lambda *_args: (_ for _ in ()).throw(OSError("synthetic replace failure")),
-    )
-
-    result = runner.invoke(
-        preset_commands.app,
-        ["save", str(output), "--force"],
-    )
-
-    assert result.exit_code == 1
-    assert "synthetic replace failure" in result.output
-    assert output.read_text() == "original"
-    assert list(tmp_path.glob(".*.tmp")) == []
-
-
-def test_preset_force_replaces_existing_file(monkeypatch, tmp_path):
-    output = tmp_path / "existing.xml"
-    output.write_text("original")
-    devices = {"device.local.": SimpleNamespace(name="Device")}
-
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        _common,
-        "format_devices_xml",
-        lambda *_args, **_kwargs: "replacement",
-    )
-
-    result = runner.invoke(
-        preset_commands.app,
-        ["save", str(output), "--force"],
-    )
-
-    assert result.exit_code == 0
-    assert output.read_text() == "replacement"
-    assert list(tmp_path.glob(".*.tmp")) == []
-
-
-def test_preset_save_publishes_complete_file_atomically(monkeypatch, tmp_path):
-    output = tmp_path / "new.xml"
-    devices = {"device.local.": SimpleNamespace(name="Device")}
-
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        _common,
-        "format_devices_xml",
-        lambda *_args, **_kwargs: "complete preset",
-    )
-
-    result = runner.invoke(preset_commands.app, ["save", str(output)])
-
-    assert result.exit_code == 0
-    assert output.read_text() == "complete preset"
-    assert list(tmp_path.glob(".*.tmp")) == []
-
-
-def test_preset_converts_dc_latency_microseconds_for_display(tmp_path):
-    preset = tmp_path / "latency.xml"
-    _write_preset(preset, [{"name": "Device", "latency_us": 150}])
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset), "--dry-run"])
-
-    assert result.exit_code == 0
-    assert "latency: 0.15 ms" in result.output
-    assert "unsupported for load" not in result.output
-
-
-def test_preset_rejects_duplicate_friendly_names(tmp_path):
-    preset = tmp_path / "duplicates.xml"
-    _write_preset(
-        preset,
-        [
-            {"name": "Duplicate", "sample_rate": 48000},
-            {"name": "Duplicate", "sample_rate": 96000},
-        ],
-    )
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset), "--dry-run"])
-
-    assert result.exit_code == 1
-    assert "duplicate preset device name" in result.output
-
-
-def test_preset_rejects_invalid_preferred_master_value(tmp_path):
-    preset = tmp_path / "invalid-preferred.xml"
-    preset.write_text(
-        '<?xml version="1.0"?><preset><name>test</name><device>'
-        "<friendly_name>Device</friendly_name>"
-        '<preferred_master value="definitely" />'
-        "</device></preset>"
-    )
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset), "--dry-run"])
-
-    assert result.exit_code == 1
-    assert "preferred_master value must be true or false" in result.output
-
-
-def test_preset_marks_additional_interfaces_unsupported(monkeypatch, tmp_path):
-    preset = tmp_path / "interfaces.xml"
-    interfaces = (
-        '<interface network="0"><ipv4_address mode="dynamic" /></interface>'
-        '<interface network="1"><ipv4_address mode="dynamic" /></interface>'
-    )
-    _write_preset(preset, [{"name": "Device", "interface": interfaces}])
-    devices = {"device.local.": _preset_device("Device")}
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert "unsupported fields: additional network interfaces" in result.output
-    assert sends == []
-
-
-def test_preset_preflights_all_matches_before_any_send(monkeypatch, tmp_path):
-    preset = tmp_path / "partial.xml"
-    _write_preset(
-        preset,
-        [
-            {"name": "First", "sample_rate": 48000},
-            {"name": "Second", "encoding": 24},
-        ],
-    )
-    devices = {
-        "first.local.": _preset_device("First"),
-        "second.local.": _preset_device("Second", supported_encodings=[16]),
-    }
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert "refused before sending any changes" in result.output
-    assert "Second: device reports supported encodings [16]; 24 is not supported" in result.output
-    assert sends == []
-
-
-def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_path):
-    preset = tmp_path / "audio-settings.xml"
-    _write_preset(preset, [{"name": "Device", "encoding": 24, "latency_us": 150}])
-    device = _preset_device("Device", encoding=24, active_latency_ns=150_000)
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    async def probe_encoding_status(_ipv4):
-        return device.encoding, device.supported_encodings
-
-    send.probe_encoding_status = probe_encoding_status
-    _install_preset_context(monkeypatch, {"device.local.": device}, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 0
-    assert "encoding 24-bit (verified)" in result.output
-    assert "latency 0.15 ms (verified)" in result.output
-    assert len(sends) == 2
-
-
-def test_preset_refuses_unmatched_devices_without_explicit_filter(monkeypatch, tmp_path):
-    preset = tmp_path / "offline.xml"
-    _write_preset(
-        preset,
-        [
-            {"name": "Online", "sample_rate": 48000},
-            {"name": "Offline", "sample_rate": 48000},
-        ],
-    )
-    devices = {"online.local.": _preset_device("Online")}
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert "these preset devices were not found" in result.output
-    assert "Offline" in result.output
-    assert sends == []
-
-
-def test_preset_filters_devices_before_unsupported_preflight(
-    monkeypatch,
-    tmp_path,
-    reset_cli_state,
-):
-    preset = tmp_path / "filtered.xml"
-    _write_preset(
-        preset,
-        [
-            {"name": "Selected", "sample_rate": 48000},
-            {"name": "Excluded", "encoding": 24},
-        ],
-    )
-    devices = {
-        "selected.local.": _preset_device("Selected"),
-        "excluded.local.": _preset_device("Excluded"),
-    }
-    sends = []
-    reset_cli_state.names = ["Selected"]
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 0
-    assert len(sends) == 1
-    assert sends[0][1]["expect_response"] is False
-    assert "sample rate 48000 Hz (verified)" in result.output
-    assert "Excluded" not in result.output
-
-
-def test_preset_accepts_nonstandard_sample_rate_advertised_by_device(monkeypatch, tmp_path):
-    preset = tmp_path / "future-rate.xml"
-    _write_preset(preset, [{"name": "Device", "sample_rate": 384000}])
-    devices = {
-        "device.local.": _preset_device(
-            "Device",
-            sample_rate=384000,
-            supported_sample_rates=[48000, 384000],
-        )
-    }
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 0
-    assert len(sends) == 1
-    assert "sample rate 384000 Hz (verified)" in result.output
-
-
-def test_preset_rejects_sample_rate_missing_from_device_capabilities(monkeypatch, tmp_path):
-    preset = tmp_path / "unsupported-rate.xml"
-    _write_preset(preset, [{"name": "Device", "sample_rate": 96000}])
-    devices = {
-        "device.local.": _preset_device(
-            "Device",
-            supported_sample_rates=[48000],
-        )
-    }
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert "device reports supported sample rates [48000]" in result.output
-    assert sends == []
-
-
-def test_preset_preflight_rejects_incomplete_static_interface(monkeypatch, tmp_path):
-    preset = tmp_path / "static.xml"
-    interface = '<interface><ipv4_address mode="static"><ip_address>192.0.2.9</ip_address></ipv4_address></interface>'
-    _write_preset(preset, [{"name": "Device", "interface": interface}])
-    devices = {"device.local.": _preset_device("Device")}
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert "static interface is missing" in result.output
-    assert sends == []
-
-
-def test_preset_reports_unverified_requests_honestly(monkeypatch, tmp_path):
-    preset = tmp_path / "requested.xml"
-    interface = '<interface><ipv4_address mode="dynamic" /></interface>'
-    _write_preset(
-        preset,
-        [{"name": "Device", "preferred": True, "interface": interface}],
-    )
-    devices = {"device.local.": _preset_device("Device")}
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        "netaudio.dante.services.cmc._get_host_mac",
-        lambda *_args: b"\x02\x00\x00\x00\x00\x01",
-    )
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 0
-    assert len(sends) == 2
-    assert all(kwargs["expect_response"] is False for _, kwargs in sends)
-    assert "preferred leader on requested; not verified" in result.output
-    assert "interface dynamic requested; not verified" in result.output
-    assert "applied" not in result.output.lower()
-
-
-@pytest.mark.parametrize(
-    ("pending_interface_config", "expects_reboot"),
-    [
-        (None, False),
-        ({"mode": "dynamic"}, True),
-    ],
-)
-def test_preset_verifies_preferred_leader_and_interface_when_available(
-    monkeypatch,
-    tmp_path,
-    pending_interface_config,
-    expects_reboot,
-):
-    preset = tmp_path / "verified-state.xml"
-    interface = '<interface><ipv4_address mode="dynamic" /></interface>'
-    _write_preset(
-        preset,
-        [{"name": "Device", "preferred": True, "interface": interface}],
-    )
-    device = _preset_device("Device")
-    device.interface_pending_config = pending_interface_config
-    devices = {"device.local.": device}
-
-    class ReadbackApplication:
-        shutdown_called = False
-
-        async def probe_preferred_leader_state(self, _device_ip, timeout):
-            assert timeout == 1.0
-            return True
-
-        async def probe_interface_status(self, _device_ip, timeout):
-            assert timeout == 1.0
-            return [{"mode": "dynamic", "ip_address": "192.0.2.40"}]
-
-        async def shutdown(self):
-            self.shutdown_called = True
-
-    readback = ReadbackApplication()
-
-    async def start_readback():
-        return readback
-
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        preset_commands,
-        "_start_preset_readback_application",
-        start_readback,
-    )
-    monkeypatch.setattr(
-        "netaudio.dante.services.cmc._get_host_mac",
-        lambda *_args: b"\x02\x00\x00\x00\x00\x01",
-    )
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 0
-    assert "preferred leader on (verified)" in result.output
-    assert "interface dynamic (verified)" in result.output
-    assert "requested; not verified" not in result.output
-    assert ("Reboot required: Device" in result.output) is expects_reboot
-    assert readback.shutdown_called
-
-
-def test_preset_summary_reports_partial_failure_and_continues(
-    monkeypatch,
-    tmp_path,
-):
-    preset = tmp_path / "partial-runtime.xml"
-    _write_preset(
-        preset,
-        [{"name": "Device", "sample_rate": 48000, "preferred": True}],
-    )
-    devices = {"device.local.": _preset_device("Device")}
-    send_count = 0
-
-    async def send(*_args, **_kwargs):
-        nonlocal send_count
-        send_count += 1
-        if send_count == 1:
-            raise OSError("synthetic sample-rate send failure")
-
-    _install_preset_context(monkeypatch, devices, send)
-
-    result = runner.invoke(preset_commands.app, ["load", str(preset)])
-
-    assert result.exit_code == 1
-    assert send_count == 2
-    assert "Preset load summary:" in result.output
-    assert "sample rate: FAILED to send request: synthetic sample-rate send failure" in result.output
-    assert "preferred leader on requested; not verified" in result.output

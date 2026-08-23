@@ -59,14 +59,15 @@ class TestParseHeader:
         assert h["opcode"] == 0x9999
         assert h["opcode_name"] == "0x9999"
 
-    def test_opcode_name_falls_back_across_every_arc_variant(self, monkeypatch):
+    def test_opcode_name_marks_labels_borrowed_from_another_arc_wrapper(self, monkeypatch):
         monkeypatch.setattr(
             debug_formatter,
             "_external_labels",
             lambda: ({(0x2729, 0x2200): "query_tx_flows"}, {}),
         )
 
-        assert get_opcode_name(0x2801, 0x2200) == "query_tx_flows"
+        assert get_opcode_name(0x2729, 0x2200) == "query_tx_flows"
+        assert get_opcode_name(0x2801, 0x2200) == "query_tx_flows [0x2729 label]"
 
 
 class TestStorePacket:

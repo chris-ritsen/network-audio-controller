@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import NoReturn, Optional
 
 import typer
@@ -30,6 +31,13 @@ from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon, icon_only
 
 app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True)
+
+
+@dataclass(frozen=True)
+class SubscriptionReconciliationResult:
+    unchanged: dict[int, tuple[str, str] | None]
+    verified: dict[int, tuple[str, str] | None]
+    failures: dict[int, str]
 
 
 def _fail(message: str) -> NoReturn:
@@ -100,17 +108,111 @@ async def _verify_subscriptions(device, expected):
 
 
 async def _send_subscription_change(send, packet, device, arc_port):
-    return await send_and_wait_for_notification(
-        send,
-        packet,
-        device.ipv4,
-        arc_port,
-        (
-            NOTIFICATION_RX_CHANNEL_CHANGE,
-            NOTIFICATION_RX_FLOW_CHANGE,
-            NOTIFICATION_ROUTING_DEVICE_CHANGE,
-        ),
-        expect_response=False,
+    async with device.topology_mutation_lock:
+        return await send_and_wait_for_notification(
+            send,
+            packet,
+            device.ipv4,
+            arc_port,
+            (
+                NOTIFICATION_RX_CHANNEL_CHANGE,
+                NOTIFICATION_RX_FLOW_CHANGE,
+                NOTIFICATION_ROUTING_DEVICE_CHANGE,
+            ),
+            expect_response=False,
+        )
+
+
+async def reconcile_receiver_subscriptions(
+    send,
+    device,
+    desired_sources: dict[int, tuple[str, str] | None],
+) -> SubscriptionReconciliationResult:
+    await device.get_rx_channels()
+    _index_fresh_subscriptions(device)
+
+    current_sources = {
+        receiver_channel_number: _subscription_signature(device, receiver_channel_number)
+        for receiver_channel_number in desired_sources
+    }
+    unchanged = {
+        receiver_channel_number: desired_source
+        for receiver_channel_number, desired_source in desired_sources.items()
+        if current_sources[receiver_channel_number] == desired_source
+    }
+    pending = {
+        receiver_channel_number: desired_source
+        for receiver_channel_number, desired_source in desired_sources.items()
+        if current_sources[receiver_channel_number] != desired_source
+    }
+    verified: dict[int, tuple[str, str] | None] = {}
+    failures: dict[int, str] = {}
+    commands = DanteDeviceCommands()
+    arc_port = _get_arc_port(device)
+
+    removals = [
+        receiver_channel_number for receiver_channel_number, desired_source in pending.items() if desired_source is None
+    ]
+    additions = [
+        (receiver_channel_number, desired_source)
+        for receiver_channel_number, desired_source in pending.items()
+        if desired_source is not None
+    ]
+
+    for batch_start in range(0, len(removals), 16):
+        batch = removals[batch_start : batch_start + 16]
+        try:
+            packet, _ = commands.command_remove_subscriptions(batch)
+            await _send_subscription_change(send, packet, device, arc_port)
+        except Exception as exception:
+            for receiver_channel_number in batch:
+                failures[receiver_channel_number] = f"request failed: {exception}"
+            continue
+
+        expected = {receiver_channel_number: None for receiver_channel_number in batch}
+        readback = await _verify_subscriptions(device, expected)
+        observed = readback.observed if isinstance(readback.observed, dict) else {}
+        for receiver_channel_number in batch:
+            if (
+                readback.observed_available
+                and receiver_channel_number in observed
+                and observed[receiver_channel_number] is None
+            ):
+                verified[receiver_channel_number] = None
+            elif readback.observed_available:
+                failures[receiver_channel_number] = f"fresh readback reports {observed.get(receiver_channel_number)!r}"
+            else:
+                failures[receiver_channel_number] = f"fresh readback unavailable: {readback.error}"
+
+    for batch_start in range(0, len(additions), 16):
+        batch = additions[batch_start : batch_start + 16]
+        records = [
+            (receiver_channel_number, desired_source[0], desired_source[1])
+            for receiver_channel_number, desired_source in batch
+        ]
+        try:
+            packet, _ = commands.command_add_subscriptions(records)
+            await _send_subscription_change(send, packet, device, arc_port)
+        except Exception as exception:
+            for receiver_channel_number, _ in batch:
+                failures[receiver_channel_number] = f"request failed: {exception}"
+            continue
+
+        expected = dict(batch)
+        readback = await _verify_subscriptions(device, expected)
+        observed = readback.observed if isinstance(readback.observed, dict) else {}
+        for receiver_channel_number, desired_source in batch:
+            if observed.get(receiver_channel_number) == desired_source and readback.observed_available:
+                verified[receiver_channel_number] = desired_source
+            elif readback.observed_available:
+                failures[receiver_channel_number] = f"fresh readback reports {observed.get(receiver_channel_number)!r}"
+            else:
+                failures[receiver_channel_number] = f"fresh readback unavailable: {readback.error}"
+
+    return SubscriptionReconciliationResult(
+        unchanged=unchanged,
+        verified=verified,
+        failures=failures,
     )
 
 
@@ -122,12 +224,26 @@ def _readback_failure(action: str, device, result) -> str:
     return f"{action} sent to {label}, but fresh readback was unavailable{detail}"
 
 
+def _subscription_has_configured_source(subscription) -> bool:
+    return bool(getattr(subscription, "has_configured_source", getattr(subscription, "tx_device_name", None)))
+
+
 @app.command("list")
-def subscription_list():
-    """List all active subscriptions."""
+def subscription_list(
+    include_unused: bool = typer.Option(
+        False,
+        "--all",
+        help="Include unused receiver channels that have no configured source.",
+    ),
+):
+    """List configured subscriptions."""
 
     async def _run():
-        from netaudio.dante.const import SUBSCRIPTION_STATUS_INFO
+        from netaudio.dante.const import (
+            SUBSCRIPTION_STATUS_INFO,
+            subscription_status_entry,
+            subscription_status_label,
+        )
         from netaudio.dante.device_serializer import DanteDeviceSerializer
 
         devices = await _discover()
@@ -138,58 +254,39 @@ def subscription_list():
 
         for server_name, device in sort_devices(devices):
             for subscription in device.subscriptions:
-                all_subscriptions.append(subscription)
+                if include_unused or _subscription_has_configured_source(subscription):
+                    all_subscriptions.append(subscription)
 
         if not all_subscriptions:
             typer.echo("No active subscriptions.")
             return
 
         from netaudio._common import ansi
-
-        _STATE_ANSI = {
-            "connected": "32",
-            "in_progress": "33",
-            "resolved": "33",
-            "idle": "33",
-            "unresolved": "31",
-            "error": "31",
-            "none": "90",
-        }
-
-        _STATE_ICONS = {
-            "connected": "connected",
-            "in_progress": "info",
-            "resolved": "info",
-            "idle": "info",
-            "unresolved": "error",
-            "error": "error",
-            "none": "offline",
-        }
+        from netaudio.icons import SEVERITY_PRESENTATION, severity_icon
 
         def _status_label(code: int):
-            info = SUBSCRIPTION_STATUS_INFO.get(code)
-            if not info:
+            if SUBSCRIPTION_STATUS_INFO.get(code) is None:
                 return ""
-            raw_state, raw_label, _ = info
-            status_state = str(raw_state)
-            label = str(raw_label)
-            status_icon = icon(_STATE_ICONS.get(status_state, ""))
-            ansi_code = _STATE_ANSI.get(status_state, "")
-            if not ansi_code:
-                return f"{status_icon}{label}"
-            return ansi(ansi_code, f"{status_icon}{label}")
+            entry = subscription_status_entry(code)
+            severity = str(entry["severity"])
+            label = subscription_status_label(code)
+            marker = severity_icon(severity)
+            color = SEVERITY_PRESENTATION.get(severity, {}).get("color")
+            colored_label = ansi(color, label) if color else label
+            return f"{marker} {colored_label}" if marker else colored_label
 
         headers = ["RX Channel", "RX Device", "TX Channel", "TX Device", "Status"]
         rows = []
         json_data = [DanteDeviceSerializer.subscription_to_json(s) for s in all_subscriptions]
 
         for subscription in all_subscriptions:
+            configured = _subscription_has_configured_source(subscription)
             rows.append(
                 [
                     subscription.rx_channel_name or "",
                     subscription.rx_device_name or "",
-                    subscription.tx_channel_name or "",
-                    subscription.tx_device_name or "",
+                    (subscription.tx_channel_name or "") if configured else "",
+                    (subscription.tx_device_name or "") if configured else "",
                     _status_label(subscription.status_code),
                 ]
             )

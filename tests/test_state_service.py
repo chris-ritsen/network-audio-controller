@@ -6,7 +6,14 @@ import pytest
 
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.services.notification import NOTIFICATION_CLEAR_CONFIG_STATUS
+from netaudio.dante.services.notification import (
+    NOTIFICATION_CLEAR_CONFIG_STATUS,
+    NOTIFICATION_ROUTING_READY,
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_RX_FLOW_CHANGE,
+    NOTIFICATION_TX_FLOW_CHANGE,
+    NOTIFICATION_TX_LABEL_CHANGE,
+)
 from netaudio.dante.state import DanteStateService
 
 
@@ -50,6 +57,160 @@ def test_notification_registration_is_idempotent():
 
     assert registered_count > 0
     assert application.on_notification.call_count == registered_count
+
+
+class TestRoutingNotifications:
+    @pytest.mark.asyncio
+    async def test_receiver_channel_change_refreshes_only_receiver_channels(self):
+        device = make_device()
+        device.get_rx_channels = AsyncMock()
+        device.get_tx_channels = AsyncMock()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_RX_CHANNEL_CHANGE},
+        )
+
+        await state._on_receiver_channel_changed(event)
+
+        device.get_rx_channels.assert_awaited_once()
+        device.get_tx_channels.assert_not_awaited()
+        assert len(emitted_events(application)) == 1
+
+    @pytest.mark.asyncio
+    async def test_transmitter_label_change_refreshes_only_transmitter_channels(self):
+        device = make_device()
+        device.get_rx_channels = AsyncMock()
+        device.get_tx_channels = AsyncMock()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_TX_LABEL_CHANGE},
+        )
+
+        await state._on_transmitter_channel_changed(event)
+
+        device.get_tx_channels.assert_awaited_once()
+        device.get_rx_channels.assert_not_awaited()
+        assert len(emitted_events(application)) == 1
+
+    @pytest.mark.asyncio
+    async def test_transmitter_flow_change_detects_frontend_and_refreshes_inventory(self, monkeypatch):
+        from netaudio.dante import flows
+
+        device = make_device()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        detect = AsyncMock(return_value=0x2729)
+        query = AsyncMock(
+            return_value={
+                "max_flow_slots": 16,
+                "flows": [
+                    {
+                        "flow_number": 32,
+                        "flow_type": "multicast",
+                        "channel_count": 8,
+                        "sample_rate": 48000,
+                        "encoding": 24,
+                    }
+                ],
+            }
+        )
+        monkeypatch.setattr(flows, "detect_flow_protocol", detect)
+        monkeypatch.setattr(flows, "query_preferred_tx_flow_inventory", query)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_TX_FLOW_CHANGE},
+        )
+
+        await state._on_transmitter_flow_changed(event)
+
+        detect.assert_awaited_once_with("192.168.1.50", 4440)
+        query.assert_awaited_once_with("192.168.1.50", 4440, 0x2729)
+        assert device.flow_protocol_id == 0x2729
+        assert device.tx_flow_count == 1
+        assert device.transmitter_flows == [
+            {
+                "flow_number": 32,
+                "flow_type": "multicast",
+                "flow_type_code": None,
+                "channel_count": 8,
+                "sample_rate": 48000,
+                "encoding": 24,
+                "destination_internet_protocol_version_four_address": None,
+                "destination_user_datagram_port": None,
+                "subscriber_device_name": None,
+                "subscriber_flow_name": None,
+            }
+        ]
+        assert len(emitted_events(application)) == 1
+
+    @pytest.mark.asyncio
+    async def test_receiver_flow_change_refreshes_channels_and_flow_inventory(self, monkeypatch):
+        from netaudio.dante import flows
+
+        device = make_device()
+        device.get_rx_channels = AsyncMock()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        query = AsyncMock(
+            return_value={
+                "maximum_flow_slots": 16,
+                "flows": [
+                    {
+                        "flow_number": 1,
+                        "flow_type": "unicast",
+                        "latency_nanoseconds": 1000000,
+                    }
+                ],
+            }
+        )
+        monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_RX_FLOW_CHANGE},
+        )
+
+        await state._on_receiver_flow_changed(event)
+
+        device.get_rx_channels.assert_awaited_once()
+        query.assert_awaited_once_with(device)
+        assert device.rx_flow_count == 1
+        assert device.receiver_flow_latency_nanoseconds == 1000000
+        assert device.receiver_flows == [
+            {
+                "flow_number": 1,
+                "flow_type": "unicast",
+                "latency_nanoseconds": 1000000,
+            }
+        ]
+        assert len(emitted_events(application)) == 1
+
+    @pytest.mark.asyncio
+    async def test_receiver_flow_change_emits_channel_refresh_when_flow_inventory_is_unavailable(self, monkeypatch):
+        from netaudio.dante import flows
+
+        device = make_device()
+        device.get_rx_channels = AsyncMock()
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", AsyncMock(return_value=None))
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_RX_FLOW_CHANGE},
+        )
+
+        await state._on_receiver_flow_changed(event)
+
+        device.get_rx_channels.assert_awaited_once()
+        assert len(emitted_events(application)) == 1
 
 
 class TestRefetchDeviceControls:
@@ -227,6 +388,40 @@ class TestFetchDeviceControls:
 
 class TestControlNotifications:
     @pytest.mark.asyncio
+    async def test_settled_routing_capacity_refreshes_device_controls(self):
+        device = make_device()
+        device.routing_ready = True
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        state.fetch_device_controls = AsyncMock()
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_ROUTING_READY, "conmon_response": True},
+        )
+
+        await state._on_device_state_changed(event)
+
+        state.fetch_device_controls.assert_awaited_once_with("dev1.local.")
+
+    @pytest.mark.asyncio
+    async def test_transitional_routing_capacity_does_not_refresh_device_controls(self):
+        device = make_device()
+        device.routing_ready = False
+        application = make_application({"dev1.local.": device})
+        state = DanteStateService(application)
+        state.fetch_device_controls = AsyncMock()
+        event = DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name="dev1.local.",
+            data={"notification_id": NOTIFICATION_ROUTING_READY, "conmon_response": True},
+        )
+
+        await state._on_device_state_changed(event)
+
+        state.fetch_device_controls.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_typed_state_update_does_not_refetch_controls(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
@@ -289,18 +484,34 @@ class TestControlNotifications:
         application.dispatcher.emit_nowait.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_typed_sample_rate_value_change_refreshes_settings_then_emits(self):
+    async def test_typed_sample_rate_value_change_replaces_active_inventory_then_emits(self):
         device = make_device()
+        device.tx_count = 64
+        device.rx_count = 64
+        device.tx_channels = {number: SimpleNamespace(number=number) for number in range(1, 65)}
+        device.rx_channels = {number: SimpleNamespace(number=number) for number in range(1, 65)}
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
-        device.fetch_controls_data = AsyncMock()
+        replacement_tx = {number: SimpleNamespace(number=number) for number in range(1, 17)}
+        replacement_rx = {number: SimpleNamespace(number=number) for number in range(1, 17)}
+        device.fetch_controls_data = AsyncMock(
+            return_value={
+                "tx_count": 16,
+                "rx_count": 16,
+                "tx_channels": replacement_tx,
+                "rx_channels": replacement_rx,
+                "subscriptions": [],
+                "min_latency": 0.5,
+                "max_latency": 5.0,
+            }
+        )
 
-        async def get_device_settings():
-            device.min_latency = 0.5
-            device.max_latency = 5.0
-            return {"min_latency_ns": 500_000, "max_latency_ns": 5_000_000}
+        def assert_state_was_replaced_before_emit(_event):
+            assert device.tx_count == device.rx_count == 16
+            assert device.tx_channels == replacement_tx
+            assert device.rx_channels == replacement_rx
 
-        device.operations.get_device_settings = AsyncMock(side_effect=get_device_settings)
+        application.dispatcher.emit_nowait.side_effect = assert_state_was_replaced_before_emit
         event = DanteEvent(
             type=EventType.NOTIFICATION_RECEIVED,
             server_name="dev1.local.",
@@ -314,8 +525,10 @@ class TestControlNotifications:
 
         await state._on_sample_rate_status(event)
 
-        device.operations.get_device_settings.assert_awaited_once_with()
-        device.fetch_controls_data.assert_not_awaited()
+        device.fetch_controls_data.assert_awaited_once_with(include_channels=True)
+        assert device.tx_count == device.rx_count == 16
+        assert list(device.tx_channels) == list(range(1, 17))
+        assert list(device.rx_channels) == list(range(1, 17))
         assert device.min_latency == 0.5
         assert device.max_latency == 5.0
         events = emitted_events(application)
@@ -324,8 +537,8 @@ class TestControlNotifications:
         assert events[0].server_name == "dev1.local."
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("settings_result", [None, TimeoutError("no settings response")])
-    async def test_failed_sample_rate_settings_refresh_clears_stale_latency_state(self, settings_result):
+    @pytest.mark.parametrize("controls_result", [None, TimeoutError("no controls response")])
+    async def test_failed_sample_rate_controls_refresh_clears_stale_latency_state(self, controls_result):
         device = make_device()
         device.latency = 1.0
         device.active_latency = 1.0
@@ -335,10 +548,10 @@ class TestControlNotifications:
         device.max_latency = 21.333334
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
-        if isinstance(settings_result, BaseException):
-            device.operations.get_device_settings = AsyncMock(side_effect=settings_result)
+        if isinstance(controls_result, BaseException):
+            device.fetch_controls_data = AsyncMock(side_effect=controls_result)
         else:
-            device.operations.get_device_settings = AsyncMock(return_value=settings_result)
+            device.fetch_controls_data = AsyncMock(return_value=controls_result)
         event = DanteEvent(
             type=EventType.NOTIFICATION_RECEIVED,
             server_name="dev1.local.",
@@ -358,20 +571,22 @@ class TestControlNotifications:
         assert events[0].type == EventType.DEVICE_UPDATED
 
     @pytest.mark.asyncio
-    async def test_sample_rate_settings_refresh_uses_device_lock(self):
+    async def test_sample_rate_controls_refresh_uses_device_lock(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
-        settings_entered = asyncio.Event()
-        release_settings = asyncio.Event()
+        controls_entered = asyncio.Event()
+        release_controls = asyncio.Event()
         routing_started = asyncio.Event()
         operation_order = []
 
-        async def get_device_settings():
-            operation_order.append("settings enter")
-            settings_entered.set()
-            await release_settings.wait()
-            operation_order.append("settings exit")
+        async def fetch_controls_data(*, include_channels):
+            assert include_channels is True
+            operation_order.append("controls enter")
+            controls_entered.set()
+            await release_controls.wait()
+            operation_order.append("controls exit")
+            return {}
 
         async def get_rx_channels():
             operation_order.append("routing")
@@ -380,7 +595,7 @@ class TestControlNotifications:
             routing_started.set()
             await state._on_routing_changed(DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name="dev1.local."))
 
-        device.operations.get_device_settings = AsyncMock(side_effect=get_device_settings)
+        device.fetch_controls_data = AsyncMock(side_effect=fetch_controls_data)
         device.get_rx_channels = AsyncMock(side_effect=get_rx_channels)
         sample_rate_event = DanteEvent(
             type=EventType.NOTIFICATION_RECEIVED,
@@ -389,13 +604,13 @@ class TestControlNotifications:
         )
 
         sample_rate_task = asyncio.create_task(state._on_sample_rate_status(sample_rate_event))
-        await settings_entered.wait()
+        await controls_entered.wait()
         routing_task = asyncio.create_task(refresh_routing())
         await routing_started.wait()
-        release_settings.set()
+        release_controls.set()
         await asyncio.gather(sample_rate_task, routing_task)
 
-        assert operation_order == ["settings enter", "settings exit", "routing"]
+        assert operation_order == ["controls enter", "controls exit", "routing"]
 
     @pytest.mark.asyncio
     async def test_unparsed_conmon_response_does_not_create_probe_loop(self):

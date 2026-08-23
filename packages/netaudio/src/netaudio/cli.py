@@ -223,7 +223,7 @@ def _global_options(
 
     try:
         core.require()
-    except core.NetaudioCoreError as error:
+    except (core.NetaudioCoreError, core.NetaudioCoreLibraryMissing) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1)
 
