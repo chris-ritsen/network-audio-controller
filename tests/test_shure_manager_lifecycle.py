@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import netaudio.shure.manager as manager_module
+from netaudio.shure.device import ShureDeviceInfo, ShureDeviceType
 from netaudio.shure.manager import ShureConnection, ShureManager
 
 
@@ -135,6 +136,29 @@ async def test_lost_shure_connection_closes_socket_before_reconnect():
     )
     assert connection.reader is None
     assert connection.writer is None
+
+
+def test_lost_shure_connection_keeps_device_offline_with_last_seen():
+    dispatcher = MagicMock()
+    manager = ShureManager(dispatcher)
+    device = ShureDeviceInfo(
+        ip="192.0.2.13",
+        mac="00:0e:dd:48:96:29",
+        device_type=ShureDeviceType.ad4d,
+        name="AD4D-A",
+    )
+    device.mark_seen(1_700_000_000.0)
+    manager.devices[device.mac] = device
+    connection = ShureConnection(device.ip, device.mac, manager)
+    manager._connections[device.ip] = connection
+
+    manager._on_connection_lost(connection, reconnect=False)
+
+    retained = manager.devices[device.mac]
+    assert retained.online is False
+    assert retained.last_seen == 1_700_000_000.0
+    assert device.ip not in manager._connections
+    dispatcher.emit_nowait.assert_called()
 
 
 @pytest.mark.asyncio
