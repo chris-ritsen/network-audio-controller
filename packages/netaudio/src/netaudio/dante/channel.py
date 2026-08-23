@@ -3,6 +3,7 @@ class DanteChannel:
         self._channel_type = None
         self._device = None
         self._friendly_name = None
+        self._factory_name = None
         self._name = None
         self._number = None
         self._status_code = None
@@ -73,6 +74,14 @@ class DanteChannel:
     @friendly_name.setter
     def friendly_name(self, friendly_name):
         self._friendly_name = friendly_name
+
+    @property
+    def factory_name(self):
+        return self._factory_name
+
+    @factory_name.setter
+    def factory_name(self, factory_name):
+        self._factory_name = factory_name
 
     @property
     def name(self):

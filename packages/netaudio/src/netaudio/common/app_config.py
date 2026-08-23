@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
 import ifaddr
 
 from netaudio.dante.const import DEFAULT_MULTICAST_METERING_PORT
+
+logger = logging.getLogger("netaudio")
 
 DEFAULT_MDNS_TIMEOUT = 5
 DEFAULT_RELAY_PORT = 9000
@@ -92,9 +95,10 @@ class AppSettings:
                 if ipv4_addresses:
                     self._interface_ip = ipv4_addresses[0]
 
-                    print(
-                        f"Using IPv4 address {self._interface_ip} for interface {self._interface}",
-                        file=sys.stderr,
+                    logger.debug(
+                        "Using IPv4 address %s for interface %s",
+                        self._interface_ip,
+                        self._interface,
                     )
 
                     return self._interface_ip

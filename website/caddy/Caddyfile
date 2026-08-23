@@ -1,0 +1,9 @@
+{
+	admin off
+	auto_https off
+}
+
+http://:18088 {
+	bind 127.0.0.1
+	import netaudio.caddy
+}

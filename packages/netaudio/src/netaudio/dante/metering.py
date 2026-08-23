@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import ipaddress
 import logging
@@ -10,6 +12,30 @@ from netaudio.dante.const import (
 )
 
 logger = logging.getLogger("netaudio")
+
+
+def metering_value_dbfs(value: int) -> float | None:
+    if not 0 <= value <= 0xFF:
+        raise ValueError("metering value must fit in one byte")
+    if value == 0x01:
+        return 0.0
+    if 0x02 <= value <= 0xFD:
+        return -((value - 1) / 2)
+    return None
+
+
+def classify_signal_presence(value: int) -> str:
+    if not 0 <= value <= 0xFF:
+        raise ValueError("metering value must fit in one byte")
+    if value == 0x00:
+        return "clipping"
+    if value <= 0x7B:
+        return "signal_present"
+    if value <= 0xFD:
+        return "below_threshold"
+    if value == 0xFE:
+        return "muted"
+    return "unknown"
 
 
 def parse_metering_levels(data: bytes) -> dict:
@@ -36,7 +62,7 @@ async def meter_device(device, application, timeout: float = 3.0) -> dict:
     device_ip = str(device.ipv4)
     device_name = device.name or device.server_name
     host_ip = _get_local_ip()
-    host_mac = application.cmc._host_mac
+    host_mac = application.cmc.host_media_access_control_address
     metering_port = app_settings.metering_port
 
     received = asyncio.Event()
