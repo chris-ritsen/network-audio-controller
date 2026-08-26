@@ -1,0 +1,358 @@
+{
+  "exceptions": {
+    "packages/netaudio/generate_man.py::build_man_page": {
+      "complexity": 19,
+      "source_sha256": "02c52cabae3b6c863165485988d5461f38167dfd56ec1c1ea0b28fc6fd094082"
+    },
+    "packages/netaudio/src/netaudio/_common_output.py::_device_to_preset_xml": {
+      "complexity": 20,
+      "source_sha256": "940ba2acc76e3b47fe7c7e8d810cbecd59180c03948793f0938c76a5f36c164f"
+    },
+    "packages/netaudio/src/netaudio/capture/daemon.py::CaptureDaemon.run": {
+      "complexity": 25,
+      "source_sha256": "f6055df64f5405018d02d91dd83e0686d5955885dc7095bb59c7c5ef24eb4fa4"
+    },
+    "packages/netaudio/src/netaudio/capture/display.py::_print_marker_row": {
+      "complexity": 21,
+      "source_sha256": "2b899cab26894188a7bcbdbcf07893064eddd55fc34a8cf5c0251f346e3bbc0e"
+    },
+    "packages/netaudio/src/netaudio/capture/fact.py::_spec_to_plain": {
+      "complexity": 22,
+      "source_sha256": "91ff9cfebda6e97bdf08fbd04571b483dd349038e3414b0fcf2acffbcbf6cd1d"
+    },
+    "packages/netaudio/src/netaudio/commands/capture_collection.py::collect": {
+      "complexity": 53,
+      "source_sha256": "8675c5f1d38df8faf0d038f62c28c293e1390910824a2e4b5feb519c8c7abcdc"
+    },
+    "packages/netaudio/src/netaudio/commands/capture_packets.py::packet_list": {
+      "complexity": 22,
+      "source_sha256": "3710a9c4ba1faf79c4edebbe1d578e734e6da6b787d104dd2259a7f744f46611"
+    },
+    "packages/netaudio/src/netaudio/commands/capture_packets.py::packet_state_diff": {
+      "complexity": 16,
+      "source_sha256": "d01927b2ab2b352d0717a5478f276512c89b87680d3004fae7e73a09baa21e27"
+    },
+    "packages/netaudio/src/netaudio/commands/channel.py::gain": {
+      "complexity": 18,
+      "source_sha256": "da6cc32ad13c8259ebc06d14ae1d9bbbcb2fc22b3e8b48e16d8273f8ac2a0a1d"
+    },
+    "packages/netaudio/src/netaudio/commands/channel.py::gain._run": {
+      "complexity": 17,
+      "source_sha256": "9e0d887096817de55f6439f90686599b88bf65d0c4f876a56c92354e33de7ed3"
+    },
+    "packages/netaudio/src/netaudio/commands/channel.py::name": {
+      "complexity": 18,
+      "source_sha256": "341a65f6b58eb630f9b27ee49d9ec20a71cc9cb7205295eb0ab021416654bf1f"
+    },
+    "packages/netaudio/src/netaudio/commands/channel.py::name._run": {
+      "complexity": 17,
+      "source_sha256": "2decae877f2c5cf518c0052a9b21e472c3b4eeb314a2806d58c956fbeafe0c17"
+    },
+    "packages/netaudio/src/netaudio/commands/config.py::aes67": {
+      "complexity": 23,
+      "source_sha256": "5ab9cbd23943a928f959c139fa2531437cea59c202debe25c351cd37aa21a8fa"
+    },
+    "packages/netaudio/src/netaudio/commands/config.py::aes67._run": {
+      "complexity": 22,
+      "source_sha256": "d10c53fe111e35e5aef9f8663246c1a1f99b219b31db2f78e3aac4c220bd55bb"
+    },
+    "packages/netaudio/src/netaudio/commands/config.py::sample_rate": {
+      "complexity": 20,
+      "source_sha256": "51bdde7b1edcda6e625236bf74a30210bfe75fdde4cae6f1c90778455e4668d9"
+    },
+    "packages/netaudio/src/netaudio/commands/config.py::sample_rate._run": {
+      "complexity": 19,
+      "source_sha256": "015505774268831f48b460ed86be24eab8e21e80bb080816b044f107eedce69f"
+    },
+    "packages/netaudio/src/netaudio/commands/config.py::sample_rate_pullup": {
+      "complexity": 16,
+      "source_sha256": "f98f19f60caf03aa46133d800b2f6adf5d8fe319601e1370f8ab6600707e3d4f"
+    },
+    "packages/netaudio/src/netaudio/commands/device_meter.py::measure_timeout": {
+      "complexity": 17,
+      "source_sha256": "5c1170ad06eef1b207c194ba7d83d5212ee809e2402bf595db17d94f571955bb"
+    },
+    "packages/netaudio/src/netaudio/commands/device_meter.py::measure_timeout._run": {
+      "complexity": 16,
+      "source_sha256": "2953a1d6c4e7d389c1a4b84be5c90b5a7a59cf5d065fe420c3972a4d1d570c69"
+    },
+    "packages/netaudio/src/netaudio/commands/device_meter.py::meter_callback": {
+      "complexity": 24,
+      "source_sha256": "b7a38e33357b8536f8748f154badefacacff3ebd71df906a864799923ea2ba8d"
+    },
+    "packages/netaudio/src/netaudio/commands/device_meter.py::meter_callback._run": {
+      "complexity": 22,
+      "source_sha256": "9190a9b1a5fa720ef32704daa75ac105bf0b1eb59da7984fec24a42ab96ccac7"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_add": {
+      "complexity": 18,
+      "source_sha256": "285c756184ae8c3bc05bd4bbf02700c57117076ec2890d89b05c75e532aee7ac"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_check": {
+      "complexity": 26,
+      "source_sha256": "d3bc7ed1a7d1b41976de7263e405575f65e7a9178a9d67ffc2289e4b7f21bb4c"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_list": {
+      "complexity": 16,
+      "source_sha256": "f00e853f0fcf299e3a87dda77745639b8ad4750f1a9dba8d35d0b1d630b10f5c"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_show": {
+      "complexity": 29,
+      "source_sha256": "122b382c35c68dfd47b7122664da000c67493dac2fa85e02643aab7958c15a30"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_update": {
+      "complexity": 16,
+      "source_sha256": "5edfa47c5f12a042364989009f10ce6b5b25030b1737f90bd549640a6c002b0e"
+    },
+    "packages/netaudio/src/netaudio/commands/fact.py::fact_verify": {
+      "complexity": 23,
+      "source_sha256": "57460b2cedad0440f53c3845b553ff6f011d67772a1e88f0982b63e2f1c4b2e8"
+    },
+    "packages/netaudio/src/netaudio/commands/fact_support.py::_run_fact_verify": {
+      "complexity": 19,
+      "source_sha256": "48816b90383a3af6f0b0467923cb7209904add25db0628f7fad561eb697b493f"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_cramfs.py::_cramfs_walk_directory": {
+      "complexity": 22,
+      "source_sha256": "12a96591aa7774d19443e1b1313b9ac079eb42b42517e3b411506989cfe81262"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_dissection.py::_dissect_capability_partition": {
+      "complexity": 19,
+      "source_sha256": "8c1611972604799b52dc4cb6775b0e2c806215db5be80214abf4c80f2bf76743"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_evidence.py::_verify_brooklyn2_hardware_profile_evidence_from_root": {
+      "complexity": 34,
+      "source_sha256": "58476cef50c9d814bf83adf654e58dfdb85fa41cea53a6dad0906aefcd221c96"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_image_builder.py::_build_brooklyn2_image": {
+      "complexity": 27,
+      "source_sha256": "87764a49ddf1bcc4a900a879826e9e4d47eaba127e7991530879cd15302526f4"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_models.py::_load_brooklyn2_board_information_descriptor": {
+      "complexity": 22,
+      "source_sha256": "a085e9868159361dd3cdb2722c00b52c3ebe62a03566958d34f8b99e4f3a26f7"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_models.py::_load_brooklyn2_hardware_profile": {
+      "complexity": 27,
+      "source_sha256": "6ca90fdea6605be348ff428cdb700123735ffc7263b1f5231aea5a33d748a556"
+    },
+    "packages/netaudio/src/netaudio/commands/firmware_validation.py::_validate_fpga_payload": {
+      "complexity": 19,
+      "source_sha256": "07ea848552e7c3b57108a38560594e866eaea3c7824cc5577bdd20085ebbdaf7"
+    },
+    "packages/netaudio/src/netaudio/commands/meter_rendering.py::render_meter_frame": {
+      "complexity": 18,
+      "source_sha256": "a7eb4d55dd20813e294e0eb6f36acf8d65ec6913eace4bab0205b510a99076bd"
+    },
+    "packages/netaudio/src/netaudio/commands/meter_terminal.py::KeyDecoder.feed": {
+      "complexity": 21,
+      "source_sha256": "b20f722cfa9fda078c32fb71e78bf25ba3dd27a3f4fe77831cd99ee21ed1edaf"
+    },
+    "packages/netaudio/src/netaudio/commands/preset.py::_parse_preset": {
+      "complexity": 24,
+      "source_sha256": "58e4135ba73d328eca93663d994d4c707aa0e25135e0769ad5c3957e26c31044"
+    },
+    "packages/netaudio/src/netaudio/commands/preset.py::preset_load": {
+      "complexity": 78,
+      "source_sha256": "43d4c60f156ec87102647bb03e49ba8a5009864a5b959936295fc2c2689cee1c"
+    },
+    "packages/netaudio/src/netaudio/commands/preset.py::preset_load._apply": {
+      "complexity": 74,
+      "source_sha256": "00435b5bd1278b83c0e1c1d43cbfd2ac1901533ce49640e2eb65f50abd0bb4d0"
+    },
+    "packages/netaudio/src/netaudio/commands/provenance_analysis.py::provenance_analyze": {
+      "complexity": 21,
+      "source_sha256": "d6e1d624578f2c32b321ed45eb2cb644c2ace43045716e280e688ce67686ae7a"
+    },
+    "packages/netaudio/src/netaudio/commands/provenance_evidence.py::provenance_ingest_packet": {
+      "complexity": 17,
+      "source_sha256": "840f1f83bf40b03827bccacfb8bc8161de38d956f0bf6dfd1f3c3781d3567d32"
+    },
+    "packages/netaudio/src/netaudio/commands/provenance_network.py::provenance_replay": {
+      "complexity": 20,
+      "source_sha256": "56e3ff95344e1a6882d167e87985957b0556238351181cd294fdd3f0ee661cb3"
+    },
+    "packages/netaudio/src/netaudio/commands/provenance_support.py::_audit_single_bundle": {
+      "complexity": 34,
+      "source_sha256": "51888e4a8ef7a04d05a3d1588a69907f5625bac87d98d84f6b6c1b9119b43d1c"
+    },
+    "packages/netaudio/src/netaudio/commands/provenance_support.py::_verify_single_bundle": {
+      "complexity": 21,
+      "source_sha256": "6a858d6a4855c5907a11beb0aebca7e880128ee85fd33f8bf65eb0489c7487d5"
+    },
+    "packages/netaudio/src/netaudio/commands/shure.py::shure_channel_list": {
+      "complexity": 28,
+      "source_sha256": "cd9a1c98e8a0e143b29f797c4b6b96f7e3bec543d4c5125d00a6bfc5a589749c"
+    },
+    "packages/netaudio/src/netaudio/commands/shure_transport.py::_send": {
+      "complexity": 22,
+      "source_sha256": "00d866555f1d4f9862d884610885b8864ca7674d9e5aaf999b661e1676ab50c8"
+    },
+    "packages/netaudio/src/netaudio/commands/subscription.py::add": {
+      "complexity": 36,
+      "source_sha256": "c01fd0ab407a1b0d6494d8c6ecb33ec1df716e2050f29e0a36b5945aef208690"
+    },
+    "packages/netaudio/src/netaudio/commands/subscription.py::add._run": {
+      "complexity": 35,
+      "source_sha256": "3ffd76591547bea027798c45775aac5501c9a32fdd21bc9859dcf0ce97623046"
+    },
+    "packages/netaudio/src/netaudio/commands/subscription.py::remove": {
+      "complexity": 24,
+      "source_sha256": "4a4ddbe8da1ae0c389b960cfa63d69d41c9eb735d3e4c9c0ef621632e28c9212"
+    },
+    "packages/netaudio/src/netaudio/commands/subscription.py::remove._run": {
+      "complexity": 23,
+      "source_sha256": "517d039328f2953a717432fd0673289c85ce07d22746b58adff8f3d049bf2e36"
+    },
+    "packages/netaudio/src/netaudio/daemon/client.py::stream_daemon_events": {
+      "complexity": 21,
+      "source_sha256": "9e2148c47ced8c22fad44b6f5b22139cdcb13566f90b3f58df9c2770ee93eb68"
+    },
+    "packages/netaudio/src/netaudio/daemon/enforcement.py::EnforcementManager._enforce_shure_device": {
+      "complexity": 19,
+      "source_sha256": "bdcda83229751f2b128df53c7fd8a0059f710d752bf122ae9af3983e7f2130a0"
+    },
+    "packages/netaudio/src/netaudio/daemon/enforcement.py::EnforcementManager._enforce_subscriptions": {
+      "complexity": 23,
+      "source_sha256": "a8fbccc52390a15245f67d54dbdaa17d9e1fb952642f7deff8e18fb666d7c931"
+    },
+    "packages/netaudio/src/netaudio/daemon/relay.py::RelayServer._dispatch": {
+      "complexity": 19,
+      "source_sha256": "6aea2d3145fae44f90e7a42697d9f30d1b151a89a905044b93fc630cac1ecba1"
+    },
+    "packages/netaudio/src/netaudio/daemon/server.py::NetaudioDaemon._stop_once": {
+      "complexity": 25,
+      "source_sha256": "a18c43821fbab4fd0c8f7721f3877fd2680d89df0e6bfa2de108c41b471b65b9"
+    },
+    "packages/netaudio/src/netaudio/dante/application_operations.py::DanteApplicationOperations._query_conmon_all": {
+      "complexity": 16,
+      "source_sha256": "d20cee210b1b56b2a4bb2b136c3f4fe1ad45b32bc830105fef9a480fe10a1a59"
+    },
+    "packages/netaudio/src/netaudio/dante/browser.py::DanteBrowser._assemble_completed_services": {
+      "complexity": 21,
+      "source_sha256": "6e60396f9fe586c4e0412a736e71516c892e344fe74bc6dfcac2cdd334e88778"
+    },
+    "packages/netaudio/src/netaudio/dante/clean_labels.py::load_clean_labels": {
+      "complexity": 21,
+      "source_sha256": "0c9920c4e1b9ffa85754b37fd4663ac44589cc1f6e1c7536920340a0e80dc50d"
+    },
+    "packages/netaudio/src/netaudio/dante/clean_labels.py::load_clean_subscription_status_labels": {
+      "complexity": 17,
+      "source_sha256": "396df11a3a744d6c134ec6d91aec8e1d37fed2577d94c2ce1dc4c8083f48bcb0"
+    },
+    "packages/netaudio/src/netaudio/dante/conmon_export.py::ConmonExportCollector.observe": {
+      "complexity": 17,
+      "source_sha256": "bfaa80045b2b9ad1359f990ac879e6ae54ff903e9448c454b1f946dd887263b7"
+    },
+    "packages/netaudio/src/netaudio/dante/device.py::DanteDevice.apply_controls": {
+      "complexity": 21,
+      "source_sha256": "1dbadb9f284fecd1566c617fbdaedaf50ba2efda6a69d50205acaac5f10b91f6"
+    },
+    "packages/netaudio/src/netaudio/dante/device_xml_serializer.py::DantePresetXMLSerializer._serialize_device": {
+      "complexity": 19,
+      "source_sha256": "9e09c143ba979c3df7759703857e610489df11a093b15b741bc05e1383007fb3"
+    },
+    "packages/netaudio/src/netaudio/dante/fact_store.py::check_facts": {
+      "complexity": 19,
+      "source_sha256": "c31efd4140b4b5684a13208407c6342f5308ab1cc5f0c2208e163deabe71f3f2"
+    },
+    "packages/netaudio/src/netaudio/dante/flows.py::query_tx_flow_inventory": {
+      "complexity": 23,
+      "source_sha256": "2dfa2fee37879647a89100d2033cffd38e4b95c941ee345248fb4d1f88065776"
+    },
+    "packages/netaudio/src/netaudio/dante/heartbeat_connection_health.py::ReceiverFlowConnectionHealthTracker._pair_records": {
+      "complexity": 20,
+      "source_sha256": "81659cb338af16cfa4634404f17877d1db424e5e7cae567dfd8d43d1470038be"
+    },
+    "packages/netaudio/src/netaudio/dante/packet_channel_dissection.py::_dissect_rx_channels_body": {
+      "complexity": 25,
+      "source_sha256": "fd2d9f6156ac498ad9ef38dca6a72ac6e80d2be89179dc28e802cc27ca4d337d"
+    },
+    "packages/netaudio/src/netaudio/dante/packet_dissection_rendering.py::render_dissection": {
+      "complexity": 21,
+      "source_sha256": "c1086f3274e00370a1460c8a6b3433f4115ec7fbe5a61d408b7393bf8d16f3bb"
+    },
+    "packages/netaudio/src/netaudio/dante/packet_dissector.py::dissect": {
+      "complexity": 23,
+      "source_sha256": "c4fe5e270c4367443d7e0559c662d9f98dd49537ce399357b194619c25d6e780"
+    },
+    "packages/netaudio/src/netaudio/dante/protocol_verifier.py::export_session_bundle": {
+      "complexity": 17,
+      "source_sha256": "aa5fa0828520fc5800f6c9ed02de1b0f417b9f9cb5ac0d0f08c0a2c137de3032"
+    },
+    "packages/netaudio/src/netaudio/dante/services/cmc.py::_get_host_mac": {
+      "complexity": 17,
+      "source_sha256": "b553b18c2bd0c5b0a19b07e6f9b5e33bfd12aaffe6f99f37d69d529b1f98be34"
+    },
+    "packages/netaudio/src/netaudio/dante/services/notification_packet_handlers.py::NotificationPacketHandlers._handle_conmon_response": {
+      "complexity": 18,
+      "source_sha256": "21d409542ec1aff21a966f51d5195d6eed0d24c3e36e75da317666cc71f44189"
+    },
+    "packages/netaudio/src/netaudio/dante/state.py::DanteStateService.fetch_device_controls": {
+      "complexity": 25,
+      "source_sha256": "bf6dd87da5f31f6ece73e377269112d55572f2e13fa223ee721feafd83bdba43"
+    },
+    "packages/netaudio/src/netaudio/dante/tshark_capture.py::TsharkCapture._parse_line": {
+      "complexity": 18,
+      "source_sha256": "469f817b8f4b1e5122d41a8c55722f3b968a7eb0a3d006b82456aa908d6de7d8"
+    },
+    "packages/netaudio/src/netaudio/dante/tshark_capture.py::TsharkCapture.start": {
+      "complexity": 22,
+      "source_sha256": "f5e7a95eb990c970f37f30b6cc389d4c430bc2a1d22bcd88c79fef831527c7a6"
+    },
+    "packages/netaudio/src/netaudio/dante/virtual_device_requests.py::VirtualDeviceRequestHandler._handle_mcast_format_request": {
+      "complexity": 18,
+      "source_sha256": "a25156746695597f812a17e225ad59f51dd47be9f21a4ee74bdeec7159c03407"
+    },
+    "packages/netaudio/src/netaudio/shure/manager.py::ShureManager._on_shure_report": {
+      "complexity": 21,
+      "source_sha256": "13ac8e3dd520069a164c5b31a2ff7aafc5616e234aa32711f68ca22266881f1d"
+    },
+    "packages/netaudio/src/netaudio/shure/manager.py::ShureManager._update_ad4d_channel": {
+      "complexity": 30,
+      "source_sha256": "15064b881a5a81a0349f6d54822ed6f66ed365f078b6794b2315c259b808a7be"
+    },
+    "tests/test_cli_write_verification.py::_install_context": {
+      "complexity": 17,
+      "source_sha256": "231d1a976717c6e7da3d5658084c767be760a303d7feba4cbdef9285db128b3b"
+    },
+    "tools/ddm_lab/_lifecycle_cleanup.py::CleanupMixin._inspect_prunable_session": {
+      "complexity": 16,
+      "source_sha256": "907389ffe8d6f1abd2d5e58dd0725e085874b6db0eec0a443bce6ef3001c34de"
+    },
+    "tools/ddm_lab/_lifecycle_cleanup.py::CleanupMixin.prune": {
+      "complexity": 16,
+      "source_sha256": "60176f6a2aed668c233983bdeb115b1e07c8fc34f194e72cc7de942d1847038d"
+    },
+    "tools/ddm_lab/_lifecycle_cleanup.py::CleanupMixin.stop": {
+      "complexity": 16,
+      "source_sha256": "d8db9e584093dd59ce547c6fb43d42066ea4d97336aadca0b12e6320f7f40a26"
+    },
+    "tools/ddm_lab/cli.py::_managed_enrollment": {
+      "complexity": 16,
+      "source_sha256": "7c41b2b5301e84c3d28174b25f6da0580fe4dcea0d290db5775bd774f725df9b"
+    },
+    "tools/ddm_lab/cli.py::_smoke": {
+      "complexity": 29,
+      "source_sha256": "bdeb38381163d9f610ec1d5b165185eb23c4fe2dd74253b8756aa7467001e34c"
+    },
+    "tools/ddm_lab/cli.py::run": {
+      "complexity": 26,
+      "source_sha256": "d75d69f134253845a2343f5541c4db4d701ba0ff816eb046d2a474c6c34db177"
+    },
+    "tools/ddm_lab/lifecycle.py::LabHarness.start": {
+      "complexity": 28,
+      "source_sha256": "ae1171124dfc06e5d3b16775a759c39c86d20579839cab739c13a0374d59d7fc"
+    },
+    "website/validate.py::DocumentAnalysis.handle_starttag": {
+      "complexity": 27,
+      "source_sha256": "b2f89baa0c8152681054a001eba586adedfb8e7a183683f771d0669993479ef0"
+    },
+    "website/validate.py::validate_page": {
+      "complexity": 34,
+      "source_sha256": "888abebe543ae0f354a400cb73120d1215a1844f50b4405c9e7a185caf4a1ce9"
+    }
+  },
+  "maximum_complexity": 15,
+  "schema_version": 1
+}
