@@ -11,3 +11,4 @@ packages/netaudio-core/target/
 packages/netaudio/src/netaudio/core/libnetaudio_core.so
 packages/netaudio/src/netaudio/core/libnetaudio_core.dylib
 packages/netaudio/src/netaudio/core/netaudio_core.dll
+!CLAUDE.md
