@@ -1,4 +1,4 @@
-.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
+.PHONY: core header example example-swift test complexity quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -44,10 +44,14 @@ dev:
 test:
 	uv run pytest -q
 
+complexity:
+	uv run python scripts/check_complexity.py
+
 quality:
 	uv lock --check
 	uv run ruff check .
 	uv run ruff format --check .
+	uv run python scripts/check_complexity.py
 	uv run pyright
 	cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
