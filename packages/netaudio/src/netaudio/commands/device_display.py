@@ -347,16 +347,20 @@ def _diagnostic_audio_capability_rows(capabilities) -> list[list[str]]:
     return rows
 
 
-def _device_show_rows(device) -> list[list[str]]:
+def _device_channel_count_labels(device) -> tuple[str, str]:
     tx_count = device.tx_count
     if tx_count is None and device.tx_channels:
         tx_count = len(device.tx_channels)
     rx_count = device.rx_count
     if rx_count is None and device.rx_channels:
         rx_count = len(device.rx_channels)
-    tx_count_label = str(tx_count) if tx_count is not None else "unknown"
-    rx_count_label = str(rx_count) if rx_count is not None else "unknown"
-    active_latency = device.active_latency if device.active_latency is not None else device.latency
+    return (
+        str(tx_count) if tx_count is not None else "unknown",
+        str(rx_count) if rx_count is not None else "unknown",
+    )
+
+
+def _device_identity_rows(device) -> list[list[str]]:
     model = device.dante_model or device.model_id or device.model
     manufacturer = device.manufacturer or device.manufacturer_mdns
     rows = [
@@ -374,6 +378,11 @@ def _device_show_rows(device) -> list[list[str]]:
         rows.append(["Software", device.software_version])
     if device.model_id in BLUETOOTH_MODEL_IDS or device.bluetooth_connected is not None:
         rows.append(["Bluetooth", _format_bluetooth(device)])
+    return rows
+
+
+def _device_license_rows(device) -> list[list[str]]:
+    rows = []
     if device.is_licensed is False:
         rows.append(["License State", "unlicensed"])
     if device.diagnostic_log_export_supported is not None:
@@ -406,62 +415,71 @@ def _device_show_rows(device) -> list[list[str]]:
                 f"{capacity['transmit_channel_count']} TX / {capacity['receive_channel_count']} RX",
             ]
         )
-    rows.extend(
-        [
-            ["Channels", f"{tx_count_label} TX / {rx_count_label} RX"],
-            ["Sample Rate", _format_sample_rate(device.sample_rate)],
-            ["Supported Sample Rates", _format_supported_sample_rates(device.supported_sample_rates)],
-            ["Encoding", _format_encoding(device.encoding)],
-            ["Supported Encodings", _format_supported_encodings(device.supported_encodings)],
-            ["Active Latency", _format_latency(active_latency)],
-            ["Configured Latency", _format_latency(device.configured_latency)],
-            ["Default Latency", _format_latency(device.default_latency)],
-            ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
-            ["Standard Latencies", _format_show_standard_latencies(device)],
-            ["AES67", _format_aes67(device)],
-        ]
-    )
+    return rows
+
+
+def _device_audio_rows(device) -> list[list[str]]:
+    tx_count_label, rx_count_label = _device_channel_count_labels(device)
+    active_latency = device.active_latency if device.active_latency is not None else device.latency
+    return [
+        ["Channels", f"{tx_count_label} TX / {rx_count_label} RX"],
+        ["Sample Rate", _format_sample_rate(device.sample_rate)],
+        ["Supported Sample Rates", _format_supported_sample_rates(device.supported_sample_rates)],
+        ["Encoding", _format_encoding(device.encoding)],
+        ["Supported Encodings", _format_supported_encodings(device.supported_encodings)],
+        ["Active Latency", _format_latency(active_latency)],
+        ["Configured Latency", _format_latency(device.configured_latency)],
+        ["Default Latency", _format_latency(device.default_latency)],
+        ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
+        ["Standard Latencies", _format_show_standard_latencies(device)],
+        ["AES67", _format_aes67(device)],
+    ]
+
+
+def _device_sample_rate_pullup_rows(device) -> list[list[str]]:
     if (
         device.sample_rate_pullup_raw_value is not None
         or device.requested_sample_rate_pullup_raw_value is not None
         or device.supported_sample_rate_pullup_raw_values is not None
     ):
-        rows.extend(
+        return [
+            ["Sample Rate Pull-Up", sample_rate_pullup_label(device.sample_rate_pullup_raw_value)],
             [
-                ["Sample Rate Pull-Up", sample_rate_pullup_label(device.sample_rate_pullup_raw_value)],
-                [
-                    "Pull-Up Requested",
-                    sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
-                ],
-                [
-                    "Pull-Up Supported",
-                    format_supported_sample_rate_pullup_values(device.supported_sample_rate_pullup_raw_values),
-                ],
-            ]
-        )
-    if device.transmitter_flows is not None:
-        if not device.transmitter_flows:
-            rows.append(["Transmitter Flows", "none"])
-        else:
-            for flow in device.transmitter_flows:
-                flow_number = flow.get("flow_number")
-                label = f"Transmitter Flow {flow_number}" if flow_number is not None else "Transmitter Flow"
-                rows.append([label, _format_transmitter_flow(flow)])
-    rows.extend(_connection_health_rows(device.receiver_flow_connection_health))
-    rows.extend(
-        [
-            [
-                "Lock",
-                "unknown" if device.is_locked is None else ("locked" if device.is_locked else "unlocked"),
+                "Pull-Up Requested",
+                sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
             ],
             [
-                "Preferred Leader",
-                "unknown"
-                if device.preferred_leader is None
-                else ("enabled" if device.preferred_leader else "disabled"),
+                "Pull-Up Supported",
+                format_supported_sample_rate_pullup_values(device.supported_sample_rate_pullup_raw_values),
             ],
         ]
-    )
+    return []
+
+
+def _device_transmitter_flow_rows(device) -> list[list[str]]:
+    if device.transmitter_flows is None:
+        return []
+    if not device.transmitter_flows:
+        return [["Transmitter Flows", "none"]]
+    rows = []
+    for flow in device.transmitter_flows:
+        flow_number = flow.get("flow_number")
+        label = f"Transmitter Flow {flow_number}" if flow_number is not None else "Transmitter Flow"
+        rows.append([label, _format_transmitter_flow(flow)])
+    return rows
+
+
+def _device_control_rows(device) -> list[list[str]]:
+    rows = [
+        [
+            "Lock",
+            "unknown" if device.is_locked is None else ("locked" if device.is_locked else "unlocked"),
+        ],
+        [
+            "Preferred Leader",
+            "unknown" if device.preferred_leader is None else ("enabled" if device.preferred_leader else "disabled"),
+        ],
+    ]
     if device.clock_subdomain is not None:
         rows.append(["Clock Subdomain", format_clock_subdomain(device.clock_subdomain)])
     if device.gain_device_type is not None:
@@ -472,6 +490,11 @@ def _device_show_rows(device) -> list[list[str]]:
                 ["Reference Options", _format_reference_options(device)],
             ]
         )
+    return rows
+
+
+def _device_clock_rows(device) -> list[list[str]]:
+    rows = []
     if device.clock_role:
         rows.append(["Clock Role", device.clock_role])
     if device.clock_identity:
@@ -494,6 +517,18 @@ def _device_show_rows(device) -> list[list[str]]:
                 _format_clock_port_record(record),
             ]
         )
+    return rows
+
+
+def _device_show_rows(device) -> list[list[str]]:
+    rows = _device_identity_rows(device)
+    rows.extend(_device_license_rows(device))
+    rows.extend(_device_audio_rows(device))
+    rows.extend(_device_sample_rate_pullup_rows(device))
+    rows.extend(_device_transmitter_flow_rows(device))
+    rows.extend(_connection_health_rows(device.receiver_flow_connection_health))
+    rows.extend(_device_control_rows(device))
+    rows.extend(_device_clock_rows(device))
     rows.append(["Server Name", device.server_name or "unknown"])
     if device.interface_reboot_required:
         rows.append(["Network Reboot Required", "yes"])
