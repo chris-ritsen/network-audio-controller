@@ -87,6 +87,16 @@ task-specific documents linked below before doing DDM or lab work.
 
 - Keep hand-written source and test files at 900 lines or fewer. Split by
   responsibility instead of compressing code to stay under the limit.
+- Keep all new hand-written Python functions and methods outside generated,
+  vendored, build, and virtual-environment directories at cyclomatic complexity
+  15 or lower, as measured by Ruff `C901`. The checked complexity baseline
+  records legacy debt only: never add an exception or raise an existing
+  allowance. Any semantic change to a baseline exception must reduce it, and
+  baseline updates may only lower or remove allowances. Never hand-edit the
+  baseline or suppress `C901` with `noqa` or Ruff configuration. A Chris-approved
+  exception requires an explicit policy and checker change, not a baseline edit.
+  Run `uv run python scripts/check_complexity.py` before handing off Python
+  changes.
 - Default tests must be offline and deterministic. Use focused tests first, then
   `uv run pytest -q` and the relevant Rust checks when the change warrants them.
 - Live tests must be opt-in. Mutating live tests require a second explicit opt-in
