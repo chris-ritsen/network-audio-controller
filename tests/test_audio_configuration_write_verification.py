@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from netaudio.commands import channel as channel_commands
@@ -210,8 +212,31 @@ def test_latency_get_uses_active_device_readback(monkeypatch):
     result = runner.invoke(config_commands.app, ["latency"])
 
     assert result.exit_code == 0
-    assert result.output.strip() == "0.15"
+    assert result.output.strip() == "Latency: 0.15 ms"
     assert device.operations.settings_calls == 1
+
+
+def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 150_000,
+            "latency_ns": 150_000,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"avio.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.json)
+
+    result = runner.invoke(config_commands.app, ["latency"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "active_latency_ms": 0.15,
+        "active_latency_ns": 150_000,
+    }
 
 
 def test_clock_source_get_is_not_implemented(monkeypatch):
