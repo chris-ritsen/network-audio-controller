@@ -473,7 +473,16 @@ def latency(
 
                 async def _read_target(server_name, device):
                     try:
-                        return server_name, device, await _read_latency_milliseconds(device), None
+                        latency_nanoseconds = int(await _read_settings_value(device, "active_latency_ns"))
+                        return (
+                            server_name,
+                            device,
+                            {
+                                "active_latency_ms": nanoseconds_to_milliseconds(latency_nanoseconds),
+                                "active_latency_ns": latency_nanoseconds,
+                            },
+                            None,
+                        )
                     except Exception as exception:
                         return server_name, device, None, exception
 
@@ -492,14 +501,27 @@ def latency(
                     raise typer.Exit(code=ExitCode.ERROR)
                 if all_devices:
                     output_table(
-                        ["Name", "Latency"],
+                        ["Name", "Latency (ms)"],
                         [
-                            [device.name or server_name, f"{latency_value:g}"]
-                            for server_name, device, latency_value, _ in readings
+                            [device.name or server_name, f"{latency_values['active_latency_ms']:g}"]
+                            for server_name, device, latency_values, _ in readings
                         ],
+                        json_data={
+                            server_name: {
+                                "name": device.name or server_name,
+                                **latency_values,
+                            }
+                            for server_name, device, latency_values, _ in readings
+                        },
                     )
                 else:
-                    output_single(readings[0][2])
+                    from netaudio.cli import OutputFormat, state
+
+                    latency_values = readings[0][2]
+                    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
+                        output_single(latency_values)
+                    else:
+                        output_single(f"Latency: {latency_values['active_latency_ms']:g} ms")
                 return
 
             if not math.isfinite(value) or value < 0:
