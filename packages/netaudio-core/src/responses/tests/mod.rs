@@ -71,4 +71,6 @@ mod conmon;
 mod conmon_detail;
 mod device;
 mod flows;
+mod github_issue_reports;
+mod modern_arc_capture;
 mod robustness;

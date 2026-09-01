@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import math
 import os
 import subprocess
 import sys
@@ -15,7 +14,6 @@ from netaudio.dante.clock_config import (
     format_clock_subdomain,
     parse_clock_subdomain_selection,
 )
-from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.sample_rate_pullup import (
     format_supported_sample_rate_pullup_values,
     parse_sample_rate_pullup_selection,
@@ -31,7 +29,6 @@ from netaudio.dante.services.notification import (
     NOTIFICATION_AES67_STATUS,
     NOTIFICATION_CLOCKING_STATUS,
     NOTIFICATION_ENCODING_STATUS,
-    NOTIFICATION_LATENCY_CHANGE,
     NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS,
     NOTIFICATION_SAMPLE_RATE_STATUS,
     NOTIFICATION_SETTINGS_CHANGE,
@@ -52,6 +49,7 @@ from netaudio._common import (
     sort_devices,
 )
 from netaudio._exit_codes import ExitCode
+from netaudio.commands.config_latency import register_latency_command
 
 app = typer.Typer(help="Get or set device configuration.", no_args_is_help=True)
 
@@ -127,7 +125,6 @@ from netaudio.commands.config_readback import (
     _read_sample_rate_pullup_status_result,
     _read_sample_rate_status,
     _read_sample_rate_status_result,
-    _read_settings_value,
     _render_cached_reading,
     _report_reading_failures,
     _resolve_targets,
@@ -455,96 +452,7 @@ def encoding(
     asyncio.run(_run())
 
 
-@app.command()
-def latency(
-    value: Optional[float] = typer.Argument(None, help="Latency in milliseconds."),
-    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
-):
-    """Get or set the device latency."""
-
-    commands = DanteDeviceCommands()
-
-    async def _run():
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            targets = _resolve_targets(filtered, all_devices)
-
-            if value is None:
-
-                async def _read_target(server_name, device):
-                    try:
-                        latency_nanoseconds = int(await _read_settings_value(device, "active_latency_ns"))
-                        return (
-                            server_name,
-                            device,
-                            {
-                                "active_latency_ms": nanoseconds_to_milliseconds(latency_nanoseconds),
-                                "active_latency_ns": latency_nanoseconds,
-                            },
-                            None,
-                        )
-                    except Exception as exception:
-                        return server_name, device, None, exception
-
-                readings = await asyncio.gather(*(_read_target(server_name, device) for server_name, device in targets))
-                failures = [
-                    (server_name, device, exception)
-                    for server_name, device, _, exception in readings
-                    if exception is not None
-                ]
-                if failures:
-                    for server_name, device, exception in failures:
-                        typer.echo(
-                            f"Error: could not read latency from {device.name or server_name}: {exception}",
-                            err=True,
-                        )
-                    raise typer.Exit(code=ExitCode.ERROR)
-                if all_devices:
-                    output_table(
-                        ["Name", "Latency (ms)"],
-                        [
-                            [device.name or server_name, f"{latency_values['active_latency_ms']:g}"]
-                            for server_name, device, latency_values, _ in readings
-                        ],
-                        json_data={
-                            server_name: {
-                                "name": device.name or server_name,
-                                **latency_values,
-                            }
-                            for server_name, device, latency_values, _ in readings
-                        },
-                    )
-                else:
-                    from netaudio.cli import OutputFormat, state
-
-                    latency_values = readings[0][2]
-                    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
-                        output_single(latency_values)
-                    else:
-                        output_single(f"Latency: {latency_values['active_latency_ms']:g} ms")
-                return
-
-            if not math.isfinite(value) or value < 0:
-                typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            packet, _ = commands.command_set_latency(value)
-            expected_ns = int(round(value * 1_000_000))
-            failures = await _send_verified_change(
-                targets,
-                send,
-                packet,
-                _get_arc_port,
-                expected_ns,
-                lambda device: _read_settings_value(device, "active_latency_ns"),
-                "latency change",
-                lambda label: f"Set latency for {label}: {value:g} ms (verified)",
-                (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
-            )
-            if failures:
-                raise typer.Exit(code=ExitCode.ERROR)
-
-    asyncio.run(_run())
+latency = register_latency_command(app, lambda: _command_context())
 
 
 def _aes67_state_label(value):

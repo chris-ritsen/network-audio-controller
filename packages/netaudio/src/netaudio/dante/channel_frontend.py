@@ -5,6 +5,7 @@ from netaudio.dante.const import (
     PROTOCOL_ARC_2809,
     RESULT_CODE_FRONTEND_UNAVAILABLE,
     RESULT_CODE_SUCCESS,
+    RESULT_CODE_SUCCESS_EXTENDED,
 )
 
 
@@ -35,7 +36,7 @@ def _channel_name_protocol_identifier_from_probe(
     result_code = channel_result_code(response, operation)
     if result_code == RESULT_CODE_FRONTEND_UNAVAILABLE:
         return PROTOCOL_ARC_2729
-    if result_code != RESULT_CODE_SUCCESS:
+    if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
         raise ChannelFrontendError(f"{operation} failed with result 0x{result_code:04X}")
 
     from netaudio import core

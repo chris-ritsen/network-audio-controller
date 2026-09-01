@@ -1,5 +1,13 @@
 use super::*;
 
+fn modern_arc_page_disposition(result_code: u16) -> Option<ModernArcPageDisposition> {
+    match result_code {
+        RESULT_CODE_SUCCESS => Some(ModernArcPageDisposition::Complete),
+        crate::protocol::RESULT_CODE_MORE_PAGES => Some(ModernArcPageDisposition::MorePages),
+        _ => None,
+    }
+}
+
 pub fn parse_transmitter_channel_name_reconciliation_2809(
     response: &[u8],
 ) -> Option<TransmitterChannelNameReconciliation2809> {
@@ -79,20 +87,17 @@ pub fn parse_transmitter_channel_status_page_2809(
 ) -> Option<TransmitterChannelStatusPage2809> {
     let envelope = validate_response_envelope(
         response,
-        &[(
-            PROTOCOL_ARC_2809,
-            OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-        )],
-        &[RESULT_CODE_SUCCESS],
+        &modern_arc_protocol_opcodes(OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809),
+        &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
     let body = envelope.body;
     if body.len() < 8 {
         return None;
     }
 
-    let maximum_transmitter_channels = *body.get(6)?;
+    let page_capacity = *body.get(6)?;
     let reported_record_count = *body.get(7)?;
-    if maximum_transmitter_channels == 0 || reported_record_count > maximum_transmitter_channels {
+    if page_capacity == 0 || reported_record_count > page_capacity {
         return None;
     }
 
@@ -134,14 +139,15 @@ pub fn parse_transmitter_channel_status_page_2809(
 
     let mut records = Vec::with_capacity(usize::from(reported_record_count));
     let mut channel_numbers = HashSet::with_capacity(usize::from(reported_record_count));
+    let mut media_identities = HashSet::with_capacity(usize::from(reported_record_count));
     for record_pointer in record_pointers {
         let record = parse_transmitter_channel_status_record_2809(
             response,
             record_pointer,
             pointer_table_end,
         )?;
-        if record.channel_number > u16::from(maximum_transmitter_channels)
-            || !channel_numbers.insert(record.channel_number)
+        if !channel_numbers.insert(record.channel_number)
+            || !media_identities.insert((record.media_type, record.media_local_channel_id))
         {
             return None;
         }
@@ -149,7 +155,13 @@ pub fn parse_transmitter_channel_status_page_2809(
     }
 
     Some(TransmitterChannelStatusPage2809 {
-        maximum_transmitter_channels,
+        protocol_id: envelope.protocol_id,
+        transaction_id: envelope.transaction_id,
+        opcode: envelope.opcode,
+        result_code: envelope.result_code,
+        page_disposition: modern_arc_page_disposition(envelope.result_code)?,
+        page_capacity,
+        maximum_transmitter_channels: page_capacity,
         reported_record_count,
         records,
         raw_body_hexadecimal: bytes_to_hex(body),
@@ -169,6 +181,17 @@ fn parse_transmitter_channel_status_record_2809(
         record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER)?,
     )?;
     if channel_number == 0 {
+        return None;
+    }
+    let media_type = read_u16(
+        response,
+        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_TYPE)?,
+    )?;
+    let media_local_channel_id = read_u16(
+        response,
+        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID)?,
+    )?;
+    if media_type == 0 || media_local_channel_id == 0 {
         return None;
     }
 
@@ -208,6 +231,8 @@ fn parse_transmitter_channel_status_record_2809(
         record_pointer,
         record_type_code: read_u16(record, 0)?,
         channel_number,
+        media_type,
+        media_local_channel_id,
         channel_name_pointer,
         channel_name,
         format_pointer,
@@ -225,17 +250,17 @@ pub fn parse_receiver_channel_status_page_2809(
 ) -> Option<ReceiverChannelStatusPage2809> {
     let envelope = validate_response_envelope(
         response,
-        &[(PROTOCOL_ARC_2809, OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809)],
-        &[RESULT_CODE_SUCCESS],
+        &modern_arc_protocol_opcodes(OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809),
+        &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
     let body = envelope.body;
     if body.len() < 8 {
         return None;
     }
 
-    let maximum_receiver_channels = *body.get(6)?;
+    let page_capacity = *body.get(6)?;
     let reported_record_count = *body.get(7)?;
-    if maximum_receiver_channels == 0 || reported_record_count > maximum_receiver_channels {
+    if page_capacity == 0 || reported_record_count > page_capacity {
         return None;
     }
 
@@ -277,11 +302,12 @@ pub fn parse_receiver_channel_status_page_2809(
 
     let mut records = Vec::with_capacity(usize::from(reported_record_count));
     let mut channel_numbers = HashSet::with_capacity(usize::from(reported_record_count));
+    let mut media_identities = HashSet::with_capacity(usize::from(reported_record_count));
     for record_pointer in record_pointers {
         let record =
             parse_receiver_channel_status_record_2809(response, record_pointer, pointer_table_end)?;
-        if record.channel_number > u16::from(maximum_receiver_channels)
-            || !channel_numbers.insert(record.channel_number)
+        if !channel_numbers.insert(record.channel_number)
+            || !media_identities.insert((record.media_type, record.media_local_channel_id))
         {
             return None;
         }
@@ -289,7 +315,13 @@ pub fn parse_receiver_channel_status_page_2809(
     }
 
     Some(ReceiverChannelStatusPage2809 {
-        maximum_receiver_channels,
+        protocol_id: envelope.protocol_id,
+        transaction_id: envelope.transaction_id,
+        opcode: envelope.opcode,
+        result_code: envelope.result_code,
+        page_disposition: modern_arc_page_disposition(envelope.result_code)?,
+        page_capacity,
+        maximum_receiver_channels: page_capacity,
         reported_record_count,
         records,
         raw_body_hexadecimal: bytes_to_hex(body),
@@ -309,6 +341,17 @@ fn parse_receiver_channel_status_record_2809(
         record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER)?,
     )?;
     if channel_number == 0 {
+        return None;
+    }
+    let media_type = read_u16(
+        response,
+        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_TYPE)?,
+    )?;
+    let media_local_channel_id = read_u16(
+        response,
+        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID)?,
+    )?;
+    if media_type == 0 || media_local_channel_id == 0 {
         return None;
     }
 
@@ -360,6 +403,8 @@ fn parse_receiver_channel_status_record_2809(
         record_pointer,
         record_type_code: read_u16(record, 0)?,
         channel_number,
+        media_type,
+        media_local_channel_id,
         local_channel_name_pointer,
         local_channel_name,
         format_pointer,

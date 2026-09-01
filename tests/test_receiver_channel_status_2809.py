@@ -88,6 +88,8 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         "record_pointer": 68,
         "record_type_code": 0x141C,
         "channel_number": 1,
+        "media_type": 3,
+        "media_local_channel_id": 1,
         "local_channel_name_pointer": 60,
         "local_channel_name": "01",
         "format_pointer": 44,

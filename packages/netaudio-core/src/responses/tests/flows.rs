@@ -354,7 +354,7 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     assert_eq!(unicast_flow.format_pointer, 24);
     assert_eq!(unicast_flow.sample_rate, 48_000);
     assert_eq!(unicast_flow.encoding, 24);
-    assert_eq!(unicast_flow.channel_count, 1);
+    assert_eq!(unicast_flow.channel_count, 2);
     assert_eq!(unicast_flow.endpoint_descriptor_pointer, 112);
     assert_eq!(
         unicast_flow.endpoint_descriptor_hexadecimal,
@@ -374,7 +374,8 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     );
     assert_eq!(unicast_flow.subscriber_flow_name_pointer, 129);
     assert_eq!(unicast_flow.subscriber_flow_name.as_deref(), Some("3"));
-    assert_eq!(unicast_flow.raw_record_hexadecimal.len(), 160);
+    assert_eq!(unicast_flow.record_length_bytes, 76);
+    assert_eq!(unicast_flow.raw_record_hexadecimal.len(), 152);
     assert_eq!(parse_tx_flows(&unicast), None);
 
     let multicast = decode_hex(
@@ -459,7 +460,7 @@ fn transmitter_channel_status_2809_parser_decodes_shipping_controller_response()
             "280900a42852240000010000000000000202003c007c00030000bb80010100180400001800180004626c7565746f6f74683a6c656674004c6566740014140001000000030001000000000007000000000028001800000000000000370000000000000000626c7565746f6f74683a726967687400526967687400000014140002000000030002000000000007000000000064001800000000000000740000000000000000",
         );
     let page = parse_transmitter_channel_status_page_2809(&response).unwrap();
-    assert_eq!(page.maximum_transmitter_channels, 2);
+    assert_eq!(page.page_capacity, 2);
     assert_eq!(page.reported_record_count, 2);
     assert_eq!(page.records.len(), 2);
 
@@ -517,7 +518,7 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
         (20, 22, 60u16.to_be_bytes().to_vec()),
         (20, 22, 80u16.to_be_bytes().to_vec()),
         (62, 64, 0u16.to_be_bytes().to_vec()),
-        (62, 64, 3u16.to_be_bytes().to_vec()),
+        (62, 64, 2u16.to_be_bytes().to_vec()),
         (80, 82, 17u16.to_be_bytes().to_vec()),
         (82, 84, 159u16.to_be_bytes().to_vec()),
         (90, 92, 17u16.to_be_bytes().to_vec()),
@@ -652,7 +653,7 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
             "2809007c284a34000001000000000000010100446d69632d6d69782d68696768006c782d64616e74650000000000bb800101001804000018001800043031004c65667400141c000100000003000100000000000600000000003c002c000000000000003f000000000000000006080000001400210010000002020000",
         );
     let first_page = parse_receiver_channel_status_page_2809(&first).unwrap();
-    assert_eq!(first_page.maximum_receiver_channels, 1);
+    assert_eq!(first_page.page_capacity, 1);
     assert_eq!(first_page.reported_record_count, 1);
     assert_eq!(first_page.records.len(), 1);
     let first_record = &first_page.records[0];
@@ -702,7 +703,7 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
             "280900a801f13400000100000000000002020030007000030000bb8001010018040000200020000e303100434831006c141c00010000000300010000000000060000000000280018000000000000002b0000000000000000060800000000000000000000020200003032004348320032141c00020000000300020000000000060000000000680018000000000000006b000000000000000006080000000000000000000002020000",
         );
     let page = parse_receiver_channel_status_page_2809(&response).unwrap();
-    assert_eq!(page.maximum_receiver_channels, 2);
+    assert_eq!(page.page_capacity, 2);
     assert_eq!(page.reported_record_count, 2);
     assert_eq!(
         page.records
@@ -720,7 +721,7 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
     assert_eq!(
         parse_receiver_channel_status_page_2809(&larger_capacity)
             .unwrap()
-            .maximum_receiver_channels,
+            .page_capacity,
         64
     );
 

@@ -1,6 +1,6 @@
 # DDM lab harness
 
-This is a repository-only clean-room test harness. It starts one or more virtual
+This is a repository-only research test harness. It starts one or more virtual
 A32s from a hash-bound opaque base image on the ordinary Dante LAN. Every guest
 gets a deterministic synthetic identity, private tmpfs flash, and a unique
 TAP/QMP namespace. The harness makes bounded guest-TAP captures and talks to DDM
@@ -9,7 +9,7 @@ unenroll active leased synthetic guests with `clearConfig: false` and fresh
 readback. It contains no Dante packet parser and performs no protocol
 interpretation.
 
-Read `AGENTS.md`, `docs/agent/DDM_CLEAN_ROOM.md`, and
+Read `AGENTS.md`, `docs/agent/DDM_RESEARCH_BOUNDARY.md`, and
 `docs/agent/EXPERIMENTS.md` first.
 
 ## Quick use
