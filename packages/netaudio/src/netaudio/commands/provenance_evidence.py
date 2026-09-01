@@ -36,7 +36,7 @@ EVIDENCE_ARTIFACT_ROLES = frozenset(
 )
 
 
-@app.command("evidence")
+@app.command("evidence", help="Tag captured packets as evidence with a label and note.")
 def provenance_evidence(
     packet_ids_positional: Optional[list[int]] = typer.Argument(None, help="Packet IDs to tag as evidence."),
     label: str = typer.Option(..., "--label", help="Evidence label for this marker."),
@@ -133,7 +133,7 @@ def provenance_evidence(
         store.close()
 
 
-@app.command("artifact")
+@app.command("artifact", help="Attach a curated file as an evidence artifact.")
 def provenance_artifact(
     file: str = typer.Argument(..., help="Path to a curated evidence artifact."),
     label: str = typer.Option(..., "--label", help="Evidence label for this artifact."),
@@ -212,7 +212,7 @@ def provenance_artifact(
     print(f"Capture: Size: {artifact['size']} bytes")
 
 
-@app.command("ingest-pcap")
+@app.command("ingest-pcap", help="Ingest selected frames from a pcap file as evidence.")
 def provenance_ingest_pcap(
     pcap: str = typer.Argument(..., help="Path to an existing packet capture."),
     frame: Optional[list[int]] = typer.Option(None, "--frame", help="Frame number to ingest (repeatable)."),
@@ -298,7 +298,7 @@ def provenance_ingest_pcap(
         )
 
 
-@app.command("ingest-payload")
+@app.command("ingest-payload", help="Ingest one raw UDP payload file as evidence.")
 def provenance_ingest_payload(
     file: str = typer.Argument(..., help="Path to one exact captured UDP payload."),
     source_ip: str = typer.Option(..., "--source-ip", help="Original source IPv4 address."),
@@ -418,7 +418,7 @@ def provenance_ingest_payload(
     print(f"  payload -> packet #{packet_id} {normalized_direction} {len(payload)}B")
 
 
-@app.command("ingest-packet")
+@app.command("ingest-packet", help="Copy packets from another capture database as evidence.")
 def provenance_ingest_packet(
     source_db: str = typer.Option(..., "--source-db", help="Read-only source capture database path."),
     packet_id: Optional[list[int]] = typer.Option(

@@ -325,7 +325,7 @@ def test_subscription_remove_rejects_bare_device_spec(monkeypatch):
     )
 
     assert result.exit_code == 1
-    assert "expected channel@device" in result.output
+    assert "expected CHANNEL@DEVICE" in result.output
     assert not sent
 
 
@@ -382,7 +382,7 @@ def test_flow_create_rejects_malformed_channels_before_discovery(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["create", "device", "--slot", "17", "--channels", "1,"],
+        ["create", "--slot", "17", "--channels", "1,"],
     )
 
     assert result.exit_code == 1
@@ -407,7 +407,7 @@ def test_empty_flow_list_preserves_structured_output(monkeypatch):
     monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
     state.output_format = OutputFormat.json
 
-    result = runner.invoke(flow_commands.app, ["list", "device"])
+    result = runner.invoke(flow_commands.app, ["list"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == flow_inventory
@@ -447,7 +447,7 @@ def test_receiver_flow_list_preserves_structured_output(monkeypatch):
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
     state.output_format = OutputFormat.json
 
-    result = runner.invoke(flow_commands.app, ["receiver-list", "device"])
+    result = runner.invoke(flow_commands.app, ["receiver-list"])
 
     assert result.exit_code == 0
     assert json.loads(result.output) == flow_inventory
@@ -487,7 +487,7 @@ def test_receiver_flow_list_displays_endpoint_type_and_port(monkeypatch):
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
     state.output_format = OutputFormat.plain
 
-    result = runner.invoke(flow_commands.app, ["receiver-list", "device"])
+    result = runner.invoke(flow_commands.app, ["receiver-list"])
 
     assert result.exit_code == 0
     assert "unicast" in result.output
@@ -520,7 +520,7 @@ def test_receiver_port_ranges_preserve_structured_output(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["receiver-port-ranges", "device"],
+        ["receiver-port-ranges"],
     )
 
     assert result.exit_code == 0
@@ -543,7 +543,7 @@ def test_transmit_channel_capabilities_fail_closed_without_traceback(monkeypatch
 
     result = runner.invoke(
         flow_commands.app,
-        ["transmit-channel-capabilities", "device"],
+        ["transmit-channel-capabilities"],
     )
 
     assert result.exit_code == 1
@@ -657,7 +657,7 @@ def test_transmit_channel_capabilities_preserve_structured_output(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["transmit-channel-capabilities", "device"],
+        ["transmit-channel-capabilities"],
     )
 
     assert result.exit_code == 0
@@ -686,7 +686,7 @@ def test_flow_create_refuses_occupied_slot(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["create", "device", "--slot", "17", "--channels", "1"],
+        ["create", "--slot", "17", "--channels", "1"],
     )
 
     assert result.exit_code == 1
@@ -715,7 +715,7 @@ def test_flow_create_confirms_success(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["create", "device", "--slot", "17", "--channels", "1,2"],
+        ["create", "--slot", "17", "--channels", "1,2"],
     )
 
     assert result.exit_code == 0
@@ -744,7 +744,7 @@ def test_flow_create_refuses_slot_above_device_capacity(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["create", "device", "--slot", "17", "--channels", "1"],
+        ["create", "--slot", "17", "--channels", "1"],
     )
 
     assert result.exit_code == 1
@@ -763,7 +763,7 @@ def test_flow_delete_requires_confirmation_before_discovery(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["delete", "device", "--slot", "17"],
+        ["delete", "--slot", "17"],
     )
 
     assert result.exit_code == 1
@@ -792,7 +792,7 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["delete", "device", "--slot", "17", "--yes"],
+        ["delete", "--slot", "17", "--yes"],
     )
 
     assert result.exit_code == 1

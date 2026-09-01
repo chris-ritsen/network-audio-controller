@@ -1,5 +1,6 @@
 from netaudio.icons import icon
 
+HELP_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 HEADER_ICONS = {
     "Name": "name",

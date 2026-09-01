@@ -37,7 +37,7 @@ from netaudio.dante.packet_store import PacketStore
 from netaudio.icons import icon
 
 
-@session_app.command("start")
+@session_app.command("start", help="Start a new capture session.")
 def session_start(
     name: Optional[str] = typer.Option(None, "--name", help="Session name (defaults to timestamped name)."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
@@ -68,7 +68,7 @@ def session_start(
         store.close()
 
 
-@session_app.command("stop")
+@session_app.command("stop", help="Stop a capture session.")
 def session_stop(
     id: Optional[int] = typer.Option(None, "--id", help="Session ID."),
     session: Optional[str] = typer.Option(
@@ -185,7 +185,7 @@ def session_rename(
         store.close()
 
 
-@session_app.command("list")
+@session_app.command("list", help="List capture sessions.")
 def session_list(
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     limit: int = typer.Option(25, "--limit", help="Number of sessions to show."),
@@ -253,7 +253,7 @@ def session_list(
         store.close()
 
 
-@session_app.command("show")
+@session_app.command("show", help="Show a session's marker timeline.")
 def session_show(
     id: Optional[int] = typer.Option(None, "--id", help="Session ID."),
     session: Optional[str] = typer.Option(
@@ -389,7 +389,7 @@ def session_show(
         store.close()
 
 
-@session_app.command("packets")
+@session_app.command("packets", help="List packets captured in a session.")
 def session_packets(
     id: Optional[int] = typer.Option(None, "--id", help="Session ID."),
     session: Optional[str] = typer.Option(
@@ -528,7 +528,7 @@ def session_packets(
         store.close()
 
 
-@app.command("marker")
+@app.command("marker", help="Add a marker to a capture session timeline.")
 def marker(
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(

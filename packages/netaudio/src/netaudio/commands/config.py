@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import os
 import subprocess
 import sys
 from typing import Optional
 
 import typer
+
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.clock_config import (
@@ -43,9 +46,11 @@ from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.commands.config_latency import register_latency_command
 
-app = typer.Typer(help="Get or set device configuration.", no_args_is_help=True)
+app = typer.Typer(help="Get or set device configuration.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
-top_app = typer.Typer(help="Manage netaudio configuration.", no_args_is_help=True)
+top_app = typer.Typer(
+    help="Manage netaudio configuration.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS
+)
 
 VALID_SAMPLE_RATES = [44100, 48000, 88200, 96000, 176400, 192000]
 VALID_ENCODINGS = [16, 24, 32]
@@ -62,9 +67,12 @@ def _moved_command(name: str):
 
 
 for _name in MOVED_COMMANDS:
-    top_app.command(_name, hidden=True, context_settings={"allow_extra_args": True, "allow_interspersed_args": False})(
-        _moved_command(_name)
-    )
+    top_app.command(
+        _name,
+        hidden=True,
+        help=f"Moved to 'netaudio device config {_name}'.",
+        context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+    )(_moved_command(_name))
 
 
 @top_app.command("edit")
@@ -103,6 +111,79 @@ def config_path():
     from netaudio.common.config_loader import default_config_path
 
     typer.echo(str(default_config_path()))
+
+
+SECRET_CONFIGURATION_KEY_MARKERS = ("key", "password", "secret", "token")
+
+
+def _merge_configuration(base: dict, overlay: dict) -> dict:
+    merged = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_configuration(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _flatten_configuration(data: dict, prefix: str = "") -> list[tuple[str, object]]:
+    flattened: list[tuple[str, object]] = []
+    for key in sorted(data):
+        value = data[key]
+        qualified_key = f"{prefix}{key}"
+        if isinstance(value, dict):
+            flattened.extend(_flatten_configuration(value, f"{qualified_key}."))
+        else:
+            flattened.append((qualified_key, value))
+    return flattened
+
+
+def _format_configuration_value(key: str, value: object) -> str:
+    leaf = key.rsplit(".", 1)[-1].lower()
+    if any(marker in leaf for marker in SECRET_CONFIGURATION_KEY_MARKERS) and value not in (None, ""):
+        return "(set; hidden)"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, default=str)
+
+
+def effective_configuration(config_path) -> dict:
+    from netaudio.common.config_loader import load_capture_profile, tomllib
+
+    if tomllib is None:
+        raise ValueError("TOML parser unavailable. Install 'tomli' or use Python 3.11+.")
+    data = tomllib.loads(config_path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Config {config_path} must contain a TOML table.")
+    top_level = {key: value for key, value in data.items() if key != "profiles"}
+    if not isinstance(data.get("profiles"), dict):
+        return top_level
+    selected_profile, _ = load_capture_profile(None, None)
+    if selected_profile is data:
+        return top_level
+    return _merge_configuration(top_level, selected_profile)
+
+
+@top_app.command("show", help="Print the effective configuration as key = value lines.")
+def config_show():
+    from netaudio.common.config_loader import default_config_path
+
+    config_path = default_config_path()
+    typer.echo(f"path = {config_path}")
+    if not config_path.exists():
+        typer.echo("(no configuration file; defaults apply)")
+        return
+
+    try:
+        configuration = effective_configuration(config_path)
+    except ValueError as exception:
+        typer.echo(f"Error: {exception}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    for key, value in _flatten_configuration(configuration):
+        typer.echo(f"{key} = {_format_configuration_value(key, value)}")
 
 
 from netaudio.commands.config_readback import (

@@ -349,7 +349,7 @@ def live(
         signal.signal(signal.SIGTERM, original_sigterm)
 
 
-@app.command()
+@app.command(help="Resend a captured packet and listen for responses.")
 def replay(
     id: int = typer.Option(..., "--id", help="Packet ID to replay."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),

@@ -19,7 +19,7 @@ def test_receiver_channel_name_uses_2809_after_successful_frontend_probe(monkeyp
         send_responses=[status_response, rename_response],
     )
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "rx"])
+    result = runner.invoke(channel_commands.app, ["name", "rx:1", "New"])
 
     assert result.exit_code == 0
     assert [int.from_bytes(packet[0:2], "big") for _, _, packet, _ in sent] == [0x2809, 0x2809]
@@ -38,7 +38,7 @@ def test_receiver_channel_name_uses_2729_after_authentic_a32_frontend_rejection(
         send_responses=[status_response, rename_response],
     )
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "rx"])
+    result = runner.invoke(channel_commands.app, ["name", "rx:1", "New"])
 
     assert result.exit_code == 0
     assert [int.from_bytes(packet[0:2], "big") for _, _, packet, _ in sent] == [0x2809, 0x2729]
@@ -60,7 +60,7 @@ def test_transmitter_channel_name_uses_2809_after_successful_frontend_probe(monk
         send_responses=[status_response, rename_response],
     )
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["name", "tx:1", "New"])
 
     assert result.exit_code == 0
     assert [int.from_bytes(packet[0:2], "big") for _, _, packet, _ in sent] == [0x2809, 0x2809]
@@ -80,7 +80,7 @@ def test_transmitter_channel_name_uses_2729_after_authentic_a32_frontend_rejecti
         send_responses=[status_response, rename_response],
     )
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["name", "tx:1", "New"])
 
     assert result.exit_code == 0
     assert [int.from_bytes(packet[0:2], "big") for _, _, packet, _ in sent] == [0x2809, 0x2729]

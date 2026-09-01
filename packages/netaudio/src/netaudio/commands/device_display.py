@@ -1,17 +1,133 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from fnmatch import fnmatch
 
 from netaudio.dante.clock_config import format_clock_subdomain
 from netaudio.dante.const import BLUETOOTH_MODEL_IDS
-from netaudio.dante.latency import standard_latency_choices_for_range
+from netaudio.dante.latency import nanoseconds_to_milliseconds, standard_latency_choices_for_range
 from netaudio.dante.sample_rate_pullup import (
     format_supported_sample_rate_pullup_values,
     sample_rate_pullup_label,
 )
+from netaudio.icons import icon
+
+DEVICE_LIST_COMPACT_HEADERS = [
+    "Name",
+    "Status",
+    "Kind",
+    "IP Address",
+    "MAC Address",
+    "Model",
+    "Lock",
+    "TX",
+    "RX",
+    "Last Seen",
+    "Server Name",
+]
+
+DEVICE_LIST_VERBOSE_HEADERS = [
+    "Manufacturer",
+    "Product Version",
+    "Board",
+    "Firmware",
+    "Software",
+    "Link Speed",
+    "Sample Rate",
+    "Supported Sample Rates",
+    "Encoding",
+    "Supported Encodings",
+    "Latency",
+    "Configured Latency",
+    "Latency Range",
+    "Latency Options",
+    "AES67",
+    "Sample Rate Pull-Up",
+    "Preferred Leader",
+    "Clock Subdomain",
+    "PTP Role",
+    "Bluetooth",
+]
 
 
-def _format_mac(mac: str) -> str:
+def _format_number(value: float) -> str:
+    if value == int(value):
+        return str(int(value))
+    return f"{value:g}"
+
+
+def format_clock_frequency_offset_parts_per_billion(clock_frequency_offset_parts_per_billion: int | None) -> str:
+    if clock_frequency_offset_parts_per_billion is None:
+        return ""
+    return f"{clock_frequency_offset_parts_per_billion / 1000:g} ppm"
+
+
+def format_encoding(encoding_bit_depth: int | None) -> str:
+    if encoding_bit_depth is None:
+        return ""
+    return f"PCM{encoding_bit_depth}"
+
+
+def format_encodings(encoding_bit_depths: list[int] | None) -> str:
+    if encoding_bit_depths is None:
+        return ""
+    if not encoding_bit_depths:
+        return "none advertised"
+    return ", ".join(format_encoding(encoding_bit_depth) for encoding_bit_depth in encoding_bit_depths)
+
+
+def format_last_seen(last_seen: float | None) -> str:
+    if last_seen is None:
+        return ""
+    return datetime.fromtimestamp(last_seen, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_latency_choices_milliseconds(latency_choices_milliseconds: list[float] | None) -> str:
+    if latency_choices_milliseconds is None:
+        return ""
+    if not latency_choices_milliseconds:
+        return "none advertised"
+    return ", ".join(_format_number(choice) for choice in latency_choices_milliseconds) + " ms"
+
+
+def format_latency_milliseconds(latency_milliseconds: float | None) -> str:
+    if latency_milliseconds is None:
+        return ""
+    return f"{_format_number(latency_milliseconds)} ms"
+
+
+def format_latency_nanoseconds(latency_nanoseconds: int | None) -> str:
+    if type(latency_nanoseconds) is not int or latency_nanoseconds < 0:
+        return ""
+    return format_latency_milliseconds(nanoseconds_to_milliseconds(latency_nanoseconds))
+
+
+def format_latency_range_milliseconds(
+    minimum_latency_milliseconds: float | None,
+    maximum_latency_milliseconds: float | None,
+) -> str:
+    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
+        return ""
+    return f"{_format_number(minimum_latency_milliseconds)}-{_format_number(maximum_latency_milliseconds)} ms"
+
+
+def format_link_speed_megabits_per_second(link_speed_megabits_per_second: int | None) -> str:
+    if link_speed_megabits_per_second is None:
+        return ""
+    if link_speed_megabits_per_second >= 1_000:
+        return f"{link_speed_megabits_per_second / 1_000:g} Gbps"
+    return f"{link_speed_megabits_per_second} Mbps"
+
+
+def format_lock_state(device) -> str:
+    if device.is_locked is True:
+        return icon("lock") or "locked"
+    if device.is_locked is False:
+        return icon("unlock") or "unlocked"
+    return unknown_or_blank(device, "is_locked")
+
+
+def format_mac_address(mac: str | None) -> str:
     if not mac:
         return ""
     raw = mac.replace(":", "").replace("-", "").upper()
@@ -22,58 +138,63 @@ def _format_mac(mac: str) -> str:
     return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
 
 
+def format_on_off(value: bool | None) -> str:
+    if value is None:
+        return ""
+    return "on" if value else "off"
+
+
+def format_sample_rate_hertz(sample_rate_hertz: int | None) -> str:
+    if sample_rate_hertz is None:
+        return ""
+    return f"{sample_rate_hertz / 1000:g} kHz"
+
+
+def format_sample_rates_hertz(sample_rates_hertz: list[int] | None) -> str:
+    if sample_rates_hertz is None:
+        return ""
+    if not sample_rates_hertz:
+        return "none advertised"
+    return ", ".join(f"{sample_rate_hertz / 1000:g}" for sample_rate_hertz in sample_rates_hertz) + " kHz"
+
+
+def unknown_or_blank(device, query_name: str) -> str:
+    if query_name in (getattr(device, "failed_queries", None) or ()):
+        return "unknown"
+    return ""
+
+
 def _format_latency_milliseconds(latency_milliseconds: float) -> str:
-    if latency_milliseconds == int(latency_milliseconds):
-        return str(int(latency_milliseconds))
-    return f"{latency_milliseconds:g}"
+    return _format_number(latency_milliseconds)
 
 
 def _format_standard_latency_choices(
     minimum_latency_milliseconds: float | None,
     maximum_latency_milliseconds: float | None,
 ) -> str:
-    choices = standard_latency_choices_for_range(
-        minimum_latency_milliseconds,
-        maximum_latency_milliseconds,
+    return format_latency_choices_milliseconds(
+        standard_latency_choices_for_range(minimum_latency_milliseconds, maximum_latency_milliseconds)
     )
-    if choices is None:
-        return ""
-    if not choices:
-        return ""
-    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + "ms"
 
 
-def _format_latency_range(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
-        return ""
-    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
-    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
-    return f"{minimum_label}-{maximum_label}ms"
+_format_clock_frequency_offset = format_clock_frequency_offset_parts_per_billion
+_format_encoding = format_encoding
+_format_last_seen = format_last_seen
+_format_latency = format_latency_milliseconds
+_format_latency_range = format_latency_range_milliseconds
+_format_link_speed = format_link_speed_megabits_per_second
+_format_mac = format_mac_address
+_format_sample_rate = format_sample_rate_hertz
+_format_supported_encodings = format_encodings
+_format_supported_sample_rates = format_sample_rates_hertz
 
 
-def _format_last_seen(last_seen: float | None) -> str:
-    if last_seen is None:
-        return ""
-    from datetime import datetime, timezone
-
-    return datetime.fromtimestamp(last_seen, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+def _device_active_latency(device) -> float | None:
+    return device.active_latency if device.active_latency is not None else device.latency
 
 
-def _format_sample_rate(sample_rate_hertz: int | None) -> str:
-    if sample_rate_hertz is None:
-        return "unknown"
-    return f"{sample_rate_hertz / 1000:g} kHz"
-
-
-def _format_link_speed(link_speed_mbps: int | None) -> str:
-    if link_speed_mbps is None:
-        return "unknown"
-    if link_speed_mbps >= 1_000:
-        return f"{link_speed_mbps / 1_000:g} Gbps"
-    return f"{link_speed_mbps} Mbps"
+def _device_encoding(device) -> int | None:
+    return device.encoding if device.encoding is not None else device.bit_depth
 
 
 def _format_bluetooth(device) -> str:
@@ -81,11 +202,7 @@ def _format_bluetooth(device) -> str:
         return device.bluetooth_device or "connected"
     if device.bluetooth_connected is False:
         return "disconnected"
-    return "unknown"
-
-
-def _format_clock_frequency_offset(clock_frequency_offset_parts_per_billion: int) -> str:
-    return f"{clock_frequency_offset_parts_per_billion / 1000:.3f} ppm"
+    return unknown_or_blank(device, "bluetooth")
 
 
 def _format_clock_port_record(record: dict) -> str:
@@ -107,29 +224,9 @@ def _format_clock_port_record(record: dict) -> str:
     )
 
 
-def _format_supported_sample_rates(supported_sample_rates: list[int] | None) -> str:
-    if supported_sample_rates is None:
-        return "unknown"
-    if not supported_sample_rates:
-        return "none advertised"
-    return ", ".join(f"{sample_rate_hertz / 1000:g}" for sample_rate_hertz in supported_sample_rates) + " kHz"
-
-
-def _format_encoding(encoding: int | None) -> str:
-    return f"PCM{encoding}" if encoding is not None else "unknown"
-
-
-def _format_supported_encodings(supported_encodings: list[int] | None) -> str:
-    if supported_encodings is None:
-        return "unknown"
-    if not supported_encodings:
-        return "none advertised"
-    return ", ".join(f"PCM{encoding}" for encoding in supported_encodings)
-
-
 def _format_reference_levels(device) -> str:
     if device.gain_device_type is None or device.gain_levels is None:
-        return "unknown"
+        return ""
     return ", ".join(
         f"{channel_number}: {device.gain_level_label_for_channel(channel_number, 'tx' if device.gain_device_type == 'input' else 'rx')}"
         for channel_number in range(1, len(device.gain_levels) + 1)
@@ -139,36 +236,10 @@ def _format_reference_levels(device) -> str:
 def _format_reference_options(device) -> str:
     choices = device.gain_level_choices
     if choices is None:
-        return "unknown"
+        return ""
     if not choices:
         return "none advertised"
     return ", ".join(choice["label"] for choice in choices)
-
-
-def _format_latency(latency_milliseconds: float | None) -> str:
-    if latency_milliseconds is None:
-        return "unknown"
-    return f"{_format_latency_milliseconds(latency_milliseconds)} ms"
-
-
-def _format_show_latency_range(
-    minimum_latency_milliseconds: float | None,
-    maximum_latency_milliseconds: float | None,
-) -> str:
-    if minimum_latency_milliseconds is None or maximum_latency_milliseconds is None:
-        return "unknown"
-    minimum_label = _format_latency_milliseconds(minimum_latency_milliseconds)
-    maximum_label = _format_latency_milliseconds(maximum_latency_milliseconds)
-    return f"{minimum_label}-{maximum_label} ms"
-
-
-def _format_show_standard_latencies(device) -> str:
-    choices = device.standard_latency_choices
-    if choices is None:
-        return "unknown"
-    if not choices:
-        return "none advertised"
-    return ", ".join(_format_latency_milliseconds(choice) for choice in choices) + " ms"
 
 
 def _format_aes67(device) -> str:
@@ -177,15 +248,21 @@ def _format_aes67(device) -> str:
     current = device.aes67_current
     configured = device.aes67_configured
     prefix = device.aes67_multicast_prefix
-    prefix_suffix = f"; multicast prefix {prefix}" if prefix else ""
+    details = []
     if current is None and configured is None:
-        return f"unknown{prefix_suffix}" if prefix_suffix else "unknown"
-    if current is not None and configured is not None and current != configured:
-        current_label = "enabled" if current else "disabled"
-        configured_label = "enabled" if configured else "disabled"
-        return f"{current_label}; configured {configured_label} (reboot required){prefix_suffix}"
-    effective_state = configured if configured is not None else current
-    return ("enabled" if effective_state else "disabled") + prefix_suffix
+        state_label = unknown_or_blank(device, "aes67")
+    elif current is not None and configured is not None and current != configured:
+        state_label = format_on_off(current)
+        details.append(f"configured {format_on_off(configured)}, reboot required")
+    else:
+        state_label = format_on_off(configured if configured is not None else current)
+    if prefix:
+        details.append(f"multicast prefix {prefix}")
+    if not details:
+        return state_label
+    if not state_label:
+        return "; ".join(details)
+    return f"{state_label} ({'; '.join(details)})"
 
 
 def _format_transmitter_flow(flow: dict) -> str:
@@ -200,13 +277,10 @@ def _format_transmitter_flow(flow: dict) -> str:
         channel_text = f"{flow['channel_count']}ch"
     else:
         channel_text = "unknown channels"
-    sample_rate = flow.get("sample_rate")
-    encoding = flow.get("encoding")
-    audio_parts = []
-    if sample_rate is not None:
-        audio_parts.append(str(sample_rate))
-    if encoding is not None:
-        audio_parts.append(f"PCM{encoding}")
+    audio_parts = [
+        format_sample_rate_hertz(flow.get("sample_rate")),
+        format_encoding(flow.get("encoding")),
+    ]
     destination_address = flow.get("destination_internet_protocol_version_four_address")
     destination_port = flow.get("destination_user_datagram_port")
     if destination_address and destination_port:
@@ -220,8 +294,7 @@ def _format_transmitter_flow(flow: dict) -> str:
     else:
         subscriber = subscriber_device
     parts = [str(flow_type), channel_text]
-    if audio_parts:
-        parts.append("/".join(audio_parts))
+    parts.extend(part for part in audio_parts if part)
     if destination:
         parts.append(f"-> {destination}")
     if subscriber:
@@ -230,13 +303,7 @@ def _format_transmitter_flow(flow: dict) -> str:
 
 
 def _format_connection_latency_nanoseconds(latency_nanoseconds: int | None) -> str:
-    if type(latency_nanoseconds) is not int or latency_nanoseconds < 0:
-        return "unknown"
-    if latency_nanoseconds < 1_000:
-        return f"{latency_nanoseconds} ns"
-    if latency_nanoseconds < 1_000_000:
-        return f"{latency_nanoseconds / 1_000:g} us"
-    return f"{latency_nanoseconds / 1_000_000:g} ms"
+    return format_latency_nanoseconds(latency_nanoseconds) or "unknown"
 
 
 def _connection_health_rows(connection_health: dict | None) -> list[list[str]]:
@@ -315,17 +382,17 @@ def _format_channel_count(channels: dict, reported_count: int | None) -> str:
 
 def _diagnostic_audio_capabilities_data(capabilities) -> dict:
     return {
+        "current_sample_rate_hertz": capabilities.current_sample_rate_hertz,
+        "default_sample_rate_hertz": capabilities.default_sample_rate_hertz,
         "diagnostic_log_export_supported": True,
         "license_signature_length_bytes": capabilities.license_signature_length_bytes,
         "licensed_receive_channel_count": capabilities.licensed_receive_channel_count,
-        "licensed_transmit_channel_count": capabilities.licensed_transmit_channel_count,
         "licensed_redundancy_enabled": capabilities.licensed_redundancy_enabled,
-        "default_sample_rate_hertz": capabilities.default_sample_rate_hertz,
-        "current_sample_rate_hertz": capabilities.current_sample_rate_hertz,
+        "licensed_transmit_channel_count": capabilities.licensed_transmit_channel_count,
         "sample_rate_channel_capacities": [
             {
-                "sample_rate_hertz": capacity.sample_rate_hertz,
                 "receive_channel_count": capacity.receive_channel_count,
+                "sample_rate_hertz": capacity.sample_rate_hertz,
                 "transmit_channel_count": capacity.transmit_channel_count,
             }
             for capacity in capabilities.channel_capacities
@@ -348,20 +415,15 @@ def _diagnostic_audio_capability_rows(capabilities) -> list[list[str]]:
             ]
         )
     if capabilities.licensed_redundancy_enabled is not None:
-        rows.append(
-            [
-                "Licensed Redundancy",
-                "enabled" if capabilities.licensed_redundancy_enabled else "disabled",
-            ]
-        )
+        rows.append(["Licensed Redundancy", format_on_off(capabilities.licensed_redundancy_enabled)])
     if capabilities.default_sample_rate_hertz is not None:
-        rows.append(["Default Sample Rate", _format_sample_rate(capabilities.default_sample_rate_hertz)])
+        rows.append(["Default Sample Rate", format_sample_rate_hertz(capabilities.default_sample_rate_hertz)])
     if capabilities.current_sample_rate_hertz is not None:
-        rows.append(["Current Sample Rate", _format_sample_rate(capabilities.current_sample_rate_hertz)])
+        rows.append(["Current Sample Rate", format_sample_rate_hertz(capabilities.current_sample_rate_hertz)])
     for capacity in capabilities.channel_capacities:
         rows.append(
             [
-                f"Channels at {_format_sample_rate(capacity.sample_rate_hertz)}",
+                f"Channels at {format_sample_rate_hertz(capacity.sample_rate_hertz)}",
                 f"{capacity.transmit_channel_count} TX / {capacity.receive_channel_count} RX",
             ]
         )
@@ -387,11 +449,12 @@ def _device_identity_rows(device) -> list[list[str]]:
     rows = [
         ["Name", device.name or "unknown"],
         ["Status", "online" if device.online else "offline"],
+        ["Kind", device.kind],
         ["Model", model or "unknown"],
         ["Manufacturer", manufacturer or "unknown"],
         ["IP Address", str(device.ipv4) if device.ipv4 else "unknown"],
-        ["MAC Address", _format_mac(device.mac_address) if device.mac_address else "unknown"],
-        ["Link Speed", _format_link_speed(device.link_speed_mbps)],
+        ["MAC Address", format_mac_address(device.mac_address) if device.mac_address else "unknown"],
+        ["Link Speed", format_link_speed_megabits_per_second(device.link_speed_mbps)],
     ]
     if device.firmware_version:
         rows.append(["Firmware", device.firmware_version])
@@ -423,16 +486,11 @@ def _device_license_rows(device) -> list[list[str]]:
             ]
         )
     if device.licensed_redundancy_enabled is not None:
-        rows.append(
-            [
-                "Licensed Redundancy",
-                "enabled" if device.licensed_redundancy_enabled else "disabled",
-            ]
-        )
+        rows.append(["Licensed Redundancy", format_on_off(device.licensed_redundancy_enabled)])
     for capacity in device.sample_rate_channel_capacities or []:
         rows.append(
             [
-                f"Channels at {_format_sample_rate(capacity['sample_rate_hertz'])}",
+                f"Channels at {format_sample_rate_hertz(capacity['sample_rate_hertz'])}",
                 f"{capacity['transmit_channel_count']} TX / {capacity['receive_channel_count']} RX",
             ]
         )
@@ -441,18 +499,24 @@ def _device_license_rows(device) -> list[list[str]]:
 
 def _device_audio_rows(device) -> list[list[str]]:
     tx_count_label, rx_count_label = _device_channel_count_labels(device)
-    active_latency = device.active_latency if device.active_latency is not None else device.latency
     return [
         ["Channels", f"{tx_count_label} TX / {rx_count_label} RX"],
-        ["Sample Rate", _format_sample_rate(device.sample_rate)],
-        ["Supported Sample Rates", _format_supported_sample_rates(device.supported_sample_rates)],
-        ["Encoding", _format_encoding(device.encoding)],
-        ["Supported Encodings", _format_supported_encodings(device.supported_encodings)],
-        ["Active Latency", _format_latency(active_latency)],
-        ["Configured Latency", _format_latency(device.configured_latency)],
-        ["Default Latency", _format_latency(device.default_latency)],
-        ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
-        ["Latency Options", _format_show_standard_latencies(device)],
+        ["Sample Rate", format_sample_rate_hertz(device.sample_rate)],
+        [
+            "Supported Sample Rates",
+            format_sample_rates_hertz(device.supported_sample_rates)
+            or unknown_or_blank(device, "supported_sample_rates"),
+        ],
+        ["Encoding", format_encoding(_device_encoding(device))],
+        [
+            "Supported Encodings",
+            format_encodings(device.supported_encodings) or unknown_or_blank(device, "supported_encodings"),
+        ],
+        ["Active Latency", format_latency_milliseconds(_device_active_latency(device))],
+        ["Configured Latency", format_latency_milliseconds(device.configured_latency)],
+        ["Default Latency", format_latency_milliseconds(device.default_latency)],
+        ["Latency Range", format_latency_range_milliseconds(device.min_latency, device.max_latency)],
+        ["Latency Options", format_latency_choices_milliseconds(device.standard_latency_choices)],
         ["AES67", _format_aes67(device)],
     ]
 
@@ -492,14 +556,8 @@ def _device_transmitter_flow_rows(device) -> list[list[str]]:
 
 def _device_control_rows(device) -> list[list[str]]:
     rows = [
-        [
-            "Lock",
-            "unknown" if device.is_locked is None else ("locked" if device.is_locked else "unlocked"),
-        ],
-        [
-            "Preferred Leader",
-            "unknown" if device.preferred_leader is None else ("enabled" if device.preferred_leader else "disabled"),
-        ],
+        ["Lock", format_lock_state(device)],
+        ["Preferred Leader", format_on_off(device.preferred_leader) or unknown_or_blank(device, "clock_status")],
     ]
     if device.clock_subdomain is not None:
         rows.append(["Clock Subdomain", format_clock_subdomain(device.clock_subdomain)])
@@ -526,7 +584,7 @@ def _device_clock_rows(device) -> list[list[str]]:
         rows.append(
             [
                 "Clock Frequency Offset",
-                _format_clock_frequency_offset(device.clock_frequency_offset_parts_per_billion),
+                format_clock_frequency_offset_parts_per_billion(device.clock_frequency_offset_parts_per_billion),
             ]
         )
     if device.clock_port_state_code is not None:
@@ -555,6 +613,58 @@ def _device_show_rows(device) -> list[list[str]]:
     if device.interface_reboot_required:
         rows.append(["Network Reboot Required", "yes"])
     return rows
+
+
+def device_list_headers(verbose: bool) -> list[str]:
+    if verbose:
+        return DEVICE_LIST_COMPACT_HEADERS + DEVICE_LIST_VERBOSE_HEADERS
+    return list(DEVICE_LIST_COMPACT_HEADERS)
+
+
+def device_list_row(server_name: str, device, verbose: bool) -> list[str]:
+    row = [
+        device.name or "",
+        "online" if device.online else "offline",
+        device.kind,
+        str(device.ipv4) if device.ipv4 else "",
+        format_mac_address(device.mac_address),
+        device.dante_model or device.model_id or "",
+        format_lock_state(device),
+        _format_channel_count(device.tx_channels, device.tx_count),
+        _format_channel_count(device.rx_channels, device.rx_count),
+        format_last_seen(device.last_seen),
+        server_name,
+    ]
+    if not verbose:
+        return row
+    row.extend(
+        [
+            device.manufacturer or "",
+            device.product_version or "",
+            device.board_name or device.dante_model_id or "",
+            device.firmware_version or "",
+            device.software_version or "",
+            format_link_speed_megabits_per_second(device.link_speed_mbps),
+            format_sample_rate_hertz(device.sample_rate),
+            format_sample_rates_hertz(device.supported_sample_rates)
+            or unknown_or_blank(device, "supported_sample_rates"),
+            format_encoding(_device_encoding(device)),
+            format_encodings(device.supported_encodings) or unknown_or_blank(device, "supported_encodings"),
+            format_latency_milliseconds(_device_active_latency(device)),
+            format_latency_milliseconds(device.configured_latency),
+            format_latency_range_milliseconds(device.min_latency, device.max_latency),
+            format_latency_choices_milliseconds(device.standard_latency_choices),
+            _format_aes67(device),
+            sample_rate_pullup_label(device.sample_rate_pullup_raw_value)
+            if device.sample_rate_pullup_raw_value is not None
+            else "",
+            format_on_off(device.preferred_leader),
+            format_clock_subdomain(device.clock_subdomain) if device.clock_subdomain is not None else "",
+            device.clock_role or "",
+            _format_bluetooth(device) if device.model_id in BLUETOOTH_MODEL_IDS else "",
+        ]
+    )
+    return row
 
 
 def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -> bool:
