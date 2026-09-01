@@ -131,17 +131,13 @@ def get_subscription_status_name(status_code):
     if isinstance(entry, dict):
         label = entry.get("label")
         if isinstance(label, str) and label.strip():
-            from netaudio.i18n import translate
-
-            return translate(label.strip())
+            return label.strip()
 
         labels = entry.get("labels")
         if isinstance(labels, list):
             for value in labels:
                 if isinstance(value, str) and value.strip():
-                    from netaudio.i18n import translate
-
-                    return translate(value.strip())
+                    return value.strip()
 
     from netaudio.dante.const import subscription_status_label
 
@@ -252,139 +248,6 @@ def format_hex_dump(data: bytes, highlights: list = None, bytes_per_line: int = 
             result.append(f"{color}{data[i]:02X}{C.RESET}")
 
         print(f"  {' '.join(result)}", file=sys.stderr)
-
-
-def format_request(data: bytes, device_name: str, command_name: str):
-    if len(data) < 8:
-        return
-
-    protocol = struct.unpack(">H", data[0:2])[0]
-    length = struct.unpack(">H", data[2:4])[0]
-    transaction_id = struct.unpack(">H", data[4:6])[0]
-    opcode = struct.unpack(">H", data[6:8])[0]
-
-    opcode_name = get_opcode_name(protocol, opcode)
-
-    print(
-        f"\n{C.CYAN}{C.BOLD}>>> REQUEST{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}",
-        file=sys.stderr,
-    )
-    print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
-
-    highlights = [
-        (0, 2, C.YELLOW),
-        (2, 4, C.BLUE),
-        (4, 6, C.DIM),
-        (6, 8, C.YELLOW),
-    ]
-    if len(data) > 8:
-        highlights.append((8, len(data), C.CYAN))
-
-    format_hex_dump(data, highlights)
-
-    print(f"\n  {C.DIM}Parsed:{C.RESET}", file=sys.stderr)
-
-    if protocol in PROTOCOL_NAMES:
-        print_const(0, 2, data[0:2], PROTOCOL_NAMES[protocol])
-    else:
-        print_field(0, 2, data[0:2], "protocol", f"0x{protocol:04X}", C.DIM)
-
-    print_field(2, 2, data[2:4], "length", f"{length} bytes", C.BLUE)
-    print_field(4, 2, data[4:6], "transaction_id", f"0x{transaction_id:04X}", C.DIM)
-
-    resolved_opcode_name = get_opcode_name(protocol, opcode)
-    if not resolved_opcode_name.startswith("0x"):
-        print_const(6, 2, data[6:8], resolved_opcode_name)
-    else:
-        print_field(6, 2, data[6:8], "opcode", resolved_opcode_name, C.YELLOW)
-
-    if len(data) > 8:
-        body = data[8:]
-
-        if opcode in (0x3000, 0x2000, 0x2010) and len(body) >= 8:
-            print_field(8, 2, body[0:2], "unknown", f"0x{struct.unpack('>H', body[0:2])[0]:04X}", C.DIM)
-            print_field(10, 2, body[2:4], "unknown", f"0x{struct.unpack('>H', body[2:4])[0]:04X}", C.DIM)
-            print_field(12, 2, body[4:6], "start_channel", str(struct.unpack(">H", body[4:6])[0]), C.BLUE)
-            print_field(14, 2, body[6:8], "unknown", f"0x{struct.unpack('>H', body[6:8])[0]:04X}", C.DIM)
-
-
-def format_response(data: bytes, device_name: str, command_name: str):
-    if len(data) < 10:
-        return
-
-    protocol = struct.unpack(">H", data[0:2])[0]
-    length = struct.unpack(">H", data[2:4])[0]
-    transaction_id = struct.unpack(">H", data[4:6])[0]
-    opcode = struct.unpack(">H", data[6:8])[0]
-    result = struct.unpack(">H", data[8:10])[0]
-
-    opcode_name = get_opcode_name(protocol, opcode)
-
-    print(
-        f"\n{C.GREEN}{C.BOLD}<<< RESPONSE{C.RESET} {C.DIM}{device_name}{C.RESET} {C.BOLD}({opcode_name}){C.RESET} {C.DIM}[{command_name}]{C.RESET}",
-        file=sys.stderr,
-    )
-    print(f"{C.DIM}{'─' * 80}{C.RESET}", file=sys.stderr)
-
-    result_color = C.RED if result == 0x0022 else C.GREEN
-    highlights = [
-        (0, 2, C.YELLOW),
-        (2, 4, C.BLUE),
-        (4, 6, C.DIM),
-        (6, 8, C.YELLOW),
-        (8, 10, result_color),
-    ]
-    if len(data) > 10:
-        highlights.append((10, len(data), C.CYAN))
-
-    format_hex_dump(data, highlights)
-
-    print(f"\n  {C.DIM}Parsed:{C.RESET}", file=sys.stderr)
-
-    if protocol in PROTOCOL_NAMES:
-        print_const(0, 2, data[0:2], PROTOCOL_NAMES[protocol])
-    else:
-        print_field(0, 2, data[0:2], "protocol", f"0x{protocol:04X}", C.DIM)
-
-    print_field(2, 2, data[2:4], "length", f"{length} bytes", C.BLUE)
-    print_field(4, 2, data[4:6], "transaction_id", f"0x{transaction_id:04X}", C.DIM)
-
-    resolved_opcode_name = get_opcode_name(protocol, opcode)
-    if not resolved_opcode_name.startswith("0x"):
-        print_const(6, 2, data[6:8], resolved_opcode_name)
-    else:
-        print_field(6, 2, data[6:8], "opcode", resolved_opcode_name, C.YELLOW)
-
-    if result in RESULT_NAMES:
-        color = C.RED if result == 0x0022 else C.GREEN
-        print(
-            f"  {C.DIM}[  8: 10]{C.RESET} {color}{C.BOLD}{format_hex(data[8:10])}{C.RESET}  {color}{RESULT_NAMES[result]}{C.RESET}",
-            file=sys.stderr,
-        )
-    else:
-        print_field(8, 2, data[8:10], "result_code", f"0x{result:04X}", C.YELLOW)
-
-    if len(data) <= 10:
-        return
-
-    body = data[10:]
-
-    if opcode == 0x1002:
-        name = body.rstrip(b"\x00").decode("utf-8", errors="replace")
-        print(f"\n  {C.DIM}Parsed:{C.RESET}", file=sys.stderr)
-        print(f'  {C.CYAN}"{name}"{C.RESET}', file=sys.stderr)
-
-    elif opcode == 0x1000:
-        format_channel_count_body(body)
-
-    elif opcode == 0x2010:
-        format_tx_friendly_names_body(body)
-
-    elif opcode == 0x3000:
-        format_rx_channels_body(body)
-
-    elif opcode == 0x2000:
-        format_tx_channels_body(body)
 
 
 def format_channel_count_body(body: bytes):

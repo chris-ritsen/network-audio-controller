@@ -11,7 +11,6 @@ from netaudio.shure.device import (
     BatteryType,
     ShureChannel,
     ShureDeviceInfo,
-    ShureDeviceType,
     ShureP10TChannel,
     ShureTransmitter,
     parse_ad4d,

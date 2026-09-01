@@ -3,7 +3,7 @@ use super::command_values::*;
 use super::*;
 
 #[derive(Debug, Deserialize)]
-struct Subscription {
+pub(super) struct Subscription {
     rx_channel: u16,
     tx_channel: String,
     tx_device: String,
@@ -11,7 +11,7 @@ struct Subscription {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
-enum SubscriptionPageEntry {
+pub(super) enum SubscriptionPageEntry {
     Set {
         rx_channel: u16,
         tx_channel: String,
@@ -23,20 +23,20 @@ enum SubscriptionPageEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct ReceiveChannelNamePageEntry {
+pub(super) struct ReceiveChannelNamePageEntry {
     rx_channel: u16,
     name: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct TransmitterChannelNameReconciliationEntry {
+pub(super) struct TransmitterChannelNameReconciliationEntry {
     channel_number: u16,
     name: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
-enum CommandSpec {
+pub(super) enum CommandSpec {
     DeviceInfo {
         #[serde(default)]
         transaction_id: u16,
@@ -443,7 +443,110 @@ enum CommandSpec {
     },
 }
 
-fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>, SpecError> {
+impl CommandSpec {
+    pub(super) fn route(&self) -> (Target, IoMode) {
+        use IoMode::*;
+        use Target::*;
+        match self {
+            CommandSpec::DeviceInfo { .. }
+            | CommandSpec::DeviceName { .. }
+            | CommandSpec::ChannelCount { .. }
+            | CommandSpec::DeviceSettings { .. }
+            | CommandSpec::PropertyDirectory { .. }
+            | CommandSpec::SetName { .. }
+            | CommandSpec::ResetName { .. }
+            | CommandSpec::Receivers { .. }
+            | CommandSpec::Transmitters { .. }
+            | CommandSpec::TransmitterNames { .. }
+            | CommandSpec::ResetChannelName { .. }
+            | CommandSpec::SetChannelName { .. }
+            | CommandSpec::ReceiveChannelNamePage2729 { .. }
+            | CommandSpec::AddSubscriptions { .. }
+            | CommandSpec::RemoveSubscriptions { .. }
+            | CommandSpec::SubscriptionPage2729 { .. }
+            | CommandSpec::SetLatency { .. }
+            | CommandSpec::QueryLatencyConfig { .. }
+            | CommandSpec::SetAes67MulticastPrefix { .. }
+            | CommandSpec::QueryTxFlows { .. }
+            | CommandSpec::QueryTransmitterChannelStatus2809 { .. }
+            | CommandSpec::ReconcileTransmitterChannelNames2809 { .. }
+            | CommandSpec::QueryReceiverChannelStatus2809 { .. }
+            | CommandSpec::QueryReceiverFlowStatus2809 { .. }
+            | CommandSpec::QueryReceiverFlows { .. }
+            | CommandSpec::QueryTransmitChannelCapabilities { .. }
+            | CommandSpec::QueryReceiverPortRanges { .. }
+            | CommandSpec::CreateTxFlow { .. }
+            | CommandSpec::DeleteTxFlow { .. } => (Arc, StampedRequest),
+            CommandSpec::SetEncoding { .. }
+            | CommandSpec::SetSampleRate { .. }
+            | CommandSpec::SetSampleRatePullup { .. }
+            | CommandSpec::SetGainLevel { .. }
+            | CommandSpec::Reboot { .. }
+            | CommandSpec::FactoryReset { .. }
+            | CommandSpec::Identify { .. }
+            | CommandSpec::ProbeInterfaceStatus { .. }
+            | CommandSpec::ProbeLinkStatus { .. }
+            | CommandSpec::ProbeSwitchConfiguration { .. }
+            | CommandSpec::ProbeSampleRate { .. }
+            | CommandSpec::ProbeEncoding { .. }
+            | CommandSpec::ProbeSampleRatePullup { .. }
+            | CommandSpec::ProbeGainLevel { .. }
+            | CommandSpec::SetInterfaceDhcp { .. }
+            | CommandSpec::SetInterfaceStatic { .. }
+            | CommandSpec::ProbeAes67 { .. }
+            | CommandSpec::ProbeLockResetStatus { .. }
+            | CommandSpec::ProbeClearConfigurationStatus { .. }
+            | CommandSpec::ClearAllConfiguration { .. }
+            | CommandSpec::ClearAllConfigurationPreservingInternetProtocolSettings { .. }
+            | CommandSpec::ProbePreferredLeader { .. }
+            | CommandSpec::RefreshClockStatus { .. }
+            | CommandSpec::BluetoothStatus { .. }
+            | CommandSpec::MakeModel { .. }
+            | CommandSpec::DanteModel { .. } => (
+                Settings,
+                Fire {
+                    repeat: 1,
+                    interval_ms: 0,
+                },
+            ),
+            CommandSpec::EnableAes67 { .. } => (
+                Settings,
+                Fire {
+                    repeat: 3,
+                    interval_ms: 100,
+                },
+            ),
+            CommandSpec::SetPreferredLeader { .. }
+            | CommandSpec::SetClockSource { .. }
+            | CommandSpec::SetClockSubdomain { .. } => (
+                Settings,
+                Fire {
+                    repeat: 3,
+                    interval_ms: 500,
+                },
+            ),
+            CommandSpec::DeviceLogExport { .. } | CommandSpec::CapabilityPartitionExport { .. } => {
+                (Settings, Request)
+            }
+            CommandSpec::CmcRegister { .. } => (Control, Request),
+            CommandSpec::VolumeStart { .. }
+            | CommandSpec::VolumeStop { .. }
+            | CommandSpec::MeteringStart { .. }
+            | CommandSpec::MeteringStop { .. } => (
+                Control,
+                Fire {
+                    repeat: 1,
+                    interval_ms: 0,
+                },
+            ),
+        }
+    }
+}
+
+pub(super) fn build_command(
+    spec: CommandSpec,
+    default_host_mac: [u8; 6],
+) -> Result<Vec<u8>, SpecError> {
     let packet = match spec {
         CommandSpec::DeviceInfo { transaction_id } => commands::build_device_info(transaction_id)?,
         CommandSpec::DeviceName { transaction_id } => commands::build_device_name(transaction_id)?,
@@ -459,7 +562,7 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
         CommandSpec::SetName {
             name,
             transaction_id,
-        } => commands::build_set_name(&name, transaction_id)?,
+        } => crate::protocol::build_set_device_name(&name, transaction_id)?,
         CommandSpec::ResetName { transaction_id } => commands::build_reset_name(transaction_id)?,
         CommandSpec::Receivers {
             page,
@@ -850,10 +953,6 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
     Ok(packet)
 }
 
-pub(super) fn build_command_with_default_host_mac(
-    json: &str,
-    default_host_mac: [u8; 6],
-) -> Result<Vec<u8>, SpecError> {
-    let spec: CommandSpec = serde_json::from_str(json).map_err(|_| SpecError::InvalidJson)?;
-    build_command(spec, default_host_mac)
+pub(super) fn parse_command_spec(json: &str) -> Result<CommandSpec, SpecError> {
+    serde_json::from_str(json).map_err(|_| SpecError::InvalidJson)
 }

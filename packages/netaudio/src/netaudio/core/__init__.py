@@ -1,4 +1,5 @@
 from netaudio.core.binding import (
+    STATUS_TIMEOUT,
     CoreClient,
     NetaudioCoreError,
     NetaudioCoreLibraryMissing,
@@ -12,6 +13,7 @@ from netaudio.core.binding import (
 )
 
 __all__ = [
+    "STATUS_TIMEOUT",
     "CoreClient",
     "NetaudioCoreError",
     "NetaudioCoreLibraryMissing",

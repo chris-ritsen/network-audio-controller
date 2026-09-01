@@ -1,10 +1,11 @@
 from fnmatch import fnmatch
-from glob import has_magic
 from typing import Optional
 
+import typer
+
 from netaudio import DanteDevice
+from netaudio._exit_codes import ExitCode
 from netaudio._common_cli import _get_state
-from netaudio.common.app_config import settings
 
 
 def _normalize_mac(mac: str) -> str:
@@ -99,13 +100,11 @@ def find_device(devices: dict[str, DanteDevice], identifier: str) -> Optional[Da
 def find_channel(device: DanteDevice, channel_id: str, channel_type: str):
     channels = device.rx_channels if channel_type == "rx" else device.tx_channels
 
-    try:
+    if channel_id.isdigit():
         number = int(channel_id)
         for channel in channels.values():
             if channel.number == number:
                 return channel
-    except ValueError:
-        pass
 
     for channel in channels.values():
         if channel.name == channel_id or channel.friendly_name == channel_id:

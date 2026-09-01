@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-import asyncio
-import os
 import time
-from collections import deque
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 from rich.cells import cell_len
 
 from netaudio.commands.meter_tui import (
     KeyDecoder,
-    MOUSE_WHEEL_ROWS,
     MeterFilterDialog,
     MeterRow,
     MeterRowKey,
-    MeterTerminal,
     MeterViewModel,
     MeterViewport,
     _dbfs_label,
@@ -27,8 +21,6 @@ from netaudio.commands.meter_tui import (
     format_meter_sample,
     render_meter_frame,
     render_meter_filter_prompt,
-    run_meter_tui,
-    stop_metering_attempts,
 )
 
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typer.testing import CliRunner
 
 from netaudio.cli import OutputFormat, app, state
-from netaudio.commands.device import meter_callback
+from netaudio.commands.device_meter import meter_callback
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 

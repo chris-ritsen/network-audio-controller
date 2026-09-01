@@ -2,14 +2,9 @@ import asyncio
 
 import typer
 
-from netaudio._common import (
-    ReadbackResult,
-    output_single,
-    output_table,
-    readback_after_notification,
-    send_and_wait_for_notification,
-    sort_devices,
-)
+from netaudio._common import readback_after_notification, ReadbackResult, send_and_wait_for_notification
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import sort_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 
@@ -32,13 +27,6 @@ def _resolve_targets(filtered, all_devices):
         raise typer.Exit(code=ExitCode.ERROR)
 
     return [next(iter(filtered.items()))]
-
-
-async def _read_settings_value(device, key):
-    settings = await device.operations.get_device_settings()
-    if not isinstance(settings, dict) or settings.get(key) is None:
-        raise RuntimeError(f"{key} readback was unavailable")
-    return settings[key]
 
 
 async def _read_aes67_configured(device):

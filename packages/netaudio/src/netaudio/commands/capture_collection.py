@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import socket
 import sys
 import time
@@ -12,22 +13,24 @@ import typer
 
 from netaudio.capture.daemon import _print_packet_line
 from netaudio.commands.capture_app import app
+
+logger = logging.getLogger("netaudio")
+
 from netaudio.commands.capture_helpers import (
     _as_dict,
     _coalesce,
     _load_capture_profile,
     _normalize_marker_label,
     _normalize_marker_type,
-    _packet_fingerprint,
     _parse_config_bool,
     _parse_config_int,
     _parse_optional_int,
-    _print_packet_table_header,
     _require_positive_session_id,
     _resolve_db_from_config,
     _resolve_redis_from_config,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _packet_fingerprint, _print_packet_table_header
 from netaudio.commands.capture_live import _resolve_redis_for_capture
 from netaudio.dante.packet_store import PacketStore
 
@@ -269,7 +272,8 @@ def collect(
                         continue
                     try:
                         payload = bytes.fromhex(payload_hex)
-                    except Exception:
+                    except ValueError as exception:
+                        logger.warning(f"Skipping packet with invalid payload hex: {exception}")
                         continue
 
                     src_port = _parse_optional_int(fields.get("src_port"))
@@ -461,7 +465,8 @@ def follow(
                     continue
                 try:
                     payload = bytes.fromhex(payload_hex)
-                except Exception:
+                except ValueError as exception:
+                    logger.warning(f"Skipping packet with invalid payload hex: {exception}")
                     continue
 
                 src_ip = fields.get("src_ip") or "?"

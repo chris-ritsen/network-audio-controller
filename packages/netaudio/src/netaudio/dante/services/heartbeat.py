@@ -177,7 +177,7 @@ class DanteHeartbeatService(DanteMulticastService):
                 try:
                     self._on_signal_presence(record, addr)
                 except Exception as exception:
-                    logger.debug(f"Signal-presence callback failed for {source_ip}: {exception}")
+                    logger.warning(f"Signal-presence callback failed for {source_ip}: {exception}", exc_info=True)
 
     def _update_interface_traffic(
         self,
@@ -322,7 +322,7 @@ class DanteHeartbeatService(DanteMulticastService):
             except asyncio.CancelledError:
                 break
             except Exception as exception:
-                logger.debug(f"Heartbeat sweep error: {exception}")
+                logger.warning(f"Heartbeat sweep error: {exception}", exc_info=True)
 
     def _check_stale_devices(self) -> None:
         if not self._get_devices:

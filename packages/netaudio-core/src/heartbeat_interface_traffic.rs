@@ -100,18 +100,7 @@ pub fn parse_heartbeat_interface_traffic_packet(
 mod tests {
     use super::*;
     use crate::heartbeat::{HEARTBEAT_HEADER_SIZE, HEARTBEAT_PROTOCOL};
-
-    fn decode_hexadecimal(encoded: &str) -> Vec<u8> {
-        encoded
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = (pair[0] as char).to_digit(16).unwrap();
-                let low = (pair[1] as char).to_digit(16).unwrap();
-                ((high << 4) | low) as u8
-            })
-            .collect()
-    }
+    use crate::test_support::decode_hexadecimal;
 
     fn packet(records: &[u8]) -> Vec<u8> {
         let length = HEARTBEAT_HEADER_SIZE + records.len();

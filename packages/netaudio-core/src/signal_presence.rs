@@ -108,18 +108,7 @@ pub fn parse_signal_presence_packet(data: &[u8]) -> Option<Vec<SignalPresenceRec
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn decode_hex(encoded: &str) -> Vec<u8> {
-        encoded
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = (pair[0] as char).to_digit(16).unwrap();
-                let low = (pair[1] as char).to_digit(16).unwrap();
-                ((high << 4) | low) as u8
-            })
-            .collect()
-    }
+    use crate::test_support::decode_hexadecimal;
 
     fn packet(record_bytes: &[u8]) -> Vec<u8> {
         let length = crate::heartbeat::HEARTBEAT_HEADER_SIZE + record_bytes.len();
@@ -160,7 +149,8 @@ mod tests {
         ];
 
         for (encoded, expected_tx, expected_rx, expected_padding) in cases {
-            let parsed = parse_signal_presence_packet(&packet(&decode_hex(encoded))).unwrap();
+            let parsed =
+                parse_signal_presence_packet(&packet(&decode_hexadecimal(encoded))).unwrap();
             assert_eq!(parsed.len(), 1);
             assert_eq!(parsed[0].tx_levels, expected_tx);
             assert_eq!(parsed[0].rx_levels, expected_rx);
@@ -170,9 +160,9 @@ mod tests {
 
     #[test]
     fn unknown_records_are_skipped_and_multiple_signal_records_are_preserved() {
-        let first = decode_hex("001c8002000400100001000000010000000000000018000011000000");
-        let second = decode_hex("001c8002000400100002000000000000000100000018000022000000");
-        let unknown = decode_hex("00048001");
+        let first = decode_hexadecimal("001c8002000400100001000000010000000000000018000011000000");
+        let second = decode_hexadecimal("001c8002000400100002000000000000000100000018000022000000");
+        let unknown = decode_hexadecimal("00048001");
         let mut records = unknown.clone();
         records.extend_from_slice(&first);
         records.extend_from_slice(&unknown);
@@ -189,9 +179,10 @@ mod tests {
 
     #[test]
     fn malformed_signal_record_is_ignored_without_partial_values() {
-        let mut malformed = decode_hex("001c8002000400104dec0000000200000001000000180000fefe6d00");
+        let mut malformed =
+            decode_hexadecimal("001c8002000400104dec0000000200000001000000180000fefe6d00");
         malformed[16..18].copy_from_slice(&3u16.to_be_bytes());
-        let valid = decode_hex("001c80020004001047360000000000000002000000180000fdfd0000");
+        let valid = decode_hexadecimal("001c80020004001047360000000000000002000000180000fdfd0000");
         malformed.extend_from_slice(&valid);
 
         let parsed = parse_signal_presence_packet(&packet(&malformed)).unwrap();
@@ -201,7 +192,7 @@ mod tests {
 
     #[test]
     fn malformed_outer_or_record_lengths_are_rejected() {
-        let record = decode_hex("001c8002000400104dec0000000200000001000000180000fefe6d00");
+        let record = decode_hexadecimal("001c8002000400104dec0000000200000001000000180000fefe6d00");
         let original = packet(&record);
 
         for length in 0..crate::heartbeat::HEARTBEAT_HEADER_SIZE {
@@ -223,7 +214,7 @@ mod tests {
 
     #[test]
     fn invalid_payload_lengths_offsets_and_counts_are_ignored() {
-        let record = decode_hex("001c8002000400104dec0000000200000001000000180000fefe6d00");
+        let record = decode_hexadecimal("001c8002000400104dec0000000200000001000000180000fefe6d00");
         let cases = [
             (4usize, 3u16),
             (6, 12),
@@ -245,7 +236,7 @@ mod tests {
 
     #[test]
     fn raw_boundary_values_are_not_collapsed() {
-        let record = decode_hex("001c8002000400100001000000040000000000000018000000fdfeff");
+        let record = decode_hexadecimal("001c8002000400100001000000040000000000000018000000fdfeff");
         let parsed = parse_signal_presence_packet(&packet(&record)).unwrap();
         assert_eq!(parsed[0].tx_levels, vec![0x00, 0xFD, 0xFE, 0xFF]);
     }

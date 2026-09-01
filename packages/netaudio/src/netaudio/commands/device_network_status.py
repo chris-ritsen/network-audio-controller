@@ -4,13 +4,9 @@ import asyncio
 
 import typer
 
-from netaudio._common import (
-    CapabilityProbeTimeout,
-    _command_context,
-    filter_devices,
-    output_table,
-    sort_devices,
-)
+from netaudio._common import _command_context, CapabilityProbeTimeout
+from netaudio._common_output import output_table
+from netaudio._common_selection import filter_devices, sort_devices
 
 
 def network_status(

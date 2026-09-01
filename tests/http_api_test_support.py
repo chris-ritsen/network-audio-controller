@@ -1,14 +1,11 @@
-import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.daemon.relay import RelayServer
-from netaudio.dante.events import DanteEvent, EventType
+from netaudio.daemon.http_api import DaemonHTTPServer
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.services.notification import DanteNotificationService
 
@@ -121,7 +118,7 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
     return device
 
 
-def make_relay(devices=None, metering=None, on_shutdown=None):
+def make_http_server(devices=None, metering=None, on_shutdown=None):
     notifications = DanteNotificationService(dispatcher=MagicMock())
 
     def sample_rate_change_result(_device, sample_rate, **_options):
@@ -188,20 +185,20 @@ def make_relay(devices=None, metering=None, on_shutdown=None):
         refresh_device=AsyncMock(),
         refresh_all_devices=AsyncMock(),
     )
-    relay = RelayServer(application, state, metering=metering, on_shutdown=on_shutdown)
-    relay.audio_capability_verification_timeout = 0.05
-    return relay
+    http_server = DaemonHTTPServer(application, state, metering=metering, on_shutdown=on_shutdown)
+    http_server.audio_capability_verification_timeout = 0.05
+    return http_server
 
 
-async def post(relay, path, body):
+async def post(http_server, path, body):
     writer = FakeWriter()
     if isinstance(body, (dict, list)):
         body = json.dumps(body).encode()
-    await relay._dispatch("POST", path, body, writer)
+    await http_server._dispatch("POST", path, body, writer)
     return writer.response()
 
 
-async def get(relay, path):
+async def get(http_server, path):
     writer = FakeWriter()
-    await relay._dispatch("GET", path, None, writer)
+    await http_server._dispatch("GET", path, None, writer)
     return writer.response()

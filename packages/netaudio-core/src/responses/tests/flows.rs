@@ -37,7 +37,7 @@ pub(super) fn flow_query_response() -> Vec<u8> {
 }
 
 pub(super) fn captured_receiver_flow_response() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "2729017c033a320000011004002c008000d40128000000000000000000000000000000000000000000000000000100010000bb80000000180001000200080068\
              0046005600700000001000000000000000000000000000000020000000000000000000000000000008023813c0a8016c0009000108000000000f424000000000\
              000200010000bb800000001800010002000800bc009a00aa00c40000000100000000000000000000000000000002000000000000000000000000000008023803\
@@ -49,7 +49,7 @@ pub(super) fn captured_receiver_flow_response() -> Vec<u8> {
 
 #[test]
 fn transmitter_channel_name_reconciliation_parser_decodes_controller_avio_response() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
         "280900394a0c243800010000000000000600020200010003002000020003002c7672726f6f6d3a6c656674007672726f6f6d3a726967687400",
     );
     assert_eq!(
@@ -160,7 +160,7 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
 #[test]
 fn receiver_channel_bitmap_preserves_multiple_and_empty_mappings() {
     assert_eq!(
-        receiver_channel_numbers(&decode_hex("00010010000000000000000000000000")),
+        receiver_channel_numbers(&decode_hexadecimal("00010010000000000000000000000000")),
         Some(vec![1, 21])
     );
     assert_eq!(receiver_channel_numbers(&[0; 16]), Some(Vec::new()));
@@ -169,7 +169,7 @@ fn receiver_channel_bitmap_preserves_multiple_and_empty_mappings() {
 
 #[test]
 fn receiver_flow_parser_accepts_authentic_empty_virtual_a32_response() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
         "2729002c033a3200000110000000000000000000000000000000000000000000000000000000000000000000",
     );
     assert_eq!(
@@ -183,7 +183,7 @@ fn receiver_flow_parser_accepts_authentic_empty_virtual_a32_response() {
 
 #[test]
 fn receiver_port_ranges_parse_controller_and_authentic_firmware_response() {
-    let response = decode_hex("27290012033c330000013800397f398039ff");
+    let response = decode_hexadecimal("27290012033c330000013800397f398039ff");
     assert_eq!(parse_result_code(&response), Some(RESULT_CODE_SUCCESS));
     assert_eq!(
         parse_receiver_port_ranges(&response),
@@ -202,7 +202,7 @@ fn receiver_port_ranges_parse_controller_and_authentic_firmware_response() {
 
 #[test]
 fn transmit_channel_capabilities_parse_controller_and_authentic_firmware_responses() {
-    let physical_response = decode_hex("272900120329203200010001000100807fff");
+    let physical_response = decode_hexadecimal("272900120329203200010001000100807fff");
     assert_eq!(
         parse_result_code(&physical_response),
         Some(RESULT_CODE_SUCCESS)
@@ -217,7 +217,7 @@ fn transmit_channel_capabilities_parse_controller_and_authentic_firmware_respons
         })
     );
 
-    let virtual_response = decode_hex("272900120329203200010001000100207fff");
+    let virtual_response = decode_hexadecimal("272900120329203200010001000100207fff");
     assert_eq!(
         parse_transmit_channel_capabilities(&virtual_response),
         Some(TransmitChannelCapabilities {
@@ -294,7 +294,7 @@ fn tx_flows_parser_uses_variable_channel_offset_in_short_records() {
 
 #[test]
 fn tx_flows_parser_preserves_authentic_zero_channel_placeholders() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "2729006f286c220000011001002c000000000000000000000000000000000000000000000000000000000000002000020002ee0000000018000100080050001000000000000000000000000000000058080210e1efff45670a000001000000000010006c000f424000000000333200",
         );
     let flows = parse_tx_flows(&response).unwrap();
@@ -331,14 +331,14 @@ fn tx_flows_parser_accepts_paginated_and_alternate_legacy_protocol_responses() {
 
 #[test]
 fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
-    let zero_record = decode_hex("28090016294126000001000000000000020000000000");
+    let zero_record = decode_hexadecimal("28090016294126000001000000000000020000000000");
     let zero_page = parse_transmitter_flow_status_page(&zero_record).unwrap();
     assert_eq!(zero_page.maximum_flow_slots, 2);
     assert_eq!(zero_page.reported_flow_count, 0);
     assert!(zero_page.flows.is_empty());
     assert_eq!(zero_page.raw_body_hexadecimal, "000000000000020000000000");
 
-    let unicast = decode_hex(
+    let unicast = decode_hexadecimal(
             "2809008329422600000100000000000002010020000031000000bb80000000181427000100000003000100000000001100000000001600180000000000000000000000000000000008130000007800810001000000000000040b0101007000000507000200010002000002000010000008023805c0a8016c6c782d64616e7465003300",
         );
     let unicast_page = parse_transmitter_flow_status_page(&unicast).unwrap();
@@ -378,7 +378,7 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     assert_eq!(unicast_flow.raw_record_hexadecimal.len(), 152);
     assert_eq!(parse_tx_flows(&unicast), None);
 
-    let multicast = decode_hex(
+    let multicast = decode_hexadecimal(
             "2809007802a02600000100000000000002010020000232000000bb8000000018142700020000000300020000000000020000000000160018000f424000000000000000000000000008130000000000000001000000000000040b01010070000005070002000100020000020000100000080210e1efffff38",
         );
     let multicast_page = parse_transmitter_flow_status_page(&multicast).unwrap();
@@ -403,7 +403,7 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
 
 #[test]
 fn transmitter_flow_status_parser_preserves_unknown_types_and_rejects_malformed_frames() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "2809008329422600000100000000000002010020000031000000bb80000000181427000100000003000100000000001100000000001600180000000000000000000000000000000008130000007800810001000000000000040b0101007000000507000200010002000002000010000008023805c0a8016c6c782d64616e7465003300",
         );
     for length in 0..response.len() {
@@ -447,7 +447,7 @@ fn transmitter_flow_status_parser_preserves_unknown_types_and_rejects_malformed_
         None
     );
 
-    let mut stale_zero_record = decode_hex("2809001629a92600000100000000000002006f2d6368");
+    let mut stale_zero_record = decode_hexadecimal("2809001629a92600000100000000000002006f2d6368");
     stale_zero_record[4..6].copy_from_slice(&0x1234u16.to_be_bytes());
     let stale_page = parse_transmitter_flow_status_page(&stale_zero_record).unwrap();
     assert_eq!(stale_page.reported_flow_count, 0);
@@ -456,7 +456,7 @@ fn transmitter_flow_status_parser_preserves_unknown_types_and_rejects_malformed_
 
 #[test]
 fn transmitter_channel_status_2809_parser_decodes_shipping_controller_response() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "280900a42852240000010000000000000202003c007c00030000bb80010100180400001800180004626c7565746f6f74683a6c656674004c6566740014140001000000030001000000000007000000000028001800000000000000370000000000000000626c7565746f6f74683a726967687400526967687400000014140002000000030002000000000007000000000064001800000000000000740000000000000000",
         );
     let page = parse_transmitter_channel_status_page_2809(&response).unwrap();
@@ -493,7 +493,7 @@ fn transmitter_channel_status_2809_parser_decodes_shipping_controller_response()
 
 #[test]
 fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "280900a42852240000010000000000000202003c007c00030000bb80010100180400001800180004626c7565746f6f74683a6c656674004c6566740014140001000000030001000000000007000000000028001800000000000000370000000000000000626c7565746f6f74683a726967687400526967687400000014140002000000030002000000000007000000000064001800000000000000740000000000000000",
         );
     for length in 0..response.len() {
@@ -531,7 +531,7 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
         assert_eq!(parse_transmitter_channel_status_page_2809(&malformed), None);
     }
 
-    let bodyless_a32_response = decode_hex("2809000a285224000030");
+    let bodyless_a32_response = decode_hexadecimal("2809000a285224000030");
     assert_eq!(parse_result_code(&bodyless_a32_response), Some(0x0030));
     assert_eq!(
         parse_transmitter_channel_status_page_2809(&bodyless_a32_response),
@@ -541,13 +541,13 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
 
 #[test]
 fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
-    let empty = decode_hex("28090016285636000001000000000000020000020002");
+    let empty = decode_hexadecimal("28090016285636000001000000000000020000020002");
     let empty_page = parse_receiver_flow_status_page_2809(&empty).unwrap();
     assert_eq!(empty_page.maximum_flow_slots, 2);
     assert_eq!(empty_page.reported_flow_count, 0);
     assert!(empty_page.flows.is_empty());
 
-    let active = decode_hex(
+    let active = decode_hexadecimal(
             "2809007401c93600000100000000000002010020000231000000bb8000000018142200010000000300010000000000010000000000160018000f42400000000000000000000000000a0e000000000000000000000001006c00000000040001010064000008023801c0a8013d0001000200000100",
         );
     let page = parse_receiver_flow_status_page_2809(&active).unwrap();
@@ -584,7 +584,7 @@ fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
     assert_eq!(flow.raw_record_hexadecimal.len(), 168);
     assert_eq!(page.raw_body_hexadecimal, bytes_to_hex(&active[10..]));
 
-    let two_local_receivers = decode_hex(
+    let two_local_receivers = decode_hexadecimal(
             "2809007402d23600000100000000000002010020000231000000bb8000000018142200010000000300010000000000010000000000160018000f42400000000000000000000000000a0e000000000000000000000002006c00000000040001010064000008023801c0a801240001000200000101",
         );
     let two_receiver_flow = &parse_receiver_flow_status_page_2809(&two_local_receivers)
@@ -599,7 +599,7 @@ fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
 
 #[test]
 fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "2809007401c93600000100000000000002010020000231000000bb8000000018142200010000000300010000000000010000000000160018000f42400000000000000000000000000a0e000000000000000000000001006c00000000040001010064000008023801c0a8013d0001000200000100",
         );
     for length in 0..response.len() {
@@ -639,7 +639,7 @@ fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
         assert_eq!(parse_receiver_flow_status_page_2809(&malformed), None);
     }
 
-    let bodyless_a32_response = decode_hex("2809000a285636000030");
+    let bodyless_a32_response = decode_hexadecimal("2809000a285636000030");
     assert_eq!(parse_result_code(&bodyless_a32_response), Some(0x0030));
     assert_eq!(
         parse_receiver_flow_status_page_2809(&bodyless_a32_response),
@@ -649,7 +649,7 @@ fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
 
 #[test]
 fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
-    let first = decode_hex(
+    let first = decode_hexadecimal(
             "2809007c284a34000001000000000000010100446d69632d6d69782d68696768006c782d64616e74650000000000bb800101001804000018001800043031004c65667400141c000100000003000100000000000600000000003c002c000000000000003f000000000000000006080000001400210010000002020000",
         );
     let first_page = parse_receiver_channel_status_page_2809(&first).unwrap();
@@ -683,7 +683,7 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
     assert_eq!(first_record.status_flags, 0x0202);
     assert_eq!(first_record.raw_record_hexadecimal.len(), 112);
 
-    let second = decode_hex(
+    let second = decode_hexadecimal(
             "28090084284d340000010000000000000101004c6d69632d6d69782d68696768006c782d64616e74650000000000bb800101001804000018001800046d69632d6d6978004c65667400000000141c000100000003000100000000000600000000003c002c0000000000000044000000000000000006080000001400210010000002020000",
         );
     let second_page = parse_receiver_channel_status_page_2809(&second).unwrap();
@@ -699,7 +699,7 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
 
 #[test]
 fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malformed_records() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "280900a801f13400000100000000000002020030007000030000bb8001010018040000200020000e303100434831006c141c00010000000300010000000000060000000000280018000000000000002b0000000000000000060800000000000000000000020200003032004348320032141c00020000000300020000000000060000000000680018000000000000006b000000000000000006080000000000000000000002020000",
         );
     let page = parse_receiver_channel_status_page_2809(&response).unwrap();
@@ -780,12 +780,12 @@ fn tx_flows_parser_rejects_failure_result_code() {
 
 #[test]
 fn dante_brooklyn_control_protocol_flow_setup_parsers_decode_authentic_fallback_exchange() {
-    let request = decode_hex(
+    let request = decode_hexadecimal(
         "1102005000000100000000380000bb8000000018000100040048000100000000\
              000000240a000002001000430000000000000000000000004133322d30303030\
              3031003100000000080238010afe4e0b",
     );
-    let response = decode_hex("1102001800000100000100017fef911d0001000100000000");
+    let response = decode_hexadecimal("1102001800000100000100017fef911d0001000100000000");
 
     let parsed_request =
         parse_dante_brooklyn_control_protocol_flow_setup_request(&request).unwrap();
@@ -817,12 +817,12 @@ fn dante_brooklyn_control_protocol_flow_setup_parsers_decode_authentic_fallback_
 
 #[test]
 fn dante_brooklyn_control_protocol_flow_setup_parsers_reject_malformed_and_truncated_messages() {
-    let request = decode_hex(
+    let request = decode_hexadecimal(
         "1102005000000100000000380000bb8000000018000100040048000100000000\
              000000240a000002001000430000000000000000000000004133322d30303030\
              3031003100000000080238010afe4e0b",
     );
-    let response = decode_hex("1102001800000100000100017fef911d0001000100000000");
+    let response = decode_hexadecimal("1102001800000100000100017fef911d0001000100000000");
 
     for length in 0..request.len() {
         assert_eq!(

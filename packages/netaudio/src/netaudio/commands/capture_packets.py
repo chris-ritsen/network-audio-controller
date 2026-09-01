@@ -24,16 +24,13 @@ from netaudio.capture.display import (
 )
 from netaudio.commands.capture_app import app, packet_app
 from netaudio.commands.capture_helpers import (
-    _format_endpoint,
-    _hexdump,
-    _label_packet,
     _load_capture_profile,
     _parse_int_option,
     _parse_time_filter,
-    _print_packet_table_header,
     _resolve_db_from_config,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _format_endpoint, _hexdump, _label_packet, _print_packet_table_header
 from netaudio.dante.packet_store import PacketStore
 
 
@@ -264,10 +261,10 @@ def packet_show(
                     status = struct.unpack(">H", payload[8:10])[0]
                     print(f"  Status:    0x{status:04X}")
 
-                print(f"  Payload:")
+                print("  Payload:")
                 print(_hexdump(payload, indent="    "))
             else:
-                from netaudio.dante.packet_dissector import dissect_and_render
+                from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
                 print(dissect_and_render(payload, indent="  "))
 

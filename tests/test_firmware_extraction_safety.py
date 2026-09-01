@@ -2,7 +2,6 @@ import os
 import stat
 import struct
 import zlib
-from pathlib import Path
 
 import pytest
 

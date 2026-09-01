@@ -16,6 +16,37 @@ def load_fixture():
     return _load_fixture
 
 
+@pytest.fixture
+def reset_cli_state():
+    from netaudio.cli import state
+
+    original = (
+        list(state.names),
+        list(state.hosts),
+        list(state.server_names),
+        list(state.macs),
+        state.sort_field,
+        state.sort_reverse,
+    )
+    state.names = []
+    state.hosts = []
+    state.server_names = []
+    state.macs = []
+    state.sort_field = "mac"
+    state.sort_reverse = False
+    try:
+        yield
+    finally:
+        (
+            state.names,
+            state.hosts,
+            state.server_names,
+            state.macs,
+            state.sort_field,
+            state.sort_reverse,
+        ) = original
+
+
 def check_generated_command_payload(
     generated_hex_payload: bytes,
     actual_service_type: str,

@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 import json
 from types import SimpleNamespace
@@ -6,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-from netaudio import _common
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.commands import flow as flow_commands
 from netaudio.commands import preset as preset_commands

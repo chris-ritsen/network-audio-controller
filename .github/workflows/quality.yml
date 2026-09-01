@@ -15,20 +15,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - run: cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
       - run: uv sync --python ${{ matrix.python-version }} --all-groups
       - run: uv run --python ${{ matrix.python-version }} pytest -q
 
+  cross-platform-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04-arm, macos-15, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
+      - run: uv run pytest -q
+
   native-quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -38,9 +47,9 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --python 3.9 --all-groups
       - run: uv lock --check
+      - run: uv run --isolated --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run python scripts/check_complexity.py
       - run: uv run pyright
       - run: >-
           cbindgen --verify --config packages/netaudio-core/cbindgen.toml

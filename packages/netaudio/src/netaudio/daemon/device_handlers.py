@@ -21,7 +21,7 @@ from netaudio.dante.services.notification import mutate_and_wait_for_capability_
 logger = logging.getLogger("netaudio")
 
 
-class RelayDeviceHandlers:
+class DaemonDeviceHandlers:
     async def _handle_get_shure_devices(self, writer):
         if not self.shure:
             await self._send_json(writer, {})
@@ -547,7 +547,7 @@ class RelayDeviceHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        client_id = params.get("client_id", "relay_http")
+        client_id = params.get("client_id", "daemon_http")
         if not self.metering:
             await self._send_json(writer, {"error": "metering not available"}, 503)
             return
@@ -558,7 +558,7 @@ class RelayDeviceHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        client_id = params.get("client_id", "relay_http")
+        client_id = params.get("client_id", "daemon_http")
         if not self.metering:
             await self._send_json(writer, {"error": "metering not available"}, 503)
             return

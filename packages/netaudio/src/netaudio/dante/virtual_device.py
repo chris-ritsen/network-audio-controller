@@ -18,8 +18,6 @@ from netaudio.dante.const import (
     DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
     MULTICAST_GROUP_HEARTBEAT,
-    PROTOCOL_ID,
-    RESULT_CODE_SUCCESS,
     SERVICE_ARC,
     SERVICE_CHAN,
     SERVICE_CMC,
@@ -29,8 +27,6 @@ from netaudio.dante.virtual_device_protocol import (
     MCAST_HEADER_LENGTH,
     PCM_ENCODING_CAPABILITY_BITS,
     PCM_ENCODING_OCTETS,
-    Opcode,
-    Protocol,
 )
 from netaudio.dante.virtual_device_requests import VirtualDeviceRequestHandler
 
@@ -320,10 +316,8 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         loop = asyncio.get_running_loop()
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
+        if hasattr(socket, "SO_REUSEPORT"):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except AttributeError:
-            pass
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
         if self._local_ip and self._local_ip != "0.0.0.0":
             sock.setsockopt(
@@ -373,8 +367,6 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                 logger.warning(f"Could not bind port {port}: {e}")
 
     async def _register_mdns(self) -> None:
-        mac_hex = self._mac.replace(":", "")
-        mac_eui64 = mac_hex[:6] + "fffe" + mac_hex[6:]
         ip_bytes = socket.inet_aton(self._local_ip)
 
         server_name = f"{self._config.name}.local."

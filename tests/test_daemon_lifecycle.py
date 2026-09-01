@@ -57,7 +57,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon._dbus = _component(stop=AsyncMock())
     daemon.heartbeat = _component(stop=AsyncMock())
     daemon.shure = _component(stop=AsyncMock())
-    daemon.relay = _component(stop=AsyncMock())
+    daemon.http_api = _component(stop=AsyncMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = _component(aclose=AsyncMock())
     daemon.application = _component(shutdown=AsyncMock())
@@ -83,7 +83,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     dbus.stop.assert_awaited_once()
     heartbeat.stop.assert_awaited_once()
     daemon.shure.stop.assert_awaited_once()
-    daemon.relay.stop.assert_awaited_once()
+    daemon.http_api.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
     redis.aclose.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
@@ -112,7 +112,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
     daemon._dbus = _component(stop=AsyncMock(side_effect=RuntimeError("dbus failed")))
     daemon.heartbeat = _component(stop=AsyncMock(side_effect=RuntimeError("heartbeat failed")))
     daemon.shure = None
-    daemon.relay = _component(stop=AsyncMock())
+    daemon.http_api = _component(stop=AsyncMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
@@ -122,7 +122,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
 
     await daemon.stop()
 
-    daemon.relay.stop.assert_awaited_once()
+    daemon.http_api.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
     assert daemon._stop_complete is True
@@ -143,7 +143,7 @@ async def test_partial_start_failure_unwinds_started_components():
     daemon._dbus = None
     daemon.heartbeat = None
     daemon.shure = _component(stop=AsyncMock())
-    daemon.relay = _component(start=AsyncMock(), stop=AsyncMock())
+    daemon.http_api = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
@@ -155,7 +155,7 @@ async def test_partial_start_failure_unwinds_started_components():
     release = asyncio.Event()
 
     async def partial_start():
-        await daemon.relay.start()
+        await daemon.http_api.start()
         entered.set()
         await release.wait()
         raise RuntimeError("metering startup failed")
@@ -175,8 +175,8 @@ async def test_partial_start_failure_unwinds_started_components():
     assert all(isinstance(result, RuntimeError) for result in results)
     assert all("metering startup failed" in str(result) for result in results)
 
-    daemon.relay.start.assert_awaited_once()
-    daemon.relay.stop.assert_awaited_once()
+    daemon.http_api.start.assert_awaited_once()
+    daemon.http_api.stop.assert_awaited_once()
     daemon.shure.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
@@ -198,7 +198,7 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon._dbus = None
     daemon.heartbeat = None
     daemon.shure = None
-    daemon.relay = _component(stop=AsyncMock())
+    daemon.http_api = _component(stop=AsyncMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
@@ -228,4 +228,4 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     await daemon.stop()
 
     assert initialize_calls == 1
-    daemon.relay.stop.assert_awaited_once()
+    daemon.http_api.stop.assert_awaited_once()

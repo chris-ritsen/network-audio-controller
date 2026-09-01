@@ -81,10 +81,10 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "RUF006"]
-ignore = ["E402", "E501", "E713", "F401", "F541", "F602", "F811", "F821", "F841", "I001", "W291"]
+ignore = ["E402", "E501", "E713", "F602", "I001", "W291"]
 
 [tool.ruff.lint.per-file-ignores]
-"packages/netaudio/src/netaudio/daemon/dbus_interfaces.py" = ["F722"]
+"packages/netaudio/src/netaudio/daemon/dbus_interfaces.py" = ["F722", "F821"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
@@ -105,7 +105,7 @@ include = [
     "packages/netaudio/src/netaudio/daemon/dbus_state.py",
     "packages/netaudio/src/netaudio/daemon/enforcement.py",
     "packages/netaudio/src/netaudio/daemon/metering.py",
-    "packages/netaudio/src/netaudio/daemon/relay.py",
+    "packages/netaudio/src/netaudio/daemon/http_api.py",
     "packages/netaudio/src/netaudio/daemon/server.py",
     "packages/netaudio/src/netaudio/dante/browser.py",
     "packages/netaudio/src/netaudio/dante/device.py",

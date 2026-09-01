@@ -23,7 +23,6 @@ from netaudio.commands.capture_helpers import (
 from netaudio.commands.provenance_app import app
 from netaudio.commands.provenance_support import _sha256_path
 from netaudio.dante.packet_store import PacketStore
-from netaudio.dante.tshark_capture import TsharkCapture
 
 
 EVIDENCE_ARTIFACT_ROLES = frozenset(

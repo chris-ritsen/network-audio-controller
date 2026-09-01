@@ -11,7 +11,9 @@ from typing import Optional
 import typer
 
 from netaudio.commands.firmware_app import app
+from netaudio.commands.firmware_capabilities import _read_str
 from netaudio.commands.firmware_constants import FIRMWARE_DATABASE_SCHEMA_VERSION
+from netaudio.commands.firmware_dissection import _dissect_header
 from netaudio.commands.firmware_parser import (
     _collect_dnt_files,
     _detect_content,
@@ -29,7 +31,7 @@ def firmware_info(
     resume: Optional[Path] = typer.Option(None, "--resume", help="Skip files already in this JSON output."),
 ):
     """Extract product identity facts from .dnt firmware files."""
-    from netaudio._common import output_table
+    from netaudio._common_output import output_table
     from netaudio.cli import OutputFormat, state
 
     dnt_files = _collect_dnt_files(paths)
@@ -94,8 +96,6 @@ def firmware_info(
 
 
 def _init_db(db_path):
-    import sqlite3
-
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     existing_tables = {
@@ -173,9 +173,6 @@ def firmware_db(
     db: Path = typer.Option("firmware.db", "--db", help="SQLite database path."),
 ):
     """Parse .dnt firmware files into a SQLite database."""
-    import hashlib
-    import sqlite3
-
     dnt_files = _collect_dnt_files(paths)
     if not dnt_files:
         typer.echo("No .dnt files found.", err=True)
@@ -281,7 +278,7 @@ def firmware_sections(
     scan: bool = typer.Option(False, "--scan", help="Scan section contents for embedded filesystems."),
 ):
     """Show the section table of .dnt files."""
-    from netaudio._common import output_table
+    from netaudio._common_output import output_table
     from netaudio.cli import state
 
     dnt_files = _collect_dnt_files(paths)

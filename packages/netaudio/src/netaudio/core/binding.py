@@ -12,7 +12,7 @@ logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 2
+ABI_VERSION = 3
 
 LOCK_NONCE_LENGTH = 24
 LOCK_KEY_LENGTH = 32
@@ -62,6 +62,7 @@ _STATUS_NAMES = {
     30: "flow protocol must be 0x2729, 0x2801, or 0x2809",
     31: "sequence must be nonzero",
     32: "the selected protocol does not support this operation",
+    33: "internal panic",
 }
 
 
@@ -258,7 +259,7 @@ def require():
 
 
 def _call_buffer(function, *leading_args, capacity=8192):
-    lib = require()
+    require()
     out = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = function(*leading_args, out, capacity, ctypes.byref(length))
@@ -404,7 +405,7 @@ class CoreClient:
             data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "client_request")
-        response = data if data else None
+        response = data if expect_response else None
         if self.observer is not None:
             self.observer(packet, response, self._device_ip, target_port)
         return response

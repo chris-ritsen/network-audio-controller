@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 import typer
 
-from netaudio._common import output_single, output_table, sort_devices
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import sort_devices
 from netaudio.icons import icon
 
 DANTE_STATUS_HEADERS = [

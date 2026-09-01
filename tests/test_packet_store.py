@@ -1,11 +1,10 @@
 import os
 import struct
-import tempfile
 
 import pytest
 
 from netaudio.dante import debug_formatter
-from netaudio.dante.debug_formatter import PROTOCOL_NAMES, get_opcode_name
+from netaudio.dante.debug_formatter import get_opcode_name
 from netaudio.dante.packet_store import PacketStore, _parse_header
 
 

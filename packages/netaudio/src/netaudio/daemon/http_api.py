@@ -14,21 +14,16 @@ import ifaddr
 from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
+from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
-from netaudio.core.binding import STATUS_TIMEOUT
-from netaudio.dante import flows
-from netaudio.dante.const import RESULT_CODE_SUCCESS
-from netaudio.dante.device_operations import validate_pin
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
-from netaudio.daemon.relay_configuration_handlers import RelayConfigurationHandlers
-from netaudio.daemon.relay_device_handlers import RelayDeviceHandlers
+from netaudio.daemon.configuration_handlers import DaemonConfigurationHandlers
+from netaudio.daemon.device_handlers import DaemonDeviceHandlers
 
 logger = logging.getLogger("netaudio")
 
-RELAY_SERVICE_TYPE = "_netaudio-relay._tcp.local."
-DEFAULT_RELAY_PORT = 9000
+DAEMON_SERVICE_TYPE = "_netaudio-relay._tcp.local."
 BONJOUR_MONITOR_INTERVAL_SECONDS = 5
 BONJOUR_REFRESH_INTERVAL_SECONDS = 60
 BONJOUR_SLEEP_GAP_MULTIPLIER = 3
@@ -37,8 +32,8 @@ SSE_DRAIN_TIMEOUT_SECONDS = 5
 SSE_CLOSE_TIMEOUT_SECONDS = 1
 AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS = 2
 SERVICE_LABEL_MAXIMUM_BYTES = 63
-RELAY_SERVICE_INSTANCE_PREFIX = "netaudio-relay ("
-RELAY_SERVICE_INSTANCE_SUFFIX = ")"
+DAEMON_SERVICE_INSTANCE_PREFIX = "netaudio-daemon ("
+DAEMON_SERVICE_INSTANCE_SUFFIX = ")"
 
 
 def _bounded_service_label(value: str, maximum_bytes: int) -> str:
@@ -53,12 +48,12 @@ def _bounded_service_label(value: str, maximum_bytes: int) -> str:
     return f"{bounded_prefix}{digest_suffix}"
 
 
-def _relay_service_instance_label(hostname: str) -> str:
+def _daemon_service_instance_label(hostname: str) -> str:
     hostname_byte_limit = SERVICE_LABEL_MAXIMUM_BYTES - len(
-        f"{RELAY_SERVICE_INSTANCE_PREFIX}{RELAY_SERVICE_INSTANCE_SUFFIX}".encode("ascii")
+        f"{DAEMON_SERVICE_INSTANCE_PREFIX}{DAEMON_SERVICE_INSTANCE_SUFFIX}".encode("ascii")
     )
     bounded_hostname = _bounded_service_label(hostname, hostname_byte_limit)
-    return f"{RELAY_SERVICE_INSTANCE_PREFIX}{bounded_hostname}{RELAY_SERVICE_INSTANCE_SUFFIX}"
+    return f"{DAEMON_SERVICE_INSTANCE_PREFIX}{bounded_hostname}{DAEMON_SERVICE_INSTANCE_SUFFIX}"
 
 
 @dataclass(eq=False)
@@ -84,7 +79,7 @@ async def _bounded(awaitable, timeout: float):
     return task.result()
 
 
-class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
+class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
     def __init__(self, application, state, metering=None, shure=None, port=None, on_shutdown=None, mark_offline=None):
         self.application = application
         self.state = state
@@ -92,7 +87,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
         self.shure = shure
         self.on_shutdown = on_shutdown
         self.mark_offline = mark_offline or application.mark_device_offline
-        self.port: int = int(port if port is not None else DEFAULT_RELAY_PORT)
+        self.port: int = int(port if port is not None else DEFAULT_DAEMON_PORT)
         self.tcp_server = None
         self.zeroconf = None
         self.service_info = None
@@ -142,7 +137,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
             return
         self._stop_lock = asyncio.Lock()
         self.tcp_server = await asyncio.start_server(self.handle_connection, "0.0.0.0", self.port)
-        logger.info(f"Relay server listening on port {self.port}")
+        logger.info(f"Daemon HTTP API listening on port {self.port}")
 
         try:
             self._register_events()
@@ -174,7 +169,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
             clients = list(self.sse_clients.values())
             if clients:
                 await asyncio.gather(
-                    *(self._close_sse_client(client, "relay shutdown") for client in clients),
+                    *(self._close_sse_client(client, "daemon shutdown") for client in clients),
                     return_exceptions=True,
                 )
 
@@ -185,7 +180,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
                 try:
                     await _bounded(server.wait_closed(), 5)
                 except asyncio.TimeoutError:
-                    logger.warning("Relay connections did not drain within 5s, abandoning them")
+                    logger.warning("Daemon HTTP API connections did not drain within 5s, abandoning them")
 
             self._unregister_events()
 
@@ -309,7 +304,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.debug(f"SSE client writer stopped: {exception}")
+            logger.warning(f"SSE client writer stopped: {exception}")
         finally:
             self._drop_sse_client(client, "writer stopped", cancel_sender=False)
 
@@ -328,7 +323,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
         try:
             client.writer.close()
         except Exception as exception:
-            logger.debug(f"SSE client close error: {exception}")
+            logger.warning(f"SSE client close error: {exception}", exc_info=True)
 
     async def _close_sse_client(self, client: _SseClient, reason: str):
         self._drop_sse_client(client, reason)
@@ -343,7 +338,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
                 SSE_CLOSE_TIMEOUT_SECONDS,
             )
         except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.debug(f"SSE client shutdown ended with {exception}")
+            logger.warning(f"SSE client shutdown ended with {exception}")
 
     async def _bonjour_monitor_loop(self):
         self._last_bonjour_probe_wall_time = time.time()
@@ -362,13 +357,13 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
             except asyncio.CancelledError:
                 raise
             except Exception as exception:
-                logger.warning(f"Relay Bonjour monitor error: {exception}")
+                logger.warning(f"Daemon Bonjour monitor error: {exception}")
 
     async def _reconcile_bonjour(self, force=False, woke_from_sleep=False):
         current_addresses = self._get_advertisement_addresses()
         if not current_addresses:
             if self.zeroconf or self.service_info:
-                logger.info("Relay Bonjour advertisement removed because no non-loopback IPv4 addresses are available")
+                logger.info("Daemon Bonjour advertisement removed because no non-loopback IPv4 addresses are available")
                 await self._close_bonjour()
             return
 
@@ -413,10 +408,10 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
                 self.service_info = service_info
                 self._bonjour_addresses = addresses
                 self._bonjour_registered_monotonic = time.monotonic()
-                logger.info(f"Relay Bonjour advertisement refreshed ({reason}) at {', '.join(addresses)}:{self.port}")
+                logger.info(f"Daemon Bonjour advertisement refreshed ({reason}) at {', '.join(addresses)}:{self.port}")
                 return
             except Exception as exception:
-                logger.warning(f"Relay Bonjour update failed ({reason}); recreating advertisement: {exception}")
+                logger.warning(f"Daemon Bonjour update failed ({reason}); recreating advertisement: {exception}")
 
         await self._close_bonjour()
 
@@ -431,26 +426,26 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
             raise
         except Exception as exception:
             await self._dispose_bonjour(zeroconf, service_info)
-            logger.warning(f"Relay Bonjour advertisement failed ({reason}): {exception}")
+            logger.warning(f"Daemon Bonjour advertisement failed ({reason}): {exception}")
             return
 
         self.zeroconf = zeroconf
         self.service_info = service_info
         self._bonjour_addresses = addresses
         self._bonjour_registered_monotonic = time.monotonic()
-        logger.info(f"Relay Bonjour advertisement refreshed ({reason}) at {', '.join(addresses)}:{self.port}")
+        logger.info(f"Daemon Bonjour advertisement refreshed ({reason}) at {', '.join(addresses)}:{self.port}")
 
     async def _dispose_bonjour(self, zeroconf, service_info):
         if service_info:
             try:
                 await _bounded(zeroconf.async_unregister_service(service_info), 5)
             except Exception as exception:
-                logger.debug(f"Relay Bonjour unregister failed: {exception}")
+                logger.warning(f"Daemon Bonjour unregister failed: {exception}", exc_info=True)
 
         try:
             await _bounded(zeroconf.async_close(), 5)
         except Exception as exception:
-            logger.debug(f"Relay Bonjour close failed: {exception}")
+            logger.warning(f"Daemon Bonjour close failed: {exception}", exc_info=True)
 
     async def _close_bonjour(self):
         zeroconf = self.zeroconf
@@ -473,8 +468,8 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
         hostname = socket.gethostname().removesuffix(".local")
         server_hostname = _bounded_service_label(hostname, SERVICE_LABEL_MAXIMUM_BYTES)
         return ServiceInfo(
-            RELAY_SERVICE_TYPE,
-            name or f"{_relay_service_instance_label(hostname)}.{RELAY_SERVICE_TYPE}",
+            DAEMON_SERVICE_TYPE,
+            name or f"{_daemon_service_instance_label(hostname)}.{DAEMON_SERVICE_TYPE}",
             addresses=[socket.inet_aton(address) for address in addresses],
             port=self.port,
             properties={"version": "1"},
@@ -535,9 +530,9 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
             await self._route(method, path, body, writer, reader)
 
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError) as exception:
-            logger.debug(f"Relay peer disconnected: {exception}")
-        except Exception as exception:
-            logger.debug(f"Relay connection error: {exception}")
+            logger.warning(f"Daemon HTTP API peer disconnected: {exception}")
+        except Exception:
+            logger.warning("Daemon HTTP API connection error", exc_info=True)
 
     async def _route(self, method, path, body, writer, reader):
         if method == "GET" and path == "/events":
@@ -549,14 +544,14 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
         except TimeoutError:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
         except Exception as exception:
-            logger.exception(f"Relay error handling {method} {path}")
+            logger.exception(f"Daemon HTTP API error handling {method} {path}")
             await self._send_json(writer, {"error": str(exception)}, 500)
 
         try:
             writer.close()
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.debug(f"Relay writer close ended with {exception}")
+            logger.warning(f"Daemon HTTP API writer close ended with {exception}")
 
     async def _dispatch(self, method, path, body, writer):
         if method == "GET":
@@ -665,7 +660,7 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
                 if closed_task in done or not read_task.result():
                     break
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as exception:
-            logger.debug(f"SSE connection ended with {exception}")
+            logger.warning(f"SSE connection ended with {exception}")
         finally:
             if client is not None:
                 await self._close_sse_client(client, "peer disconnected")
@@ -674,4 +669,4 @@ class RelayServer(RelayDeviceHandlers, RelayConfigurationHandlers):
                     writer.close()
                     await _bounded(writer.wait_closed(), SSE_CLOSE_TIMEOUT_SECONDS)
                 except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-                    logger.debug(f"SSE writer close ended with {exception}")
+                    logger.warning(f"SSE writer close ended with {exception}")

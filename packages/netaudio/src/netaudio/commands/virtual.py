@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import select
 import signal
 import socket
 import subprocess
@@ -15,13 +14,11 @@ import time
 import uuid
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Any, Callable, Iterator, NoReturn, Optional, cast
+from typing import Any, NoReturn, Optional
 
 import typer
 
 from netaudio.commands.virtual_process import (
-    PROCESS_EXIT_POLL_INTERVAL_SECONDS,
     ProcessRecord,
     VirtualLifecycleError,
     _ownership_state,

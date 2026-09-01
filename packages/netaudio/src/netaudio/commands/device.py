@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from enum import Enum
-from fnmatch import fnmatch
-from pathlib import Path
 from typing import Optional
 
 import typer
@@ -21,10 +18,8 @@ from netaudio.dante.device_operations import (
     validate_pin,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.latency import standard_latency_choices_for_range
 from netaudio.dante.clock_config import format_clock_subdomain
 from netaudio.dante.sample_rate_pullup import (
-    format_supported_sample_rate_pullup_values,
     sample_rate_pullup_label,
 )
 from netaudio.dante.services.notification import (
@@ -33,7 +28,6 @@ from netaudio.dante.services.notification import (
 )
 
 from netaudio._common import (
-    CapabilityProbeTimeout,
     _command_context,
     _discover,
     _get_arc_port,
@@ -41,14 +35,13 @@ from netaudio._common import (
     _populate_controls,
     _probe_lock_status_once,
     _resolve_one,
-    filter_devices,
-    output_single,
-    output_table,
+    CapabilityProbeTimeout,
     readback_after_notification,
     send_and_wait_for_notification,
-    sort_devices,
 )
-from netaudio.icons import icon, icon_only
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import filter_devices, sort_devices
+from netaudio.icons import icon
 
 app = typer.Typer(help="Manage Dante devices.", no_args_is_help=True)
 
@@ -59,37 +52,23 @@ class ClearConfigurationMode(str, Enum):
 
 
 from netaudio.commands.device_display import (
-    _channel_matches,
     _device_show_rows,
     _diagnostic_audio_capabilities_data,
     _diagnostic_audio_capability_rows,
     _format_aes67,
     _format_bluetooth,
     _format_channel_count,
-    _format_clock_frequency_offset,
-    _format_clock_port_record,
-    _format_encoding,
     _format_last_seen,
-    _format_latency,
-    _format_latency_milliseconds,
     _format_latency_range,
     _format_link_speed,
     _format_mac,
-    _format_reference_levels,
-    _format_reference_options,
-    _format_sample_rate,
-    _format_show_latency_range,
-    _format_show_standard_latencies,
     _format_standard_latency_choices,
-    _format_supported_encodings,
-    _format_supported_sample_rates,
-    _format_transmitter_flow,
 )
 
 
-async def _lock_via_relay(pin: str, action: str) -> dict | None:
+async def _lock_via_daemon(pin: str, action: str) -> dict | None:
     from netaudio.cli import state
-    from netaudio.daemon.client import _relay_request
+    from netaudio.daemon.client import _daemon_request
 
     device_name = None
     if state.names:
@@ -103,7 +82,7 @@ async def _lock_via_relay(pin: str, action: str) -> dict | None:
         _, device = _resolve_one(filtered)
         device_name = device.name or device.server_name
 
-    status, data = await _relay_request("POST", f"/{action}", body={"device": device_name, "pin": pin}, timeout=8.0)
+    status, data = await _daemon_request("POST", f"/{action}", body={"device": device_name, "pin": pin}, timeout=8.0)
     if status is None:
         return None
     return data
@@ -607,7 +586,7 @@ def lock_set(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to lock the device with."),
 ):
     async def _run():
-        result = await _lock_via_relay(pin, "lock")
+        result = await _lock_via_daemon(pin, "lock")
         if result is not None:
             if not result.get("success"):
                 _report_lock_failure("lock", result)
@@ -639,7 +618,7 @@ def lock_clear(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to unlock the device."),
 ):
     async def _run():
-        result = await _lock_via_relay(pin, "unlock")
+        result = await _lock_via_daemon(pin, "unlock")
         if result is not None:
             if not result.get("success"):
                 _report_lock_failure("unlock", result)
@@ -682,8 +661,6 @@ def lock_status():
         if not filtered:
             typer.echo("Error: no devices found.", err=True)
             raise typer.Exit(code=1)
-
-        from netaudio.cli import state as cli_state
 
         headers = ["Name", "IP Address", "Lock Status"]
         rows = []
@@ -826,14 +803,7 @@ from netaudio.commands.flow import app as flow_app
 app.add_typer(flow_app, name="flow", hidden=True)
 
 from netaudio.commands.device_meter import (
-    _render_meter_bar,
-    _render_meter_display,
-    measure_timeout,
     meter_app,
-    meter_callback,
-    start,
-    status,
-    stop,
 )
 
 app.add_typer(meter_app, name="meter", hidden=True)

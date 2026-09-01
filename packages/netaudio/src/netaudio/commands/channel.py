@@ -27,14 +27,11 @@ from netaudio._common import (
     _get_arc_port,
     _populate_controls,
     _resolve_one,
-    filter_devices,
-    find_channel,
-    output_single,
-    output_table,
     readback_after_notification,
     send_and_wait_for_notification,
-    sort_devices,
 )
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import filter_devices, find_channel, sort_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
 

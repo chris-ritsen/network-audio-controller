@@ -6,15 +6,6 @@ pub extern "C" fn netaudio_abi_version() -> u32 {
 }
 
 #[no_mangle]
-pub extern "C" fn netaudio_service_arc() -> *const c_char {
-    debug_assert_eq!(
-        &SERVICE_ARC_CSTR[..SERVICE_ARC_CSTR.len() - 1],
-        SERVICE_ARC.as_bytes()
-    );
-    SERVICE_ARC_CSTR.as_ptr() as *const c_char
-}
-
-#[no_mangle]
 pub extern "C" fn netaudio_status_name(status: i32) -> *const c_char {
     let name: &'static [u8] = match status {
         0 => b"ok\0",
@@ -50,47 +41,10 @@ pub extern "C" fn netaudio_status_name(status: i32) -> *const c_char {
         30 => b"invalid_flow_protocol\0",
         31 => b"invalid_sequence\0",
         32 => b"unsupported_protocol_operation\0",
+        33 => b"internal_panic\0",
         _ => b"unknown\0",
     };
     name.as_ptr() as *const c_char
-}
-
-#[no_mangle]
-pub extern "C" fn netaudio_lock_nonce_length() -> usize {
-    crate::lock::NONCE_LENGTH
-}
-
-#[no_mangle]
-pub extern "C" fn netaudio_lock_key_length() -> usize {
-    crate::lock::KEY_LENGTH
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_build_set_device_name(
-    name: *const c_char,
-    transaction_id: u16,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    if let Err(status) = unsafe { prepare_output(out_buffer, out_capacity, out_length) } {
-        return status;
-    }
-    if name.is_null() {
-        return NetaudioStatus::NullPointer;
-    }
-
-    let name = match unsafe { CStr::from_ptr(name) }.to_str() {
-        Ok(value) => value,
-        Err(_) => return NetaudioStatus::InvalidUtf8,
-    };
-
-    let packet = match build_set_device_name(name, transaction_id) {
-        Ok(packet) => packet,
-        Err(error) => return error.into(),
-    };
-
-    unsafe { write_bytes(&packet, out_buffer, out_capacity, out_length) }
 }
 
 #[no_mangle]
@@ -100,22 +54,24 @@ pub unsafe extern "C" fn netaudio_build_command(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    if let Err(status) = unsafe { prepare_output(out_buffer, out_capacity, out_length) } {
-        return status;
-    }
-    if json.is_null() {
-        return NetaudioStatus::NullPointer;
-    }
+    guard_panic(|| {
+        if let Err(status) = unsafe { prepare_output(out_buffer, out_capacity, out_length) } {
+            return status;
+        }
+        if json.is_null() {
+            return NetaudioStatus::NullPointer;
+        }
 
-    let json = match unsafe { CStr::from_ptr(json) }.to_str() {
-        Ok(value) => value,
-        Err(_) => return NetaudioStatus::InvalidUtf8,
-    };
+        let json = match unsafe { CStr::from_ptr(json) }.to_str() {
+            Ok(value) => value,
+            Err(_) => return NetaudioStatus::InvalidUtf8,
+        };
 
-    let packet = match crate::spec::build_command_from_json(json) {
-        Ok(packet) => packet,
-        Err(error) => return error.into(),
-    };
+        let packet = match crate::spec::build_command_from_json(json) {
+            Ok(packet) => packet,
+            Err(error) => return error.into(),
+        };
 
-    unsafe { write_bytes(&packet, out_buffer, out_capacity, out_length) }
+        unsafe { write_bytes(&packet, out_buffer, out_capacity, out_length) }
+    })
 }
