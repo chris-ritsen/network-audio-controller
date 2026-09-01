@@ -169,15 +169,6 @@ class DanteDeviceCommands:
     def command_query_transmitter_channel_status_2809(self, transaction_id=0):
         return self.command_query_transmitter_channel_status(transaction_id=transaction_id)
 
-    def command_reconcile_transmitter_channel_names_2809(self, records, transaction_id=0):
-        return self._arc(
-            {
-                "command": "reconcile_transmitter_channel_names_2809",
-                "records": [{"channel_number": channel_number, "name": name} for channel_number, name in records],
-                "transaction_id": transaction_id,
-            }
-        )
-
     def command_query_receiver_flow_status_2809(self, transaction_id=0):
         return self._arc(
             {
@@ -548,22 +539,6 @@ class DanteDeviceCommands:
                 "host_mac": _mac_to_hex(self._resolve_host_mac(host_mac)),
             }
         )
-
-    def command_volume_start(self, device_name, ipv4, mac, port, timeout=True, transaction_id=0):
-        return self._control(
-            {
-                "command": "volume_start",
-                "device_name": device_name,
-                "ipv4": str(ipv4) if ipv4 else "",
-                "mac": _mac_to_hex(mac),
-                "port": port,
-                "timeout": timeout,
-                "transaction_id": transaction_id,
-            }
-        )
-
-    def command_volume_stop(self, device_name, ipv4, mac, port):
-        return self._control({"command": "volume_stop", "device_name": device_name, "mac": _mac_to_hex(mac)})
 
     def command_metering_start(self, device_name, ipv4, mac, port, timeout=True, transaction_id=0):
         return self._control(

@@ -662,7 +662,7 @@ class DanteApplicationOperations:
 
             self.settings.send(packet, str(device.ipv4), DEVICE_SETTINGS_PORT)
         except Exception:
-            logger.debug(f"Failed to send conmon {opcode} to {device.server_name}")
+            logger.warning(f"Failed to send conmon {opcode} to {device.server_name}", exc_info=True)
 
     async def probe_preferred_leader_state(self, device_ip: str, timeout: float = 2.0) -> bool | None:
         waiter = self.notifications.register_preferred_leader_waiter(device_ip)

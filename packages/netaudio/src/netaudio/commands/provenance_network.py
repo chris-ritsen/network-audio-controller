@@ -11,9 +11,6 @@ from typing import Optional
 import typer
 
 from netaudio.commands.capture_helpers import (
-    _compact_hexdump,
-    _hexdump,
-    _label_packet,
     _load_capture_profile,
     _normalize_marker_label,
     _require_positive_session_id,
@@ -21,6 +18,7 @@ from netaudio.commands.capture_helpers import (
     _resolve_provenance_bundle_path,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _compact_hexdump, _hexdump, _label_packet
 from netaudio.commands.provenance_app import app
 from netaudio.dante.packet_store import PacketStore
 
@@ -315,7 +313,6 @@ async def _run_replay(
     profile: str | None,
     db_override: str | None,
 ):
-    import struct
     from netaudio.dante.protocol_verifier import ProtocolVerifier
 
     async with ProtocolVerifier(

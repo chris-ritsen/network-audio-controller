@@ -6,9 +6,12 @@ from typing import Optional
 
 import typer
 
-from netaudio._common import _get_arc_port, filter_devices, output_single, output_table
+from netaudio._common import _get_arc_port
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.commands.config_readback import _resolve_targets, _send_verified_change
+from netaudio.commands.device_display import _format_latency_milliseconds as format_latency_milliseconds
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.latency import latency_state_from_settings
 from netaudio.dante.services.notification import NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE
@@ -53,7 +56,7 @@ async def _read_latency_targets(targets):
 
 
 def _format_latency_milliseconds(value) -> str:
-    return "unknown" if value is None else f"{value:g}"
+    return "unknown" if value is None else format_latency_milliseconds(value)
 
 
 def _format_latency_range(values: dict) -> str:
@@ -61,7 +64,7 @@ def _format_latency_range(values: dict) -> str:
     maximum = values.get("max_latency_ms")
     if minimum is None or maximum is None:
         return "unknown"
-    return f"{minimum:g}-{maximum:g}"
+    return f"{format_latency_milliseconds(minimum)}-{format_latency_milliseconds(maximum)}"
 
 
 def _format_latency_choices(values: dict) -> str:
@@ -70,7 +73,7 @@ def _format_latency_choices(values: dict) -> str:
         return "unknown"
     if not choices:
         return "none"
-    return ", ".join(f"{choice:g}" for choice in choices)
+    return ", ".join(format_latency_milliseconds(choice) for choice in choices)
 
 
 def _render_all_latency_readings(readings) -> None:
