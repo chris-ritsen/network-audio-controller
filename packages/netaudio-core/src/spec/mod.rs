@@ -6,6 +6,7 @@ use crate::commands::{self, ChannelType, ReceiveChannelNamePageRecord, Subscript
 use crate::protocol::NetaudioError;
 
 mod command_defaults;
+mod command_values;
 
 #[derive(Debug)]
 pub enum SpecError {
