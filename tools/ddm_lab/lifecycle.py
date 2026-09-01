@@ -1,4 +1,4 @@
-"""Bounded lifecycle support for the clean-room DDM virtual-device lab.
+"""Bounded lifecycle support for the DDM virtual-device research lab.
 
 This module deliberately knows how to launch an opaque, hash-bound emulator image,
 but it contains no Dante wire-format knowledge. Every mutable run lives in tmpfs.

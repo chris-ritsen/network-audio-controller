@@ -57,17 +57,54 @@ pub fn build_query_tx_flows_from(
     }
 }
 
-fn build_status_query_2809(opcode: u16, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+fn build_channel_status_query(
+    protocol_id: u16,
+    opcode: u16,
+    media_type: u16,
+    starting_channel_identifier: u16,
+    ending_channel_identifier: u16,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::protocol::is_modern_arc_protocol(protocol_id)
+        || media_type == 0
+        || starting_channel_identifier == 0
+        || (ending_channel_identifier != 0
+            && ending_channel_identifier < starting_channel_identifier)
+    {
+        return Err(NetaudioError::InvalidChannel);
+    }
     let mut body = [0u8; 24];
-    body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
-    body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
-    protocol_packet(PROTOCOL_ARC_2809, opcode, &body, transaction_id)
+    body[6..8].copy_from_slice(&1u16.to_be_bytes());
+    body[8..10].copy_from_slice(&media_type.to_be_bytes());
+    body[10..12].copy_from_slice(&starting_channel_identifier.to_be_bytes());
+    body[12..14].copy_from_slice(&ending_channel_identifier.to_be_bytes());
+    if protocol_id == PROTOCOL_ARC_2809 {
+        body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
+    }
+    protocol_packet(protocol_id, opcode, &body, transaction_id)
+}
+
+pub fn build_query_transmitter_channel_status(
+    protocol_id: u16,
+    media_type: u16,
+    starting_channel_identifier: u16,
+    ending_channel_identifier: u16,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    build_channel_status_query(
+        protocol_id,
+        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
+        media_type,
+        starting_channel_identifier,
+        ending_channel_identifier,
+        transaction_id,
+    )
 }
 
 pub fn build_query_transmitter_channel_status_2809(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_status_query_2809(OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809, transaction_id)
+    build_query_transmitter_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, transaction_id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,13 +169,38 @@ pub fn build_reconcile_transmitter_channel_names_2809(
 pub fn build_query_receiver_channel_status_2809(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_status_query_2809(OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809, transaction_id)
+    build_query_receiver_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, transaction_id)
+}
+
+pub fn build_query_receiver_channel_status(
+    protocol_id: u16,
+    media_type: u16,
+    starting_channel_identifier: u16,
+    ending_channel_identifier: u16,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    build_channel_status_query(
+        protocol_id,
+        OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
+        media_type,
+        starting_channel_identifier,
+        ending_channel_identifier,
+        transaction_id,
+    )
 }
 
 pub fn build_query_receiver_flow_status_2809(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_status_query_2809(OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809, transaction_id)
+    let mut body = [0u8; 24];
+    body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
+    body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
+    protocol_packet(
+        PROTOCOL_ARC_2809,
+        OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809,
+        &body,
+        transaction_id,
+    )
 }
 
 pub fn build_set_receiver_channel_name_2809(
