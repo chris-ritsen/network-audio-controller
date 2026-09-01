@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import struct
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field as dataclass_field
 
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
-    DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
 from netaudio.dante.conmon_export import (
@@ -18,8 +16,7 @@ from netaudio.dante.conmon_export import (
     ConmonExportError,
     ConmonExportUnavailableError,
 )
-from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
+from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.service import DanteMulticastService
 from netaudio.dante.services.notification_packet_handlers import NotificationPacketHandlers

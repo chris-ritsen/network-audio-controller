@@ -157,14 +157,6 @@ async def _systemd_manager():
     return bus, proxy.get_interface("org.freedesktop.systemd1.Manager")
 
 
-async def systemd_daemon_reload() -> None:
-    bus, manager = await _systemd_manager()
-    try:
-        await manager.call_reload()
-    finally:
-        bus.disconnect()
-
-
 async def systemd_enable(start: bool) -> None:
     bus, manager = await _systemd_manager()
     try:
@@ -342,12 +334,12 @@ def windows_task_run() -> None:
     task.Run("")
 
 
-def spawn_detached(relay_port: int | None) -> Path:
+def spawn_detached(daemon_port: int | None) -> Path:
     log_path = spawn_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command = [executable_path(), "daemon", "run"]
-    if relay_port:
-        command.extend(["--relay-port", str(relay_port)])
+    if daemon_port:
+        command.extend(["--port", str(daemon_port)])
     options = {}
     if sys.platform == "win32":
         options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP

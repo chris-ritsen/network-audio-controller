@@ -100,7 +100,7 @@ class DanteUnicastService:
                     session_id=self._session_id,
                 )
             except Exception as exception:
-                logger.debug(f"PacketStore error (request): {exception}")
+                logger.warning(f"PacketStore error (request): {exception}", exc_info=True)
 
         if self._dissect:
             self._log_dissected(packet, device_ip, port, direction="request", command_name=logical_command_name)
@@ -131,7 +131,7 @@ class DanteUnicastService:
                     session_id=self._session_id,
                 )
             except Exception as exception:
-                logger.debug(f"PacketStore error (response): {exception}")
+                logger.warning(f"PacketStore error (response): {exception}", exc_info=True)
 
         return response
 
@@ -156,7 +156,7 @@ class DanteUnicastService:
                     session_id=self._session_id,
                 )
             except Exception as exception:
-                logger.debug(f"PacketStore error (send): {exception}")
+                logger.warning(f"PacketStore error (send): {exception}", exc_info=True)
         if self._dissect:
             self._log_dissected(packet, device_ip, port, direction="send")
         self._protocol.send_fire_and_forget(packet, (device_ip, port))
@@ -166,14 +166,14 @@ class DanteUnicastService:
     ) -> None:
         try:
             from netaudio.common.app_config import settings as app_settings
-            from netaudio.dante.packet_dissector import dissect_and_render, format_dissect_label
+            from netaudio.dante.packet_dissection_rendering import dissect_and_render, format_dissect_label
 
             color = not app_settings.no_color
             label = format_dissect_label(direction, f"{device_ip}:{port}", command_name=command_name, color=color)
             rendered = dissect_and_render(payload, indent="  ", color=color)
             logger.debug(f"Dissect [{label}] {len(payload)}B:\n{rendered}")
         except Exception as exception:
-            logger.debug(f"Dissect error: {exception}")
+            logger.warning(f"Dissect error: {exception}", exc_info=True)
 
     @staticmethod
     def _extract_transaction_id(packet: bytes) -> int:

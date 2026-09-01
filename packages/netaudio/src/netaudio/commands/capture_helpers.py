@@ -7,25 +7,8 @@ from typing import Optional
 import typer
 
 from netaudio.capture.markers import (
-    MARKER_LABEL_SANITIZE,
-    MARKER_TYPE_ALIASES,
-    STANDARD_MARKER_TYPES,
     normalize_marker_label,
     normalize_marker_type,
-)
-from netaudio.capture.packets import (
-    ARC_PROTOCOLS,
-    PACKET_ENDPOINT_WIDTH,
-    PORT_LABELS,
-    TARGET_PROTOCOLS,
-    _compact_hexdump,
-    _format_endpoint,
-    _hexdump,
-    _hexdump_line,
-    _label_packet,
-    _load_fact_labels,
-    _packet_fingerprint,
-    _print_packet_table_header,
 )
 from netaudio.dante.packet_store import PacketStore
 from netaudio.dante.fact_store import DEFAULT_PROVENANCE_DIRECTORY

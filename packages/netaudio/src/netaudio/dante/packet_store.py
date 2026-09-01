@@ -17,10 +17,7 @@ from netaudio.dante.debug_formatter import (
     get_settings_message_type_name,
 )
 from netaudio.dante.packet_store_common import (
-    SESSION_MEMBERSHIP_SQL,
     decompress_payload as _decompress_payload,
-    extract_evidence_packet_ids,
-    safe_name as _safe_name,
 )
 from netaudio.dante.packet_store_queries import PacketStoreQueries
 
@@ -493,24 +490,6 @@ class PacketStore(PacketStoreQueries):
                 result["data"] = None
             items.append(result)
         return items
-
-    def get_marker(self, marker_id: int) -> dict | None:
-        row = self._conn.execute(
-            "SELECT * FROM capture_markers WHERE id = ?",
-            (marker_id,),
-        ).fetchone()
-        if not row:
-            return None
-        result = dict(row)
-        data_json = result.get("data_json")
-        if data_json:
-            try:
-                result["data"] = json.loads(data_json)
-            except Exception:
-                result["data"] = None
-        else:
-            result["data"] = None
-        return result
 
     def add_artifact(
         self,

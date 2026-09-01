@@ -1,9 +1,7 @@
-import asyncio
 import json
 import struct
-import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -49,7 +47,6 @@ async def test_session_lifecycle(temp_db, output_dir):
                 assert session["ended_ns"] is None
 
                 session_id = verifier.session_id
-                packet_store_ref = verifier.packet_store
 
     from netaudio.dante.packet_store import PacketStore
 

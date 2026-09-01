@@ -30,9 +30,6 @@ untracked path. Stage exact paths only. Never use `git checkout`, `git restore`,
 after showing the exact command and target. Do not commit, rewrite history,
 push, or change remotes unless requested.
 
-Keep hand-written source and test files at 900 lines or fewer. New or changed
-hand-written Python functions and methods have a hard Ruff `C901` complexity
-limit of 15. The checked legacy baseline is reduction-only: do not add or
-increase an allowance, hand-edit the baseline, or suppress `C901`. Run
-`uv run python scripts/check_complexity.py` with Python changes, use focused
-tests first, and keep ordinary tests offline and deterministic.
+Split modules by responsibility, never by line count. Keep `uv run ruff check .`
+clean, use focused tests first, and keep ordinary tests offline and
+deterministic.

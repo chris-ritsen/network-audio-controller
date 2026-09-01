@@ -546,6 +546,7 @@ class DanteStateService:
                 self.application._send_conmon_query_for_device(device, "dante_model")
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
+                logger.warning(f"Conmon retry {attempt} timed out for {server_name}")
                 continue
             finally:
                 self.application.notifications.unregister_conmon_waiter(device_ip)

@@ -41,10 +41,7 @@ def _write_preset_atomic(path: Path, content: str, *, force: bool) -> None:
             os.link(temporary, path)
             temporary.unlink()
     finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        temporary.unlink(missing_ok=True)
 
 
 async def _start_preset_readback_application():
@@ -108,7 +105,9 @@ def preset_save(
         raise typer.Exit(code=ExitCode.ERROR)
 
     async def _run():
-        from netaudio._common import _command_context, filter_devices, format_devices_xml
+        from netaudio._common import _command_context
+        from netaudio._common_output import format_devices_xml
+        from netaudio._common_selection import filter_devices
 
         async with _command_context() as (devices, send):
             devices = filter_devices(devices)
@@ -352,10 +351,10 @@ def preset_load(
         from netaudio._common import (
             _command_context,
             _get_arc_port,
-            filter_devices,
             readback_after_notification,
             send_and_wait_for_notification,
         )
+        from netaudio._common_selection import filter_devices
         from netaudio.cli import state as cli_state
         from netaudio.commands.subscription import reconcile_receiver_subscriptions
         from netaudio.dante.device_commands import DanteDeviceCommands

@@ -52,14 +52,14 @@ class NotificationPacketHandlers(LinkStatusPacketHandler):
         if self._dissect:
             try:
                 from netaudio.common.app_config import settings as app_settings
-                from netaudio.dante.packet_dissector import dissect_and_render, format_dissect_label
+                from netaudio.dante.packet_dissection_rendering import dissect_and_render, format_dissect_label
 
                 color = not app_settings.no_color
                 label = format_dissect_label("multicast", f"{source_ip}:{addr[1]}", color=color)
                 rendered = dissect_and_render(data, indent="  ", color=color)
                 logger.debug(f"Dissect [{label}] {len(data)}B:\n{rendered}")
             except Exception as exception:
-                logger.debug(f"Dissect error: {exception}")
+                logger.warning(f"Dissect error: {exception}", exc_info=True)
 
         if self._packet_store:
             device = self._lookup_device(source_ip)
@@ -76,7 +76,7 @@ class NotificationPacketHandlers(LinkStatusPacketHandler):
                     session_id=self._session_id,
                 )
             except Exception as exception:
-                logger.debug(f"PacketStore error (notification): {exception}")
+                logger.warning(f"PacketStore error (notification): {exception}", exc_info=True)
 
         protocol_id = struct.unpack(">H", data[0:2])[0]
 

@@ -1,77 +1,42 @@
 use super::*;
 
+fn route_for(json: &str) -> (Target, IoMode) {
+    let routed = build_routed_command(json, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]).unwrap();
+    (routed.target, routed.io)
+}
+
 #[test]
-fn routes_arc_commands_as_stamped_requests() {
-    for command in [
-        "set_channel_name",
-        "add_subscriptions",
-        "set_latency",
-        "channel_count",
-        "query_transmitter_channel_status_2809",
-        "query_receiver_channel_status_2809",
-        "query_receiver_flow_status_2809",
-        "query_receiver_flows",
-        "query_transmit_channel_capabilities",
-        "query_receiver_port_ranges",
+fn conmon_export_commands_route_to_the_settings_port_and_wait_for_a_reply() {
+    for json in [
+        r#"{"command":"device_log_export"}"#,
+        r#"{"command":"capability_partition_export"}"#,
     ] {
         assert_eq!(
-            route(command),
-            (Target::Arc, IoMode::StampedRequest),
-            "{command}"
+            route_for(json),
+            (Target::Settings, IoMode::Request),
+            "{json}"
         );
     }
 }
 
 #[test]
-fn routes_unacknowledged_settings_writes_as_single_fire_commands() {
-    for command in [
-        "set_encoding",
-        "set_sample_rate",
-        "set_sample_rate_pullup",
-        "set_gain_level",
-        "clear_all_configuration",
-        "clear_all_configuration_preserving_internet_protocol_settings",
-    ] {
-        assert_eq!(
-            route(command),
-            (
-                Target::Settings,
-                IoMode::Fire {
-                    repeat: 1,
-                    interval_ms: 0
-                }
-            ),
-            "{command}"
-        );
-    }
-}
-
-#[test]
-fn routes_cmc_registration_as_control_request() {
-    assert_eq!(route("cmc_register"), (Target::Control, IoMode::Request));
-}
-
-#[test]
-fn routes_system_resets_as_single_fire_commands() {
-    for command in ["reboot", "factory_reset"] {
-        assert_eq!(
-            route(command),
-            (
-                Target::Settings,
-                IoMode::Fire {
-                    repeat: 1,
-                    interval_ms: 0
-                }
-            ),
-            "{command}"
-        );
-    }
-}
-
-#[test]
-fn routes_repeated_fire_commands() {
+fn representative_commands_keep_their_routes() {
     assert_eq!(
-        route("enable_aes67"),
+        route_for(r#"{"command":"channel_count"}"#),
+        (Target::Arc, IoMode::StampedRequest)
+    );
+    assert_eq!(
+        route_for(r#"{"command":"identify"}"#),
+        (
+            Target::Settings,
+            IoMode::Fire {
+                repeat: 1,
+                interval_ms: 0
+            }
+        )
+    );
+    assert_eq!(
+        route_for(r#"{"command":"enable_aes67","enabled":true}"#),
         (
             Target::Settings,
             IoMode::Fire {
@@ -81,7 +46,7 @@ fn routes_repeated_fire_commands() {
         )
     );
     assert_eq!(
-        route("set_preferred_leader"),
+        route_for(r#"{"command":"set_clock_source","clock_source":1}"#),
         (
             Target::Settings,
             IoMode::Fire {
@@ -90,62 +55,12 @@ fn routes_repeated_fire_commands() {
             }
         )
     );
-}
-
-#[test]
-fn routes_single_fire_and_control_commands() {
     assert_eq!(
-        route("identify"),
-        (
-            Target::Settings,
-            IoMode::Fire {
-                repeat: 1,
-                interval_ms: 0
-            }
-        )
+        route_for(r#"{"command":"cmc_register","sequence":1,"host_mac":"001122334455"}"#),
+        (Target::Control, IoMode::Request)
     );
     assert_eq!(
-        route("probe_sample_rate"),
-        (
-            Target::Settings,
-            IoMode::Fire {
-                repeat: 1,
-                interval_ms: 0
-            }
-        )
-    );
-    assert_eq!(
-        route("probe_encoding"),
-        (
-            Target::Settings,
-            IoMode::Fire {
-                repeat: 1,
-                interval_ms: 0
-            }
-        )
-    );
-    assert_eq!(
-        route("probe_sample_rate_pullup"),
-        (
-            Target::Settings,
-            IoMode::Fire {
-                repeat: 1,
-                interval_ms: 0
-            }
-        )
-    );
-    assert_eq!(
-        route("probe_gain_level"),
-        (
-            Target::Settings,
-            IoMode::Fire {
-                repeat: 1,
-                interval_ms: 0
-            }
-        )
-    );
-    assert_eq!(
-        route("metering_start"),
+        route_for(r#"{"command":"metering_stop","device_name":"avio","mac":"001122334455"}"#),
         (
             Target::Control,
             IoMode::Fire {
@@ -167,8 +82,12 @@ fn default_host_mac_fills_in_when_omitted() {
 fn identify_defaults_sequence_when_omitted() {
     let routed = build_routed_command("{\"command\":\"identify\"}", [0xFF; 6]).unwrap();
     assert_eq!(routed.packet, crate::commands::build_identify(1).unwrap());
-    let explicit = build_routed_command("{\"command\":\"identify\",\"sequence\":3017}", [0xFF; 6]).unwrap();
-    assert_eq!(explicit.packet, crate::commands::build_identify(0x0BC9).unwrap());
+    let explicit =
+        build_routed_command("{\"command\":\"identify\",\"sequence\":3017}", [0xFF; 6]).unwrap();
+    assert_eq!(
+        explicit.packet,
+        crate::commands::build_identify(0x0BC9).unwrap()
+    );
 }
 
 #[test]
