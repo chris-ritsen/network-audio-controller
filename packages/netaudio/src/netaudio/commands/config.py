@@ -30,24 +30,16 @@ from netaudio.dante.services.notification import (
     NOTIFICATION_CLOCKING_STATUS,
     NOTIFICATION_ENCODING_STATUS,
     NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS,
-    NOTIFICATION_SAMPLE_RATE_STATUS,
     NOTIFICATION_SETTINGS_CHANGE,
 )
 
 from netaudio._common import (
-    CapabilityProbeTimeout,
-    ReadbackResult,
     _command_context,
-    _discover,
     _get_arc_port,
-    _populate_controls,
-    filter_devices,
-    output_single,
-    output_table,
-    readback_after_notification,
-    send_and_wait_for_notification,
-    sort_devices,
+    CapabilityProbeTimeout,
 )
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.commands.config_latency import register_latency_command
 
@@ -120,11 +112,8 @@ from netaudio.commands.config_readback import (
     _read_aes67_multicast_prefix,
     _read_encoding_status,
     _read_encoding_status_result,
-    _read_latency_milliseconds,
     _read_sample_rate_pullup_status,
     _read_sample_rate_pullup_status_result,
-    _read_sample_rate_status,
-    _read_sample_rate_status_result,
     _render_cached_reading,
     _report_reading_failures,
     _resolve_targets,

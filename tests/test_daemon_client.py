@@ -14,7 +14,7 @@ async def test_meter_cache_from_daemon_uses_cache_only_endpoint(monkeypatch):
             {"dev1": {"metering_source": "signal_presence", "tx": {"1": 0x7B}, "rx": {}}},
         )
     )
-    monkeypatch.setattr(daemon_client, "_relay_request", request)
+    monkeypatch.setattr(daemon_client, "_daemon_request", request)
 
     result = await daemon_client.meter_cache_from_daemon()
 
@@ -34,7 +34,7 @@ async def test_meter_cache_from_daemon_uses_cache_only_endpoint(monkeypatch):
 )
 async def test_meter_start_and_stop_report_success(monkeypatch, function_name, path, response, expected):
     request = AsyncMock(return_value=response)
-    monkeypatch.setattr(daemon_client, "_relay_request", request)
+    monkeypatch.setattr(daemon_client, "_daemon_request", request)
 
     result = await getattr(daemon_client, function_name)("dev1", "tui-1")
 
@@ -76,7 +76,7 @@ async def test_stream_daemon_events_handles_fragmentation_and_isolates_malformed
 
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(daemon_client, "relay_port", lambda: port)
+    monkeypatch.setattr(daemon_client, "daemon_port", lambda: port)
     stream = daemon_client.stream_daemon_events()
 
     try:
@@ -109,7 +109,7 @@ async def test_stream_daemon_events_rejects_invalid_http_response_and_closes(mon
 
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(daemon_client, "relay_port", lambda: port)
+    monkeypatch.setattr(daemon_client, "daemon_port", lambda: port)
     stream = daemon_client.stream_daemon_events()
 
     try:
@@ -139,7 +139,7 @@ async def test_stream_daemon_events_cancellation_closes_connection(monkeypatch):
 
     server = await asyncio.start_server(handle, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(daemon_client, "relay_port", lambda: port)
+    monkeypatch.setattr(daemon_client, "daemon_port", lambda: port)
     stream = daemon_client.stream_daemon_events()
     assert await asyncio.wait_for(stream.__anext__(), timeout=1.0) == {"event": "ready"}
     pending_event = asyncio.create_task(stream.__anext__())

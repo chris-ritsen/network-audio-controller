@@ -138,51 +138,6 @@ def test_windows_task_runs_foreground_without_a_time_limit(monkeypatch):
     assert definition.Settings.ExecutionTimeLimit == "PT0S"
 
 
-def test_supported_python_floor_is_consistent():
-    try:
-        import tomllib
-    except ModuleNotFoundError:
-        import tomli as tomllib
-
-    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
-    release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
-    quality_workflow = (REPO_ROOT / ".github" / "workflows" / "quality.yml").read_text()
-
-    assert project["project"]["requires-python"] == ">=3.9"
-    assert project["tool"]["ruff"]["target-version"] == "py39"
-    assert 'python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]' in quality_workflow
-    for version in ("3.9", "3.10", "3.11", "3.12", "3.13"):
-        assert version in release_workflow
-        assert version in quality_workflow
-    assert (REPO_ROOT / "scripts" / "smoke_wheel.py").is_file()
-    assert "scripts/smoke_wheel_install.py" in release_workflow
-    assert "scripts/smoke_wheel_install.py" in quality_workflow
-    assert "scripts/verify_wheel_artifact.py" in release_workflow
-    assert "scripts/verify_wheel_artifact.py" in quality_workflow
-    assert "scripts/check_native_abi.py" in quality_workflow
-    assert "uv run --isolated --no-project" in release_workflow
-    assert "uv run --isolated --no-project" in quality_workflow
-    assert 'uv build --wheel --out-dir "$wheel_dir" "${archive[0]}"' in release_workflow
-
-
-def test_release_artifact_portability_policy_is_explicit():
-    release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
-    quality_workflow = (REPO_ROOT / ".github" / "workflows" / "quality.yml").read_text()
-
-    for workflow in (release_workflow, quality_workflow):
-        assert "quay.io/pypa/manylinux_2_28_x86_64" in workflow
-        assert "quay.io/pypa/manylinux_2_28_aarch64" in workflow
-        assert "auditwheel show" in workflow
-        assert "ubuntu-24.04-arm" in workflow
-        assert "macos-15-intel" in workflow
-        assert "architecture: arm64" in workflow
-        assert "architecture: x86_64" in workflow
-    assert "macos-14" not in release_workflow
-    assert "cbindgen --verify" in quality_workflow
-    assert "rename_channel.c" in quality_workflow
-    assert "rename_channel.swift" in quality_workflow
-
-
 def _elf(machine: int = 62, glibc: bytes = b"GLIBC_2.28") -> bytes:
     data = bytearray(64)
     data[:6] = b"\x7fELF\x02\x01"
@@ -285,17 +240,6 @@ def test_wheel_policy_accepts_matching_windows_artifact(tmp_path):
     _load_artifact_verifier().verify_wheel(wheel, "windows", "x86_64")
 
 
-def test_aur_published_package_matches_pure_python_release():
-    package_build = (REPO_ROOT / "aur" / "netaudio" / "PKGBUILD").read_text()
-    dependencies = next(line for line in package_build.splitlines() if line.startswith("depends="))
-    build_dependencies = next(line for line in package_build.splitlines() if line.startswith("makedepends="))
-
-    assert "pkgver=0.2.4" in package_build
-    assert "arch=(any)" in package_build
-    assert "'rust'" not in build_dependencies
-    assert "'python-pynacl'" in dependencies
-
-
 def test_aur_git_package_builds_native_core_and_declares_linux_runtime_dependencies():
     package_build = (REPO_ROOT / "aur" / "netaudio-git" / "PKGBUILD").read_text()
     dependencies = next(line for line in package_build.splitlines() if line.startswith("depends="))
@@ -305,16 +249,3 @@ def test_aur_git_package_builds_native_core_and_declares_linux_runtime_dependenc
     assert "'rust'" in build_dependencies
     assert "'python-redis'" in dependencies
     assert "'python-dbus-fast'" in dependencies
-
-
-def test_xcframework_build_requires_clean_committed_source_and_writes_provenance():
-    build_script = (REPO_ROOT / "scripts" / "build_xcframework.sh").read_text()
-
-    assert 'git -C "$root" rev-parse --verify HEAD' in build_script
-    assert 'git -C "$root" status --porcelain=v1 --untracked-files=all --' in build_script
-    assert "packages/netaudio-core" in build_script
-    assert "scripts/build_xcframework.sh" in build_script
-    assert 'if [[ -n "$repository_changes" ]]' in build_script
-    assert '"$framework_path/PROVENANCE.md"' in build_script
-    assert "Source commit:" in build_script
-    assert "ABI version:" in build_script

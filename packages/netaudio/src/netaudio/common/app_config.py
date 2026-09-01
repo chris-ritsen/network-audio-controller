@@ -11,7 +11,7 @@ from netaudio.dante.const import DEFAULT_MULTICAST_METERING_PORT
 logger = logging.getLogger("netaudio")
 
 DEFAULT_MDNS_TIMEOUT = 5
-DEFAULT_RELAY_PORT = 9000
+DEFAULT_DAEMON_PORT = 9000
 DEFAULT_INTERFACE = None
 
 
@@ -37,7 +37,7 @@ class AppSettings:
         self._interface_ip: str = None
         self.refresh: bool = False
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
-        self.relay_port: int = int(os.environ.get("NETAUDIO_RELAY_PORT", DEFAULT_RELAY_PORT))
+        self.daemon_port: int = int(os.environ.get("NETAUDIO_DAEMON_PORT", DEFAULT_DAEMON_PORT))
         self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")
         self.lock_state_timeout: float = float(os.environ.get("NETAUDIO_LOCK_STATE_TIMEOUT", 4))
         self._device_lock_key: bytes | None = None

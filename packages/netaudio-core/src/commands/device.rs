@@ -20,10 +20,6 @@ pub fn build_property_directory(transaction_id: u16) -> Result<Vec<u8>, Netaudio
     build_control_packet(OPCODE_PROPERTY_DIRECTORY, &[0x00, 0x00], transaction_id)
 }
 
-pub fn build_set_name(name: &str, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_set_device_name(name, transaction_id)
-}
-
 pub fn build_reset_name(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
     build_control_packet(OPCODE_DEVICE_NAME_SET, &[0x00, 0x00], transaction_id)
 }

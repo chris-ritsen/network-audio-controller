@@ -11,7 +11,6 @@ from tests.test_cli_write_verification import (
     FakeChannelDevice,
     FakeDevice,
     _install_context,
-    reset_cli_state,
     runner,
 )
 
@@ -504,13 +503,13 @@ def test_commands_without_readback_use_requested_language(monkeypatch, arguments
     ("command", "action"),
     [("set", "lock"), ("clear", "unlock")],
 )
-def test_relay_lock_failure_reports_protocol_status(monkeypatch, command, action):
-    async def failed_relay_request(pin, requested_action):
+def test_daemon_lock_failure_reports_protocol_status(monkeypatch, command, action):
+    async def failed_daemon_request(pin, requested_action):
         assert pin == "1234"
         assert requested_action == action
         return {"success": False, "status": 0x1101}
 
-    monkeypatch.setattr(device_commands, "_lock_via_relay", failed_relay_request)
+    monkeypatch.setattr(device_commands, "_lock_via_daemon", failed_daemon_request)
 
     result = runner.invoke(device_commands.lock_app, [command, "1234"])
 
@@ -546,8 +545,8 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
 ):
     calls = []
 
-    async def unavailable_relay(pin, action):
-        calls.append(("relay", action))
+    async def unavailable_daemon(pin, action):
+        calls.append(("daemon", action))
         return None
 
     async def operation(device_ip, pin, key):
@@ -563,7 +562,7 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
         calls.append(("probe", device_ip))
         return _lock_observation(expected_is_locked)
 
-    monkeypatch.setattr(device_commands, "_lock_via_relay", unavailable_relay)
+    monkeypatch.setattr(device_commands, "_lock_via_daemon", unavailable_daemon)
     monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
     monkeypatch.setattr(device_commands, "_resolve_lock_ip", lambda: _async_value("192.0.2.10"))
     monkeypatch.setattr(device_commands, operation_name, operation)
@@ -573,7 +572,7 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
 
     assert result.exit_code == 0
     assert calls == [
-        ("relay", "lock" if expected_is_locked else "unlock"),
+        ("daemon", "lock" if expected_is_locked else "unlock"),
         ("operation", operation_name, "192.0.2.10", "1234", b"x" * 32),
         ("probe", "192.0.2.10"),
     ]
@@ -592,7 +591,7 @@ def test_standalone_lock_fallback_fails_closed_when_readback_is_missing(
     async def operation(device_ip, pin, key):
         return {"success": True, "already": False, "status": 0, "lock_state": 1}
 
-    monkeypatch.setattr(device_commands, "_lock_via_relay", lambda pin, requested_action: _async_value(None))
+    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda pin, requested_action: _async_value(None))
     monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
     monkeypatch.setattr(device_commands, "_resolve_lock_ip", lambda: _async_value("192.0.2.10"))
     monkeypatch.setattr(device_commands, operation_name, operation)
@@ -608,7 +607,7 @@ def test_standalone_lock_fallback_rejects_opposite_observation(monkeypatch):
     async def operation(device_ip, pin, key):
         return {"success": True, "already": True, "status": 0x1102, "lock_state": 1}
 
-    monkeypatch.setattr(device_commands, "_lock_via_relay", lambda pin, action: _async_value(None))
+    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda pin, action: _async_value(None))
     monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
     monkeypatch.setattr(device_commands, "_resolve_lock_ip", lambda: _async_value("192.0.2.10"))
     monkeypatch.setattr(device_commands, "core_lock_device", operation)
@@ -636,7 +635,7 @@ def test_standalone_already_result_is_reported_only_after_matching_observation(m
         probed = True
         return _lock_observation(True)
 
-    monkeypatch.setattr(device_commands, "_lock_via_relay", lambda pin, action: _async_value(None))
+    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda pin, action: _async_value(None))
     monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
     monkeypatch.setattr(device_commands, "_resolve_lock_ip", lambda: _async_value("192.0.2.10"))
     monkeypatch.setattr(device_commands, "core_lock_device", operation)

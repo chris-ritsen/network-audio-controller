@@ -6,17 +6,11 @@ from pathlib import Path
 from netaudio.dante.packet_channel_dissection import _dissect_rx_channels_body, _dissect_tx_channels_body
 from netaudio.dante.packet_dissection_models import (
     ARC_PROTOCOL_IDENTIFIERS,
+    ARC_STATUS_NAMES,
     ARC_SUCCESS_STATUSES,
-    CONMON_MESSAGE_NAMES,
     PROTOCOL_ID_NAMES,
     DissectedPacket,
     Span,
-)
-from netaudio.dante.packet_dissection_rendering import (
-    dissect_and_render,
-    format_dissect_label,
-    hexdump_or_dissect,
-    render_dissection,
 )
 from netaudio.dante.packet_dissection_values import _extract_value, _format_detail, _humanize_value
 from netaudio.dante.packet_settings_dissection import (
@@ -83,13 +77,6 @@ def _load_facts_for_packet(
     return matched
 
 
-def _find_fact(facts: list[dict], category: str, key: str) -> dict | None:
-    for fact in facts:
-        if fact["category"] == category and fact["key"] == key:
-            return fact
-    return None
-
-
 def _build_span(
     payload: bytes,
     field_def: dict,
@@ -101,7 +88,6 @@ def _build_span(
     length = field_def.get("length", 0)
     name = field_def.get("name", "?")
     dtype = field_def.get("dtype", "")
-    expected = field_def.get("value")
 
     if offset + length > len(payload):
         return Span(

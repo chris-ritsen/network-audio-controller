@@ -9,7 +9,6 @@ from typer.testing import CliRunner
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio._common import CoreCommandSender, _make_core_sender, readback_after_notification
 from netaudio.commands import channel as channel_commands
-from netaudio.commands import config as config_commands
 from netaudio.commands import device as device_commands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.events import DanteEventDispatcher
@@ -263,34 +262,8 @@ async def _assert_encoding_operation_sends(supported_encodings):
 
 
 @pytest.fixture(autouse=True)
-def reset_cli_state():
-    from netaudio.cli import state
-
-    original = (
-        list(state.names),
-        list(state.hosts),
-        list(state.server_names),
-        list(state.macs),
-        state.sort_field,
-        state.sort_reverse,
-    )
-    state.names = []
-    state.hosts = []
-    state.server_names = []
-    state.macs = []
-    state.sort_field = "mac"
-    state.sort_reverse = False
-    try:
-        yield
-    finally:
-        (
-            state.names,
-            state.hosts,
-            state.server_names,
-            state.macs,
-            state.sort_field,
-            state.sort_reverse,
-        ) = original
+def _reset_cli_state_for_module(reset_cli_state):
+    yield
 
 
 @pytest.mark.asyncio

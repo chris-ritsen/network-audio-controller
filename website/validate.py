@@ -265,7 +265,7 @@ def validate_content(failures: list[str]) -> None:
     ]
     required_privacy_text = [
         "Information discovered from your audio devices stays on your device and local network unless you deliberately submit feedback that includes it.",
-        "Current relay connections use unencrypted HTTP and server-sent events on the local network",
+        "Current daemon connections use unencrypted HTTP and server-sent events on the local network",
         "The diagnostic privacy level does not make the entire submission anonymous.",
         "There is currently no fixed automatic deletion schedule for submitted feedback or App Attest registration records",
         "Cloudflare enables Network Error Logging",

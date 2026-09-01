@@ -15,3 +15,6 @@ pub mod protocol;
 pub mod responses;
 pub mod signal_presence;
 pub mod spec;
+
+#[cfg(test)]
+pub mod test_support;

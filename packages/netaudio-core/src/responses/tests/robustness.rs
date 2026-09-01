@@ -20,7 +20,7 @@ fn typed_parsers_reject_every_truncated_prefix_without_panicking() {
         assert_eq!(parse_result_code(&receiver_flow[..length]), None);
     }
 
-    let receiver_port_ranges = decode_hex("27290012033c330000013800397f398039ff");
+    let receiver_port_ranges = decode_hexadecimal("27290012033c330000013800397f398039ff");
     for length in 0..receiver_port_ranges.len() {
         assert_eq!(
             parse_receiver_port_ranges(&receiver_port_ranges[..length]),
@@ -29,7 +29,7 @@ fn typed_parsers_reject_every_truncated_prefix_without_panicking() {
     }
 
     let cmc_registration =
-        decode_hex("120000200000100100010000020000000001000000010000c0a8013d21fc0000");
+        decode_hexadecimal("120000200000100100010000020000000001000000010000c0a8013d21fc0000");
     for length in 0..cmc_registration.len() {
         assert_eq!(
             parse_cmc_registration_response(&cmc_registration[..length]),

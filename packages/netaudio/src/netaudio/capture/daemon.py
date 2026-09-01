@@ -50,8 +50,8 @@ def _resolve_host_ipv4(hostname: str) -> str:
         results = _socket.getaddrinfo(hostname, None, _socket.AF_INET, _socket.SOCK_STREAM)
         if results:
             return results[0][4][0]
-    except _socket.gaierror:
-        pass
+    except _socket.gaierror as exception:
+        logger.warning(f"Could not resolve {hostname}: {exception}")
     return hostname
 
 
@@ -163,7 +163,7 @@ def _print_packet_line(
     )
 
     if dissect_mode:
-        from netaudio.dante.packet_dissector import dissect_and_render
+        from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
         print(dissect_and_render(payload))
     elif dump:
@@ -192,7 +192,7 @@ class CaptureDaemon:
         redis_db: int | None = None,
         redis_password: str | None = None,
         redis_socket: str | None = None,
-        relay_stream: str | None = None,
+        ingress_stream: str | None = None,
     ):
         self.stop_event = Event()
         self.store = PacketStore(db_path=db_path)
@@ -223,8 +223,8 @@ class CaptureDaemon:
         self.redis_db = redis_db
         self.redis_password = redis_password
         self.redis_socket = redis_socket
-        self.relay_stream = relay_stream
-        self._relay_redis = None
+        self.ingress_stream = ingress_stream
+        self._ingress_redis = None
 
     def _label_endpoint(self, ip, port):
         name = self._ip_to_name.get(ip)
@@ -232,8 +232,8 @@ class CaptureDaemon:
             return f"{name}:{port}"
         return f"{ip}:{port}"
 
-    def _publish_packet_to_relay(self, packet_id: int, fields: dict):
-        if not self.relay_stream or self._relay_redis is None:
+    def _publish_packet_to_ingress_stream(self, packet_id: int, fields: dict):
+        if not self.ingress_stream or self._ingress_redis is None:
             return
 
         payload = fields.get("payload", b"")
@@ -262,11 +262,11 @@ class CaptureDaemon:
         }
 
         try:
-            self._relay_redis.xadd(self.relay_stream, event, maxlen=200000, approximate=True)
+            self._ingress_redis.xadd(self.ingress_stream, event, maxlen=200000, approximate=True)
         except Exception as exception:
-            print(f"Capture: Redis relay publish failed: {exception}", file=sys.stderr)
+            print(f"Capture: Redis ingress stream publish failed: {exception}", file=sys.stderr)
 
-    def _publish_marker_to_relay(
+    def _publish_marker_to_ingress_stream(
         self,
         session_id: int,
         marker_type: str,
@@ -276,7 +276,7 @@ class CaptureDaemon:
         data: dict | None = None,
         timestamp_ns: int | None = None,
     ):
-        if not self.relay_stream or self._relay_redis is None:
+        if not self.ingress_stream or self._ingress_redis is None:
             return
 
         if timestamp_ns is None:
@@ -295,9 +295,9 @@ class CaptureDaemon:
         }
 
         try:
-            self._relay_redis.xadd(self.relay_stream, event, maxlen=200000, approximate=True)
+            self._ingress_redis.xadd(self.ingress_stream, event, maxlen=200000, approximate=True)
         except Exception as exception:
-            print(f"Capture: Redis relay marker publish failed: {exception}", file=sys.stderr)
+            print(f"Capture: Redis ingress stream marker publish failed: {exception}", file=sys.stderr)
 
     def _print_packet(self, packet_id, fields):
         self._packet_count += 1
@@ -375,7 +375,7 @@ class CaptureDaemon:
                             },
                         )
                     if packet_id:
-                        self._publish_packet_to_relay(
+                        self._publish_packet_to_ingress_stream(
                             packet_id,
                             {
                                 "src_ip": source_host,
@@ -420,7 +420,7 @@ class CaptureDaemon:
 
         async def on_packet(packet_id, fields):
             fields["source_type"] = "tshark"
-            self._publish_packet_to_relay(packet_id, fields)
+            self._publish_packet_to_ingress_stream(packet_id, fields)
             if self.live:
                 self._print_packet(packet_id, fields)
 
@@ -486,12 +486,12 @@ class CaptureDaemon:
         print(f"  Uncorrelated:     {stats['uncorrelated']}")
 
         if stats["by_source"]:
-            print(f"\n  By source:")
+            print("\n  By source:")
             for source, count in stats["by_source"].items():
                 print(f"    {source:25s} {count}")
 
         if stats["by_opcode"]:
-            print(f"\n  By opcode/direction:")
+            print("\n  By opcode/direction:")
             for entry in stats["by_opcode"][:20]:
                 name = entry["opcode_name"] or "unknown"
                 direction = entry["direction"] or "multicast"
@@ -549,18 +549,18 @@ class CaptureDaemon:
     async def run(self):
         print(f"{icon('capture')}Capture: Database at {self.store._db_path}")
 
-        if self.relay_stream:
-            self._relay_redis = _get_redis_client(
+        if self.ingress_stream:
+            self._ingress_redis = _get_redis_client(
                 host=self.redis_host,
                 port=self.redis_port,
                 db=self.redis_db,
                 password=self.redis_password,
                 socket_path=self.redis_socket,
             )
-            if self._relay_redis is None:
-                print("Capture: Redis relay requested but Redis is unavailable.", file=sys.stderr)
+            if self._ingress_redis is None:
+                print("Capture: Redis ingress stream requested but Redis is unavailable.", file=sys.stderr)
             else:
-                print(f"Capture: Relaying packets to Redis stream {self.relay_stream}")
+                print(f"Capture: Publishing packets to Redis stream {self.ingress_stream}")
 
         if self.session_name and self.session_id is None:
             self.session_id = self.store.start_session(
@@ -568,7 +568,7 @@ class CaptureDaemon:
                 source_host=self._source_host,
                 metadata={
                     "interface": self.interface,
-                    "relay_stream": self.relay_stream,
+                    "ingress_stream": self.ingress_stream,
                 },
             )
             self._auto_session = True
@@ -583,17 +583,17 @@ class CaptureDaemon:
                 source_host=self._source_host,
                 data={
                     "interface": self.interface,
-                    "relay_stream": self.relay_stream,
+                    "ingress_stream": self.ingress_stream,
                 },
                 timestamp_ns=marker_ts,
             )
-            self._publish_marker_to_relay(
+            self._publish_marker_to_ingress_stream(
                 session_id=self.session_id,
                 marker_type="system",
                 label="capture_started",
                 data={
                     "interface": self.interface,
-                    "relay_stream": self.relay_stream,
+                    "ingress_stream": self.ingress_stream,
                 },
                 timestamp_ns=marker_ts,
             )
@@ -685,7 +685,7 @@ class CaptureDaemon:
                     },
                     timestamp_ns=marker_ts,
                 )
-                self._publish_marker_to_relay(
+                self._publish_marker_to_ingress_stream(
                     session_id=self.session_id,
                     marker_type="system",
                     label="capture_stopped",

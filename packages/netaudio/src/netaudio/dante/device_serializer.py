@@ -199,10 +199,6 @@ class DanteDeviceSerializer:
         return subscription
 
     @staticmethod
-    def channels_to_json(channels):
-        return dict(sorted(channels.items(), key=lambda x: x[1].number))
-
-    @staticmethod
     def channel_to_json(channel):
         as_json = {"name": channel.name}
 
@@ -284,14 +280,3 @@ class DanteDeviceSerializer:
             )
 
         return as_json
-
-    @staticmethod
-    def device_summary_to_json(device):
-        return {
-            "name": device.name,
-            "ipv4": str(device.ipv4),
-            "server_name": device.server_name,
-            "model_id": device.model_id,
-            "tx_count": device.tx_count,
-            "rx_count": device.rx_count,
-        }

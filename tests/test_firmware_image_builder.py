@@ -1,9 +1,9 @@
 import hashlib
 import json
+import os
 import shutil
 import struct
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -535,7 +535,7 @@ def test_trusted_evidence_root_descriptor_survives_pathname_replacement(tmp_path
     moved_evidence_root = tmp_path / "opened-evidence-root"
     replacement_evidence_root = tmp_path / "replacement-evidence-root"
     replacement_evidence_root.mkdir()
-    original_open = firmware_commands.os.open
+    original_open = os.open
     replaced = False
 
     def replace_root_pathname(path, flags, mode=0o777, *, dir_fd=None):
@@ -549,7 +549,7 @@ def test_trusted_evidence_root_descriptor_survives_pathname_replacement(tmp_path
             )
         return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(firmware_commands.os, "open", replace_root_pathname)
+    monkeypatch.setattr(os, "open", replace_root_pathname)
 
     manifest = _build_brooklyn2_image(
         source,
@@ -573,7 +573,7 @@ def test_trusted_evidence_reader_rejects_directory_replaced_by_symbolic_link(tmp
     moved_runs_directory = evidence_root / "opened-runs"
     replacement_runs_directory = tmp_path / "replacement-runs"
     replacement_runs_directory.mkdir()
-    original_open = firmware_commands.os.open
+    original_open = os.open
     replaced = False
 
     def replace_runs_directory(path, flags, mode=0o777, *, dir_fd=None):
@@ -587,7 +587,7 @@ def test_trusted_evidence_reader_rejects_directory_replaced_by_symbolic_link(tmp
             )
         return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(firmware_commands.os, "open", replace_runs_directory)
+    monkeypatch.setattr(os, "open", replace_runs_directory)
 
     with pytest.raises(ValueError, match="symbolic-link directory"):
         _build_brooklyn2_image(

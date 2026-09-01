@@ -19,7 +19,7 @@ STATUS_TEXT = {
 }
 
 
-class RelayConfigurationHandlers:
+class DaemonConfigurationHandlers:
     async def _handle_set_gain(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:

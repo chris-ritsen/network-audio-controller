@@ -414,26 +414,6 @@ def _resolve_icons_setting() -> bool:
         return False
 
 
-def _cached_facts(facts_path: Path | None = None) -> list[dict]:
-    global _FACTS_CACHE
-    if _FACTS_CACHE is not None:
-        return _FACTS_CACHE
-
-    if facts_path is None:
-        from netaudio.dante.fact_store import DEFAULT_FACTS_PATH
-
-        facts_path = DEFAULT_FACTS_PATH
-
-    if not facts_path.exists():
-        _FACTS_CACHE = []
-        return _FACTS_CACHE
-
-    from netaudio.dante.fact_store import list_facts
-
-    _FACTS_CACHE = list_facts(facts_path)
-    return _FACTS_CACHE
-
-
 def format_dissect_label(direction: str, address: str, command_name: str = "", color: bool = False) -> str:
     if color:
         direction_color = DIRECTION_COLORS.get(direction, _BOLD)

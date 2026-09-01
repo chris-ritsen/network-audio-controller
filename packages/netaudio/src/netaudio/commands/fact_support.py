@@ -166,7 +166,6 @@ async def _run_fact_verify(
     db_override: str | None,
     auto_disprove: bool = False,
 ):
-    import struct
     from netaudio.dante.fact_store import _field_applies_to_direction, _verify_field, disprove_fact
     from netaudio.dante.protocol_verifier import ProtocolVerifier
 

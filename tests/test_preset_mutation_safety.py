@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -7,7 +6,7 @@ import pytest
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from typer.testing import CliRunner
 
-from netaudio import _common
+from netaudio import _common, _common_output
 from netaudio.commands import preset as preset_commands
 from netaudio.commands import subscription as subscription_commands
 from tests.test_cli_mutation_safety import _channel, _subscription
@@ -213,7 +212,7 @@ def test_preset_force_save_failure_preserves_existing_file(monkeypatch, tmp_path
 
     _install_preset_context(monkeypatch, devices, send)
     monkeypatch.setattr(
-        _common,
+        _common_output,
         "format_devices_xml",
         lambda *_args, **_kwargs: "replacement",
     )
@@ -244,7 +243,7 @@ def test_preset_force_replaces_existing_file(monkeypatch, tmp_path):
 
     _install_preset_context(monkeypatch, devices, send)
     monkeypatch.setattr(
-        _common,
+        _common_output,
         "format_devices_xml",
         lambda *_args, **_kwargs: "replacement",
     )
@@ -268,7 +267,7 @@ def test_preset_save_publishes_complete_file_atomically(monkeypatch, tmp_path):
 
     _install_preset_context(monkeypatch, devices, send)
     monkeypatch.setattr(
-        _common,
+        _common_output,
         "format_devices_xml",
         lambda *_args, **_kwargs: "complete preset",
     )

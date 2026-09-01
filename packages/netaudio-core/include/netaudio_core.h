@@ -39,6 +39,7 @@ typedef enum {
   NETAUDIO_STATUS_INVALID_FLOW_PROTOCOL = 30,
   NETAUDIO_STATUS_INVALID_SEQUENCE = 31,
   NETAUDIO_STATUS_UNSUPPORTED_PROTOCOL_OPERATION = 32,
+  NETAUDIO_STATUS_INTERNAL_PANIC = 33,
 } NetaudioStatus;
 
 typedef struct NetaudioClient NetaudioClient;
@@ -163,19 +164,7 @@ NetaudioStatus netaudio_parse_page(const char *kind,
 
 uint32_t netaudio_abi_version(void);
 
-const char *netaudio_service_arc(void);
-
 const char *netaudio_status_name(int32_t status);
-
-uintptr_t netaudio_lock_nonce_length(void);
-
-uintptr_t netaudio_lock_key_length(void);
-
-NetaudioStatus netaudio_build_set_device_name(const char *name,
-                                              uint16_t transaction_id,
-                                              uint8_t *out_buffer,
-                                              uintptr_t out_capacity,
-                                              uintptr_t *out_length);
 
 NetaudioStatus netaudio_build_command(const char *json,
                                       uint8_t *out_buffer,

@@ -22,7 +22,6 @@ from netaudio.commands.capture_helpers import (
     _default_fixture_root,
     _default_label_overrides_path,
     _default_provenance_output_dir,
-    _hexdump,
     _load_capture_profile,
     _normalize_marker_label,
     _parse_set_message,
@@ -32,6 +31,7 @@ from netaudio.commands.capture_helpers import (
     _resolve_db_from_config,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _hexdump
 from netaudio.commands.provenance_app import app
 from netaudio.commands.provenance_support import (
     _audit_single_bundle,

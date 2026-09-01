@@ -1,17 +1,6 @@
 use super::*;
 use crate::protocol::PROTOCOL_ID;
-
-fn decode_hex(encoded: &str) -> Vec<u8> {
-    encoded
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let high = (pair[0] as char).to_digit(16).unwrap();
-            let low = (pair[1] as char).to_digit(16).unwrap();
-            ((high << 4) | low) as u8
-        })
-        .collect()
-}
+use crate::test_support::decode_hexadecimal;
 
 fn stamp_arc_response(response: &mut [u8], protocol: u16, opcode: u16, result: u16) {
     let length = response.len() as u16;

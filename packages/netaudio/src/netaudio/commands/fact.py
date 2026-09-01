@@ -12,18 +12,14 @@ from netaudio.capture.fact import (
     _spec_to_markdown,
     _spec_to_plain,
 )
-from netaudio.commands.capture_helpers import (
-    _compact_hexdump,
-    _parse_field_spec,
-    _resolve_facts_path,
-)
+from netaudio.commands.capture_helpers import _parse_field_spec, _resolve_facts_path
+from netaudio.capture.packets import _compact_hexdump
 
 
 from netaudio.icons import icon
 
 from netaudio.commands.fact_support import (
     _create_evidence_markers,
-    _open_evidence_store,
     _resolve_evidence_sessions,
     _run_fact_verify,
     _validate_evidence_references,
@@ -394,7 +390,7 @@ def fact_show(
         print()
 
     if fact.get("fields"):
-        print(f"  Fields:")
+        print("  Fields:")
         for f in fact["fields"]:
             value_str = f" = {f['value']}" if "value" in f else ""
             direction_str = f"[{f['direction']}] " if f.get("direction") else ""
@@ -403,12 +399,12 @@ def fact_show(
             )
 
     if fact.get("evidence"):
-        print(f"  Evidence:")
+        print("  Evidence:")
         for ref in fact["evidence"]:
             print(f"    {ref}")
 
     if fact.get("disprovals"):
-        print(f"  Disprovals:")
+        print("  Disprovals:")
         for disproval in fact["disprovals"]:
             device = disproval.get("device_ip", "unknown device")
             reason = disproval.get("reason", "")
@@ -419,7 +415,7 @@ def fact_show(
 
     confidence_log = fact.get("confidence_log", [])
     if len(confidence_log) > 1:
-        print(f"  Confidence log:")
+        print("  Confidence log:")
         for entry in confidence_log:
             timestamp_ns = entry.get("timestamp_ns", 0)
             timestamp_s = timestamp_ns / 1_000_000_000 if timestamp_ns else 0
@@ -460,7 +456,7 @@ def fact_show(
                 print(f"    Started: {session_meta.get('started', '?')}")
 
             if packet_id_str is None:
-                print(f"    (session-level evidence, no specific packet)")
+                print("    (session-level evidence, no specific packet)")
                 continue
 
             packet_id = int(packet_id_str)
@@ -487,14 +483,14 @@ def fact_show(
                 continue
 
             print(f"      Size: {len(payload)}B")
-            print(f"      Payload:")
-            from netaudio.dante.packet_dissector import dissect_and_render
+            print("      Payload:")
+            from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
             print(dissect_and_render(payload, indent="        ", direction=direction))
 
             if fact.get("fields"):
                 print()
-                print(f"      Field verification:")
+                print("      Field verification:")
                 for field_def in fact["fields"]:
                     if not _field_applies_to_direction(field_def, direction):
                         continue
@@ -632,7 +628,7 @@ def fact_check(
                     print(f"\n         --- {ref} ---")
                     print(f"         Packet #{packet_id}  {direction}  opcode={opcode_str}  {len(payload)}B")
                     print(f"         {src} -> {dst}")
-                    from netaudio.dante.packet_dissector import dissect_and_render
+                    from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
                     print(dissect_and_render(payload, indent="           ", direction=direction))
 
@@ -838,7 +834,7 @@ def fact_spec(
         False, "--prove", "-p", help="Annotate with provenance: evidence bundles and packet IDs."
     ),
 ):
-    from netaudio._common import output_single
+    from netaudio._common_output import output_single
     from netaudio.cli import OutputFormat, state as cli_state
 
     facts_path = _resolve_facts_path()

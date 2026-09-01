@@ -69,18 +69,7 @@ pub fn parse_heartbeat_clock_frequency_offset_packet(
 mod tests {
     use super::*;
     use crate::heartbeat::{HEARTBEAT_HEADER_SIZE, HEARTBEAT_PROTOCOL};
-
-    fn decode_hex(encoded: &str) -> Vec<u8> {
-        encoded
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = (pair[0] as char).to_digit(16).unwrap();
-                let low = (pair[1] as char).to_digit(16).unwrap();
-                ((high << 4) | low) as u8
-            })
-            .collect()
-    }
+    use crate::test_support::decode_hexadecimal;
 
     fn packet(records: &[u8]) -> Vec<u8> {
         let length = HEARTBEAT_HEADER_SIZE + records.len();
@@ -99,9 +88,10 @@ mod tests {
         ];
 
         for (encoded, expected) in cases {
-            let parsed =
-                parse_heartbeat_clock_frequency_offset_packet(&packet(&decode_hex(encoded)))
-                    .unwrap();
+            let parsed = parse_heartbeat_clock_frequency_offset_packet(&packet(
+                &decode_hexadecimal(encoded),
+            ))
+            .unwrap();
             assert_eq!(parsed.len(), 1);
             assert_eq!(parsed[0].clock_frequency_offset_parts_per_billion, expected);
             assert_eq!(parsed[0].trailing_payload, Vec::<u8>::new());
@@ -110,7 +100,7 @@ mod tests {
 
     #[test]
     fn longer_physical_record_preserves_unknown_trailing_payload() {
-        let record = decode_hex("001c800100040010b5300000ffffb393000000000000000000000000");
+        let record = decode_hexadecimal("001c800100040010b5300000ffffb393000000000000000000000000");
         let parsed = parse_heartbeat_clock_frequency_offset_packet(&packet(&record)).unwrap();
 
         assert_eq!(parsed[0].clock_frequency_offset_parts_per_billion, -19_565);
@@ -119,9 +109,9 @@ mod tests {
 
     #[test]
     fn skips_unknown_and_malformed_target_records_without_partial_values() {
-        let unknown = decode_hex("00048000");
-        let malformed = decode_hex("001080010004000819f80000fff9f9fb");
-        let valid = decode_hex("00108001000400041a1c0000fffc9bf2");
+        let unknown = decode_hexadecimal("00048000");
+        let malformed = decode_hexadecimal("001080010004000819f80000fff9f9fb");
+        let valid = decode_hexadecimal("00108001000400041a1c0000fffc9bf2");
         let mut records = unknown;
         records.extend_from_slice(&malformed);
         records.extend_from_slice(&valid);

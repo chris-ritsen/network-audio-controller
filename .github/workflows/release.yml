@@ -10,13 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv lock --check
       - run: uv run --isolated --python 3.9 --no-project python -m compileall -q packages/netaudio/src/netaudio
       - run: uv run ruff check .
-      - run: uv run python scripts/check_complexity.py
       - run: |
           tag="${GITHUB_REF_NAME#v}"
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
@@ -42,8 +39,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml

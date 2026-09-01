@@ -8,8 +8,9 @@ import select
 import shutil
 import signal
 import sys
+import time
 from collections import deque
-from typing import TextIO
+from typing import Any, TextIO
 
 
 _MOUSE_REPORTING_ENABLE = "\x1b[?1000h\x1b[?1006h"

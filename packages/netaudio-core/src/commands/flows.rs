@@ -368,14 +368,7 @@ pub fn build_delete_tx_flow(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn bytes_from_hex(hexadecimal: &str) -> Vec<u8> {
-        hexadecimal
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-            .collect()
-    }
+    use crate::test_support::decode_hexadecimal;
 
     #[test]
     fn transmitter_channel_name_reconciliation_matches_shipping_controller_request() {
@@ -391,7 +384,7 @@ mod tests {
         ];
         assert_eq!(
             build_reconcile_transmitter_channel_names_2809(&records, 0x4A0C).unwrap(),
-            bytes_from_hex(
+            decode_hexadecimal(
                 "280900394a0c243800000000000000000600020200010003002000020003002c7672726f6f6d3a6c656674007672726f6f6d3a726967687400"
             )
         );

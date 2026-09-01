@@ -65,29 +65,32 @@ def _record(store, session_id, payload, device_ip, port, direction, source_type)
             session_id=session_id,
         )
     except Exception as exception:
-        logger.debug(f"PacketStore error ({direction}): {exception}")
+        logger.warning(f"PacketStore error ({direction}): {exception}", exc_info=True)
 
 
 def _dissect(payload, device_ip, port, direction):
     try:
         from netaudio.common.app_config import settings
-        from netaudio.dante.packet_dissector import dissect_and_render, format_dissect_label
+        from netaudio.dante.packet_dissection_rendering import dissect_and_render, format_dissect_label
 
         color = not settings.no_color
         label = format_dissect_label(direction, f"{device_ip}:{port}", color=color)
         rendered = dissect_and_render(payload, indent="  ", color=color)
         logger.info(f"Dissect [{label}] {len(payload)}B:\n{rendered}")
     except Exception as exception:
-        logger.debug(f"Dissect error: {exception}")
+        logger.warning(f"Dissect error: {exception}", exc_info=True)
 
 
 def _query(client, spec, port, parse_kind=None, starting_channel=None):
     packet = core.build_command(spec)
-    response = client.request(packet, port)
+    try:
+        response = client.request(packet, port)
+    except core.NetaudioCoreError as error:
+        if error.status != core.STATUS_TIMEOUT:
+            raise
+        return None
     if parse_kind is None:
         return response
-    if not response:
-        return None
     if starting_channel is not None:
         return core.parse_page(parse_kind, response, starting_channel)
     return core.parse_response(parse_kind, response)

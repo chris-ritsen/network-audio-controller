@@ -281,14 +281,6 @@ class MeteringManager:
             if (cached := self._selected_sample(server_name, now)) is not None
         }
 
-    def get_history(self, server_name: str, max_samples: int | None = None) -> list[dict]:
-        history = self._history.get(server_name)
-        if not history:
-            return []
-        if max_samples is not None:
-            return list(history)[-max_samples:]
-        return list(history)
-
     def add_persistent(self, server_name: str, client_id: str):
         was_active = self._is_active(server_name)
         refs = self._persistent_refs.setdefault(server_name, set())

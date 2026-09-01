@@ -5,7 +5,9 @@ from typing import Optional
 
 import typer
 
-from netaudio._common import _command_context, filter_devices, output_table, sort_devices
+from netaudio._common import _command_context
+from netaudio._common_output import output_table
+from netaudio._common_selection import filter_devices, sort_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.commands.config_readback import _resolve_targets, _send_requested_change
 from netaudio.dante.device_commands import DanteDeviceCommands

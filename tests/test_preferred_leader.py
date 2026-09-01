@@ -10,10 +10,6 @@ from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.services.notification import (
-    CLOCK_PORT_ROLE_MAP,
-    CLOCK_PORT_STATE_FOLLOWER,
-    CLOCK_PORT_STATE_LEADER,
-    CONMON_CLOCK_FREQUENCY_OFFSET_PARTS_PER_BILLION_OFFSET,
     CONMON_CLOCK_PORT_STATE_OFFSET,
     CONMON_OPCODE_PTP_CLOCK_STATUS,
     CONMON_PREFERRED_LEADER_OFFSET,

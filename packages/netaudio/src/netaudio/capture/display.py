@@ -152,7 +152,7 @@ def _print_marker_row(
             print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
 
             if use_dissect:
-                from netaudio.dante.packet_dissector import dissect_and_render
+                from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
                 print(dissect_and_render(payload, indent=evidence_indent + "  "))
             else:
@@ -217,7 +217,7 @@ def _follow_session_timeline(
 
 
 def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bool, no_evidence: bool):
-    from netaudio.dante.packet_dissector import dissect_and_render
+    from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
     for session in sessions:
         session_id = int(session["id"])

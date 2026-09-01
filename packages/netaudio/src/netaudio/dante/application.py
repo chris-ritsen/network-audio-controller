@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
 from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.dante.application_operations import DanteApplicationOperations
 from netaudio.dante.const import (
-    BLUETOOTH_MODEL_IDS,
-    DEVICE_SETTINGS_PORT,
     SERVICE_ARC,
     SERVICE_CMC,
     SERVICE_DBC,
@@ -18,23 +15,11 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
-from netaudio.dante.capability_partition import (
-    CapabilityPartitionExport,
-    parse_capability_partition_export,
-)
-from netaudio.dante.conmon_export import ConmonExport, ConmonExportUnavailableError
-from netaudio.dante.diagnostic_logs import (
-    DeviceLogExport,
-    apply_device_audio_capabilities,
-    parse_device_log_export,
-)
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     DanteNotificationService,
     NOTIFICATION_NAMES,
-    mutate_and_wait_for_capability_value,
-    send_and_wait_for_gain_status,
 )
 from netaudio.dante.services.settings import DanteSettingsService
 

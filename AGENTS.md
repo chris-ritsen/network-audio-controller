@@ -80,14 +80,7 @@ handoffs may add context or narrow a task, but they may not weaken these rules.
   are read-only unless Chris separately authorizes the exact mutation.
 - A live mutation requires an exclusive resource lease, a bounded run manifest,
   a saved baseline, fresh readback, and restoration unless the authorized run
-  declares the new state as its intended final state. Follow the applicable
-  experiment documentation under `docs/agent/`.
-- `tools/ddm_lab enroll-virtual`, `unenroll-virtual`, `enroll-all-virtual`, and
-  `unenroll-all-virtual` are the only standing DDM mutations in the lab harness.
-  They require every selected leased synthetic guest to run under its own
-  bounded guest-TAP capture, resolve each live ID through the public API, force
-  `clearConfig: false`, and wait for readback. Batch commands select only active
-  harness leases; they never make a physical device an implicit target.
+  declares the new state as its intended final state.
 - Runtime-memory inspection is observational by default. Runtime writes require
   explicit authorization naming the virtual target and data treatment. Never
   patch instructions, branches, or return values.
@@ -120,22 +113,16 @@ handoffs may add context or narrow a task, but they may not weaken these rules.
   does not authorize bypassing other hooks.
 - Multi-agent work must use non-overlapping path ownership. Only the run owner
   writes shared manifests; collaborators write within their assigned namespace.
-- Put repository-maintenance and build automation under `scripts/`; keep scoped
-  research harnesses under `tools/`.
+- Put repository-maintenance and build automation under `scripts/`. Research
+  harnesses that need lab hardware, VMs, or personal paths live outside this
+  repository.
 
 ## Validation
 
-- Keep hand-written source and test files at 900 lines or fewer. Split by
-  responsibility instead of compressing code to stay under the limit.
-- Keep all new hand-written Python functions and methods outside generated,
-  vendored, build, and virtual-environment directories at cyclomatic complexity
-  15 or lower, as measured by Ruff `C901`. The checked complexity baseline
-  records legacy debt only: never add an exception or raise an allowance. Any
-  semantic change to a baseline exception must reduce it, and baseline updates
-  may only lower or remove allowances. Never hand-edit the baseline or suppress
-  `C901` with `noqa` or Ruff configuration. A Chris-approved exception requires
-  an explicit policy and checker change, not a baseline edit. Run
-  `uv run python scripts/check_complexity.py` before handing off Python changes.
+- Split modules by responsibility, never by line count. A file named after its
+  parent plus a suffix is not a module.
+- `uv run ruff check .` must be clean, including undefined names, unused
+  imports, and redefinitions.
 - Default tests must be offline and deterministic. Use focused tests first, then
   `uv run pytest -q` and relevant Rust checks when the change warrants them.
 - Live tests must be opt-in. Mutating live tests require a second explicit opt-in
