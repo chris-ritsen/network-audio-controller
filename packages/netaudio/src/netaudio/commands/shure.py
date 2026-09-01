@@ -8,6 +8,8 @@ from typing import Optional
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio.commands.shure_transport import (
     PROTOCOL_CONFIGS,
     Protocol,
@@ -28,9 +30,9 @@ from netaudio.commands.shure_correlation import (
     _save_correlation,
 )
 
-app = typer.Typer(help="Shure wireless device control.", no_args_is_help=True)
-device_app = typer.Typer(help="Shure device commands.", no_args_is_help=True)
-channel_app = typer.Typer(help="Shure channel commands.", no_args_is_help=True)
+app = typer.Typer(help="Shure wireless device control.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
+device_app = typer.Typer(help="Shure device commands.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
+channel_app = typer.Typer(help="Shure channel commands.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 app.add_typer(device_app, name="device")
 app.add_typer(channel_app, name="channel")
 
@@ -118,7 +120,7 @@ def _query_device_info(device, discovered, *, require_channels=False):
     )
 
 
-@device_app.command("list")
+@device_app.command("list", help="List discovered Shure devices.")
 def shure_device_list():
     from netaudio.cli import state
     from netaudio._common_output import output_single
@@ -211,7 +213,7 @@ def shure_device_list():
         raise typer.Exit(code=1)
 
 
-@channel_app.command("list")
+@channel_app.command("list", help="List channels on a Shure device.")
 def shure_channel_list(
     host: Optional[str] = typer.Argument(None, help="Device IP or hostname."),
     device: Optional[Protocol] = typer.Option(None, "--device", "-d", help="Protocol type."),
@@ -365,7 +367,7 @@ def _parse_device(
     return device_info
 
 
-@device_app.command("show")
+@device_app.command("show", help="Show details for one Shure device.")
 def shure_device_show(
     host: Optional[str] = typer.Argument(None, help="Device IP or hostname (omit to auto-discover)."),
     device: Optional[Protocol] = typer.Option(None, "--device", "-d", help="Device type (auto-detected)."),
@@ -399,7 +401,7 @@ def shure_device_show(
         typer.echo("\n".join(_format_plain(device_info.to_json())))
 
 
-@app.command("get")
+@app.command("get", help="Query a value from a Shure device.")
 def shure_get(
     key: str = typer.Argument(..., help="Key to query (e.g. CHAN_NAME, MODEL)."),
     host: Optional[str] = typer.Argument(None, help="Device IP or hostname (omit to auto-discover)."),
@@ -443,7 +445,7 @@ def shure_get(
     typer.echo(result)
 
 
-@app.command("set")
+@app.command("set", help="Set a value on a Shure device.")
 def shure_set(
     key: str = typer.Argument(..., help="Key to set (e.g. CHAN_NAME, AUDIO_GAIN)."),
     value: str = typer.Argument(..., help="Value to set."),
@@ -514,7 +516,7 @@ def shure_set(
     typer.echo(f"Set {full_key} to {reported!r} (verified)")
 
 
-@app.command("keys")
+@app.command("keys", help="List the keys supported by a Shure protocol type.")
 def shure_keys(
     device: Protocol = typer.Option(..., "--device", "-d", help="Protocol type."),
 ):
@@ -668,7 +670,7 @@ def _resolve_as_dante(value):
     return None
 
 
-@app.command("associate")
+@app.command("associate", help="Associate a Shure device with a Dante device.")
 def shure_associate(
     device_a: str = typer.Argument(..., help="Device identifier (MAC, IP, or name)."),
     device_b: Optional[str] = typer.Argument(None, help="Second device (omit to use -n/-h for Shure side)."),
@@ -712,7 +714,7 @@ def shure_associate(
     _save_correlation(_normalize_mac(shure_device_info.mac), dante_mac)
 
 
-@app.command("correlate")
+@app.command("correlate", help="Correlate a Shure device with a Dante device by metering activity.")
 def shure_correlate(
     host: Optional[str] = typer.Argument(None, help="Shure device IP or hostname."),
     device: Optional[Protocol] = typer.Option(None, "--device", "-d", help="Device type."),
