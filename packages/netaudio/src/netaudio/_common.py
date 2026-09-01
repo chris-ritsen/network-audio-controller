@@ -571,17 +571,51 @@ async def _apply_avio_status_pages(device) -> None:
         device.apply_receiver_channel_status_page(receiver_channel_page)
 
 
+async def _populate_audio_capabilities(device) -> None:
+    if device.ipv4 is None:
+        return
+    probes = []
+    if device.supported_sample_rates is None:
+        probes.append(("supported_sample_rates", "probe_sample_rate_status", "sample_rate", "supported_sample_rates"))
+    if device.supported_encodings is None:
+        probes.append(("supported_encodings", "probe_encoding_status", "encoding", "supported_encodings"))
+    if not probes:
+        return
+    sender = _make_core_sender(devices={device.server_name: device})
+    try:
+        for query_name, probe_name, current_attribute, supported_attribute in probes:
+            try:
+                current_value, supported_values = await getattr(sender, probe_name)(device.ipv4, timeout=2.0)
+            except RuntimeError as exception:
+                logger.debug(f"{query_name} unavailable for {device.server_name or device.name}: {exception}")
+                device.failed_queries.add(query_name)
+                continue
+            setattr(device, current_attribute, current_value)
+            setattr(device, supported_attribute, supported_values)
+            device.failed_queries.discard(query_name)
+    finally:
+        await sender.close()
+
+
 async def _populate_show_details(device, include_channels: bool) -> None:
     if device.clock_source_code is None or device.clock_subdomain is None:
         try:
-            await device.get_clocking_status()
+            clock_status = await device.get_clocking_status()
         except Exception as exception:
+            clock_status = None
             logger.debug(f"Clock status unavailable for {device.server_name or device.name}: {exception}")
+        if clock_status is None:
+            device.failed_queries.add("clock_status")
+        else:
+            device.failed_queries.discard("clock_status")
     if device.aes67_multicast_prefix is None and device.aes67_supported is not False:
         try:
             await device.operations.get_aes67_configured()
+            device.failed_queries.discard("aes67")
         except Exception as exception:
+            device.failed_queries.add("aes67")
             logger.debug(f"AES67 multicast prefix unavailable for {device.server_name or device.name}: {exception}")
+    await _populate_audio_capabilities(device)
     if include_channels or device.transmitter_flows is None:
         await _apply_avio_status_pages(device)
 
@@ -799,11 +833,13 @@ async def _enrich_lock_states(devices: dict[str, DanteDevice]) -> None:
         for device, result in zip(candidates.values(), results):
             if isinstance(result, BaseException):
                 logger.debug(f"Lock status unavailable for {device.server_name or device.name}: {result}")
+                result = None
+            if result is None:
                 device.is_locked = None
-            elif result is None:
-                device.is_locked = None
-            else:
-                device.is_locked = result.is_locked
+                device.failed_queries.add("is_locked")
+                continue
+            device.is_locked = result.is_locked
+            device.failed_queries.discard("is_locked")
     finally:
         await application.shutdown()
 
