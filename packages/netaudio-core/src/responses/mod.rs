@@ -18,9 +18,10 @@ use crate::commands::{
 };
 use crate::protocol::{
     common_arc_protocol_opcodes, conmon_opcode, device_settings_arc_protocol_opcodes,
-    is_common_arc_protocol, response_envelope, validate_conmon_envelope,
-    validate_response_envelope, OPCODE_CHANNEL_COUNT, OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS,
-    OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES, PROTOCOL_ARC_2809,
+    is_common_arc_protocol, modern_arc_protocol_opcodes, response_envelope,
+    validate_conmon_envelope, validate_response_envelope, OPCODE_CHANNEL_COUNT,
+    OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
+    PROTOCOL_ARC_2809,
 };
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
@@ -47,20 +48,28 @@ const FLOW_RECORD_FRAMES_PER_PACKET: usize = 12;
 const FLOW_RECORD_CHANNEL_COUNT: usize = 14;
 const FLOW_TYPE_UNICAST: u16 = 0x0011;
 const TRANSMITTER_FLOW_STATUS_POINTER_TABLE_OFFSET: usize = 18;
-const TRANSMITTER_FLOW_STATUS_RECORD_SIZE: usize = 80;
 const TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER: usize = 2;
-const TRANSMITTER_FLOW_STATUS_RECORD_CHANNEL_COUNT: usize = 8;
+const TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_TYPE: usize = 6;
+const TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID: usize = 8;
 const TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE: usize = 14;
 const TRANSMITTER_FLOW_STATUS_RECORD_NAME_POINTER: usize = 20;
 const TRANSMITTER_FLOW_STATUS_RECORD_FORMAT_POINTER: usize = 22;
-const TRANSMITTER_FLOW_STATUS_RECORD_SUBSCRIBER_DEVICE_POINTER: usize = 44;
-const TRANSMITTER_FLOW_STATUS_RECORD_SUBSCRIBER_FLOW_POINTER: usize = 46;
-const TRANSMITTER_FLOW_STATUS_RECORD_ENDPOINT_POINTER: usize = 60;
+const TRANSMITTER_FLOW_STATUS_SUBSCRIBER_SEGMENT_INDEX: usize = 1;
+const TRANSMITTER_FLOW_STATUS_SUBSCRIBER_DEVICE_POINTER: usize = 4;
+const TRANSMITTER_FLOW_STATUS_SUBSCRIBER_FLOW_POINTER: usize = 6;
+const TRANSMITTER_FLOW_STATUS_ENDPOINT_SEGMENT_INDEX: usize = 2;
+const TRANSMITTER_FLOW_STATUS_ENDPOINT_POINTER: usize = 4;
+const TRANSMITTER_FLOW_STATUS_SLOT_COUNT: usize = 2;
+const TRANSMITTER_FLOW_STATUS_SLOT_IDS: usize = 4;
+const TRANSMITTER_FLOW_STATUS_SLOT_TRAILING_FIELD_SIZE: usize = 2;
 const TRANSMITTER_FLOW_STATUS_FORMAT_SIZE: usize = 8;
 const TRANSMITTER_FLOW_STATUS_ENDPOINT_SIZE: usize = 8;
+const MEDIA_TYPE_AUDIO: u16 = 3;
 const TRANSMITTER_CHANNEL_STATUS_POINTER_TABLE_OFFSET: usize = 18;
 const TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE: usize = 40;
 const TRANSMITTER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER: usize = 2;
+const TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_TYPE: usize = 6;
+const TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID: usize = 8;
 const TRANSMITTER_CHANNEL_STATUS_RECORD_NAME_POINTER: usize = 20;
 const TRANSMITTER_CHANNEL_STATUS_RECORD_FORMAT_POINTER: usize = 22;
 const TRANSMITTER_CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER: usize = 30;
@@ -68,6 +77,8 @@ const TRANSMITTER_CHANNEL_STATUS_FORMAT_SIZE: usize = 16;
 const RECEIVER_CHANNEL_STATUS_POINTER_TABLE_OFFSET: usize = 18;
 const RECEIVER_CHANNEL_STATUS_RECORD_SIZE: usize = 56;
 const RECEIVER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER: usize = 2;
+const RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_TYPE: usize = 6;
+const RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID: usize = 8;
 const RECEIVER_CHANNEL_STATUS_RECORD_LOCAL_NAME_POINTER: usize = 20;
 const RECEIVER_CHANNEL_STATUS_RECORD_FORMAT_POINTER: usize = 22;
 const RECEIVER_CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER: usize = 30;
@@ -222,7 +233,12 @@ pub struct TxFlowPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransmitterFlowStatus {
     pub record_pointer: u16,
+    pub record_length_bytes: u16,
+    pub global_flow_id: u16,
+    /// Compatibility alias for `global_flow_id`.
     pub flow_number: u16,
+    pub media_type: u16,
+    pub media_local_flow_id: u16,
     pub flow_name_pointer: u16,
     pub flow_name: String,
     pub flow_type_code: u16,
@@ -230,7 +246,13 @@ pub struct TransmitterFlowStatus {
     pub format_pointer: u16,
     pub sample_rate: u32,
     pub encoding: u32,
+    /// Deprecated compatibility count derived from populated channel slots.
     pub channel_count: u16,
+    pub channel_slot_segment_header: Option<u16>,
+    pub channel_slot_count: Option<u16>,
+    pub transmitter_channel_ids_by_slot: Vec<u16>,
+    pub populated_transmitter_channel_ids: Vec<u16>,
+    pub populated_slot_count: u16,
     pub endpoint_descriptor_pointer: u16,
     pub endpoint_descriptor_hexadecimal: String,
     pub destination_user_datagram_port: Option<u16>,
@@ -255,6 +277,8 @@ pub struct TransmitterChannelStatus2809 {
     pub record_pointer: u16,
     pub record_type_code: u16,
     pub channel_number: u16,
+    pub media_type: u16,
+    pub media_local_channel_id: u16,
     pub channel_name_pointer: u16,
     pub channel_name: String,
     pub format_pointer: u16,
@@ -266,8 +290,22 @@ pub struct TransmitterChannelStatus2809 {
     pub raw_record_hexadecimal: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModernArcPageDisposition {
+    Complete,
+    MorePages,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransmitterChannelStatusPage2809 {
+    pub protocol_id: u16,
+    pub transaction_id: u16,
+    pub opcode: u16,
+    pub result_code: u16,
+    pub page_disposition: ModernArcPageDisposition,
+    pub page_capacity: u8,
+    /// Deprecated compatibility alias for `page_capacity`.
     pub maximum_transmitter_channels: u8,
     pub reported_record_count: u8,
     pub records: Vec<TransmitterChannelStatus2809>,
@@ -295,6 +333,8 @@ pub struct ReceiverChannelStatus2809 {
     pub record_pointer: u16,
     pub record_type_code: u16,
     pub channel_number: u16,
+    pub media_type: u16,
+    pub media_local_channel_id: u16,
     pub local_channel_name_pointer: u16,
     pub local_channel_name: String,
     pub format_pointer: u16,
@@ -315,6 +355,13 @@ pub struct ReceiverChannelStatus2809 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReceiverChannelStatusPage2809 {
+    pub protocol_id: u16,
+    pub transaction_id: u16,
+    pub opcode: u16,
+    pub result_code: u16,
+    pub page_disposition: ModernArcPageDisposition,
+    pub page_capacity: u8,
+    /// Deprecated compatibility alias for `page_capacity`.
     pub maximum_receiver_channels: u8,
     pub reported_record_count: u8,
     pub records: Vec<ReceiverChannelStatus2809>,

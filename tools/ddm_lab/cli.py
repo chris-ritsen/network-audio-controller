@@ -1,4 +1,4 @@
-"""Command-line interface for the bounded DDM clean-room lab harness."""
+"""Command-line interface for the bounded DDM research lab harness."""
 
 from __future__ import annotations
 
@@ -570,7 +570,7 @@ def _smoke(arguments: argparse.Namespace, harness: LabHarness) -> dict[str, Any]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tools.ddm_lab",
-        description="Bounded clean-room DDM/A32 lab lifecycle (no protocol semantics)",
+        description="Bounded DDM/A32 research lab lifecycle (no protocol semantics)",
     )
     parser.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     parser.add_argument("--promotion-root", type=Path, default=DEFAULT_PROMOTION_ROOT)

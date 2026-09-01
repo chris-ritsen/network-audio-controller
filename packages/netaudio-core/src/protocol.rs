@@ -1,5 +1,6 @@
 pub const PROTOCOL_ID: u16 = 0x27FF;
 pub const PROTOCOL_ARC_2809: u16 = 0x2809;
+pub const PROTOCOL_ARC_280F: u16 = 0x280F;
 pub const OPCODE_CHANNEL_COUNT: u16 = 0x1000;
 pub const OPCODE_DEVICE_NAME_SET: u16 = 0x1001;
 pub const OPCODE_TX_CHANNEL_INFO: u16 = 0x2000;
@@ -13,6 +14,7 @@ pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
 pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, PROTOCOL_ARC_2809];
 pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] =
     [PROTOCOL_ID, 0x2729, 0x2801, PROTOCOL_ARC_2809];
+pub const MODERN_ARC_PROTOCOL_IDS: [u16; 2] = [PROTOCOL_ARC_2809, PROTOCOL_ARC_280F];
 
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
 const CONMON_MINIMUM_SIZE: usize = 28;
@@ -23,6 +25,7 @@ const CONMON_OPCODE_OFFSET: usize = 26;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResponseEnvelope<'a> {
     pub protocol_id: u16,
+    pub transaction_id: u16,
     pub opcode: u16,
     pub result_code: u16,
     pub body: &'a [u8],
@@ -36,6 +39,7 @@ pub fn response_envelope(response: &[u8]) -> Option<ResponseEnvelope<'_>> {
     }
     Some(ResponseEnvelope {
         protocol_id: crate::bytes::read_u16(response, 0)?,
+        transaction_id: crate::bytes::read_u16(response, 4)?,
         opcode: crate::bytes::read_u16(response, 6)?,
         result_code: crate::bytes::read_u16(response, 8)?,
         body: &response[RESPONSE_HEADER_SIZE..],
@@ -62,6 +66,14 @@ pub fn common_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 3] {
 
 pub fn device_settings_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 4] {
     DEVICE_SETTINGS_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
+}
+
+pub fn modern_arc_protocol_opcodes(opcode: u16) -> [(u16, u16); 2] {
+    MODERN_ARC_PROTOCOL_IDS.map(|protocol_id| (protocol_id, opcode))
+}
+
+pub fn is_modern_arc_protocol(protocol_id: u16) -> bool {
+    MODERN_ARC_PROTOCOL_IDS.contains(&protocol_id)
 }
 
 pub fn is_common_arc_protocol(protocol_id: u16) -> bool {

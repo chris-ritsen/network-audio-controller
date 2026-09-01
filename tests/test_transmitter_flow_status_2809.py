@@ -57,7 +57,11 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
     assert unicast_page["flows"] == [
         {
             "record_pointer": 32,
+            "record_length_bytes": 76,
+            "global_flow_id": 1,
             "flow_number": 1,
+            "media_type": 3,
+            "media_local_flow_id": 1,
             "flow_name_pointer": 22,
             "flow_name": "1",
             "flow_type_code": 0x0011,
@@ -65,7 +69,12 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
             "format_pointer": 24,
             "sample_rate": 48_000,
             "encoding": 24,
-            "channel_count": 1,
+            "channel_count": 2,
+            "channel_slot_segment_header": 0x0507,
+            "channel_slot_count": 2,
+            "transmitter_channel_ids_by_slot": [1, 2],
+            "populated_transmitter_channel_ids": [1, 2],
+            "populated_slot_count": 2,
             "endpoint_descriptor_pointer": 112,
             "endpoint_descriptor_hexadecimal": "08023805c0a8016c",
             "destination_user_datagram_port": 14_341,
@@ -77,13 +86,17 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
             "raw_record_hexadecimal": unicast_page["flows"][0]["raw_record_hexadecimal"],
         }
     ]
-    assert len(unicast_page["flows"][0]["raw_record_hexadecimal"]) == 160
+    assert len(unicast_page["flows"][0]["raw_record_hexadecimal"]) == 152
 
     assert multicast_page["maximum_flow_slots"] == 2
     assert multicast_page["reported_flow_count"] == 1
     assert multicast_page["flows"][0] == {
         "record_pointer": 32,
+        "record_length_bytes": 76,
+        "global_flow_id": 2,
         "flow_number": 2,
+        "media_type": 3,
+        "media_local_flow_id": 2,
         "flow_name_pointer": 22,
         "flow_name": "2",
         "flow_type_code": 0x0002,
@@ -92,6 +105,11 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
         "sample_rate": 48_000,
         "encoding": 24,
         "channel_count": 2,
+        "channel_slot_segment_header": 0x0507,
+        "channel_slot_count": 2,
+        "transmitter_channel_ids_by_slot": [1, 2],
+        "populated_transmitter_channel_ids": [1, 2],
+        "populated_slot_count": 2,
         "endpoint_descriptor_pointer": 112,
         "endpoint_descriptor_hexadecimal": "080210e1efffff38",
         "destination_user_datagram_port": 4_321,
