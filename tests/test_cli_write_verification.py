@@ -776,7 +776,7 @@ def test_channel_name_only_reports_success_after_matching_readback(monkeypatch):
     device = FakeChannelDevice(channel_reads="New")
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["name", "tx:1", "New"])
 
     assert result.exit_code == 0
     assert "Set channel name: New (verified)" in result.output
@@ -787,7 +787,7 @@ def test_channel_name_mismatch_is_not_reported_as_success(monkeypatch):
     device = FakeChannelDevice(channel_reads="Old")
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["name", "tx:1", "New"])
 
     assert result.exit_code == 1
     assert "device reports 'Old' instead of 'New'" in result.output
@@ -798,7 +798,7 @@ def test_channel_name_reset_remains_explicitly_unverified(monkeypatch):
     device = FakeChannelDevice(channel_reads="unused")
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    reset_result = runner.invoke(channel_commands.app, ["name", "1", "", "--type", "tx"])
+    reset_result = runner.invoke(channel_commands.app, ["name", "tx:1", ""])
 
     assert reset_result.exit_code == 0
     assert "Channel name reset requested" in reset_result.output

@@ -23,7 +23,7 @@ from netaudio.commands.provenance_app import app
 from netaudio.dante.packet_store import PacketStore
 
 
-@app.command("analysis")
+@app.command("analysis", help="Record an analysis marker with extracted packet fields.")
 def provenance_analysis(
     label: str = typer.Option(..., "--label", help="Analysis label."),
     note: str = typer.Option(..., "--note", help="What was found in the packet(s)."),
@@ -95,7 +95,7 @@ def provenance_analysis(
         store.close()
 
 
-@app.command("hypothesis")
+@app.command("hypothesis", help="Record a falsifiable hypothesis marker in a session.")
 def provenance_hypothesis(
     label: str = typer.Option(..., "--label", help="Hypothesis label."),
     note: str = typer.Option(..., "--note", help="Falsifiable claim being tested."),
@@ -136,7 +136,7 @@ def provenance_hypothesis(
     print(f"Capture: Label: {normalized_label}")
 
 
-@app.command("analyze")
+@app.command("analyze", help="Dissect every packet in a provenance bundle.")
 def provenance_analyze(
     bundle: str = typer.Argument(..., help="Path to provenance bundle (.tar.gz or directory)."),
     raw: bool = typer.Option(False, "--raw", help="Show raw hexdump for each packet."),

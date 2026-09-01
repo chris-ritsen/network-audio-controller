@@ -6,6 +6,8 @@ from typing import Optional
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio._common import _discover
 from netaudio._common_output import output_table
 from netaudio._common_selection import filter_devices
@@ -13,7 +15,9 @@ from netaudio.commands.device_display import _channel_matches
 from netaudio.icons import icon
 
 
-meter_app = typer.Typer(help="Device metering.", no_args_is_help=False, invoke_without_command=True)
+meter_app = typer.Typer(
+    help="Device metering.", no_args_is_help=False, invoke_without_command=True, context_settings=HELP_CONTEXT_SETTINGS
+)
 
 
 def _render_meter_bar(level: int, bar_width: int = 32, no_color: bool = False) -> str:

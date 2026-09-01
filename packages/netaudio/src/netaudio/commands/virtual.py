@@ -18,6 +18,8 @@ from typing import Any, NoReturn, Optional
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio.commands.virtual_process import (
     ProcessRecord,
     VirtualLifecycleError,
@@ -29,7 +31,7 @@ from netaudio.commands.virtual_process import (
 
 logger = logging.getLogger("netaudio")
 
-app = typer.Typer(help="Virtual Dante device.", no_args_is_help=True)
+app = typer.Typer(help="Virtual Dante device.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 
 def _default_runtime_directory() -> str:
@@ -611,17 +613,21 @@ def _report_lifecycle_error(exception: VirtualLifecycleError) -> NoReturn:
     raise typer.Exit(code=1)
 
 
-@app.command("start")
+@app.command("start", help="Start the virtual Dante device.")
 def virtual_start(
-    name: str = typer.Option("netaudio-virtual", "--name", "-n"),
-    model: str = typer.Option("netaudio", "--model"),
-    tx: int = typer.Option(2, "--tx"),
-    rx: int = typer.Option(2, "--rx"),
-    sample_rate: int = typer.Option(48000, "--sample-rate", "-r"),
-    interface: Optional[str] = typer.Option(None, "--interface", "-i"),
-    foreground: bool = typer.Option(False, "--foreground", "-f"),
-    ownership_token: Optional[str] = typer.Option(None, "--ownership-token", hidden=True),
-    readiness_port: Optional[int] = typer.Option(None, "--readiness-port", hidden=True),
+    name: str = typer.Option("netaudio-virtual", "--name", "-n", help="Device name to advertise."),
+    model: str = typer.Option("netaudio", "--model", help="Model name to advertise."),
+    tx: int = typer.Option(2, "--tx", help="Number of transmitter channels."),
+    rx: int = typer.Option(2, "--rx", help="Number of receiver channels."),
+    sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
+    interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
+    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in the foreground instead of detaching."),
+    ownership_token: Optional[str] = typer.Option(
+        None, "--ownership-token", hidden=True, help="Ownership token handed to the detached process."
+    ),
+    readiness_port: Optional[int] = typer.Option(
+        None, "--readiness-port", hidden=True, help="Local port the detached process reports readiness on."
+    ),
 ) -> None:
     try:
         _start_virtual(
@@ -712,7 +718,7 @@ def _stop_virtual(*, missing_ok: bool = False) -> bool:
     return True
 
 
-@app.command("stop")
+@app.command("stop", help="Stop the virtual Dante device.")
 def virtual_stop() -> None:
     try:
         _stop_virtual()
@@ -720,14 +726,14 @@ def virtual_stop() -> None:
         _report_lifecycle_error(exception)
 
 
-@app.command("restart")
+@app.command("restart", help="Restart the virtual Dante device.")
 def virtual_restart(
-    name: str = typer.Option("netaudio-virtual", "--name", "-n"),
-    model: str = typer.Option("netaudio", "--model"),
-    tx: int = typer.Option(2, "--tx"),
-    rx: int = typer.Option(2, "--rx"),
-    sample_rate: int = typer.Option(48000, "--sample-rate", "-r"),
-    interface: Optional[str] = typer.Option(None, "--interface", "-i"),
+    name: str = typer.Option("netaudio-virtual", "--name", "-n", help="Device name to advertise."),
+    model: str = typer.Option("netaudio", "--model", help="Model name to advertise."),
+    tx: int = typer.Option(2, "--tx", help="Number of transmitter channels."),
+    rx: int = typer.Option(2, "--rx", help="Number of receiver channels."),
+    sample_rate: int = typer.Option(48000, "--sample-rate", "-r", help="Sample rate in Hz."),
+    interface: Optional[str] = typer.Option(None, "--interface", "-i", help="Network interface to bind."),
 ) -> None:
     try:
         _stop_virtual(missing_ok=True)
@@ -744,7 +750,7 @@ def virtual_restart(
         _report_lifecycle_error(exception)
 
 
-@app.command("status")
+@app.command("status", help="Show whether the virtual Dante device is running.")
 def virtual_status() -> None:
     try:
         record = _read_process_record()
@@ -804,10 +810,10 @@ def _follow_log_file(lines: int) -> None:
         raise VirtualLifecycleError(f"could not follow log file {LOGFILE}: {exception}") from exception
 
 
-@app.command("logs")
+@app.command("logs", help="Show the virtual Dante device log.")
 def virtual_logs(
-    follow: bool = typer.Option(False, "--follow", "-f"),
-    lines: int = typer.Option(50, "--lines", "-n"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow the log as it grows."),
+    lines: int = typer.Option(50, "--lines", "-n", help="Number of trailing lines to show."),
 ) -> None:
     if lines < 0:
         raise typer.BadParameter("--lines cannot be negative")

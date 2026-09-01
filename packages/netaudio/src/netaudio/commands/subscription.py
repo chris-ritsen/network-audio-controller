@@ -21,12 +21,19 @@ from netaudio._common import (
     readback_after_notification,
     send_and_wait_for_notification,
 )
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio._common_output import output_table
-from netaudio._common_selection import filter_devices, find_channel, find_device, parse_qualified_name, sort_devices
+from netaudio._common_selection import (
+    filter_devices,
+    find_device,
+    parse_qualified_channel,
+    resolve_channel,
+    sort_devices,
+)
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
 
-app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True)
+app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 
 @dataclass(frozen=True)
@@ -294,8 +301,16 @@ def subscription_list(
 
 @app.command()
 def add(
-    tx: str = typer.Option(..., "--tx", help="TX source: channel@device (single) or device (bulk 1:1)."),
-    rx: str = typer.Option(..., "--rx", help="RX destination: channel@device (single) or device (bulk 1:1)."),
+    tx: str = typer.Option(
+        ...,
+        "--tx",
+        help="TX source: tx:1@DEVICE, 1@DEVICE, or NAME@DEVICE (single), or DEVICE (bulk 1:1).",
+    ),
+    rx: str = typer.Option(
+        ...,
+        "--rx",
+        help="RX destination: rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE (single), or DEVICE (bulk 1:1).",
+    ),
     count: int = typer.Option(
         0,
         "--count",
@@ -316,7 +331,7 @@ def add(
         help="Starting RX channel offset (bulk only, 0-based).",
     ),
 ):
-    """Add subscriptions. Single: --tx channel@device --rx channel@device. Bulk: --tx device --rx device."""
+    """Add subscriptions. Single: --tx tx:1@DEVICE --rx rx:1@DEVICE. Bulk: --tx DEVICE --rx DEVICE."""
 
     commands = DanteDeviceCommands()
 
@@ -331,8 +346,12 @@ def add(
         if is_single:
             if count or offset_tx or offset_rx:
                 _fail("--count and channel offsets are only valid for bulk subscriptions")
-            tx_channel_id, tx_device_id = parse_qualified_name(tx)
-            rx_channel_id, rx_device_id = parse_qualified_name(rx)
+            tx_reference, tx_device_id = parse_qualified_channel(tx, "tx")
+            rx_reference, rx_device_id = parse_qualified_channel(rx, "rx")
+            if tx_reference.direction != "tx":
+                _fail(f"--tx must name a transmitter channel (tx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {tx!r}")
+            if rx_reference.direction != "rx":
+                _fail(f"--rx must name a receiver channel (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {rx!r}")
 
             async with _command_context() as (devices, send):
                 tx_device = find_device(devices, tx_device_id)
@@ -345,15 +364,8 @@ def add(
                     typer.echo(f"Error: RX device '{rx_device_id}' not found.", err=True)
                     raise typer.Exit(code=ExitCode.ERROR)
 
-                tx_channel = find_channel(tx_device, tx_channel_id, "tx")
-                if tx_channel is None:
-                    typer.echo(f"Error: TX channel '{tx_channel_id}' not found on {tx_device.name}.", err=True)
-                    raise typer.Exit(code=ExitCode.ERROR)
-
-                rx_channel = find_channel(rx_device, rx_channel_id, "rx")
-                if rx_channel is None:
-                    typer.echo(f"Error: RX channel '{rx_channel_id}' not found on {rx_device.name}.", err=True)
-                    raise typer.Exit(code=ExitCode.ERROR)
+                _, tx_channel = resolve_channel(tx_device, tx_reference)
+                _, rx_channel = resolve_channel(rx_device, rx_reference)
 
                 tx_channel_name = tx_channel.friendly_name or tx_channel.name
                 if not tx_channel_name or not tx_device.name:
@@ -372,11 +384,12 @@ def add(
                 if not result.matched:
                     _fail(_readback_failure("subscription change", rx_device, result))
                 typer.echo(
-                    f"{icon('add')}{rx_channel_id}@{rx_device.name} <- {tx_channel_id}@{tx_device.name} (verified)"
+                    f"{icon('add')}{rx_reference.identifier}@{rx_device.name} <- "
+                    f"{tx_reference.identifier}@{tx_device.name} (verified)"
                 )
         else:
             if "@" in tx or "@" in rx:
-                _fail("both --tx and --rx must be channel@device or both must be device names")
+                _fail("both --tx and --rx must be CHANNEL@DEVICE or both must be device names")
 
             async with _command_context() as (devices, send):
                 tx_device = find_device(devices, tx)
@@ -515,7 +528,7 @@ def remove(
     rx: Optional[list[str]] = typer.Option(
         None,
         "--rx",
-        help="RX channel@device to unsubscribe (repeatable).",
+        help="RX channel to unsubscribe: rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE (repeatable).",
     ),
     all_channels: bool = typer.Option(
         False,
@@ -568,10 +581,14 @@ def remove(
                 for rx_spec in rx or []:
                     if "@" not in rx_spec:
                         _fail(
-                            f"expected channel@device for --rx {rx_spec!r}; use global device "
-                            "filters with --all to remove every subscription on a device"
+                            f"expected CHANNEL@DEVICE for --rx {rx_spec!r} (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE); "
+                            "use global device filters with --all to remove every subscription on a device"
                         )
-                    rx_channel_id, rx_device_id = parse_qualified_name(rx_spec)
+                    rx_reference, rx_device_id = parse_qualified_channel(rx_spec, "rx")
+                    if rx_reference.direction != "rx":
+                        _fail(
+                            f"--rx must name a receiver channel (rx:1@DEVICE, 1@DEVICE, or NAME@DEVICE), got {rx_spec!r}"
+                        )
                     rx_device = find_device(devices, rx_device_id)
                     if rx_device is None:
                         _fail(f"RX device '{rx_device_id}' not found")
@@ -584,11 +601,9 @@ def remove(
                         _index_fresh_subscriptions(rx_device)
                         refreshed_devices.add(id(rx_device))
 
-                    rx_channel = find_channel(rx_device, rx_channel_id, "rx")
-                    if rx_channel is None:
-                        _fail(f"RX channel '{rx_channel_id}' not found on {rx_device.name}")
+                    _, rx_channel = resolve_channel(rx_device, rx_reference)
                     if _subscription_signature(rx_device, rx_channel.number) is None:
-                        _fail(f"RX channel '{rx_channel_id}' on {rx_device.name} is not subscribed")
+                        _fail(f"RX channel '{rx_reference.identifier}' on {rx_device.name} is not subscribed")
 
                     entry = device_removals.setdefault(
                         id(rx_device),

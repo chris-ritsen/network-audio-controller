@@ -35,7 +35,7 @@ from netaudio.commands.capture_live import _resolve_redis_for_capture
 from netaudio.dante.packet_store import PacketStore
 
 
-@app.command("collect")
+@app.command("collect", help="Consume packets from a Redis stream into the capture database.")
 def collect(
     stream: Optional[str] = typer.Option(None, "--stream", help="Redis stream key to consume."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
@@ -379,7 +379,7 @@ def collect(
         )
 
 
-@app.command("follow")
+@app.command("follow", help="Print packets from a Redis stream as they arrive.")
 def follow(
     stream: Optional[str] = typer.Option(None, "--stream", help="Redis stream key to consume."),
     start_id: str = typer.Option("$", "--start-id", help="Redis stream ID cursor."),
