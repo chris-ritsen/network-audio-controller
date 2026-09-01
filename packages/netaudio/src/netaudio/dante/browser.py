@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from queue import Queue
 from typing import Any, TypedDict
@@ -11,7 +10,6 @@ from zeroconf import (
     DNSService,
     DNSText,
     IPVersion,
-    ServiceBrowser,
     ServiceInfo,
     ServiceStateChange,
     Zeroconf,
@@ -225,18 +223,6 @@ class DanteBrowser:
                 )
 
         return kwargs
-
-    def sync_run(self):
-        zc = Zeroconf(**self.get_zeroconf_kwargs())
-        services = SERVICES
-
-        browser = ServiceBrowser(
-            zc,
-            services,
-            handlers=[self.sync_on_service_state_change],
-        )
-
-        browser.run()
 
     async def async_run(self) -> None:
         self.aio_zc = AsyncZeroconf(**self.get_zeroconf_kwargs())

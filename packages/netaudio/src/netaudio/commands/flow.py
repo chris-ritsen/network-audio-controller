@@ -5,12 +5,9 @@ from typing import NoReturn
 
 import typer
 
-from netaudio._common import (
-    _get_arc_port,
-    filter_devices,
-    find_device,
-    output_table,
-)
+from netaudio._common import _get_arc_port
+from netaudio._common_output import output_table
+from netaudio._common_selection import filter_devices, find_device
 from netaudio._exit_codes import ExitCode
 from netaudio.dante import flows
 from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS

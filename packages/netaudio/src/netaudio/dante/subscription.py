@@ -46,11 +46,6 @@ class DanteSubscription:
             (f"status:{self.status_code}",),
         )
 
-    def rx_channel_status_text(self):
-        if self.rx_channel_status_code is None:
-            return ("receiver-status:unknown",)
-        return (f"receiver-status:0x{self.rx_channel_status_code:04X}",)
-
     def to_json(self):
         from netaudio.dante.device_serializer import DanteDeviceSerializer
 

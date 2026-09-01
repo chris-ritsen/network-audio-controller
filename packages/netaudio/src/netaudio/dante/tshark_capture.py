@@ -7,7 +7,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import (
     DEVICE_ARC_PORT,
     DEVICE_CONTROL_PORT,

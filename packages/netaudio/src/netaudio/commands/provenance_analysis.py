@@ -3,15 +3,12 @@ from __future__ import annotations
 import socket
 import struct
 import sys
-from pathlib import Path
 from typing import Optional
 
 import typer
 
 from netaudio.capture.provenance import _extract_field
 from netaudio.commands.capture_helpers import (
-    _compact_hexdump,
-    _label_packet,
     _load_capture_profile,
     _normalize_marker_label,
     _parse_field_spec,
@@ -21,6 +18,7 @@ from netaudio.commands.capture_helpers import (
     _resolve_provenance_bundle_path,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _compact_hexdump, _label_packet
 from netaudio.commands.provenance_app import app
 from netaudio.dante.packet_store import PacketStore
 
@@ -143,7 +141,7 @@ def provenance_analyze(
     bundle: str = typer.Argument(..., help="Path to provenance bundle (.tar.gz or directory)."),
     raw: bool = typer.Option(False, "--raw", help="Show raw hexdump for each packet."),
 ):
-    from netaudio.dante.fact_store import _load_bundle as lib_load_bundle, list_facts, _verify_field
+    from netaudio.dante.fact_store import _load_bundle as lib_load_bundle, list_facts
 
     bundle_path = _resolve_provenance_bundle_path(bundle)
     if not bundle_path.exists():

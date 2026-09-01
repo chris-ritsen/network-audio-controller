@@ -559,11 +559,8 @@ def _device_show_rows(device) -> list[list[str]]:
 
 def _channel_matches(channel_key: int, channel_name: str, patterns: list[str]) -> bool:
     for pat in patterns:
-        try:
-            if int(pat) == channel_key:
-                return True
-        except ValueError:
-            pass
+        if pat.isdigit() and int(pat) == channel_key:
+            return True
         if fnmatch(channel_name.lower(), pat.lower()):
             return True
     return False

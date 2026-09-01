@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 import netaudio._capture as capture_module
 import netaudio._common as common_module
 from netaudio.commands import device as device_commands
+from netaudio.commands import device_display
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -35,7 +36,7 @@ def test_format_clock_frequency_offset_preserves_parts_per_billion_resolution(
     clock_frequency_offset_parts_per_billion,
     expected,
 ):
-    assert device_commands._format_clock_frequency_offset(clock_frequency_offset_parts_per_billion) == expected
+    assert device_display._format_clock_frequency_offset(clock_frequency_offset_parts_per_billion) == expected
 
 
 def test_format_channel_count_does_not_turn_unknown_into_zero():

@@ -1,13 +1,5 @@
 use super::*;
-
-fn bytes_from_hex(hexadecimal: &str) -> Vec<u8> {
-    assert_eq!(hexadecimal.len() % 2, 0);
-    hexadecimal
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
-        .collect()
-}
+use crate::test_support::decode_hexadecimal;
 
 #[test]
 fn set_clock_source_uses_mask_bit_zero_and_raw_selection() {
@@ -31,7 +23,7 @@ fn refresh_clock_status_matches_shipping_controller_frame_7536() {
     let packet = build_refresh_clock_status([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x0021).unwrap();
     assert_eq!(
             packet,
-            bytes_from_hex(
+            decode_hexadecimal(
                 "ffff005c00210000842f5774e86d0000417564696e617465073a002100000064000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
             )
         );
@@ -345,13 +337,13 @@ fn set_aes67_multicast_prefix_matches_controller_usb_write() {
         build_set_aes67_multicast_prefix(std::net::Ipv4Addr::new(239, 238, 0, 0), 0x0403).unwrap();
     assert_eq!(
         packet,
-        bytes_from_hex("28090014040311010000010180600010efee0000")
+        decode_hexadecimal("28090014040311010000010180600010efee0000")
     );
     let restored =
         build_set_aes67_multicast_prefix(std::net::Ipv4Addr::new(239, 69, 0, 0), 0x00c0).unwrap();
     assert_eq!(
         restored,
-        bytes_from_hex("2809001400c011010000010180600010ef450000")
+        decode_hexadecimal("2809001400c011010000010180600010ef450000")
     );
 }
 
@@ -459,7 +451,7 @@ fn audio_settings_accept_nonzero_wire_values_without_truncation() {
 fn identify_uses_caller_transaction_sequence() {
     assert_eq!(
         build_identify(0x0BC9).unwrap(),
-        bytes_from_hex("ffff00200bc900000000000000000000417564696e6174650731006300000064")
+        decode_hexadecimal("ffff00200bc900000000000000000000417564696e6174650731006300000064")
     );
     assert_eq!(build_identify(0), Err(NetaudioError::InvalidSequence));
 }
@@ -469,11 +461,11 @@ fn sample_rate_pullup_control_matches_authentic_a32_requests() {
     let host_mac = [0x52, 0x55, 0x0A, 0x00, 0x02, 0x02];
     assert_eq!(
             build_probe_sample_rate_pullup(host_mac, 0x0047).unwrap(),
-            bytes_from_hex("ffff00380047000052550a0002020000417564696e617465073a008500000000000000000000000000000000000000000000000000000000")
+            decode_hexadecimal("ffff00380047000052550a0002020000417564696e617465073a008500000000000000000000000000000000000000000000000000000000")
         );
     assert_eq!(
             build_set_sample_rate_pullup(host_mac, 0x0047, 1).unwrap(),
-            bytes_from_hex("ffff00380047000052550a0002020000417564696e617465073a008500000000000000010000000100000000000000000000000000000000")
+            decode_hexadecimal("ffff00380047000052550a0002020000417564696e617465073a008500000000000000010000000100000000000000000000000000000000")
         );
     assert_eq!(
         build_probe_sample_rate_pullup(host_mac, 0),
@@ -579,7 +571,7 @@ fn query_tx_flows_selects_opcode_per_protocol() {
 fn receiver_channel_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
         build_query_receiver_channel_status_2809(0x284A).unwrap(),
-        bytes_from_hex("28090022284a34000000000000000000000100010001000000000000830283060310")
+        decode_hexadecimal("28090022284a34000000000000000000000100010001000000000000830283060310")
     );
 }
 
@@ -587,7 +579,7 @@ fn receiver_channel_status_2809_query_matches_shipping_controller_request() {
 fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
         build_query_transmitter_channel_status_2809(0x2852).unwrap(),
-        bytes_from_hex("28090022285224000000000000000000000100010001000000000000830283060310")
+        decode_hexadecimal("28090022285224000000000000000000000100010001000000000000830283060310")
     );
 }
 
@@ -595,7 +587,7 @@ fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
 fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
         build_query_receiver_flow_status_2809(0x2856).unwrap(),
-        bytes_from_hex("28090022285636000000000000000000000100010001000000000000830283060310")
+        decode_hexadecimal("28090022285636000000000000000000000100010001000000000000830283060310")
     );
 }
 
@@ -603,7 +595,7 @@ fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
 fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
     assert_eq!(
         build_set_receiver_channel_name_2809(1, "01", 0x2849).unwrap(),
-        bytes_from_hex("2809001d2849340100000000000000000600010100010003001a303100")
+        decode_hexadecimal("2809001d2849340100000000000000000600010100010003001a303100")
     );
     assert_eq!(
         build_set_channel_name_for_protocol(
@@ -614,7 +606,7 @@ fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
             0x284C,
         )
         .unwrap(),
-        bytes_from_hex("28090022284c340100000000000000000600010100010003001a6d69632d6d697800")
+        decode_hexadecimal("28090022284c340100000000000000000600010100010003001a6d69632d6d697800")
     );
     assert_eq!(
         build_set_channel_name_for_protocol(
@@ -625,7 +617,7 @@ fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
             0x0411,
         )
         .unwrap(),
-        bytes_from_hex("28090022041120130000020100000002001800000000000074762d70726f62653200")
+        decode_hexadecimal("28090022041120130000020100000002001800000000000074762d70726f62653200")
     );
     assert_eq!(
         build_set_receiver_channel_name_2809(0, "rx-a", 0),
@@ -830,7 +822,7 @@ fn metering_start_matches_captured_ad4d_packet_7298186() {
                 0,
             )
             .unwrap(),
-            bytes_from_hex(
+            decode_hexadecimal(
                 "1200004200003010000000003e42274cff2400000004001000020012000a6164346400000000000100160001223000010000c0a8019c223000000000000000000000"
             )
         );
@@ -848,7 +840,7 @@ fn metering_start_matches_captured_a32_packet_7298185() {
                 0,
             )
             .unwrap(),
-            bytes_from_hex(
+            decode_hexadecimal(
                 "1200004000003010000000003e42274cff2400000004000e00020010000a613332000000000100140001223000010000c0a8019c223000000000000000000000"
             )
         );

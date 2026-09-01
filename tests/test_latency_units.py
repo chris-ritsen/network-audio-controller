@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from netaudio._common import format_devices_xml
+from netaudio._common_output import format_devices_xml
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.latency import (
     latency_state_from_settings,

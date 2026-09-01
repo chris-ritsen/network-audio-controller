@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from typing import Callable
 
 from rich.cells import cell_len, set_cell_size
 
+from netaudio.commands.device_display import _channel_matches
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.metering import classify_signal_presence
 
@@ -76,18 +76,6 @@ def _fit_render_cell(value: object, width: int) -> str:
     """Fit untrusted row text without allowing ANSI marker collisions."""
     text = _clean_terminal_text(value).replace(_STATE_PLACEHOLDER, "?").replace(_METER_PLACEHOLDER, "?")
     return _fit_cell(text, width)
-
-
-def _channel_matches(channel_number: int, channel_name: str, patterns: list[str]) -> bool:
-    for pattern in patterns:
-        try:
-            if int(pattern) == channel_number:
-                return True
-        except ValueError:
-            pass
-        if fnmatch(channel_name.lower(), pattern.lower()):
-            return True
-    return False
 
 
 def _normalize_level_map(value: object) -> dict[int, int] | None:

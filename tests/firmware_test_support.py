@@ -1,38 +1,13 @@
 import hashlib
 import json
-import shutil
-import sqlite3
 import struct
 import zlib
-from pathlib import Path
 
-import pytest
 
-from netaudio.commands import firmware as firmware_commands
-from netaudio.commands import firmware_parser
 from netaudio.commands.firmware import (
     BROOKLYN2_BOARD_INFORMATION_PARTITION_OFFSET,
     BROOKLYN2_BOARD_INFORMATION_PARTITION_SIZE,
     BROOKLYN2_FLASH_SIZE,
-    BROOKLYN2_HARDWARE_PROFILE_FORMAT_VERSION,
-    BROOKLYN2_IMAGE_MANIFEST_FORMAT_VERSION,
-    BROOKLYN2_PROTECTED_CAPABILITY_PARTITION_OFFSET,
-    BROOKLYN2_PROTECTED_CAPABILITY_PARTITION_SIZE,
-    DNT_PARSER_VERSION,
-    FIRMWARE_DATABASE_SCHEMA_VERSION,
-    PARTITION_NAMES,
-    _brooklyn2_board_information_manifest,
-    _build_brooklyn2_board_information_partition,
-    _build_brooklyn2_image,
-    _extract_capability_9,
-    _init_db,
-    _load_brooklyn2_board_information_descriptor,
-    _load_brooklyn2_hardware_profile,
-    _load_resume_results,
-    _parse_sections,
-    _publish_output_directory_without_replacement,
-    firmware_extract,
-    parse_dnt,
 )
 
 

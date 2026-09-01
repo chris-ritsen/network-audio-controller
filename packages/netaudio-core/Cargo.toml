@@ -18,5 +18,5 @@ libc = "0.2"
 
 [profile.release]
 lto = true
-panic = "abort"
+panic = "unwind"
 overflow-checks = true

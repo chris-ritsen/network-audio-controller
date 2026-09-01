@@ -15,7 +15,7 @@ fn conmon_opcode_extracts_after_magic() {
 
 #[test]
 fn captured_clock_status_refresh_response_has_the_paired_opcode() {
-    let response = decode_hex(
+    let response = decode_hexadecimal(
             "ffff00a8001b00000200000000010000417564696e6174650724002000000000000100060000007bfff9f9fb020000000001000002000000000100000200000000010000000100340004000002b40000000186a0000000020000000000000000000000000000000000080002005800040003000000600010000000010102010000000002000400070001000201020200000000020003000300010003020202000000000200030003",
         );
     assert_eq!(
@@ -27,7 +27,7 @@ fn captured_clock_status_refresh_response_has_the_paired_opcode() {
 
 #[test]
 fn routing_capacity_status_parses_settled_and_transitional_authentic_packets() {
-    let settled = decode_hex(
+    let settled = decode_hexadecimal(
         "ffff002812870000001dc10812580000417564696e61746507240100000000000101000000800080",
     );
     assert_eq!(
@@ -42,7 +42,7 @@ fn routing_capacity_status_parses_settled_and_transitional_authentic_packets() {
         })
     );
 
-    let transitional = decode_hex(
+    let transitional = decode_hexadecimal(
         "ffff002812870000001dc10812580000417564696e61746507240100000000000001000000000000",
     );
     assert_eq!(
@@ -60,7 +60,7 @@ fn routing_capacity_status_parses_settled_and_transitional_authentic_packets() {
 
 #[test]
 fn routing_capacity_status_preserves_unknown_state_and_rejects_invalid_packets() {
-    let mut unknown = decode_hex(
+    let mut unknown = decode_hexadecimal(
         "ffff002812870000001dc10812580000417564696e61746507240100123456789abc55aa00200010",
     );
     assert_eq!(
@@ -78,7 +78,7 @@ fn routing_capacity_status_preserves_unknown_state_and_rejects_invalid_packets()
     unknown[26..28].copy_from_slice(&CONMON_OPCODE_SAMPLE_RATE_STATUS.to_be_bytes());
     assert_eq!(parse_routing_capacity_status(&unknown), None);
 
-    let mut wrong_length = decode_hex(
+    let mut wrong_length = decode_hexadecimal(
         "ffff002812870000001dc10812580000417564696e61746507240100000000000101000000800080",
     );
     wrong_length.push(0);
@@ -88,7 +88,7 @@ fn routing_capacity_status_preserves_unknown_state_and_rejects_invalid_packets()
 }
 
 fn captured_ad4d_switch_configuration_status() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
         "ffff0158004e0000000eddfd4e130000417564696e617465072e00140000000000020018001000040000007f000100010001000053776974636865640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0000000000000000000000000002000053706c69742f526564756e64616e74000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000240000005300000000",
     )
 }
@@ -266,7 +266,7 @@ fn encoding_status_rejects_invalid_envelope_and_oversized_count() {
 }
 
 pub(super) fn captured_sample_rate_pullup_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff005c001e00000200000000010000417564696e6174650724008400000000003000050000000000000000000200000000000100000000000000000000000000000000000000000000000000000001000000020000000300000004",
         )
 }
@@ -296,7 +296,7 @@ fn sample_rate_pullup_status_parses_authentic_a32_packet_and_semantics() {
 }
 
 fn retained_sample_rate_pullup_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff005c000c00000200000000010000417564696e6174650724008400000000003000050000000100000001000200000000000100000000000000000000000000000000000000000000000000000001000000020000000300000004",
         )
 }
@@ -428,7 +428,9 @@ fn gain_status_rejects_unknown_direction_and_inconsistent_channel_count() {
 }
 
 fn authentic_0086_status_packet() -> Vec<u8> {
-    decode_hex("ffff0028001100000200000000010000417564696e61746507240086000000001000000129ad36f0")
+    decode_hexadecimal(
+        "ffff0028001100000200000000010000417564696e61746507240086000000001000000129ad36f0",
+    )
 }
 
 #[test]
@@ -440,7 +442,7 @@ fn unmapped_0086_status_parses_authentic_a32_publication() {
 }
 
 fn authentic_00e0_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff0034000000000200000000010000417564696e617465072400e000000000000100000000000000000000000000000000000a",
         )
 }
@@ -458,7 +460,7 @@ fn unmapped_00e0_status_parses_authentic_a32_publication() {
 
 #[test]
 fn unmapped_00e0_status_parses_solicited_a32_publication() {
-    let parsed = parse_unmapped_00e0_status(&decode_hex(
+    let parsed = parse_unmapped_00e0_status(&decode_hexadecimal(
             "ffff0034008e00000200000000010000417564696e617465072400e0000000000001a5a50000000000000000a5a5a5a50000000a",
         ))
         .unwrap();
@@ -469,14 +471,14 @@ fn unmapped_00e0_status_parses_solicited_a32_publication() {
 }
 
 fn authentic_0106_status_packet() -> Vec<u8> {
-    decode_hex("ffff0020003000000200000000010000417564696e6174650724010600000000")
+    decode_hexadecimal("ffff0020003000000200000000010000417564696e6174650724010600000000")
 }
 
 #[test]
 fn unmapped_0106_status_parses_authentic_a32_publication() {
     let parsed = parse_unmapped_0106_status(&authentic_0106_status_packet()).unwrap();
     assert_eq!(parsed.unmapped_word_at_body_offset_0, 0);
-    let after_subdomain_a = parse_unmapped_0106_status(&decode_hex(
+    let after_subdomain_a = parse_unmapped_0106_status(&decode_hexadecimal(
         "ffff0020007c00000200000000010000417564696e6174650724010600000000",
     ))
     .unwrap();
@@ -485,20 +487,20 @@ fn unmapped_0106_status_parses_authentic_a32_publication() {
 
 #[test]
 fn unmapped_0102_status_parses_controller_visible_variable_tails() {
-    let one = parse_unmapped_0102_status(&decode_hex(
+    let one = parse_unmapped_0102_status(&decode_hexadecimal(
         "ffff002302b500000200000000010000417564696e6174650724010200000000000101",
     ))
     .unwrap();
     assert_eq!(one.unmapped_prefix_word, 0);
     assert_eq!(one.trailing_byte_count, 1);
     assert_eq!(one.trailing_bytes, vec![0x01]);
-    let two = parse_unmapped_0102_status(&decode_hex(
+    let two = parse_unmapped_0102_status(&decode_hexadecimal(
         "ffff0024104200000200000000010000417564696e61746507240102000000000002ffff",
     ))
     .unwrap();
     assert_eq!(two.trailing_byte_count, 2);
     assert_eq!(two.trailing_bytes, vec![0xFF, 0xFF]);
-    let eight = parse_unmapped_0102_status(&decode_hex(
+    let eight = parse_unmapped_0102_status(&decode_hexadecimal(
         "ffff002a10c700000200000000010000417564696e617465072401020000000000080000ffffffffffff",
     ))
     .unwrap();
@@ -510,7 +512,7 @@ fn unmapped_0102_status_parses_controller_visible_variable_tails() {
 }
 
 fn authentic_0024_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff0030001a00000200000000010000417564696e617465072400240000000000010008001000000000000000030000",
         )
 }
@@ -526,7 +528,7 @@ fn unmapped_0024_status_parses_authentic_a32_publication() {
 }
 
 fn authentic_0022_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff0040000100000200000000010000417564696e61746507240022000000000003001400060003000300000000000000000000000000000000000000000000",
         )
 }
@@ -541,7 +543,7 @@ fn unmapped_0022_status_parses_authentic_a32_publication() {
 }
 
 fn authentic_0026_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff004c000000000200000000010000417564696e6174650724002600000000003400010010000a001a000000260000002e4133322d30303030303100000200000000010000020000000001",
         )
 }
@@ -553,48 +555,48 @@ fn unmapped_0026_status_parses_authentic_a32_device_name() {
     assert_eq!(parsed.device_name, "A32-000001");
     assert_eq!(
         parsed.trailing_bytes,
-        decode_hex("000200000000010000020000000001")
+        decode_hexadecimal("000200000000010000020000000001")
     );
 }
 
 fn authentic_0040_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff008c001400000200000000010000417564696e6174650724004000000000000100240010000000140000000000010000000000000000000000070003002c0044005c0000000000000000000000000000000000000001000003e80000000000000000000000000000000001000001000003e8000000000000000000000000000000000101000000000000",
         )
 }
 
 fn authentic_0040_status_packet_at_100_megabits_per_second() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff008c001000000200000000010000417564696e6174650724004000000000000100240010000000140000000000010000000000000000000000070003002c0044005c000000000000000000000000000000000000000100000064000000000000000000000000000000000100000100000064000000000000000000000000000000000101000000000000",
         )
 }
 
 fn authentic_0040_status_packet_on_switch_port_three() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff008c001000000200000000010000417564696e6174650724004000000000000100240010000000140000000000010000000000000000000000070003002c0044005c0000000000000000000000000000000000000001000003e80000000000000000000000000000000001000000000000000000000000000000000000000000000001010001000003e8",
         )
 }
 
 fn authentic_0040_status_packet_on_switch_port_three_at_100_megabits_per_second() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
             "ffff008c001000000200000000010000417564696e6174650724004000000000000100240010000000140000000000010000000000000000000000070003002c0044005c000000000000000000000000000000000000000100000064000000000000000000000000000000000100000000000000000000000000000000000000000000000101000100000064",
         )
 }
 
 fn authentic_lx_dante_0040_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
         "ffff0074688a0000001dc10812580000417564696e61746507240040000000000002002400400010001400000000000100000000000000000000000700010028002067380014cba8000000000000000000000001000003e800010044000000000000000000000000000000000000000000000000",
     )
 }
 
 fn authentic_avio_0040_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
         "ffff00589ed40000001dc1fffe50368b417564696e6174650738004000000000000100240010000000140000000000010000000000000000000000030001002800085fd80009926d00000000000000000000000100000064",
     )
 }
 
 fn authentic_ad4d_0040_status_packet() -> Vec<u8> {
-    decode_hex(
+    decode_hexadecimal(
         "ffff005800220000000eddfd4e130000417564696e617465072e004000000000000100240010000000140000000000010000000000000000000000070001002800169e8c00070964000000000000000000000001000003e8",
     )
 }
@@ -771,7 +773,7 @@ fn unmapped_0040_status_maps_switch_port_link_state_to_records() {
 
 #[test]
 fn clear_configuration_status_parses_authentic_publications_and_preserves_unknown_values() {
-    let mode_one = decode_hex(
+    let mode_one = decode_hexadecimal(
         "ffff0028000f00000200000000010000417564696e61746507240078000000000000000300000001",
     );
     assert_eq!(

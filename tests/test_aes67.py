@@ -1,7 +1,5 @@
-import asyncio
 import struct
 
-import pytest
 
 from netaudio import core
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
