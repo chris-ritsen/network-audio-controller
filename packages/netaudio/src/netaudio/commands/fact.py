@@ -7,6 +7,8 @@ from typing import Optional
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio.capture.fact import (
     _build_spec_data,
     _spec_to_markdown,
@@ -26,10 +28,14 @@ from netaudio.commands.fact_support import (
 )
 
 
-app = typer.Typer(help="Protocol fact registry — what we know and how we proved it.", no_args_is_help=True)
+app = typer.Typer(
+    help="Protocol fact registry — what we know and how we proved it.",
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+)
 
 
-@app.command("add")
+@app.command("add", help="Record a new protocol fact with evidence references.")
 def fact_add(
     category: str = typer.Option(
         ..., "--category", "-c", help="Fact category (e.g. arc_opcode, conmon_message, multicast_announcement)."
@@ -155,7 +161,7 @@ def fact_add(
         print(f"  (updated existing fact, {len(fact['history'])} previous version(s))")
 
 
-@app.command("update")
+@app.command("update", help="Update the fields, evidence, or confidence of an existing fact.")
 def fact_update(
     category: str = typer.Option(..., "--category", "-c", help="Fact category."),
     key: str = typer.Option(..., "--key", "-k", help="Fact key."),
@@ -283,7 +289,7 @@ def fact_update(
         print(f"  ({len(fact['history'])} revision(s))")
 
 
-@app.command("list")
+@app.command("list", help="List recorded facts, optionally filtered by category.")
 def fact_list(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category."),
 ):
@@ -347,7 +353,7 @@ def fact_list(
     print(f"\n{len(facts)} facts ({'+' if category else 'all categories'})")
 
 
-@app.command("show")
+@app.command("show", help="Show one fact and optionally its full proof.")
 def fact_show(
     category: str = typer.Option(..., "--category", "-c", help="Fact category."),
     key: str = typer.Option(..., "--key", "-k", help="Fact key."),
@@ -504,7 +510,7 @@ def fact_show(
         print("=" * 80)
 
 
-@app.command("check")
+@app.command("check", help="Check every fact's evidence against stored provenance bundles.")
 def fact_check(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Check only facts in this category."),
     prove: bool = typer.Option(
@@ -685,7 +691,7 @@ PORT_BY_CATEGORY = {
 }
 
 
-@app.command("verify")
+@app.command("verify", help="Verify facts against a live device by sending their request packets.")
 def fact_verify(
     device_ip: str = typer.Option(..., "--device-ip", "-d", help="Target device IP address."),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
@@ -825,7 +831,7 @@ def fact_verify(
     )
 
 
-@app.command("spec")
+@app.command("spec", help="Render the fact registry as a protocol specification document.")
 def fact_spec(
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Limit to one category."),
     output: Optional[str] = typer.Option(None, "--output", help="Write to file instead of stdout."),
@@ -878,8 +884,8 @@ from netaudio.commands.fact_lifecycle import (
     fact_unquarantine,
 )
 
-app.command("remove")(fact_remove)
-app.command("disprove")(fact_disprove)
-app.command("reinstate")(fact_reinstate)
-app.command("quarantine")(fact_quarantine)
-app.command("unquarantine")(fact_unquarantine)
+app.command("disprove", help="Mark a fact as disproved with a reason.")(fact_disprove)
+app.command("quarantine", help="Mark a fact as temporarily uncheckable.")(fact_quarantine)
+app.command("reinstate", help="Restore a disproved or quarantined fact.")(fact_reinstate)
+app.command("remove", help="Delete a fact from the registry.")(fact_remove)
+app.command("unquarantine", help="Return a quarantined fact to active status.")(fact_unquarantine)

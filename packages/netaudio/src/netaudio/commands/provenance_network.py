@@ -23,7 +23,7 @@ from netaudio.commands.provenance_app import app
 from netaudio.dante.packet_store import PacketStore
 
 
-@app.command("send")
+@app.command("send", help="Send a payload to a device and record the exchange as evidence.")
 def provenance_send(
     device_ip: str = typer.Option(..., "--device-ip", help="Target device IP address."),
     port: int = typer.Option(4440, "--port", help="Target UDP port."),
@@ -188,7 +188,7 @@ def _do_send(
         print(f"\nEvidence marker #{marker_id}: {normalized_label} ({len(tagged_packet_ids)} packets)")
 
 
-@app.command("replay")
+@app.command("replay", help="Replay a provenance bundle's requests against a device.")
 def provenance_replay(
     bundle: str = typer.Argument(..., help="Path to provenance bundle (.tar.gz or directory)."),
     device_ip: Optional[str] = typer.Option(None, "--device-ip", help="Override target device IP."),

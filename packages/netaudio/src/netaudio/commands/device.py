@@ -9,7 +9,6 @@ import typer
 
 logger = logging.getLogger("netaudio")
 
-from netaudio.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import (
     core_lock_device,
@@ -18,10 +17,6 @@ from netaudio.dante.device_operations import (
     validate_pin,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.clock_config import format_clock_subdomain
-from netaudio.dante.sample_rate_pullup import (
-    sample_rate_pullup_label,
-)
 from netaudio.dante.services.notification import (
     NOTIFICATION_ROUTING_DEVICE_CHANGE,
     NOTIFICATION_SETTINGS_CHANGE,
@@ -39,11 +34,13 @@ from netaudio._common import (
     readback_after_notification,
     send_and_wait_for_notification,
 )
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio._common_output import output_single, output_table
 from netaudio._common_selection import filter_devices, sort_devices
+from netaudio.commands.status import status as status_command
 from netaudio.icons import icon
 
-app = typer.Typer(help="Manage Dante devices.", no_args_is_help=True)
+app = typer.Typer(help="Manage Dante devices.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 
 class ClearConfigurationMode(str, Enum):
@@ -55,14 +52,6 @@ from netaudio.commands.device_display import (
     _device_show_rows,
     _diagnostic_audio_capabilities_data,
     _diagnostic_audio_capability_rows,
-    _format_aes67,
-    _format_bluetooth,
-    _format_channel_count,
-    _format_last_seen,
-    _format_latency_range,
-    _format_link_speed,
-    _format_mac,
-    _format_standard_latency_choices,
 )
 
 
@@ -174,156 +163,7 @@ async def _standalone_lock_operation(device_ip: str, pin: str, lock_key: bytes, 
     }
 
 
-@app.command("list")
-def device_list(
-    json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
-):
-    """List discovered Dante devices."""
-
-    async def _run():
-        from netaudio.cli import OutputFormat, state
-
-        if json_flag:
-            state.output_format = OutputFormat.json
-
-        devices = await _discover()
-        await _populate_controls(devices, strict=False)
-        devices = filter_devices(devices)
-        from netaudio._common import _enrich_clock_fields, _enrich_lock_states
-
-        await _enrich_clock_fields(devices)
-        await _enrich_lock_states(devices)
-        if state.verbose:
-            await asyncio.gather(
-                *[
-                    device.operations.get_aes67_configured()
-                    for device in devices.values()
-                    if device.aes67_multicast_prefix is None and device.aes67_supported is not False
-                ],
-                return_exceptions=True,
-            )
-
-        sorted_devices = list(sort_devices(devices))
-
-        any_bluetooth = any(device.model_id in BLUETOOTH_MODEL_IDS for _, device in sorted_devices)
-
-        compact_headers = [
-            "Name",
-            "Status",
-            "IP Address",
-            "MAC Address",
-            "Model",
-            "Lock",
-            "TX",
-            "RX",
-            "Last Seen",
-            "Server Name",
-        ]
-        verbose_extras = [
-            "Manufacturer",
-            "Product Version",
-            "Board",
-            "Firmware",
-            "Software",
-            "Link Speed",
-            "Sample Rate",
-            "Supported Sample Rates",
-            "Encoding",
-            "Supported Encodings",
-            "Bit Depth",
-            "Latency",
-            "Configured Latency",
-            "Latency Range",
-            "Latency Options",
-            "AES67",
-            "Sample Rate Pull-Up",
-            "Preferred Leader",
-            "Clock Subdomain",
-            "PTP Role",
-        ]
-        if any_bluetooth:
-            verbose_extras.append("Bluetooth")
-        verbose_headers = compact_headers + verbose_extras
-
-        headers = verbose_headers if state.verbose else compact_headers
-        rows = []
-        json_data = {}
-
-        for server_name, device in sorted_devices:
-            last_seen = device.last_seen
-            name_display = device.name or ""
-
-            if device.is_locked is True:
-                lock_display = icon("lock") or "locked"
-            elif device.is_locked is False:
-                lock_display = icon("unlock") or "unlocked"
-            else:
-                lock_display = ""
-
-            row = [
-                name_display,
-                "online" if device.online else "offline",
-                str(device.ipv4) if device.ipv4 else "",
-                _format_mac(device.mac_address),
-                device.dante_model or device.model_id or "",
-                lock_display,
-                _format_channel_count(device.tx_channels, device.tx_count),
-                _format_channel_count(device.rx_channels, device.rx_count),
-                _format_last_seen(last_seen),
-                server_name,
-            ]
-
-            if state.verbose:
-                row.append(device.manufacturer or "")
-                row.append(device.product_version or "")
-                row.append(device.board_name or device.dante_model_id or "")
-                row.append(device.firmware_version or "")
-                row.append(device.software_version or "")
-                row.append(_format_link_speed(device.link_speed_mbps) if device.link_speed_mbps is not None else "")
-                row.append(str(device.sample_rate or ""))
-                row.append(", ".join(str(value) for value in device.supported_sample_rates or []))
-
-                encoding = device.encoding
-                row.append(f"PCM{encoding}" if encoding is not None else "")
-
-                supported_encodings = device.supported_encodings
-                row.append(", ".join(f"PCM{value}" for value in supported_encodings or []))
-
-                bit_depth = device.bit_depth
-                row.append(str(bit_depth) if bit_depth is not None else "")
-
-                latency = device.active_latency if device.active_latency is not None else device.latency
-                row.append(f"{latency}ms" if latency is not None else "")
-
-                configured_latency = device.configured_latency
-                row.append(f"{configured_latency}ms" if configured_latency is not None else "")
-                row.append(_format_latency_range(device.min_latency, device.max_latency))
-                row.append(_format_standard_latency_choices(device.min_latency, device.max_latency))
-
-                row.append(_format_aes67(device))
-                if device.sample_rate_pullup_raw_value is not None:
-                    row.append(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
-                else:
-                    row.append("")
-
-                preferred_leader = device.preferred_leader
-                if preferred_leader is not None:
-                    row.append("on" if preferred_leader else "off")
-                else:
-                    row.append("")
-                row.append(format_clock_subdomain(device.clock_subdomain) if device.clock_subdomain is not None else "")
-
-                row.append(device.clock_role or "")
-
-                if any_bluetooth:
-                    row.append(_format_bluetooth(device) if device.model_id in BLUETOOTH_MODEL_IDS else "")
-
-            rows.append(row)
-            json_data[server_name] = DanteDeviceSerializer.to_json(device)
-
-        output_table(headers, rows, json_data=json_data, devices=devices)
-
-    asyncio.run(_run())
+app.command("list")(status_command)
 
 
 @app.command("show")
@@ -577,11 +417,11 @@ from netaudio.commands.config import app as device_config_app
 
 app.add_typer(device_config_app, name="config")
 
-lock_app = typer.Typer(help="Device lock management.", no_args_is_help=True)
+lock_app = typer.Typer(help="Device lock management.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 app.add_typer(lock_app, name="lock", hidden=True)
 
 
-@lock_app.command("set")
+@lock_app.command("set", help="Lock the selected device with a 4-digit PIN.")
 def lock_set(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to lock the device with."),
 ):
@@ -613,7 +453,7 @@ def lock_set(
     asyncio.run(_run())
 
 
-@lock_app.command("clear")
+@lock_app.command("clear", help="Unlock the selected device with its 4-digit PIN.")
 def lock_clear(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to unlock the device."),
 ):
@@ -791,11 +631,6 @@ def name(
                 raise typer.Exit(code=1)
 
     asyncio.run(_run())
-
-
-from netaudio.commands.device_clock import clock
-
-app.command()(clock)
 
 
 from netaudio.commands.flow import app as flow_app
