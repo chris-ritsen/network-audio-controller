@@ -194,7 +194,7 @@ def packet_list(
         store.close()
 
 
-@packet_app.command("show")
+@packet_app.command("show", help="Show captured packets with annotated dissection.")
 def packet_show(
     packet_id: list[int] = typer.Argument(..., help="Packet ID(s) to display."),
     raw: bool = typer.Option(False, "--raw", help="Plain hex dump instead of annotated dissection."),

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from typing import Optional
 
@@ -71,18 +72,86 @@ def sort_devices(devices: dict[str, DanteDevice]) -> list[tuple[str, DanteDevice
     return sorted(devices.items(), key=sort_keys[state.sort_field], reverse=state.sort_reverse)
 
 
-def set_device_filter(device_arg: str) -> None:
-    state = _get_state()
-    state.names = [device_arg]
+CHANNEL_REFERENCE_FORMS = "tx:NUMBER, rx:NUMBER, tx:NAME, rx:NAME, or a bare channel name"
+QUALIFIED_CHANNEL_FORMS = "tx:1@DEVICE, rx:1@DEVICE, or CHANNEL-NAME@DEVICE"
+
+CHANNEL_DIRECTION_LABELS = {"rx": "RX", "tx": "TX"}
 
 
-def parse_qualified_name(s: str) -> tuple[str, str]:
-    if "@" not in s:
-        typer.echo(f"Error: expected channel@device format, got: {s}", err=True)
+@dataclass(frozen=True)
+class ChannelReference:
+    direction: Optional[str]
+    identifier: str
+
+
+def _channel_reference_error(message: str) -> typer.Exit:
+    typer.echo(f"Error: {message}; accepted forms are {CHANNEL_REFERENCE_FORMS}.", err=True)
+    return typer.Exit(code=ExitCode.ERROR)
+
+
+def parse_channel_reference(value: str, default_direction: Optional[str] = None) -> ChannelReference:
+    text = value.strip()
+    if not text:
+        raise _channel_reference_error("channel reference is empty")
+
+    prefix, separator, remainder = text.partition(":")
+    if separator:
+        direction = prefix.strip().lower()
+        identifier = remainder.strip()
+        if direction not in CHANNEL_DIRECTION_LABELS:
+            raise _channel_reference_error(f"unknown channel direction {prefix.strip()!r} in {value!r}")
+        if not identifier:
+            raise _channel_reference_error(f"missing channel after {direction}: in {value!r}")
+        return ChannelReference(direction, identifier)
+
+    return ChannelReference(default_direction, text)
+
+
+def parse_qualified_channel(value: str, default_direction: Optional[str] = None) -> tuple[ChannelReference, str]:
+    channel_text, separator, device_identifier = value.rpartition("@")
+    if not separator or not channel_text.strip() or not device_identifier.strip():
+        typer.echo(
+            f"Error: expected CHANNEL@DEVICE, got {value!r}; accepted forms are {QUALIFIED_CHANNEL_FORMS}.",
+            err=True,
+        )
         raise typer.Exit(code=ExitCode.ERROR)
+    return parse_channel_reference(channel_text, default_direction), device_identifier.strip()
 
-    channel, device = s.rsplit("@", 1)
-    return channel, device
+
+def resolve_channel(device: DanteDevice, reference: ChannelReference):
+    device_label = device.name or device.server_name or str(device.ipv4)
+    if reference.direction is not None:
+        channel = find_channel(device, reference.identifier, reference.direction)
+        if channel is None:
+            typer.echo(
+                f"Error: {CHANNEL_DIRECTION_LABELS[reference.direction]} channel {reference.identifier!r} "
+                f"not found on {device_label}.",
+                err=True,
+            )
+            raise typer.Exit(code=ExitCode.ERROR)
+        return reference.direction, channel
+
+    matches = [
+        (direction, channel)
+        for direction in ("rx", "tx")
+        for channel in [find_channel(device, reference.identifier, direction)]
+        if channel is not None
+    ]
+    if not matches:
+        typer.echo(
+            f"Error: channel {reference.identifier!r} not found on {device_label}; "
+            f"accepted forms are {CHANNEL_REFERENCE_FORMS}.",
+            err=True,
+        )
+        raise typer.Exit(code=ExitCode.ERROR)
+    if len(matches) > 1:
+        typer.echo(
+            f"Error: channel {reference.identifier!r} matches both TX and RX on {device_label}; "
+            f"use tx:{reference.identifier} or rx:{reference.identifier}.",
+            err=True,
+        )
+        raise typer.Exit(code=ExitCode.ERROR)
+    return matches[0]
 
 
 def find_device(devices: dict[str, DanteDevice], identifier: str) -> Optional[DanteDevice]:

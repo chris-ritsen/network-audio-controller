@@ -6,7 +6,9 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="Lock key management.", no_args_is_help=True)
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
+app = typer.Typer(help="Lock key management.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 
 def _write_qr_code(lock_key: str, output: Optional[Path], open_qr_code: bool) -> Path:

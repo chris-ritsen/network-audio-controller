@@ -19,7 +19,7 @@ def test_gain_getter_reports_configured_reference_level(monkeypatch):
     device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["gain", "1", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["gain", "tx:1"])
 
     assert result.exit_code == 0
     assert "-10 dBV (level 5)" in result.output
@@ -40,7 +40,7 @@ def test_gain_setter_reports_success_only_after_matching_readback(monkeypatch):
     device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["gain", "tx:1", "3"])
 
     assert result.exit_code == 0
     assert "0 dBu (verified)" in result.output
@@ -55,7 +55,7 @@ def test_gain_setter_rejects_mismatched_readback(monkeypatch):
     )
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["gain", "tx:1", "3"])
 
     assert result.exit_code == 1
     assert "gain change was not applied" in result.output
@@ -66,7 +66,7 @@ def test_gain_setter_rejects_missing_readback(monkeypatch):
     device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]), gain_write_status=None)
     _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["gain", "1", "3", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["gain", "tx:1", "3"])
 
     assert result.exit_code == 1
     assert "readback was unavailable" in result.output
@@ -78,7 +78,7 @@ def test_gain_rejects_fractional_level_before_discovery(monkeypatch):
 
     monkeypatch.setattr(channel_commands, "_command_context", should_not_run)
 
-    result = runner.invoke(channel_commands.app, ["gain", "1", "1.9", "--type", "tx"])
+    result = runner.invoke(channel_commands.app, ["gain", "tx:1", "1.9"])
 
     assert result.exit_code != 0
     assert "not a valid integer" in result.output
@@ -88,10 +88,10 @@ def test_channel_commands_reject_unknown_channel_type_before_sending(monkeypatch
     device = FakeChannelDevice(channel_reads="unused")
     sent = _install_context(monkeypatch, channel_commands, {"avio.local.": device})
 
-    result = runner.invoke(channel_commands.app, ["name", "1", "New", "--type", "banana"])
+    result = runner.invoke(channel_commands.app, ["name", "banana:1", "New"])
 
     assert result.exit_code == 1
-    assert "channel type must be 'tx' or 'rx'" in result.output
+    assert "unknown channel direction 'banana'" in result.output
     assert sent == []
 
 

@@ -22,6 +22,7 @@ from netaudio.dante.const import (
     SERVICE_CHAN,
     SERVICE_CMC,
 )
+from netaudio.dante.device_kind import VIRTUAL_DEVICE_MANUFACTURER, VIRTUAL_DEVICE_MODEL
 from netaudio.dante.virtual_device_protocol import (
     DEVICE_ARC_SECONDARY_PORT,
     MCAST_HEADER_LENGTH,
@@ -36,8 +37,8 @@ logger = logging.getLogger("netaudio")
 @dataclass
 class VirtualDeviceConfig:
     name: str = "netaudio-virtual"
-    model: str = "netaudio"
-    manufacturer: str = "netaudio"
+    model: str = VIRTUAL_DEVICE_MODEL
+    manufacturer: str = VIRTUAL_DEVICE_MANUFACTURER
     tx_channels: list[str] = field(default_factory=lambda: ["Ch 1", "Ch 2"])
     rx_channels: list[str] = field(default_factory=lambda: ["Ch 1", "Ch 2"])
     sample_rate: int = 48000

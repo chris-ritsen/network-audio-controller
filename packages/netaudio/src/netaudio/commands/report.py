@@ -10,9 +10,13 @@ from typing import Any, Optional
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio import __version__
 
-app = typer.Typer(help="Report issues with diagnostic context.", no_args_is_help=True)
+app = typer.Typer(
+    help="Report issues with diagnostic context.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS
+)
 
 REPO = "chris-ritsen/network-audio-controller"
 
@@ -132,7 +136,7 @@ def _filter_device(device: dict, level: str) -> dict:
         filtered["dante_model_id"] = device.get("dante_model_id", "")
         filtered["firmware_version"] = device.get("firmware_version", "")
         filtered["software_version"] = device.get("software_version", "")
-        filtered["sample_rate"] = device.get("sample_rate", "")
+        filtered["sample_rate_hz"] = device.get("sample_rate_hz", "")
         filtered["encoding"] = device.get("encoding")
         filtered["aes67_current"] = device.get("aes67_current")
         filtered["aes67_configured"] = device.get("aes67_configured")
@@ -319,7 +323,7 @@ def _format_bundle_section(encoded: str, bundle_size: int, session_ref: str) -> 
     return "\n".join(lines)
 
 
-@app.command("create")
+@app.command("create", help="Create a GitHub issue with diagnostic context.")
 def report_create(
     title: str = typer.Option(..., "--title", "-t", help="Issue title."),
     description: str = typer.Option(..., "--description", "-d", help="Description of the problem."),
@@ -362,7 +366,7 @@ def report_create(
     _submit_issue(title, body)
 
 
-@app.command("levels")
+@app.command("levels", help="List the privacy levels available for report content.")
 def report_levels():
     for level in PRIVACY_LEVELS:
         typer.echo(f"{level}: {PRIVACY_DESCRIPTIONS[level]}")

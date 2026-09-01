@@ -5,16 +5,18 @@ from typing import NoReturn
 
 import typer
 
-from netaudio._common import _get_arc_port
+from netaudio._common import _discover, _get_arc_port, _populate_controls, _resolve_one
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio._common_output import output_table
-from netaudio._common_selection import filter_devices, find_device
+from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.dante import flows
 from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
 
 app = typer.Typer(
-    help="Inspect receiver flows and manage transmitter multicast flows.",
+    help="Inspect receiver flows and manage transmitter multicast flows on the selected device.",
     no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
 )
 
 
@@ -47,46 +49,19 @@ async def _detect_flow_protocol(application, device, arc_port):
     return flow_protocol_id
 
 
-async def _get_device_and_app(device_name: str):
-    from netaudio.common.app_config import settings
-    from netaudio.daemon.client import get_devices_from_daemon
-    from netaudio.dante.application import DanteApplication
-
-    application = None
-    devices = await get_devices_from_daemon()
-    if devices is None:
-        application = DanteApplication()
-        await application.startup()
-        try:
-            named_devices = await application.discover_named_device(device_name, timeout=settings.mdns_timeout)
-            devices = named_devices or await application.wait_for_discovery(timeout=settings.mdns_timeout) or {}
-            await application.populate_device_names(
-                devices,
-                request_timeout_milliseconds=500,
-                request_attempts=1,
-            )
-        except BaseException:
-            await application.shutdown()
-            raise
-
-    device = find_device(filter_devices(devices or {}), device_name)
-    if device is None:
-        if application is not None:
-            await application.shutdown()
-        typer.echo(f"Error: device not found: {device_name}", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    return application, device, _get_arc_port(device)
+async def _get_device_and_app():
+    devices = await _discover()
+    server_name, device = _resolve_one(filter_devices(devices))
+    await _populate_controls({server_name: device}, strict=False)
+    return None, device, _get_arc_port(device)
 
 
 @app.command("list")
-def flow_list(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
-):
+def flow_list():
     """List transmitter flow records reported by a device."""
 
     async def _run():
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             device_ip = str(device.ipv4)
             flow_protocol_id = await _detect_flow_protocol(application, device, arc_port)
@@ -171,13 +146,11 @@ def flow_list(
 
 
 @app.command("receiver-list")
-def receiver_flow_list(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
-):
+def receiver_flow_list():
     """List receiver flows and their local channel mappings."""
 
     async def _run():
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
             if flow_inventory is None:
@@ -262,13 +235,11 @@ def receiver_flow_list(
 
 
 @app.command("receiver-port-ranges")
-def receiver_port_ranges(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
-):
+def receiver_port_ranges():
     """Show the receiver port ranges reported by a device."""
 
     async def _run():
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             port_ranges = await flows.query_receiver_port_ranges(
                 str(device.ipv4),
@@ -299,7 +270,6 @@ def receiver_port_ranges(
 
 @app.command("transmit-channel-capabilities")
 def transmit_channel_capabilities(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
     starting_channel_identifier: int = typer.Option(
         1,
         "--starting-channel",
@@ -318,7 +288,7 @@ def transmit_channel_capabilities(
     """Show the transmitter channel capacity and raw capability flags reported by a device."""
 
     async def _run():
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             capabilities = await flows.query_transmit_channel_capabilities(
                 str(device.ipv4),
@@ -348,7 +318,6 @@ def transmit_channel_capabilities(
 
 @app.command("create")
 def flow_create(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
     slot: int = typer.Option(..., "--slot", help="Flow slot number, limited by the device-reported capacity."),
     channels: str = typer.Option(..., "--channels", help="Comma-separated TX channel numbers."),
 ):
@@ -361,7 +330,7 @@ def flow_create(
             _fail_validation(exception)
         channel_numbers = _parse_channel_numbers(channels)
 
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             device_ip = str(device.ipv4)
             flow_protocol_id = await _detect_flow_protocol(application, device, arc_port)
@@ -419,7 +388,7 @@ def flow_create(
             channel_label = ", ".join(str(number) for number in channel_numbers)
             typer.echo(
                 f"Created multicast TX flow in slot {flow_slot} on "
-                f"{device.name or device_name}: channels {channel_label} (device confirmed)."
+                f"{device.name or device.ipv4}: channels {channel_label} (device confirmed)."
             )
         finally:
             if application is not None:
@@ -430,7 +399,6 @@ def flow_create(
 
 @app.command("delete")
 def flow_delete(
-    device_name: str = typer.Argument(..., help="Device name or IP."),
     slot: int = typer.Option(..., "--slot", help="Flow slot number to delete."),
     confirmed: bool = typer.Option(
         False,
@@ -453,7 +421,7 @@ def flow_delete(
             )
             raise typer.Exit(code=ExitCode.ERROR)
 
-        application, device, arc_port = await _get_device_and_app(device_name)
+        application, device, arc_port = await _get_device_and_app()
         try:
             device_ip = str(device.ipv4)
             flow_protocol_id = await _detect_flow_protocol(application, device, arc_port)
@@ -505,7 +473,7 @@ def flow_delete(
                 typer.echo(f"Error: delete flow failed with result 0x{result_code:04X}", err=True)
                 raise typer.Exit(code=ExitCode.ERROR)
             typer.echo(
-                f"Deleted multicast TX flow from slot {flow_slot} on {device.name or device_name} (device confirmed)."
+                f"Deleted multicast TX flow from slot {flow_slot} on {device.name or device.ipv4} (device confirmed)."
             )
         finally:
             if application is not None:

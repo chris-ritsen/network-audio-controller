@@ -172,12 +172,22 @@ def _format_table(headers: list[str], rows: list[list[str]], title: Optional[str
     return capture.get().rstrip("\n")
 
 
+def drop_empty_columns(headers: list[str], rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    kept_indexes = [
+        index for index in range(len(headers)) if any(str(row[index]) != "" for row in rows if index < len(row))
+    ]
+    kept_headers = [headers[index] for index in kept_indexes]
+    kept_rows = [[row[index] for index in kept_indexes if index < len(row)] for row in rows]
+    return kept_headers, kept_rows
+
+
 def output_table(
     headers: list[str],
     rows: list[list[str]],
     json_data: Any = None,
     title: Optional[str] = None,
     devices: Optional[dict[str, DanteDevice]] = None,
+    omit_empty_columns: bool = False,
 ) -> None:
     from netaudio.cli import OutputFormat
 
@@ -186,6 +196,9 @@ def output_table(
 
     if json_data is None:
         json_data = [dict(zip(headers, row)) for row in rows]
+
+    if omit_empty_columns and rows:
+        headers, rows = drop_empty_columns(headers, rows)
 
     display_headers = _iconize_headers(headers)
 

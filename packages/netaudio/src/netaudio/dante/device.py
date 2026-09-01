@@ -17,6 +17,7 @@ from netaudio.dante.const import (
     SERVICE_ARC,
 )
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.device_kind import device_kind
 from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_parser import DanteDeviceParser
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -128,6 +129,7 @@ class DanteDevice:
         self.licensed_transmit_channel_count: int | None = None
         self.licensed_redundancy_enabled: bool | None = None
         self.sample_rate_channel_capacities: list[dict] | None = None
+        self.failed_queries: set[str] = set()
 
         self._app = app
         self._core = None
@@ -169,6 +171,10 @@ class DanteDevice:
     @property
     def topology_mutation_lock(self) -> DeferredAsyncioLock:
         return self._topology_mutation_lock
+
+    @property
+    def kind(self) -> str:
+        return device_kind(self)
 
     @property
     def standard_latency_choices(self):

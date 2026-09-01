@@ -30,12 +30,26 @@ from netaudio._common import (
     readback_after_notification,
     send_and_wait_for_notification,
 )
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import filter_devices, find_channel, sort_devices
+from netaudio._common_selection import (
+    CHANNEL_REFERENCE_FORMS,
+    ChannelReference,
+    filter_devices,
+    parse_channel_reference,
+    resolve_channel,
+    sort_devices,
+)
 from netaudio._exit_codes import ExitCode
 from netaudio.icons import icon
 
-app = typer.Typer(help="Manage device channels.", no_args_is_help=True)
+CHANNEL_ARGUMENT_HELP = f"Channel to address: {CHANNEL_REFERENCE_FORMS} (a bare name searches both directions)."
+
+app = typer.Typer(
+    help="Manage channels on the selected device.",
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+)
 
 
 @app.command("list")
@@ -116,27 +130,19 @@ def channel_list():
 
 @app.command()
 def name(
-    channel: str = typer.Argument(help="Channel number or name."),
+    channel: str = typer.Argument(..., help=CHANNEL_ARGUMENT_HELP),
     new_name: Optional[str] = typer.Argument(None, help="New name (omit to get, empty string to reset)."),
-    channel_type: str = typer.Option("tx", "--type", "-t", help="Channel type: tx or rx."),
 ):
     """Get or set a channel name."""
 
     commands = DanteDeviceCommands()
+    reference = parse_channel_reference(channel)
 
     async def _run():
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
             _, device = _resolve_one(filtered)
-
-            if channel_type not in ("tx", "rx"):
-                typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            found_channel = find_channel(device, channel, channel_type)
-            if found_channel is None:
-                typer.echo(f"Error: channel '{channel}' not found.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
+            channel_type, found_channel = resolve_channel(device, reference)
 
             if new_name is None:
                 typer.echo(found_channel.friendly_name or found_channel.name)
@@ -153,30 +159,26 @@ def name(
                     raise typer.Exit(code=ExitCode.ERROR)
                 typer.echo(f"{icon('name')}Channel name reset requested for {found_channel.name}; not verified.")
             else:
-                protocol_identifier = None
-                if channel_type in ("rx", "tx"):
-                    attribute_name = (
-                        "receiver_channel_name_protocol_identifier"
-                        if channel_type == "rx"
-                        else "transmitter_channel_name_protocol_identifier"
-                    )
-                    protocol_identifier = getattr(device, attribute_name, None)
-                    if protocol_identifier is None:
-                        if channel_type == "rx":
-                            probe_packet, _ = commands.command_query_receiver_channel_status_2809()
-                            resolve_protocol_identifier = receiver_channel_name_protocol_identifier_from_probe
-                        else:
-                            probe_packet, _ = commands.command_query_transmitter_channel_status_2809()
-                            resolve_protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe
-                        try:
-                            probe_response = await send(probe_packet, device.ipv4, arc_port)
-                            protocol_identifier = resolve_protocol_identifier(probe_response)
-                        except Exception as exception:
-                            typer.echo(
-                                f"Error: could not determine {channel_type} channel frontend: {exception}", err=True
-                            )
-                            raise typer.Exit(code=ExitCode.ERROR)
-                        setattr(device, attribute_name, protocol_identifier)
+                attribute_name = (
+                    "receiver_channel_name_protocol_identifier"
+                    if channel_type == "rx"
+                    else "transmitter_channel_name_protocol_identifier"
+                )
+                protocol_identifier = getattr(device, attribute_name, None)
+                if protocol_identifier is None:
+                    if channel_type == "rx":
+                        probe_packet, _ = commands.command_query_receiver_channel_status_2809()
+                        resolve_protocol_identifier = receiver_channel_name_protocol_identifier_from_probe
+                    else:
+                        probe_packet, _ = commands.command_query_transmitter_channel_status_2809()
+                        resolve_protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe
+                    try:
+                        probe_response = await send(probe_packet, device.ipv4, arc_port)
+                        protocol_identifier = resolve_protocol_identifier(probe_response)
+                    except Exception as exception:
+                        typer.echo(f"Error: could not determine {channel_type} channel frontend: {exception}", err=True)
+                        raise typer.Exit(code=ExitCode.ERROR)
+                    setattr(device, attribute_name, protocol_identifier)
                 packet, _ = commands.command_set_channel_name(
                     channel_type,
                     found_channel.number,
@@ -244,25 +246,18 @@ def name(
 
 @app.command()
 def gain(
-    channel: str = typer.Argument(help="Channel number or name."),
+    channel: str = typer.Argument(..., help=CHANNEL_ARGUMENT_HELP),
     level: Optional[int] = typer.Argument(None, help="Gain level (1-5)."),
-    channel_type: Optional[str] = typer.Option(
-        None,
-        "--type",
-        "-t",
-        help="Channel type: tx or rx. Defaults to the side that reports gain.",
-    ),
 ):
     """Get or set channel gain level."""
+
+    reference = parse_channel_reference(channel)
+    channel_type = reference.direction
 
     async def _run():
         async with _command_context() as (devices, send):
             filtered = filter_devices(devices)
             _, device = _resolve_one(filtered)
-
-            if channel_type is not None and channel_type not in ("tx", "rx"):
-                typer.echo("Error: channel type must be 'tx' or 'rx'.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
 
             if device.gain_levels is None:
                 try:
@@ -280,7 +275,11 @@ def gain(
                     typer.echo("unsupported")
                     return
                 if channel_type is None:
-                    typer.echo("Error: this device does not report gain controls.", err=True)
+                    typer.echo(
+                        f"Error: this device does not report gain controls; use tx:{reference.identifier} or "
+                        f"rx:{reference.identifier} to choose the side.",
+                        err=True,
+                    )
                     raise typer.Exit(code=ExitCode.ERROR)
                 selected_channel_type = channel_type
                 device_type = "input" if selected_channel_type == "tx" else "output"
@@ -295,10 +294,7 @@ def gain(
                 selected_channel_type = inferred_channel_type
                 device_type = device.gain_device_type
 
-            found_channel = find_channel(device, channel, selected_channel_type)
-            if found_channel is None:
-                typer.echo(f"Error: channel '{channel}' not found.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
+            _, found_channel = resolve_channel(device, ChannelReference(selected_channel_type, reference.identifier))
 
             current_level = device.gain_level_for_channel(found_channel.number, selected_channel_type)
             if level is None:

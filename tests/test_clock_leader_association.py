@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import netaudio._common as common_module
 from netaudio import core
 from netaudio.cli import OutputFormat, state
-from netaudio.commands import device as device_commands
-from netaudio.commands.device_clock import _matching_leader_name
+from netaudio.commands.device_clock import _matching_leader_name, clock
 from netaudio.dante.clock_identity import canonical_clock_identity
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher
@@ -16,6 +16,8 @@ from netaudio.dante.services.notification import DanteNotificationService
 
 
 runner = CliRunner()
+clock_app = typer.Typer()
+clock_app.command("clock")(clock)
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "clock_leader_association"
 
 
@@ -66,7 +68,7 @@ def test_identity_association_distinguishes_two_simultaneous_leaders(monkeypatch
     monkeypatch.setattr(common_module, "_load_display_devices", load_display_devices)
     monkeypatch.setattr(state, "output_format", OutputFormat.json)
 
-    result = runner.invoke(device_commands.app, ["clock"])
+    result = runner.invoke(clock_app, [])
 
     assert result.exit_code == 0
     payload = json.loads(result.output)

@@ -51,7 +51,7 @@ from netaudio.dante.clean_labels import (
 from netaudio.dante.packet_store import PacketStore
 
 
-@app.command("seed")
+@app.command("seed", help="Write payload fixtures from captured packets into a fixture directory.")
 def provenance_seed(
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     out: Optional[str] = typer.Option(None, "--out", help="Output fixture directory."),
@@ -126,7 +126,7 @@ def provenance_seed(
     print(f"Capture: Manifest: {manifest_path}")
 
 
-@app.command("label")
+@app.command("label", help="Maintain opcode, message, and status labels for captured packets.")
 def provenance_label(
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     labels: Optional[str] = typer.Option(None, "--labels", help="Labels JSON path."),
@@ -263,7 +263,7 @@ def provenance_label(
     print(f"saved labels: {saved_path}")
 
 
-@app.command("check")
+@app.command("check", help="Check fixture payload samples against the label catalog.")
 def provenance_check(
     fixtures_root: Optional[str] = typer.Option(
         None, "--fixtures-root", help="Fixture root to scan for .bin payload samples."
@@ -341,7 +341,7 @@ def provenance_check(
     )
 
 
-@app.command("verify")
+@app.command("verify", help="Verify bundle checksums and manifests.")
 def provenance_verify(
     bundle: Optional[str] = typer.Argument(
         None, help="Path to a specific bundle directory, .tar.gz, or .zip. Omit to scan all bundles."
@@ -387,7 +387,7 @@ def provenance_verify(
         raise typer.Exit(1)
 
 
-@app.command("show")
+@app.command("show", help="Show the contents of a provenance bundle.")
 def provenance_show(
     bundle: str = typer.Argument(..., help="Path to a bundle directory or .tar.gz file."),
 ):
@@ -466,7 +466,7 @@ def provenance_show(
             )
 
 
-@app.command("audit")
+@app.command("audit", help="Audit bundles for missing evidence or inconsistent metadata.")
 def provenance_audit(
     bundle: Optional[str] = typer.Argument(
         None, help="Path to a bundle directory or .tar.gz. Omit to scan all bundles."
@@ -512,7 +512,7 @@ def provenance_audit(
         raise typer.Exit(1)
 
 
-@app.command("export")
+@app.command("export", help="Export a capture session as a provenance bundle.")
 def provenance_export(
     session_id: Optional[int] = typer.Option(None, "--session-id", help="Session ID."),
     session: Optional[str] = typer.Option(
