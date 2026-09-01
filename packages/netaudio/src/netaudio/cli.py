@@ -10,6 +10,7 @@ import typer
 from click.core import ParameterSource
 
 from netaudio import __version__
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio.common.app_config import settings
 
 logger = logging.getLogger("netaudio")
@@ -121,7 +122,7 @@ def _load_icons_from_config() -> bool:
 app = typer.Typer(
     name="netaudio",
     help="CLI for managing network audio devices.",
-    context_settings={"help_option_names": ["--help"]},
+    context_settings=HELP_CONTEXT_SETTINGS,
     invoke_without_command=True,
 )
 
@@ -132,7 +133,7 @@ def _global_options(
     name: Optional[list[str]] = typer.Option(
         None, "-n", "--name", help="Filter by device name (glob).", envvar="NETAUDIO_NAME"
     ),
-    host: Optional[list[str]] = typer.Option(None, "-h", "--host", help="Filter by device IP.", envvar="NETAUDIO_HOST"),
+    host: Optional[list[str]] = typer.Option(None, "--host", help="Filter by device IP.", envvar="NETAUDIO_HOST"),
     server_name: Optional[list[str]] = typer.Option(
         None, "-s", "--server-name", help="Filter by mDNS server name (glob).", envvar="NETAUDIO_SERVER_NAME"
     ),
@@ -251,42 +252,42 @@ from netaudio.commands import (
     subscription,
     virtual,
 )
-from netaudio.commands.device import clock as device_clock
+from netaudio.commands.device_clock import clock as device_clock
 from netaudio.commands.device import lock_app, meter_app
 
-app.command("status")(status.status)
-app.add_typer(device.app, name="device")
-app.add_typer(channel.app, name="channel")
-app.add_typer(subscription.app, name="subscription")
-app.add_typer(subscription.app, name="sub", hidden=True)
-app.add_typer(subscription.app, name="route", hidden=True)
-app.add_typer(flow.app, name="flow")
-app.command("clock")(device_clock)
-
-lock_app.add_typer(key.app, name="key")
-app.add_typer(lock_app, name="lock")
-app.add_typer(key.app, name="key", hidden=True)
-app.add_typer(meter_app, name="meter")
-
-app.add_typer(shure.app, name="shure")
-app.add_typer(virtual.app, name="virtual")
-app.add_typer(preset.app, name="preset")
-app.add_typer(report.app, name="report")
-
-app.add_typer(server.app, name="daemon")
-app.add_typer(server.app, name="server", hidden=True)
-app.add_typer(config.top_app, name="config")
-
-lab_app = typer.Typer(help="Protocol engineering: capture, dissection, provenance, firmware.", no_args_is_help=True)
+lab_app = typer.Typer(
+    help="Protocol engineering: capture, dissection, provenance, firmware.",
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+)
 lab_app.add_typer(capture.app, name="capture")
-lab_app.add_typer(provenance.app, name="provenance")
 lab_app.add_typer(fact.app, name="fact")
 lab_app.add_typer(firmware.app, name="firmware")
-app.add_typer(lab_app, name="lab")
+lab_app.add_typer(provenance.app, name="provenance")
+lock_app.add_typer(key.app, name="key")
 
 app.add_typer(capture.app, name="capture", hidden=True)
-app.add_typer(provenance.app, name="provenance", hidden=True)
+app.add_typer(channel.app, name="channel")
+app.command("clock")(device_clock)
+app.add_typer(config.top_app, name="config")
+app.add_typer(server.app, name="daemon")
+app.add_typer(device.app, name="device")
 app.add_typer(fact.app, name="fact", hidden=True)
+app.add_typer(flow.app, name="flow")
+app.add_typer(key.app, name="key", hidden=True)
+app.add_typer(lab_app, name="lab")
+app.add_typer(lock_app, name="lock")
+app.add_typer(meter_app, name="meter")
+app.add_typer(preset.app, name="preset")
+app.add_typer(provenance.app, name="provenance", hidden=True)
+app.add_typer(report.app, name="report")
+app.add_typer(subscription.app, name="route", hidden=True)
+app.add_typer(server.app, name="server", hidden=True)
+app.add_typer(shure.app, name="shure")
+app.command("status")(status.status)
+app.add_typer(subscription.app, name="sub", hidden=True)
+app.add_typer(subscription.app, name="subscription")
+app.add_typer(virtual.app, name="virtual")
 
 
 def main():
