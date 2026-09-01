@@ -201,9 +201,12 @@ def test_latency_get_uses_active_device_readback(monkeypatch):
     device = FakeDevice(
         "AVIO",
         settings={
+            "default_latency_ns": 1_000_000,
             "configured_latency_ns": 250_000,
             "active_latency_ns": 150_000,
             "latency_ns": 150_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 21_333_334,
         },
     )
     device.latency = 99.0
@@ -212,7 +215,13 @@ def test_latency_get_uses_active_device_readback(monkeypatch):
     result = runner.invoke(config_commands.app, ["latency"])
 
     assert result.exit_code == 0
-    assert result.output.strip() == "Latency: 0.15 ms"
+    assert result.output.splitlines() == [
+        "Active latency: 0.15 ms",
+        "Configured latency: 0.25 ms",
+        "Default latency: 1 ms",
+        "Reported latency range: 0.15-21.3333 ms",
+        "Latency options: 0.15, 0.25, 0.5, 1, 2, 5 ms",
+    ]
     assert device.operations.settings_calls == 1
 
 
@@ -222,9 +231,12 @@ def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
     device = FakeDevice(
         "AVIO",
         settings={
+            "default_latency_ns": 1_000_000,
             "configured_latency_ns": 250_000,
             "active_latency_ns": 150_000,
             "latency_ns": 150_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 21_333_334,
         },
     )
     _install_context(monkeypatch, config_commands, {"avio.local.": device})
@@ -236,7 +248,129 @@ def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
     assert json.loads(result.output) == {
         "active_latency_ms": 0.15,
         "active_latency_ns": 150_000,
+        "configured_latency_ms": 0.25,
+        "configured_latency_ns": 250_000,
+        "default_latency_ms": 1.0,
+        "default_latency_ns": 1_000_000,
+        "min_latency_ms": 0.15,
+        "min_latency_ns": 150_000,
+        "max_latency_ms": 21.333334,
+        "max_latency_ns": 21_333_334,
+        "latency_options_ms": [0.15, 0.25, 0.5, 1.0, 2.0, 5.0],
+        "latency_options_ns": [150_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000],
+        "latency_options_source": "controller_fixed_set_filtered_by_reported_range",
+        "active_latency_is_standard_choice": True,
+        "active_latency_within_reported_range": True,
+        "configured_latency_is_standard_choice": True,
+        "configured_latency_within_reported_range": True,
     }
+
+
+def test_latency_get_surfaces_retained_configured_value_when_active_is_zero(monkeypatch):
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 0,
+            "latency_ns": 0,
+            "min_latency_ns": 1_000_000,
+            "max_latency_ns": 20_312_500,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"avio.local.": device})
+
+    result = runner.invoke(config_commands.app, ["latency"])
+
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        "Active latency: 0 ms",
+        "Configured latency: 0.25 ms",
+        "Reported latency range: 1-20.3125 ms",
+        "Latency options: 1, 2, 5 ms",
+    ]
+
+
+def test_latency_get_json_surfaces_retained_configured_value(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 0,
+            "latency_ns": 0,
+            "min_latency_ns": 1_000_000,
+            "max_latency_ns": 20_312_500,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"avio.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.json)
+
+    result = runner.invoke(config_commands.app, ["latency"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "active_latency_ms": 0.0,
+        "active_latency_ns": 0,
+        "configured_latency_ms": 0.25,
+        "configured_latency_ns": 250_000,
+        "min_latency_ms": 1.0,
+        "min_latency_ns": 1_000_000,
+        "max_latency_ms": 20.3125,
+        "max_latency_ns": 20_312_500,
+        "latency_options_ms": [1.0, 2.0, 5.0],
+        "latency_options_ns": [1_000_000, 2_000_000, 5_000_000],
+        "latency_options_source": "controller_fixed_set_filtered_by_reported_range",
+        "active_latency_is_standard_choice": False,
+        "active_latency_within_reported_range": False,
+        "configured_latency_is_standard_choice": False,
+        "configured_latency_within_reported_range": False,
+    }
+
+
+def test_latency_get_json_preserves_an_off_list_current_value(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice(
+        "Synthetic",
+        settings={
+            "configured_latency_ns": 750_000,
+            "active_latency_ns": 750_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 5_000_000,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"synthetic.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.json)
+
+    result = runner.invoke(config_commands.app, ["latency"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["active_latency_ms"] == 0.75
+    assert payload["active_latency_ns"] == 750_000
+    assert payload["active_latency_within_reported_range"] is True
+    assert payload["active_latency_is_standard_choice"] is False
+    assert 0.75 not in payload["latency_options_ms"]
+
+
+def test_latency_get_fails_when_every_reported_latency_value_is_unavailable(monkeypatch):
+    device = FakeDevice(
+        "Unavailable",
+        settings={
+            "active_latency_ns": None,
+            "configured_latency_ns": None,
+            "default_latency_ns": None,
+            "min_latency_ns": None,
+            "max_latency_ns": None,
+        },
+    )
+    _install_context(monkeypatch, config_commands, {"unavailable.local.": device})
+
+    result = runner.invoke(config_commands.app, ["latency"])
+
+    assert result.exit_code == 1
+    assert "latency readback was unavailable" in result.output
 
 
 def test_clock_source_get_is_not_implemented(monkeypatch):
