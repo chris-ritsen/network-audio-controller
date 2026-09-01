@@ -62,7 +62,7 @@ pub fn parse_tx_flows(response: &[u8]) -> Option<Vec<TxFlow>> {
 pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<TransmitterFlowStatusPage> {
     let envelope = validate_response_envelope(
         response,
-        &[(PROTOCOL_ARC_2809, OPCODE_QUERY_TX_FLOWS_2809)],
+        &modern_arc_protocol_opcodes(OPCODE_QUERY_TX_FLOWS_2809),
         &[RESULT_CODE_SUCCESS],
     )?;
     let body = envelope.body;
@@ -86,41 +86,35 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
             .checked_add(usize::from(index).checked_mul(2)?)?;
         let record_pointer = read_u16(response, pointer_offset)?;
         let record_offset = usize::from(record_pointer);
-        let record_end = record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_SIZE)?;
-        if record_offset < pointer_table_end
-            || record_end > response.len()
-            || !seen_record_pointers.insert(record_pointer)
-        {
+        if record_offset < pointer_table_end || !seen_record_pointers.insert(record_pointer) {
             return None;
         }
         record_pointers.push(record_pointer);
     }
 
-    let mut sorted_ranges: Vec<(usize, usize)> = record_pointers
-        .iter()
-        .map(|pointer| {
-            let start = usize::from(*pointer);
-            (start, start + TRANSMITTER_FLOW_STATUS_RECORD_SIZE)
-        })
-        .collect();
-    sorted_ranges.sort_unstable();
-    if sorted_ranges
-        .windows(2)
-        .any(|ranges| ranges[0].1 > ranges[1].0)
-    {
-        return None;
-    }
-
     let mut flows = Vec::with_capacity(usize::from(reported_flow_count));
+    let mut record_ranges = Vec::with_capacity(usize::from(reported_flow_count));
     let mut flow_numbers = HashSet::with_capacity(usize::from(reported_flow_count));
+    let mut media_identities = HashSet::with_capacity(usize::from(reported_flow_count));
     for record_pointer in record_pointers {
         let flow = parse_transmitter_flow_status_record(response, record_pointer)?;
         if flow.flow_number > u16::from(maximum_flow_slots)
             || !flow_numbers.insert(flow.flow_number)
+            || !media_identities.insert((flow.media_type, flow.media_local_flow_id))
         {
             return None;
         }
+        let record_start = usize::from(record_pointer);
+        let record_end = record_start.checked_add(usize::from(flow.record_length_bytes))?;
+        record_ranges.push((record_start, record_end));
         flows.push(flow);
+    }
+    record_ranges.sort_unstable();
+    if record_ranges
+        .windows(2)
+        .any(|ranges| ranges[0].1 > ranges[1].0)
+    {
+        return None;
     }
 
     Some(TransmitterFlowStatusPage {
@@ -131,27 +125,152 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
     })
 }
 
+#[derive(Debug)]
+struct TransmitterFlowStatusRecordGeometry {
+    record_end: usize,
+    segment_offsets: Vec<usize>,
+}
+
+fn transmitter_flow_status_record_geometry(
+    response: &[u8],
+    record_offset: usize,
+) -> Option<TransmitterFlowStatusRecordGeometry> {
+    let mut segment_offsets = Vec::new();
+    let mut segment_offset = record_offset;
+    let record_end = loop {
+        let header = response.get(segment_offset..segment_offset.checked_add(2)?)?;
+        let next_word_distance = usize::from(*header.first()?);
+        if next_word_distance == 0 {
+            return None;
+        }
+        segment_offsets.push(segment_offset);
+        if *header.get(1)? == 0 {
+            break segment_offset.checked_add(2)?;
+        }
+        let next_segment_offset = segment_offset.checked_add(next_word_distance.checked_mul(2)?)?;
+        response.get(segment_offset..next_segment_offset)?;
+        if segment_offsets.len() >= 32 {
+            return None;
+        }
+        segment_offset = next_segment_offset;
+    };
+    if segment_offsets.len() < 3 {
+        return None;
+    }
+
+    Some(TransmitterFlowStatusRecordGeometry {
+        record_end,
+        segment_offsets,
+    })
+}
+
+fn transmitter_flow_status_segment_u16(
+    response: &[u8],
+    segment_start: usize,
+    segment_end: usize,
+    field_offset: usize,
+) -> Option<u16> {
+    let field_start = segment_start.checked_add(field_offset)?;
+    let field_end = field_start.checked_add(2)?;
+    (field_end <= segment_end).then(|| read_u16(response, field_start))?
+}
+
+fn parse_audio_channel_slot_segment(
+    response: &[u8],
+    geometry: &TransmitterFlowStatusRecordGeometry,
+    media_type: u16,
+) -> Option<(Option<u16>, Option<u16>, Vec<u16>)> {
+    if media_type != MEDIA_TYPE_AUDIO {
+        return Some((None, None, Vec::new()));
+    }
+    let mut parsed = None;
+    for (index, segment_start) in geometry.segment_offsets.iter().copied().enumerate() {
+        let segment_end = geometry
+            .segment_offsets
+            .get(index + 1)
+            .copied()
+            .unwrap_or(geometry.record_end);
+        let Some(count) = transmitter_flow_status_segment_u16(
+            response,
+            segment_start,
+            segment_end,
+            TRANSMITTER_FLOW_STATUS_SLOT_COUNT,
+        ) else {
+            continue;
+        };
+        let Some(slot_ids_size) = usize::from(count).checked_mul(2) else {
+            continue;
+        };
+        let Some(expected_size) = TRANSMITTER_FLOW_STATUS_SLOT_IDS
+            .checked_add(slot_ids_size)
+            .and_then(|size| size.checked_add(TRANSMITTER_FLOW_STATUS_SLOT_TRAILING_FIELD_SIZE))
+        else {
+            continue;
+        };
+        let header = read_u16(response, segment_start)?;
+        let Ok(expected_next_words) = u8::try_from(expected_size / 2) else {
+            continue;
+        };
+        let Some(expected_terminal_words) = expected_next_words.checked_add(2) else {
+            continue;
+        };
+        if expected_size != segment_end.checked_sub(segment_start)?
+            || header.to_be_bytes() != [expected_next_words, expected_terminal_words]
+        {
+            continue;
+        }
+        if parsed.is_some() {
+            return None;
+        }
+        let mut channel_ids = Vec::with_capacity(usize::from(count));
+        for slot_index in 0..count {
+            let field_offset = TRANSMITTER_FLOW_STATUS_SLOT_IDS
+                .checked_add(usize::from(slot_index).checked_mul(2)?)?;
+            channel_ids.push(transmitter_flow_status_segment_u16(
+                response,
+                segment_start,
+                segment_end,
+                field_offset,
+            )?);
+        }
+        parsed = Some((Some(header), Some(count), channel_ids));
+    }
+    parsed
+}
+
 fn parse_transmitter_flow_status_record(
     response: &[u8],
     record_pointer: u16,
 ) -> Option<TransmitterFlowStatus> {
     let record_offset = usize::from(record_pointer);
-    let record_end = record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_SIZE)?;
-    let record = response.get(record_offset..record_end)?;
-    let flow_number = read_u16(
+    let geometry = transmitter_flow_status_record_geometry(response, record_offset)?;
+    let first_segment_end = *geometry.segment_offsets.get(1)?;
+    let global_flow_id = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER)?,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER,
     )?;
-    let channel_count = read_u16(
+    let media_type = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_CHANNEL_COUNT)?,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_TYPE,
     )?;
-    if flow_number == 0 || channel_count == 0 {
+    let media_local_flow_id = transmitter_flow_status_segment_u16(
+        response,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID,
+    )?;
+    if global_flow_id == 0 || media_type == 0 || media_local_flow_id == 0 {
         return None;
     }
-    let flow_type_code = read_u16(
+    let flow_type_code = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE)?,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE,
     )?;
     let flow_type = match flow_type_code {
         FLOW_TYPE_MULTICAST => Some("multicast".to_owned()),
@@ -159,14 +278,18 @@ fn parse_transmitter_flow_status_record(
         _ => None,
     };
 
-    let flow_name_pointer = read_u16(
+    let flow_name_pointer = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_NAME_POINTER)?,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_NAME_POINTER,
     )?;
     let flow_name = string_at_pointer(response, flow_name_pointer)?;
-    let format_pointer = read_u16(
+    let format_pointer = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_FORMAT_POINTER)?,
+        record_offset,
+        first_segment_end,
+        TRANSMITTER_FLOW_STATUS_RECORD_FORMAT_POINTER,
     )?;
     let format_offset = usize::from(format_pointer);
     response.get(format_offset..format_offset.checked_add(TRANSMITTER_FLOW_STATUS_FORMAT_SIZE)?)?;
@@ -176,9 +299,39 @@ fn parse_transmitter_flow_status_record(
         return None;
     }
 
-    let endpoint_descriptor_pointer = read_u16(
+    let subscriber_segment_start = *geometry
+        .segment_offsets
+        .get(TRANSMITTER_FLOW_STATUS_SUBSCRIBER_SEGMENT_INDEX)?;
+    let subscriber_segment_end = *geometry
+        .segment_offsets
+        .get(TRANSMITTER_FLOW_STATUS_SUBSCRIBER_SEGMENT_INDEX + 1)?;
+    let subscriber_device_name_pointer = transmitter_flow_status_segment_u16(
         response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_ENDPOINT_POINTER)?,
+        subscriber_segment_start,
+        subscriber_segment_end,
+        TRANSMITTER_FLOW_STATUS_SUBSCRIBER_DEVICE_POINTER,
+    )?;
+    let subscriber_device_name =
+        optional_string_at_pointer(response, subscriber_device_name_pointer)?;
+    let subscriber_flow_name_pointer = transmitter_flow_status_segment_u16(
+        response,
+        subscriber_segment_start,
+        subscriber_segment_end,
+        TRANSMITTER_FLOW_STATUS_SUBSCRIBER_FLOW_POINTER,
+    )?;
+    let subscriber_flow_name = optional_string_at_pointer(response, subscriber_flow_name_pointer)?;
+
+    let endpoint_segment_start = *geometry
+        .segment_offsets
+        .get(TRANSMITTER_FLOW_STATUS_ENDPOINT_SEGMENT_INDEX)?;
+    let endpoint_segment_end = *geometry
+        .segment_offsets
+        .get(TRANSMITTER_FLOW_STATUS_ENDPOINT_SEGMENT_INDEX + 1)?;
+    let endpoint_descriptor_pointer = transmitter_flow_status_segment_u16(
+        response,
+        endpoint_segment_start,
+        endpoint_segment_end,
+        TRANSMITTER_FLOW_STATUS_ENDPOINT_POINTER,
     )?;
     let endpoint_descriptor_offset = usize::from(endpoint_descriptor_pointer);
     let endpoint_descriptor = response.get(
@@ -195,21 +348,24 @@ fn parse_transmitter_flow_status_record(
             (None, None)
         };
 
-    let subscriber_device_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_SUBSCRIBER_DEVICE_POINTER)?,
-    )?;
-    let subscriber_device_name =
-        optional_string_at_pointer(response, subscriber_device_name_pointer)?;
-    let subscriber_flow_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_FLOW_STATUS_RECORD_SUBSCRIBER_FLOW_POINTER)?,
-    )?;
-    let subscriber_flow_name = optional_string_at_pointer(response, subscriber_flow_name_pointer)?;
+    let (channel_slot_segment_header, channel_slot_count, transmitter_channel_ids_by_slot) =
+        parse_audio_channel_slot_segment(response, &geometry, media_type)?;
+    let populated_transmitter_channel_ids: Vec<u16> = transmitter_channel_ids_by_slot
+        .iter()
+        .copied()
+        .filter(|channel_id| *channel_id != 0)
+        .collect();
+    let populated_slot_count = u16::try_from(populated_transmitter_channel_ids.len()).ok()?;
+    let record = response.get(record_offset..geometry.record_end)?;
+    let record_length_bytes = u16::try_from(record.len()).ok()?;
 
     Some(TransmitterFlowStatus {
         record_pointer,
-        flow_number,
+        record_length_bytes,
+        global_flow_id,
+        flow_number: global_flow_id,
+        media_type,
+        media_local_flow_id,
         flow_name_pointer,
         flow_name,
         flow_type_code,
@@ -217,7 +373,12 @@ fn parse_transmitter_flow_status_record(
         format_pointer,
         sample_rate,
         encoding,
-        channel_count,
+        channel_count: populated_slot_count,
+        channel_slot_segment_header,
+        channel_slot_count,
+        transmitter_channel_ids_by_slot,
+        populated_transmitter_channel_ids,
+        populated_slot_count,
         endpoint_descriptor_pointer,
         endpoint_descriptor_hexadecimal: bytes_to_hex(endpoint_descriptor),
         destination_user_datagram_port,

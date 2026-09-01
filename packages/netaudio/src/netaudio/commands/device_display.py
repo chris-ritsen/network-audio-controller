@@ -284,6 +284,27 @@ def _connection_health_rows(connection_health: dict | None) -> list[list[str]]:
     return rows
 
 
+def _receiver_flow_setting_rows(receiver_flows: list[dict] | None) -> list[list[str]]:
+    if not isinstance(receiver_flows, list):
+        return []
+    rows = []
+    for flow in receiver_flows:
+        if not isinstance(flow, dict):
+            continue
+        flow_number = flow.get("flow_number")
+        if type(flow_number) is not int:
+            continue
+        parts = [f"latency {_format_connection_latency_nanoseconds(flow.get('latency_nanoseconds'))}"]
+        frames_per_packet = flow.get("frames_per_packet")
+        if type(frames_per_packet) is int:
+            parts.append(f"frames per packet {frames_per_packet}")
+        flow_type = flow.get("flow_type")
+        if isinstance(flow_type, str) and flow_type:
+            parts.append(flow_type)
+        rows.append([f"Receiver Flow {flow_number} Setting", "; ".join(parts)])
+    return rows
+
+
 def _format_channel_count(channels: dict, reported_count: int | None) -> str:
     if channels:
         return str(len(channels))
@@ -431,7 +452,7 @@ def _device_audio_rows(device) -> list[list[str]]:
         ["Configured Latency", _format_latency(device.configured_latency)],
         ["Default Latency", _format_latency(device.default_latency)],
         ["Latency Range", _format_show_latency_range(device.min_latency, device.max_latency)],
-        ["Standard Latencies", _format_show_standard_latencies(device)],
+        ["Latency Options", _format_show_standard_latencies(device)],
         ["AES67", _format_aes67(device)],
     ]
 
@@ -526,6 +547,7 @@ def _device_show_rows(device) -> list[list[str]]:
     rows.extend(_device_audio_rows(device))
     rows.extend(_device_sample_rate_pullup_rows(device))
     rows.extend(_device_transmitter_flow_rows(device))
+    rows.extend(_receiver_flow_setting_rows(device.receiver_flows))
     rows.extend(_connection_health_rows(device.receiver_flow_connection_health))
     rows.extend(_device_control_rows(device))
     rows.extend(_device_clock_rows(device))

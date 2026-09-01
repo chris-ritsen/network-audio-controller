@@ -1,87 +1,127 @@
 # NetAudio agent policy
 
 This is the canonical agent policy for this repository. `CLAUDE.md` and task
-handoffs may add context, but they may not weaken these rules. Read the
-task-specific documents linked below before doing DDM or lab work.
+handoffs may add context or narrow a task, but they may not weaken these rules.
 
-## Product and research boundary
+## Project purpose and scope
 
-- Shipping NetAudio code is a library, CLI, and daemon. Research tooling,
-  captures, emulators, firmware images, VM state, and runtime observations are
-  lab inputs, not production dependencies.
-- The shipping DDM client may use only the documented Dante Managed API at the
-  configurable `/graphql` endpoint. It must not use packet capture, process
-  memory, internal ports, VM state, or emulator state at runtime.
-- Protocol behavior must be established through the clean-room evidence allowed
-  by the active task. Do not import meanings, constants, names, or structures
-  from prohibited sources.
-- Classify research claims as `documented`, `observed`, `causal`, `inferred`, or
-  `unknown`. Green tests do not upgrade the evidence class.
+- NetAudio is primarily an interoperability reverse-engineering and protocol
+  research project for Dante Controller and related software. It also produces
+  useful end-user software: a library, CLI, daemon/server components, and
+  potentially TUI, GUI, and web interfaces.
+- Protocol research is first-class project work. Bounded lab harnesses,
+  emulators, experiment tooling, findings, provenance records, and minimal
+  evidence fixtures may belong in the repository when they make the work
+  reproducible or reviewable.
+- Most end users should be able to ignore the research surface and use the
+  product interfaces normally. Shipping features must not require a lab,
+  proprietary applications, packet captures, firmware, VM state, or research
+  artifacts at runtime.
+- The project independently establishes interoperability facts and keeps a
+  defensible evidence trail. This policy reduces avoidable legal and provenance
+  risk; it does not declare any activity legally risk-free.
 
-## Clean-room rules
+## Independent research and evidence
 
+- Do not join the words `clean` and `room`—with a space, hyphen, underscore, or
+  no separator—in committed filenames or contents. Use neutral terms such as
+  `protocol research`, `evidence boundary`, `capture-derived`, or `independent
+  implementation`.
+- Do not invent a named parallel process for excluded evidence. Identify
+  excluded sources directly and explain why they are excluded.
+- Permitted evidence includes public documentation and APIs; packet captures
+  from real or synthetic devices; official tools exercised through their normal
+  user-visible interfaces; controlled black-box experiments; authorized runtime
+  observation; and causal treatments performed on authorized targets.
 - Do not decompile, disassemble, inspect strings in, extract, mount, or otherwise
   statically inspect Dante firmware, DDM, or Dante Controller executables.
 - Do not use recovered source, source maps, firmware-derived symbol catalogs,
-  copied/deprecated status catalogs, or prior conclusions whose provenance is
-  outside the active clean-room boundary.
-- Never put decompiled/internal symbol names or firmware-derived identifiers in
-  product code, tests, comments, or documentation.
-- Preserve exact capture and artifact provenance: source, timestamp or frame,
-  scope, SHA-256, and allowed/excluded evidence.
-- Read `docs/agent/DDM_CLEAN_ROOM.md` before DDM or authentic-firmware lab work.
+  leaked material, copied internal status catalogs, or conclusions whose
+  provenance falls outside the active task's evidence boundary.
+- Never put decompiled or internal symbol names, firmware-derived identifiers,
+  or unsupported proprietary terminology in product code, tests, comments, or
+  documentation.
+- Classify research claims as `documented`, `observed`, `causal`, `inferred`, or
+  `unknown`. Passing tests do not upgrade the evidence class.
+- Preserve exact capture and artifact provenance: source device or tool, run,
+  timestamp or frame, scope, SHA-256, and allowed/excluded evidence. Record
+  transformations from a source capture to a promoted fixture.
+- Packet captures and ordinary experimentation sessions with official tools may
+  support provenance records. Promote only the minimum sanitized, digest-bound
+  packets or derived fixtures needed to substantiate a claim or deterministic
+  test. Large captures and complete research runs normally remain outside the
+  source tree.
+
+## Product and research boundary
+
+- Shipping protocol behavior must be implemented from permitted evidence and
+  stand on its own as reviewed source, focused tests, and necessary user or
+  operational documentation.
+- Research tools and observations are development inputs, not hidden production
+  dependencies. Keep experimental paths explicit and opt-in.
+- The shipping DDM client may use only the documented Dante Managed API at the
+  configurable `/graphql` endpoint. It must not use packet capture, process
+  memory, internal ports, VM state, or emulator state at runtime.
+- Keep Dante wire-format encoding and parsing in the Rust core unless an
+  explicit architecture decision establishes another boundary. Do not create
+  silent parallel protocol implementations.
+- Do not commit proprietary firmware, DDM or Controller binaries, VM images,
+  private writable flash, credentials, or unrelated personal infrastructure.
 
 ## Live systems and mutations
 
 - Read-only is the default. Do not start, stop, restart, pause, resume, connect,
   route, capture from, or mutate a service, VM, emulator, interface, device, or
   audio path unless the current task explicitly authorizes it.
-- Never generate audio, play a tone, change audio routing, or start/stop an audio
-  service as an incidental test.
-- DDM experiments may mutate only virtual devices explicitly designated as
+- Never generate audio, play a tone, change audio routing, or start or stop an
+  audio service as an incidental test.
+- Experiments may mutate only virtual devices explicitly designated as
   disposable for that run. Physical AVIOs and all other physical Dante devices
   are read-only unless Chris separately authorizes the exact mutation.
 - A live mutation requires an exclusive resource lease, a bounded run manifest,
   a saved baseline, fresh readback, and restoration unless the authorized run
-  declares the new state as its intended final state. Follow
-  `docs/agent/EXPERIMENTS.md`.
+  declares the new state as its intended final state. Follow the applicable
+  experiment documentation under `docs/agent/`.
 - `tools/ddm_lab enroll-virtual`, `unenroll-virtual`, `enroll-all-virtual`, and
   `unenroll-all-virtual` are the only standing DDM mutations in the lab harness.
-  They require every selected leased synthetic guest to be running under its own
+  They require every selected leased synthetic guest to run under its own
   bounded guest-TAP capture, resolve each live ID through the public API, force
   `clearConfig: false`, and wait for readback. Batch commands select only active
   harness leases; they never make a physical device an implicit target.
-- Runtime-memory inspection is observational by default. Runtime writes are
-  prohibited unless a later explicit authorization names the exact virtual
-  target and data treatment. Never patch instructions, branches, or return
-  values.
+- Runtime-memory inspection is observational by default. Runtime writes require
+  explicit authorization naming the virtual target and data treatment. Never
+  patch instructions, branches, or return values.
 - Do not weaken the DDM VM's outbound-Internet isolation.
 
 ## Secrets and captures
 
 - Never print, log, commit, embed, or copy API keys, credentials, authorization
   headers, or secret-bearing command environments into artifacts or manifests.
-- Minimal binary packet/capture fixtures are allowed when their clean-room
-  provenance and hashes are recorded. Do not commit proprietary firmware, DDM
-  or Controller binaries, VM images, private writable flash, or credentials.
-- Lab endpoints and credential-file locations are local defaults. Shipping code
-  must accept configuration and must not hard-code them.
+- Lab endpoints and credential-file locations are local configuration. Shipping
+  code must accept configuration and must not hard-code them.
 - Bound every capture by interface, endpoints, duration, and output path. Record
-  its digest. Do not capture unrelated traffic when a narrower filter suffices.
+  its digest and avoid unrelated traffic when a narrower filter is possible.
+- Existing dirty and untracked research artifacts belong to the user or another
+  agent. Preserve them. Do not stage them unless the task explicitly promotes
+  them under the evidence rules above.
 
 ## Shared worktree and Git
 
-- Inspect `git status`, branch, remotes, and relevant diffs before editing.
+- Inspect Git status, branch, remotes, and relevant diffs before editing.
   Existing dirty and untracked paths belong to the user or another agent unless
   explicitly assigned.
+- Stage exact paths only in a mixed worktree. Never use broad staging as a
+  shortcut.
 - Do not use `git checkout`, `git restore`, `git reset`, or equivalent commands
   to overwrite files without explicit user confirmation. Show the exact command
   and target first.
-- Do not commit, amend, rebase, merge, push, force-push, or change remotes unless
-  requested. GPG signing may be disabled for this repository when needed; that
+- Do not commit, amend, rebase, merge, push, force-push, rewrite history, or
+  change remotes unless requested. GPG signing may be disabled when needed; that
   does not authorize bypassing other hooks.
 - Multi-agent work must use non-overlapping path ownership. Only the run owner
   writes shared manifests; collaborators write within their assigned namespace.
+- Put repository-maintenance and build automation under `scripts/`; keep scoped
+  research harnesses under `tools/`.
 
 ## Validation
 
@@ -90,16 +130,17 @@ task-specific documents linked below before doing DDM or lab work.
 - Keep all new hand-written Python functions and methods outside generated,
   vendored, build, and virtual-environment directories at cyclomatic complexity
   15 or lower, as measured by Ruff `C901`. The checked complexity baseline
-  records legacy debt only: never add an exception or raise an existing
-  allowance. Any semantic change to a baseline exception must reduce it, and
-  baseline updates may only lower or remove allowances. Never hand-edit the
-  baseline or suppress `C901` with `noqa` or Ruff configuration. A Chris-approved
-  exception requires an explicit policy and checker change, not a baseline edit.
-  Run `uv run python scripts/check_complexity.py` before handing off Python
-  changes.
+  records legacy debt only: never add an exception or raise an allowance. Any
+  semantic change to a baseline exception must reduce it, and baseline updates
+  may only lower or remove allowances. Never hand-edit the baseline or suppress
+  `C901` with `noqa` or Ruff configuration. A Chris-approved exception requires
+  an explicit policy and checker change, not a baseline edit. Run
+  `uv run python scripts/check_complexity.py` before handing off Python changes.
 - Default tests must be offline and deterministic. Use focused tests first, then
-  `uv run pytest -q` and the relevant Rust checks when the change warrants them.
+  `uv run pytest -q` and relevant Rust checks when the change warrants them.
 - Live tests must be opt-in. Mutating live tests require a second explicit opt-in
   and an authorized disposable target; they do not run in ordinary CI.
-- Promote only minimal, digest-bound evidence into repository fixtures. Draft
-  captures and research runs belong outside the source tree.
+- CI must remain portable across its declared operating systems. Isolate and
+  condition platform-specific behavior honestly.
+- Do not weaken checks, add exception inventories, or hide failures to make CI
+  pass. Fix the implementation or reduce the enforced scope explicitly.

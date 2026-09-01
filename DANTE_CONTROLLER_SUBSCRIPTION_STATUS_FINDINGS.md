@@ -2,7 +2,7 @@
 
 Status: experimentally verified and implemented through 2026-08-14
 
-## Goal and clean-room boundary
+## Goal and evidence boundary
 
 The goal is to enumerate how shipping Dante Controller presents every subscription status by exposing controlled values from authentic A32 firmware running under QEMU. Controller is used only as an ordinary UI oracle. No Controller executable, resource, decompiled output, or internal status table is an allowed input.
 

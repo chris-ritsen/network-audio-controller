@@ -33,6 +33,10 @@ class FakeOperations:
         self.settings_calls += 1
         return _next_value(self.settings)
 
+    async def get_latency_settings(self):
+        self.settings_calls += 1
+        return _next_value(self.settings)
+
     async def get_aes67_configured(self):
         self.aes67_calls += 1
         return _next_value(self.aes67)

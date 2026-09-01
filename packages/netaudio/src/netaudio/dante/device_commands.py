@@ -3,6 +3,7 @@ import secrets
 from netaudio.dante.const import (
     DEVICE_CONTROL_PORT,
     DEVICE_SETTINGS_PORT,
+    PROTOCOL_ARC_2809,
     SERVICE_ARC,
 )
 
@@ -124,21 +125,49 @@ class DanteDeviceCommands:
             specification["protocol_id"] = protocol_id
         return self._arc(specification)
 
-    def command_query_receiver_channel_status_2809(self, transaction_id=0):
+    def command_query_receiver_channel_status(
+        self,
+        protocol_id=PROTOCOL_ARC_2809,
+        media_type=1,
+        starting_channel_identifier=1,
+        ending_channel_identifier=0,
+        transaction_id=0,
+    ):
         return self._arc(
             {
                 "command": "query_receiver_channel_status_2809",
+                "protocol_id": protocol_id,
+                "media_type": media_type,
+                "starting_channel_identifier": starting_channel_identifier,
+                "ending_channel_identifier": ending_channel_identifier,
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_query_receiver_channel_status_2809(self, transaction_id=0):
+        return self.command_query_receiver_channel_status(transaction_id=transaction_id)
+
+    def command_query_transmitter_channel_status(
+        self,
+        protocol_id=PROTOCOL_ARC_2809,
+        media_type=1,
+        starting_channel_identifier=1,
+        ending_channel_identifier=0,
+        transaction_id=0,
+    ):
+        return self._arc(
+            {
+                "command": "query_transmitter_channel_status_2809",
+                "protocol_id": protocol_id,
+                "media_type": media_type,
+                "starting_channel_identifier": starting_channel_identifier,
+                "ending_channel_identifier": ending_channel_identifier,
                 "transaction_id": transaction_id,
             }
         )
 
     def command_query_transmitter_channel_status_2809(self, transaction_id=0):
-        return self._arc(
-            {
-                "command": "query_transmitter_channel_status_2809",
-                "transaction_id": transaction_id,
-            }
-        )
+        return self.command_query_transmitter_channel_status(transaction_id=transaction_id)
 
     def command_reconcile_transmitter_channel_names_2809(self, records, transaction_id=0):
         return self._arc(

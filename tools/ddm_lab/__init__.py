@@ -1,4 +1,4 @@
-"""Repository-only DDM clean-room lab harness."""
+"""Repository-only DDM research lab harness."""
 
 from .graphql import (
     DDMGraphQLClient,

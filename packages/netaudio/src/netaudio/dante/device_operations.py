@@ -10,7 +10,17 @@ from netaudio.dante.channel_frontend import (
     receiver_channel_name_protocol_identifier_from_probe,
     transmitter_channel_name_protocol_identifier_from_probe,
 )
-from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
+from netaudio.dante.channel_status_paging import (
+    ChannelStatusPageAccumulator,
+    modern_arc_protocol_identifier_for_device,
+)
+from netaudio.dante.const import (
+    OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
+    OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
+    PROTOCOL_ARC_2809,
+    RESULT_CODE_SUCCESS,
+    RESULT_CODE_SUCCESS_EXTENDED,
+)
 from netaudio.dante.latency import latency_controls_from_settings
 
 DANTE_NAME_MAX_LENGTH = 31
@@ -108,6 +118,46 @@ class DanteDeviceOperations:
             raise RuntimeError(f"{description} returned an invalid status page")
         return page
 
+    async def _query_channel_status_pages(self, channel_type):
+        protocol_id = modern_arc_protocol_identifier_for_device(self.device)
+        if channel_type == "rx":
+            command_builder = self.device.commands.command_query_receiver_channel_status
+            opcode = OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
+            page_kind = "receiver_channel_status_page_2809"
+            description = "receiver channel status query"
+            logical_name = "query_receiver_channel_status_2809"
+            cache_attribute = "receiver_channel_name_protocol_identifier"
+        else:
+            command_builder = self.device.commands.command_query_transmitter_channel_status
+            opcode = OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
+            page_kind = "transmitter_channel_status_page_2809"
+            description = "transmitter channel status query"
+            logical_name = "query_transmitter_channel_status_2809"
+            cache_attribute = "transmitter_channel_name_protocol_identifier"
+
+        accumulator = ChannelStatusPageAccumulator(protocol_id, opcode)
+        request_range = (1, 1, 0)
+        while request_range is not None:
+            media_type, starting_channel_identifier, ending_channel_identifier = request_range
+            command_arguments = command_builder(
+                protocol_id=protocol_id,
+                media_type=media_type,
+                starting_channel_identifier=starting_channel_identifier,
+                ending_channel_identifier=ending_channel_identifier,
+            )
+            response = await self.device.dante_command(
+                *command_arguments,
+                logical_command_name=logical_name,
+            )
+            result_code = channel_result_code(response, description)
+            if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
+                raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
+            page = self._parse_status_page(response, description, page_kind)
+            request_range = accumulator.add(page)
+
+        setattr(self.device, cache_attribute, protocol_id)
+        return accumulator.result()
+
     async def _query_status_page_2809(self, command_arguments, logical_command_name, description, page_kind):
         from netaudio import core
 
@@ -128,27 +178,10 @@ class DanteDeviceOperations:
         return self._parse_status_page(response, description, page_kind)
 
     async def query_receiver_channel_status_2809(self):
-        response = await self._request_receiver_channel_status_2809()
-        result_code = channel_result_code(response, "receiver channel status query")
-        if result_code != RESULT_CODE_SUCCESS:
-            raise RuntimeError(f"receiver channel status query failed with result 0x{result_code:04X}")
-        return self._parse_status_page(
-            response,
-            "receiver channel status query",
-            "receiver_channel_status_page_2809",
-        )
+        return await self._query_channel_status_pages("rx")
 
     async def query_transmitter_channel_status_2809(self):
-        response = await self._request_transmitter_channel_status_2809()
-        protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe(response)
-        if protocol_identifier != PROTOCOL_ARC_2809:
-            raise RuntimeError("transmitter channel status query failed with result 0x0030")
-        self.device.transmitter_channel_name_protocol_identifier = protocol_identifier
-        return self._parse_status_page(
-            response,
-            "transmitter channel status query",
-            "transmitter_channel_status_page_2809",
-        )
+        return await self._query_channel_status_pages("tx")
 
     async def query_receiver_flow_status_2809(self):
         return await self._query_status_page_2809(
@@ -382,11 +415,30 @@ class DanteDeviceOperations:
         import asyncio
 
         settings = await asyncio.to_thread(client.get_device_settings)
+        self._apply_device_settings(settings)
+        return settings
+
+    async def get_latency_settings(self):
+        from netaudio import core
+
+        command_arguments = self.device.commands.command_query_latency_config()
+        response = await self.device.dante_command(
+            *command_arguments,
+            logical_command_name="query_latency_config",
+        )
+        if response is None:
+            return None
+        settings = core.parse_response("device_settings", response)
+        self._apply_device_settings(settings)
+        return settings
+
+    def _apply_device_settings(self, settings):
+        if not isinstance(settings, dict):
+            return
         controls = latency_controls_from_settings(settings)
         if settings.get("sample_rate"):
             controls["sample_rate"] = settings["sample_rate"]
         self.device.apply_controls(controls)
-        return settings
 
     async def get_aes67_configured(self):
         client = self.device._core_client()

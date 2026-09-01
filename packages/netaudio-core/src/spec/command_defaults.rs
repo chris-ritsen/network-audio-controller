@@ -60,6 +60,10 @@ pub(super) fn default_system_reset_sequence() -> u16 {
     1
 }
 
+pub(super) fn default_identify_sequence() -> u16 {
+    1
+}
+
 pub(super) fn default_interface_sequence() -> u16 {
     1
 }
@@ -74,6 +78,10 @@ pub(super) fn default_switch_configuration_sequence() -> u16 {
 
 pub(super) fn default_flow_start() -> u16 {
     1
+}
+
+pub(super) fn default_modern_arc_protocol() -> u16 {
+    crate::protocol::PROTOCOL_ARC_2809
 }
 
 pub(super) fn default_channel_name_protocol() -> u16 {

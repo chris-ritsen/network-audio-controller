@@ -1,4 +1,5 @@
 use super::command_defaults::*;
+use super::command_values::*;
 use super::*;
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +138,7 @@ enum CommandSpec {
         sequence: u16,
     },
     Identify {
+        #[serde(default = "default_identify_sequence")]
         sequence: u16,
     },
     SetEncoding {
@@ -373,6 +375,14 @@ enum CommandSpec {
     },
     #[serde(rename = "query_transmitter_channel_status_2809")]
     QueryTransmitterChannelStatus2809 {
+        #[serde(default = "default_modern_arc_protocol")]
+        protocol_id: u16,
+        #[serde(default = "default_flow_start")]
+        media_type: u16,
+        #[serde(default = "default_flow_start")]
+        starting_channel_identifier: u16,
+        #[serde(default)]
+        ending_channel_identifier: u16,
         #[serde(default)]
         transaction_id: u16,
     },
@@ -384,6 +394,14 @@ enum CommandSpec {
     },
     #[serde(rename = "query_receiver_channel_status_2809")]
     QueryReceiverChannelStatus2809 {
+        #[serde(default = "default_modern_arc_protocol")]
+        protocol_id: u16,
+        #[serde(default = "default_flow_start")]
+        media_type: u16,
+        #[serde(default = "default_flow_start")]
+        starting_channel_identifier: u16,
+        #[serde(default)]
+        ending_channel_identifier: u16,
         #[serde(default)]
         transaction_id: u16,
     },
@@ -423,62 +441,6 @@ enum CommandSpec {
         #[serde(default)]
         transaction_id: u16,
     },
-}
-
-fn parse_mac(value: &Option<String>, default: [u8; 6]) -> Result<[u8; 6], SpecError> {
-    match value {
-        None if default != [0u8; 6] => Ok(default),
-        None => Err(SpecError::InvalidMac),
-        Some(text) => parse_mac_required(text),
-    }
-}
-
-fn parse_mac_required(text: &str) -> Result<[u8; 6], SpecError> {
-    let cleaned: Vec<u8> = text
-        .bytes()
-        .filter(|character| *character != b':')
-        .collect();
-    if cleaned.len() != 12 || !cleaned.iter().all(u8::is_ascii_hexdigit) {
-        return Err(SpecError::InvalidMac);
-    }
-    let mut mac = [0u8; 6];
-    for (destination, pair) in mac.iter_mut().zip(cleaned.chunks_exact(2)) {
-        let pair = std::str::from_utf8(pair).map_err(|_| SpecError::InvalidMac)?;
-        *destination = u8::from_str_radix(pair, 16).map_err(|_| SpecError::InvalidMac)?;
-    }
-    Ok(mac)
-}
-
-fn parse_required_ipv4_address(text: &str) -> Result<[u8; 4], SpecError> {
-    if text.is_empty() {
-        return Err(SpecError::InvalidIp);
-    }
-    text.parse::<Ipv4Addr>()
-        .map(|address| address.octets())
-        .map_err(|_| SpecError::InvalidIp)
-}
-
-fn parse_optional_ipv4_address(text: &str) -> Result<[u8; 4], SpecError> {
-    if text.is_empty() {
-        return Ok([0u8; 4]);
-    }
-    parse_required_ipv4_address(text)
-}
-
-fn parse_channel_type(text: &str) -> Result<ChannelType, SpecError> {
-    match text {
-        "rx" => Ok(ChannelType::Rx),
-        "tx" => Ok(ChannelType::Tx),
-        _ => Err(SpecError::InvalidChannelType),
-    }
-}
-
-fn parse_gain_device_type(text: &str) -> Result<bool, SpecError> {
-    match text {
-        "input" => Ok(true),
-        "output" => Ok(false),
-        _ => Err(SpecError::InvalidDeviceType),
-    }
 }
 
 fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>, SpecError> {
@@ -811,9 +773,19 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
             starting_flow,
             transaction_id,
         } => commands::build_query_tx_flows_from(flow_protocol_id, starting_flow, transaction_id)?,
-        CommandSpec::QueryTransmitterChannelStatus2809 { transaction_id } => {
-            commands::build_query_transmitter_channel_status_2809(transaction_id)?
-        }
+        CommandSpec::QueryTransmitterChannelStatus2809 {
+            protocol_id,
+            media_type,
+            starting_channel_identifier,
+            ending_channel_identifier,
+            transaction_id,
+        } => commands::build_query_transmitter_channel_status(
+            protocol_id,
+            media_type,
+            starting_channel_identifier,
+            ending_channel_identifier,
+            transaction_id,
+        )?,
         CommandSpec::ReconcileTransmitterChannelNames2809 {
             records,
             transaction_id,
@@ -829,9 +801,19 @@ fn build_command(spec: CommandSpec, default_host_mac: [u8; 6]) -> Result<Vec<u8>
                 .collect::<Vec<_>>(),
             transaction_id,
         )?,
-        CommandSpec::QueryReceiverChannelStatus2809 { transaction_id } => {
-            commands::build_query_receiver_channel_status_2809(transaction_id)?
-        }
+        CommandSpec::QueryReceiverChannelStatus2809 {
+            protocol_id,
+            media_type,
+            starting_channel_identifier,
+            ending_channel_identifier,
+            transaction_id,
+        } => commands::build_query_receiver_channel_status(
+            protocol_id,
+            media_type,
+            starting_channel_identifier,
+            ending_channel_identifier,
+            transaction_id,
+        )?,
         CommandSpec::QueryReceiverFlowStatus2809 { transaction_id } => {
             commands::build_query_receiver_flow_status_2809(transaction_id)?
         }

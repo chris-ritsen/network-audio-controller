@@ -167,6 +167,34 @@ def test_device_show_exposes_receiver_flow_connection_health_without_assigning_r
     assert rows["Receiver Flow Slot 1 Raw Impairment"] == "value 825; delta +0"
 
 
+def test_device_show_distinguishes_receiver_flow_setting_from_measured_latency():
+    device = make_show_device()
+    device.receiver_flows = [
+        {
+            "flow_number": 1,
+            "flow_type": "unicast",
+            "latency_nanoseconds": 1_000_000,
+            "frames_per_packet": 48,
+        }
+    ]
+    device.receiver_flow_connection_health = {
+        "fresh": True,
+        "flows": [
+            {
+                "receiver_flow_slot": 1,
+                "current_latency_nanoseconds": 291_667,
+                "average_latency_nanoseconds": 300_000,
+                "peak_latency_nanoseconds": 500_000,
+            }
+        ],
+    }
+
+    rows = dict(device_commands._device_show_rows(device))
+
+    assert rows["Receiver Flow 1 Setting"] == "latency 1 ms; frames per packet 48; unicast"
+    assert rows["Receiver Flow Slot 1 Latency"] == "current 291.667 us; average 300 us; peak 500 us"
+
+
 def test_device_show_preserves_raw_clock_port_record_fields():
     rows = dict(device_commands._device_show_rows(make_show_device()))
     assert rows["Clock Port Record 1"] == (

@@ -23,6 +23,44 @@ def standard_latency_choices_for_range(minimum_latency_milliseconds, maximum_lat
     ]
 
 
+def latency_state_from_settings(settings):
+    if not isinstance(settings, dict):
+        return {}
+
+    state = {}
+    for field_name in ("active", "configured", "default", "min", "max"):
+        nanoseconds_key = f"{field_name}_latency_ns"
+        if nanoseconds_key not in settings:
+            continue
+        nanoseconds = settings[nanoseconds_key]
+        state[nanoseconds_key] = int(nanoseconds) if nanoseconds is not None else None
+        state[f"{field_name}_latency_ms"] = (
+            nanoseconds_to_milliseconds(nanoseconds) if nanoseconds is not None else None
+        )
+
+    if not state and "latency_ns" in settings:
+        nanoseconds = settings["latency_ns"]
+        state["latency_ns"] = int(nanoseconds) if nanoseconds is not None else None
+        state["latency_ms"] = nanoseconds_to_milliseconds(nanoseconds) if nanoseconds is not None else None
+
+    minimum = state.get("min_latency_ms")
+    maximum = state.get("max_latency_ms")
+    choices = standard_latency_choices_for_range(minimum, maximum)
+    if choices is None:
+        return state
+
+    state["latency_options_ms"] = choices
+    state["latency_options_ns"] = [int(round(choice * NANOSECONDS_PER_MILLISECOND)) for choice in choices]
+    state["latency_options_source"] = "controller_fixed_set_filtered_by_reported_range"
+    for field_name in ("active", "configured"):
+        value = state.get(f"{field_name}_latency_ms")
+        if value is None:
+            continue
+        state[f"{field_name}_latency_is_standard_choice"] = value in choices
+        state[f"{field_name}_latency_within_reported_range"] = minimum <= value <= maximum
+    return state
+
+
 def latency_controls_from_settings(settings):
     controls = {}
     active_latency_present = "active_latency_ns" in settings

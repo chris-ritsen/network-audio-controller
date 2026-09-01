@@ -164,6 +164,14 @@ fn default_host_mac_fills_in_when_omitted() {
 }
 
 #[test]
+fn identify_defaults_sequence_when_omitted() {
+    let routed = build_routed_command("{\"command\":\"identify\"}", [0xFF; 6]).unwrap();
+    assert_eq!(routed.packet, crate::commands::build_identify(1).unwrap());
+    let explicit = build_routed_command("{\"command\":\"identify\",\"sequence\":3017}", [0xFF; 6]).unwrap();
+    assert_eq!(explicit.packet, crate::commands::build_identify(0x0BC9).unwrap());
+}
+
+#[test]
 fn explicit_host_mac_overrides_default() {
     let routed = build_routed_command(
         "{\"command\":\"reboot\",\"host_mac\":\"001122334455\"}",
