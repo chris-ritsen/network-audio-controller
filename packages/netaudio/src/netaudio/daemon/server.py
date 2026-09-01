@@ -15,7 +15,7 @@ from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsync
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
-from netaudio.daemon.relay import RelayServer
+from netaudio.daemon.http_api import DaemonHTTPServer
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.shure.manager import ShureManager
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
@@ -56,13 +56,13 @@ def _probe_device(device_ip: str) -> bool:
 
 
 class NetaudioDaemon(DanteDiscoveryMixin):
-    def __init__(self, dissect=False, capture=False, relay_port=None):
+    def __init__(self, dissect=False, capture=False, daemon_port=None):
         from netaudio import core
 
         core.require()
 
         self._capture = capture
-        self._relay_port = relay_port
+        self._daemon_port = daemon_port
         self._packet_store = None
         self._session_id = None
 
@@ -116,12 +116,12 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._stop_complete = False
         self.metering = MeteringManager(self.application)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
-        self.relay = RelayServer(
+        self.http_api = DaemonHTTPServer(
             self.application,
             self.state,
             metering=self.metering,
             shure=self.shure,
-            port=self._relay_port,
+            port=self._daemon_port,
             on_shutdown=self.request_shutdown,
             mark_offline=self.mark_device_offline,
         )
@@ -194,7 +194,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 try:
                     await candidate.aclose()
                 except Exception as close_exception:
-                    logger.debug(f"Redis failed-connect cleanup error: {close_exception}")
+                    logger.warning(f"Redis failed-connect cleanup error: {close_exception}", exc_info=True)
             self._redis = None
 
     async def _publish_device_to_redis(self, device):
@@ -434,10 +434,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
     async def _start_once(self):
 
         try:
-            await self.relay.start()
+            await self.http_api.start()
         except OSError as error:
             raise DaemonAlreadyRunningError(
-                f"Another daemon is already listening on port {self.relay.port}: {error}"
+                f"Another daemon is already listening on port {self.http_api.port}: {error}"
             ) from error
 
         logger.info("Daemon listening")
@@ -539,7 +539,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             try:
                 await browser.async_cancel()
             except Exception as exception:
-                logger.debug(f"mDNS browser close error: {exception}")
+                logger.warning(f"mDNS browser close error: {exception}", exc_info=True)
 
         zeroconf = self.zeroconf
         self.zeroconf = None
@@ -547,57 +547,57 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             try:
                 await zeroconf.async_close()
             except Exception as exception:
-                logger.debug(f"Zeroconf close error: {exception}")
+                logger.warning(f"Zeroconf close error: {exception}", exc_info=True)
 
         if self._dbus:
             try:
                 await self._dbus.stop()
             except Exception as exception:
-                logger.debug(f"D-Bus stop error: {exception}")
+                logger.warning(f"D-Bus stop error: {exception}", exc_info=True)
             self._dbus = None
 
         if self.heartbeat:
             try:
                 await self.heartbeat.stop()
             except Exception as exception:
-                logger.debug(f"Heartbeat stop error: {exception}")
+                logger.warning(f"Heartbeat stop error: {exception}", exc_info=True)
             self.heartbeat = None
 
         if self.shure:
             try:
                 await self.shure.stop()
             except Exception as exception:
-                logger.debug(f"Shure stop error: {exception}")
+                logger.warning(f"Shure stop error: {exception}", exc_info=True)
 
-        if self.relay:
+        if self.http_api:
             try:
-                await self.relay.stop()
+                await self.http_api.stop()
             except Exception as exception:
-                logger.debug(f"Relay stop error: {exception}")
+                logger.warning(f"Daemon HTTP API stop error: {exception}", exc_info=True)
 
         if self.metering:
             try:
                 await self.metering.stop()
             except Exception as exception:
-                logger.debug(f"Metering stop error: {exception}")
+                logger.warning(f"Metering stop error: {exception}", exc_info=True)
 
         if self._redis:
             try:
                 await self._redis.aclose()
             except Exception as exception:
-                logger.debug(f"Redis close error: {exception}")
+                logger.warning(f"Redis close error: {exception}", exc_info=True)
             self._redis = None
 
         try:
             await self.application.shutdown()
         except Exception as exception:
-            logger.debug(f"Application shutdown error: {exception}")
+            logger.warning(f"Application shutdown error: {exception}", exc_info=True)
 
         if self._packet_store:
             try:
                 self._packet_store.close()
             except Exception as exception:
-                logger.debug(f"Packet store close error: {exception}")
+                logger.warning(f"Packet store close error: {exception}", exc_info=True)
             self._packet_store = None
 
     def clear_offline_candidate(self, server_name: str) -> None:
@@ -668,8 +668,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                         device.update_last_seen()
                         self.clear_offline_candidate(server_name)
                         return
-                except (asyncio.TimeoutError, OSError):
-                    pass
+                except (asyncio.TimeoutError, OSError) as exception:
+                    logger.warning(f"Dante probe failed for {server_name}: {exception}")
 
             logger.info(f"Device confirmed offline after consecutive failures: {server_name}")
             self.application.mark_device_offline(server_name)
@@ -712,8 +712,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 self.state.fetch_device_controls(server_name),
                 name=f"fetch-controls:{server_name}",
             )
-        except (asyncio.TimeoutError, OSError):
-            logger.debug(f"Device not reachable after recheck: {server_name}")
+        except (asyncio.TimeoutError, OSError) as exception:
+            logger.warning(f"Device not reachable after recheck: {server_name}: {exception}")
 
     async def _recover_known_devices(self, delay: float = 0, offline_only: bool = True) -> None:
         if delay > 0:
@@ -751,8 +751,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 self.clear_offline_candidate(server_name)
                 device.update_last_seen()
                 return
-        except (asyncio.TimeoutError, OSError):
-            pass
+        except (asyncio.TimeoutError, OSError) as exception:
+            logger.warning(f"Dante probe failed for {server_name}: {exception}")
 
         logger.info(f"Online device failed active revalidation: {server_name}")
         self.mark_device_offline_verified(server_name, reason="active_revalidation")
@@ -780,13 +780,13 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             except asyncio.CancelledError:
                 break
             except Exception as exception:
-                logger.debug(f"Revalidation loop error: {exception}")
+                logger.warning(f"Revalidation loop error: {exception}", exc_info=True)
 
 
-async def run_daemon(dissect=False, capture=False, relay_port=None):
+async def run_daemon(dissect=False, capture=False, daemon_port=None):
     import signal
 
-    daemon = NetaudioDaemon(dissect=dissect, capture=capture, relay_port=relay_port)
+    daemon = NetaudioDaemon(dissect=dissect, capture=capture, daemon_port=daemon_port)
     loop = asyncio.get_running_loop()
 
     def handle_signal():
@@ -799,7 +799,7 @@ async def run_daemon(dissect=False, capture=False, relay_port=None):
                 loop.add_signal_handler(sig, handle_signal)
                 installed_signals.append(sig)
             except (NotImplementedError, RuntimeError) as exception:
-                logger.debug(f"Could not install {sig.name} handler: {exception}")
+                logger.warning(f"Could not install {sig.name} handler: {exception}")
 
     try:
         await daemon.start()

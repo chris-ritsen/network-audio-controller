@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from fnmatch import fnmatch
 from typing import Optional
 
 import typer
 
-from netaudio._common import _discover, filter_devices, output_table
+from netaudio._common import _discover
+from netaudio._common_output import output_table
+from netaudio._common_selection import filter_devices
 from netaudio.commands.device_display import _channel_matches
 from netaudio.icons import icon
 

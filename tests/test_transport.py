@@ -1,7 +1,6 @@
 import asyncio
 import struct
 
-import pytest
 
 from netaudio.dante.transport import DanteMulticastProtocol, DanteUnicastProtocol
 

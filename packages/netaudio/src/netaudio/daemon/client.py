@@ -6,28 +6,28 @@ import logging
 from collections.abc import AsyncIterator
 from urllib.parse import quote
 
+from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 
 logger = logging.getLogger("netaudio")
 
-DEFAULT_RELAY_PORT = 9000
-RELAY_HOST = "127.0.0.1"
+DAEMON_HOST = "127.0.0.1"
 EVENT_STREAM_CLOSE_TIMEOUT = 1.0
 EVENT_STREAM_LINE_LIMIT = 1024 * 1024
 EVENT_STREAM_EVENT_LIMIT = 4 * 1024 * 1024
 
 
-def relay_port() -> int:
+def daemon_port() -> int:
     from netaudio.common.app_config import settings as app_settings
 
-    return app_settings.relay_port or DEFAULT_RELAY_PORT
+    return app_settings.daemon_port or DEFAULT_DAEMON_PORT
 
 
-async def _relay_request(method: str, path: str, body=None, timeout: float = 5.0):
+async def _daemon_request(method: str, path: str, body=None, timeout: float = 5.0):
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(RELAY_HOST, relay_port()),
+            asyncio.open_connection(DAEMON_HOST, daemon_port()),
             timeout=1.0,
         )
     except (ConnectionRefusedError, OSError, asyncio.TimeoutError):
@@ -37,7 +37,7 @@ async def _relay_request(method: str, path: str, body=None, timeout: float = 5.0
         payload = json.dumps(body).encode() if body is not None else b""
         head = (
             f"{method} {path} HTTP/1.1\r\n"
-            f"Host: {RELAY_HOST}\r\n"
+            f"Host: {DAEMON_HOST}\r\n"
             f"Content-Type: application/json\r\n"
             f"Content-Length: {len(payload)}\r\n"
             f"Connection: close\r\n"
@@ -73,14 +73,14 @@ async def _relay_request(method: str, path: str, body=None, timeout: float = 5.0
         ValueError,
         json.JSONDecodeError,
     ) as exception:
-        logger.debug(f"Relay request {method} {path} failed: {exception}")
+        logger.debug(f"Daemon request {method} {path} failed: {exception}")
         return None, None
     finally:
         writer.close()
         try:
             await writer.wait_closed()
         except (ConnectionResetError, BrokenPipeError, OSError) as exception:
-            logger.debug(f"Relay connection close error: {exception}")
+            logger.debug(f"Daemon connection close error: {exception}")
 
 
 def daemon_is_accessible() -> bool:
@@ -88,11 +88,11 @@ def daemon_is_accessible() -> bool:
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.settimeout(0.5)
-        return probe.connect_ex((RELAY_HOST, relay_port())) == 0
+        return probe.connect_ex((DAEMON_HOST, daemon_port())) == 0
 
 
 async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
-    status, data = await _relay_request("GET", "/devices")
+    status, data = await _daemon_request("GET", "/devices")
     if status != 200 or data is None:
         return None
 
@@ -104,37 +104,33 @@ async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
 
 
 async def get_device_summaries_from_daemon() -> dict | None:
-    status, data = await _relay_request("GET", "/devices")
+    status, data = await _daemon_request("GET", "/devices")
     if status != 200:
         return None
     return data
 
 
 async def get_shure_devices_from_daemon() -> dict | None:
-    status, data = await _relay_request("GET", "/shure/devices")
+    status, data = await _daemon_request("GET", "/shure/devices")
     if status != 200:
         return None
     return data
 
 
-async def report_unresponsive_device(server_name: str) -> None:
-    await _relay_request("POST", "/report-unresponsive", body={"device": server_name})
-
-
 async def shutdown_daemon() -> bool:
-    status, data = await _relay_request("POST", "/shutdown")
+    status, data = await _daemon_request("POST", "/shutdown")
     return status == 200 and bool(data and data.get("success"))
 
 
 async def refresh_clock_on_daemon(device_name: str) -> dict | None:
-    status, data = await _relay_request("POST", "/refresh-clock", {"device": device_name}, timeout=5.0)
+    status, data = await _daemon_request("POST", "/refresh-clock", {"device": device_name}, timeout=5.0)
     if status != 200 or not isinstance(data, dict):
         return None
     return data
 
 
 async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
-    status, data = await _relay_request("GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0)
+    status, data = await _daemon_request("GET", f"/metering/snapshot/{quote(server_name, safe='')}", timeout=6.0)
     if status != 200 or data is None:
         if data and data.get("error"):
             logger.debug(f"Daemon metering error: {data['error']}")
@@ -143,14 +139,14 @@ async def meter_snapshot_from_daemon(server_name: str) -> dict | None:
 
 
 async def meter_cache_from_daemon() -> dict[str, dict] | None:
-    status, data = await _relay_request("GET", "/metering/cache")
+    status, data = await _daemon_request("GET", "/metering/cache")
     if status != 200 or not isinstance(data, dict):
         return None
     return data
 
 
 async def meter_start_on_daemon(server_name: str, client_id: str) -> bool:
-    status, data = await _relay_request(
+    status, data = await _daemon_request(
         "POST",
         "/metering/start",
         body={"device": server_name, "client_id": client_id},
@@ -159,7 +155,7 @@ async def meter_start_on_daemon(server_name: str, client_id: str) -> bool:
 
 
 async def meter_stop_on_daemon(server_name: str, client_id: str) -> bool:
-    status, data = await _relay_request(
+    status, data = await _daemon_request(
         "POST",
         "/metering/stop",
         body={"device": server_name, "client_id": client_id},
@@ -168,7 +164,7 @@ async def meter_stop_on_daemon(server_name: str, client_id: str) -> bool:
 
 
 async def meter_status_from_daemon() -> dict | None:
-    status, data = await _relay_request("GET", "/metering/status")
+    status, data = await _daemon_request("GET", "/metering/status")
     if status != 200:
         return None
     return data
@@ -218,19 +214,19 @@ async def stream_daemon_events(
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(
-                    RELAY_HOST,
-                    relay_port(),
+                    DAEMON_HOST,
+                    daemon_port(),
                     limit=EVENT_STREAM_LINE_LIMIT,
                 ),
                 timeout=connect_timeout,
             )
         except (ConnectionRefusedError, OSError, asyncio.TimeoutError) as exception:
-            logger.debug(f"Relay event connection failed: {exception}")
+            logger.debug(f"Daemon event connection failed: {exception}")
             return
 
         request = (
             "GET /events HTTP/1.1\r\n"
-            f"Host: {RELAY_HOST}\r\n"
+            f"Host: {DAEMON_HOST}\r\n"
             "Accept: text/event-stream\r\n"
             "Cache-Control: no-cache\r\n"
             "Connection: keep-alive\r\n"
@@ -245,7 +241,7 @@ async def stream_daemon_events(
         content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if status != 200 or content_type != "text/event-stream":
             logger.debug(
-                "Relay event stream rejected: HTTP %s, content-type %r",
+                "Daemon event stream rejected: HTTP %s, content-type %r",
                 status,
                 headers.get("content-type"),
             )
@@ -267,12 +263,12 @@ async def stream_daemon_events(
                     try:
                         event = json.loads("\n".join(data_lines))
                     except json.JSONDecodeError as exception:
-                        logger.debug(f"Ignoring malformed relay SSE JSON: {exception}")
+                        logger.debug(f"Ignoring malformed daemon SSE JSON: {exception}")
                     else:
                         if isinstance(event, dict):
                             yield event
                         else:
-                            logger.debug("Ignoring non-object relay SSE event")
+                            logger.debug("Ignoring non-object daemon SSE event")
                 data_lines.clear()
                 data_size = 0
                 discard_event = False
@@ -294,7 +290,7 @@ async def stream_daemon_events(
             try:
                 data_lines.append(value.decode("utf-8"))
             except UnicodeDecodeError as exception:
-                logger.debug(f"Ignoring malformed relay SSE UTF-8: {exception}")
+                logger.debug(f"Ignoring malformed daemon SSE UTF-8: {exception}")
                 discard_event = True
     except (asyncio.CancelledError, GeneratorExit):
         aborted = True
@@ -308,7 +304,7 @@ async def stream_daemon_events(
         UnicodeDecodeError,
         ValueError,
     ) as exception:
-        logger.debug(f"Relay event stream failed: {exception}")
+        logger.debug(f"Daemon event stream failed: {exception}")
     finally:
         if writer is not None:
             writer.close()
@@ -316,4 +312,4 @@ async def stream_daemon_events(
                 try:
                     await asyncio.wait_for(writer.wait_closed(), timeout=EVENT_STREAM_CLOSE_TIMEOUT)
                 except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as exception:
-                    logger.debug(f"Relay event connection close error: {exception}")
+                    logger.debug(f"Daemon event connection close error: {exception}")

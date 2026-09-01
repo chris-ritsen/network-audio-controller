@@ -72,7 +72,7 @@ def write_options(lines, params):
         return
     for param in options:
         decl, help_text = format_option(param)
-        lines.append(f".TP")
+        lines.append(".TP")
         lines.append(decl)
         if help_text:
             lines.append(escape_troff(help_text))
@@ -84,7 +84,7 @@ def write_arguments(lines, params):
         return
     for param in args:
         name, help_text = format_argument(param)
-        lines.append(f".TP")
+        lines.append(".TP")
         lines.append(f"\\fI{escape_troff(name)}\\fR")
         if help_text:
             lines.append(escape_troff(help_text))
@@ -168,7 +168,7 @@ def build_man_page():
 
                 if isinstance(sub_cmd, click.Group):
                     subsub_names = sub_cmd.list_commands(click.Context(sub_cmd))
-                    lines.append(f".PP")
+                    lines.append(".PP")
                     lines.append(f".B {escape_troff(cmd_name)} {escape_troff(sub_name)}")
                     sub_help = (
                         sub_cmd.get_short_help_str(limit=300)
@@ -183,7 +183,7 @@ def build_man_page():
                         if subsub_cmd is None or getattr(subsub_cmd, "hidden", False):
                             continue
                         full_prefix = f"{cmd_name} {sub_name} {subsub_name}"
-                        lines.append(f".TP")
+                        lines.append(".TP")
                         lines.append(synopsis_for(subsub_cmd, f"netaudio {full_prefix}"))
                         subsub_help = (
                             subsub_cmd.get_short_help_str(limit=300)
@@ -196,7 +196,7 @@ def build_man_page():
                         write_options(lines, subsub_cmd.params)
                 else:
                     full_prefix = f"{cmd_name} {sub_name}"
-                    lines.append(f".TP")
+                    lines.append(".TP")
                     lines.append(synopsis_for(sub_cmd, f"netaudio {full_prefix}"))
                     sub_help = (
                         sub_cmd.get_short_help_str(limit=300)
@@ -208,7 +208,7 @@ def build_man_page():
                     write_arguments(lines, sub_cmd.params)
                     write_options(lines, sub_cmd.params)
         else:
-            lines.append(f".TP")
+            lines.append(".TP")
             lines.append(synopsis_for(cmd, f"netaudio {cmd_name}"))
             write_arguments(lines, cmd.params)
             write_options(lines, cmd.params)
@@ -223,7 +223,7 @@ def build_man_page():
                 desc = param.help or param.name
                 env_vars.append((env, desc))
     for env, desc in sorted(env_vars):
-        lines.append(f".TP")
+        lines.append(".TP")
         lines.append(f"\\fB{escape_troff(env)}\\fR")
         lines.append(escape_troff(desc))
 

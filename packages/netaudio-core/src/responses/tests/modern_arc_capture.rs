@@ -25,7 +25,7 @@ fn payloads(path: &[&str], source_port: Option<u16>) -> Vec<Vec<u8>> {
         .filter(|packet| {
             source_port.is_none_or(|port| packet["source_port"].as_u64() == Some(u64::from(port)))
         })
-        .map(|packet| decode_hex(packet["payload"].as_str().unwrap()))
+        .map(|packet| decode_hexadecimal(packet["payload"].as_str().unwrap()))
         .collect()
 }
 
