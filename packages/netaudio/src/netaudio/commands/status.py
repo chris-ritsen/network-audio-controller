@@ -7,27 +7,38 @@ import typer
 
 from netaudio._common_output import output_single, output_table
 from netaudio._common_selection import sort_devices
-from netaudio.icons import icon
+from netaudio.commands.device_display import (
+    _device_active_latency,
+    _device_encoding,
+    format_encoding,
+    format_latency_milliseconds,
+    format_lock_state,
+    format_sample_rate_hertz,
+)
 
 DANTE_STATUS_HEADERS = [
     "Name",
     "Status",
+    "Kind",
     "Manufacturer",
     "Model",
     "IP Address",
     "TX",
     "RX",
+    "Sample Rate",
+    "Encoding",
+    "Latency",
     "Clock",
     "Lock",
     "Last Seen",
 ]
 
-SHURE_STATUS_HEADERS = ["Name", "Status", "Model", "IP Address", "Type", "Channels", "Last Seen"]
-
 SHURE_DEVICE_TYPE_LABELS = {
     "ad4d": "receiver",
     "p10t": "transmitter",
 }
+
+SHURE_STATUS_HEADERS = ["Name", "Status", "Model", "IP Address", "Type", "Channels", "Last Seen"]
 
 
 def _format_timestamp(value) -> str:
@@ -36,14 +47,6 @@ def _format_timestamp(value) -> str:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     return str(value)
-
-
-def _lock_display(is_locked) -> str:
-    if is_locked is True:
-        return icon("lock") or "locked"
-    if is_locked is False:
-        return icon("unlock") or "unlocked"
-    return ""
 
 
 def _status_label(online) -> str:
@@ -62,13 +65,17 @@ def _dante_row_from_device(device) -> list[str]:
     return [
         device.name or "",
         _status_label(device.online),
+        device.kind,
         device.manufacturer or "",
         device.dante_model or device.model_id or "",
         str(device.ipv4) if device.ipv4 else "",
         str(len(device.tx_channels) if device.tx_channels else (device.tx_count or 0)),
         str(len(device.rx_channels) if device.rx_channels else (device.rx_count or 0)),
+        format_sample_rate_hertz(device.sample_rate),
+        format_encoding(_device_encoding(device)),
+        format_latency_milliseconds(_device_active_latency(device)),
         device.clock_role or "",
-        _lock_display(device.is_locked),
+        format_lock_state(device),
         _format_timestamp(device.last_seen),
     ]
 
@@ -159,6 +166,6 @@ def status(
         return
 
     if dante_rows:
-        output_table(DANTE_STATUS_HEADERS, dante_rows, title="Dante")
+        output_table(DANTE_STATUS_HEADERS, dante_rows)
     if shure_rows:
         output_table(SHURE_STATUS_HEADERS, shure_rows, title="Shure")
