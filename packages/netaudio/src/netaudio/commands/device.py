@@ -255,7 +255,7 @@ def device_list(
             "Latency",
             "Configured Latency",
             "Latency Range",
-            "Standard Latencies",
+            "Latency Options",
             "AES67",
             "Sample Rate Pull-Up",
             "Preferred Leader",

@@ -49,4 +49,4 @@ Architecture and distribution decisions for netaudio. These were argued out once
 - Explicit commands over magic. Each install flavor is its own command doing exactly one thing; no flag silently changes state outside netaudio's own scope.
 - `install` never overwrites a user-managed unit without `--force`; `uninstall` never deletes anything lacking the `X-NetaudioManaged` marker.
 - Generated units reference the stable `~/.local/bin/netaudio` shim, never resolved symlinks into uv internals.
-- Clean room: protocol knowledge comes from packet captures and runtime observation. No decompiled names anywhere.
+- Protocol research: protocol knowledge comes from packet captures and runtime observation. No decompiled names anywhere.

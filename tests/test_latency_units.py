@@ -1,10 +1,12 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from netaudio._common import format_devices_xml
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.latency import (
+    latency_state_from_settings,
     milliseconds_to_microseconds,
     nanoseconds_to_milliseconds,
     standard_latency_choices_for_range,
@@ -112,6 +114,72 @@ def test_standard_latency_choices_are_derived_only_from_advertised_range():
     assert standard_latency_choices_for_range(1.0, 20.3125) == [1.0, 2.0, 5.0]
     assert standard_latency_choices_for_range(0.15, 21.333334) == [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
     assert standard_latency_choices_for_range(None, 5.0) is None
+
+
+def test_latency_state_preserves_raw_units_bounds_choices_and_off_list_status():
+    state = latency_state_from_settings(
+        {
+            "default_latency_ns": 1_000_000,
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 750_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 5_000_000,
+        }
+    )
+
+    assert state == {
+        "active_latency_ms": 0.75,
+        "active_latency_ns": 750_000,
+        "configured_latency_ms": 0.25,
+        "configured_latency_ns": 250_000,
+        "default_latency_ms": 1.0,
+        "default_latency_ns": 1_000_000,
+        "min_latency_ms": 0.15,
+        "min_latency_ns": 150_000,
+        "max_latency_ms": 5.0,
+        "max_latency_ns": 5_000_000,
+        "latency_options_ms": [0.15, 0.25, 0.5, 1.0, 2.0, 5.0],
+        "latency_options_ns": [150_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000],
+        "latency_options_source": "controller_fixed_set_filtered_by_reported_range",
+        "active_latency_is_standard_choice": False,
+        "active_latency_within_reported_range": True,
+        "configured_latency_is_standard_choice": True,
+        "configured_latency_within_reported_range": True,
+    }
+
+
+def test_capture_backed_avio_bounds_filter_controller_latency_choices(load_fixture):
+    from netaudio import core
+
+    settings = core.parse_response("device_settings", load_fixture("core_device_settings_avio-aes3-1.bin"))
+    state = latency_state_from_settings(settings)
+
+    assert state["min_latency_ns"] == 1_000_000
+    assert state["max_latency_ns"] == 20_312_500
+    assert state["latency_options_ms"] == [1.0, 2.0, 5.0]
+    assert state["latency_options_ns"] == [1_000_000, 2_000_000, 5_000_000]
+
+
+@pytest.mark.asyncio
+async def test_latency_settings_operation_uses_the_focused_latency_query(load_fixture):
+    from netaudio import core
+
+    device = DanteDevice()
+    response = load_fixture("core_latency_config_avio-aes3-1.bin")
+    device.dante_command = AsyncMock(return_value=response)
+
+    settings = await device.operations.get_latency_settings()
+
+    command = core.build_command({"command": "query_latency_config"})
+    device.dante_command.assert_awaited_once_with(
+        command,
+        "_netaudio-arc._udp.local.",
+        None,
+        logical_command_name="query_latency_config",
+    )
+    assert settings["active_latency_ns"] == 1_000_000
+    assert settings["min_latency_ns"] == 1_000_000
+    assert settings["max_latency_ns"] == 20_312_500
 
 
 def test_explicit_unavailable_latency_fields_clear_stale_device_state():
