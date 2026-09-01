@@ -1,4 +1,3 @@
-import codecs
 from dataclasses import dataclass
 
 import pytest

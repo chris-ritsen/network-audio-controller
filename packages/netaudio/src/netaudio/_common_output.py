@@ -8,9 +8,8 @@ import typer
 
 from netaudio import DanteDevice
 from netaudio._common_cli import _get_state, _iconize_headers
-from netaudio.common.app_config import settings
+from netaudio._exit_codes import ExitCode
 from netaudio.dante.latency import milliseconds_to_microseconds
-from netaudio.icons import icon
 
 
 def _format_text(headers: list[str], rows: list[list[str]]) -> str:

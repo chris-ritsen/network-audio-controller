@@ -25,13 +25,13 @@ from netaudio.commands.capture_helpers import (
     _normalize_marker_type,
     _parse_int_option,
     _parse_time_filter,
-    _print_packet_table_header,
     _require_positive_session_id,
     _resolve_db_from_config,
     _resolve_marker_window,
     _resolve_redis_from_config,
     _resolve_session_reference,
 )
+from netaudio.capture.packets import _print_packet_table_header
 from netaudio.commands.capture_live import _resolve_redis_for_capture
 from netaudio.dante.packet_store import PacketStore
 from netaudio.icons import icon
@@ -201,7 +201,7 @@ def session_list(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio._common import output_table
+    from netaudio._common_output import output_table
 
     profile_cfg, _ = _load_capture_profile(config, profile)
     resolved_db = _resolve_db_from_config(db, profile_cfg)
@@ -283,7 +283,7 @@ def session_show(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio._common import output_single
+    from netaudio._common_output import output_single
     from netaudio.cli import OutputFormat, state as cli_state
 
     _require_positive_session_id(id, "--id")
@@ -547,10 +547,12 @@ def marker(
     data: Optional[str] = typer.Option(None, "--data", help="Optional JSON object payload."),
     db: Optional[str] = typer.Option(None, "--db", help="SQLite database path."),
     source_host: Optional[str] = typer.Option(None, "--source-host", help="Host that generated this marker."),
-    relay_stream: Optional[str] = typer.Option(
-        None, "--relay-stream", help="Redis stream key to publish marker events."
+    ingress_stream: Optional[str] = typer.Option(
+        None, "--ingress-stream", help="Redis stream key to publish marker events."
     ),
-    relay_only: bool = typer.Option(False, "--relay-only", help="Only publish to Redis stream (skip local DB write)."),
+    ingress_only: bool = typer.Option(
+        False, "--ingress-only", help="Only publish to Redis stream (skip local DB write)."
+    ),
     redis_host: Optional[str] = typer.Option(None, "--redis-host", help="Redis host."),
     redis_port: Optional[int] = typer.Option(None, "--redis-port", help="Redis port."),
     redis_db: Optional[int] = typer.Option(None, "--redis-db", help="Redis DB."),
@@ -591,7 +593,7 @@ def marker(
     normalized_type = _normalize_marker_type(marker_type, strict=True)
     normalized_label = _normalize_marker_label(label)
     resolved_session_id: int
-    if relay_only and session_id is not None and not session:
+    if ingress_only and session_id is not None and not session:
         resolved_session_id = int(session_id)
     else:
         store = PacketStore(db_path=resolved_db)
@@ -607,11 +609,13 @@ def marker(
 
     resolved_host = source_host or socket.gethostname()
     marker_ts = time.time_ns()
-    resolved_relay_stream = _coalesce(relay_stream, capture_cfg.get("ingress_stream"))
-    if relay_only and not resolved_relay_stream:
-        print("Capture: --relay-only requires --relay-stream (or capture.ingress_stream in config).", file=sys.stderr)
+    resolved_ingress_stream = _coalesce(ingress_stream, capture_cfg.get("ingress_stream"))
+    if ingress_only and not resolved_ingress_stream:
+        print(
+            "Capture: --ingress-only requires --ingress-stream (or capture.ingress_stream in config).", file=sys.stderr
+        )
         raise typer.Exit(1)
-    if not relay_only:
+    if not ingress_only:
         store = PacketStore(db_path=resolved_db)
         try:
             marker_id = store.add_marker(
@@ -628,7 +632,7 @@ def marker(
         finally:
             store.close()
 
-    if resolved_relay_stream:
+    if resolved_ingress_stream:
         client = _resolve_redis_for_capture(
             redis_host=resolved_redis_host,
             redis_port=resolved_redis_port,
@@ -646,11 +650,11 @@ def marker(
             "summary": str(summary or ""),
             "note": str(note or ""),
             "data_json": json.dumps(payload, sort_keys=True) if payload else "",
-            "already_stored": "0" if relay_only else "1",
+            "already_stored": "0" if ingress_only else "1",
         }
         try:
-            client.xadd(str(resolved_relay_stream), event, maxlen=200000, approximate=True)
-            print(f"Capture: Published marker to stream {resolved_relay_stream}")
+            client.xadd(str(resolved_ingress_stream), event, maxlen=200000, approximate=True)
+            print(f"Capture: Published marker to stream {resolved_ingress_stream}")
         except Exception as exception:
             print(f"Capture: failed to publish marker: {exception}", file=sys.stderr)
             raise typer.Exit(1)

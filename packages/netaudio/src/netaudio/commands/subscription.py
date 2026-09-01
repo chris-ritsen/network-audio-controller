@@ -18,17 +18,13 @@ from netaudio._common import (
     _discover,
     _get_arc_port,
     _populate_controls,
-    filter_devices,
-    find_channel,
-    find_device,
-    output_table,
-    parse_qualified_name,
     readback_after_notification,
     send_and_wait_for_notification,
-    sort_devices,
 )
+from netaudio._common_output import output_table
+from netaudio._common_selection import filter_devices, find_channel, find_device, parse_qualified_name, sort_devices
 from netaudio._exit_codes import ExitCode
-from netaudio.icons import icon, icon_only
+from netaudio.icons import icon
 
 app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True)
 

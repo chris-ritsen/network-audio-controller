@@ -15,7 +15,7 @@ fn payload(path: &[&str]) -> Vec<u8> {
     for component in path {
         value = &value[*component];
     }
-    decode_hex(value["payload"].as_str().unwrap())
+    decode_hexadecimal(value["payload"].as_str().unwrap())
 }
 
 #[test]

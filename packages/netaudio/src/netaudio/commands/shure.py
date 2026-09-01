@@ -1,34 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
 
 import typer
 
-from netaudio.shure.discovery import get_shure_neighbor_entries
 from netaudio.commands.shure_transport import (
     PROTOCOL_CONFIGS,
     Protocol,
     ShureCommandError,
-    ShureCommandRejected,
     ShureCommandTimeout,
     ShureDevice,
     _discover_shure_devices,
     _format_plain,
-    _parse_ad4d_line,
-    _parse_p10t_line,
-    _probe_device,
     _resolve_target,
     _send,
 )
 from netaudio.commands.shure_correlation import (
-    _config_path,
     _get_active_shure_channels,
     _load_correlation,
     _mac_match,
@@ -130,7 +121,7 @@ def _query_device_info(device, discovered, *, require_channels=False):
 @device_app.command("list")
 def shure_device_list():
     from netaudio.cli import state
-    from netaudio._common import output_single
+    from netaudio._common_output import output_single
 
     discovered = _discover_shure_devices()
     if not discovered:
@@ -227,7 +218,7 @@ def shure_channel_list(
     port: Optional[int] = typer.Option(None, "--port", "-p", help="TCP control port."),
 ):
     from netaudio.cli import state
-    from netaudio._common import output_single
+    from netaudio._common_output import output_single
     from netaudio.shure.device import ShureChannel, ShureP10TChannel
 
     if host:
@@ -400,7 +391,7 @@ def shure_device_show(
         )
         raise typer.Exit(code=1) from exception
 
-    from netaudio._common import output_single
+    from netaudio._common_output import output_single
 
     if state.output_format.value in ("json", "yaml", "xml", "csv"):
         output_single(device_info.to_json())

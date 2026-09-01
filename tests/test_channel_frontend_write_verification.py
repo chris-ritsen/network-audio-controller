@@ -2,7 +2,6 @@ from tests.test_cli_write_verification import (
     FakeChannelDevice,
     _install_context,
     channel_commands,
-    reset_cli_state,
     runner,
 )
 

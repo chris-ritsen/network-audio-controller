@@ -205,11 +205,7 @@ impl Client {
             }
             IoMode::Request => {
                 let match_id = u16::from_be_bytes([routed.packet[4], routed.packet[5]]);
-                match self.request_to(&routed.packet, match_id, address) {
-                    Ok(response) => Ok(response),
-                    Err(ClientError::Timeout) => Ok(Vec::new()),
-                    Err(error) => Err(error),
-                }
+                self.request_to(&routed.packet, match_id, address)
             }
             IoMode::Fire {
                 repeat,
@@ -292,11 +288,7 @@ impl Client {
         let match_id = u16::from_be_bytes([packet[4], packet[5]]);
 
         if expect_response {
-            return match self.request_to(packet, match_id, address) {
-                Ok(response) => Ok(response),
-                Err(ClientError::Timeout) => Ok(Vec::new()),
-                Err(error) => Err(error),
-            };
+            return self.request_to(packet, match_id, address);
         }
 
         for attempt in 0..repeat.max(1) {
@@ -667,6 +659,30 @@ mod tests {
 
         assert!(matches!(result, Err(ClientError::Timeout)));
         assert!(started.elapsed() >= Duration::from_millis(200));
+    }
+
+    #[test]
+    fn raw_request_that_expects_a_reply_reports_timeout_instead_of_an_empty_buffer() {
+        let device = FakeDevice::new();
+        let client = test_client(device.port());
+        let packet = crate::commands::build_device_log_export([0x11; 6], 0x0083).unwrap();
+
+        let result = client.request_raw(&packet, device.port(), true, 1, 0);
+
+        assert!(matches!(result, Err(ClientError::Timeout)));
+    }
+
+    #[test]
+    fn raw_fire_request_keeps_empty_response_semantics() {
+        let device = FakeDevice::new();
+        let client = test_client(device.port());
+        let packet = crate::commands::build_device_log_export([0x11; 6], 0x0083).unwrap();
+
+        let response = client
+            .request_raw(&packet, device.port(), false, 1, 0)
+            .unwrap();
+
+        assert!(response.is_empty());
     }
 
     #[test]

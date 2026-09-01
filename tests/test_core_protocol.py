@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import validate_dante_name
 from tests.protocol_test_fixtures import load_protocol_packet
@@ -78,16 +77,13 @@ def _find_or_build_library():
 @pytest.fixture(scope="module")
 def core():
     library = ctypes.CDLL(str(_find_or_build_library()))
-    library.netaudio_build_set_device_name.argtypes = [
+    library.netaudio_build_command.argtypes = [
         ctypes.c_char_p,
-        ctypes.c_uint16,
         ctypes.POINTER(ctypes.c_uint8),
         ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_size_t),
     ]
-    library.netaudio_build_set_device_name.restype = ctypes.c_int
-    library.netaudio_service_arc.argtypes = []
-    library.netaudio_service_arc.restype = ctypes.c_char_p
+    library.netaudio_build_command.restype = ctypes.c_int
     library.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
         ctypes.c_uint16,
@@ -252,9 +248,8 @@ def client_factory(core):
 def rust_build_set_device_name(core, name, transaction_id=0, capacity=64):
     buffer = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
-    status = core.netaudio_build_set_device_name(
-        name.encode("utf-8"), transaction_id, buffer, capacity, ctypes.byref(length)
-    )
+    specification = json.dumps({"command": "set_name", "name": name, "transaction_id": transaction_id})
+    status = core.netaudio_build_command(specification.encode("utf-8"), buffer, capacity, ctypes.byref(length))
     return status, bytes(buffer[: length.value])
 
 
@@ -285,9 +280,6 @@ class TestSetDeviceNameParity:
         status, rust_packet = rust_build_set_device_name(core, "Studio-AVIO", transaction_id=transaction_id)
         assert status == NETAUDIO_OK
         assert rust_packet == python_packet
-
-    def test_service_matches_python(self, core):
-        assert core.netaudio_service_arc().decode() == SERVICE_ARC
 
     @pytest.mark.parametrize("name,expected_status", INVALID_NAMES.items())
     def test_validation_rejects_what_python_rejects(self, core, name, expected_status):
