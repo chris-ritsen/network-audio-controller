@@ -43,12 +43,12 @@ def _resolve_rep(monkeypatch):
 
 
 def test_response_parsers_preserve_values_with_spaces():
-    assert shure._parse_ad4d_line("< REP DEVICE_ID {Studio Rack A} >") == (
+    assert shure_transport._parse_ad4d_line("< REP DEVICE_ID {Studio Rack A} >") == (
         None,
         "DEVICE_ID",
         "Studio Rack A",
     )
-    assert shure._parse_p10t_line("< REPORT DEVICE_NAME Studio Rack A >") == (
+    assert shure_transport._parse_p10t_line("< REPORT DEVICE_NAME Studio Rack A >") == (
         None,
         "DEVICE_NAME",
         "Studio Rack A",
@@ -63,7 +63,7 @@ def test_p10t_probe_preserves_device_names_with_spaces(monkeypatch):
         lambda *args, **kwargs: connection_socket,
     )
 
-    assert shure._probe_device("192.0.2.10") == (
+    assert shure_transport._probe_device("192.0.2.10") == (
         shure.Protocol.report,
         "Studio Rack A",
         "Studio Rack A",
@@ -78,7 +78,7 @@ def test_strict_send_raises_for_explicit_device_error(monkeypatch):
         lambda *args, **kwargs: connection_socket,
     )
 
-    with pytest.raises(shure.ShureCommandRejected, match="INVALID_VALUE"):
+    with pytest.raises(shure_transport.ShureCommandRejected, match="INVALID_VALUE"):
         shure._send(
             "192.0.2.10",
             2202,
@@ -208,7 +208,7 @@ def test_set_error_response_stops_before_readback(monkeypatch):
 
     def send(*args, **kwargs):
         calls.append(kwargs["command"])
-        raise shure.ShureCommandRejected("device rejected the value")
+        raise shure_transport.ShureCommandRejected("device rejected the value")
 
     monkeypatch.setattr(shure, "_send", send)
 
@@ -356,7 +356,7 @@ def test_channel_list_keeps_successes_and_aggregates_device_errors(monkeypatch):
                 "MODEL": "AD4D",
                 1: {"CHAN_NAME": "Vocal"},
             }
-        raise shure.ShureCommandRejected("device rejected bulk query: ERR BUSY")
+        raise shure_transport.ShureCommandRejected("device rejected bulk query: ERR BUSY")
 
     monkeypatch.setattr(shure, "_send", send)
 

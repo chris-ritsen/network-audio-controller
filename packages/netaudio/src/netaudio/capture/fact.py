@@ -262,7 +262,7 @@ def _dissect_evidence_packet(provenance_dir, session_ref: str, packet_id: int) -
             payload = files.get(filename)
             if payload:
                 try:
-                    from netaudio.dante.packet_dissector import dissect_and_render
+                    from netaudio.dante.packet_dissection_rendering import dissect_and_render
                     from netaudio.common.app_config import settings as app_settings
 
                     color = not app_settings.no_color

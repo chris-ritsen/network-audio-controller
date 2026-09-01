@@ -243,10 +243,6 @@ pub fn build_set_gain_level(
     settings_packet(sequence, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
 }
 
-pub fn build_enable_aes67(enabled: bool, mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
-    build_enable_aes67_with_sequence(enabled, mac, 0x22DC)
-}
-
 pub fn build_enable_aes67_with_sequence(
     enabled: bool,
     mac: [u8; 6],

@@ -90,7 +90,8 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
                             mac_addr = line.split()[1]
                     if has_ip and mac_addr:
                         return bytes.fromhex(mac_addr.replace(":", ""))
-                except Exception:
+                except (OSError, subprocess.TimeoutExpired, ValueError) as exception:
+                    logger.warning(f"Could not read interface {interface}: {exception}")
                     continue
     except Exception:
         logger.exception("Failed to derive host MAC address from network interfaces")
@@ -187,9 +188,6 @@ class DanteCMCService(DanteUnicastService):
         tasks = [self.register_device(ip) for ip in device_ips]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def start_heartbeat(self, get_device_ips) -> None:
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(get_device_ips))
-
     async def _heartbeat_loop(self, get_device_ips) -> None:
         while True:
             try:
@@ -200,7 +198,7 @@ class DanteCMCService(DanteUnicastService):
             except asyncio.CancelledError:
                 break
             except Exception as exception:
-                logger.debug(f"CMC heartbeat error: {exception}")
+                logger.warning(f"CMC heartbeat error: {exception}", exc_info=True)
 
     async def stop(self) -> None:
         if self._heartbeat_task:

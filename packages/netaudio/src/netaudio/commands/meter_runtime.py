@@ -140,7 +140,7 @@ class _MeteringState:
 
     def issue_initial_starts(self) -> None:
         # Once these requests are issued, balance every one with a stop even
-        # if the local relay response is lost.
+        # if the local daemon response is lost.
         self.issued_devices = list(self.attempted_devices)
         self._schedule_starts(self.attempted_devices)
 
@@ -433,7 +433,7 @@ class _MeterRuntime:
                     no_color=self.no_color,
                 )
                 self.metering.issue_initial_starts()
-                # Start the local relay requests, but never make the UI wait
+                # Start the local daemon requests, but never make the UI wait
                 # for their response before accepting input.
                 await asyncio.sleep(0)
 
