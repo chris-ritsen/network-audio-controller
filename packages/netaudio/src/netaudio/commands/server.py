@@ -10,12 +10,14 @@ logger = logging.getLogger("netaudio")
 
 import typer
 
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+
 from netaudio.daemon.client import get_device_summaries_from_daemon, shutdown_daemon
 from netaudio.daemon import service_install
 
 from netaudio.icons import icon
 
-app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True)
+app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
 
 def _port_in_use(port):
