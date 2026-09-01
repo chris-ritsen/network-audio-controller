@@ -3,9 +3,6 @@ from __future__ import annotations
 from netaudio.dante.clean_labels import load_clean_subscription_status_labels
 from netaudio.dante.subscription_status import (
     SUBSCRIPTION_STATUS_DEFINITIONS,
-    SubscriptionSeverity,
-    SubscriptionState,
-    SubscriptionStatus,
     default_status_entry as _builtin_status_entry,
 )
 
@@ -177,13 +174,9 @@ def subscription_status_entry(code: int) -> dict[str, object]:
 
 
 def subscription_status_label(code: int) -> str:
-    from netaudio.i18n import translate
-
-    return translate(subscription_status_entry(code)["label"])
+    return subscription_status_entry(code)["label"]
 
 
 def subscription_status_detail(code: int) -> str | None:
-    from netaudio.i18n import translate
-
     detail = subscription_status_entry(code)["detail"]
-    return translate(detail) if detail else None
+    return detail if detail else None

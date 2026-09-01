@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import re
@@ -91,7 +90,7 @@ class DBusService:
                     try:
                         candidate_bus.disconnect()
                     except Exception as exception:
-                        logger.debug(f"D-Bus failed-connect cleanup error: {exception}")
+                        logger.warning(f"D-Bus failed-connect cleanup error: {exception}", exc_info=True)
                 raise
 
             logger.info("D-Bus service started: com.netaudio.Daemon")
@@ -138,14 +137,14 @@ class DBusService:
             try:
                 bus.unexport("/com/netaudio", self._manager)
             except Exception as exception:
-                logger.debug(f"D-Bus manager unexport error: {exception}")
+                logger.warning(f"D-Bus manager unexport error: {exception}", exc_info=True)
         self._manager = None
 
         if bus:
             try:
                 bus.disconnect()
             except Exception as exception:
-                logger.debug(f"D-Bus disconnect error: {exception}")
+                logger.warning(f"D-Bus disconnect error: {exception}", exc_info=True)
         self._bus = None
         self._dante_interfaces.clear()
         self._dante_paths.clear()

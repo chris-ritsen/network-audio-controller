@@ -2,7 +2,8 @@ import asyncio
 
 import typer
 
-from netaudio._common import output_table, sort_devices
+from netaudio._common_output import output_table
+from netaudio._common_selection import sort_devices
 from netaudio.dante.clock_identity import canonical_clock_identity
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 

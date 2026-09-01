@@ -105,7 +105,7 @@ async def _collect_diagnostics() -> dict:
         finally:
             await application.shutdown()
 
-    from netaudio._common import filter_devices
+    from netaudio._common_selection import filter_devices
 
     devices = filter_devices(devices or {})
 

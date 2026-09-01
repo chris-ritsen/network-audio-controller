@@ -1,4 +1,3 @@
-import asyncio
 import socket
 import struct
 from unittest.mock import MagicMock

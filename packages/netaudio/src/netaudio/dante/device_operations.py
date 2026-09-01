@@ -17,7 +17,6 @@ from netaudio.dante.channel_status_paging import (
 from netaudio.dante.const import (
     OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
     OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-    PROTOCOL_ARC_2809,
     RESULT_CODE_SUCCESS,
     RESULT_CODE_SUCCESS_EXTENDED,
 )
@@ -448,10 +447,15 @@ class DanteDeviceOperations:
 
         def _query():
             packet = core.build_command({"command": "query_latency_config"})
-            return client.request(packet, client._arc_port)
+            try:
+                return client.request(packet, client._arc_port)
+            except core.NetaudioCoreError as error:
+                if error.status != core.STATUS_TIMEOUT:
+                    raise
+                return None
 
         response = await asyncio.to_thread(_query)
-        if not response:
+        if response is None:
             return None
         configured = core.parse_response("aes67_configured", response)
         settings = core.parse_response("device_settings", response)

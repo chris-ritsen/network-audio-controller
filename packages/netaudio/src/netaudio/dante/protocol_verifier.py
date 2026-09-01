@@ -11,7 +11,8 @@ from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
-from netaudio.dante.packet_store import PacketStore, _parse_header, _safe_name, extract_evidence_packet_ids
+from netaudio.dante.packet_store import PacketStore, _parse_header
+from netaudio.dante.packet_store_common import extract_evidence_packet_ids, safe_name as _safe_name
 from netaudio.dante.service import DanteUnicastService
 
 logger = logging.getLogger("netaudio")

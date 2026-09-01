@@ -14,7 +14,7 @@ Architecture and distribution decisions for netaudio. These were argued out once
 - **Hand-rolled C ABI + cbindgen, not uniffi.** uniffi is right when you own all consumers; the C ABI lets any language bind without a binding generator in the loop. This was deliberate. Keep it.
 - **ABI discipline:** any FFI signature change bumps `NETAUDIO_ABI_VERSION` in `ffi/mod.rs` and `binding.py` together, plus `make header`. The binding refuses to load a mismatched library rather than segfault.
 - **Crate artifacts:** one build produces cdylib (Python loads), staticlib (iOS links), rlib (Rust-internal).
-- Python remains the orchestration layer: CLI, daemon, relay HTTP API. Event-driven, Redis-backed, dbus-fast for systemd (launchctl subprocess is the sole exception — launchd has no library API).
+- Python remains the orchestration layer: CLI, daemon and its HTTP API. Event-driven, Redis-backed, dbus-fast for systemd (launchctl subprocess is the sole exception — launchd has no library API).
 
 ## Distribution
 

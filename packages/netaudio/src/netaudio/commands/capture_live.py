@@ -19,13 +19,12 @@ from netaudio.commands.capture_app import app
 from netaudio.commands.capture_helpers import (
     _as_dict,
     _coalesce,
-    _label_packet,
     _load_capture_profile,
-    _print_packet_table_header,
     _require_positive_session_id,
     _resolve_db_from_config,
     _resolve_redis_from_config,
 )
+from netaudio.capture.packets import _label_packet, _print_packet_table_header
 from netaudio.common.app_config import get_available_interfaces
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.packet_store import PacketStore
@@ -231,17 +230,23 @@ def live(
     session_name: Optional[str] = typer.Option(
         None, "--session-name", help="Create a new capture session with this name."
     ),
-    redis_host: Optional[str] = typer.Option(None, "--redis-host", help="Redis host for device discovery/relay."),
-    redis_port: Optional[int] = typer.Option(None, "--redis-port", help="Redis port for device discovery/relay."),
-    redis_db: Optional[int] = typer.Option(None, "--redis-db", help="Redis DB index for device discovery/relay."),
+    redis_host: Optional[str] = typer.Option(
+        None, "--redis-host", help="Redis host for device discovery and capture ingress."
+    ),
+    redis_port: Optional[int] = typer.Option(
+        None, "--redis-port", help="Redis port for device discovery and capture ingress."
+    ),
+    redis_db: Optional[int] = typer.Option(
+        None, "--redis-db", help="Redis DB index for device discovery and capture ingress."
+    ),
     redis_password: Optional[str] = typer.Option(
-        None, "--redis-password", help="Redis password for device discovery/relay."
+        None, "--redis-password", help="Redis password for device discovery and capture ingress."
     ),
     redis_socket: Optional[str] = typer.Option(
-        None, "--redis-socket", help="Redis UNIX socket path for device discovery/relay."
+        None, "--redis-socket", help="Redis UNIX socket path for device discovery and capture ingress."
     ),
-    relay_stream: Optional[str] = typer.Option(
-        None, "--relay-stream", help="Redis stream key to publish capture events."
+    ingress_stream: Optional[str] = typer.Option(
+        None, "--ingress-stream", help="Redis stream key to publish capture events."
     ),
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
@@ -296,7 +301,7 @@ def live(
         raise typer.Exit(1)
 
     print(f"{icon('capture')}Capture: Interface {resolved_interface} ({interface_ip}) {_emdash()} {interface_source}")
-    resolved_relay_stream = _coalesce(relay_stream, capture_cfg.get("ingress_stream"))
+    resolved_ingress_stream = _coalesce(ingress_stream, capture_cfg.get("ingress_stream"))
 
     daemon = CaptureDaemon(
         db_path=resolved_db,
@@ -318,7 +323,7 @@ def live(
         redis_db=resolved_redis_db,
         redis_password=resolved_redis_password,
         redis_socket=resolved_redis_socket,
-        relay_stream=str(resolved_relay_stream) if resolved_relay_stream is not None else None,
+        ingress_stream=str(resolved_ingress_stream) if resolved_ingress_stream is not None else None,
     )
 
     original_sigint = signal.getsignal(signal.SIGINT)

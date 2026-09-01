@@ -2,12 +2,13 @@
 
 use std::ffi::{c_char, CStr};
 use std::net::IpAddr;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use crate::client::{Client, ClientError};
-use crate::protocol::{build_set_device_name, NetaudioError, SERVICE_ARC};
+use crate::protocol::NetaudioError;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,7 @@ pub enum NetaudioStatus {
     InvalidFlowProtocol = 30,
     InvalidSequence = 31,
     UnsupportedProtocolOperation = 32,
+    InternalPanic = 33,
 }
 
 impl From<crate::lock::LockError> for NetaudioStatus {
@@ -116,9 +118,14 @@ pub struct NetaudioClient {
     inner: Mutex<Client>,
 }
 
-const SERVICE_ARC_CSTR: &[u8] = b"_netaudio-arc._udp.local.\0";
+pub const NETAUDIO_ABI_VERSION: u32 = 3;
 
-pub const NETAUDIO_ABI_VERSION: u32 = 2;
+fn guard_panic(operation: impl FnOnce() -> NetaudioStatus) -> NetaudioStatus {
+    match catch_unwind(AssertUnwindSafe(operation)) {
+        Ok(status) => status,
+        Err(_) => NetaudioStatus::InternalPanic,
+    }
+}
 
 unsafe fn prepare_output(
     out_buffer: *mut u8,

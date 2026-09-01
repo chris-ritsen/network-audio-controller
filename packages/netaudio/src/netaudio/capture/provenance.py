@@ -380,7 +380,7 @@ def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int
                         if f:
                             _process_payload(f.read())
         except Exception as exception:
-            logger.debug(f"Failed to process archive {archive}: {exception}")
+            logger.warning(f"Failed to process archive {archive}: {exception}", exc_info=True)
 
     return observed_opcodes, observed_messages, observed_subscription_statuses
 

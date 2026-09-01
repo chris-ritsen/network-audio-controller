@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import csv
-import io
-import json as json_module
 import logging
-import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from glob import has_magic
 from typing import Any, Awaitable, Callable, Optional
 
@@ -31,11 +26,11 @@ from netaudio.dante.diagnostic_logs import (
     apply_device_audio_capabilities,
     parse_device_log_export,
 )
-from netaudio.dante.latency import milliseconds_to_microseconds
 from netaudio.dante.lock_status import LockStatusObservation
 
+from netaudio._common_cli import _get_state
+from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
-from netaudio.icons import icon
 
 logger = logging.getLogger("netaudio")
 
@@ -231,7 +226,7 @@ class CoreCommandSender(CoreCapabilityProbeOperations):
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                pass
+                logger.warning(f"Clock status probe timed out for {device_ip_address}")
         finally:
             notifications.unregister_preferred_leader_waiter(device_ip_address)
         if device.clock_source_code is None:
@@ -494,9 +489,6 @@ def ansi(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
-from netaudio._common_cli import HEADER_ICONS, _get_state, _iconize_headers
-
-
 def _make_dante_application(packet_store=None, session_id=None) -> DanteApplication:
     application = DanteApplication(packet_store=packet_store, dissect=_get_state().dissect)
     if packet_store and session_id:
@@ -525,7 +517,9 @@ async def _probe_lock_status_once(
         try:
             await application.shutdown()
         except Exception as exception:
-            logger.debug(f"Lock status application shutdown failed for {device_ip_address}: {exception}")
+            logger.warning(
+                f"Lock status application shutdown failed for {device_ip_address}: {exception}", exc_info=True
+            )
 
 
 async def _discover(packet_store=None, session_id=None) -> dict[str, DanteDevice]:
@@ -826,29 +820,3 @@ async def _load_display_devices(include_channels: bool = False) -> dict[str, Dan
     await _enrich_clock_fields(devices)
     await _enrich_lock_states(devices)
     return devices
-
-
-from netaudio._common_output import (
-    _device_to_preset_xml,
-    _format_csv,
-    _format_json,
-    _format_table,
-    _format_text,
-    _format_yaml,
-    _hex_encode,
-    _sub_text,
-    format_devices_xml,
-    output_single,
-    output_table,
-)
-from netaudio._common_selection import (
-    _mac_matches,
-    _normalize_mac,
-    _strip_separators,
-    filter_devices,
-    find_channel,
-    find_device,
-    parse_qualified_name,
-    set_device_filter,
-    sort_devices,
-)

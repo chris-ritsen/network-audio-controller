@@ -113,8 +113,8 @@ def _load_icons_from_config() -> bool:
         ui_section = data.get("ui", {})
         if isinstance(ui_section, dict):
             return bool(ui_section.get("icons", False))
-    except Exception as exception:
-        logger.debug(f"Failed to read config for icons setting: {exception}")
+    except (ImportError, OSError, ValueError) as exception:
+        logger.warning(f"Failed to read config for icons setting: {exception}")
     return False
 
 
@@ -238,7 +238,6 @@ from netaudio.commands import (
     channel,
     config,
     device,
-    diagnose,
     fact,
     firmware,
     flow,
@@ -283,13 +282,11 @@ lab_app.add_typer(capture.app, name="capture")
 lab_app.add_typer(provenance.app, name="provenance")
 lab_app.add_typer(fact.app, name="fact")
 lab_app.add_typer(firmware.app, name="firmware")
-lab_app.add_typer(diagnose.app, name="diagnose")
 app.add_typer(lab_app, name="lab")
 
 app.add_typer(capture.app, name="capture", hidden=True)
 app.add_typer(provenance.app, name="provenance", hidden=True)
 app.add_typer(fact.app, name="fact", hidden=True)
-app.add_typer(diagnose.app, name="diagnose", hidden=True)
 
 
 def main():

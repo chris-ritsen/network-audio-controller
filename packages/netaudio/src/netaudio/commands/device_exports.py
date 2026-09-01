@@ -5,7 +5,8 @@ from pathlib import Path
 
 import typer
 
-from netaudio._common import CapabilityProbeTimeout, _command_context, _resolve_one, filter_devices
+from netaudio._common import _command_context, _resolve_one, CapabilityProbeTimeout
+from netaudio._common_selection import filter_devices
 
 
 def _selected_device(filtered_devices):

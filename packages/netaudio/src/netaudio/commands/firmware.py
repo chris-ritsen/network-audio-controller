@@ -1,5 +1,3 @@
-import os
-
 from netaudio.commands.firmware_app import app
 from netaudio.commands.firmware_capabilities import _extract_capability_9
 from netaudio.commands.firmware_commands import (

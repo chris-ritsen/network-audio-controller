@@ -63,7 +63,8 @@ def load_clean_labels(
                 protocol_token, opcode_token = str(key).split(":", 1)
                 protocol_id = _parse_u16(protocol_token)
                 opcode = _parse_u16(opcode_token)
-            except Exception:
+            except (TypeError, ValueError) as exception:
+                logger.warning(f"Ignoring label key {key!r}: {exception}")
                 continue
 
             opcode_labels[(protocol_id, opcode)] = label.strip()
@@ -79,7 +80,8 @@ def load_clean_labels(
             try:
                 protocol_id = _parse_u16(entry.get("protocol"))
                 opcode = _parse_u16(entry.get("opcode"))
-            except Exception:
+            except (TypeError, ValueError) as exception:
+                logger.warning(f"Ignoring label entry {entry!r}: {exception}")
                 continue
 
             opcode_labels[(protocol_id, opcode)] = label.strip()
@@ -92,7 +94,8 @@ def load_clean_labels(
 
             try:
                 message_type = _parse_u16(key)
-            except Exception:
+            except (TypeError, ValueError) as exception:
+                logger.warning(f"Ignoring label key {key!r}: {exception}")
                 continue
 
             message_labels[message_type] = label.strip()
@@ -107,7 +110,8 @@ def load_clean_labels(
 
             try:
                 message_type = _parse_u16(entry.get("message_type"))
-            except Exception:
+            except (TypeError, ValueError) as exception:
+                logger.warning(f"Ignoring label entry {entry!r}: {exception}")
                 continue
 
             message_labels[message_type] = label.strip()
@@ -136,7 +140,8 @@ def load_clean_subscription_status_labels(
     for key, entry in status_section.items():
         try:
             code = _parse_u16(key)
-        except Exception:
+        except (TypeError, ValueError) as exception:
+            logger.warning(f"Ignoring label key {key!r}: {exception}")
             continue
 
         if isinstance(entry, str):

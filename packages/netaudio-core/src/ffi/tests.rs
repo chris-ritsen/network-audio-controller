@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::decode_hexadecimal;
 use std::ffi::CString;
 
 fn lock_token_call_with_pin(pin: &str, nonce: &[u8], key: &[u8]) -> (NetaudioStatus, Vec<u8>) {
@@ -101,7 +102,7 @@ fn parse_response_call(kind: &str, data: &[u8]) -> (NetaudioStatus, Vec<u8>) {
 
 #[test]
 fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
-    for status in [-1, 33, i32::MAX] {
+    for status in [-1, 34, i32::MAX] {
         let name = unsafe { CStr::from_ptr(netaudio_status_name(status)) };
         assert_eq!(name.to_str().unwrap(), "unknown");
     }
@@ -119,6 +120,19 @@ fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
         unsupported.to_str().unwrap(),
         "unsupported_protocol_operation"
     );
+    let internal_panic =
+        unsafe { CStr::from_ptr(netaudio_status_name(NetaudioStatus::InternalPanic as i32)) };
+    assert_eq!(internal_panic.to_str().unwrap(), "internal_panic");
+}
+
+#[test]
+fn guard_panic_converts_a_panic_into_internal_panic_status() {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let status = guard_panic(|| panic!("deliberate"));
+    std::panic::set_hook(previous_hook);
+    assert_eq!(status, NetaudioStatus::InternalPanic);
+    assert_eq!(guard_panic(|| NetaudioStatus::Ok), NetaudioStatus::Ok);
 }
 
 #[test]
@@ -384,23 +398,12 @@ fn metering_response_kind_serializes_expected_schema() {
 
 #[test]
 fn dante_brooklyn_control_protocol_flow_setup_response_kinds_serialize_authentic_exchange() {
-    let decode_hex = |encoded: &str| {
-        encoded
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| {
-                let high = (pair[0] as char).to_digit(16).unwrap();
-                let low = (pair[1] as char).to_digit(16).unwrap();
-                ((high << 4) | low) as u8
-            })
-            .collect::<Vec<_>>()
-    };
-    let request = decode_hex(
+    let request = decode_hexadecimal(
         "1102005000000100000000380000bb8000000018000100040048000100000000\
              000000240a000002001000430000000000000000000000004133322d30303030\
              3031003100000000080238010afe4e0b",
     );
-    let response = decode_hex("1102001800000100000100017fef911d0001000100000000");
+    let response = decode_hexadecimal("1102001800000100000100017fef911d0001000100000000");
 
     let (request_status, request_output) = parse_response_call(
         "dante_brooklyn_control_protocol_flow_setup_request",

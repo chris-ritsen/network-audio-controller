@@ -8,12 +8,8 @@ from pathlib import Path
 import typer
 
 from netaudio.capture.provenance import _decode_packet_payload, _verify_parse_header
-from netaudio.commands.capture_helpers import (
-    _hexdump,
-    _resolve_marker_window,
-    _resolve_session_reference,
-    _valid_label,
-)
+from netaudio.commands.capture_helpers import _resolve_marker_window, _resolve_session_reference, _valid_label
+from netaudio.capture.packets import _hexdump
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.packet_store import PacketStore
 
@@ -276,7 +272,7 @@ def _verify_single_bundle(bundle_path: Path) -> bool:
     hypotheses = [m for m in markers if m.get("marker_type") == "hypothesis"]
     observations = [m for m in markers if m.get("marker_type") == "observation"]
 
-    print(f"\n  Verification Summary:")
+    print("\n  Verification Summary:")
     print(f"    Packets verified: {verified_count}/{len(samples)}")
     print(f"    Artifacts verified: {verified_artifact_count}/{len(artifacts)}")
     print(f"    Hypotheses: {len(hypotheses)}")
@@ -576,7 +572,7 @@ def _audit_single_bundle(bundle_path: Path) -> bool:
         print(f"  Integrity failure: {failure}")
 
     if verified_count == len(samples) and verified_artifact_count == len(artifacts):
-        print(f"\n  RESULT: PASS")
+        print("\n  RESULT: PASS")
         return True
 
     print(f"\n  RESULT: FAIL — {len(samples) - verified_count} packet(s) missing")

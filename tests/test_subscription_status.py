@@ -154,28 +154,3 @@ def test_status_to_json_includes_status_severity_and_icon():
         assert DanteDeviceSerializer._status_to_json(None) is None
     finally:
         state.icons, state.no_color = previous
-
-
-def test_translation_engine_overrides_label():
-    from netaudio import i18n
-    from netaudio.dante.const import subscription_status_detail, subscription_status_label
-
-    try:
-        i18n.register_catalog(
-            "es",
-            {
-                "Subscribed (unicast)": "Suscrito (unidifusión)",
-                "The transmitting device isn't currently on the network.": "El dispositivo transmisor no está en la red.",
-            },
-        )
-        i18n.set_locale("es")
-        assert subscription_status_label(0x09) == "Suscrito (unidifusión)"
-        assert subscription_status_detail(0x01) == "El dispositivo transmisor no está en la red."
-
-        i18n.set_locale("en")
-        assert subscription_status_label(0x09) == "Subscribed (unicast)"
-
-        i18n.set_locale("fr")
-        assert subscription_status_label(0x09) == "Subscribed (unicast)"
-    finally:
-        i18n.set_locale("en")

@@ -23,48 +23,48 @@ def _port_in_use(port):
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _effective_relay_port(relay_port):
+def _effective_daemon_port(daemon_port):
     from netaudio.common.app_config import settings as app_settings
 
-    return relay_port or app_settings.relay_port
+    return daemon_port or app_settings.daemon_port
 
 
 def _pin_client_port(effective_port):
     from netaudio.common.app_config import settings as app_settings
 
-    app_settings.relay_port = effective_port
+    app_settings.daemon_port = effective_port
 
 
-def _wait_for_shutdown(relay_port, timeout=10):
+def _wait_for_shutdown(daemon_port, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _port_in_use(relay_port):
+        if not _port_in_use(daemon_port):
             return True
         time.sleep(0.25)
     return False
 
 
-def _wait_for_startup(relay_port, timeout=15):
+def _wait_for_startup(daemon_port, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _port_in_use(relay_port):
+        if _port_in_use(daemon_port):
             return True
         time.sleep(0.25)
     return False
 
 
-def _run_foreground(relay_port):
+def _run_foreground(daemon_port):
     from netaudio.common.app_config import settings as app_settings
     from netaudio.cli import state
     from netaudio.daemon.server import run_daemon
 
-    effective_port = _effective_relay_port(relay_port)
-    app_settings.relay_port = effective_port
-    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, relay_port=effective_port))
+    effective_port = _effective_daemon_port(daemon_port)
+    app_settings.daemon_port = effective_port
+    asyncio.run(run_daemon(dissect=state.dissect, capture=state.capture, daemon_port=effective_port))
 
 
 def _uses_configured_port(effective_port) -> bool:
-    return effective_port == _effective_relay_port(None)
+    return effective_port == _effective_daemon_port(None)
 
 
 def _service_active() -> bool:
@@ -84,26 +84,26 @@ def _service_active() -> bool:
 
 @app.command()
 def run(
-    relay_port: Optional[int] = typer.Option(
-        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
 ):
     """Run the daemon in the foreground (Ctrl-C to stop)."""
-    _run_foreground(relay_port)
+    _run_foreground(daemon_port)
 
 
 @app.command()
 def start(
-    relay_port: Optional[int] = typer.Option(
-        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
 ):
     """Start the daemon (via the boot service if installed, otherwise in the background)."""
     if service_install.running_under_systemd():
-        _run_foreground(relay_port)
+        _run_foreground(daemon_port)
         return
 
-    effective_port = _effective_relay_port(relay_port)
+    effective_port = _effective_daemon_port(daemon_port)
     on_configured_port = _uses_configured_port(effective_port)
     _pin_client_port(effective_port)
     if _port_in_use(effective_port):
@@ -115,7 +115,7 @@ def start(
     if use_service and platform == "systemd":
         asyncio.run(service_install.systemd_start())
         if not _wait_for_startup(effective_port):
-            typer.echo("Daemon service started but the relay port never opened.", err=True)
+            typer.echo("Daemon service started but the daemon port never opened.", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"{icon('online')}Daemon started (systemd).")
         return
@@ -126,7 +126,7 @@ def start(
         else:
             service_install.launchd_bootstrap()
         if not _wait_for_startup(effective_port):
-            typer.echo("Daemon service started but the relay port never opened.", err=True)
+            typer.echo("Daemon service started but the daemon port never opened.", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"{icon('online')}Daemon started (launchd).")
         return
@@ -134,12 +134,12 @@ def start(
     if use_service and platform == "taskscheduler":
         service_install.windows_task_run()
         if not _wait_for_startup(effective_port):
-            typer.echo("Daemon task started but the relay port never opened.", err=True)
+            typer.echo("Daemon task started but the daemon port never opened.", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"{icon('online')}Daemon started (Task Scheduler).")
         return
 
-    log_path = service_install.spawn_detached(relay_port)
+    log_path = service_install.spawn_detached(daemon_port)
     if not _wait_for_startup(effective_port):
         typer.echo(f"Daemon did not come up. Check logs: {log_path}", err=True)
         raise typer.Exit(code=1)
@@ -148,12 +148,12 @@ def start(
 
 @app.command()
 def stop(
-    relay_port: Optional[int] = typer.Option(
-        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
 ):
     """Stop the daemon."""
-    effective_port = _effective_relay_port(relay_port)
+    effective_port = _effective_daemon_port(daemon_port)
     on_configured_port = _uses_configured_port(effective_port)
     _pin_client_port(effective_port)
 
@@ -178,19 +178,19 @@ def stop(
 
 @app.command()
 def restart(
-    relay_port: Optional[int] = typer.Option(
-        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
 ):
     """Restart the daemon."""
-    effective_port = _effective_relay_port(relay_port)
+    effective_port = _effective_daemon_port(daemon_port)
     on_configured_port = _uses_configured_port(effective_port)
     _pin_client_port(effective_port)
 
     if service_install.platform_name() == "systemd" and on_configured_port and _service_active():
         asyncio.run(service_install.systemd_restart())
         if not _wait_for_startup(effective_port):
-            typer.echo("Daemon service restarted but the relay port never opened.", err=True)
+            typer.echo("Daemon service restarted but the daemon port never opened.", err=True)
             raise typer.Exit(code=1)
         typer.echo(f"{icon('online')}Daemon restarted (systemd).")
         return
@@ -201,17 +201,17 @@ def restart(
             typer.echo("Timed out waiting for daemon to stop.", err=True)
             raise typer.Exit(code=1)
 
-    start(relay_port=relay_port)
+    start(daemon_port=daemon_port)
 
 
 @app.command()
 def status(
-    relay_port: Optional[int] = typer.Option(
-        None, "--relay-port", help="Relay server port.", envvar="NETAUDIO_RELAY_PORT"
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
     ),
 ):
     """Show daemon status."""
-    effective_port = _effective_relay_port(relay_port)
+    effective_port = _effective_daemon_port(daemon_port)
     _pin_client_port(effective_port)
 
     platform = service_install.platform_name()
@@ -220,7 +220,7 @@ def status(
         active = "active" if _service_active() else "inactive"
         typer.echo(f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_location()}")
     else:
-        typer.echo(f"Boot service: not installed (install with: netaudio daemon install)")
+        typer.echo("Boot service: not installed (install with: netaudio daemon install)")
 
     if not _port_in_use(effective_port):
         typer.echo(f"{icon('offline')}Daemon is not running.")
@@ -265,7 +265,7 @@ def install(
         service_install.windows_task_register()
         typer.echo(f"Registered Task Scheduler task {service_install.WINDOWS_TASK_NAME} (runs at logon).")
         if start_service:
-            start(relay_port=None)
+            start(daemon_port=None)
         return
 
     content = service_install.generate_service_file()
