@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import struct
 
+from netaudio.dante.const import (
+    ARC_PROTOCOL_IDS,
+    DANTE_CONTROLLER_METERING_PORT,
+    DEVICE_INFO_PORT,
+    PROTOCOL_NAMES,
+    PROTOCOL_SETTINGS,
+)
+from netaudio.dante.packet_header import parse_packet_header
 
 PORT_LABELS = {
-    8751: "metering",
-    8702: "info",
+    DANTE_CONTROLLER_METERING_PORT: "metering",
+    DEVICE_INFO_PORT: "info",
 }
 
 PACKET_ENDPOINT_WIDTH = 28
-
-ARC_PROTOCOLS = (0x2729, 0x27FF, 0x2801, 0x2809)
-TARGET_PROTOCOLS = (*ARC_PROTOCOLS, 0x1200, 0xFFFF)
 
 
 _FACT_LABEL_CACHE: dict[str, str] | None = None
@@ -50,56 +54,39 @@ def _load_fact_labels() -> dict[str, str]:
                     _FACT_LABEL_CACHE[f"conmon:{key}"] = name
                 elif category == "multicast_announcement":
                     _FACT_LABEL_CACHE[f"multicast:{key}"] = name
-    except Exception:
-        logger.exception("Failed to load capture fact labels")
+    except (OSError, ValueError, KeyError, TypeError) as exception:
+        logger.warning(f"Failed to load capture fact labels: {exception}")
 
     return _FACT_LABEL_CACHE
 
 
 def _label_packet(payload: bytes, *, include_code: bool = False):
-    if len(payload) < 8:
+    header = parse_packet_header(payload)
+    if header is None:
         return ""
 
-    from netaudio.dante.debug_formatter import (
-        PROTOCOL_NAMES,
-        get_opcode_name,
-        get_settings_message_type_name,
-    )
+    protocol_id = header["protocol_id"]
+    opcode = header["opcode"]
+    code = f"0x{opcode:04X}"
+    fact_labels = _load_fact_labels()
 
-    protocol_id = struct.unpack(">H", payload[0:2])[0]
+    if protocol_id == PROTOCOL_SETTINGS:
+        fact_name = fact_labels.get(f"conmon:{code}") or fact_labels.get(f"multicast:{code}")
+    elif protocol_id in PROTOCOL_NAMES:
+        fact_name = None
+        if protocol_id in ARC_PROTOCOL_IDS:
+            fact_name = fact_labels.get(f"arc:0x{protocol_id:04X}:{code}") or fact_labels.get(f"arc:{code}")
+    else:
+        return f"proto:0x{protocol_id:04X}"
 
-    if protocol_id in PROTOCOL_NAMES and protocol_id != 0xFFFF:
-        opcode = struct.unpack(">H", payload[6:8])[0]
-        opcode_str = f"0x{opcode:04X}"
-        fact_labels = _load_fact_labels()
-        if protocol_id in ARC_PROTOCOLS:
-            fact_name = fact_labels.get(f"arc:0x{protocol_id:04X}:{opcode_str}") or fact_labels.get(f"arc:{opcode_str}")
-            if fact_name:
-                return f"{opcode_str} {fact_name}" if include_code else fact_name
-
-        name = get_opcode_name(protocol_id, opcode)
-        if not include_code:
-            return name
-        if name and name != opcode_str:
-            return f"{opcode_str} {name}"
-        return opcode_str
-
-    if protocol_id == 0xFFFF and len(payload) >= 28:
-        message_type = struct.unpack(">H", payload[26:28])[0]
-        msg_str = f"0x{message_type:04X}"
-        fact_labels = _load_fact_labels()
-        fact_name = fact_labels.get(f"conmon:{msg_str}") or fact_labels.get(f"multicast:{msg_str}")
-        if fact_name:
-            return f"{msg_str} {fact_name}" if include_code else fact_name
-
-        name = get_settings_message_type_name(message_type)
-        if not include_code:
-            return name
-        if name and name != msg_str:
-            return f"{msg_str} {name}"
-        return msg_str
-
-    return f"proto:0x{protocol_id:04X}"
+    if fact_name:
+        return f"{code} {fact_name}" if include_code else fact_name
+    name = header["opcode_name"]
+    if not include_code:
+        return name
+    if name and name != code:
+        return f"{code} {name}"
+    return code
 
 
 def _hexdump(data: bytes, indent: str = "         "):

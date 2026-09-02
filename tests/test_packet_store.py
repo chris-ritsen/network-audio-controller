@@ -5,7 +5,8 @@ import pytest
 
 from netaudio.dante import debug_formatter
 from netaudio.dante.debug_formatter import get_opcode_name
-from netaudio.dante.packet_store import PacketStore, _parse_header
+from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.packet_store import PacketRecord, PacketStore
 
 
 def _make_packet(protocol=0x27FF, opcode=0x1002, transaction_id=0x0042, body=b""):
@@ -34,7 +35,7 @@ def store(tmp_path):
 class TestParseHeader:
     def test_valid_request(self):
         data = _make_packet(opcode=0x1002, transaction_id=0x0042)
-        h = _parse_header(data)
+        h = parse_packet_header(data)
         assert h["protocol_id"] == 0x27FF
         assert h["transaction_id"] == 0x0042
         assert h["opcode"] == 0x1002
@@ -43,18 +44,18 @@ class TestParseHeader:
 
     def test_valid_response(self):
         data = _make_response(opcode=0x3010, result=0x0001)
-        h = _parse_header(data)
+        h = parse_packet_header(data)
         assert h["opcode"] == 0x3010
         assert h["opcode_name"] == "0x3010"
         assert h["result_code"] == 0x0001
         assert h["result_name"] == "RESULT_CODE_SUCCESS"
 
     def test_too_short(self):
-        assert _parse_header(b"\x00\x01\x02") is None
+        assert parse_packet_header(b"\x00\x01\x02") is None
 
     def test_unknown_opcode(self):
         data = _make_packet(opcode=0x9999)
-        h = _parse_header(data)
+        h = parse_packet_header(data)
         assert h["opcode"] == 0x9999
         assert h["opcode_name"] == "0x9999"
 
@@ -73,10 +74,12 @@ class TestStorePacket:
     def test_store_and_retrieve(self, store):
         pkt = _make_packet()
         pid = store.store_packet(
-            payload=pkt,
-            source_type="netaudio_request",
-            device_ip="192.168.1.10",
-            direction="request",
+            PacketRecord(
+                payload=pkt,
+                source_type="netaudio_request",
+                device_ip="192.168.1.10",
+                direction="request",
+            )
         )
         assert pid is not None
 
@@ -87,7 +90,7 @@ class TestStorePacket:
 
     def test_stores_and_decompresses_payload(self, store):
         pkt = _make_packet(body=b"\xde\xad")
-        store.store_packet(payload=pkt, source_type="tshark")
+        store.store_packet(PacketRecord(payload=pkt, source_type="tshark"))
         packets = store.get_packets()
         assert packets[0]["payload"] == pkt
 
@@ -98,16 +101,20 @@ class TestCorrelation:
         resp = _make_response(transaction_id=0x0099, opcode=0x3010)
 
         req_id = store.store_packet(
-            payload=req,
-            source_type="netaudio_request",
-            device_ip="192.168.1.50",
-            direction="request",
+            PacketRecord(
+                payload=req,
+                source_type="netaudio_request",
+                device_ip="192.168.1.50",
+                direction="request",
+            )
         )
         resp_id = store.store_packet(
-            payload=resp,
-            source_type="netaudio_response",
-            device_ip="192.168.1.50",
-            direction="response",
+            PacketRecord(
+                payload=resp,
+                source_type="netaudio_response",
+                device_ip="192.168.1.50",
+                direction="response",
+            )
         )
 
         packets = store.get_packets(limit=10)
@@ -121,16 +128,20 @@ class TestCorrelation:
         resp = _make_response(transaction_id=0x0002)
 
         store.store_packet(
-            payload=req,
-            source_type="netaudio_request",
-            device_ip="192.168.1.50",
-            direction="request",
+            PacketRecord(
+                payload=req,
+                source_type="netaudio_request",
+                device_ip="192.168.1.50",
+                direction="request",
+            )
         )
         store.store_packet(
-            payload=resp,
-            source_type="netaudio_response",
-            device_ip="192.168.1.50",
-            direction="response",
+            PacketRecord(
+                payload=resp,
+                source_type="netaudio_response",
+                device_ip="192.168.1.50",
+                direction="response",
+            )
         )
 
         packets = store.get_packets()
@@ -142,21 +153,25 @@ class TestCorrelation:
         now = 1_000_000_000_000  # 1 second in nanoseconds
 
         store.store_packet(
-            payload=req,
-            source_type="netaudio_request",
-            device_ip="192.168.1.20",
-            direction="request",
-            timestamp_ns=now,
+            PacketRecord(
+                payload=req,
+                source_type="netaudio_request",
+                device_ip="192.168.1.20",
+                direction="request",
+                timestamp_ns=now,
+            )
         )
 
         # Multicast from same device 50ms later
         mc_pkt = _make_packet(opcode=0x1003)
         mc_id = store.store_packet(
-            payload=mc_pkt,
-            source_type="multicast",
-            src_ip="192.168.1.20",
-            device_ip="192.168.1.20",
-            timestamp_ns=now + 50_000_000,  # 50ms later
+            PacketRecord(
+                payload=mc_pkt,
+                source_type="multicast",
+                src_ip="192.168.1.20",
+                device_ip="192.168.1.20",
+                timestamp_ns=now + 50_000_000,  # 50ms later
+            )
         )
 
         packets = store.get_packets()
@@ -168,18 +183,22 @@ class TestCorrelation:
         resp = _make_response(transaction_id=0x0077, opcode=0x3010)
 
         store.store_packet(
-            payload=req,
-            source_type="netaudio_request",
-            device_ip="192.168.1.50",
-            direction="request",
-            timestamp_ns=1000,
+            PacketRecord(
+                payload=req,
+                source_type="netaudio_request",
+                device_ip="192.168.1.50",
+                direction="request",
+                timestamp_ns=1000,
+            )
         )
         store.store_packet(
-            payload=resp,
-            source_type="netaudio_response",
-            device_ip="192.168.1.50",
-            direction="response",
-            timestamp_ns=2000,
+            PacketRecord(
+                payload=resp,
+                source_type="netaudio_response",
+                device_ip="192.168.1.50",
+                direction="response",
+                timestamp_ns=2000,
+            )
         )
 
         pairs = store.get_correlated_pairs()
@@ -192,18 +211,22 @@ class TestCorrelation:
             req = _make_packet(transaction_id=opcode, opcode=opcode)
             resp = _make_response(transaction_id=opcode, opcode=opcode)
             store.store_packet(
-                payload=req,
-                source_type="netaudio_request",
-                device_ip="192.168.1.50",
-                direction="request",
-                timestamp_ns=opcode * 1000,
+                PacketRecord(
+                    payload=req,
+                    source_type="netaudio_request",
+                    device_ip="192.168.1.50",
+                    direction="request",
+                    timestamp_ns=opcode * 1000,
+                )
             )
             store.store_packet(
-                payload=resp,
-                source_type="netaudio_response",
-                device_ip="192.168.1.50",
-                direction="response",
-                timestamp_ns=opcode * 1000 + 1,
+                PacketRecord(
+                    payload=resp,
+                    source_type="netaudio_response",
+                    device_ip="192.168.1.50",
+                    direction="response",
+                    timestamp_ns=opcode * 1000 + 1,
+                )
             )
 
         pairs = store.get_correlated_pairs(opcode=0x3010)
@@ -214,11 +237,13 @@ class TestExport:
     def test_export_fixture(self, store, tmp_path):
         pkt = _make_packet(opcode=0x1002)
         pid = store.store_packet(
-            payload=pkt,
-            source_type="netaudio_request",
-            device_name="avio-usb-1",
-            device_ip="192.168.1.10",
-            direction="request",
+            PacketRecord(
+                payload=pkt,
+                source_type="netaudio_request",
+                device_name="avio-usb-1",
+                device_ip="192.168.1.10",
+                direction="request",
+            )
         )
 
         output_dir = str(tmp_path / "fixtures")
@@ -237,20 +262,24 @@ class TestExport:
         resp = _make_response(transaction_id=0x00AA, opcode=0x3010)
 
         req_id = store.store_packet(
-            payload=req,
-            source_type="netaudio_request",
-            device_name="test-device",
-            device_ip="192.168.1.5",
-            direction="request",
-            timestamp_ns=1000,
+            PacketRecord(
+                payload=req,
+                source_type="netaudio_request",
+                device_name="test-device",
+                device_ip="192.168.1.5",
+                direction="request",
+                timestamp_ns=1000,
+            )
         )
         store.store_packet(
-            payload=resp,
-            source_type="netaudio_response",
-            device_name="test-device",
-            device_ip="192.168.1.5",
-            direction="response",
-            timestamp_ns=2000,
+            PacketRecord(
+                payload=resp,
+                source_type="netaudio_response",
+                device_name="test-device",
+                device_ip="192.168.1.5",
+                direction="response",
+                timestamp_ns=2000,
+            )
         )
 
         output_dir = str(tmp_path / "pairs")
@@ -265,15 +294,19 @@ class TestStats:
     def test_stats(self, store):
         for i in range(3):
             store.store_packet(
-                payload=_make_packet(transaction_id=i),
-                source_type="netaudio_request",
-                direction="request",
-                timestamp_ns=i * 1000,
+                PacketRecord(
+                    payload=_make_packet(transaction_id=i),
+                    source_type="netaudio_request",
+                    direction="request",
+                    timestamp_ns=i * 1000,
+                )
             )
         store.store_packet(
-            payload=_make_packet(opcode=0x1003, transaction_id=0xFF),
-            source_type="multicast",
-            timestamp_ns=99000,
+            PacketRecord(
+                payload=_make_packet(opcode=0x1003, transaction_id=0xFF),
+                source_type="multicast",
+                timestamp_ns=99000,
+            )
         )
 
         stats = store.get_stats()
@@ -283,14 +316,18 @@ class TestStats:
 
     def test_get_packets_by_opcode(self, store):
         store.store_packet(
-            payload=_make_packet(opcode=0x3010),
-            source_type="tshark",
-            timestamp_ns=1000,
+            PacketRecord(
+                payload=_make_packet(opcode=0x3010),
+                source_type="tshark",
+                timestamp_ns=1000,
+            )
         )
         store.store_packet(
-            payload=_make_packet(opcode=0x1002),
-            source_type="tshark",
-            timestamp_ns=2000,
+            PacketRecord(
+                payload=_make_packet(opcode=0x1002),
+                source_type="tshark",
+                timestamp_ns=2000,
+            )
         )
 
         results = store.get_packets_by_opcode(0x3010)

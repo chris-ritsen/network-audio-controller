@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import pytest
 
 from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device import DanteDevice
+from netaudio.dante.device_commands import DanteDeviceCommands
 from tests.conftest import check_generated_command_payload
 
 RECEIVERS_RESPONSE_HEADER_SIZE_HEXCHARS = 24
@@ -299,8 +299,9 @@ get_receivers_test_cases = [
     ids=[tc.device_id for tc in get_receivers_test_cases],
 )
 def test_generate_get_receivers_command_payload(load_fixture, test_case: GetReceiversTestCase):
-    device = DanteDevice()
-    hex_command_str, service_type = device.commands.command_receivers(page=0, transaction_id=test_case.sequence_id)
+    hex_command_str, service_type = DanteDeviceCommands().command_receivers(
+        page=0, transaction_id=test_case.sequence_id
+    )
 
     check_generated_command_payload(
         generated_hex_payload=hex_command_str,

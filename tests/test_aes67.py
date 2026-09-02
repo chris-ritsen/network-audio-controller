@@ -1,17 +1,22 @@
 import struct
 
+import pytest
 
 from netaudio import core
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.services.notification import (
-    AES67_CURRENT_NEW_MAP,
+from netaudio.dante.const import (
     CONMON_AES67_CURRENT_NEW_OFFSET,
     CONMON_OPCODE_AES67_CURRENT_NEW,
+)
+from netaudio.dante.services.notification import (
     DanteNotificationService,
-    parse_aes67_current_new_byte,
+)
+from netaudio.dante.services.notification_packet_handlers import (
+    STATUS_KIND_AES67,
+    _parse_aes67_current_new,
 )
 
 
@@ -66,34 +71,34 @@ class TestAES67ConfiguredFromARC1100:
 
 
 class TestAES67CurrentNewFromConmon1007:
+    def _build_conmon_1007_packet(self, state_byte):
+        packet = bytearray(36)
+        struct.pack_into(">H", packet, 0, 0xFFFF)
+        struct.pack_into(">H", packet, 2, 36)
+        packet[0x10:0x18] = b"Audinate"
+        packet[0x18] = 0x07
+        struct.pack_into(">H", packet, 0x1A, CONMON_OPCODE_AES67_CURRENT_NEW)
+        packet[CONMON_AES67_CURRENT_NEW_OFFSET] = state_byte
+        return bytes(packet)
+
+    def _parse(self, state_byte):
+        return core.parse_response("aes67_status", self._build_conmon_1007_packet(state_byte))
+
     def test_0x00_means_disabled_disabled(self):
-        current, configured = parse_aes67_current_new_byte(0x00)
-        assert current is False
-        assert configured is False
+        assert self._parse(0x00) == {"aes67_configured": False, "aes67_current": False}
 
     def test_0x02_means_disabled_enabled(self):
-        current, configured = parse_aes67_current_new_byte(0x02)
-        assert current is False
-        assert configured is True
+        assert self._parse(0x02) == {"aes67_configured": True, "aes67_current": False}
 
     def test_0x03_means_enabled_enabled(self):
-        current, configured = parse_aes67_current_new_byte(0x03)
-        assert current is True
-        assert configured is True
+        assert self._parse(0x03) == {"aes67_configured": True, "aes67_current": True}
 
     def test_0x01_means_enabled_disabled(self):
-        current, configured = parse_aes67_current_new_byte(0x01)
-        assert current is True
-        assert configured is False
+        assert self._parse(0x01) == {"aes67_configured": False, "aes67_current": True}
 
-    def test_unknown_byte_returns_none_none(self):
-        current, configured = parse_aes67_current_new_byte(0xFF)
-        assert current is None
-        assert configured is None
-
-    def test_map_has_four_values(self):
-        assert len(AES67_CURRENT_NEW_MAP) == 4
-        assert set(AES67_CURRENT_NEW_MAP.keys()) == {0x00, 0x01, 0x02, 0x03}
+    def test_unknown_byte_is_rejected(self):
+        with pytest.raises(core.NetaudioCoreError):
+            self._parse(0xFF)
 
     def test_conmon_opcode_constant(self):
         assert CONMON_OPCODE_AES67_CURRENT_NEW == 0x1007
@@ -101,35 +106,14 @@ class TestAES67CurrentNewFromConmon1007:
     def test_offset_constant(self):
         assert CONMON_AES67_CURRENT_NEW_OFFSET == 0x21
 
-    def _build_conmon_1007_packet(self, state_byte):
-        packet = bytearray(36)
-        struct.pack_into(">H", packet, 0, 0xFFFF)
-        struct.pack_into(">H", packet, 2, 36)
-        packet[0x10:0x18] = b"Audinate"
-        struct.pack_into(">H", packet, 0x1A, 0x1007)
-        packet[CONMON_AES67_CURRENT_NEW_OFFSET] = state_byte
-        return bytes(packet)
+    def test_packet_handler_returns_status_and_waiter_result(self):
+        parsed = _parse_aes67_current_new(self._build_conmon_1007_packet(0x02), "192.0.2.10", None)
+        assert parsed.kind == STATUS_KIND_AES67
+        assert parsed.status == {"aes67_configured": True, "aes67_current": False}
+        assert parsed.waiter_result == (False, True)
 
-    def test_parse_from_real_packet_structure_disabled_disabled(self):
-        packet = self._build_conmon_1007_packet(0x00)
-        state_byte = packet[CONMON_AES67_CURRENT_NEW_OFFSET]
-        current, configured = parse_aes67_current_new_byte(state_byte)
-        assert current is False
-        assert configured is False
-
-    def test_parse_from_real_packet_structure_disabled_enabled(self):
-        packet = self._build_conmon_1007_packet(0x02)
-        state_byte = packet[CONMON_AES67_CURRENT_NEW_OFFSET]
-        current, configured = parse_aes67_current_new_byte(state_byte)
-        assert current is False
-        assert configured is True
-
-    def test_parse_from_real_packet_structure_enabled_enabled(self):
-        packet = self._build_conmon_1007_packet(0x03)
-        state_byte = packet[CONMON_AES67_CURRENT_NEW_OFFSET]
-        current, configured = parse_aes67_current_new_byte(state_byte)
-        assert current is True
-        assert configured is True
+    def test_packet_handler_rejects_unknown_byte(self):
+        assert _parse_aes67_current_new(self._build_conmon_1007_packet(0xFF), "192.0.2.10", None) is None
 
 
 class TestAES67RebootRequired:
@@ -258,49 +242,46 @@ class TestAES67Waiter:
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.247"
 
-        waiter = service.register_aes67_waiter(device_ip)
+        waiter = service.register_waiter("aes67", device_ip)
         assert not waiter.is_set()
 
         packet = self._build_conmon_1007_packet(0x03)
         service._on_packet(packet, (device_ip, 8700))
 
         assert waiter.is_set()
-        result = service.get_aes67_result(device_ip)
-        assert result == (True, True)
+        assert waiter.latest_result == (True, True)
 
-        service.unregister_aes67_waiter(device_ip)
+        service.unregister_waiter(waiter)
 
     def test_waiter_captures_pending_state(self):
         dispatcher = DanteEventDispatcher()
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.36"
 
-        waiter = service.register_aes67_waiter(device_ip)
+        waiter = service.register_waiter("aes67", device_ip)
 
         packet = self._build_conmon_1007_packet(0x02)
         service._on_packet(packet, (device_ip, 8700))
 
         assert waiter.is_set()
-        result = service.get_aes67_result(device_ip)
-        assert result == (False, True)
+        assert waiter.latest_result == (False, True)
 
-        service.unregister_aes67_waiter(device_ip)
+        service.unregister_waiter(waiter)
 
     def test_waiter_captures_on_to_off_pending(self):
         dispatcher = DanteEventDispatcher()
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.108"
 
-        waiter = service.register_aes67_waiter(device_ip)
+        waiter = service.register_waiter("aes67", device_ip)
 
         packet = self._build_conmon_1007_packet(0x01)
         service._on_packet(packet, (device_ip, 8700))
 
         assert waiter.is_set()
-        result = service.get_aes67_result(device_ip)
-        assert result == (True, False)
+        assert waiter.latest_result == (True, False)
 
-        service.unregister_aes67_waiter(device_ip)
+        service.unregister_waiter(waiter)
 
     def test_no_waiter_no_crash(self):
         dispatcher = DanteEventDispatcher()
@@ -314,7 +295,7 @@ class TestAES67Waiter:
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.247"
 
-        service.register_aes67_waiter(device_ip)
-        assert service._waiters.is_registered("aes67", device_ip)
-        service.unregister_aes67_waiter(device_ip)
-        assert not service._waiters.is_registered("aes67", device_ip)
+        waiter = service.register_waiter("aes67", device_ip)
+        assert service.is_waiting("aes67", device_ip)
+        service.unregister_waiter(waiter)
+        assert not service.is_waiting("aes67", device_ip)

@@ -1,11 +1,8 @@
-from unittest.mock import MagicMock
-
 from netaudio import core
-from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.services.notification import DanteNotificationService
 from tests.protocol_test_fixtures import load_protocol_packet
+from tests.status_test_support import application_with_device, receive_packets
 
 
 MODEL_PACKET_FILENAMES = {
@@ -82,18 +79,11 @@ def test_board_model_parser_matches_physical_and_authentic_virtual_devices():
     }
 
 
-def test_notification_service_applies_and_serializes_controller_visible_identity():
+def test_state_service_applies_and_serializes_controller_visible_identity():
     device_ip_address = "10.0.2.15"
-    device = DanteDevice(server_name="virtual-a32.local.")
-    device.name = "virtual-a32"
-    device.ipv4 = device_ip_address
-    service = DanteNotificationService(
-        dispatcher=MagicMock(),
-        device_lookup=lambda ip_address: device if ip_address == device_ip_address else None,
-    )
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
 
-    service._on_packet(_packet(10), (device_ip_address, 8702))
-    service._on_packet(_packet(12), (device_ip_address, 8702))
+    receive_packets(application, [_packet(10), _packet(12)], (device_ip_address, 8702))
 
     assert device.manufacturer == "Ferrofish GmbH"
     assert device.dante_model == "A32 Dante AD/DA Converter"

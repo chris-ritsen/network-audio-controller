@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -100,24 +99,15 @@ def _parse_sort(value: str) -> tuple[str, bool]:
 
 
 def _load_icons_from_config() -> bool:
+    from netaudio.common.config_loader import load_config_document
+
     try:
-        from netaudio.common.config_loader import default_config_path
-
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            import tomli as tomllib
-
-        config_path = default_config_path()
-        if not config_path.exists():
-            return False
-
-        data = tomllib.loads(config_path.read_text())
-        ui_section = data.get("ui", {})
-        if isinstance(ui_section, dict):
-            return bool(ui_section.get("icons", False))
-    except (ImportError, OSError, ValueError) as exception:
+        ui_section = load_config_document().get("ui", {})
+    except ValueError as exception:
         logger.warning(f"Failed to read config for icons setting: {exception}")
+        return False
+    if isinstance(ui_section, dict):
+        return bool(ui_section.get("icons", False))
     return False
 
 

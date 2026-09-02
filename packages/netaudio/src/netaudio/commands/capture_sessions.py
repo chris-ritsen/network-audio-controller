@@ -31,8 +31,9 @@ from netaudio.commands.capture_helpers import (
     _resolve_session_reference,
 )
 from netaudio.capture.packets import _print_packet_table_header
+from netaudio.capture.daemon import REDIS_ERRORS
 from netaudio.commands.capture_live import _resolve_redis_for_capture
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketQuery, PacketStore
 from netaudio.icons import icon
 
 
@@ -422,7 +423,7 @@ def session_packets(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.capture.daemon import PacketLine, _print_packet_line
 
     from netaudio.cli import state as cli_state
 
@@ -462,25 +463,29 @@ def session_packets(
             resolved_direction = "__null__"
 
         total = store.get_session_packet_count_filtered(
-            session_id=resolved_session_id,
-            device_ip=device_ip,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=resolved_opcode,
-            protocol_id=resolved_protocol,
-            direction=resolved_direction,
+            PacketQuery(
+                session_id=resolved_session_id,
+                device_ip=device_ip,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                opcode=resolved_opcode,
+                protocol_id=resolved_protocol,
+                direction=resolved_direction,
+            )
         )
         rows = store.get_session_packets(
-            session_id=resolved_session_id,
-            device_ip=device_ip,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=resolved_opcode,
-            protocol_id=resolved_protocol,
-            direction=resolved_direction,
-            limit=limit,
-            offset=offset,
-            ascending=not descending,
+            PacketQuery(
+                session_id=resolved_session_id,
+                device_ip=device_ip,
+                start_ns=start_ns,
+                end_ns=end_ns,
+                opcode=resolved_opcode,
+                protocol_id=resolved_protocol,
+                direction=resolved_direction,
+                limit=limit,
+                offset=offset,
+                ascending=not descending,
+            )
         )
 
         print(
@@ -510,21 +515,7 @@ def session_packets(
         _print_packet_table_header()
 
         for row in rows:
-            payload = row.get("payload") or b""
-            if isinstance(payload, str):
-                payload = bytes.fromhex(payload)
-            _print_packet_line(
-                packet_id=int(row["id"]),
-                timestamp_ns=int(row["timestamp_ns"]),
-                source_ip=row.get("src_ip"),
-                source_port=row.get("src_port"),
-                destination_ip=row.get("dst_ip"),
-                destination_port=row.get("dst_port"),
-                direction=row.get("direction"),
-                payload=payload,
-                dump=dump,
-                dissect_mode=cli_state.dissect,
-            )
+            _print_packet_line(PacketLine.from_row(row), dump=dump, dissect_mode=cli_state.dissect)
     finally:
         store.close()
 
@@ -571,7 +562,7 @@ def marker(
                 payload = parsed
             else:
                 payload = {"value": parsed}
-        except Exception as exception:
+        except ValueError as exception:
             print(f"Capture: invalid --data JSON: {exception}", file=sys.stderr)
             raise typer.Exit(1)
     profile_cfg, _ = _load_capture_profile(config, profile)
@@ -656,6 +647,6 @@ def marker(
         try:
             client.xadd(str(resolved_ingress_stream), event, maxlen=200000, approximate=True)
             print(f"Capture: Published marker to stream {resolved_ingress_stream}")
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             print(f"Capture: failed to publish marker: {exception}", file=sys.stderr)
             raise typer.Exit(1)
