@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_operations import validate_dante_name
+from netaudio.dante.commands import validate_dante_name
 from tests.protocol_test_fixtures import load_protocol_packet
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

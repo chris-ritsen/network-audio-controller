@@ -1,9 +1,9 @@
 import pytest
 import typer
+from netaudio.commands.device import cli as device_commands
+from netaudio.commands.device.cli import ClearConfigurationMode
+from netaudio.commands.firmware.cramfs import _prepare_rootfs_output
 
-from netaudio.commands import device as device_commands
-from netaudio.commands.device import ClearConfigurationMode
-from netaudio.commands.firmware import _prepare_rootfs_output
 from tests.cli_test_support import FakeApplication, FakeDevice, invoke
 
 

@@ -1,10 +1,9 @@
 import json
 
 import pytest
-
-from netaudio._common_output import drop_empty_columns
-from netaudio.commands import device_display
-from netaudio.commands.device_display import (
+from netaudio.cli_support.output import drop_empty_columns
+from netaudio.commands.device import display as device_display
+from netaudio.commands.device.display import (
     device_list_headers,
     device_list_row,
     format_clock_frequency_offset_parts_per_billion,

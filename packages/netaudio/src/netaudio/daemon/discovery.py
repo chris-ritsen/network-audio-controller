@@ -185,9 +185,9 @@ class DanteDiscoveryMixin:
             return
 
         if not device.dante_model:
-            await self.application._send_conmon_query_for_device(device, self.application.settings.request_make_model)
+            await self.application._send_conmon_query_for_device(device, self.application.send_make_model_request)
         if not device.dante_model_id:
-            await self.application._send_conmon_query_for_device(device, self.application.settings.request_dante_model)
+            await self.application._send_conmon_query_for_device(device, self.application.send_dante_model_request)
             self._spawn_background(
                 self.state.retry_conmon_query(service.server_name),
                 name=f"retry-conmon:{service.server_name}",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import asyncio
 import datetime
 import json
@@ -11,6 +10,7 @@ import struct
 import sys
 import time
 import traceback
+from dataclasses import dataclass
 from threading import Event, Thread
 
 from netaudio.common.app_config import settings as app_settings
@@ -35,7 +35,6 @@ except ImportError:
 
 REDIS_ERRORS: tuple[type[BaseException], ...] = (OSError, RedisError)
 
-from netaudio.icons import icon
 from netaudio.capture.packets import (
     PACKET_ENDPOINT_WIDTH,
     PORT_LABELS,
@@ -44,6 +43,7 @@ from netaudio.capture.packets import (
     _label_packet,
     _print_packet_table_header,
 )
+from netaudio.icons import icon
 
 _LAST_REDIS_ERROR: str | None = None
 
@@ -189,7 +189,7 @@ def _print_packet_line(line: PacketLine, dump=False, dissect_mode=False):
     )
 
     if dissect_mode:
-        from netaudio.dante.packet_dissection_rendering import dissect_and_render
+        from netaudio.dante.dissection.rendering import dissect_and_render
 
         print(dissect_and_render(line.payload))
     elif dump:
@@ -598,158 +598,130 @@ class CaptureDaemon:
         self._name_to_ip = name_to_ip
         self._ip_to_name = {v: k for k, v in name_to_ip.items()}
 
-    async def run(self):
-        print(f"{icon('capture')}Capture: Database at {self.store._db_path}")
+    def _open_ingress_stream(self):
+        if not self.ingress_stream:
+            return
+        self._ingress_redis = _get_redis_client(
+            host=self.redis_host,
+            port=self.redis_port,
+            db=self.redis_db,
+            password=self.redis_password,
+            socket_path=self.redis_socket,
+        )
+        if self._ingress_redis is None:
+            print("Capture: Redis ingress stream requested but Redis is unavailable.", file=sys.stderr)
+        else:
+            print(f"Capture: Publishing packets to Redis stream {self.ingress_stream}")
 
-        if self.ingress_stream:
-            self._ingress_redis = _get_redis_client(
-                host=self.redis_host,
-                port=self.redis_port,
-                db=self.redis_db,
-                password=self.redis_password,
-                socket_path=self.redis_socket,
-            )
-            if self._ingress_redis is None:
-                print("Capture: Redis ingress stream requested but Redis is unavailable.", file=sys.stderr)
-            else:
-                print(f"Capture: Publishing packets to Redis stream {self.ingress_stream}")
+    def _record_capture_marker(self, label, data):
+        if self.session_id is None:
+            return
+        marker_ts = time.time_ns()
+        self.store.add_marker(
+            session_id=self.session_id,
+            marker_type="system",
+            label=label,
+            source_host=self._source_host,
+            data=data,
+            timestamp_ns=marker_ts,
+        )
+        self._publish_marker_to_ingress_stream(
+            session_id=self.session_id,
+            marker_type="system",
+            label=label,
+            data=data,
+            timestamp_ns=marker_ts,
+        )
 
+    def _start_capture_session(self):
+        session_metadata = {"interface": self.interface, "ingress_stream": self.ingress_stream}
         if self.session_name and self.session_id is None:
             self.session_id = self.store.start_session(
                 name=self.session_name,
                 source_host=self._source_host,
-                metadata={
-                    "interface": self.interface,
-                    "ingress_stream": self.ingress_stream,
-                },
+                metadata=session_metadata,
             )
             self._auto_session = True
             print(f"Capture: Started session #{self.session_id} ({self.session_name})")
+        self._record_capture_marker("capture_started", session_metadata)
 
-        if self.session_id is not None:
-            marker_ts = time.time_ns()
-            self.store.add_marker(
-                session_id=self.session_id,
-                marker_type="system",
-                label="capture_started",
-                source_host=self._source_host,
-                data={
-                    "interface": self.interface,
-                    "ingress_stream": self.ingress_stream,
-                },
-                timestamp_ns=marker_ts,
-            )
-            self._publish_marker_to_ingress_stream(
-                session_id=self.session_id,
-                marker_type="system",
-                label="capture_started",
-                data={
-                    "interface": self.interface,
-                    "ingress_stream": self.ingress_stream,
-                },
-                timestamp_ns=marker_ts,
-            )
-
-        self._resolve_device_filter()
-
+    def _report_device_filter(self):
         if self.device_filter and self._explicit_device_filter:
             print(f"Capture: Filtering to IPs: {', '.join(sorted(self.device_filter))}")
         elif self.device_filter:
             print(f"Capture: Known device IPs: {', '.join(sorted(self.device_filter))}")
 
+    def _raise_if_tshark_exited_without_multicast(self, tshark_task):
+        exception = tshark_task.exception()
+        if exception:
+            raise RuntimeError(f"tshark failed and multicast is disabled: {exception}")
+        raise RuntimeError("tshark exited and multicast is disabled")
+
+    async def _start_tshark(self):
+        if not self.use_tshark:
+            return None, False
+        if not TsharkCapture.is_available():
+            print(
+                "Capture: tshark not found, falling back to multicast socket only.\n"
+                "  Install with: brew install --cask wireshark",
+                file=sys.stderr,
+            )
+            return None, False
+        print("Capture: Starting tshark...", flush=True)
+        tshark_task = asyncio.create_task(self._run_tshark())
+        await asyncio.sleep(0.2)
+        if not tshark_task.done():
+            return tshark_task, True
+        self._report_tshark_failure(tshark_task)
+        if not self.use_multicast:
+            self._raise_if_tshark_exited_without_multicast(tshark_task)
+        return tshark_task, False
+
+    async def _supervise_capture(self, tshark_task):
+        while not self.stop_event.is_set():
+            tshark_finished = tshark_task is not None and tshark_task.done()
+            if self.use_multicast and not self._multicast_started and tshark_finished:
+                self._report_tshark_failure(tshark_task)
+                self._start_multicast_workers()
+            if not self.use_multicast and tshark_finished:
+                self._raise_if_tshark_exited_without_multicast(tshark_task)
+            await asyncio.sleep(0.1)
+
+    async def _shutdown_capture(self, tshark_task):
+        self.stop_event.set()
+        if tshark_task and not tshark_task.done():
+            tshark_task.cancel()
+            try:
+                await tshark_task
+            except asyncio.CancelledError:
+                pass
+        for thread in self._threads:
+            thread.join(timeout=3.0)
+        self._print_stats()
+        if self.export_dir:
+            self._export_fixtures()
+        self._record_capture_marker("capture_stopped", {"packets_total": self.store.get_stats().get("total", 0)})
+        if self._auto_session and self.session_id is not None:
+            self.store.end_session(self.session_id)
+            print(f"{icon('session')}Capture: Ended session #{self.session_id}")
+        self.store.close()
+        print(f"\n{icon('capture')}Capture stopped.")
+
+    async def run(self):
+        print(f"{icon('capture')}Capture: Database at {self.store._db_path}")
+        self._open_ingress_stream()
+        self._start_capture_session()
+        self._resolve_device_filter()
+        self._report_device_filter()
         if self.live:
             print("\nPackets")
             _print_packet_table_header()
-
-        tshark_task = None
-        tshark_running = False
-        if self.use_tshark:
-            if TsharkCapture.is_available():
-                print("Capture: Starting tshark...", flush=True)
-                tshark_task = asyncio.create_task(self._run_tshark())
-                await asyncio.sleep(0.2)
-                if tshark_task.done():
-                    self._report_tshark_failure(tshark_task)
-                    if not self.use_multicast:
-                        exception = tshark_task.exception()
-                        if exception:
-                            raise RuntimeError(f"tshark failed and multicast is disabled: {exception}")
-                        raise RuntimeError("tshark exited and multicast is disabled")
-                else:
-                    tshark_running = True
-            else:
-                print(
-                    "Capture: tshark not found, falling back to multicast socket only.\n"
-                    "  Install with: brew install --cask wireshark",
-                    file=sys.stderr,
-                )
-
+        tshark_task, tshark_running = await self._start_tshark()
         if self.use_multicast and not tshark_running:
             self._start_multicast_workers()
-
         try:
-            while not self.stop_event.is_set():
-                if (
-                    self.use_multicast
-                    and not self._multicast_started
-                    and tshark_task is not None
-                    and tshark_task.done()
-                ):
-                    self._report_tshark_failure(tshark_task)
-                    self._start_multicast_workers()
-
-                if not self.use_multicast and tshark_task is not None and tshark_task.done():
-                    exception = tshark_task.exception()
-                    if exception:
-                        raise RuntimeError(f"tshark failed and multicast is disabled: {exception}")
-                    raise RuntimeError("tshark exited and multicast is disabled")
-
-                await asyncio.sleep(0.1)
+            await self._supervise_capture(tshark_task)
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:
-            self.stop_event.set()
-
-            if tshark_task and not tshark_task.done():
-                tshark_task.cancel()
-                try:
-                    await tshark_task
-                except asyncio.CancelledError:
-                    pass
-
-            for thread in self._threads:
-                thread.join(timeout=3.0)
-
-            self._print_stats()
-
-            if self.export_dir:
-                self._export_fixtures()
-
-            if self.session_id is not None:
-                marker_ts = time.time_ns()
-                self.store.add_marker(
-                    session_id=self.session_id,
-                    marker_type="system",
-                    label="capture_stopped",
-                    source_host=self._source_host,
-                    data={
-                        "packets_total": self.store.get_stats().get("total", 0),
-                    },
-                    timestamp_ns=marker_ts,
-                )
-                self._publish_marker_to_ingress_stream(
-                    session_id=self.session_id,
-                    marker_type="system",
-                    label="capture_stopped",
-                    data={
-                        "packets_total": self.store.get_stats().get("total", 0),
-                    },
-                    timestamp_ns=marker_ts,
-                )
-
-            if self._auto_session and self.session_id is not None:
-                self.store.end_session(self.session_id)
-                print(f"{icon('session')}Capture: Ended session #{self.session_id}")
-
-            self.store.close()
-            print(f"\n{icon('capture')}Capture stopped.")
+            await self._shutdown_capture(tshark_task)

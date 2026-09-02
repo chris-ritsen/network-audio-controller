@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from netaudio._common import readback_after_notification
+from netaudio.cli_support.execution import readback_after_notification
 from netaudio.dante.channel_frontend import (
     ChannelFrontendError,
     channel_result_code,
@@ -67,7 +67,7 @@ async def reconcile_transmitter_channel_names(
         )
 
     try:
-        await device.operations.resolve_channel_name_protocol_identifier("tx")
+        await application.resolve_channel_name_protocol_identifier(device, "tx")
     except (core.NetaudioCoreError, ChannelFrontendError, OSError, RuntimeError) as exception:
         return TransmitterChannelNameReconciliationResult(
             unchanged=unchanged,

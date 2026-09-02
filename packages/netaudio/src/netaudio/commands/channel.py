@@ -5,10 +5,11 @@ from typing import Optional
 
 import typer
 
-from netaudio._common import CapabilityProbeTimeout, readback_after_notification, run_command
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import (
+from netaudio._exit_codes import ExitCode
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.execution import CapabilityProbeTimeout, readback_after_notification, run_command
+from netaudio.cli_support.output import output_sections
+from netaudio.cli_support.selection import (
     CHANNEL_REFERENCE_FORMS,
     ChannelReference,
     filter_devices,
@@ -17,8 +18,7 @@ from netaudio._common_selection import (
     select_device,
     sort_devices,
 )
-from netaudio._exit_codes import ExitCode
-from netaudio.commands.config_readback import MUTATION_ERRORS
+from netaudio.commands.config.readback import MUTATION_ERRORS
 from netaudio.dante.channel_frontend import ChannelFrontendError, channel_result_code
 from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, gain_channel_type, gain_level_label
@@ -46,7 +46,7 @@ def _channel_json(channels: dict) -> dict:
     }
 
 
-def _channel_table(channels: dict, title: str) -> None:
+def _channel_section(channels: dict, title: str) -> tuple[str, list[str], list[list[str]]]:
     include_factory_name = any(channel.factory_name for channel in channels.values())
     headers = ["#", "Name", "Friendly Name"]
     if include_factory_name:
@@ -57,7 +57,7 @@ def _channel_table(channels: dict, title: str) -> None:
         if include_factory_name:
             row.append(channel.factory_name or "")
         rows.append(row)
-    output_table(headers, rows, title=title)
+    return title, headers, rows
 
 
 async def run_channel_list(application, devices) -> None:
@@ -67,27 +67,22 @@ async def run_channel_list(application, devices) -> None:
         return_exceptions=True,
     )
 
-    from netaudio.cli import OutputFormat, state
-
-    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
-        output_single(
-            {
-                server_name: {
-                    "name": device.name,
-                    "tx_channels": _channel_json(device.tx_channels),
-                    "rx_channels": _channel_json(device.rx_channels),
-                }
-                for server_name, device in sort_devices(devices)
-            }
-        )
-        return
-
+    json_data = {
+        server_name: {
+            "name": device.name,
+            "tx_channels": _channel_json(device.tx_channels),
+            "rx_channels": _channel_json(device.rx_channels),
+        }
+        for server_name, device in sort_devices(devices)
+    }
+    sections = []
     for server_name, device in sort_devices(devices):
         device_label = device.name or server_name
         if device.tx_channels:
-            _channel_table(device.tx_channels, f"{device_label} TX Channels")
+            sections.append(_channel_section(device.tx_channels, f"{device_label} TX Channels"))
         if device.rx_channels:
-            _channel_table(device.rx_channels, f"{device_label} RX Channels")
+            sections.append(_channel_section(device.rx_channels, f"{device_label} RX Channels"))
+    output_sections(sections, json_data)
 
 
 @app.command("list")
@@ -128,7 +123,7 @@ async def run_channel_name(application, devices, reference: ChannelReference, ne
         return
 
     try:
-        await device.operations.resolve_channel_name_protocol_identifier(channel_type)
+        await application.resolve_channel_name_protocol_identifier(device, channel_type)
     except (*MUTATION_ERRORS, ChannelFrontendError) as exception:
         typer.echo(f"Error: could not determine {channel_type} channel frontend: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR)

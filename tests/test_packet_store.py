@@ -2,10 +2,9 @@ import os
 import struct
 
 import pytest
-
 from netaudio.dante import debug_formatter
 from netaudio.dante.debug_formatter import get_opcode_name
-from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.dissection.header import parse_packet_header
 from netaudio.dante.packet_store import PacketRecord, PacketStore
 
 

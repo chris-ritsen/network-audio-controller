@@ -1,14 +1,13 @@
 from pathlib import Path
 
 from netaudio import core
-from netaudio.commands.device_network_status import (
+from netaudio.commands.device.network_status import (
     NETWORK_STATUS_DISSECT_HEADERS,
     NETWORK_STATUS_HEADERS,
     _without_port_column,
     network_status_rows,
 )
 from netaudio.dante.link_status import LinkStatusObservation, LinkStatusRecord
-
 
 SWITCH_CONFIGURATION_FIXTURE = Path(__file__).parent / "fixtures" / "switch_configuration" / "ad4d-switched-0014.hex"
 

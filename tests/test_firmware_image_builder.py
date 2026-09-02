@@ -12,18 +12,19 @@ pytestmark = pytest.mark.skipif(
     reason="Brooklyn II image publication requires Linux or macOS",
 )
 
-from netaudio.commands import firmware as firmware_commands
-from netaudio.commands import firmware_parser
-from netaudio.commands.firmware import (
+from netaudio.commands.firmware import parser as firmware_parser
+from netaudio.commands.firmware.constants import (
     BROOKLYN2_FLASH_SIZE,
     BROOKLYN2_HARDWARE_PROFILE_FORMAT_VERSION,
     BROOKLYN2_IMAGE_MANIFEST_FORMAT_VERSION,
     BROOKLYN2_PROTECTED_CAPABILITY_PARTITION_OFFSET,
     BROOKLYN2_PROTECTED_CAPABILITY_PARTITION_SIZE,
-    _build_brooklyn2_image,
-    _load_brooklyn2_hardware_profile,
-    parse_dnt,
 )
+from netaudio.commands.firmware.image import _build_brooklyn2_image
+from netaudio.commands.firmware.models import _load_brooklyn2_hardware_profile
+from netaudio.commands.firmware.parser import parse_dnt
+from netaudio.commands.firmware.validation import _validate_cramfs_payload
+
 from tests.firmware_test_support import (
     build_board_information_descriptor,
     build_cramfs_payload,
@@ -123,7 +124,7 @@ def test_build_brooklyn2_image_installs_validated_protected_capability_partition
         "artifact_filename": "cap.bin",
         "size": len(protected_capability_partition),
         "sha256": hashlib.sha256(protected_capability_partition).hexdigest(),
-        "validation": firmware_commands._validate_cramfs_payload(protected_capability_partition),
+        "validation": _validate_cramfs_payload(protected_capability_partition),
     }
     assert json.loads((output_directory / "manifest.json").read_text()) == manifest
 

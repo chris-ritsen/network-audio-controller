@@ -447,7 +447,7 @@ async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_sending
         raise AssertionError("a same-rate no-op must not send a write")
 
     application.probe_sample_rate_status = probe_sample_rate_status
-    application.settings.set_sample_rate = refuse_write
+    application.send_set_sample_rate = refuse_write
 
     result = await application.set_sample_rate(device, 96_000)
 
@@ -482,7 +482,7 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
         device.phase_index = 1
 
     application.probe_sample_rate_status = probe_sample_rate_status
-    application.settings.set_sample_rate = set_sample_rate
+    application.send_set_sample_rate = set_sample_rate
 
     result = await application.set_sample_rate(device, 96_000)
 

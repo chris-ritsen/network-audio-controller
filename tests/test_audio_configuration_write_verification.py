@@ -2,15 +2,15 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from typer.testing import CliRunner
-
-from netaudio._common_selection import parse_channel_reference
+from netaudio.cli_support.selection import parse_channel_reference
 from netaudio.commands import channel as channel_commands
-from netaudio.commands import config as config_commands
-from netaudio.commands import config_network as config_network_commands
-from netaudio.commands import device as device_commands
+from netaudio.commands.config import cli as config_commands
+from netaudio.commands.config import interface as config_network_commands
+from netaudio.commands.device import lock as lock_commands
 from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.lock_status import LockStatusObservation
+from typer.testing import CliRunner
+
 from tests.cli_test_support import FakeApplication, FakeChannelDevice, FakeDevice, invoke
 
 runner = CliRunner()
@@ -238,7 +238,7 @@ def test_latency_get_uses_active_device_readback():
         "Reported latency range: 0.15-21.3333 ms",
         "Latency options: 0.15, 0.25, 0.5, 1, 2, 5 ms",
     ]
-    assert device.operations.settings_calls == 1
+    assert device.settings_calls == 1
 
 
 def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
@@ -478,7 +478,7 @@ def test_aes67_verifies_configured_state_not_current_state():
     result = _aes67(application, "on")
 
     assert result.exit_code == 0
-    assert device.operations.aes67_calls == 1
+    assert device.aes67_calls == 1
     assert "AES67 configured state for AVIO: on (verified)" in result.output
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_aes67_enabled", (True,))]
 
@@ -538,11 +538,11 @@ def test_daemon_lock_failure_reports_protocol_status(monkeypatch, reset_cli_stat
         assert requested_action == action
         return {"success": False, "status": 0x1101}
 
-    monkeypatch.setattr(device_commands, "_lock_via_daemon", failed_daemon_request)
+    monkeypatch.setattr(lock_commands, "_lock_via_daemon", failed_daemon_request)
     device = FakeDevice("AVIO")
 
     result = invoke(
-        device_commands.run_lock_operation, SimpleNamespace(), {device.server_name: device}, "1234", locking=locking
+        lock_commands.run_lock_operation, SimpleNamespace(), {device.server_name: device}, "1234", locking=locking
     )
 
     assert result.exit_code == 1
@@ -567,9 +567,7 @@ async def _async_value(value):
 
 def _lock(application, locking, device=None):
     device = device or FakeDevice("AVIO")
-    return invoke(
-        device_commands.run_lock_operation, application, {device.server_name: device}, "1234", locking=locking
-    )
+    return invoke(lock_commands.run_lock_operation, application, {device.server_name: device}, "1234", locking=locking)
 
 
 @pytest.mark.parametrize(
@@ -601,9 +599,9 @@ def test_standalone_lock_fallback_requires_matching_post_request_observation(
         calls.append(("probe", device_ip))
         return _lock_observation(locking)
 
-    monkeypatch.setattr(device_commands, "_lock_via_daemon", unavailable_daemon)
-    monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
-    monkeypatch.setattr(device_commands, operation_name, operation)
+    monkeypatch.setattr(lock_commands, "_lock_via_daemon", unavailable_daemon)
+    monkeypatch.setattr(lock_commands, "_get_lock_key", lambda: b"x" * 32)
+    monkeypatch.setattr(lock_commands, operation_name, operation)
 
     result = _lock(SimpleNamespace(probe_lock_status=probe), locking)
 
@@ -632,9 +630,9 @@ def test_standalone_lock_fallback_fails_closed_when_readback_is_missing(
     async def probe(device_ip, timeout=None):
         raise CapabilityProbeTimeout("lock status readback timed out")
 
-    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
-    monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
-    monkeypatch.setattr(device_commands, operation_name, operation)
+    monkeypatch.setattr(lock_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
+    monkeypatch.setattr(lock_commands, "_get_lock_key", lambda: b"x" * 32)
+    monkeypatch.setattr(lock_commands, operation_name, operation)
 
     result = _lock(SimpleNamespace(probe_lock_status=probe), locking)
 
@@ -649,9 +647,9 @@ def test_standalone_lock_fallback_rejects_opposite_observation(monkeypatch, rese
     async def probe(device_ip, timeout=None):
         return _lock_observation(False)
 
-    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
-    monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
-    monkeypatch.setattr(device_commands, "core_lock_device", operation)
+    monkeypatch.setattr(lock_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
+    monkeypatch.setattr(lock_commands, "_get_lock_key", lambda: b"x" * 32)
+    monkeypatch.setattr(lock_commands, "core_lock_device", operation)
 
     result = _lock(SimpleNamespace(probe_lock_status=probe), True)
 
@@ -671,9 +669,9 @@ def test_standalone_already_result_is_reported_only_after_matching_observation(m
         probed = True
         return _lock_observation(True)
 
-    monkeypatch.setattr(device_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
-    monkeypatch.setattr(device_commands, "_get_lock_key", lambda: b"x" * 32)
-    monkeypatch.setattr(device_commands, "core_lock_device", operation)
+    monkeypatch.setattr(lock_commands, "_lock_via_daemon", lambda device_name, pin, action: _async_value(None))
+    monkeypatch.setattr(lock_commands, "_get_lock_key", lambda: b"x" * 32)
+    monkeypatch.setattr(lock_commands, "core_lock_device", operation)
 
     result = _lock(SimpleNamespace(probe_lock_status=probe), True)
 
