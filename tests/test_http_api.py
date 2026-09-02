@@ -177,8 +177,8 @@ class TestErrorMapping:
     @pytest.mark.asyncio
     async def test_handler_exception_returns_500(self):
         device = make_device()
-        device.operations.identify.side_effect = RuntimeError("socket exploded")
         http_server = make_http_server({"dev1": device})
+        http_server.application.identify.side_effect = RuntimeError("socket exploded")
         writer = FakeWriter()
         await http_server._route("POST", "/identify", json.dumps({"device": "dev1"}).encode(), writer, None)
         status, body = writer.response()
@@ -323,11 +323,10 @@ class TestMutationVerification:
         old_status_observed = asyncio.Event()
 
         async def probe_status(_device_ip_address):
-            http_server.application.notifications._notify_capability_value_waiters(
+            http_server.application.notifications.notify_waiters(
                 capability_name,
                 "192.168.1.50",
-                old_status[0],
-                old_status[1],
+                (old_status[0], old_status[1]),
             )
             old_status_observed.set()
             return old_status
@@ -337,24 +336,21 @@ class TestMutationVerification:
         await old_status_observed.wait()
 
         assert not request_task.done()
-        http_server.application.notifications._notify_capability_value_waiters(
+        http_server.application.notifications.notify_waiters(
             capability_name,
             "192.168.1.99",
-            requested_status[0],
-            requested_status[1],
+            (requested_status[0], requested_status[1]),
         )
-        http_server.application.notifications._notify_capability_value_waiters(
+        http_server.application.notifications.notify_waiters(
             "encoding" if capability_name == "sample_rate" else "sample_rate",
             "192.168.1.50",
-            requested_status[0],
-            requested_status[1],
+            (requested_status[0], requested_status[1]),
         )
         assert not request_task.done()
-        http_server.application.notifications._notify_capability_value_waiters(
+        http_server.application.notifications.notify_waiters(
             capability_name,
             "192.168.1.50",
-            requested_status[0],
-            requested_status[1],
+            (requested_status[0], requested_status[1]),
         )
 
         status, response = await request_task
@@ -470,7 +466,7 @@ class TestMutationVerification:
             "preflight": {"target_sample_rate_hertz": 96_000},
             "readback": {"sample_rate_hertz": 96_000},
         }
-        http_server.application.set_sample_rate_state.assert_awaited_once_with(
+        http_server.application.set_sample_rate.assert_awaited_once_with(
             device,
             96_000,
             confirm_destructive=True,
@@ -485,7 +481,7 @@ class TestMutationVerification:
         device = make_device()
         http_server = make_http_server({"dev1": device})
         preflight = SimpleNamespace(to_dict=lambda: {"destructive_transmitter_membership_loss": [{"flow": 7}]})
-        http_server.application.set_sample_rate_state.side_effect = SampleRateTopologyConfirmationRequired(
+        http_server.application.set_sample_rate.side_effect = SampleRateTopologyConfirmationRequired(
             "explicit confirmation is required",
             preflight,
         )
@@ -508,7 +504,7 @@ class TestMutationVerification:
 
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_sample_rate_state.side_effect = SampleRateTopologyReadbackError(
+        http_server.application.set_sample_rate.side_effect = SampleRateTopologyReadbackError(
             "fresh transmitter-flow inventory did not respond"
         )
 
@@ -534,7 +530,7 @@ class TestMutationVerification:
 
         assert status == 400
         assert response == {"error": "confirm_destructive must be a boolean"}
-        http_server.application.set_sample_rate_state.assert_not_awaited()
+        http_server.application.set_sample_rate.assert_not_awaited()
 
     @pytest.mark.parametrize(
         ("path", "body"),
@@ -594,8 +590,8 @@ class TestMutationVerification:
     async def test_preferred_leader_mismatch_is_conflict(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_preferred_leader_state.side_effect = None
-        http_server.application.set_preferred_leader_state.return_value = False
+        http_server.application.set_preferred_leader.side_effect = None
+        http_server.application.set_preferred_leader.return_value = False
 
         status, response = await post(
             http_server,
@@ -610,8 +606,8 @@ class TestMutationVerification:
     async def test_aes67_missing_readback_is_gateway_timeout(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_aes67_state.side_effect = None
-        http_server.application.set_aes67_state.return_value = None
+        http_server.application.set_aes67_enabled.side_effect = None
+        http_server.application.set_aes67_enabled.return_value = None
 
         status, response = await post(http_server, "/set-aes67", {"device": "dev1", "enabled": True})
 
@@ -628,7 +624,7 @@ class TestMutationVerification:
 
         assert status == 409
         assert response == {"error": "device does not support AES67 configuration"}
-        http_server.application.set_aes67_state.assert_not_awaited()
+        http_server.application.set_aes67_enabled.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_aes67_multicast_prefix_write_is_verified(self):
@@ -644,7 +640,7 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True, "prefix": "239.238.0.0"}
-        http_server.application.set_aes67_multicast_prefix_state.assert_awaited_once_with(device, "239.238.0.0")
+        http_server.application.set_aes67_multicast_prefix.assert_awaited_once_with(device, "239.238.0.0")
 
     @pytest.mark.asyncio
     async def test_aes67_multicast_prefix_rejects_device_without_property(self):
@@ -659,7 +655,7 @@ class TestMutationVerification:
 
         assert status == 409
         assert response == {"error": "device does not advertise an AES67 multicast prefix"}
-        http_server.application.set_aes67_multicast_prefix_state.assert_not_awaited()
+        http_server.application.set_aes67_multicast_prefix.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_sample_rate_pullup_write_is_verified(self):
@@ -675,14 +671,14 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True, "raw_value": 1, "supported": [0, 1, 2, 3, 4]}
-        http_server.application.set_sample_rate_pullup_state.assert_awaited_once_with(device, 1)
+        http_server.application.set_sample_rate_pullup.assert_awaited_once_with(device, 1)
 
     @pytest.mark.asyncio
     async def test_sample_rate_pullup_missing_readback_is_gateway_timeout(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_sample_rate_pullup_state.side_effect = None
-        http_server.application.set_sample_rate_pullup_state.return_value = None
+        http_server.application.set_sample_rate_pullup.side_effect = None
+        http_server.application.set_sample_rate_pullup.return_value = None
 
         status, response = await post(
             http_server,
@@ -706,7 +702,7 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True, "clock_source": 57044}
-        http_server.application.set_clock_source_state.assert_awaited_once_with(device, 57044)
+        http_server.application.set_clock_source.assert_awaited_once_with(device, 57044)
 
     @pytest.mark.asyncio
     async def test_clock_subdomain_write_is_verified(self):
@@ -721,7 +717,7 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True, "subdomain": "_DFLT"}
-        http_server.application.set_clock_subdomain_state.assert_awaited_once()
+        http_server.application.set_clock_subdomain.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_refresh_clock_returns_raw_clock_source(self):
@@ -846,7 +842,7 @@ class TestDeviceLookup:
         status, body = await post(http_server, "/identify", {"device": "studio-avio"})
         assert status == 202
         assert body == {"accepted": True, "verified": False}
-        device.operations.identify.assert_awaited_once()
+        http_server.application.identify.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_lookup_by_ip_address(self):

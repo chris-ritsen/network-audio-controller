@@ -2,24 +2,20 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+from dataclasses import dataclass
 import json
 import logging
 import os
 import sqlite3
-import struct
 import time
 import zlib
 
-from netaudio.dante.debug_formatter import (
-    PROTOCOL_NAMES,
-    RESULT_NAMES,
-    get_opcode_name,
-    get_settings_message_type_name,
-)
+from netaudio.dante.const import PROTOCOL_NAMES
+from netaudio.dante.packet_header import parse_packet_header
 from netaudio.dante.packet_store_common import (
     decompress_payload as _decompress_payload,
 )
-from netaudio.dante.packet_store_queries import PacketStoreQueries
+from netaudio.dante.packet_store_queries import PacketQuery, PacketStoreQueries
 
 logger = logging.getLogger("netaudio")
 
@@ -34,61 +30,44 @@ DEFAULT_DB_PATH = _default_db_path()
 
 TEMPORAL_CORRELATION_WINDOW = 0.1
 
-KNOWN_PROTOCOL_IDS = frozenset(PROTOCOL_NAMES.keys()) | {0x0008, 0x2729}
+KNOWN_PROTOCOL_IDS = frozenset(PROTOCOL_NAMES.keys())
 
 
-def _parse_header(data: bytes):
-    if len(data) < 8:
-        return None
+@dataclass(frozen=True)
+class ArtifactRecord:
+    content: bytes
+    filename: str
+    label: str
+    media_type: str
+    role: str
+    session_id: int
+    note: str | None = None
+    source_host: str | None = None
+    source_modified_ns: int | None = None
+    source_path: str | None = None
+    timestamp_ns: int | None = None
 
-    protocol_id = struct.unpack(">H", data[0:2])[0]
-    length = struct.unpack(">H", data[2:4])[0]
 
-    if protocol_id == 0xFFFF and len(data) >= 28:
-        message_type = struct.unpack(">H", data[26:28])[0]
-        message_type_name = get_settings_message_type_name(message_type)
+@dataclass(frozen=True)
+class PacketRecord:
+    payload: bytes
+    source_type: str
+    device_ip: str | None = None
+    device_name: str | None = None
+    direction: str | None = None
+    dst_ip: str | None = None
+    dst_port: int | None = None
+    interface: str | None = None
+    multicast_group: str | None = None
+    multicast_port: int | None = None
+    session_id: int | None = None
+    source_host: str | None = None
+    src_ip: str | None = None
+    src_port: int | None = None
+    timestamp_ns: int | None = None
 
-        return {
-            "protocol_id": protocol_id,
-            "length": length,
-            "transaction_id": None,
-            "opcode": message_type,
-            "result_code": None,
-            "protocol_name": "PROTOCOL_SETTINGS",
-            "opcode_name": message_type_name,
-            "result_name": None,
-        }
 
-    if protocol_id == 0x0008 and len(data) >= 12:
-        direction_field = struct.unpack(">H", data[6:8])[0]
-        opcode = struct.unpack(">H", data[10:12])[0]
-        sequence = struct.unpack(">H", data[16:18])[0] if len(data) >= 18 else None
-
-        return {
-            "protocol_id": protocol_id,
-            "length": length,
-            "transaction_id": sequence,
-            "opcode": opcode,
-            "result_code": direction_field,
-            "protocol_name": "DDP_LOCK",
-            "opcode_name": get_opcode_name(protocol_id, opcode) if opcode is not None else None,
-            "result_name": None,
-        }
-
-    transaction_id = struct.unpack(">H", data[4:6])[0] if len(data) >= 6 else None
-    opcode = struct.unpack(">H", data[6:8])[0] if len(data) >= 8 else None
-    result_code = struct.unpack(">H", data[8:10])[0] if len(data) >= 10 else None
-
-    return {
-        "protocol_id": protocol_id,
-        "length": length,
-        "transaction_id": transaction_id,
-        "opcode": opcode,
-        "result_code": result_code,
-        "protocol_name": PROTOCOL_NAMES.get(protocol_id),
-        "opcode_name": get_opcode_name(protocol_id, opcode) if opcode is not None else None,
-        "result_name": RESULT_NAMES.get(result_code) if result_code is not None else None,
-    }
+__all__ = ["DEFAULT_DB_PATH", "PacketQuery", "PacketRecord", "PacketStore"]
 
 
 class PacketStore(PacketStoreQueries):
@@ -366,7 +345,7 @@ class PacketStore(PacketStoreQueries):
         if metadata_json:
             try:
                 result["metadata"] = json.loads(metadata_json)
-            except Exception:
+            except ValueError:
                 result["metadata"] = None
         else:
             result["metadata"] = None
@@ -381,7 +360,7 @@ class PacketStore(PacketStoreQueries):
         if metadata_json:
             try:
                 result["metadata"] = json.loads(metadata_json)
-            except Exception:
+            except ValueError:
                 result["metadata"] = None
         else:
             result["metadata"] = None
@@ -484,27 +463,25 @@ class PacketStore(PacketStoreQueries):
             if data_json:
                 try:
                     result["data"] = json.loads(data_json)
-                except Exception:
+                except ValueError:
                     result["data"] = None
             else:
                 result["data"] = None
             items.append(result)
         return items
 
-    def add_artifact(
-        self,
-        session_id: int,
-        label: str,
-        role: str,
-        filename: str,
-        media_type: str,
-        content: bytes,
-        note: str | None = None,
-        source_path: str | None = None,
-        source_host: str | None = None,
-        source_modified_ns: int | None = None,
-        timestamp_ns: int | None = None,
-    ) -> int:
+    def add_artifact(self, record: ArtifactRecord) -> int:
+        session_id = record.session_id
+        label = record.label
+        role = record.role
+        filename = record.filename
+        media_type = record.media_type
+        content = record.content
+        note = record.note
+        source_path = record.source_path
+        source_host = record.source_host
+        source_modified_ns = record.source_modified_ns
+        timestamp_ns = record.timestamp_ns
         if self.get_session(session_id) is None:
             raise ValueError(f"capture session {session_id} does not exist")
         if not label.strip():
@@ -570,30 +547,28 @@ class PacketStore(PacketStoreQueries):
         ).fetchall()
         return [artifact for row in rows if (artifact := self._decode_artifact_row(row)) is not None]
 
-    def store_packet(
-        self,
-        payload: bytes,
-        source_type: str,
-        src_ip: str = None,
-        src_port: int = None,
-        dst_ip: str = None,
-        dst_port: int = None,
-        device_name: str = None,
-        device_ip: str = None,
-        direction: str = None,
-        multicast_group: str = None,
-        multicast_port: int = None,
-        session_id: int = None,
-        timestamp_ns: int = None,
-        source_host: str = None,
-        interface: str = None,
-    ) -> int | None:
+    def store_packet(self, record: PacketRecord) -> int | None:
+        payload = record.payload
+        source_type = record.source_type
+        src_ip = record.src_ip
+        src_port = record.src_port
+        dst_ip = record.dst_ip
+        dst_port = record.dst_port
+        device_name = record.device_name
+        device_ip = record.device_ip
+        direction = record.direction
+        multicast_group = record.multicast_group
+        multicast_port = record.multicast_port
+        session_id = record.session_id
+        timestamp_ns = record.timestamp_ns
+        source_host = record.source_host
+        interface = record.interface
         if timestamp_ns is None:
             timestamp_ns = time.time_ns()
 
         timestamp_iso = self._iso_from_ns(timestamp_ns)
 
-        header = _parse_header(payload)
+        header = parse_packet_header(payload)
 
         compressed_payload = zlib.compress(payload)
 

@@ -71,6 +71,21 @@ def default_config_path() -> Path:
     return candidates[0]
 
 
+def load_config_document(config_path: Path | None = None) -> dict:
+    config_path = config_path or default_config_path()
+    if not config_path.exists():
+        return {}
+    if tomllib is None:
+        raise ValueError("TOML parser unavailable. Install 'tomli' or use Python 3.11+.")
+    try:
+        data = tomllib.loads(config_path.read_text())
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exception:
+        raise ValueError(f"Failed to parse config {config_path}: {exception}") from exception
+    if not isinstance(data, dict):
+        raise ValueError(f"Config {config_path} must contain a TOML table.")
+    return data
+
+
 def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict, Path]:
     config_path = Path(config).expanduser().resolve() if config else default_config_path()
     explicit_config = config is not None
@@ -80,16 +95,7 @@ def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict,
             raise ValueError(f"Capture config file not found: {config_path}")
         return {}, config_path
 
-    if tomllib is None:
-        raise ValueError("TOML parser unavailable. Install 'tomli' or use Python 3.11+.")
-
-    try:
-        data = tomllib.loads(config_path.read_text())
-    except Exception as exception:
-        raise ValueError(f"Failed to parse capture config {config_path}: {exception}")
-
-    if not isinstance(data, dict):
-        raise ValueError(f"Capture config {config_path} must contain a TOML table.")
+    data = load_config_document(config_path)
 
     selected_profile = None
     profiles_section = data.get("profiles")
@@ -121,12 +127,9 @@ def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict,
 
 
 def load_daemon_config() -> dict:
-    config_path = default_config_path()
-    if not config_path.exists() or tomllib is None:
+    data = load_config_document()
+    if not data:
         return {}
-    data = tomllib.loads(config_path.read_text())
-    if not isinstance(data, dict):
-        raise ValueError(f"Config {config_path} must contain a TOML table.")
     profile_config, _ = load_capture_profile(None, None)
     daemon_config = dict(_as_dict(data.get("daemon")))
     if profile_config is not data:

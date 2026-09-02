@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import struct
 import sys
 
@@ -28,7 +29,7 @@ def _open_evidence_store(
         if profile is not None:
             options["profile"] = profile
         return open_packet_store(**options)
-    except Exception as exception:
+    except (OSError, ValueError, sqlite3.Error) as exception:
         print(f"Capture: unable to open the packet database: {exception}", file=sys.stderr)
         raise typer.Exit(1)
 

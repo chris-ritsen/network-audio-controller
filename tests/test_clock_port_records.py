@@ -1,6 +1,5 @@
 from netaudio import core
-from netaudio.dante.device import DanteDevice
-from netaudio.dante.services.notification import DanteEventDispatcher, DanteNotificationService
+from tests.status_test_support import application_with_device, receive_packets
 
 
 CLOCK_STATUS_PACKET = bytes.fromhex(
@@ -93,16 +92,9 @@ def test_clock_status_parser_preserves_every_port_record():
 
 def test_notification_and_device_serialization_preserve_every_clock_port_record():
     expected = core.parse_response("ptp_clock_status", CLOCK_STATUS_PACKET)["clock_port_records"]
-    device = DanteDevice()
-    device.name = "clock-port-test"
-    device.server_name = "clock-port-test"
-    device.ipv4 = "192.168.1.108"
-    service = DanteNotificationService(
-        dispatcher=DanteEventDispatcher(),
-        device_lookup=lambda source_ip: device if source_ip == "192.168.1.108" else None,
-    )
+    application, device = application_with_device("clock-port-test", "192.168.1.108", name="clock-port-test")
 
-    service._on_packet(CLOCK_STATUS_PACKET, ("192.168.1.108", 1034))
+    receive_packets(application, [CLOCK_STATUS_PACKET], ("192.168.1.108", 1034))
 
     assert device.clock_port_records == expected
     assert device.to_json()["clock_port_records"] == expected

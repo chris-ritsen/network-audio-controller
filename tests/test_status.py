@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from netaudio.commands.status import (
     DANTE_STATUS_HEADERS,
@@ -102,20 +103,21 @@ async def test_gather_status_verbose_uses_device_list_layout(monkeypatch):
     device = make_status_device()
     device.online = True
 
-    async def load_display_devices():
+    async def load_display_devices(application):
         return {device.server_name: device}
 
     monkeypatch.setattr(common_module, "_load_display_devices", load_display_devices)
     monkeypatch.setattr(daemon_client, "daemon_is_accessible", lambda: False)
+    application = SimpleNamespace()
 
-    headers, rows, shure_rows, json_data = await status_module._gather_status(verbose=True)
+    headers, rows, shure_rows, json_data = await status_module.gather_status(application, {}, verbose=True)
 
     assert headers == device_list_headers(True)
     assert rows == [device_list_row(device.server_name, device, verbose=True)]
     assert shure_rows == []
     assert list(json_data["dante"]) == [device.server_name]
 
-    headers, rows, _, _ = await status_module._gather_status(verbose=False)
+    headers, rows, _, _ = await status_module.gather_status(application, {}, verbose=False)
 
     assert headers == DANTE_STATUS_HEADERS
     assert rows == [_dante_row_from_device(device)]

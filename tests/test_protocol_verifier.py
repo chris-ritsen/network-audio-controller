@@ -1,5 +1,6 @@
 import json
 import struct
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -7,6 +8,7 @@ import pytest
 
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante.packet_store import PacketQuery, PacketRecord
 from netaudio.dante.protocol_verifier import ProtocolVerifier
 
 
@@ -39,7 +41,7 @@ async def test_session_lifecycle(temp_db, output_dir):
             ) as verifier:
                 assert verifier.session_id is not None
                 assert verifier.packet_store is not None
-                assert verifier.service is not None
+                assert verifier.transport is not None
 
                 session = verifier.packet_store.get_session(verifier.session_id)
                 assert session is not None
@@ -100,11 +102,13 @@ async def test_bundle_export(temp_db, output_dir):
                 output_dir=output_dir,
             ) as verifier:
                 verifier.packet_store.store_packet(
-                    payload=fake_response,
-                    source_type="test_request",
-                    device_ip="192.168.1.100",
-                    direction="request",
-                    session_id=verifier.session_id,
+                    PacketRecord(
+                        payload=fake_response,
+                        source_type="test_request",
+                        device_ip="192.168.1.100",
+                        direction="request",
+                        session_id=verifier.session_id,
+                    )
                 )
 
                 verifier.hypothesis("test_export", note="Testing export")
@@ -151,19 +155,18 @@ async def test_send_command_unwraps_tuple(temp_db, output_dir):
                 session_name="command_test",
                 output_dir=output_dir,
             ) as verifier:
-                with patch.object(verifier._service, "request", new_callable=AsyncMock, return_value=fake_response):
+                with patch.object(verifier._transport, "call", new_callable=AsyncMock, return_value=fake_response):
                     response = await verifier.send_command(
                         command_tuple,
                         label="get_name",
                     )
 
                     assert response == fake_response
-                    verifier._service.request.assert_called_once()
-                    call_kwargs = verifier._service.request.call_args
-                    assert (
-                        call_kwargs.kwargs.get("port") == DEVICE_ARC_PORT
-                        or call_kwargs[1].get("port") == DEVICE_ARC_PORT
-                    )
+                    verifier._transport.call.assert_called_once()
+                    device_ip, operation = verifier._transport.call.call_args.args
+                    assert device_ip == "192.168.1.100"
+                    requested = operation(SimpleNamespace(request=lambda packet, port: (packet, port)))
+                    assert requested == (command_tuple[0], DEVICE_ARC_PORT)
 
 
 @pytest.mark.asyncio
@@ -178,7 +181,7 @@ async def test_send_with_labels_creates_markers(temp_db, output_dir):
                 session_name="label_test",
                 output_dir=output_dir,
             ) as verifier:
-                with patch.object(verifier._service, "request", new_callable=AsyncMock, return_value=fake_response):
+                with patch.object(verifier._transport, "call", new_callable=AsyncMock, return_value=fake_response):
                     await verifier.send(
                         b"\x27\xff\x00\x0a\x00\x01\x10\x01\x00\x00",
                         port=4440,
@@ -208,26 +211,29 @@ async def test_include_evidence_from_ambient(temp_db, output_dir):
                 output_dir=output_dir,
             ) as verifier:
                 verifier.packet_store.store_packet(
-                    payload=ambient_packet,
-                    source_type="tshark",
-                    device_ip="192.168.1.100",
-                    direction="request",
-                    session_id=None,
+                    PacketRecord(
+                        payload=ambient_packet,
+                        source_type="tshark",
+                        device_ip="192.168.1.100",
+                        direction="request",
+                        session_id=None,
+                    )
                 )
 
                 verifier.packet_store.store_packet(
-                    payload=_fake_response(),
-                    source_type="tshark",
-                    device_ip="192.168.1.200",
-                    direction="request",
-                    session_id=None,
+                    PacketRecord(
+                        payload=_fake_response(),
+                        source_type="tshark",
+                        device_ip="192.168.1.200",
+                        direction="request",
+                        session_id=None,
+                    )
                 )
 
                 found = verifier.include_evidence(
+                    PacketQuery(device_ip="192.168.1.100", opcode=0x1101),
                     label="set_latency_observed",
                     note="Captured set-latency from Dante Controller",
-                    device_ip="192.168.1.100",
-                    opcode=0x1101,
                 )
 
                 assert len(found) == 1
@@ -275,22 +281,26 @@ async def test_include_evidence_by_payload_hex(temp_db, output_dir):
                 output_dir=output_dir,
             ) as verifier:
                 verifier.packet_store.store_packet(
-                    payload=packet_with_latency,
-                    source_type="tshark",
-                    device_ip="192.168.1.100",
-                    direction="request",
+                    PacketRecord(
+                        payload=packet_with_latency,
+                        source_type="tshark",
+                        device_ip="192.168.1.100",
+                        direction="request",
+                    )
                 )
 
                 verifier.packet_store.store_packet(
-                    payload=packet_without,
-                    source_type="tshark",
-                    device_ip="192.168.1.100",
-                    direction="request",
+                    PacketRecord(
+                        payload=packet_without,
+                        source_type="tshark",
+                        device_ip="192.168.1.100",
+                        direction="request",
+                    )
                 )
 
                 found = verifier.include_evidence(
+                    PacketQuery(payload_hex_contains="0003d090"),
                     label="latency_250us_packets",
-                    payload_hex_contains="0003d090",
                 )
 
                 assert len(found) == 1
@@ -307,26 +317,32 @@ async def test_query_packets_filters(tmp_path):
     pkt_b = struct.pack(">HHHH", 0x2729, 20, 0x0002, 0x1002) + struct.pack(">H", 0x0001)
     pkt_c = struct.pack(">HHHH", 0x27FF, 20, 0x0003, 0x1101) + struct.pack(">H", 0x0001)
 
-    store.store_packet(payload=pkt_a, source_type="tshark", device_ip="192.168.1.100", direction="request")
-    store.store_packet(payload=pkt_b, source_type="tshark", device_ip="192.168.1.200", direction="request")
-    store.store_packet(payload=pkt_c, source_type="netaudio_request", device_ip="192.168.1.100", direction="request")
+    store.store_packet(
+        PacketRecord(payload=pkt_a, source_type="tshark", device_ip="192.168.1.100", direction="request")
+    )
+    store.store_packet(
+        PacketRecord(payload=pkt_b, source_type="tshark", device_ip="192.168.1.200", direction="request")
+    )
+    store.store_packet(
+        PacketRecord(payload=pkt_c, source_type="netaudio_request", device_ip="192.168.1.100", direction="request")
+    )
 
-    by_ip = store.query_packets(device_ip="192.168.1.100")
+    by_ip = store.query_packets(PacketQuery(device_ip="192.168.1.100"))
     assert len(by_ip) == 2
 
-    by_opcode = store.query_packets(opcode=0x1101)
+    by_opcode = store.query_packets(PacketQuery(opcode=0x1101))
     assert len(by_opcode) == 2
 
-    by_protocol = store.query_packets(protocol_id=0x2729)
+    by_protocol = store.query_packets(PacketQuery(protocol_id=0x2729))
     assert len(by_protocol) == 2
 
-    by_combo = store.query_packets(device_ip="192.168.1.100", opcode=0x1101, protocol_id=0x2729)
+    by_combo = store.query_packets(PacketQuery(device_ip="192.168.1.100", opcode=0x1101, protocol_id=0x2729))
     assert len(by_combo) == 1
 
-    by_source = store.query_packets(source_type="tshark")
+    by_source = store.query_packets(PacketQuery(source_type="tshark"))
     assert len(by_source) == 2
 
-    by_hex = store.query_packets(payload_hex_contains="2729")
+    by_hex = store.query_packets(PacketQuery(payload_hex_contains="2729"))
     assert len(by_hex) == 2
 
     store.close()

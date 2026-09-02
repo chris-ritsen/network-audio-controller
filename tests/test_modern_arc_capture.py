@@ -16,15 +16,13 @@ from netaudio.dante.const import (
     PROTOCOL_ARC_280F,
     SERVICE_ARC,
 )
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import DanteDeviceOperations
 from tests.modern_arc_test_support import modern_arc_fixture, modern_arc_payloads
 
 
 def _arc_device(version: str, responses: list[bytes] | None = None):
     return SimpleNamespace(
-        commands=DanteDeviceCommands(),
-        dante_command=AsyncMock(side_effect=responses or []),
+        execute=AsyncMock(side_effect=responses or []),
         services={
             "arc": {
                 "type": SERVICE_ARC,
@@ -105,7 +103,7 @@ async def test_transmitter_operation_fetches_and_merges_all_four_captured_pages(
     assert result["records"][32]["channel_number"] == 33
     assert result["records"][32]["media_local_channel_id"] == 33
 
-    actual_requests = [awaited.args[0] for awaited in device.dante_command.await_args_list]
+    actual_requests = [core.build_command(awaited.args[0]) for awaited in device.execute.await_args_list]
     captured_requests = modern_arc_payloads("pagination", "transmitter_0x2400", source_port=49_818)
     assert [_without_transaction_id(request) for request in actual_requests] == [
         _without_transaction_id(request) for request in captured_requests
@@ -126,7 +124,7 @@ async def test_receiver_operation_fetches_a_short_final_page_and_merges_all_reco
     assert result["records"][-1]["channel_number"] == 64
     assert result["records"][-1]["media_local_channel_id"] == 64
 
-    actual_requests = [awaited.args[0] for awaited in device.dante_command.await_args_list]
+    actual_requests = [core.build_command(awaited.args[0]) for awaited in device.execute.await_args_list]
     captured_requests = modern_arc_payloads("pagination", "receiver_0x3400", source_port=49_818)
     assert [_without_transaction_id(request) for request in actual_requests] == [
         _without_transaction_id(request) for request in captured_requests

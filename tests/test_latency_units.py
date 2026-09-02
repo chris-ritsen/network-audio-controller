@@ -101,7 +101,12 @@ async def test_device_settings_operation_preserves_configured_compatibility_late
             "latency_ns": 250_000,
         }
     )
-    device._core_client = lambda: core_client
+    device.ipv4 = "192.0.2.10"
+
+    async def call_core(operation, **_options):
+        return operation(core_client)
+
+    device.call_core = call_core
 
     await device.operations.get_device_settings()
 
@@ -162,21 +167,14 @@ def test_capture_backed_avio_bounds_filter_controller_latency_choices(load_fixtu
 
 @pytest.mark.asyncio
 async def test_latency_settings_operation_uses_the_focused_latency_query(load_fixture):
-    from netaudio import core
 
     device = DanteDevice()
     response = load_fixture("core_latency_config_avio-aes3-1.bin")
-    device.dante_command = AsyncMock(return_value=response)
+    device.execute = AsyncMock(return_value=response)
 
     settings = await device.operations.get_latency_settings()
 
-    command = core.build_command({"command": "query_latency_config"})
-    device.dante_command.assert_awaited_once_with(
-        command,
-        "_netaudio-arc._udp.local.",
-        None,
-        logical_command_name="query_latency_config",
-    )
+    device.execute.assert_awaited_once_with({"command": "query_latency_config"})
     assert settings["active_latency_ns"] == 1_000_000
     assert settings["min_latency_ns"] == 1_000_000
     assert settings["max_latency_ns"] == 20_312_500

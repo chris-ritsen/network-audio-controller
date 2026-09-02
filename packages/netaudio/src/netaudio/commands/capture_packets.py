@@ -30,7 +30,7 @@ from netaudio.commands.capture_helpers import (
     _resolve_session_reference,
 )
 from netaudio.capture.packets import _format_endpoint, _hexdump, _label_packet, _print_packet_table_header
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketQuery, PacketStore
 
 
 @packet_app.command("list")
@@ -71,7 +71,7 @@ def packet_list(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     """Search and filter captured packets."""
-    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.capture.daemon import PacketLine, _print_packet_line
 
     from netaudio.cli import state as cli_state
 
@@ -112,37 +112,25 @@ def packet_list(
         if before and session_id is not None:
             end_ns = _parse_time_filter(before, store, session_id)
 
-        total = store.search_packets_count(
-            session_id=session_id,
+        query = PacketQuery(
+            ascending=not descending,
             device_ip=device_ip,
             device_name=device_name,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=resolved_opcode,
-            protocol_id=resolved_protocol,
             direction=resolved_direction,
-            payload_contains=grep,
-            src_ip=source_ip,
             dst_ip=destination_ip,
-            port=port,
-        )
-        rows = store.search_packets(
-            session_id=session_id,
-            device_ip=device_ip,
-            device_name=device_name,
-            start_ns=start_ns,
             end_ns=end_ns,
-            opcode=resolved_opcode,
-            protocol_id=resolved_protocol,
-            direction=resolved_direction,
-            payload_contains=grep,
-            src_ip=source_ip,
-            dst_ip=destination_ip,
-            port=port,
             limit=limit,
             offset=offset,
-            ascending=not descending,
+            opcode=resolved_opcode,
+            payload_contains=grep,
+            port=port,
+            protocol_id=resolved_protocol,
+            session_id=session_id,
+            src_ip=source_ip,
+            start_ns=start_ns,
         )
+        total = store.search_packets_count(query)
+        rows = store.search_packets(query)
 
         scope = f"session #{session_id}" if session_id else "all packets"
         print(f"Capture: {scope} {_emdash()} {total} matched, showing {len(rows)} (limit={limit} offset={offset})")
@@ -176,21 +164,7 @@ def packet_list(
         _print_packet_table_header()
 
         for row in rows:
-            payload = row.get("payload") or b""
-            if isinstance(payload, str):
-                payload = bytes.fromhex(payload)
-            _print_packet_line(
-                packet_id=int(row["id"]),
-                timestamp_ns=int(row["timestamp_ns"]),
-                source_ip=row.get("src_ip"),
-                source_port=row.get("src_port"),
-                destination_ip=row.get("dst_ip"),
-                destination_port=row.get("dst_port"),
-                direction=row.get("direction"),
-                payload=payload,
-                dump=dump,
-                dissect_mode=cli_state.dissect,
-            )
+            _print_packet_line(PacketLine.from_row(row), dump=dump, dissect_mode=cli_state.dissect)
     finally:
         store.close()
 
@@ -408,22 +382,22 @@ def packet_state_diff(
             )
 
         before_rows = store.search_packets(
-            session_id=session_id,
-            device_ip=device_ip,
-            end_ns=before_ns,
-            opcode=resolved_opcode,
-            direction=resolved_direction,
-            limit=10000,
-            ascending=True,
+            PacketQuery(
+                device_ip=device_ip,
+                direction=resolved_direction,
+                end_ns=before_ns,
+                opcode=resolved_opcode,
+                session_id=session_id,
+            )
         )
         after_rows = store.search_packets(
-            session_id=session_id,
-            device_ip=device_ip,
-            start_ns=after_ns,
-            opcode=resolved_opcode,
-            direction=resolved_direction,
-            limit=10000,
-            ascending=True,
+            PacketQuery(
+                device_ip=device_ip,
+                direction=resolved_direction,
+                opcode=resolved_opcode,
+                session_id=session_id,
+                start_ns=after_ns,
+            )
         )
 
         before_by_opcode: dict[str, list[tuple[int, bytes]]] = {}

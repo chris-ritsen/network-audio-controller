@@ -2,31 +2,14 @@ import asyncio
 
 import typer
 
-from netaudio._common import readback_after_notification, ReadbackResult, send_and_wait_for_notification
+from netaudio import core
+from netaudio._common import ReadbackResult, readback_after_notification
 from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import sort_devices
 from netaudio._exit_codes import ExitCode
 from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.state import apply_device_status
 
-
-def _resolve_targets(filtered, all_devices):
-    if all_devices:
-        if not filtered:
-            typer.echo("Error: no devices found.", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-        return list(sort_devices(filtered))
-
-    if len(filtered) == 0:
-        typer.echo("Error: device not found.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    if len(filtered) > 1:
-        names = ", ".join(device.name or server_name for server_name, device in filtered.items())
-        typer.echo(f"Error: multiple devices matched: {names}", err=True)
-        typer.echo("Use -n to select a device or --all for all devices.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    return [next(iter(filtered.items()))]
+MUTATION_ERRORS = (core.NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError)
 
 
 async def _read_aes67_configured(device):
@@ -60,42 +43,41 @@ async def _read_latency_milliseconds(device):
     return nanoseconds_to_milliseconds(latency_nanoseconds)
 
 
-async def _read_sample_rate_status_result(send, device):
-    current_sample_rate, supported_sample_rates = await send.probe_sample_rate_status(device.ipv4)
-    device.sample_rate = current_sample_rate
-    device.supported_sample_rates = supported_sample_rates
-    return current_sample_rate, supported_sample_rates
+async def _read_capability_status(application, device, kind: str, supported_field: str):
+    probe = {
+        "encoding": application.probe_encoding_status,
+        "sample_rate": application.probe_sample_rate_status,
+        "sample_rate_pullup": application.probe_sample_rate_pullup_status,
+    }[kind]
+    current_value, supported_values = await probe(str(device.ipv4))
+    apply_device_status(device, kind, {kind: current_value, supported_field: supported_values})
+    return current_value, supported_values
 
 
-async def _read_sample_rate_status(send, device):
-    current_sample_rate, _ = await _read_sample_rate_status_result(send, device)
-    return current_sample_rate
+async def _read_sample_rate_status_result(application, device):
+    return await _read_capability_status(application, device, "sample_rate", "supported_sample_rates")
 
 
-async def _read_encoding_status_result(send, device):
-    current_encoding, supported_encodings = await send.probe_encoding_status(device.ipv4)
-    device.encoding = current_encoding
-    device.supported_encodings = supported_encodings
-    return current_encoding, supported_encodings
+async def _read_encoding_status_result(application, device):
+    return await _read_capability_status(application, device, "encoding", "supported_encodings")
 
 
-async def _read_encoding_status(send, device):
-    current_encoding, _ = await _read_encoding_status_result(send, device)
+async def _read_encoding_status(application, device):
+    current_encoding, _ = await _read_encoding_status_result(application, device)
     return current_encoding
 
 
-async def _read_sample_rate_pullup_status_result(send, device):
-    result = await send.probe_sample_rate_pullup_status(str(device.ipv4))
-    if result is None:
-        raise RuntimeError("sample-rate pull-up status was unavailable")
-    current_raw_value, supported_raw_values = result
-    device.sample_rate_pullup_raw_value = current_raw_value
-    device.supported_sample_rate_pullup_raw_values = supported_raw_values
-    return current_raw_value, supported_raw_values
+async def _read_sample_rate_pullup_status_result(application, device):
+    return await _read_capability_status(
+        application,
+        device,
+        "sample_rate_pullup",
+        "supported_sample_rate_pullup_raw_values",
+    )
 
 
-async def _read_sample_rate_pullup_status(send, device):
-    current_raw_value, _ = await _read_sample_rate_pullup_status_result(send, device)
+async def _read_sample_rate_pullup_status(application, device):
+    current_raw_value, _ = await _read_sample_rate_pullup_status_result(application, device)
     return current_raw_value
 
 
@@ -105,7 +87,7 @@ async def _collect_target_readings(targets, read_target):
         try:
             await read_target(server_name, device)
             readings.append((server_name, device, None))
-        except Exception as exception:
+        except MUTATION_ERRORS as exception:
             readings.append((server_name, device, exception))
     return readings
 
@@ -177,64 +159,23 @@ def _targets_supporting_value(
     return supported_targets, failures
 
 
-async def _send_verified_change(
-    targets,
-    send,
-    packet,
-    port_for,
-    expected,
-    read_for,
-    action,
-    success_message,
-    notification_ids,
-    send_kwargs=None,
-    capability_name=None,
-    probe_status_for=None,
-):
-    send_kwargs = send_kwargs or {}
+def _readback_from_status(status, expected) -> ReadbackResult:
+    if status is None:
+        return ReadbackResult(matched=False)
+    observed_value, _ = status
+    return ReadbackResult(matched=observed_value == expected, observed=observed_value, observed_available=True)
 
+
+async def _send_verified_change(targets, mutate_for, expected, action, success_message, read_for=None):
     async def _send_and_read(server_name, device):
         label = device.name or server_name
         try:
-            capability_sender = getattr(send, "send_and_wait_for_capability_value", None)
-            if capability_name is not None and probe_status_for is not None and capability_sender is not None:
-                status = await capability_sender(
-                    packet,
-                    device.ipv4,
-                    port_for(device),
-                    capability_name,
-                    expected,
-                    lambda: probe_status_for(device),
-                    **send_kwargs,
-                )
-                if status is None:
-                    return label, ReadbackResult(matched=False), None
-                observed_value, _ = status
-                return (
-                    label,
-                    ReadbackResult(
-                        matched=observed_value == expected,
-                        observed=observed_value,
-                        observed_available=True,
-                    ),
-                    None,
-                )
-            await send_and_wait_for_notification(
-                send,
-                packet,
-                device.ipv4,
-                port_for(device),
-                notification_ids,
-                **send_kwargs,
-            )
-        except TimeoutError:
-            result = await readback_after_notification(lambda: read_for(device), expected)
-            return label, result, None
-        except Exception as exception:
+            status = await mutate_for(device)
+        except MUTATION_ERRORS as exception:
             return label, None, exception
-
-        result = await readback_after_notification(lambda: read_for(device), expected)
-        return label, result, None
+        if read_for is None:
+            return label, _readback_from_status(status, expected), None
+        return label, await readback_after_notification(lambda: read_for(device), expected), None
 
     results = await asyncio.gather(*(_send_and_read(server_name, device) for server_name, device in targets))
 
@@ -269,7 +210,7 @@ async def _send_requested_change(targets, request_for, action, success_message):
         try:
             await request_for(device)
             return label, None
-        except Exception as exception:
+        except MUTATION_ERRORS as exception:
             return label, exception
 
     results = await asyncio.gather(*(_request(server_name, device) for server_name, device in targets))
