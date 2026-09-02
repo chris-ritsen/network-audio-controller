@@ -32,11 +32,29 @@ pub struct LockResult {
 
 #[derive(Debug)]
 pub enum LockError {
-    InvalidKey,
-    InvalidPin,
     Crypto,
+    InvalidKey,
+    InvalidNonce,
+    InvalidPin,
     Io(io::Error),
     Timeout,
+}
+
+impl std::fmt::Display for LockError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LockError::Crypto => formatter.write_str("secretbox encryption failed"),
+            LockError::InvalidKey => {
+                write!(formatter, "lock key must be exactly {KEY_LENGTH} bytes")
+            }
+            LockError::InvalidNonce => {
+                write!(formatter, "lock nonce must be exactly {NONCE_LENGTH} bytes")
+            }
+            LockError::InvalidPin => formatter.write_str("pin must be exactly 4 digits"),
+            LockError::Io(error) => write!(formatter, "socket error: {error}"),
+            LockError::Timeout => formatter.write_str("device did not answer the lock exchange"),
+        }
+    }
 }
 
 impl From<io::Error> for LockError {
@@ -59,7 +77,7 @@ pub fn compute_token(pin: &str, nonce: &[u8], key: &[u8]) -> Result<Vec<u8>, Loc
         return Err(LockError::InvalidKey);
     }
     if nonce.len() != NONCE_LENGTH {
-        return Err(LockError::Crypto);
+        return Err(LockError::InvalidNonce);
     }
 
     let cipher = XSalsa20Poly1305::new_from_slice(key).map_err(|_| LockError::InvalidKey)?;

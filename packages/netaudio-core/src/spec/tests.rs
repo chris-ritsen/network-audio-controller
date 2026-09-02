@@ -1,7 +1,13 @@
 use super::*;
 
+const TEST_HOST_MAC: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
+
+fn routed_with_assigned_id(json: &str, host_mac: [u8; 6], assigned_id: u16) -> Routed {
+    build_routed_command(json, Some(host_mac), || assigned_id).unwrap()
+}
+
 fn route_for(json: &str) -> (Target, IoMode) {
-    let routed = build_routed_command(json, [0x00, 0x11, 0x22, 0x33, 0x44, 0x55]).unwrap();
+    let routed = routed_with_assigned_id(json, TEST_HOST_MAC, 1);
     (routed.target, routed.io)
 }
 
@@ -23,7 +29,7 @@ fn conmon_export_commands_route_to_the_settings_port_and_wait_for_a_reply() {
 fn representative_commands_keep_their_routes() {
     assert_eq!(
         route_for(r#"{"command":"channel_count"}"#),
-        (Target::Arc, IoMode::StampedRequest)
+        (Target::Arc, IoMode::Request)
     );
     assert_eq!(
         route_for(r#"{"command":"identify"}"#),
@@ -74,29 +80,94 @@ fn representative_commands_keep_their_routes() {
 #[test]
 fn default_host_mac_fills_in_when_omitted() {
     let mac = [0x0c, 0x9d, 0x92, 0xc5, 0x12, 0xf8];
-    let routed = build_routed_command("{\"command\":\"reboot\"}", mac).unwrap();
+    let routed = routed_with_assigned_id("{\"command\":\"reboot\"}", mac, 1);
     assert_eq!(&routed.packet[8..14], &mac);
 }
 
 #[test]
-fn identify_defaults_sequence_when_omitted() {
-    let routed = build_routed_command("{\"command\":\"identify\"}", [0xFF; 6]).unwrap();
-    assert_eq!(routed.packet, crate::commands::build_identify(1).unwrap());
-    let explicit =
-        build_routed_command("{\"command\":\"identify\",\"sequence\":3017}", [0xFF; 6]).unwrap();
+fn omitted_message_id_is_assigned_and_explicit_ids_are_honored() {
+    let assigned = routed_with_assigned_id("{\"command\":\"identify\"}", [0xFF; 6], 0x0C01);
+    assert_eq!(assigned.message_id, 0x0C01);
     assert_eq!(
-        explicit.packet,
-        crate::commands::build_identify(0x0BC9).unwrap()
+        assigned.packet,
+        crate::commands::build_identify(0x0C01).unwrap()
+    );
+    for json in [
+        "{\"command\":\"identify\",\"message_id\":3017}",
+        "{\"command\":\"identify\",\"sequence\":3017}",
+        "{\"command\":\"identify\",\"transaction_id\":3017}",
+    ] {
+        let explicit = routed_with_assigned_id(json, [0xFF; 6], 0x0C01);
+        assert_eq!(explicit.message_id, 0x0BC9, "{json}");
+        assert_eq!(
+            explicit.packet,
+            crate::commands::build_identify(0x0BC9).unwrap(),
+            "{json}"
+        );
+    }
+    let arc = routed_with_assigned_id("{\"command\":\"device_info\"}", [0xFF; 6], 0x0C02);
+    assert_eq!(arc.message_id, 0x0C02);
+    assert_eq!(
+        arc.packet,
+        crate::commands::build_device_info(0x0C02).unwrap()
+    );
+    let zero = routed_with_assigned_id(
+        "{\"command\":\"device_info\",\"transaction_id\":0}",
+        [0xFF; 6],
+        0x0C03,
+    );
+    assert_eq!(zero.message_id, 0x0C03);
+}
+
+#[test]
+fn commands_without_a_message_id_field_never_consume_one() {
+    let routed = build_routed_command(
+        "{\"command\":\"make_model\",\"mac\":\"001122334455\"}",
+        None,
+        || panic!("make_model has no message id"),
+    )
+    .unwrap();
+    assert_eq!(routed.message_id, 0);
+}
+
+#[test]
+fn standalone_builder_requires_a_message_id_for_conmon_writes() {
+    assert!(matches!(
+        build_command_from_json("{\"command\":\"reboot\",\"host_mac\":\"001122334455\"}"),
+        Err(SpecError::Protocol(NetaudioError::InvalidSequence))
+    ));
+    assert!(build_command_from_json(
+        "{\"command\":\"reboot\",\"host_mac\":\"001122334455\",\"message_id\":9}"
+    )
+    .is_ok());
+    assert!(build_command_from_json("{\"command\":\"device_info\"}").is_ok());
+}
+
+#[test]
+fn unknown_fields_are_rejected_with_the_serde_message() {
+    let error = build_command_from_json("{\"command\":\"identify\",\"sequenc\":1}").unwrap_err();
+    match error {
+        SpecError::InvalidJson(message) => {
+            assert!(message.contains("unknown field `sequenc`"), "{message}")
+        }
+        other => panic!("unexpected error {other:?}"),
+    }
+    let nested = build_command_from_json(
+        "{\"command\":\"add_subscriptions\",\"subscriptions\":[{\"rx_channel\":1,\"tx_channel\":\"a\",\"tx_device\":\"b\",\"extra\":1}]}",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(nested, SpecError::InvalidJson(message) if message.contains("unknown field `extra`"))
     );
 }
 
 #[test]
 fn explicit_host_mac_overrides_default() {
-    let routed = build_routed_command(
+    let routed = routed_with_assigned_id(
         "{\"command\":\"reboot\",\"host_mac\":\"001122334455\"}",
         [0xFF; 6],
-    )
-    .unwrap();
+        1,
+    );
     assert_eq!(&routed.packet[8..14], &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
 }
 
@@ -109,24 +180,24 @@ fn standalone_builder_rejects_omitted_host_mac() {
 }
 
 #[test]
-fn probe_encoding_defaults_to_captured_message_sequence() {
-    let routed = build_routed_command(
+fn probe_encoding_keeps_its_message_type_independent_of_the_message_id() {
+    let routed = routed_with_assigned_id(
         r#"{"command":"probe_encoding"}"#,
         [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
-    )
-    .unwrap();
-    assert_eq!(&routed.packet[4..6], &0x0083u16.to_be_bytes());
+        0x4321,
+    );
+    assert_eq!(&routed.packet[4..6], &0x4321u16.to_be_bytes());
     assert_eq!(&routed.packet[26..28], &0x0083u16.to_be_bytes());
 }
 
 #[test]
 fn refresh_clock_status_preserves_the_requested_sequence_and_mac() {
     let host_mac = [0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D];
-    let routed = build_routed_command(
+    let routed = routed_with_assigned_id(
         r#"{"command":"refresh_clock_status","sequence":33}"#,
         host_mac,
-    )
-    .unwrap();
+        1,
+    );
     assert_eq!(
         routed.packet,
         commands::build_refresh_clock_status(host_mac, 33).unwrap()
@@ -145,18 +216,21 @@ fn refresh_clock_status_preserves_the_requested_sequence_and_mac() {
 #[test]
 fn sample_rate_pullup_commands_use_the_authentic_wire_contract() {
     let host_mac = [0x72, 0xE7, 0x8A, 0x7B, 0x8D, 0x82];
-    let probe =
-        build_routed_command(r#"{"command":"probe_sample_rate_pullup"}"#, host_mac).unwrap();
+    let probe = routed_with_assigned_id(
+        r#"{"command":"probe_sample_rate_pullup"}"#,
+        host_mac,
+        0x0085,
+    );
     assert_eq!(
         probe.packet,
         commands::build_probe_sample_rate_pullup(host_mac, 0x0085).unwrap()
     );
 
-    let write = build_routed_command(
+    let write = routed_with_assigned_id(
         r#"{"command":"set_sample_rate_pullup","raw_value":4,"sequence":71}"#,
         host_mac,
-    )
-    .unwrap();
+        1,
+    );
     assert_eq!(
         write.packet,
         commands::build_set_sample_rate_pullup(host_mac, 71, 4).unwrap()
@@ -329,7 +403,7 @@ fn static_interface_requires_ip_address_and_netmask() {
     }
 
     assert!(build_command_from_json(
-            r#"{"command":"set_interface_static","ip":"192.168.1.10","netmask":"255.255.255.0","host_mac":"001122334455"}"#
+            r#"{"command":"set_interface_static","ip":"192.168.1.10","netmask":"255.255.255.0","host_mac":"001122334455","message_id":1}"#
         )
         .is_ok());
 }

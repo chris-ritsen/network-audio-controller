@@ -8,44 +8,30 @@ pub unsafe extern "C" fn netaudio_client_new(
     attempts: u32,
     out_client: *mut *mut NetaudioClient,
 ) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if out_client.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         unsafe {
             *out_client = ptr::null_mut();
         }
-        if device_ip.is_null() {
-            return NetaudioStatus::NullPointer;
-        }
-
-        let device_ip = match unsafe { CStr::from_ptr(device_ip) }.to_str() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidUtf8,
-        };
-
-        let device_ip: IpAddr = match device_ip.parse() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidAddress,
-        };
-
-        let client = match Client::new(
+        let device_ip = unsafe { c_string(device_ip)? };
+        let device_ip: IpAddr = device_ip.parse().map_err(|_| {
+            FfiError::new(
+                NetaudioStatus::InvalidAddress,
+                format!("device address {device_ip:?} is not an IP address"),
+            )
+        })?;
+        let client = Client::new(
             device_ip,
             arc_port,
             Duration::from_millis(timeout_milliseconds as u64),
             attempts,
-        ) {
-            Ok(client) => client,
-            Err(error) => return error.into(),
-        };
-
+        )?;
         unsafe {
-            *out_client = Box::into_raw(Box::new(NetaudioClient {
-                inner: Mutex::new(client),
-            }));
+            *out_client = Box::into_raw(Box::new(NetaudioClient::new(client)));
         }
-
-        NetaudioStatus::Ok
+        Ok(())
     })
 }
 
@@ -54,21 +40,14 @@ pub unsafe extern "C" fn netaudio_client_set_device_name(
     client: *mut NetaudioClient,
     name: *const c_char,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        if client.is_null() || name.is_null() {
-            return NetaudioStatus::NullPointer;
+    guard(|| {
+        if client.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
         }
-
-        let name = match unsafe { CStr::from_ptr(name) }.to_str() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidUtf8,
-        };
-
+        let name = unsafe { c_string(name)? };
         let client = unsafe { &*client };
-        match lock_client(client).set_device_name(name) {
-            Ok(_) => NetaudioStatus::Ok,
-            Err(error) => error.into(),
-        }
+        lock_client(client).set_device_name(name)?;
+        Ok(())
     })
 }
 
@@ -79,7 +58,7 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
     out_rx_count: *mut u16,
     out_locked: *mut i32,
 ) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if !out_tx_count.is_null() {
             unsafe {
                 *out_tx_count = 0;
@@ -100,15 +79,11 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
             || out_rx_count.is_null()
             || out_locked.is_null()
         {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
 
         let client = unsafe { &*client };
-        let count = match lock_client(client).get_channel_count() {
-            Ok(count) => count,
-            Err(error) => return error.into(),
-        };
-
+        let count = lock_client(client).get_channel_count()?;
         unsafe {
             *out_tx_count = count.tx_count;
             *out_rx_count = count.rx_count;
@@ -118,9 +93,20 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
                 None => -1,
             };
         }
-
-        NetaudioStatus::Ok
+        Ok(())
     })
+}
+
+unsafe fn client_json_query<T: serde::Serialize>(
+    client: *mut NetaudioClient,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+    query: impl FnOnce(&mut Client) -> Result<T, ClientError>,
+) -> FfiResult {
+    let client = unsafe { nonnull_client(client, out_buffer, out_capacity, out_length)? };
+    let value = query(&mut lock_client(client))?;
+    unsafe { write_json(&value, out_buffer, out_capacity, out_length) }
 }
 
 #[no_mangle]
@@ -130,18 +116,10 @@ pub unsafe extern "C" fn netaudio_client_get_rx_channels_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-
-        let channels = match lock_client(client).get_rx_channels() {
-            Ok(channels) => channels,
-            Err(error) => return error.into(),
-        };
-
-        unsafe { write_json(&channels, out_buffer, out_capacity, out_length) }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_rx_channels()
+        })
     })
 }
 
@@ -153,18 +131,10 @@ pub unsafe extern "C" fn netaudio_client_get_rx_inventory_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-
-        let inventory = match lock_client(client).get_rx_inventory(rx_count) {
-            Ok(inventory) => inventory,
-            Err(error) => return error.into(),
-        };
-
-        unsafe { write_json(&inventory, out_buffer, out_capacity, out_length) }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_rx_inventory(rx_count)
+        })
     })
 }
 
@@ -175,18 +145,10 @@ pub unsafe extern "C" fn netaudio_client_get_tx_channels_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-
-        let channels = match lock_client(client).get_tx_channels() {
-            Ok(channels) => channels,
-            Err(error) => return error.into(),
-        };
-
-        unsafe { write_json(&channels, out_buffer, out_capacity, out_length) }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_tx_channels()
+        })
     })
 }
 
@@ -197,15 +159,10 @@ pub unsafe extern "C" fn netaudio_client_get_device_name_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-        match lock_client(client).get_device_name() {
-            Ok(name) => unsafe { write_json(&name, out_buffer, out_capacity, out_length) },
-            Err(error) => error.into(),
-        }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_device_name()
+        })
     })
 }
 
@@ -216,15 +173,10 @@ pub unsafe extern "C" fn netaudio_client_get_device_info_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-        match lock_client(client).get_device_info() {
-            Ok(info) => unsafe { write_json(&info, out_buffer, out_capacity, out_length) },
-            Err(error) => error.into(),
-        }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_device_info()
+        })
     })
 }
 
@@ -235,15 +187,10 @@ pub unsafe extern "C" fn netaudio_client_get_device_settings_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-        match lock_client(client).get_device_settings() {
-            Ok(settings) => unsafe { write_json(&settings, out_buffer, out_capacity, out_length) },
-            Err(error) => error.into(),
-        }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_device_settings()
+        })
     })
 }
 
@@ -254,18 +201,10 @@ pub unsafe extern "C" fn netaudio_client_get_property_directory_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
-
-        let property_directory = match lock_client(client).get_property_directory() {
-            Ok(property_directory) => property_directory,
-            Err(error) => return error.into(),
-        };
-
-        unsafe { write_json(&property_directory, out_buffer, out_capacity, out_length) }
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_property_directory()
+        })
     })
 }
 
@@ -274,29 +213,25 @@ pub unsafe extern "C" fn netaudio_client_get_aes67_configured(
     client: *mut NetaudioClient,
     out_state: *mut i32,
 ) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if !out_state.is_null() {
             unsafe {
                 *out_state = -1;
             }
         }
         if client.is_null() || out_state.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         let client = unsafe { &*client };
-        match lock_client(client).get_aes67_configured() {
-            Ok(state) => {
-                unsafe {
-                    *out_state = match state {
-                        Some(true) => 1,
-                        Some(false) => 0,
-                        None => -1,
-                    };
-                }
-                NetaudioStatus::Ok
-            }
-            Err(error) => error.into(),
+        let state = lock_client(client).get_aes67_configured()?;
+        unsafe {
+            *out_state = match state {
+                Some(true) => 1,
+                Some(false) => 0,
+                None => -1,
+            };
         }
+        Ok(())
     })
 }
 
@@ -310,17 +245,12 @@ pub unsafe extern "C" fn netaudio_parse_page(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        if let Err(status) = unsafe { prepare_output(out_buffer, out_capacity, out_length) } {
-            return status;
+    guard(|| {
+        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
+        let kind = unsafe { c_string(kind)? };
+        if data.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
         }
-        if kind.is_null() || data.is_null() {
-            return NetaudioStatus::NullPointer;
-        }
-        let kind = match unsafe { CStr::from_ptr(kind) }.to_str() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidUtf8,
-        };
         let bytes = unsafe { std::slice::from_raw_parts(data, data_len) };
 
         use crate::parser;
@@ -328,23 +258,29 @@ pub unsafe extern "C" fn netaudio_parse_page(
             match kind {
                 "rx" => write_optional_json(
                     parser::parse_rx_page(bytes, starting_channel),
-                    out_buffer,
-                    out_capacity,
-                    out_length,
-                ),
-                "tx_info" => write_optional_json(
-                    parser::parse_tx_info_page(bytes, starting_channel),
+                    kind,
                     out_buffer,
                     out_capacity,
                     out_length,
                 ),
                 "tx_friendly" => write_optional_json(
                     parser::parse_tx_friendly_page(bytes, starting_channel),
+                    kind,
                     out_buffer,
                     out_capacity,
                     out_length,
                 ),
-                _ => NetaudioStatus::InvalidChannelType,
+                "tx_info" => write_optional_json(
+                    parser::parse_tx_info_page(bytes, starting_channel),
+                    kind,
+                    out_buffer,
+                    out_capacity,
+                    out_length,
+                ),
+                _ => Err(FfiError::new(
+                    NetaudioStatus::UnknownKind,
+                    format!("unknown page kind {kind:?}"),
+                )),
             }
         }
     })

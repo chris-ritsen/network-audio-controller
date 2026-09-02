@@ -16,6 +16,7 @@ NETAUDIO_OK = 0
 NETAUDIO_INVALID_KEY = 17
 NETAUDIO_INVALID_PIN = 18
 NETAUDIO_CRYPTO_ERROR = 19
+NETAUDIO_INVALID_LENGTH = 35
 
 LOCK_DDP_HEADER = struct.pack(">HHHH", 8, 0x0001, 0x1000, 0x0200)
 
@@ -106,7 +107,7 @@ class TestLockTokenParity:
     @pytest.mark.parametrize("nonce_length", [0, 1, 23, 25, 64])
     def test_rejects_invalid_nonce_lengths(self, lib, nonce_length):
         status, token = rust_token(lib, "1234", b"n" * nonce_length, KEYS[0])
-        assert status == NETAUDIO_CRYPTO_ERROR
+        assert status == NETAUDIO_INVALID_LENGTH
         assert token == b""
 
     @pytest.mark.parametrize("key_length", [0, 1, 31, 33, 64])
