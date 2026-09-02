@@ -34,9 +34,7 @@ fn client_lock_call(key: &[u8], locking: bool) -> NetaudioStatus {
         1,
     )
     .unwrap();
-    let mut client = NetaudioClient {
-        inner: Mutex::new(inner),
-    };
+    let mut client = NetaudioClient::new(inner);
     let pin = CString::new("1234").unwrap();
     let mut output = vec![0u8; 64];
     let mut output_length = 0usize;
@@ -100,9 +98,20 @@ fn parse_response_call(kind: &str, data: &[u8]) -> (NetaudioStatus, Vec<u8>) {
     (status, output)
 }
 
+fn last_error_message_call() -> String {
+    let mut output = vec![0u8; 512];
+    let mut output_length = 0usize;
+    let status = unsafe {
+        netaudio_last_error_message(output.as_mut_ptr(), output.len(), &mut output_length)
+    };
+    assert_eq!(status, NetaudioStatus::Ok);
+    output.truncate(output_length);
+    String::from_utf8(output).unwrap()
+}
+
 #[test]
 fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
-    for status in [-1, 34, i32::MAX] {
+    for status in [-1, 36, i32::MAX] {
         let name = unsafe { CStr::from_ptr(netaudio_status_name(status)) };
         assert_eq!(name.to_str().unwrap(), "unknown");
     }
@@ -123,24 +132,137 @@ fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
     let internal_panic =
         unsafe { CStr::from_ptr(netaudio_status_name(NetaudioStatus::InternalPanic as i32)) };
     assert_eq!(internal_panic.to_str().unwrap(), "internal_panic");
+    let unknown_kind =
+        unsafe { CStr::from_ptr(netaudio_status_name(NetaudioStatus::UnknownKind as i32)) };
+    assert_eq!(unknown_kind.to_str().unwrap(), "unknown_kind");
+    let invalid_length =
+        unsafe { CStr::from_ptr(netaudio_status_name(NetaudioStatus::InvalidLength as i32)) };
+    assert_eq!(invalid_length.to_str().unwrap(), "invalid_length");
 }
 
 #[test]
-fn guard_panic_converts_a_panic_into_internal_panic_status() {
+fn status_enum_matches_the_generated_header_and_the_table_is_complete() {
+    let header = include_str!("../../include/netaudio_core.h");
+    let mut header_entries = Vec::new();
+    for line in header.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("NETAUDIO_STATUS_") else {
+            continue;
+        };
+        let Some((name, value)) = rest.split_once(" = ") else {
+            continue;
+        };
+        let value: i32 = value.trim_end_matches(',').parse().unwrap();
+        header_entries
+            .push(serde_json::json!({ "name": name.to_ascii_lowercase(), "value": value }));
+    }
+    let enum_entries: Vec<serde_json::Value> = NetaudioStatus::ALL
+        .iter()
+        .map(|status| {
+            serde_json::json!({ "name": status.name().to_str().unwrap(), "value": *status as i32 })
+        })
+        .collect();
+    assert_eq!(
+        serde_json::to_string_pretty(&enum_entries).unwrap(),
+        serde_json::to_string_pretty(&header_entries).unwrap()
+    );
+    for (index, status) in NetaudioStatus::ALL.iter().enumerate() {
+        assert_eq!(*status as usize, index);
+        assert_eq!(NetaudioStatus::from_code(index as i32), Some(*status));
+    }
+    assert_eq!(
+        NetaudioStatus::from_code(NetaudioStatus::ALL.len() as i32),
+        None
+    );
+}
+
+#[test]
+fn guard_converts_a_panic_into_internal_panic_status_with_a_message() {
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
-    let status = guard_panic(|| panic!("deliberate"));
+    let status = guard(|| panic!("deliberate"));
     std::panic::set_hook(previous_hook);
     assert_eq!(status, NetaudioStatus::InternalPanic);
-    assert_eq!(guard_panic(|| NetaudioStatus::Ok), NetaudioStatus::Ok);
+    assert_eq!(last_error_message_call(), "internal panic: deliberate");
+    assert_eq!(guard(|| Ok(())), NetaudioStatus::Ok);
+    assert_eq!(last_error_message_call(), "");
+}
+
+#[test]
+fn last_error_message_reports_serde_field_errors_and_clears_on_success() {
+    assert_eq!(
+        build_command_status(r#"{"command":"identify","sequenc":1}"#),
+        NetaudioStatus::InvalidJson
+    );
+    let message = last_error_message_call();
+    assert!(message.contains("unknown field `sequenc`"), "{message}");
+
+    assert_eq!(
+        build_command_status(r#"{"command":"reboot","host_mac":"001122334455"}"#),
+        NetaudioStatus::InvalidSequence
+    );
+    assert!(last_error_message_call().contains("message_id must be nonzero"));
+
+    assert_eq!(
+        build_command_status(r#"{"command":"identify","message_id":1}"#),
+        NetaudioStatus::Ok
+    );
+    assert_eq!(last_error_message_call(), "");
+
+    let mut short_output = [0u8; 4];
+    let mut output_length = 0usize;
+    assert_eq!(
+        build_command_status(r#"{"command":"identify","sequenc":1}"#),
+        NetaudioStatus::InvalidJson
+    );
+    let status = unsafe {
+        netaudio_last_error_message(
+            short_output.as_mut_ptr(),
+            short_output.len(),
+            &mut output_length,
+        )
+    };
+    assert_eq!(status, NetaudioStatus::BufferTooSmall);
+    assert!(output_length > short_output.len());
+    assert_eq!(
+        unsafe { netaudio_last_error_message(ptr::null_mut(), 0, ptr::null_mut()) },
+        NetaudioStatus::NullPointer
+    );
+}
+
+#[test]
+fn unknown_parse_kinds_are_reported_as_unknown_kind() {
+    let (status, output) = parse_response_call("no_such_kind", &[0u8; 16]);
+    assert_eq!(status, NetaudioStatus::UnknownKind);
+    assert!(output.is_empty());
+    assert_eq!(
+        last_error_message_call(),
+        "unknown response kind \"no_such_kind\""
+    );
+
+    let kind = CString::new("no_such_page").unwrap();
+    let mut output = [0u8; 16];
+    let mut output_length = 0usize;
+    let status = unsafe {
+        netaudio_parse_page(
+            kind.as_ptr(),
+            output.as_ptr(),
+            output.len(),
+            1,
+            output.as_mut_ptr(),
+            output.len(),
+            &mut output_length,
+        )
+    };
+    assert_eq!(status, NetaudioStatus::UnknownKind);
 }
 
 #[test]
 fn empty_byte_output_accepts_null_zero_capacity_buffer() {
     let mut output_length = usize::MAX;
-    let status = unsafe { write_bytes(&[], ptr::null_mut(), 0, &mut output_length) };
+    let result = unsafe { write_bytes(&[], ptr::null_mut(), 0, &mut output_length) };
 
-    assert_eq!(status, NetaudioStatus::Ok);
+    assert!(result.is_ok());
     assert_eq!(output_length, 0);
 }
 
@@ -207,6 +329,10 @@ fn ffi_errors_clear_buffer_and_scalar_outputs() {
     };
     assert_eq!(status, NetaudioStatus::MalformedResponse);
     assert_eq!(output_length, 0);
+    assert_eq!(
+        last_error_message_call(),
+        "bytes did not parse as a device_name response"
+    );
 
     let mut tx_count = u16::MAX;
     let mut rx_count = u16::MAX;
@@ -239,9 +365,7 @@ fn same_client_handle_serializes_concurrent_calls() {
         1,
     )
     .unwrap();
-    let client_pointer = Box::into_raw(Box::new(NetaudioClient {
-        inner: Mutex::new(client),
-    }));
+    let client_pointer = Box::into_raw(Box::new(NetaudioClient::new(client)));
     let client_address = client_pointer as usize;
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(5));
     let mut threads = Vec::new();
@@ -533,7 +657,7 @@ fn lock_token_ffi_rejects_incorrect_buffer_lengths() {
         let nonce = vec![0u8; length];
         assert_eq!(
             lock_token_call(&nonce, &valid_key).0,
-            NetaudioStatus::CryptoError
+            NetaudioStatus::InvalidLength
         );
     }
     for length in [0, 1, 31, 33, 64] {
