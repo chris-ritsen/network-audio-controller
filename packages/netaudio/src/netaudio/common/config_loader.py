@@ -120,6 +120,20 @@ def load_capture_profile(config: str | None, profile: str | None) -> tuple[dict,
     return data, config_path
 
 
+def load_daemon_config() -> dict:
+    config_path = default_config_path()
+    if not config_path.exists() or tomllib is None:
+        return {}
+    data = tomllib.loads(config_path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Config {config_path} must contain a TOML table.")
+    profile_config, _ = load_capture_profile(None, None)
+    daemon_config = dict(_as_dict(data.get("daemon")))
+    if profile_config is not data:
+        daemon_config.update(_as_dict(profile_config.get("daemon")))
+    return daemon_config
+
+
 def set_config_value(key: str, value: str | None) -> Path:
     config_path = default_config_path()
 
