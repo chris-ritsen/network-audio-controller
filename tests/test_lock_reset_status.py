@@ -3,17 +3,16 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import netaudio.cli_support.execution as common_module
 import pytest
-
-import netaudio._common as common_module
 from netaudio import core
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
-from tests.status_test_support import application_with_device, count_events, receive_packets
 
+from tests.status_test_support import application_with_device, count_events, receive_packets
 
 LOCK_RESET_STATUS_QUERY = bytes.fromhex("ffff002018c100003e42274cff240000417564696e617465073a100800000064")
 LOCK_RESET_STATUS_ONE = bytes.fromhex(
@@ -157,7 +156,7 @@ def test_state_service_tracks_passive_lock_transitions():
 async def test_lock_status_probe_waits_for_publication_observed_after_request():
     application = DanteApplication()
     device_ip_address = "10.0.2.15"
-    application.settings.probe_lock_reset_status = AsyncMock(
+    application.send_probe_lock_reset_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             A32_UNLOCKED_LOCK_RESET_STATUS,
             (ip_address, 8702),
@@ -169,7 +168,7 @@ async def test_lock_status_probe_waits_for_publication_observed_after_request():
     assert result.is_locked is False
     assert result.lock_state_code == 0
     assert datetime.fromisoformat(result.observed_at).tzinfo is not None
-    application.settings.probe_lock_reset_status.assert_awaited_once_with(device_ip_address)
+    application.send_probe_lock_reset_status.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("lock_status", device_ip_address)
 
 
@@ -178,7 +177,7 @@ async def test_lock_status_probe_timeout_never_returns_a_previous_observation():
     application = DanteApplication()
     device_ip_address = "10.0.2.15"
     application.notifications._on_packet(A32_UNLOCKED_LOCK_RESET_STATUS, (device_ip_address, 8702))
-    application.settings.probe_lock_reset_status = AsyncMock()
+    application.send_probe_lock_reset_status = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="lock status readback timed out"):
         await application.probe_lock_status(device_ip_address, timeout=0.001)

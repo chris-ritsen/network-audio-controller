@@ -13,11 +13,14 @@ from netaudio.dante.const import (
     PROTOCOL_ARC_2809,
     PROTOCOL_ID,
     RESULT_CODE_SUCCESS,
+)
+from netaudio.dante.const import (
     ArcOpcode as Opcode,
+)
+from netaudio.dante.const import (
     ProtocolId as Protocol,
 )
-from netaudio.dante.packet_header import parse_packet_header
-
+from netaudio.dante.dissection.header import parse_packet_header
 
 logger = logging.getLogger("netaudio")
 

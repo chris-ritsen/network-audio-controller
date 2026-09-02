@@ -4,10 +4,9 @@ import struct
 import zlib
 
 import pytest
-
-from netaudio.commands.firmware import (
-    _CramfsExtractionError,
+from netaudio.commands.firmware.cramfs import (
     _cramfs_walk,
+    _CramfsExtractionError,
     _safe_cramfs_destination,
     _safe_cramfs_symlink_target,
 )

@@ -1,6 +1,6 @@
 import json
 
-from netaudio.commands.device_display import _device_show_rows
+from netaudio.commands.device.display import _device_show_rows
 from netaudio.dante.const import SERVICE_ARC, SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer

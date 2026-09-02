@@ -8,8 +8,15 @@ from typing import Optional
 
 import typer
 
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.commands.shure_correlation import (
+    _get_active_shure_channels,
+    _load_correlation,
+    _mac_match,
+    _normalize_mac,
+    _sample_shure_levels,
+    _save_correlation,
+)
 from netaudio.commands.shure_transport import (
     PROTOCOL_CONFIGS,
     Protocol,
@@ -20,14 +27,6 @@ from netaudio.commands.shure_transport import (
     _format_plain,
     _resolve_target,
     _send,
-)
-from netaudio.commands.shure_correlation import (
-    _get_active_shure_channels,
-    _load_correlation,
-    _mac_match,
-    _normalize_mac,
-    _sample_shure_levels,
-    _save_correlation,
 )
 
 app = typer.Typer(help="Shure wireless device control.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
@@ -123,7 +122,7 @@ def _query_device_info(device, discovered, *, require_channels=False):
 @device_app.command("list", help="List discovered Shure devices.")
 def shure_device_list():
     from netaudio.cli import state
-    from netaudio._common_output import output_single
+    from netaudio.cli_support.output import output_single
 
     discovered = _discover_shure_devices()
     if not discovered:
@@ -220,8 +219,7 @@ def shure_channel_list(
     port: Optional[int] = typer.Option(None, "--port", "-p", help="TCP control port."),
 ):
     from netaudio.cli import state
-    from netaudio._common_output import output_single
-    from netaudio.shure.device import ShureChannel, ShureP10TChannel
+    from netaudio.cli_support.output import output_single
 
     if host:
         resolved_host, resolved_protocol, resolved_port = _resolve_target(host, device, port)
@@ -262,82 +260,81 @@ def shure_channel_list(
     query_results, failures = _collect_device_queries(devices_to_query, _fetch)
 
     if state.output_format.value in ("json", "yaml", "xml", "csv"):
-        all_channels = []
-        for _device, device_info in query_results:
-            for channel_number, channel in sorted(device_info.channels.items()):
-                channel_json = {
-                    "device": device_info.name,
-                    "channel": channel_number,
-                }
-                if isinstance(channel, ShureChannel):
-                    channel_json.update(
-                        {
-                            "name": channel.name,
-                            "active": channel.active,
-                            "antenna": channel.antenna_status,
-                        }
-                    )
-                    if channel.transmitter and channel.transmitter.connected:
-                        tx = channel.transmitter
-                        channel_json["tx_model"] = tx.model
-                        channel_json["battery_pct"] = tx.battery_charge_percent
-                        channel_json["battery_min"] = tx.battery_minutes
-                        channel_json["mute"] = tx.mute_status
-                elif isinstance(channel, ShureP10TChannel):
-                    channel_json.update(
-                        {
-                            "name": channel.name,
-                            "frequency": channel.frequency,
-                            "rf_mute": channel.rf_mute,
-                        }
-                    )
-                all_channels.append(channel_json)
-        output_single(all_channels)
+        output_single(
+            [
+                _shure_channel_json(device_info.name, channel_number, channel)
+                for _device, device_info in query_results
+                for channel_number, channel in sorted(device_info.channels.items())
+            ]
+        )
     else:
         for queried_device, device_info in query_results:
             if len(devices_to_query) > 1:
                 typer.echo(f"\n{device_info.name} ({queried_device.ip}):")
-
             for channel_number, channel in sorted(device_info.channels.items()):
-                if isinstance(channel, ShureChannel):
-                    status = "ACTIVE" if channel.active else "--"
-                    display_parts = [
-                        f"ch{channel_number}",
-                        f"{(channel.name or ''):<12}",
-                        f"{status:<8}",
-                    ]
-                    if channel.active and channel.transmitter and channel.transmitter.connected:
-                        tx = channel.transmitter
-                        display_parts.append(f"TX:{tx.model}")
-                        if tx.battery_charge_percent is not None:
-                            display_parts.append(f"batt:{tx.battery_charge_percent}%")
-                        elif tx.battery_hours is not None:
-                            display_parts.append(f"batt:{tx.battery_hours:.1f}h")
-                        if tx.mute_status:
-                            display_parts.append(f"mute:{tx.mute_status}")
-                        if channel.audio_level_rms is not None:
-                            display_parts.append(f"rms:{channel.audio_level_rms}")
-                        if channel.signal_quality is not None and channel.signal_quality < 255:
-                            display_parts.append(f"qual:{channel.signal_quality}")
-                    typer.echo("  ".join(display_parts))
-                elif isinstance(channel, ShureP10TChannel):
-                    display_parts = [
-                        f"ch{channel_number}",
-                        f"{(channel.name or ''):<12}",
-                    ]
-                    if channel.frequency:
-                        display_parts.append(f"freq:{channel.frequency}")
-                    if channel.rf_mute:
-                        display_parts.append("RF_MUTED")
-                    if channel.audio_in_level_l is not None:
-                        display_parts.append(f"L:{channel.audio_in_level_l}")
-                    if channel.audio_in_level_r is not None:
-                        display_parts.append(f"R:{channel.audio_in_level_r}")
+                display_parts = _shure_channel_display_parts(channel_number, channel)
+                if display_parts:
                     typer.echo("  ".join(display_parts))
 
     _report_device_query_failures(failures, "channel query")
     if failures:
         raise typer.Exit(code=1)
+
+
+def _shure_channel_json(device_name: str, channel_number: int, channel) -> dict:
+    from netaudio.shure.device import ShureChannel, ShureP10TChannel
+
+    channel_json = {"device": device_name, "channel": channel_number}
+    if isinstance(channel, ShureChannel):
+        channel_json.update({"name": channel.name, "active": channel.active, "antenna": channel.antenna_status})
+        if channel.transmitter and channel.transmitter.connected:
+            tx = channel.transmitter
+            channel_json["tx_model"] = tx.model
+            channel_json["battery_pct"] = tx.battery_charge_percent
+            channel_json["battery_min"] = tx.battery_minutes
+            channel_json["mute"] = tx.mute_status
+    elif isinstance(channel, ShureP10TChannel):
+        channel_json.update({"name": channel.name, "frequency": channel.frequency, "rf_mute": channel.rf_mute})
+    return channel_json
+
+
+def _shure_transmitter_display_parts(channel) -> list[str]:
+    tx = channel.transmitter
+    display_parts = [f"TX:{tx.model}"]
+    if tx.battery_charge_percent is not None:
+        display_parts.append(f"batt:{tx.battery_charge_percent}%")
+    elif tx.battery_hours is not None:
+        display_parts.append(f"batt:{tx.battery_hours:.1f}h")
+    if tx.mute_status:
+        display_parts.append(f"mute:{tx.mute_status}")
+    if channel.audio_level_rms is not None:
+        display_parts.append(f"rms:{channel.audio_level_rms}")
+    if channel.signal_quality is not None and channel.signal_quality < 255:
+        display_parts.append(f"qual:{channel.signal_quality}")
+    return display_parts
+
+
+def _shure_channel_display_parts(channel_number: int, channel) -> list[str]:
+    from netaudio.shure.device import ShureChannel, ShureP10TChannel
+
+    if isinstance(channel, ShureChannel):
+        status = "ACTIVE" if channel.active else "--"
+        display_parts = [f"ch{channel_number}", f"{(channel.name or ''):<12}", f"{status:<8}"]
+        if channel.active and channel.transmitter and channel.transmitter.connected:
+            display_parts.extend(_shure_transmitter_display_parts(channel))
+        return display_parts
+    if isinstance(channel, ShureP10TChannel):
+        display_parts = [f"ch{channel_number}", f"{(channel.name or ''):<12}"]
+        if channel.frequency:
+            display_parts.append(f"freq:{channel.frequency}")
+        if channel.rf_mute:
+            display_parts.append("RF_MUTED")
+        if channel.audio_in_level_l is not None:
+            display_parts.append(f"L:{channel.audio_in_level_l}")
+        if channel.audio_in_level_r is not None:
+            display_parts.append(f"R:{channel.audio_in_level_r}")
+        return display_parts
+    return []
 
 
 def _parse_device(
@@ -393,7 +390,7 @@ def shure_device_show(
         )
         raise typer.Exit(code=1) from exception
 
-    from netaudio._common_output import output_single
+    from netaudio.cli_support.output import output_single
 
     if state.output_format.value in ("json", "yaml", "xml", "csv"):
         output_single(device_info.to_json())
