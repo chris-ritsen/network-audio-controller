@@ -100,6 +100,8 @@ async def _populate_audio_capabilities(application: DanteApplication, device: Da
 
 
 async def _populate_show_details(application: DanteApplication, device: DanteDevice, include_channels: bool) -> None:
+    if device.direct_control_available is False:
+        return
     if device.clock_source_code is None or device.clock_subdomain is None:
         try:
             await application.probe_clocking_status(device)
@@ -231,7 +233,7 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
         devices = filter_devices(devices)
     candidates: dict[str, DanteDevice] = {}
     for server_name, device in devices.items():
-        if device.ipv4 is None:
+        if device.ipv4 is None or device.direct_control_available is False:
             continue
         if not explicit:
             if not device.online:
@@ -251,6 +253,8 @@ async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
     unpopulated = []
     for device in devices.values():
         if device.tx_channels or device.rx_channels or not device.ipv4:
+            continue
+        if device.direct_control_available is False:
             continue
         if not device.online and not explicit:
             logger.debug(f"Skipping control population for {_device_label(device)}: device is offline")
