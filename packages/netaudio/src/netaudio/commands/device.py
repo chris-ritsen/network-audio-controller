@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from enum import Enum
 from typing import Optional
 
 import typer
 
-logger = logging.getLogger("netaudio")
-
+from netaudio._common import (
+    CapabilityProbeTimeout,
+    _enrich_lock_states,
+    _load_device_for_show,
+    _log_unreachable,
+    readback_after_notification,
+    run_command,
+)
+from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+from netaudio._common_output import output_single, output_table
+from netaudio._common_selection import filter_devices, select_device, sort_devices
+from netaudio.commands.config_readback import MUTATION_ERRORS
+from netaudio.commands.device_display import (
+    _device_show_rows,
+    _diagnostic_audio_capabilities_data,
+    _diagnostic_audio_capability_rows,
+)
+from netaudio.commands.status import status as status_command
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.conmon_export import ConmonExportUnavailableError
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import (
     core_lock_device,
     core_unlock_device,
@@ -18,28 +33,10 @@ from netaudio.dante.device_operations import (
     validate_pin,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.services.notification import (
-    NOTIFICATION_ROUTING_DEVICE_CHANGE,
-    NOTIFICATION_SETTINGS_CHANGE,
-)
-
-from netaudio._common import (
-    _command_context,
-    _discover,
-    _get_arc_port,
-    _load_device_for_show,
-    _populate_controls,
-    _probe_lock_status_once,
-    _resolve_one,
-    CapabilityProbeTimeout,
-    readback_after_notification,
-    send_and_wait_for_notification,
-)
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import filter_devices, sort_devices
-from netaudio.commands.status import status as status_command
+from netaudio.dante.diagnostic_logs import DeviceLogExportError
 from netaudio.icons import icon
+
+logger = logging.getLogger("netaudio")
 
 app = typer.Typer(help="Manage Dante devices.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
@@ -49,28 +46,8 @@ class ClearConfigurationMode(str, Enum):
     PRESERVE_INTERNET_PROTOCOL_SETTINGS = "preserve-network"
 
 
-from netaudio.commands.device_display import (
-    _device_show_rows,
-    _diagnostic_audio_capabilities_data,
-    _diagnostic_audio_capability_rows,
-)
-
-
-async def _lock_via_daemon(pin: str, action: str) -> dict | None:
-    from netaudio.cli import state
+async def _lock_via_daemon(device_name: str, pin: str, action: str) -> dict | None:
     from netaudio.daemon.client import _daemon_request
-
-    device_name = None
-    if state.names:
-        device_name = state.names[0]
-    elif state.hosts:
-        device_name = state.hosts[0]
-
-    if not device_name:
-        devices = await _discover()
-        filtered = filter_devices(devices)
-        _, device = _resolve_one(filtered)
-        device_name = device.name or device.server_name
 
     status, data = await _daemon_request("POST", f"/{action}", body={"device": device_name, "pin": pin}, timeout=8.0)
     if status is None:
@@ -79,8 +56,6 @@ async def _lock_via_daemon(pin: str, action: str) -> dict | None:
 
 
 def _get_lock_key() -> bytes:
-    from netaudio.common.app_config import settings as app_settings
-
     if app_settings.device_lock_key:
         return app_settings.device_lock_key
 
@@ -134,13 +109,17 @@ def _report_lock_failure(action: str, result: dict) -> None:
     raise typer.Exit(code=1)
 
 
-async def _standalone_lock_operation(device_ip: str, pin: str, lock_key: bytes, *, locking: bool) -> dict:
+async def _standalone_lock_operation(application, device_ip: str, pin: str, lock_key: bytes, *, locking: bool) -> dict:
     operation = core_lock_device if locking else core_unlock_device
     result = await operation(device_ip, pin, lock_key)
     if result.get("success") is not True:
         return result
 
-    observation = await _probe_lock_status_once(device_ip)
+    try:
+        observation = await application.probe_lock_status(device_ip, timeout=app_settings.lock_state_timeout)
+    except (RuntimeError, OSError) as exception:
+        logger.debug(f"Lock status unavailable for {device_ip}: {exception}")
+        observation = None
     if observation is None:
         return {
             **result,
@@ -167,29 +146,58 @@ async def _standalone_lock_operation(device_ip: str, pin: str, lock_key: bytes, 
 app.command("list")(status_command)
 
 
+async def run_show(application, devices) -> None:
+    from netaudio.cli import OutputFormat, state
+
+    include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
+    server_name, device = await _load_device_for_show(application, include_channels=include_channels)
+    for _, reason in (await _enrich_lock_states(application, {server_name: device}, only_unknown=True)).items():
+        _log_unreachable(device, reason)
+    data = DanteDeviceSerializer.to_json(device)
+    output_table(
+        ["Field", "Value"],
+        _device_show_rows(device),
+        json_data=data,
+        title=device.name or server_name,
+        devices={server_name: device},
+    )
+
+
 @app.command("show")
 def device_show():
     """Show detailed device information."""
+    run_command(run_show, discover_devices=False)
 
-    async def _run():
-        from netaudio.cli import OutputFormat, state
 
-        include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
-        server_name, device = await _load_device_for_show(include_channels=include_channels)
-        from netaudio._common import _enrich_lock_states, _log_unreachable
+def _addressed_device(filtered):
+    [(server_name, device)] = select_device(filtered)
+    device_name = device.name or server_name
+    if device.ipv4 is None:
+        typer.echo(f"Error: {device_name} has no control address.", err=True)
+        raise typer.Exit(code=1)
+    return device_name, device
 
-        for _, reason in (await _enrich_lock_states({server_name: device}, only_unknown=True)).items():
-            _log_unreachable(device, reason)
-        data = DanteDeviceSerializer.to_json(device)
-        output_table(
-            ["Field", "Value"],
-            _device_show_rows(device),
-            json_data=data,
-            title=device.name or server_name,
-            devices={server_name: device},
+
+async def run_capabilities(application, devices, timeout: float) -> None:
+    device_name, device = _addressed_device(filter_devices(devices))
+    try:
+        result = await application.export_device_logs(device.ipv4, timeout=timeout)
+    except (CapabilityProbeTimeout, ConmonExportUnavailableError, DeviceLogExportError) as exception:
+        typer.echo(f"Error: {exception}", err=True)
+        raise typer.Exit(code=1) from None
+    capabilities = result.audio_capabilities
+    if capabilities is None:
+        typer.echo(
+            f"Error: {device_name} returned diagnostic logs without recognized audio capability records.",
+            err=True,
         )
-
-    asyncio.run(_run())
+        raise typer.Exit(code=1)
+    output_table(
+        ["Capability", "Value"],
+        _diagnostic_audio_capability_rows(capabilities),
+        json_data=_diagnostic_audio_capabilities_data(capabilities),
+        title=device_name,
+    )
 
 
 @app.command("capabilities")
@@ -197,46 +205,14 @@ def device_capabilities(
     timeout: float = typer.Option(15.0, "--timeout", min=0.1, help="Diagnostic response timeout in seconds."),
 ):
     """Inspect licensed and sample-rate-dependent audio capabilities."""
+    run_command(run_capabilities, timeout)
 
-    async def _run():
-        from netaudio.dante.diagnostic_logs import DeviceLogExportError
 
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            if not filtered:
-                typer.echo("Error: no devices matched.", err=True)
-                raise typer.Exit(code=1)
-            if len(filtered) > 1:
-                typer.echo(
-                    "Error: multiple devices matched. Narrow the selection to exactly one device.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            server_name, device = _resolve_one(filtered)
-            device_name = device.name or server_name
-            if device.ipv4 is None:
-                typer.echo(f"Error: {device_name} has no control address.", err=True)
-                raise typer.Exit(code=1)
-            try:
-                result = await send.export_device_logs(device.ipv4, timeout=timeout)
-            except (CapabilityProbeTimeout, ConmonExportUnavailableError, DeviceLogExportError) as exception:
-                typer.echo(f"Error: {exception}", err=True)
-                raise typer.Exit(code=1) from None
-            capabilities = result.audio_capabilities
-            if capabilities is None:
-                typer.echo(
-                    f"Error: {device_name} returned diagnostic logs without recognized audio capability records.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            output_table(
-                ["Capability", "Value"],
-                _diagnostic_audio_capability_rows(capabilities),
-                json_data=_diagnostic_audio_capabilities_data(capabilities),
-                title=device_name,
-            )
-
-    asyncio.run(_run())
+async def run_identify(application, devices, all_devices: bool) -> None:
+    targets = select_device(filter_devices(devices), allow_many=all_devices)
+    for server_name, device in targets:
+        await application.identify(device)
+        typer.echo(f"{icon('identify')}Identified: {device.name or server_name}")
 
 
 @app.command()
@@ -248,34 +224,14 @@ def identify(
     ),
 ):
     """Blink the identify LED on a device."""
+    run_command(run_identify, all_devices)
 
-    commands = DanteDeviceCommands()
 
-    async def _run():
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            if not filtered:
-                typer.echo("Error: device not found.", err=True)
-                raise typer.Exit(code=1)
-
-            if all_devices:
-                targets = list(filtered.items())
-            else:
-                if len(filtered) > 1:
-                    typer.echo(
-                        "Error: multiple devices matched. Narrow the selection with a device "
-                        "filter, or pass --all to identify every match.",
-                        err=True,
-                    )
-                    raise typer.Exit(code=1)
-                targets = [_resolve_one(filtered)]
-
-            for server_name, device in targets:
-                packet, _, port = commands.command_identify()
-                await send(packet, device.ipv4, port, expect_response=False)
-                typer.echo(f"{icon('identify')}Identified: {device.name}")
-
-    asyncio.run(_run())
+async def run_reboot(application, devices, all_devices: bool) -> None:
+    targets = select_device(filter_devices(devices), allow_many=all_devices)
+    for server_name, device in targets:
+        await application.reboot(device)
+        typer.echo(f"Reboot requested: {device.name or server_name}")
 
 
 @app.command()
@@ -287,31 +243,22 @@ def reboot(
     ),
 ):
     """Reboot a device."""
+    run_command(run_reboot, all_devices)
 
-    async def _run():
-        filtered = filter_devices(await _discover())
-        await _populate_controls(filtered)
-        if not filtered:
-            typer.echo("Error: no devices matched.", err=True)
-            raise typer.Exit(code=1)
 
-        if all_devices:
-            targets = list(filtered.items())
-        else:
-            if len(filtered) > 1:
-                typer.echo(
-                    "Error: multiple devices matched. Narrow the selection with a device "
-                    "filter, or pass --all to reboot every match.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            targets = [_resolve_one(filtered)]
+def _confirmed_device(filtered, confirm: str):
+    [(server_name, device)] = select_device(filtered)
+    device_name = device.name or server_name
+    if confirm != device_name:
+        typer.echo(f"Error: --confirm must exactly match {device_name!r}.", err=True)
+        raise typer.Exit(code=1)
+    return device_name, device
 
-        for server_name, device in targets:
-            await device.operations.reboot()
-            typer.echo(f"Reboot requested: {device.name or server_name}")
 
-    asyncio.run(_run())
+async def run_factory_reset(application, devices, confirm: str) -> None:
+    device_name, device = _confirmed_device(filter_devices(devices), confirm)
+    await application.factory_reset(device)
+    typer.echo(f"Factory reset requested: {device_name}")
 
 
 @app.command("factory-reset")
@@ -323,33 +270,23 @@ def factory_reset(
     ),
 ):
     """Erase all retained configuration and request a factory reset."""
+    run_command(run_factory_reset, confirm)
 
-    async def _run():
-        filtered = filter_devices(await _discover())
-        await _populate_controls(filtered)
-        if not filtered:
-            typer.echo("Error: no devices matched.", err=True)
-            raise typer.Exit(code=1)
-        if len(filtered) > 1:
-            typer.echo(
-                "Error: multiple devices matched. Narrow the selection to exactly one device.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
 
-        server_name, device = _resolve_one(filtered)
-        device_name = device.name or server_name
-        if confirm != device_name:
-            typer.echo(
-                f"Error: --confirm must exactly match {device_name!r}.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
+async def run_clear_configuration(application, devices, mode: ClearConfigurationMode, confirm: str) -> None:
+    device_name, device = _confirmed_device(filter_devices(devices), confirm)
+    if device.ipv4 is None:
+        typer.echo(f"Error: {device_name} has no control address.", err=True)
+        raise typer.Exit(code=1)
 
-        await device.operations.factory_reset()
-        typer.echo(f"Factory reset requested: {device_name}")
-
-    asyncio.run(_run())
+    preserve_internet_protocol_settings = mode is ClearConfigurationMode.PRESERVE_INTERNET_PROTOCOL_SETTINGS
+    status = await application.clear_configuration(
+        str(device.ipv4),
+        preserve_internet_protocol_settings,
+    )
+    typer.echo(
+        f"Clear-configuration accepted: {device_name} (result {status['action_result_code']}, mode {mode.value})"
+    )
 
 
 @app.command("clear-configuration")
@@ -366,43 +303,7 @@ def clear_configuration(
     ),
 ):
     """Clear retained configuration with verified device acknowledgement."""
-
-    async def _run():
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            if not filtered:
-                typer.echo("Error: no devices matched.", err=True)
-                raise typer.Exit(code=1)
-            if len(filtered) > 1:
-                typer.echo(
-                    "Error: multiple devices matched. Narrow the selection to exactly one device.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-
-            server_name, device = _resolve_one(filtered)
-            device_name = device.name or server_name
-            if confirm != device_name:
-                typer.echo(
-                    f"Error: --confirm must exactly match {device_name!r}.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            if device.ipv4 is None:
-                typer.echo(f"Error: {device_name} has no control address.", err=True)
-                raise typer.Exit(code=1)
-
-            preserve_internet_protocol_settings = mode is ClearConfigurationMode.PRESERVE_INTERNET_PROTOCOL_SETTINGS
-            status = await send.clear_configuration(
-                device.ipv4,
-                preserve_internet_protocol_settings,
-            )
-            typer.echo(
-                f"Clear-configuration accepted: {device_name} "
-                f"(result {status['action_result_code']}, mode {mode.value})"
-            )
-
-    asyncio.run(_run())
+    run_command(run_clear_configuration, mode, confirm)
 
 
 from netaudio.commands.device_exports import export_capability, export_logs
@@ -421,127 +322,156 @@ lock_app = typer.Typer(help="Device lock management.", no_args_is_help=True, con
 app.add_typer(lock_app, name="lock", hidden=True)
 
 
+async def run_lock_operation(application, devices, pin: str, *, locking: bool) -> None:
+    action = "lock" if locking else "unlock"
+    already_message = "already locked" if locking else "already unlocked"
+    [(server_name, device)] = select_device(filter_devices(devices))
+    device_name = device.name or server_name
+    result = await _lock_via_daemon(device_name, pin, action)
+    if result is not None:
+        if not result.get("success"):
+            _report_lock_failure(action, result)
+        elif result.get("already"):
+            typer.echo(already_message, err=True)
+        return
+
+    lock_key = _get_lock_key()
+
+    error = validate_pin(pin)
+    if error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1)
+
+    if device.ipv4 is None:
+        typer.echo(f"Error: {device_name} has no control address.", err=True)
+        raise typer.Exit(code=1)
+
+    result = await _standalone_lock_operation(application, str(device.ipv4), pin, lock_key, locking=locking)
+
+    if not result["success"]:
+        _report_lock_failure(action, result)
+    elif result["already"]:
+        typer.echo(already_message, err=True)
+
+
 @lock_app.command("set", help="Lock the selected device with a 4-digit PIN.")
 def lock_set(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to lock the device with."),
 ):
-    async def _run():
-        result = await _lock_via_daemon(pin, "lock")
-        if result is not None:
-            if not result.get("success"):
-                _report_lock_failure("lock", result)
-            elif result.get("already"):
-                typer.echo("already locked", err=True)
-            return
-
-        lock_key = _get_lock_key()
-
-        error = validate_pin(pin)
-        if error:
-            typer.echo(f"Error: {error}", err=True)
-            raise typer.Exit(code=1)
-
-        device_ip = await _resolve_lock_ip()
-
-        result = await _standalone_lock_operation(device_ip, pin, lock_key, locking=True)
-
-        if not result["success"]:
-            _report_lock_failure("lock", result)
-        elif result["already"]:
-            typer.echo("already locked", err=True)
-
-    asyncio.run(_run())
+    run_command(run_lock_operation, pin, locking=True)
 
 
 @lock_app.command("clear", help="Unlock the selected device with its 4-digit PIN.")
 def lock_clear(
     pin: str = typer.Argument(..., help="4-digit numeric PIN to unlock the device."),
 ):
-    async def _run():
-        result = await _lock_via_daemon(pin, "unlock")
-        if result is not None:
-            if not result.get("success"):
-                _report_lock_failure("unlock", result)
-            elif result.get("already"):
-                typer.echo("already unlocked", err=True)
-            return
+    run_command(run_lock_operation, pin, locking=False)
 
-        lock_key = _get_lock_key()
 
-        error = validate_pin(pin)
-        if error:
-            typer.echo(f"Error: {error}", err=True)
-            raise typer.Exit(code=1)
+async def run_lock_status(application, devices) -> None:
+    filtered = filter_devices(devices)
+    for server_name, reason in (await _enrich_lock_states(application, filtered)).items():
+        _log_unreachable(filtered[server_name], reason)
 
-        device_ip = await _resolve_lock_ip()
+    if not filtered:
+        typer.echo("Error: no devices found.", err=True)
+        raise typer.Exit(code=1)
 
-        result = await _standalone_lock_operation(device_ip, pin, lock_key, locking=False)
+    headers = ["Name", "IP Address", "Lock Status"]
+    rows = []
+    json_data = {}
 
-        if not result["success"]:
-            _report_lock_failure("unlock", result)
-        elif result["already"]:
-            typer.echo("already unlocked", err=True)
+    for server_name, device in sort_devices(filtered):
+        if device.is_locked is True:
+            status_display = f"{icon('lock')}locked"
+        elif device.is_locked is False:
+            status_display = f"{icon('unlock')}unlocked"
+        else:
+            status_display = "unknown"
 
-    asyncio.run(_run())
+        rows.append(
+            [
+                device.name or "",
+                str(device.ipv4) if device.ipv4 else "",
+                status_display,
+            ]
+        )
+        json_data[server_name] = {
+            "name": device.name,
+            "ipv4": str(device.ipv4),
+            "is_locked": device.is_locked,
+        }
+
+    output_table(headers, rows, json_data=json_data)
 
 
 @lock_app.command("status")
 def lock_status():
     """Show device lock status."""
+    run_command(run_lock_status)
 
-    async def _run():
-        filtered = filter_devices(await _discover())
-        await _populate_controls(filtered)
 
-        from netaudio._common import _enrich_lock_states, _log_unreachable
+async def run_name(application, devices, new_name: str | None) -> None:
+    [(server_name, device)] = select_device(filter_devices(devices))
 
-        for server_name, reason in (await _enrich_lock_states(filtered)).items():
-            _log_unreachable(filtered[server_name], reason)
+    if new_name is None:
+        output_single(device.name)
+        return
 
-        if not filtered:
-            typer.echo("Error: no devices found.", err=True)
+    if new_name == "":
+        try:
+            await application.reset_device_name(device)
+        except MUTATION_ERRORS as exception:
+            typer.echo(f"Error: could not request name reset for {server_name}: {exception}", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"{icon('name')}Name reset requested for {server_name}; not verified.")
+        return
+
+    for candidate_server_name, candidate_device in devices.items():
+        if candidate_device is device:
+            continue
+        if candidate_device.name and candidate_device.name.lower() == new_name.lower():
+            typer.echo(
+                f"Error: name '{new_name}' already in use by {candidate_device.name} ({candidate_server_name})",
+                err=True,
+            )
             raise typer.Exit(code=1)
 
-        headers = ["Name", "IP Address", "Lock Status"]
-        rows = []
-        json_data = {}
+    error = validate_dante_name(new_name)
+    if error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1)
 
-        for server_name, device in sort_devices(filtered):
-            if device.is_locked is True:
-                status_display = f"{icon('lock')}locked"
-            elif device.is_locked is False:
-                status_display = f"{icon('unlock')}unlocked"
-            else:
-                status_display = "unknown"
+    try:
+        await application.set_device_name(device, new_name)
+    except MUTATION_ERRORS as exception:
+        typer.echo(f"Error: could not send name change to {device.name or server_name}: {exception}", err=True)
+        raise typer.Exit(code=1)
 
-            rows.append(
-                [
-                    device.name or "",
-                    str(device.ipv4) if device.ipv4 else "",
-                    status_display,
-                ]
-            )
-            json_data[server_name] = {
-                "name": device.name,
-                "ipv4": str(device.ipv4),
-                "is_locked": device.is_locked,
-            }
+    async def _read_name():
+        reported_name = await device.fetch_device_name()
+        if not isinstance(reported_name, str):
+            raise RuntimeError("device name readback was unavailable")
+        return reported_name
 
-        output_table(headers, rows, json_data=json_data)
+    result = await readback_after_notification(_read_name, new_name)
+    if result.matched:
+        typer.echo(f"{icon('name')}Set name: {new_name} (verified)")
+        return
 
-    asyncio.run(_run())
-
-
-async def _resolve_lock_ip() -> str:
-    from netaudio.cli import state
-
-    if state.hosts:
-        return state.hosts[0]
-
-    devices = await _discover()
-    filtered = filter_devices(devices)
-    _, device = _resolve_one(filtered)
-    return str(device.ipv4)
+    label = device.name or server_name
+    if result.observed_available:
+        typer.echo(
+            f"Error: name change sent to {label}, but the device reports {result.observed!r} instead of {new_name!r}.",
+            err=True,
+        )
+    else:
+        detail = f": {result.error}" if result.error is not None else ""
+        typer.echo(
+            f"Error: name change sent to {label}, but readback was unavailable{detail}; the change was not verified.",
+            err=True,
+        )
+    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -549,88 +479,7 @@ def name(
     new_name: Optional[str] = typer.Argument(None, help="New name (omit to get, empty string to reset)."),
 ):
     """Get or set device name."""
-
-    commands = DanteDeviceCommands()
-
-    async def _run():
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            server_name, device = _resolve_one(filtered)
-
-            if new_name is None:
-                output_single(device.name)
-                return
-
-            arc_port = _get_arc_port(device)
-
-            if new_name == "":
-                packet, _ = commands.command_reset_name()
-                try:
-                    await send(packet, device.ipv4, arc_port)
-                except Exception as exception:
-                    typer.echo(f"Error: could not request name reset for {server_name}: {exception}", err=True)
-                    raise typer.Exit(code=1)
-                typer.echo(f"{icon('name')}Name reset requested for {server_name}; not verified.")
-            else:
-                for candidate_server_name, candidate_device in devices.items():
-                    if candidate_device is device:
-                        continue
-                    if candidate_device.name and candidate_device.name.lower() == new_name.lower():
-                        typer.echo(
-                            f"Error: name '{new_name}' already in use by "
-                            f"{candidate_device.name} ({candidate_server_name})",
-                            err=True,
-                        )
-                        raise typer.Exit(code=1)
-
-                error = validate_dante_name(new_name)
-                if error:
-                    typer.echo(f"Error: {error}", err=True)
-                    raise typer.Exit(code=1)
-
-                packet, _ = commands.command_set_name(new_name)
-                try:
-                    await send_and_wait_for_notification(
-                        send,
-                        packet,
-                        device.ipv4,
-                        arc_port,
-                        (NOTIFICATION_ROUTING_DEVICE_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
-                    )
-                except Exception as exception:
-                    typer.echo(
-                        f"Error: could not send name change to {device.name or server_name}: {exception}", err=True
-                    )
-                    raise typer.Exit(code=1)
-
-                async def _read_name():
-                    reported_name = await device.fetch_device_name()
-                    if not isinstance(reported_name, str):
-                        raise RuntimeError("device name readback was unavailable")
-                    return reported_name
-
-                result = await readback_after_notification(_read_name, new_name)
-                if result.matched:
-                    typer.echo(f"{icon('name')}Set name: {new_name} (verified)")
-                    return
-
-                label = device.name or server_name
-                if result.observed_available:
-                    typer.echo(
-                        f"Error: name change sent to {label}, but the device reports "
-                        f"{result.observed!r} instead of {new_name!r}.",
-                        err=True,
-                    )
-                else:
-                    detail = f": {result.error}" if result.error is not None else ""
-                    typer.echo(
-                        f"Error: name change sent to {label}, but readback was unavailable{detail}; "
-                        "the change was not verified.",
-                        err=True,
-                    )
-                raise typer.Exit(code=1)
-
-    asyncio.run(_run())
+    run_command(run_name, new_name)
 
 
 from netaudio.commands.flow import app as flow_app

@@ -1,26 +1,75 @@
 from __future__ import annotations
 
-import struct
+import logging
 from pathlib import Path
 
-from netaudio.dante.packet_channel_dissection import _dissect_rx_channels_body, _dissect_tx_channels_body
-from netaudio.dante.packet_dissection_models import (
-    ARC_PROTOCOL_IDENTIFIERS,
-    ARC_STATUS_NAMES,
-    ARC_SUCCESS_STATUSES,
-    PROTOCOL_ID_NAMES,
-    DissectedPacket,
-    Span,
+from netaudio.dante.const import (
+    ARC_PROTOCOL_IDS,
+    ARC_RESULT_LABELS,
+    ARC_SUCCESS_RESULT_CODES,
+    OPCODE_CHANNEL_COUNT,
+    OPCODE_DEVICE_INFO,
+    OPCODE_DEVICE_NAME,
+    OPCODE_DEVICE_SETTINGS,
+    OPCODE_PROPERTY_DIRECTORY,
+    OPCODE_RX_CHANNELS,
+    OPCODE_TX_CHANNEL_INFO,
+    OPCODE_TX_CHANNEL_NAMES,
+    PROTOCOL_LABELS,
+    PROTOCOL_SETTINGS,
+    RESULT_CODE_REQUEST,
 )
+from netaudio.dante.packet_dissection_models import DissectedPacket, Span
 from netaudio.dante.packet_dissection_values import _extract_value, _format_detail, _humanize_value
-from netaudio.dante.packet_settings_dissection import (
-    _dissect_device_settings_query,
-    _dissect_device_settings_response,
-    _dissect_encoding_control,
-    _dissect_encoding_status,
-    _dissect_property_directory,
-    _dissect_routing_capacity_status,
-)
+from netaudio.dante.packet_header import parse_packet_header
+
+logger = logging.getLogger("netaudio")
+
+ARC_RESPONSE_PARSE_KINDS = {
+    OPCODE_CHANNEL_COUNT: "channel_count",
+    OPCODE_DEVICE_INFO: "device_info",
+    OPCODE_DEVICE_NAME: "device_name",
+    OPCODE_DEVICE_SETTINGS: "device_settings",
+    OPCODE_PROPERTY_DIRECTORY: "property_directory",
+    0x2200: "tx_flows",
+    0x2400: "transmitter_channel_status_page_2809",
+    0x2600: "transmitter_flow_status_page",
+    0x3200: "receiver_flow_page",
+    0x3400: "receiver_channel_status_page_2809",
+    0x3600: "receiver_flow_status_page_2809",
+}
+
+ARC_RESPONSE_PAGE_KINDS = {
+    OPCODE_RX_CHANNELS: "rx",
+    OPCODE_TX_CHANNEL_INFO: "tx_info",
+    OPCODE_TX_CHANNEL_NAMES: "tx_friendly",
+}
+
+CONMON_PARSE_KINDS = {
+    0x0011: "interface_status",
+    0x0014: "switch_configuration_status",
+    0x0020: "ptp_clock_status",
+    0x0022: "unmapped_0022_status",
+    0x0024: "unmapped_0024_status",
+    0x0026: "unmapped_0026_status",
+    0x0040: "unmapped_0040_status",
+    0x0060: "dante_model",
+    0x0078: "clear_configuration_status",
+    0x0080: "sample_rate_status",
+    0x0082: "encoding_status",
+    0x0084: "sample_rate_pullup_status",
+    0x0086: "unmapped_0086_status",
+    0x00C0: "make_model",
+    0x00E0: "unmapped_00e0_status",
+    0x0100: "routing_capacity_status",
+    0x0102: "unmapped_0102_status",
+    0x0106: "unmapped_0106_status",
+    0x1007: "aes67_status",
+    0x1009: "lock_reset_status",
+    0x100B: "gain_status",
+    0x100E: "bluetooth_status",
+    0xFF05: "conmon_export_fragment",
+}
 
 
 def _load_facts_for_packet(
@@ -42,7 +91,7 @@ def _load_facts_for_packet(
     if len(payload) < 2:
         return []
 
-    protocol_id = struct.unpack(">H", payload[0:2])[0]
+    protocol_id = int.from_bytes(payload[0:2], "big")
     matched = []
 
     for fact in all_facts:
@@ -106,11 +155,11 @@ def _build_span(
 
     detail = ""
     if name == "protocol_id" and isinstance(int_val, int):
-        label = PROTOCOL_ID_NAMES.get(int_val)
+        label = PROTOCOL_LABELS.get(int_val)
         if label:
             detail = label
     elif name == "status" and isinstance(int_val, int):
-        label = ARC_STATUS_NAMES.get(int_val)
+        label = ARC_RESULT_LABELS.get(int_val)
         if label:
             detail = label
     elif name == "opcode" and isinstance(int_val, int):
@@ -123,19 +172,56 @@ def _build_span(
     if not detail:
         detail = _format_detail(name, raw, int_val, dtype)
 
-    value_str = humanized
-
     return Span(
         offset=offset,
         length=length,
         name=name,
         raw=raw,
-        value=value_str,
+        value=humanized,
         detail=detail,
         fact_ref=fact_ref,
         section=section_name,
         dtype=dtype,
     )
+
+
+def core_parse_kind(header: dict) -> tuple[str, bool] | None:
+    protocol_id = header["protocol_id"]
+    opcode = header["opcode"]
+    if protocol_id == PROTOCOL_SETTINGS:
+        kind = CONMON_PARSE_KINDS.get(opcode)
+        return (kind, False) if kind else None
+    if protocol_id not in ARC_PROTOCOL_IDS:
+        return None
+    result_code = header["result_code"]
+    if result_code == RESULT_CODE_REQUEST:
+        return None
+    if opcode in ARC_RESPONSE_PAGE_KINDS:
+        return (ARC_RESPONSE_PAGE_KINDS[opcode], True)
+    kind = ARC_RESPONSE_PARSE_KINDS.get(opcode)
+    if kind is None or result_code not in ARC_SUCCESS_RESULT_CODES:
+        return None
+    return (kind, False)
+
+
+def _core_fields(payload: bytes, header: dict) -> tuple[str | None, dict | None]:
+    from netaudio import core
+
+    parse_kind = core_parse_kind(header)
+    if parse_kind is None:
+        return None, None
+    kind, paged = parse_kind
+    try:
+        if paged:
+            parsed = core.parse_page(kind, payload, 1)
+        else:
+            parsed = core.parse_response(kind, payload)
+    except core.NetaudioCoreError as exception:
+        logger.debug(f"Core {kind} parser rejected packet: {exception}")
+        return kind, None
+    if not isinstance(parsed, dict):
+        parsed = {"records": parsed}
+    return kind, parsed
 
 
 def dissect(
@@ -154,19 +240,12 @@ def dissect(
     for fact in facts:
         section_name = fact.get("name", "")
         fact_ref = f"{fact['category']}:{fact['key']}"
-        section_label = section_name
 
         if fact_ref not in result.fact_refs:
             result.fact_refs.append(fact_ref)
 
-        fields = fact.get("fields", [])
-        if not fields:
-            result.sections.append((fact_ref, section_label))
-            continue
-
-        result.sections.append((fact_ref, section_label))
-
-        for field_def in sorted(fields, key=lambda f: f.get("offset", 0)):
+        result.sections.append((fact_ref, section_name))
+        for field_def in sorted(fact.get("fields", []), key=lambda f: f.get("offset", 0)):
             field_direction = field_def.get("direction")
             if field_direction is not None and field_direction != direction:
                 continue
@@ -178,43 +257,18 @@ def dissect(
 
     result.spans = list(span_by_offset.values())
 
-    if len(payload) >= 8:
-        protocol_id = struct.unpack(">H", payload[0:2])[0]
-        if protocol_id in ARC_PROTOCOL_IDENTIFIERS and len(payload) >= 10:
-            opcode = struct.unpack(">H", payload[6:8])[0]
-            status = struct.unpack(">H", payload[8:10])[0]
-            if opcode == 0x1100:
-                if status == 0x0000:
-                    _dissect_device_settings_query(payload, result, covered)
-                elif status in ARC_SUCCESS_STATUSES:
-                    _dissect_device_settings_response(payload, result, covered)
-            elif opcode == 0x1102 and status in ARC_SUCCESS_STATUSES:
-                _dissect_property_directory(payload, result, covered)
-            elif status != 0x0000:
-                if opcode == 0x3000:
-                    _dissect_rx_channels_body(payload, result, covered)
-                elif opcode == 0x2000:
-                    _dissect_tx_channels_body(payload, result, covered)
-
-        if protocol_id == 0xFFFF and len(payload) >= 28:
-            message_type = struct.unpack(">H", payload[26:28])[0]
-            if message_type == 0x0082:
-                _dissect_encoding_status(payload, result, covered)
-            elif message_type == 0x0083:
-                _dissect_encoding_control(payload, result, covered)
-            elif message_type == 0x0100:
-                _dissect_routing_capacity_status(payload, result, covered)
+    header = parse_packet_header(payload)
+    if header is not None:
+        result.core_kind, result.core_fields = _core_fields(payload, header)
+        protocol_label = PROTOCOL_LABELS.get(header["protocol_id"], f"0x{header['protocol_id']:04X}")
+        if header["length"] != len(payload):
+            result.header_summary = (
+                f"protocol={protocol_label}  {len(payload)}B  (header says {header['length']}, LENGTH MISMATCH)"
+            )
+        else:
+            result.header_summary = f"protocol={protocol_label}  {header['length']}B"
 
     _add_unknown_regions(result, covered)
-
-    if len(payload) >= 4:
-        protocol_id = struct.unpack(">H", payload[0:2])[0]
-        proto_name = PROTOCOL_ID_NAMES.get(protocol_id, f"0x{protocol_id:04X}")
-        pkt_len = struct.unpack(">H", payload[2:4])[0]
-        if pkt_len != len(payload):
-            result.header_summary = f"protocol={proto_name}  {len(payload)}B  (header says {pkt_len}, LENGTH MISMATCH)"
-        else:
-            result.header_summary = f"protocol={proto_name}  {pkt_len}B"
 
     return result
 

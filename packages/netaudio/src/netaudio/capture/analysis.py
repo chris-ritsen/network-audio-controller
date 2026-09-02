@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import datetime
-import struct
 
+from netaudio.dante.const import ARC_PROTOCOL_IDS, PROTOCOL_SETTINGS
+from netaudio.dante.packet_header import parse_packet_header
 
 ARC_VOLATILE_OFFSETS = {4, 5}
 CONMON_VOLATILE_OFFSETS = {4, 5}
 
 
 def _classify_protocol(payload: bytes) -> str:
-    if len(payload) < 2:
+    header = parse_packet_header(payload)
+    if header is None:
         return "unknown"
-    protocol_id = struct.unpack(">H", payload[0:2])[0]
-    if protocol_id in (0x27FF, 0x2809, 0x2729):
+    if header["protocol_id"] in ARC_PROTOCOL_IDS:
         return "arc"
-    if protocol_id == 0xFFFF:
+    if header["protocol_id"] == PROTOCOL_SETTINGS:
         return "conmon"
     return "unknown"
 
@@ -46,15 +47,14 @@ def _detect_jitter_offsets(payloads: list[bytes]) -> set[int]:
 
 
 def _opcode_key(payload: bytes) -> str | None:
-    if len(payload) < 8:
+    header = parse_packet_header(payload)
+    if header is None:
         return None
-    protocol_id = struct.unpack(">H", payload[0:2])[0]
-    if protocol_id in (0x27FF, 0x2809, 0x2729):
-        opcode = struct.unpack(">H", payload[6:8])[0]
-        return f"arc:0x{opcode:04X}"
-    if protocol_id == 0xFFFF and len(payload) >= 28:
-        message_type = struct.unpack(">H", payload[26:28])[0]
-        return f"conmon:0x{message_type:04X}"
+    protocol_id = header["protocol_id"]
+    if protocol_id in ARC_PROTOCOL_IDS:
+        return f"arc:0x{header['opcode']:04X}"
+    if protocol_id == PROTOCOL_SETTINGS:
+        return f"conmon:0x{header['opcode']:04X}"
     return f"proto:0x{protocol_id:04X}"
 
 
