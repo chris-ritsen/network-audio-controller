@@ -20,6 +20,8 @@ from netaudio.dante.services.notification import mutate_and_wait_for_capability_
 
 logger = logging.getLogger("netaudio")
 
+FORGET_SELECTIONS = frozenset({"emulated", "offline"})
+
 
 class DaemonDeviceHandlers:
     async def _handle_get_shure_devices(self, writer):
@@ -69,6 +71,52 @@ class DaemonDeviceHandlers:
             return
 
         await self._send_json(writer, DanteDeviceSerializer.to_json(device))
+
+    async def _handle_forget_device(self, writer, device_name):
+        device = self._find_device(device_name)
+        if not device:
+            await self._send_json(writer, {"error": "device not found"}, 404)
+            return
+        await self._send_json(writer, {"forgotten": self._forget_devices([device])})
+
+    async def _handle_forget_devices(self, writer, query):
+        selections = {
+            selection.strip()
+            for raw_value in query.get("selection", [])
+            for selection in raw_value.split(",")
+            if selection.strip()
+        }
+        unknown_selections = sorted(selections - FORGET_SELECTIONS)
+        if not selections or unknown_selections:
+            await self._send_json(
+                writer,
+                {"error": f"selection must be one or more of: {', '.join(sorted(FORGET_SELECTIONS))}"},
+                400,
+            )
+            return
+        matched = [
+            device
+            for device in self.application.devices.values()
+            if ("offline" in selections and not device.online)
+            or ("emulated" in selections and device.kind == "emulated")
+        ]
+        await self._send_json(writer, {"forgotten": self._forget_devices(matched)})
+
+    def _forget_devices(self, devices):
+        forgotten = []
+        for device in devices:
+            forgotten.append(
+                {
+                    "ipv4": str(device.ipv4) if device.ipv4 else None,
+                    "kind": device.kind,
+                    "name": device.name,
+                    "online": device.online,
+                    "server_name": device.server_name,
+                }
+            )
+            logger.info(f"Forgetting cached device {device.server_name}")
+            self.forget_device(device.server_name)
+        return forgotten
 
     async def _handle_get_interfaces(self, writer, device_name):
         device = await self._require_device(writer, device_name)

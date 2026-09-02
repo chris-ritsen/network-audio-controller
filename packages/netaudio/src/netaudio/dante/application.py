@@ -3,9 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from zeroconf import ServiceStateChange
-from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
-
 from netaudio.dante.application_operations import DanteApplicationOperations
 from netaudio.dante.const import (
     SERVICE_ARC,
@@ -210,6 +207,9 @@ class DanteApplication(DanteApplicationOperations):
         return device
 
     async def discover_named_device(self, device_name: str, timeout: float = 2.0) -> dict:
+        from zeroconf import ServiceStateChange
+        from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
+
         from netaudio.dante.browser import DanteBrowser
 
         browser = DanteBrowser(mdns_timeout=0, app=self)
@@ -300,6 +300,8 @@ class DanteApplication(DanteApplicationOperations):
         return {server_name: device}
 
     async def discover_and_populate(self, timeout: float = 5.0) -> dict:
+        from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
+
         from netaudio.dante.browser import DanteBrowser
 
         discovery_time = min(timeout * 0.4, 2.0)

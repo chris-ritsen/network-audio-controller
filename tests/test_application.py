@@ -812,8 +812,8 @@ class TestDanteApplication:
 
     @pytest.mark.asyncio
     async def test_discover_named_device_anchors_services_to_arc_record(self, monkeypatch):
-        import netaudio.dante.application as application_module
         import netaudio.dante.browser as browser_module
+        import zeroconf.asyncio as zeroconf_asyncio_module
         from zeroconf import ServiceStateChange
         from netaudio.dante.const import SERVICE_ARC, SERVICE_CMC, SERVICE_DBC
 
@@ -872,8 +872,8 @@ class TestDanteApplication:
             async def async_cancel(self):
                 self.cancelled = True
 
-        monkeypatch.setattr(application_module, "AsyncZeroconf", FakeAsyncZeroconf)
-        monkeypatch.setattr(application_module, "AsyncServiceBrowser", FakeAsyncServiceBrowser)
+        monkeypatch.setattr(zeroconf_asyncio_module, "AsyncZeroconf", FakeAsyncZeroconf)
+        monkeypatch.setattr(zeroconf_asyncio_module, "AsyncServiceBrowser", FakeAsyncServiceBrowser)
         monkeypatch.setattr(browser_module, "DanteBrowser", FakeBrowser)
         application = DanteApplication()
 

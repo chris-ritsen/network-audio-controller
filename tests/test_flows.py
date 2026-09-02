@@ -184,3 +184,93 @@ def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
     assert flow["status_code_at_record_offset_62"] == 0x0009
     assert flow["local_receiver_channel_count"] == 2
     assert flow["flow_type"] == "0x0002"
+
+
+def _flow_list_device():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        name="avio-usb-1", server_name="AVIOUSB-1.local.", ipv4="192.0.2.10", flow_protocol_id=0x2809
+    )
+
+
+def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monkeypatch):
+    from typer.testing import CliRunner
+
+    from netaudio.commands import flow as flow_commands
+
+    device = _flow_list_device()
+
+    async def get_device_and_app():
+        return None, device, 4440
+
+    async def query_inventory(device_ip, arc_port, flow_protocol_id):
+        assert (device_ip, arc_port, flow_protocol_id) == ("192.0.2.10", 4440, 0x2809)
+        return {
+            "flows": [
+                {
+                    "flow_number": 2,
+                    "flow_type": "multicast",
+                    "channels": [1, 2],
+                    "sample_rate": 48000,
+                    "encoding": 24,
+                    "destination_internet_protocol_version_four_address": "239.255.60.163",
+                    "destination_user_datagram_port": 4321,
+                }
+            ],
+            "max_flow_slots": 4,
+        }
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device_and_app)
+    monkeypatch.setattr(flows, "query_preferred_tx_flow_inventory", query_inventory)
+
+    result = CliRunner().invoke(flow_commands.app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    header, row = [line for line in result.output.splitlines() if line.strip()][:2]
+    assert "Sample Rate" in header and "Encoding" in header
+    assert "48 kHz" in row and "PCM24" in row
+    assert "48000" not in row
+
+
+def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
+    from typer.testing import CliRunner
+
+    from netaudio.commands import flow as flow_commands
+
+    device = _flow_list_device()
+
+    async def get_device_and_app():
+        return None, device, 4440
+
+    async def query_inventory(queried_device):
+        assert queried_device is device
+        return {
+            "flows": [
+                {
+                    "flow_number": 1,
+                    "flow_type": "unicast",
+                    "receiver_channel_numbers_by_flow_channel": [[1], [2]],
+                    "subscription_status_code": 0x0009,
+                    "destination_internet_protocol_version_four_address": "192.0.2.10",
+                    "destination_user_datagram_port": 14336,
+                    "sample_rate": 48000,
+                    "encoding": 24,
+                    "frames_per_packet": 8,
+                    "latency_nanoseconds": 1_000_000,
+                }
+            ],
+            "maximum_flow_slots": 2,
+        }
+
+    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device_and_app)
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query_inventory)
+
+    result = CliRunner().invoke(flow_commands.app, ["receiver-list"])
+
+    assert result.exit_code == 0, result.output
+    header, row = [line for line in result.output.splitlines() if line.strip()][:2]
+    assert "Latency" in header
+    assert "Latency (ns)" not in header
+    assert "1 ms" in row and "48 kHz" in row and "PCM24" in row
+    assert "1000000" not in row
