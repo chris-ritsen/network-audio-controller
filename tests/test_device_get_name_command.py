@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device import DanteDevice
+from netaudio.dante.device_commands import DanteDeviceCommands
 from tests.conftest import check_generated_command_payload
 
 DEVICE_NAME_RESPONSE_PAYLOAD_START_OFFSET = 10
@@ -72,8 +72,7 @@ get_device_name_test_cases = [
     ids=[tc.device_id for tc in get_device_name_test_cases],
 )
 def test_generate_get_device_name_command_payload(load_fixture, test_case: GetNameTestCase):
-    device = DanteDevice()
-    hex_command_str, service_type = device.commands.command_device_name(transaction_id=test_case.sequence_id)
+    hex_command_str, service_type = DanteDeviceCommands().command_device_name(transaction_id=test_case.sequence_id)
 
     check_generated_command_payload(
         generated_hex_payload=hex_command_str,

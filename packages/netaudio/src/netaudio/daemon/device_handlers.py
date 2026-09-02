@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from netaudio.common.app_config import settings as app_settings
-from netaudio.core.binding import STATUS_TIMEOUT
+from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
 from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.device_operations import validate_pin
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -269,7 +269,7 @@ class DaemonDeviceHandlers:
         if not device:
             return
 
-        await device.operations.identify()
+        await self.application.identify(device)
         await self._broadcast_sse(
             {
                 "event": "identify_started",
@@ -323,7 +323,7 @@ class DaemonDeviceHandlers:
             from netaudio import core
 
             result_code = core.parse_response("result_code", response)
-        except Exception as exception:
+        except NetaudioCoreError as exception:
             await self._send_json(writer, {"error": f"invalid device response: {exception}"}, 500)
             return False
         if not isinstance(result_code, int):
@@ -625,7 +625,7 @@ class DaemonDeviceHandlers:
             await self._send_json(writer, {"error": "confirm_destructive must be a boolean"}, 400)
             return
         try:
-            result = await self.application.set_sample_rate_state(
+            result = await self.application.set_sample_rate(
                 device,
                 requested_sample_rate,
                 confirm_destructive=confirm_destructive,

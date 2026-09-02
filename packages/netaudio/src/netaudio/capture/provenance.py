@@ -6,64 +6,34 @@ import sqlite3
 import struct
 from pathlib import Path
 
-from netaudio.capture.packets import ARC_PROTOCOLS, TARGET_PROTOCOLS
-from netaudio.dante.debug_formatter import (
-    OPCODE_NAMES_BY_PROTOCOL,
-    SETTINGS_MESSAGE_TYPE_NAMES,
+from netaudio.common.manifest import write_manifest
+from netaudio.dante.const import (
+    ARC_PROTOCOL_IDS,
+    ARC_SUCCESS_RESULT_CODES,
+    CAPTURE_PROTOCOL_IDS,
+    OPCODE_RX_CHANNELS,
+    PROTOCOL_CMC,
+    PROTOCOL_LABELS,
+    PROTOCOL_SETTINGS,
 )
+from netaudio.dante.debug_formatter import _external_labels
+from netaudio.dante.packet_header import parse_packet_header
 from netaudio.dante.packet_store import _decompress_payload
 
 logger = logging.getLogger("netaudio")
-ARC_SUCCESS_RESULTS = frozenset({0x0001, 0x8112})
 
 
 def _extract_subscription_status_codes(payload: bytes) -> set[int]:
-    if len(payload) < 10:
+    from netaudio import core
+
+    header = parse_packet_header(payload)
+    if header is None or header["protocol_id"] not in ARC_PROTOCOL_IDS or header["opcode"] != OPCODE_RX_CHANNELS:
         return set()
-
-    protocol = struct.unpack(">H", payload[0:2])[0]
-    if protocol not in ARC_PROTOCOLS:
+    try:
+        records = core.parse_page("rx", payload, 1)
+    except core.NetaudioCoreError:
         return set()
-
-    opcode = struct.unpack(">H", payload[6:8])[0]
-    if opcode != 0x3000:
-        return set()
-
-    body = payload[10:]
-    if len(body) < 2:
-        return set()
-
-    record_size = 20
-    record_count = body[1]
-    if body[0] != record_count or record_count > 16:
-        return set()
-
-    records_end = 2 + record_count * record_size
-    if len(body) < records_end:
-        return set()
-
-    statuses: set[int] = set()
-
-    for record_index in range(record_count):
-        record_start = 2 + record_index * record_size
-        record = body[record_start : record_start + record_size]
-        (
-            channel_number,
-            _flags,
-            _sample_rate_offset,
-            _tx_channel_offset,
-            _tx_device_offset,
-            rx_channel_offset,
-            _status,
-            subscription_status_code,
-        ) = struct.unpack(">HHHHHHHH", record[:16])
-
-        if channel_number == 0 or rx_channel_offset >= len(payload):
-            return set()
-
-        statuses.add(subscription_status_code)
-
-    return statuses
+    return {record["subscription_status_code"] for record in records}
 
 
 def _build_packet_scope(
@@ -102,7 +72,7 @@ def _query_observed_opcodes(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> list[sqlite3.Row]:
-    protocol_csv = ",".join(str(v) for v in TARGET_PROTOCOLS if v != 0xFFFF)
+    protocol_csv = ",".join(str(v) for v in CAPTURE_PROTOCOL_IDS if v != 0xFFFF)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -153,7 +123,7 @@ def _query_observed_subscription_statuses(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> list[dict[str, int]]:
-    arc_protocol_csv = ",".join(str(v) for v in ARC_PROTOCOLS)
+    arc_protocol_csv = ",".join(str(v) for v in ARC_PROTOCOL_IDS)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -206,7 +176,7 @@ def _extract_seed_samples(
     end_ns: int | None = None,
     device_ip: str | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    protocol_csv = ",".join(str(p) for p in TARGET_PROTOCOLS)
+    protocol_csv = ",".join(str(p) for p in CAPTURE_PROTOCOL_IDS)
     scope_sql, scope_params = _build_packet_scope(
         session_id=session_id,
         start_ns=start_ns,
@@ -233,7 +203,7 @@ def _extract_seed_samples(
         sample["payload"] = _decompress_payload(sample["payload"])
         rows.append(sample)
 
-    arc_protocol_csv = ",".join(str(p) for p in ARC_PROTOCOLS)
+    arc_protocol_csv = ",".join(str(p) for p in ARC_PROTOCOL_IDS)
     status_rows = conn.execute(
         f"""
         SELECT id, protocol_id, opcode, opcode_name, timestamp_iso, payload
@@ -340,9 +310,7 @@ def _write_seed_samples(
             }
         )
 
-    manifest_path = output_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
-    return manifest_path
+    return write_manifest(output_dir, manifest)
 
 
 def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int]], set[int], set[int]]:
@@ -353,18 +321,15 @@ def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int
     observed_subscription_statuses: set[int] = set()
 
     def _process_payload(payload: bytes) -> None:
-        if len(payload) < 2:
+        header = parse_packet_header(payload)
+        if header is None:
             return
 
-        protocol = struct.unpack(">H", payload[0:2])[0]
-
-        if protocol in (*ARC_PROTOCOLS, 0x1200) and len(payload) >= 8:
-            opcode = struct.unpack(">H", payload[6:8])[0]
-            observed_opcodes.add((protocol, opcode))
-
-        if protocol == 0xFFFF and len(payload) >= 28:
-            message_type = struct.unpack(">H", payload[26:28])[0]
-            observed_messages.add(message_type)
+        protocol = header["protocol_id"]
+        if protocol in (*ARC_PROTOCOL_IDS, PROTOCOL_CMC):
+            observed_opcodes.add((protocol, header["opcode"]))
+        if protocol == PROTOCOL_SETTINGS:
+            observed_messages.add(header["opcode"])
 
         observed_subscription_statuses.update(_extract_subscription_status_codes(payload))
 
@@ -379,7 +344,7 @@ def _scan_observed_from_fixtures(fixture_root: Path) -> tuple[set[tuple[int, int
                         f = tar.extractfile(member)
                         if f:
                             _process_payload(f.read())
-        except Exception as exception:
+        except (OSError, ValueError, tarfile.TarError) as exception:
             logger.warning(f"Failed to process archive {archive}: {exception}", exc_info=True)
 
     return observed_opcodes, observed_messages, observed_subscription_statuses
@@ -405,19 +370,19 @@ def _check_opcode_labels(
     overrides: set[tuple[int, int]],
 ) -> list[str]:
     failures: list[str] = []
-    arc_variant_protocols = set(ARC_PROTOCOLS)
+    arc_variant_protocols = set(ARC_PROTOCOL_IDS)
+    opcode_labels, _ = _external_labels()
 
-    for protocol, mapping in OPCODE_NAMES_BY_PROTOCOL.items():
-        for opcode, label in mapping.items():
-            if not label or label == f"0x{opcode:04X}":
+    for (protocol, opcode), label in opcode_labels.items():
+        if not label or label == f"0x{opcode:04X}":
+            continue
+        key = (protocol, opcode)
+        if key in observed or key in overrides:
+            continue
+        if protocol in arc_variant_protocols:
+            if any((fallback_protocol, opcode) in observed for fallback_protocol in arc_variant_protocols):
                 continue
-            key = (protocol, opcode)
-            if key in observed or key in overrides:
-                continue
-            if protocol in arc_variant_protocols:
-                if any((fallback_protocol, opcode) in observed for fallback_protocol in arc_variant_protocols):
-                    continue
-            failures.append(f"unproven opcode label: protocol=0x{protocol:04X} opcode=0x{opcode:04X} label={label!r}")
+        failures.append(f"unproven opcode label: protocol=0x{protocol:04X} opcode=0x{opcode:04X} label={label!r}")
 
     return failures
 
@@ -427,7 +392,8 @@ def _check_message_labels(
     overrides: set[int],
 ) -> list[str]:
     failures: list[str] = []
-    for message_type, label in SETTINGS_MESSAGE_TYPE_NAMES.items():
+    _, message_labels = _external_labels()
+    for message_type, label in message_labels.items():
         if not label or label == f"msg:0x{message_type:04X}":
             continue
         if message_type in observed or message_type in overrides:
@@ -436,86 +402,48 @@ def _check_message_labels(
     return failures
 
 
-KNOWN_PROTOCOL_NAMES = {
-    0x2729: "ARC",
-    0x27FF: "ARC",
-    0x2801: "ARC",
-    0x2809: "ARC",
-    0xFFFF: "SETTINGS",
-    0x1200: "CMC",
-}
-
-KNOWN_OPCODE_NAMES = {
-    0x1000: "CHANNEL_COUNT",
-    0x1001: "DEVICE_NAME_SET",
-    0x1002: "DEVICE_NAME",
-    0x1003: "DEVICE_INFO",
-    0x1100: "DEVICE_SETTINGS",
-    0x1101: "SET_LATENCY",
-    0x1102: "PROPERTY_DIRECTORY",
-}
-
-
 def _verify_parse_header(data: bytes) -> dict | None:
-    if len(data) < 8:
+    header = parse_packet_header(data)
+    if header is None:
         return None
-
-    protocol_id = struct.unpack(">H", data[0:2])[0]
-
-    if protocol_id == 0xFFFF and len(data) >= 28:
-        message_type = struct.unpack(">H", data[26:28])[0]
-        return {
-            "protocol_id": protocol_id,
-            "protocol_name": "SETTINGS",
-            "opcode": message_type,
-            "transaction_id": None,
-            "status": None,
-        }
-
-    transaction_id = struct.unpack(">H", data[4:6])[0]
-    opcode = struct.unpack(">H", data[6:8])[0]
-    status = struct.unpack(">H", data[8:10])[0] if len(data) >= 10 else None
-
-    return {
+    protocol_id = header["protocol_id"]
+    verified = {
+        "opcode": header["opcode"],
         "protocol_id": protocol_id,
-        "protocol_name": KNOWN_PROTOCOL_NAMES.get(protocol_id, f"0x{protocol_id:04X}"),
-        "opcode": opcode,
-        "opcode_name": KNOWN_OPCODE_NAMES.get(opcode, f"0x{opcode:04X}"),
-        "transaction_id": transaction_id,
-        "status": status,
+        "protocol_name": PROTOCOL_LABELS.get(protocol_id, f"0x{protocol_id:04X}"),
+        "status": header["result_code"],
+        "transaction_id": header["transaction_id"],
     }
+    if protocol_id != PROTOCOL_SETTINGS:
+        verified["opcode_name"] = header["opcode_name"]
+    return verified
 
 
 def _decode_packet_payload(data: bytes) -> dict:
-    result = {}
-    if len(data) < 8:
+    header = parse_packet_header(data)
+    if header is None:
+        return {"raw_hex": data.hex()}
+
+    protocol_id = header["protocol_id"]
+    result = {
+        "actual_length": len(data),
+        "declared_length": header["length"],
+        "protocol": f"0x{protocol_id:04X}",
+        "protocol_name": PROTOCOL_LABELS.get(protocol_id, f"0x{protocol_id:04X}"),
+    }
+
+    if protocol_id == PROTOCOL_SETTINGS:
+        result["message_type"] = f"0x{header['opcode']:04X}"
         result["raw_hex"] = data.hex()
         return result
 
-    protocol_id = struct.unpack(">H", data[0:2])[0]
-    length = struct.unpack(">H", data[2:4])[0]
-    result["protocol"] = f"0x{protocol_id:04X}"
-    result["protocol_name"] = KNOWN_PROTOCOL_NAMES.get(protocol_id, f"0x{protocol_id:04X}")
-    result["declared_length"] = length
-    result["actual_length"] = len(data)
+    result["transaction_id"] = f"0x{header['transaction_id']:04X}"
+    result["opcode"] = f"0x{header['opcode']:04X}"
+    result["opcode_name"] = header["opcode_name"]
 
-    if protocol_id == 0xFFFF:
-        if len(data) >= 28:
-            message_type = struct.unpack(">H", data[26:28])[0]
-            result["message_type"] = f"0x{message_type:04X}"
-        result["raw_hex"] = data.hex()
-        return result
-
-    transaction_id = struct.unpack(">H", data[4:6])[0]
-    opcode = struct.unpack(">H", data[6:8])[0]
-    result["transaction_id"] = f"0x{transaction_id:04X}"
-    result["opcode"] = f"0x{opcode:04X}"
-    result["opcode_name"] = KNOWN_OPCODE_NAMES.get(opcode, f"0x{opcode:04X}")
-
-    if len(data) >= 10:
-        status = struct.unpack(">H", data[8:10])[0]
-        result["status"] = f"0x{status:04X}"
-        result["status_ok"] = status in ARC_SUCCESS_RESULTS
+    if header["result_code"] is not None:
+        result["status"] = f"0x{header['result_code']:04X}"
+        result["status_ok"] = header["result_code"] in ARC_SUCCESS_RESULT_CODES
 
     result["raw_hex"] = data.hex()
 
@@ -526,8 +454,7 @@ def _decode_packet_payload(data: bytes) -> dict:
     for offset in range(0, len(data), 4):
         chunk = data[offset : offset + 4]
         if len(chunk) == 4:
-            val = struct.unpack(">I", chunk)[0]
-            words.append({"offset": offset, "hex": chunk.hex(), "u32": val})
+            words.append({"offset": offset, "hex": chunk.hex(), "u32": int.from_bytes(chunk, "big")})
     result["words"] = words
 
     return result

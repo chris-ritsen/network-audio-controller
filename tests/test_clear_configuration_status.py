@@ -1,13 +1,15 @@
 import json
-from unittest.mock import MagicMock, call
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from netaudio import core
-from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
-from netaudio.dante.services.notification import DanteNotificationService
 from netaudio.dante.services.settings import DanteSettingsService
+from tests.status_test_support import application_with_device, count_events, receive_packets
 
 
 CONTROLLER_REQUEST = bytes.fromhex("ffff002401ed0000fec9ca09a6d50000417564696e617465073e00770000006400000000")
@@ -75,62 +77,53 @@ def test_parser_preserves_authentic_action_masks_and_result_codes():
         }
 
 
-def test_notification_service_applies_and_serializes_clear_configuration_status_once():
+def test_state_service_applies_and_serializes_clear_configuration_status_once():
     device_ip_address = "10.0.2.15"
-    device = DanteDevice(server_name="virtual-a32.local.")
-    device.name = "virtual-a32"
-    device.ipv4 = device_ip_address
-    dispatcher = MagicMock()
-    service = DanteNotificationService(
-        dispatcher=dispatcher,
-        device_lookup=lambda ip_address: device if ip_address == device_ip_address else None,
-    )
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
     expected = core.parse_response("clear_configuration_status", MODE_ONE_STATUS)
 
-    service._on_packet(MODE_ONE_STATUS, (device_ip_address, 8702))
-    service._on_packet(MODE_ONE_STATUS, (device_ip_address, 8702))
+    events = receive_packets(application, [MODE_ONE_STATUS, MODE_ONE_STATUS], (device_ip_address, 8702))
 
     assert device.clear_configuration_status == expected
-    emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
-    assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+    assert count_events(events, EventType.DEVICE_UPDATED) == 1
     serialized = DanteDeviceSerializer.to_json(device)
     assert serialized["clear_configuration_status"] == expected
     restored = DanteDeviceSerializer.device_from_json(json.loads(json.dumps(serialized)))
     assert restored.clear_configuration_status == expected
 
 
-def test_settings_service_sends_typed_status_probe():
-    service = DanteSettingsService()
-    service._commands.command_probe_clear_configuration_status = MagicMock(return_value=(b"probe", None, 8700))
-    service.send = MagicMock()
+@pytest.mark.asyncio
+async def test_settings_service_executes_typed_status_probe():
+    transport = SimpleNamespace(execute=AsyncMock(return_value=None))
+    service = DanteSettingsService(transport)
     host_mac = b"\x10\x20\x30\x40\x50\x60"
 
-    service.probe_clear_configuration_status("192.168.1.108", host_mac=host_mac)
+    await service.probe_clear_configuration_status("192.168.1.108", host_mac=host_mac)
 
-    service._commands.command_probe_clear_configuration_status.assert_called_once_with(host_mac=host_mac)
-    service.send.assert_called_once_with(b"probe", "192.168.1.108", 8700)
+    [request] = transport.execute.await_args_list
+    address, specification = request.args
+    assert address == "192.168.1.108"
+    assert specification["command"] == "probe_clear_configuration_status"
+    assert specification["host_mac"] == "102030405060"
+    assert 1 <= specification["sequence"] <= 0xFFFF
 
 
-def test_settings_service_sends_both_typed_clear_configuration_actions():
-    service = DanteSettingsService()
-    service._commands.command_clear_all_configuration = MagicMock(return_value=(b"clear-all", None, 8700))
-    service._commands.command_clear_all_configuration_preserving_internet_protocol_settings = MagicMock(
-        return_value=(b"preserve-network", None, 8700)
-    )
-    service.send = MagicMock()
+@pytest.mark.asyncio
+async def test_settings_service_executes_both_typed_clear_configuration_actions():
+    transport = SimpleNamespace(execute=AsyncMock(return_value=None))
+    service = DanteSettingsService(transport)
     host_mac = b"\x10\x20\x30\x40\x50\x60"
 
-    service.clear_all_configuration("192.168.1.108", host_mac=host_mac)
-    service.clear_all_configuration_preserving_internet_protocol_settings(
+    await service.clear_all_configuration("192.168.1.108", host_mac=host_mac)
+    await service.clear_all_configuration_preserving_internet_protocol_settings(
         "192.168.1.108",
         host_mac=host_mac,
     )
 
-    service._commands.command_clear_all_configuration.assert_called_once_with(host_mac=host_mac)
-    service._commands.command_clear_all_configuration_preserving_internet_protocol_settings.assert_called_once_with(
-        host_mac=host_mac
-    )
-    assert service.send.call_args_list == [
-        call(b"clear-all", "192.168.1.108", 8700),
-        call(b"preserve-network", "192.168.1.108", 8700),
+    commands = [request.args[1]["command"] for request in transport.execute.await_args_list]
+    assert commands == [
+        "clear_all_configuration",
+        "clear_all_configuration_preserving_internet_protocol_settings",
     ]
+    assert all(request.args[0] == "192.168.1.108" for request in transport.execute.await_args_list)
+    assert all(request.args[1]["host_mac"] == "102030405060" for request in transport.execute.await_args_list)

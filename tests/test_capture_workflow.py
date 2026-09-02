@@ -10,6 +10,8 @@ from netaudio.commands import fact as fact_commands
 from netaudio.commands import provenance as provenance_commands
 from netaudio.commands.capture_helpers import _parse_field_spec
 from netaudio.dante.fact_store import (
+    FactRecord,
+    FactUpdate,
     add_fact,
     check_facts,
     disprove_fact,
@@ -17,7 +19,7 @@ from netaudio.dante.fact_store import (
     quarantine_fact,
     update_fact,
 )
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import ArtifactRecord, PacketQuery, PacketRecord, PacketStore
 from netaudio.dante.protocol_verifier import export_session_bundle
 
 
@@ -41,15 +43,19 @@ def test_packet_list_uses_session_membership(tmp_path):
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="target", started_ns=100)
     packet_store.store_packet(
-        payload=build_arc_packet(0x1002),
-        source_type="tshark",
-        session_id=session_id,
-        timestamp_ns=200,
+        PacketRecord(
+            payload=build_arc_packet(0x1002),
+            source_type="tshark",
+            session_id=session_id,
+            timestamp_ns=200,
+        )
     )
     packet_store.store_packet(
-        payload=build_arc_packet(0x1003),
-        source_type="tshark",
-        timestamp_ns=250,
+        PacketRecord(
+            payload=build_arc_packet(0x1003),
+            source_type="tshark",
+            timestamp_ns=250,
+        )
     )
     packet_store.end_session(session_id, ended_ns=300)
     packet_store.close()
@@ -68,14 +74,16 @@ def test_session_search_includes_secondary_session_links(tmp_path):
     primary_session_id = packet_store.start_session(name="primary")
     secondary_session_id = packet_store.start_session(name="secondary")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x1002),
-        source_type="tshark",
-        session_id=primary_session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x1002),
+            source_type="tshark",
+            session_id=primary_session_id,
+        )
     )
     packet_store.link_packet_to_session(packet_id, secondary_session_id)
 
-    packets = packet_store.search_packets(session_id=secondary_session_id)
-    packet_count = packet_store.search_packets_count(session_id=secondary_session_id)
+    packets = packet_store.search_packets(PacketQuery(session_id=secondary_session_id))
+    packet_count = packet_store.search_packets_count(PacketQuery(session_id=secondary_session_id))
     packet_store.close()
 
     assert [packet["id"] for packet in packets] == [packet_id]
@@ -107,9 +115,11 @@ def test_fact_evidence_marker_uses_packet_id_list(tmp_path, monkeypatch):
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="fact_evidence")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x1002),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x1002),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.close()
     monkeypatch.setattr(
@@ -140,20 +150,13 @@ def test_fact_evidence_marker_uses_packet_id_list(tmp_path, monkeypatch):
 
 def test_fact_update_can_replace_evidence(tmp_path):
     facts_path = tmp_path / "facts.json"
-    add_fact(
-        facts_path,
-        "conmon_message",
-        "0x100A",
-        "gain_control",
-        evidence=["old_session:1"],
-    )
+    add_fact(facts_path, "conmon_message", "0x100A", FactRecord("gain_control", evidence=["old_session:1"]))
 
     update_fact(
         facts_path,
         "conmon_message",
         "0x100A",
-        evidence=["gain_session:2", "gain_session:3"],
-        replace_evidence=True,
+        FactUpdate(evidence=["gain_session:2", "gain_session:3"], replace_evidence=True),
     )
 
     fact = get_fact(facts_path, "conmon_message", "0x100A")
@@ -167,8 +170,10 @@ def test_fact_update_can_clear_packet_fields(tmp_path, monkeypatch):
         facts_path,
         "configuration_persistence",
         "preferred_encoding",
-        "preferred_encoding_persistence",
-        fields=[{"name": "preferred_encoding", "offset": 13, "length": 1, "dtype": "uint8"}],
+        FactRecord(
+            "preferred_encoding_persistence",
+            fields=[{"name": "preferred_encoding", "offset": 13, "length": 1, "dtype": "uint8"}],
+        ),
     )
     monkeypatch.setattr(fact_commands, "_resolve_facts_path", lambda: facts_path)
 
@@ -212,18 +217,22 @@ def test_fact_check_applies_scoped_fields_only_to_matching_packet_directions(tmp
     packet_store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
     session_id = packet_store.start_session(name="direction_scoped_fields")
     request_id = packet_store.store_packet(
-        payload=bytes.fromhex("2729001016c122020000000100000020"),
-        source_type="pcap_import",
-        direction="request",
-        session_id=session_id,
-        timestamp_ns=100,
+        PacketRecord(
+            payload=bytes.fromhex("2729001016c122020000000100000020"),
+            source_type="pcap_import",
+            direction="request",
+            session_id=session_id,
+            timestamp_ns=100,
+        )
     )
     response_id = packet_store.store_packet(
-        payload=bytes.fromhex("2729000a16c122020001"),
-        source_type="pcap_import",
-        direction="response",
-        session_id=session_id,
-        timestamp_ns=200,
+        PacketRecord(
+            payload=bytes.fromhex("2729000a16c122020001"),
+            source_type="pcap_import",
+            direction="response",
+            session_id=session_id,
+            timestamp_ns=200,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -239,29 +248,31 @@ def test_fact_check_applies_scoped_fields_only_to_matching_packet_directions(tmp
         facts_path,
         "arc_opcode",
         "0x2202",
-        "delete_tx_flow",
-        fields=[
-            {
-                "name": "record_count",
-                "offset": 10,
-                "length": 2,
-                "dtype": "uint16_be",
-                "value": "1",
-                "direction": "request",
-            },
-            {
-                "name": "result_code",
-                "offset": 8,
-                "length": 2,
-                "dtype": "uint16_be",
-                "value": "1",
-                "direction": "response",
-            },
-        ],
-        evidence=[
-            f"direction_scoped_fields:{request_id}",
-            f"direction_scoped_fields:{response_id}",
-        ],
+        FactRecord(
+            "delete_tx_flow",
+            fields=[
+                {
+                    "name": "record_count",
+                    "offset": 10,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "value": "1",
+                    "direction": "request",
+                },
+                {
+                    "name": "result_code",
+                    "offset": 8,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "value": "1",
+                    "direction": "response",
+                },
+            ],
+            evidence=[
+                f"direction_scoped_fields:{request_id}",
+                f"direction_scoped_fields:{response_id}",
+            ],
+        ),
     )
 
     results = check_facts(facts_path, provenance_dir=bundle_directory)
@@ -277,11 +288,13 @@ def test_fact_check_rejects_scoped_field_without_matching_direction_evidence(tmp
     packet_store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
     session_id = packet_store.start_session(name="request_only_evidence")
     request_id = packet_store.store_packet(
-        payload=bytes.fromhex("2729001016c122020000000100000020"),
-        source_type="pcap_import",
-        direction="request",
-        session_id=session_id,
-        timestamp_ns=100,
+        PacketRecord(
+            payload=bytes.fromhex("2729001016c122020000000100000020"),
+            source_type="pcap_import",
+            direction="request",
+            session_id=session_id,
+            timestamp_ns=100,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -297,17 +310,19 @@ def test_fact_check_rejects_scoped_field_without_matching_direction_evidence(tmp
         facts_path,
         "arc_opcode",
         "0x2202",
-        "delete_tx_flow",
-        fields=[
-            {
-                "name": "result_code",
-                "offset": 8,
-                "length": 2,
-                "dtype": "uint16_be",
-                "direction": "response",
-            }
-        ],
-        evidence=[f"request_only_evidence:{request_id}"],
+        FactRecord(
+            "delete_tx_flow",
+            fields=[
+                {
+                    "name": "result_code",
+                    "offset": 8,
+                    "length": 2,
+                    "dtype": "uint16_be",
+                    "direction": "response",
+                }
+            ],
+            evidence=[f"request_only_evidence:{request_id}"],
+        ),
     )
 
     results = check_facts(facts_path, provenance_dir=bundle_directory)
@@ -345,9 +360,11 @@ def test_verified_fact_can_use_an_explicit_evidence_database(tmp_path, monkeypat
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="isolated_experiment")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x3000),
-        source_type="pcap_import",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x3000),
+            source_type="pcap_import",
+            session_id=session_id,
+        )
     )
     packet_store.close()
     monkeypatch.setattr(fact_commands, "_resolve_facts_path", lambda: facts_path)
@@ -386,9 +403,11 @@ def test_verify_accepts_exported_tarball(tmp_path):
     packet_store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
     session_id = packet_store.start_session(name="archive_verification")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x1002),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x1002),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -415,9 +434,11 @@ def test_curated_artifact_is_copied_into_verified_bundle(tmp_path):
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="curated_artifact")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x3000),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x3000),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -532,30 +553,34 @@ def test_exact_packets_can_be_copied_from_a_read_only_capture_database(tmp_path)
 
     source_store = PacketStore(db_path=str(source_database_path))
     source_request_identifier = source_store.store_packet(
-        payload=request,
-        source_type="tshark",
-        src_ip="192.168.1.156",
-        src_port=62367,
-        dst_ip="192.168.1.61",
-        dst_port=4440,
-        device_ip="192.168.1.61",
-        direction="request",
-        timestamp_ns=1_786_750_000_000_000_000,
-        source_host="macbook",
-        interface="en0",
+        PacketRecord(
+            payload=request,
+            source_type="tshark",
+            src_ip="192.168.1.156",
+            src_port=62367,
+            dst_ip="192.168.1.61",
+            dst_port=4440,
+            device_ip="192.168.1.61",
+            direction="request",
+            timestamp_ns=1_786_750_000_000_000_000,
+            source_host="macbook",
+            interface="en0",
+        )
     )
     source_response_identifier = source_store.store_packet(
-        payload=response,
-        source_type="tshark",
-        src_ip="192.168.1.61",
-        src_port=4440,
-        dst_ip="192.168.1.156",
-        dst_port=62367,
-        device_ip="192.168.1.61",
-        direction="response",
-        timestamp_ns=1_786_750_000_004_000_000,
-        source_host="macbook",
-        interface="en0",
+        PacketRecord(
+            payload=response,
+            source_type="tshark",
+            src_ip="192.168.1.61",
+            src_port=4440,
+            dst_ip="192.168.1.156",
+            dst_port=62367,
+            device_ip="192.168.1.61",
+            direction="response",
+            timestamp_ns=1_786_750_000_004_000_000,
+            source_host="macbook",
+            interface="en0",
+        )
     )
     source_store.close()
     source_database_sha256 = hashlib.sha256(source_database_path.read_bytes()).hexdigest()
@@ -611,9 +636,11 @@ def test_provenance_archives_are_reproducible(tmp_path):
     packet_store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
     session_id = packet_store.start_session(name="reproducible_bundle")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x3000),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x3000),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -622,12 +649,14 @@ def test_provenance_archives_are_reproducible(tmp_path):
         data={"packet_ids": [packet_id]},
     )
     packet_store.add_artifact(
-        session_id=session_id,
-        label="analysis",
-        role="protocol-analysis",
-        filename="analysis.json",
-        media_type="application/json",
-        content=b'{"status":"verified"}\n',
+        ArtifactRecord(
+            session_id=session_id,
+            label="analysis",
+            role="protocol-analysis",
+            filename="analysis.json",
+            media_type="application/json",
+            content=b'{"status":"verified"}\n',
+        )
     )
 
     for bundle_format in ("tar.gz", "zip"):
@@ -653,9 +682,11 @@ def test_bundle_verification_rejects_modified_artifact(tmp_path):
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="tampered_artifact")
     packet_id = packet_store.store_packet(
-        payload=build_arc_packet(0x3000),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_arc_packet(0x3000),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.add_marker(
         session_id=session_id,
@@ -664,12 +695,14 @@ def test_bundle_verification_rejects_modified_artifact(tmp_path):
         data={"packet_ids": [packet_id]},
     )
     packet_store.add_artifact(
-        session_id=session_id,
-        label="ui_observation",
-        role="controller-ui-observation",
-        filename="observation.txt",
-        media_type="text/plain",
-        content=b"controlled observation",
+        ArtifactRecord(
+            session_id=session_id,
+            label="ui_observation",
+            role="controller-ui-observation",
+            filename="observation.txt",
+            media_type="text/plain",
+            content=b"controlled observation",
+        )
     )
     bundle_path = export_session_bundle(packet_store, session_id, output_dir=str(tmp_path / "bundles"))
     packet_store.close()
@@ -714,9 +747,11 @@ def test_evidence_output_uses_conmon_message_type(tmp_path):
     packet_store = PacketStore(db_path=str(database_path))
     session_id = packet_store.start_session(name="conmon")
     packet_id = packet_store.store_packet(
-        payload=build_conmon_packet(0x100A, sequence=0x1234),
-        source_type="tshark",
-        session_id=session_id,
+        PacketRecord(
+            payload=build_conmon_packet(0x100A, sequence=0x1234),
+            source_type="tshark",
+            session_id=session_id,
+        )
     )
     packet_store.close()
 
@@ -773,14 +808,7 @@ def test_hypothesis_command_records_a_falsifiable_session_marker(tmp_path):
 
 def test_check_facts_does_not_fail_disproved_facts(tmp_path):
     facts_path = tmp_path / "facts.json"
-    add_fact(
-        facts_path,
-        "conmon_message",
-        "0x0BC8",
-        "identify",
-        note="wrong opcode",
-        confidence="observed",
-    )
+    add_fact(facts_path, "conmon_message", "0x0BC8", FactRecord("identify", note="wrong opcode", confidence="observed"))
     disprove_fact(facts_path, "conmon_message", "0x0BC8", reason="0x0BC8 is a sequence, not an opcode")
 
     results = check_facts(facts_path, provenance_dir=tmp_path)
@@ -806,9 +834,7 @@ def test_check_facts_does_not_fail_quarantined_facts(tmp_path):
         facts_path,
         "conmon_message",
         "0x0084",
-        "sample_rate_pullup_status",
-        note="catalog updated; bundle not curated",
-        confidence="verified",
+        FactRecord("sample_rate_pullup_status", note="catalog updated; bundle not curated", confidence="verified"),
     )
     quarantined = quarantine_fact(
         facts_path,
