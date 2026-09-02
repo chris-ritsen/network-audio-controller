@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
-from netaudio._common_output import format_devices_xml
+from netaudio.cli_support.output import format_devices_xml
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.latency import (
     latency_state_from_settings,
@@ -108,7 +108,7 @@ async def test_device_settings_operation_preserves_configured_compatibility_late
 
     device.call_core = call_core
 
-    await device.operations.get_device_settings()
+    await DanteApplication().get_device_settings(device)
 
     assert device.latency == 0.25
     assert device.active_latency is None
@@ -172,7 +172,7 @@ async def test_latency_settings_operation_uses_the_focused_latency_query(load_fi
     response = load_fixture("core_latency_config_avio-aes3-1.bin")
     device.execute = AsyncMock(return_value=response)
 
-    settings = await device.operations.get_latency_settings()
+    settings = await DanteApplication().get_latency_settings(device)
 
     device.execute.assert_awaited_once_with({"command": "query_latency_config"})
     assert settings["active_latency_ns"] == 1_000_000

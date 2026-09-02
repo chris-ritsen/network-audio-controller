@@ -156,7 +156,7 @@ class TestPreferredLeaderFromConmon0x0020:
             application.notifications._on_packet(packet, (device_ip_address, 8702))
             await deliver_status_events(application)
 
-        application.settings.refresh_clock_status = refresh
+        application.send_refresh_clock_status = refresh
 
         parsed = await application.probe_clocking_status(device)
 
@@ -172,12 +172,12 @@ class TestPreferredLeaderFromConmon0x0020:
     @pytest.mark.asyncio
     async def test_probe_clocking_status_times_out_without_any_publication(self):
         application, device = application_with_device("avio-bt-1.local.", "192.168.1.61")
-        application.settings.refresh_clock_status = AsyncMock()
+        application.send_refresh_clock_status = AsyncMock()
 
         with pytest.raises(CapabilityProbeTimeout, match="clock status probe timed out"):
             await application.probe_clocking_status(device, timeout=0.01)
 
-        application.settings.refresh_clock_status.assert_awaited_once_with("192.168.1.61")
+        application.send_refresh_clock_status.assert_awaited_once_with("192.168.1.61")
         assert not application.notifications.is_waiting("preferred_leader", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):

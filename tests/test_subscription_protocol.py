@@ -13,12 +13,10 @@ Both protocols are sent to the ARC service port (dynamic, discovered via mDNS).
 import struct
 
 import pytest
-
 from netaudio.dante.const import OPCODE_SUBSCRIPTION_ADD, OPCODE_SUBSCRIPTION_REMOVE, PROTOCOL_ID, SERVICE_ARC
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.dissection.header import parse_packet_header
 from netaudio.dante.packet_store import PacketRecord
-
 
 FIXTURES_DIR = "subscription"
 
