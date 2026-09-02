@@ -46,7 +46,7 @@ def load_clean_labels(
 
     try:
         data = json.loads(resolved.read_text())
-    except Exception as exception:
+    except (OSError, ValueError) as exception:
         logger.debug(f"Failed to load clean labels from {resolved}: {exception}")
         return {}, {}
 
@@ -128,7 +128,7 @@ def load_clean_subscription_status_labels(
 
     try:
         data = json.loads(resolved.read_text())
-    except Exception as exception:
+    except (OSError, ValueError) as exception:
         logger.debug(f"Failed to load subscription status labels from {resolved}: {exception}")
         return {}
 

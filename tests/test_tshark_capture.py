@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from netaudio.dante.tshark_capture import TsharkCapture, _build_bpf_filter
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketQuery, PacketStore
 
 
 class TestBpfFilter:
@@ -22,7 +22,7 @@ class TestParseLine:
     def capture(self, tmp_path):
         # Create a minimal PacketStore mock
         class MockStore:
-            def store_packet(self, **kwargs):
+            def store_packet(self, record):
                 return 1
 
         return TsharkCapture(packet_store=MockStore())
@@ -142,7 +142,7 @@ class TestReadPcapFrames:
             session_id=session_id,
             source_host="lab",
         )
-        packets = store.get_session_packets(session_id, ascending=True)
+        packets = store.get_session_packets(PacketQuery(session_id=session_id))
         store.close()
 
         assert [entry["frame_number"] for entry in imported] == [10, 11]

@@ -1,7 +1,11 @@
 import asyncio
 import logging
+import sqlite3
+import struct
 
 from netaudio import core
+from netaudio.core.binding import NetaudioCoreError
+from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
 
@@ -54,17 +58,19 @@ def make_observer(store, session_id, dissect):
 def _record(store, session_id, payload, device_ip, port, direction, source_type):
     try:
         store.store_packet(
-            payload=payload,
-            source_type=source_type,
-            device_ip=device_ip,
-            dst_ip=device_ip if direction == "request" else None,
-            dst_port=port if direction == "request" else None,
-            src_ip=device_ip if direction == "response" else None,
-            src_port=port if direction == "response" else None,
-            direction=direction,
-            session_id=session_id,
+            PacketRecord(
+                payload=payload,
+                source_type=source_type,
+                device_ip=device_ip,
+                dst_ip=device_ip if direction == "request" else None,
+                dst_port=port if direction == "request" else None,
+                src_ip=device_ip if direction == "response" else None,
+                src_port=port if direction == "response" else None,
+                direction=direction,
+                session_id=session_id,
+            )
         )
-    except Exception as exception:
+    except (OSError, ValueError, sqlite3.Error) as exception:
         logger.warning(f"PacketStore error ({direction}): {exception}", exc_info=True)
 
 
@@ -77,7 +83,7 @@ def _dissect(payload, device_ip, port, direction):
         label = format_dissect_label(direction, f"{device_ip}:{port}", color=color)
         rendered = dissect_and_render(payload, indent="  ", color=color)
         logger.info(f"Dissect [{label}] {len(payload)}B:\n{rendered}")
-    except Exception as exception:
+    except (LookupError, ValueError, NetaudioCoreError, struct.error) as exception:
         logger.warning(f"Dissect error: {exception}", exc_info=True)
 
 
