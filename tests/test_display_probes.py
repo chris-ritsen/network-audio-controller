@@ -43,6 +43,10 @@ def test_probe_candidates_skip_offline_and_emulated_devices_unless_selected(capl
 
     state.names = ["offline"]
     candidates = common_module._probe_candidates(devices, "clock status")
+    assert list(candidates) == ["offline.local."]
+
+    state.names = ["*"]
+    candidates = common_module._probe_candidates(devices, "clock status")
     assert list(candidates) == ["online.local.", "offline.local.", "emulated.local."]
 
 
