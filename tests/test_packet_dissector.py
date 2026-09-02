@@ -74,21 +74,40 @@ def test_direction_scoped_fact_fields_are_dissected_only_at_matching_boundaries(
     assert "delete_result" not in {span.name for span in unspecified_result.spans}
 
 
-def test_rx_subscription_status_uses_capture_backed_labels():
-    payload = bytearray(32)
-    payload[0:2] = (0x27FF).to_bytes(2, "big")
-    payload[2:4] = len(payload).to_bytes(2, "big")
-    payload[6:8] = (0x3000).to_bytes(2, "big")
-    payload[8:10] = (0x0001).to_bytes(2, "big")
-    payload[10] = 1
-    payload[11] = 1
-    payload[12:14] = (1).to_bytes(2, "big")
-    payload[26:28] = (0x0004).to_bytes(2, "big")
+def _rx_channels_packet(status_code: int) -> bytes:
+    strings_offset = 10 + 2 + 20
+    record = struct.pack(
+        ">HHHHHHHHI",
+        1,
+        0,
+        0,
+        strings_offset,
+        strings_offset + 4,
+        strings_offset + 8,
+        0,
+        status_code,
+        0,
+    )
+    body = bytes([1, 1]) + record + b"tx1\x00dev\x00rx1\x00"
+    return _arc_packet(0x27FF, 0x3000, 0x0001, body)
 
-    result = dissect(bytes(payload), facts=[])
 
-    subscription_status = next(span for span in result.spans if span.name == "subscription_status")
-    assert subscription_status.detail == "Subscribed (self)"
+def test_rx_channels_response_renders_core_records():
+    result = dissect(_rx_channels_packet(0x0004), facts=[])
+
+    assert result.core_kind == "rx"
+    assert result.core_fields == {
+        "records": [
+            {
+                "number": 1,
+                "rx_channel_name": "rx1",
+                "rx_status_code": 0,
+                "subscription_status_code": 4,
+                "tx_channel_name": "tx1",
+                "tx_device_name": "dev",
+            }
+        ]
+    }
 
 
 def test_encoding_status_dissects_current_and_supported_encodings():
@@ -98,33 +117,12 @@ def test_encoding_status_dissects_current_and_supported_encodings():
     )
 
     result = dissect(payload, facts=[])
-    spans_by_name = {span.name: span for span in result.spans if span.name}
 
-    assert spans_by_name["supported_encoding_count"].value == "3"
-    assert spans_by_name["current_encoding"].detail == "PCM24"
-    assert [spans_by_name[f"supported_encoding_{index}"].detail for index in range(1, 4)] == [
-        "PCM24",
-        "PCM16",
-        "PCM32",
-    ]
+    assert result.core_kind == "encoding_status"
+    assert result.core_fields == {"current_encoding": 24, "supported_encodings": [24, 16, 32]}
 
 
-def test_encoding_control_distinguishes_read_operand_from_set_target():
-    read_payload = bytes.fromhex("ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000")
-    set_payload = bytes.fromhex("ffff00284b4e00003e42274cff240000417564696e617465073a0083000000640000000100000018")
-
-    read_result = dissect(read_payload, facts=[])
-    set_result = dissect(set_payload, facts=[])
-    read_spans = {span.name: span for span in read_result.spans if span.name}
-    set_spans = {span.name: span for span in set_result.spans if span.name}
-
-    assert read_spans["operation_mode"].detail == "read current and supported encodings"
-    assert read_spans["ignored_encoding_operand"].detail == "ignored in read mode"
-    assert set_spans["operation_mode"].detail == "set encoding"
-    assert set_spans["target_encoding"].detail == "PCM24"
-
-
-def test_encoding_control_dynamic_fields_replace_generic_fact_spans():
+def test_encoding_control_request_keeps_fact_spans_without_a_core_parser():
     payload = bytes.fromhex("ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000")
 
     facts = [
@@ -144,13 +142,6 @@ def test_encoding_control_dynamic_fields_replace_generic_fact_spans():
                     "value": "0x0083",
                 },
                 {
-                    "name": "control_constant",
-                    "offset": 28,
-                    "length": 4,
-                    "dtype": "uint32_be",
-                    "value": "0x00000064",
-                },
-                {
                     "name": "operation_mode",
                     "offset": 32,
                     "length": 4,
@@ -167,12 +158,12 @@ def test_encoding_control_dynamic_fields_replace_generic_fact_spans():
     ]
 
     result = dissect(payload, facts=facts)
+    spans_by_name = {span.name: span for span in result.spans if span.name}
 
-    assert len([span for span in result.spans if span.offset == 28 and span.length == 4]) == 1
-    assert len([span for span in result.spans if span.offset == 32 and span.length == 4]) == 1
-    assert len([span for span in result.spans if span.offset == 36 and span.length == 4]) == 1
-    assert any(span.name == "ignored_encoding_operand" for span in result.spans)
-    assert all(span.name != "encoding_operand" for span in result.spans)
+    assert result.core_kind is None
+    assert spans_by_name["message_type"].detail == "encoding_control"
+    assert spans_by_name["operation_mode"].value == "0x00000000"
+    assert spans_by_name["encoding_operand"].value == "0x00000000"
 
 
 def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact():
@@ -237,13 +228,14 @@ def test_device_settings_resolves_latency_values_through_absolute_pointers():
     body += b"".join(struct.pack(">I", property_value) for property_value in values)
 
     result = dissect(_arc_packet(0x2729, 0x1100, 0x0001, body), facts=[])
-    spans_by_name = {span.name: span for span in result.spans if span.name}
 
-    assert spans_by_name["default_latency"].value == "2,000,000 ns (2 ms)"
-    assert spans_by_name["configured_latency"].value == "256,000 ns (256 us)"
-    assert spans_by_name["active_latency"].value == "1,000,000 ns (1 ms)"
-    assert spans_by_name["max_latency"].value == "42,666,667 ns (42.67 ms)"
-    assert spans_by_name["min_latency"].value == "250,000 ns (250 us)"
+    assert result.core_kind == "device_settings"
+    assert result.core_fields["default_latency_ns"] == 2_000_000
+    assert result.core_fields["configured_latency_ns"] == 256_000
+    assert result.core_fields["active_latency_ns"] == 1_000_000
+    assert result.core_fields["max_latency_ns"] == 42_666_667
+    assert result.core_fields["min_latency_ns"] == 250_000
+    assert [entry["pointer"] for entry in result.core_fields["referenced_values"]] == [32, 36, 40, 44, 48]
 
 
 @pytest.mark.parametrize(
@@ -261,17 +253,12 @@ def test_device_settings_resolves_latency_values_through_absolute_pointers():
 )
 def test_device_settings_preserves_variable_width_property_values(value_hexadecimal, payload_hexadecimal):
     result = dissect(bytes.fromhex(payload_hexadecimal), facts=[])
-    property_value = next(span for span in result.spans if span.name == "property_0x8021")
-    property_pointer = next(span for span in result.spans if span.offset == 18 and span.name == "value_pointer")
-    trailing_value = next(span for span in result.spans if span.name == "property_0x83f0")
+    referenced_by_property = {entry["info_code"]: entry for entry in result.core_fields["referenced_values"]}
 
-    assert property_pointer.value == "0x007C"
-    assert property_pointer.detail == "@0x007C, 16 bytes"
-    assert (property_value.offset, property_value.length) == (124, 16)
-    assert property_value.value == value_hexadecimal
-    assert property_value.dtype == "hex"
-    assert (trailing_value.offset, trailing_value.length) == (160, 8)
-    assert trailing_value.value == "0000000500000000"
+    assert result.core_kind == "device_settings"
+    assert referenced_by_property[0x8021]["pointer"] == 0x007C
+    assert referenced_by_property[0x8021]["value_hexadecimal"] == value_hexadecimal
+    assert referenced_by_property[0x83F0]["value_hexadecimal"] == "0000000500000000"
 
 
 def test_device_settings_preserves_unsupported_property_placeholders():
@@ -281,12 +268,11 @@ def test_device_settings_preserves_unsupported_property_placeholders():
     body += struct.pack(">II", 1_000_000, 2_000_000)
 
     result = dissect(_arc_packet(0x2809, 0x1100, 0x0001, body), facts=[])
-    unsupported_property = next(span for span in result.spans if span.name == "unsupported_property_id")
-    spans_by_name = {span.name: span for span in result.spans if span.name}
 
-    assert unsupported_property.value == "0x8218"
-    assert spans_by_name["default_latency"].value == "1,000,000 ns (1 ms)"
-    assert spans_by_name["active_latency"].value == "2,000,000 ns (2 ms)"
+    assert result.core_kind == "device_settings"
+    assert result.core_fields["unavailable_property_ids"] == [0x8218]
+    assert result.core_fields["default_latency_ns"] == 1_000_000
+    assert result.core_fields["active_latency_ns"] == 2_000_000
 
 
 def test_device_settings_does_not_parse_error_payload_as_property_table():
@@ -294,21 +280,17 @@ def test_device_settings_does_not_parse_error_payload_as_property_table():
 
     result = dissect(_arc_packet(0x2809, 0x1100, 0x0022, body), facts=[])
 
-    assert all(span.name != "property_count" for span in result.spans)
-    assert all(span.name != "default_latency" for span in result.spans)
+    assert result.core_kind is None
+    assert result.core_fields is None
 
 
-def test_selective_device_settings_query_dissects_requested_properties():
+def test_device_settings_request_has_no_core_parser():
     body = bytes([0x00, 3]) + struct.pack(">HHH", 0x8204, 0x8301, 0x8306)
 
     result = dissect(_arc_packet(0x27FF, 0x1100, 0x0000, body), facts=[])
-    requested_properties = [span for span in result.spans if span.name == "requested_property_id"]
 
-    assert [span.detail for span in requested_properties] == [
-        "default_latency",
-        "active_latency",
-        "min_latency",
-    ]
+    assert result.core_kind is None
+    assert result.header_summary == "protocol=ARC  18B"
 
 
 @pytest.mark.parametrize("protocol_identifier", [0x2729, 0x27FF, 0x2801, 0x2809])
@@ -316,17 +298,18 @@ def test_property_directory_dissects_captured_arc_protocol_variants(protocol_ide
     body = struct.pack(">HHHHH", 2, 0x8204, 0x0003, 0x8301, 0x0001)
 
     result = dissect(_arc_packet(protocol_identifier, 0x1102, 0x0001, body), facts=[])
-    property_identifiers = [span for span in result.spans if span.name == "property_id"]
-    property_flags = [span for span in result.spans if span.name == "property_flags"]
 
-    assert [span.detail for span in property_identifiers] == ["default_latency", "active_latency"]
-    assert [span.value for span in property_flags] == ["0x0003", "0x0001"]
+    assert result.core_kind == "property_directory"
+    assert result.core_fields == {
+        "aes67_supported": False,
+        "properties": [{"flags": 3, "property_id": 0x8204}, {"flags": 1, "property_id": 0x8301}],
+    }
 
 
 def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):
     from netaudio.capture import packets as capture_packets
     from netaudio.dante import fact_store
-    from netaudio.dante.fact_store import add_fact
+    from netaudio.dante.fact_store import FactRecord, add_fact
     from netaudio.dante.packet_dissector import _load_facts_for_packet
 
     facts_path = tmp_path / "facts.json"
@@ -334,18 +317,10 @@ def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):
         facts_path,
         "conmon_message",
         "0x03D7",
-        "invalid_interpretation",
-        confidence="disproved",
-        protocol_id=0xFFFF,
-        match_offset=26,
+        FactRecord("invalid_interpretation", confidence="disproved", protocol_id=0xFFFF, match_offset=26),
     )
     add_fact(
-        facts_path,
-        "conmon_message",
-        "0x03D8",
-        "active_interpretation",
-        protocol_id=0xFFFF,
-        match_offset=26,
+        facts_path, "conmon_message", "0x03D8", FactRecord("active_interpretation", protocol_id=0xFFFF, match_offset=26)
     )
     payload = bytearray(28)
     payload[0:2] = (0xFFFF).to_bytes(2, "big")

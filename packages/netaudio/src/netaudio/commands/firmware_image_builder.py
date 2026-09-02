@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import sys
 import tempfile
@@ -11,6 +10,7 @@ from typing import Any, Optional
 import typer
 
 from netaudio.commands.firmware_app import app
+from netaudio.common.manifest import manifest_bytes
 from netaudio.commands.firmware_constants import (
     BROOKLYN2_FLASH_PARTITIONS,
     BROOKLYN2_FLASH_SIZE,
@@ -286,15 +286,12 @@ def _build_brooklyn2_image(
                 temporary_directory / "cap.bin",
                 protected_capability_partition_payload,
             )
-        _write_synchronized_file(
-            temporary_directory / "manifest.json",
-            (json.dumps(manifest, indent=2) + "\n").encode("utf-8"),
-        )
+        _write_synchronized_file(temporary_directory / "manifest.json", manifest_bytes(manifest))
         _publish_output_directory_without_replacement(
             temporary_directory,
             publication_directory,
         )
-    except Exception:
+    except BaseException:
         shutil.rmtree(temporary_directory, ignore_errors=True)
         raise
 

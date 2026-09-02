@@ -2,19 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import math
-from typing import Optional
 
 import typer
 
-from netaudio._common import _get_arc_port
 from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import filter_devices
+from netaudio._common_selection import filter_devices, select_device
 from netaudio._exit_codes import ExitCode
-from netaudio.commands.config_readback import _resolve_targets, _send_verified_change
+from netaudio.commands.config_readback import MUTATION_ERRORS, _send_verified_change
 from netaudio.commands.device_display import _format_latency_milliseconds as format_latency_milliseconds
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.latency import latency_state_from_settings
-from netaudio.dante.services.notification import NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE
 
 
 async def _read_latency_settings(device):
@@ -38,7 +34,7 @@ async def _read_latency_target(server_name, device):
         if not values or not any(key.endswith("latency_ns") and value is not None for key, value in values.items()):
             raise RuntimeError("latency readback was unavailable")
         return server_name, device, values, None
-    except Exception as exception:
+    except MUTATION_ERRORS as exception:
         return server_name, device, None, exception
 
 
@@ -117,47 +113,28 @@ def _render_one_latency_reading(values: dict) -> None:
         output_single("\n".join(lines))
 
 
-def register_latency_command(app: typer.Typer, command_context_factory):
-    @app.command()
-    def latency(
-        value: Optional[float] = typer.Argument(None, help="Latency in milliseconds."),
-        all_devices: bool = typer.Option(False, "--all", help="Read or apply to all devices."),
-    ):
-        """Get the complete device latency state or set and verify latency."""
+async def run_latency(application, devices, value: float | None, all_devices: bool) -> None:
+    targets = select_device(filter_devices(devices), allow_many=all_devices)
+    if value is None:
+        readings = await _read_latency_targets(targets)
+        if all_devices:
+            _render_all_latency_readings(readings)
+        else:
+            _render_one_latency_reading(readings[0][2])
+        return
 
-        commands = DanteDeviceCommands()
+    if not math.isfinite(value) or value < 0:
+        typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
 
-        async def _run():
-            async with command_context_factory() as (devices, send):
-                targets = _resolve_targets(filter_devices(devices), all_devices)
-                if value is None:
-                    readings = await _read_latency_targets(targets)
-                    if all_devices:
-                        _render_all_latency_readings(readings)
-                    else:
-                        _render_one_latency_reading(readings[0][2])
-                    return
-
-                if not math.isfinite(value) or value < 0:
-                    typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
-                    raise typer.Exit(code=ExitCode.ERROR)
-
-                packet, _ = commands.command_set_latency(value)
-                expected_nanoseconds = int(round(value * 1_000_000))
-                failures = await _send_verified_change(
-                    targets,
-                    send,
-                    packet,
-                    _get_arc_port,
-                    expected_nanoseconds,
-                    lambda device: _read_latency_setting_value(device, "active_latency_ns"),
-                    "latency change",
-                    lambda label: f"Set latency for {label}: {value:g} ms (verified)",
-                    (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
-                )
-                if failures:
-                    raise typer.Exit(code=ExitCode.ERROR)
-
-        asyncio.run(_run())
-
-    return latency
+    expected_nanoseconds = int(round(value * 1_000_000))
+    failures = await _send_verified_change(
+        targets,
+        lambda device: application.set_latency(device, value),
+        expected_nanoseconds,
+        "latency change",
+        lambda label: f"Set latency for {label}: {value:g} ms (verified)",
+        read_for=lambda device: _read_latency_setting_value(device, "active_latency_ns"),
+    )
+    if failures:
+        raise typer.Exit(code=ExitCode.ERROR)

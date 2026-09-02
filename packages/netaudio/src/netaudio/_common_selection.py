@@ -154,16 +154,30 @@ def resolve_channel(device: DanteDevice, reference: ChannelReference):
     return matches[0]
 
 
-def find_device(devices: dict[str, DanteDevice], identifier: str) -> Optional[DanteDevice]:
+def match_device_identifier(devices: dict[str, DanteDevice], identifier: str) -> dict[str, DanteDevice]:
+    matches = {}
     for server_name, device in devices.items():
-        if device.name == identifier:
-            return device
-        if device.ipv4 and str(device.ipv4) == identifier:
-            return device
-        if server_name == identifier or server_name.startswith(identifier + "."):
-            return device
+        if (
+            device.name == identifier
+            or (device.ipv4 and str(device.ipv4) == identifier)
+            or server_name == identifier
+            or server_name.startswith(identifier + ".")
+        ):
+            matches[server_name] = device
+    return matches
 
-    return None
+
+def select_device(devices: dict[str, DanteDevice], allow_many: bool = False) -> list[tuple[str, DanteDevice]]:
+    if not devices:
+        typer.echo("Error: device not found.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    if allow_many:
+        return sort_devices(devices)
+    if len(devices) > 1:
+        names = ", ".join(device.name or server_name for server_name, device in sort_devices(devices))
+        typer.echo(f"Error: multiple devices matched: {names}; narrow the filter or pass --all.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+    return list(devices.items())
 
 
 def find_channel(device: DanteDevice, channel_id: str, channel_type: str):

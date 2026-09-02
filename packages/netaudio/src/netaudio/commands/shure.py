@@ -386,7 +386,7 @@ def shure_device_show(
     )
     try:
         device_info = _query_device_info(target, [target])
-    except Exception as exception:
+    except (OSError, ShureCommandError, TimeoutError, ValueError) as exception:
         typer.echo(
             f"Error: device query failed for {resolved_host}: {exception}",
             err=True,

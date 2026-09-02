@@ -24,6 +24,7 @@ BROADCAST_INTERVAL = 0.05
 
 class MeteringManager:
     def __init__(self, application):
+        self._send_tasks: set[asyncio.Task] = set()
         self._application = application
         self._persistent_refs: dict[str, set[str]] = {}
         self._snapshot_count: dict[str, int] = {}
@@ -115,14 +116,19 @@ class MeteringManager:
                 return device.server_name
         return None
 
-    def _send_start(self, server_name: str):
+    def _schedule(self, coroutine) -> None:
+        task = asyncio.get_running_loop().create_task(coroutine)
+        self._send_tasks.add(task)
+        task.add_done_callback(self._send_tasks.discard)
+
+    async def _send_start(self, server_name: str):
         device = self._get_device(server_name)
         if not device or not device.online:
             return
         device_ip = str(device.ipv4)
         device_name = device.name or device.server_name
         logger.debug(f"Sending metering start to {device_name} ({device_ip})")
-        self._application.cmc.start_metering(
+        await self._application.cmc.start_metering(
             device_ip,
             device_name,
             self._host_ip,
@@ -130,14 +136,14 @@ class MeteringManager:
             self._active_port,
         )
 
-    def _send_stop(self, server_name: str):
+    async def _send_stop(self, server_name: str):
         device = self._get_device(server_name)
         if not device or not device.online:
             return
         device_ip = str(device.ipv4)
         device_name = device.name or device.server_name
         logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
-        self._application.cmc.stop_metering(
+        await self._application.cmc.stop_metering(
             device_ip,
             device_name,
             self._host_ip,
@@ -184,7 +190,7 @@ class MeteringManager:
             await asyncio.sleep(5)
             for server_name in list(self._persistent_refs.keys()):
                 if self._persistent_refs.get(server_name):
-                    self._send_start(server_name)
+                    await self._send_start(server_name)
 
     async def _broadcast_loop(self):
         while True:
@@ -222,7 +228,7 @@ class MeteringManager:
             name for name, count in self._snapshot_count.items() if count > 0
         )
         for server_name in all_names:
-            self._send_stop(server_name)
+            await self._send_stop(server_name)
 
         self._persistent_refs.clear()
         self._snapshot_count.clear()
@@ -248,7 +254,7 @@ class MeteringManager:
     def reactivate_device(self, server_name: str):
         if self._persistent_refs.get(server_name):
             logger.info(f"Reactivating metering for {server_name}")
-            self._send_start(server_name)
+            self._schedule(self._send_start(server_name))
 
     def get_status(self) -> dict:
         now = time.monotonic()
@@ -286,7 +292,7 @@ class MeteringManager:
         refs = self._persistent_refs.setdefault(server_name, set())
         refs.add(client_id)
         if not was_active:
-            self._send_start(server_name)
+            self._schedule(self._send_start(server_name))
 
     def remove_persistent(self, server_name: str, client_id: str):
         refs = self._persistent_refs.get(server_name)
@@ -295,7 +301,7 @@ class MeteringManager:
             if not refs:
                 del self._persistent_refs[server_name]
         if not self._is_active(server_name):
-            self._send_stop(server_name)
+            self._schedule(self._send_stop(server_name))
 
     async def snapshot(self, server_name: str, timeout: float = 3.0) -> dict | None:
         device = self._get_device(server_name)
@@ -314,7 +320,7 @@ class MeteringManager:
         self._snapshot_count[server_name] = self._snapshot_count.get(server_name, 0) + 1
 
         if not was_active:
-            self._send_start(server_name)
+            await self._send_start(server_name)
 
         event = self._events.get(server_name)
         if event is None:
@@ -340,7 +346,7 @@ class MeteringManager:
                 self._snapshot_count[server_name] = count
 
             if not self._is_active(server_name):
-                self._send_stop(server_name)
+                await self._send_stop(server_name)
 
     def _on_metering_packet(self, data: bytes, source_address: tuple):
         source_ip = source_address[0]

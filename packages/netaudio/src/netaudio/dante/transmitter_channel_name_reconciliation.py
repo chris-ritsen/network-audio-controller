@@ -2,23 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from netaudio._common import (
-    _get_arc_port,
-    readback_after_notification,
-    send_and_wait_for_notification,
-)
+from netaudio._common import readback_after_notification
 from netaudio.dante.channel_frontend import (
     ChannelFrontendError,
     channel_result_code,
-    transmitter_channel_name_protocol_identifier_from_probe,
 )
 from netaudio.dante.const import RESULT_CODE_SUCCESS
-from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.services.notification import (
-    NOTIFICATION_PROPERTY_CHANGE,
-    NOTIFICATION_TX_CHANNEL_CHANGE,
-    NOTIFICATION_TX_LABEL_CHANGE,
-)
 
 
 @dataclass(frozen=True)
@@ -51,22 +40,13 @@ async def _read_routing_names(device, channel_numbers):
     return {channel_number: _routing_name(device, channel_number) for channel_number in channel_numbers}
 
 
-async def _resolve_protocol_identifier(send, device, commands, arc_port):
-    cached = getattr(device, "transmitter_channel_name_protocol_identifier", None)
-    if cached is not None:
-        return cached
-    packet, _ = commands.command_query_transmitter_channel_status_2809()
-    response = await send(packet, device.ipv4, arc_port)
-    protocol_identifier = transmitter_channel_name_protocol_identifier_from_probe(response)
-    device.transmitter_channel_name_protocol_identifier = protocol_identifier
-    return protocol_identifier
-
-
 async def reconcile_transmitter_channel_names(
-    send,
+    application,
     device,
     desired_names: dict[int, str],
 ) -> TransmitterChannelNameReconciliationResult:
+    from netaudio import core
+
     channel_numbers = tuple(desired_names)
     current_names = await _read_routing_names(device, channel_numbers)
     unchanged = {
@@ -86,11 +66,9 @@ async def reconcile_transmitter_channel_names(
             failures={},
         )
 
-    commands = DanteDeviceCommands()
-    arc_port = _get_arc_port(device)
     try:
-        protocol_identifier = await _resolve_protocol_identifier(send, device, commands, arc_port)
-    except Exception as exception:
+        await device.operations.resolve_channel_name_protocol_identifier("tx")
+    except (core.NetaudioCoreError, ChannelFrontendError, OSError, RuntimeError) as exception:
         return TransmitterChannelNameReconciliationResult(
             unchanged=unchanged,
             verified={},
@@ -99,31 +77,14 @@ async def reconcile_transmitter_channel_names(
 
     verified: dict[int, str] = {}
     failures: dict[int, str] = {}
-    notification_ids = (
-        NOTIFICATION_TX_CHANNEL_CHANGE,
-        NOTIFICATION_TX_LABEL_CHANGE,
-        NOTIFICATION_PROPERTY_CHANGE,
-    )
     for channel_number, desired_name in pending.items():
         try:
-            packet, _ = commands.command_set_channel_name(
-                "tx",
-                channel_number,
-                desired_name,
-                protocol_id=protocol_identifier,
-            )
             async with device.topology_mutation_lock:
-                response = await send_and_wait_for_notification(
-                    send,
-                    packet,
-                    device.ipv4,
-                    arc_port,
-                    notification_ids,
-                )
+                response = await application.set_channel_name(device, "tx", channel_number, desired_name)
             result_code = channel_result_code(response, "transmitter channel name change")
             if result_code != RESULT_CODE_SUCCESS:
                 raise ChannelFrontendError(f"transmitter channel name change failed with result 0x{result_code:04X}")
-        except Exception as exception:
+        except (core.NetaudioCoreError, ChannelFrontendError, OSError, RuntimeError) as exception:
             failures[channel_number] = f"request failed: {exception}"
             continue
 

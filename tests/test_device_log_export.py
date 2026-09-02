@@ -3,12 +3,13 @@ import io
 import os
 import stat
 import tarfile
-from unittest.mock import MagicMock, call
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from netaudio import DanteDevice, core
-from netaudio._common import CapabilityProbeTimeout, CoreCommandSender
+from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.capability_partition import (
     CapabilityPartitionExportError,
@@ -269,22 +270,14 @@ def test_notification_service_matches_source_tag_and_selector():
     assert waiter.result is not None
     assert waiter.result.echoed_tag == b"CAP1"
     assert waiter.result.selector_value == 2
-    notifications.unregister_conmon_export_waiter(waiter)
-    assert notifications._conmon_export_waiters == {}
+    notifications.unregister_waiter(waiter)
+    assert not notifications.is_waiting("conmon_export", DEVICE_IP_ADDRESS)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sender_type", [DanteApplication, CoreCommandSender])
-async def test_export_operations_use_the_shared_transport(sender_type):
-    sender = sender_type()
-    notifications = DanteNotificationService(dispatcher=MagicMock())
-    settings_service = DanteSettingsService()
-    if isinstance(sender, DanteApplication):
-        sender.notifications = notifications
-        sender.settings = settings_service
-    else:
-        sender._notifications = notifications
-        sender._settings_service = settings_service
+async def test_export_operations_use_the_shared_transport():
+    application = DanteApplication()
+    notifications = application.notifications
 
     log_packets = _fragment_packets()
     capability_packets = _fragment_packets(
@@ -295,63 +288,60 @@ async def test_export_operations_use_the_shared_transport(sender_type):
     )
 
     def publish(packets):
-        def publish_fragments(device_ip_address):
+        async def publish_fragments(device_ip_address):
             for packet in packets:
                 notifications._on_packet(packet, (device_ip_address, 8702))
 
         return publish_fragments
 
-    settings_service.request_device_log_export = MagicMock(side_effect=publish(log_packets))
-    settings_service.request_capability_partition_export = MagicMock(side_effect=publish(capability_packets))
+    application.settings.request_device_log_export = AsyncMock(side_effect=publish(log_packets))
+    application.settings.request_capability_partition_export = AsyncMock(side_effect=publish(capability_packets))
 
-    log_result = await sender.export_device_logs(DEVICE_IP_ADDRESS)
-    capability_result = await sender.export_capability_partition(DEVICE_IP_ADDRESS)
+    log_result = await application.export_device_logs(DEVICE_IP_ADDRESS)
+    capability_result = await application.export_capability_partition(DEVICE_IP_ADDRESS)
 
     assert log_result.archive_payload == _archive_payload()
     assert capability_result.capability_partition == b"capability"
-    assert notifications._conmon_export_waiters == {}
+    assert not notifications.is_waiting("conmon_export", DEVICE_IP_ADDRESS)
 
 
 @pytest.mark.asyncio
-async def test_core_command_sender_times_out_and_recognizes_empty_response():
-    notifications = DanteNotificationService(dispatcher=MagicMock())
-    settings_service = DanteSettingsService()
-    settings_service.request_device_log_export = MagicMock()
-    sender = CoreCommandSender()
-    sender._notifications = notifications
-    sender._settings_service = settings_service
+async def test_export_times_out_and_recognizes_empty_response():
+    application = DanteApplication()
+    notifications = application.notifications
+    application.settings.request_device_log_export = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="device log export timed out"):
-        await sender.export_device_logs(DEVICE_IP_ADDRESS, timeout=0.001)
+        await application.export_device_logs(DEVICE_IP_ADDRESS, timeout=0.001)
 
     device = DanteDevice()
     device.ipv4 = DEVICE_IP_ADDRESS
-    sender._devices = {"device.local.": device}
+    application.attach_devices({"device.local.": device})
 
-    def publish_empty_response(device_ip_address):
+    async def publish_empty_response(device_ip_address):
         notifications._on_packet(b"", (device_ip_address, 8700))
 
-    settings_service.request_device_log_export = MagicMock(side_effect=publish_empty_response)
+    application.settings.request_device_log_export = AsyncMock(side_effect=publish_empty_response)
     with pytest.raises(ConmonExportUnavailableError, match="empty response"):
-        await sender.export_device_logs(DEVICE_IP_ADDRESS)
+        await application.export_device_logs(DEVICE_IP_ADDRESS)
 
     assert device.diagnostic_log_export_supported is False
-    assert notifications._conmon_export_waiters == {}
+    assert not notifications.is_waiting("conmon_export", DEVICE_IP_ADDRESS)
 
 
-def test_settings_service_sends_both_typed_requests():
-    service = DanteSettingsService()
-    service._commands.command_device_log_export = MagicMock(return_value=(b"logs", None, 8700))
-    service._commands.command_capability_partition_export = MagicMock(return_value=(b"capability", None, 8700))
-    service.send = MagicMock()
+@pytest.mark.asyncio
+async def test_settings_service_executes_both_typed_requests():
+    transport = SimpleNamespace(execute=AsyncMock(return_value=None))
+    service = DanteSettingsService(transport)
     host_mac = bytes.fromhex("52550a000202")
 
-    service.request_device_log_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
-    service.request_capability_partition_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
+    await service.request_device_log_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
+    await service.request_capability_partition_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
 
-    service._commands.command_device_log_export.assert_called_once_with(host_mac=host_mac)
-    service._commands.command_capability_partition_export.assert_called_once_with(host_mac=host_mac)
-    assert service.send.call_args_list == [
-        call(b"logs", DEVICE_IP_ADDRESS, 8700),
-        call(b"capability", DEVICE_IP_ADDRESS, 8700),
+    requests = [request.args for request in transport.execute.await_args_list]
+    assert [address for address, _ in requests] == [DEVICE_IP_ADDRESS, DEVICE_IP_ADDRESS]
+    assert [specification["command"] for _, specification in requests] == [
+        "device_log_export",
+        "capability_partition_export",
     ]
+    assert all(specification["host_mac"] == "52550a000202" for _, specification in requests)

@@ -22,7 +22,7 @@ from netaudio.commands.capture_helpers import (
 )
 from netaudio.commands.provenance_app import app
 from netaudio.commands.provenance_support import _sha256_path
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import ArtifactRecord, PacketQuery, PacketRecord, PacketStore
 
 
 EVIDENCE_ARTIFACT_ROLES = frozenset(
@@ -81,17 +81,16 @@ def provenance_evidence(
                     raise typer.Exit(1)
                 resolved_packet_ids.append(pid)
 
-        query_kwargs = {}
+        query_filters = {}
         if device_ip:
-            query_kwargs["device_ip"] = device_ip
+            query_filters["device_ip"] = device_ip
         if opcode:
-            query_kwargs["opcode"] = int(opcode, 16) if opcode.startswith("0x") else int(opcode)
+            query_filters["opcode"] = int(opcode, 16) if opcode.startswith("0x") else int(opcode)
         if direction:
-            query_kwargs["direction"] = direction
+            query_filters["direction"] = direction
 
-        if query_kwargs:
-            query_kwargs["session_id"] = resolved_session_id
-            matched = store.query_packets(**query_kwargs)
+        if query_filters:
+            matched = store.query_packets(PacketQuery(session_id=resolved_session_id, **query_filters))
             for pkt in matched:
                 if pkt["id"] not in resolved_packet_ids:
                     resolved_packet_ids.append(pkt["id"])
@@ -109,7 +108,7 @@ def provenance_evidence(
             data={
                 "packet_ids": resolved_packet_ids,
                 "filters": {
-                    k: (f"0x{v:04X}" if k == "opcode" else v) for k, v in query_kwargs.items() if k != "session_id"
+                    name: (f"0x{value:04X}" if name == "opcode" else value) for name, value in query_filters.items()
                 },
             },
         )
@@ -182,16 +181,18 @@ def provenance_artifact(
             default_selector="active",
         )
         artifact_id = store.add_artifact(
-            session_id=resolved_session_id,
-            label=normalized_label,
-            role=normalized_role,
-            filename=source_path.name,
-            media_type=resolved_media_type,
-            content=content,
-            note=note,
-            source_path=str(source_path),
-            source_host=socket.gethostname(),
-            source_modified_ns=source_stat.st_mtime_ns,
+            ArtifactRecord(
+                session_id=resolved_session_id,
+                label=normalized_label,
+                role=normalized_role,
+                filename=source_path.name,
+                media_type=resolved_media_type,
+                content=content,
+                note=note,
+                source_path=str(source_path),
+                source_host=socket.gethostname(),
+                source_modified_ns=source_stat.st_mtime_ns,
+            )
         )
         artifact = store.get_artifact(artifact_id)
         marker_id = store.add_marker(
@@ -380,18 +381,20 @@ def provenance_ingest_payload(
             default_selector="active",
         )
         packet_id = store.store_packet(
-            payload=payload,
-            source_type="curated_import",
-            src_ip=str(source_address),
-            src_port=source_port,
-            dst_ip=str(destination_address),
-            dst_port=destination_port,
-            device_ip=str(device_address),
-            direction=normalized_direction,
-            session_id=resolved_session_id,
-            timestamp_ns=timestamp_ns,
-            source_host=normalized_source_host,
-            interface=interface.strip() if interface and interface.strip() else None,
+            PacketRecord(
+                payload=payload,
+                source_type="curated_import",
+                src_ip=str(source_address),
+                src_port=source_port,
+                dst_ip=str(destination_address),
+                dst_port=destination_port,
+                device_ip=str(device_address),
+                direction=normalized_direction,
+                session_id=resolved_session_id,
+                timestamp_ns=timestamp_ns,
+                source_host=normalized_source_host,
+                interface=interface.strip() if interface and interface.strip() else None,
+            )
         )
         if packet_id is None:
             raise RuntimeError("captured payload was not stored")
@@ -511,21 +514,23 @@ def provenance_ingest_packet(
         imported = []
         for row, payload in validated_packets:
             imported_packet_identifier = store.store_packet(
-                payload=payload,
-                source_type="curated_packet_import",
-                src_ip=row.get("src_ip"),
-                src_port=row.get("src_port"),
-                dst_ip=row.get("dst_ip"),
-                dst_port=row.get("dst_port"),
-                device_name=row.get("device_name"),
-                device_ip=row.get("device_ip"),
-                direction=row.get("direction"),
-                multicast_group=row.get("multicast_group"),
-                multicast_port=row.get("multicast_port"),
-                session_id=resolved_session_id,
-                timestamp_ns=row["timestamp_ns"],
-                source_host=row.get("source_host"),
-                interface=row.get("interface"),
+                PacketRecord(
+                    payload=payload,
+                    source_type="curated_packet_import",
+                    src_ip=row.get("src_ip"),
+                    src_port=row.get("src_port"),
+                    dst_ip=row.get("dst_ip"),
+                    dst_port=row.get("dst_port"),
+                    device_name=row.get("device_name"),
+                    device_ip=row.get("device_ip"),
+                    direction=row.get("direction"),
+                    multicast_group=row.get("multicast_group"),
+                    multicast_port=row.get("multicast_port"),
+                    session_id=resolved_session_id,
+                    timestamp_ns=row["timestamp_ns"],
+                    source_host=row.get("source_host"),
+                    interface=row.get("interface"),
+                )
             )
             if imported_packet_identifier is None:
                 raise RuntimeError(f"source packet #{row['id']} was not stored")

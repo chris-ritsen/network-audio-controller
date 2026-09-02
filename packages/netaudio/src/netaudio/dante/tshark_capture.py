@@ -13,6 +13,7 @@ from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
 )
+from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
 
@@ -159,18 +160,20 @@ class TsharkCapture:
         imported = []
         for frame_number, parsed in parsed_frames:
             packet_id = packet_store.store_packet(
-                payload=parsed["payload"],
-                source_type="pcap_import",
-                src_ip=parsed["src_ip"],
-                src_port=parsed["src_port"],
-                dst_ip=parsed["dst_ip"],
-                dst_port=parsed["dst_port"],
-                device_ip=parsed["device_ip"],
-                direction=parsed["direction"],
-                session_id=session_id,
-                timestamp_ns=parsed["timestamp_ns"],
-                source_host=source_host,
-                interface=f"pcap:{resolved_path.name}",
+                PacketRecord(
+                    payload=parsed["payload"],
+                    source_type="pcap_import",
+                    src_ip=parsed["src_ip"],
+                    src_port=parsed["src_port"],
+                    dst_ip=parsed["dst_ip"],
+                    dst_port=parsed["dst_port"],
+                    device_ip=parsed["device_ip"],
+                    direction=parsed["direction"],
+                    session_id=session_id,
+                    timestamp_ns=parsed["timestamp_ns"],
+                    source_host=source_host,
+                    interface=f"pcap:{resolved_path.name}",
+                )
             )
             if packet_id is None:
                 raise RuntimeError(f"failed to store frame {frame_number}")
@@ -383,17 +386,19 @@ class TsharkCapture:
                 primary_session_id = active_session_ids[0] if active_session_ids else None
 
                 packet_id = self._store.store_packet(
-                    payload=fields["payload"],
-                    source_type=source_type,
-                    src_ip=fields["src_ip"],
-                    src_port=fields["src_port"],
-                    dst_ip=fields["dst_ip"],
-                    dst_port=fields["dst_port"],
-                    device_ip=fields["device_ip"],
-                    direction=fields["direction"],
-                    session_id=primary_session_id,
-                    timestamp_ns=fields["timestamp_ns"],
-                    interface=self._interface,
+                    PacketRecord(
+                        payload=fields["payload"],
+                        source_type=source_type,
+                        src_ip=fields["src_ip"],
+                        src_port=fields["src_port"],
+                        dst_ip=fields["dst_ip"],
+                        dst_port=fields["dst_port"],
+                        device_ip=fields["device_ip"],
+                        direction=fields["direction"],
+                        session_id=primary_session_id,
+                        timestamp_ns=fields["timestamp_ns"],
+                        interface=self._interface,
+                    )
                 )
 
                 if packet_id:
@@ -410,7 +415,7 @@ class TsharkCapture:
             if self._process and not was_cancelled:
                 try:
                     await self._process.wait()
-                except Exception:
+                except OSError:
                     logger.exception("Failed to wait for tshark process shutdown")
 
             if self._process and not was_cancelled and self._process.returncode not in (None, 0):
@@ -418,7 +423,7 @@ class TsharkCapture:
                 if self._process.stderr is not None:
                     try:
                         stderr_text = (await self._process.stderr.read()).decode("utf-8", errors="replace").strip()
-                    except Exception:
+                    except OSError:
                         stderr_text = ""
 
                 if stderr_text:

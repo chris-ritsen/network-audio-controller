@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qs, unquote
 
 import ifaddr
-from zeroconf import IPVersion, ServiceInfo
+from zeroconf import Error as ZeroconfError, IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
@@ -333,7 +333,7 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
             client.sender_task.cancel()
         try:
             client.writer.close()
-        except Exception as exception:
+        except (OSError, RuntimeError) as exception:
             logger.warning(f"SSE client close error: {exception}", exc_info=True)
 
     async def _close_sse_client(self, client: _SseClient, reason: str):
@@ -367,7 +367,7 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception as exception:
+            except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour monitor error: {exception}")
 
     async def _reconcile_bonjour(self, force=False, woke_from_sleep=False):
@@ -421,7 +421,7 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
                 self._bonjour_registered_monotonic = time.monotonic()
                 logger.info(f"Daemon Bonjour advertisement refreshed ({reason}) at {', '.join(addresses)}:{self.port}")
                 return
-            except Exception as exception:
+            except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour update failed ({reason}); recreating advertisement: {exception}")
 
         await self._close_bonjour()
@@ -435,7 +435,7 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
         except asyncio.CancelledError:
             await self._dispose_bonjour(zeroconf, service_info)
             raise
-        except Exception as exception:
+        except (OSError, RuntimeError, ZeroconfError) as exception:
             await self._dispose_bonjour(zeroconf, service_info)
             logger.warning(f"Daemon Bonjour advertisement failed ({reason}): {exception}")
             return
@@ -450,12 +450,12 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
         if service_info:
             try:
                 await _bounded(zeroconf.async_unregister_service(service_info), 5)
-            except Exception as exception:
+            except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Daemon Bonjour unregister failed: {exception}", exc_info=True)
 
         try:
             await _bounded(zeroconf.async_close(), 5)
-        except Exception as exception:
+        except (OSError, RuntimeError, ZeroconfError) as exception:
             logger.warning(f"Daemon Bonjour close failed: {exception}", exc_info=True)
 
     async def _close_bonjour(self):

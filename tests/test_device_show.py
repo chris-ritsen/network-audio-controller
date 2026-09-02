@@ -12,12 +12,20 @@ import netaudio._common as common_module
 from netaudio.commands import device as device_commands
 from netaudio.commands import device_display
 from netaudio.dante.channel import DanteChannel
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
 
 
 runner = CliRunner()
+
+
+def _show(monkeypatch, device):
+    from tests.cli_test_support import invoke
+
+    application = SimpleNamespace(probe_lock_status=AsyncMock(side_effect=RuntimeError("lock status unavailable")))
+    return invoke(device_commands.run_show, application, {device.server_name: device})
 
 
 def make_show_device() -> DanteDevice:
@@ -181,14 +189,14 @@ def test_device_show_csv_is_a_two_column_summary(monkeypatch):
 
     device = make_show_device()
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
     state.output_format = OutputFormat.csv
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     rows = list(csv.reader(io.StringIO(result.output, newline="")))
@@ -276,14 +284,14 @@ def test_device_show_json_preserves_full_serializer(monkeypatch):
 
     device = make_show_device()
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is True
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
     state.output_format = OutputFormat.json
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert json.loads(result.output) == json.loads(json.dumps(DanteDeviceSerializer.to_json(device), default=str))
@@ -296,12 +304,12 @@ def test_device_show_plain_does_not_render_unknown_channel_counts_as_zero(monkey
     device.tx_channels = {}
     device.rx_channels = {}
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Channels                unknown TX / unknown RX" in result.output
@@ -313,13 +321,13 @@ def test_device_show_plain_formats_gain_capability_without_channel_inventory(mon
     device.gain_levels = [5, 1]
     device.supported_gain_levels = [1, 2, 3, 4, 5]
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Reference Controls      input" in result.output
@@ -344,12 +352,12 @@ def test_device_show_plain_includes_aes67_multicast_prefix_and_transmitter_flows
         }
     ]
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "multicast prefix 239.69.0.0" in result.output
@@ -364,13 +372,13 @@ def test_device_show_plain_includes_sample_rate_pullup_when_present(monkeypatch)
     device.requested_sample_rate_pullup_raw_value = 1
     device.supported_sample_rate_pullup_raw_values = [0, 1, 2, 3, 4]
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Sample Rate Pull-Up" in result.output
@@ -381,13 +389,13 @@ def test_device_show_plain_includes_sample_rate_pullup_when_present(monkeypatch)
 def test_device_show_plain_is_concise_and_formats_capabilities(monkeypatch):
     device = make_show_device()
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Name                    lx-dante" in result.output
@@ -405,13 +413,13 @@ def test_device_show_plain_labels_known_unsupported_aes67(monkeypatch):
     device = make_show_device()
     device.aes67_supported = False
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "AES67                   unsupported" in result.output
@@ -423,13 +431,13 @@ def test_device_show_plain_labels_unknown_capabilities_only_after_failed_queries
     device.encoding = None
     device.supported_encodings = None
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         assert include_channels is False
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Supported Sample Rates\n" in result.output
@@ -439,7 +447,7 @@ def test_device_show_plain_labels_unknown_capabilities_only_after_failed_queries
 
     device.failed_queries.update({"supported_encodings", "supported_sample_rates"})
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Supported Sample Rates  unknown" in result.output
@@ -452,12 +460,12 @@ def test_device_show_plain_omits_unnamed_clock_source(monkeypatch):
     device.clock_source_code = 57044
     device.clock_subdomain = b"_DFLT" + bytes(11)
 
-    async def load_device(include_channels):
+    async def load_device(application, include_channels):
         return device.server_name, device
 
     monkeypatch.setattr(device_commands, "_load_device_for_show", load_device)
 
-    result = runner.invoke(device_commands.app, ["show"])
+    result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
     assert "Clock Source" not in result.output
@@ -569,12 +577,17 @@ def test_instrumented_summary_fetch_skips_channel_pages(monkeypatch):
 @pytest.mark.asyncio
 async def test_populate_show_details_fills_clock_prefix_and_avio_pages():
     device = make_show_device()
-    device.get_clocking_status = AsyncMock(
-        side_effect=lambda: (
-            setattr(device, "clock_source_code", 0)
-            or setattr(device, "clock_subdomain", bytes(16))
-            or {"clock_source_code": 0, "clock_subdomain": [0] * 16}
-        )
+    application = SimpleNamespace(
+        probe_clocking_status=AsyncMock(
+            side_effect=lambda _device: (
+                setattr(device, "clock_source_code", 0)
+                or setattr(device, "clock_subdomain", bytes(16))
+                or {"clock_source_code": 0, "clock_subdomain": bytes(16)}
+            )
+        ),
+        apply_avio_status_pages=DanteApplication.apply_avio_status_pages,
+        probe_sample_rate_status=AsyncMock(side_effect=RuntimeError("unavailable")),
+        probe_encoding_status=AsyncMock(side_effect=RuntimeError("unavailable")),
     )
     device.operations.get_aes67_configured = AsyncMock(
         side_effect=lambda: setattr(device, "aes67_multicast_prefix", "239.69.0.0") or False
@@ -587,7 +600,7 @@ async def test_populate_show_details_fills_clock_prefix_and_avio_pages():
     device.operations.query_receiver_channel_status_2809 = AsyncMock(side_effect=RuntimeError("unsupported"))
     device.apply_transmitter_flow_status_page = MagicMock()
 
-    await common_module._populate_show_details(device, include_channels=False)
+    await common_module._populate_show_details(application, device, include_channels=False)
 
     assert device.clock_source_code == 0
     assert device.aes67_multicast_prefix == "239.69.0.0"
@@ -605,18 +618,20 @@ async def test_show_loader_enriches_daemon_device(monkeypatch):
 
     enrich = AsyncMock()
     populate_controls = AsyncMock()
+    application = SimpleNamespace(attach_devices=MagicMock())
     monkeypatch.setattr(common_module, "get_devices_from_daemon", daemon_devices)
     monkeypatch.setattr(common_module, "_populate_controls", populate_controls)
     monkeypatch.setattr(common_module, "_populate_show_details", enrich)
     state.names = []
     state.hosts = []
 
-    server_name, loaded = await common_module._load_device_for_show(include_channels=True)
+    server_name, loaded = await common_module._load_device_for_show(application, include_channels=True)
 
     assert server_name == device.server_name
     assert loaded is device
+    application.attach_devices.assert_called_once_with({device.server_name: device})
     populate_controls.assert_awaited_once()
-    enrich.assert_awaited_once_with(device, include_channels=True)
+    enrich.assert_awaited_once_with(application, device, include_channels=True)
 
 
 @pytest.mark.asyncio
@@ -665,18 +680,15 @@ async def test_show_loader_falls_back_to_bounded_discovery_after_literal_name_mi
 
     application = FakeApplication()
     monkeypatch.setattr(common_module, "get_devices_from_daemon", no_daemon_devices)
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda packet_store, session_id: application)
     monkeypatch.setattr(common_module, "_populate_show_details", AsyncMock())
-    monkeypatch.setattr(capture_module, "open_capture_session", lambda: (None, None))
     state.names = ["missing-device"]
 
-    server_name, loaded_device = await common_module._load_device_for_show(include_channels=False)
+    server_name, loaded_device = await common_module._load_device_for_show(application, include_channels=False)
 
     assert server_name == device.server_name
     assert loaded_device is device
     assert application.discovery_attempts == 1
     assert application.broad_discovery_attempts == 1
-    assert application.stopped is True
 
 
 @pytest.mark.asyncio
@@ -724,16 +736,10 @@ async def test_show_loader_glob_falls_back_to_identity_discovery(monkeypatch):
         return None
 
     monkeypatch.setattr(common_module, "get_devices_from_daemon", no_daemon_devices)
-    monkeypatch.setattr(
-        common_module,
-        "_make_dante_application",
-        lambda packet_store, session_id: FakeApplication(),
-    )
     monkeypatch.setattr(common_module, "_populate_show_details", AsyncMock())
-    monkeypatch.setattr(capture_module, "open_capture_session", lambda: (None, None))
     state.names = ["lx-*"]
 
-    server_name, loaded_device = await common_module._load_device_for_show(include_channels=False)
+    server_name, loaded_device = await common_module._load_device_for_show(FakeApplication(), include_channels=False)
 
     assert server_name == matching_device.server_name
     assert loaded_device is matching_device
@@ -788,17 +794,13 @@ async def test_show_loader_uses_exact_name_resolution_and_selected_population(mo
 
     application = FakeApplication()
     monkeypatch.setattr(common_module, "get_devices_from_daemon", no_daemon_devices)
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda packet_store, session_id: application)
     monkeypatch.setattr(common_module, "_populate_show_details", AsyncMock())
-    monkeypatch.setattr(capture_module, "open_capture_session", lambda: (None, None))
     state.names = ["lx-dante"]
 
-    server_name, loaded_device = await common_module._load_device_for_show(include_channels=False)
+    server_name, loaded_device = await common_module._load_device_for_show(application, include_channels=False)
 
     assert server_name == device.server_name
     assert loaded_device is device
-    assert application.started is True
-    assert application.stopped is True
     assert application.populated_devices == {device.server_name: device}
     assert application.include_channels is False
 
@@ -813,11 +815,14 @@ async def test_summary_control_fetch_skips_channel_pages(monkeypatch):
     core_client.get_device_settings.return_value = {"sample_rate": 48_000}
     core_client.get_property_directory.return_value = None
     core_client.get_aes67_configured.return_value = False
-    core_client._arc_port = 4440
-    core_client.request.return_value = bytes.fromhex(
+    core_client.execute.return_value = bytes.fromhex(
         "28090094180011000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f4240000f4240000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480"
     )
-    monkeypatch.setattr(device, "_core_client", lambda: core_client)
+
+    async def call_core(operation, request_timeout_milliseconds=None, request_attempts=None):
+        return operation(core_client)
+
+    monkeypatch.setattr(device, "call_core", call_core)
 
     controls = await device.fetch_controls_data(include_channels=False)
 

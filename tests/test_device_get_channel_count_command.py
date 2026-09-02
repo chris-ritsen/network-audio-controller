@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device import DanteDevice
+from netaudio.dante.device_commands import DanteDeviceCommands
 from tests.conftest import check_generated_command_payload
 
 CHANNEL_COUNT_RESPONSE_TX_START_OFFSET = 13
@@ -81,8 +81,7 @@ get_channel_count_test_cases = [
     ids=[tc.device_id for tc in get_channel_count_test_cases],
 )
 def test_generate_get_channel_count_command_payload(load_fixture, test_case: GetChannelCountTestCase):
-    device = DanteDevice()
-    hex_command_str, service_type = device.commands.command_channel_count(transaction_id=test_case.sequence_id)
+    hex_command_str, service_type = DanteDeviceCommands().command_channel_count(transaction_id=test_case.sequence_id)
 
     check_generated_command_payload(
         generated_hex_payload=hex_command_str,

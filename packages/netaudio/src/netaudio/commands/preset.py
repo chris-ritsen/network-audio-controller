@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import math
 import os
 import uuid
@@ -12,6 +11,7 @@ from typing import Any, Optional
 
 import typer
 
+from netaudio._common import run_command
 from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 
 from netaudio._exit_codes import ExitCode
@@ -20,7 +20,6 @@ from netaudio.dante.latency import MICROSECONDS_PER_MILLISECOND
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
     SampleRateTopologyMutationOutcomeUnknownError,
-    change_sample_rate_with_command_sender,
 )
 
 app = typer.Typer(
@@ -76,18 +75,6 @@ def _write_preset_atomic(path: Path, content: str, *, force: bool) -> None:
         temporary.unlink(missing_ok=True)
 
 
-async def _start_preset_readback_application():
-    from netaudio.dante.application import DanteApplication
-
-    application = DanteApplication()
-    try:
-        await application.startup()
-    except Exception:
-        await application.shutdown()
-        raise
-    return application
-
-
 async def _read_preferred_leader(application, device):
     state = await application.probe_preferred_leader_state(
         str(device.ipv4),
@@ -122,6 +109,34 @@ async def _read_interface_config(application, device, expected: dict):
     return {field: reported.get(field) for field in expected}
 
 
+async def run_preset_save(application, devices, output_path: Path, preset_name: str | None, force: bool) -> None:
+    from netaudio._common_output import format_devices_xml
+    from netaudio._common_selection import filter_devices
+
+    devices = filter_devices(devices)
+
+    if not devices:
+        typer.echo("Error: no devices found.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    name = preset_name or output_path.stem
+    xml_content = format_devices_xml(devices, preset_name=name)
+
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_preset_atomic(output_path, xml_content, force=force)
+    except FileExistsError as exception:
+        typer.echo(
+            f"Error: refusing to overwrite existing file: {output_path}; use --force to replace it.",
+            err=True,
+        )
+        raise typer.Exit(code=ExitCode.ERROR) from exception
+    except OSError as exception:
+        typer.echo(f"Error: could not save preset to {output_path}: {exception}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR) from exception
+    typer.echo(f"Saved {len(devices)} devices to {output_path}", err=True)
+
+
 @app.command("save", help="Save the selected devices' configuration as a preset.")
 def preset_save(
     output: str = typer.Argument(..., help=PRESET_REFERENCE_HELP),
@@ -136,36 +151,7 @@ def preset_save(
         )
         raise typer.Exit(code=ExitCode.ERROR)
 
-    async def _run():
-        from netaudio._common import _command_context
-        from netaudio._common_output import format_devices_xml
-        from netaudio._common_selection import filter_devices
-
-        async with _command_context() as (devices, send):
-            devices = filter_devices(devices)
-
-            if not devices:
-                typer.echo("Error: no devices found.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            name = preset_name or output_path.stem
-            xml_content = format_devices_xml(devices, preset_name=name)
-
-            try:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                _write_preset_atomic(output_path, xml_content, force=force)
-            except FileExistsError as exception:
-                typer.echo(
-                    f"Error: refusing to overwrite existing file: {output_path}; use --force to replace it.",
-                    err=True,
-                )
-                raise typer.Exit(code=ExitCode.ERROR) from exception
-            except OSError as exception:
-                typer.echo(f"Error: could not save preset to {output_path}: {exception}", err=True)
-                raise typer.Exit(code=ExitCode.ERROR) from exception
-            typer.echo(f"Saved {len(devices)} devices to {output_path}", err=True)
-
-    asyncio.run(_run())
+    run_command(run_preset_save, output_path, preset_name, force)
 
 
 def _parse_preset(preset_path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
@@ -329,11 +315,10 @@ async def _read_sample_rate(device):
     return settings["sample_rate"]
 
 
-async def _read_encoding(send, device):
-    current_encoding, supported_encodings = await send.probe_encoding_status(device.ipv4)
-    device.encoding = current_encoding
-    device.supported_encodings = supported_encodings
-    return current_encoding
+async def _read_encoding(application, device):
+    from netaudio.commands.config_readback import _read_encoding_status
+
+    return await _read_encoding_status(application, device)
 
 
 async def _read_latency(device):
@@ -343,14 +328,413 @@ async def _read_latency(device):
     return settings["active_latency_ns"]
 
 
-async def _read_audio_setting(action, send, device):
+async def _read_audio_setting(action, application, device):
     if action == "sample_rate":
         return await _read_sample_rate(device)
     if action == "encoding":
-        return await _read_encoding(send, device)
+        return await _read_encoding(application, device)
     if action == "latency":
         return await _read_latency(device)
     raise ValueError(f"unsupported audio setting: {action}")
+
+
+async def run_preset_load(application, devices, preset_devices: dict, confirm_destructive: bool) -> None:
+    from netaudio._common import readback_after_notification
+    from netaudio._common_selection import filter_devices
+    from netaudio.cli import state as cli_state
+    from netaudio.commands.config_readback import MUTATION_ERRORS
+    from netaudio.commands.subscription import reconcile_receiver_subscriptions
+    from netaudio.dante.transmitter_channel_name_reconciliation import (
+        reconcile_transmitter_channel_names,
+    )
+
+    devices = filter_devices(devices)
+    if not devices:
+        typer.echo("Error: no devices matched the global filters.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    devices_by_name: dict[str, list] = {}
+    for server_name, device in devices.items():
+        if device.name:
+            devices_by_name.setdefault(device.name, []).append((server_name, device))
+
+    matched = []
+    unmatched_preset_names = []
+    for device_name, config in preset_devices.items():
+        candidates = devices_by_name.get(device_name, [])
+        if not candidates:
+            unmatched_preset_names.append(device_name)
+            continue
+        if len(candidates) > 1:
+            servers = ", ".join(server_name for server_name, _ in candidates)
+            typer.echo(
+                f"Error: preset device name {device_name!r} is ambiguous: {servers}",
+                err=True,
+            )
+            raise typer.Exit(code=ExitCode.ERROR)
+        server_name, device = candidates[0]
+        matched.append((device_name, server_name, device, config))
+
+    filters_active = bool(cli_state.names or cli_state.hosts or cli_state.server_names or cli_state.macs)
+    if unmatched_preset_names and not filters_active:
+        typer.echo(
+            "Error: preset load was refused before sending any changes because these preset devices were not found:",
+            err=True,
+        )
+        for device_name in unmatched_preset_names:
+            typer.echo(f"  - {device_name}", err=True)
+        typer.echo(
+            "Use global device filters to intentionally load only a selected subset.",
+            err=True,
+        )
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    if not matched:
+        typer.echo(
+            "Error: no selected devices have matching entries in this preset.",
+            err=True,
+        )
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    preflight_errors = []
+    plans = []
+    for device_name, server_name, device, config in matched:
+        unsupported = _unsupported_load_fields(config)
+        if unsupported:
+            preflight_errors.append(f"{device_name}: unsupported fields: {', '.join(unsupported)}")
+            continue
+        try:
+            _validate_supported_config(device_name, config, device)
+            actions = []
+            if "sample_rate" in config:
+                actions.append(("sample_rate", config["sample_rate"], None))
+            if "encoding" in config:
+                actions.append(("encoding", config["encoding"], None))
+            if "latency" in config:
+                actions.append(("latency", config["latency"], None))
+            if "preferred_leader" in config:
+                actions.append(("preferred_leader", config["preferred_leader"], None))
+            if "transmitter_channel_names" in config:
+                await device.get_tx_channels()
+                available_transmitter_channels = {channel.number for channel in (device.tx_channels or {}).values()}
+                for transmitter_channel_number in config["transmitter_channel_names"]:
+                    if transmitter_channel_number not in available_transmitter_channels:
+                        raise ValueError(f"transmitter channel {transmitter_channel_number} is unavailable")
+                actions.append(
+                    (
+                        "transmitter_channel_names",
+                        config["transmitter_channel_names"],
+                        None,
+                    )
+                )
+            if "rx_subscriptions" in config:
+                await device.get_rx_channels()
+                available_receiver_channels = {channel.number for channel in (device.rx_channels or {}).values()}
+                desired_sources = {}
+                for receiver_channel_number, subscription in config["rx_subscriptions"].items():
+                    if receiver_channel_number not in available_receiver_channels:
+                        raise ValueError(f"receiver channel {receiver_channel_number} is unavailable")
+                    if subscription is None:
+                        desired_sources[receiver_channel_number] = None
+                    else:
+                        transmitter_device_name = subscription["tx_device"]
+                        if transmitter_device_name == ".":
+                            transmitter_device_name = device_name
+                        desired_sources[receiver_channel_number] = (
+                            subscription["tx_channel"],
+                            transmitter_device_name,
+                        )
+
+                actions.append(("receiver_subscriptions", desired_sources, None))
+            if "interface_mode" in config:
+                mode = config["interface_mode"]
+                if mode in ("dynamic", "dhcp"):
+                    actions.append(("interface", ("dhcp", None), None))
+                else:
+                    static_configuration = {
+                        "dns_server": config["dns_server"],
+                        "gateway": config["gateway"],
+                        "ip_address": config["ip_address"],
+                        "netmask": config["netmask"],
+                    }
+                    actions.append(("interface", ("static", static_configuration), None))
+            plans.append((device_name, server_name, device, config, actions))
+        except (*MUTATION_ERRORS, LookupError, TypeError) as exception:
+            preflight_errors.append(f"{device_name}: {exception}")
+
+    if preflight_errors:
+        typer.echo(
+            "Error: preset load was refused before sending any changes:",
+            err=True,
+        )
+        for error in preflight_errors:
+            typer.echo(f"  - {error}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    needs_reboot = []
+    failures = 0
+    action_results = []
+    try:
+        for device_name, server_name, device, config, actions in plans:
+            if not actions:
+                action_results.append((device_name, "no supported changes"))
+                continue
+
+            for action, payload, port in actions:
+                action_label = action.replace("_", " ")
+                if action == "sample_rate":
+                    try:
+                        result = await application.set_sample_rate(
+                            device,
+                            payload,
+                            confirm_destructive=confirm_destructive,
+                        )
+                    except SampleRateTopologyChangedButUnverifiedError as exception:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"sample rate: CHANGED BUT UNVERIFIED ({exception})",
+                            )
+                        )
+                        continue
+                    except SampleRateTopologyMutationOutcomeUnknownError as exception:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"sample rate: MUTATION OUTCOME UNKNOWN ({exception})",
+                            )
+                        )
+                        continue
+                    except MUTATION_ERRORS as exception:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"sample rate: REFUSED ({exception})",
+                            )
+                        )
+                        continue
+                    if result.changed:
+                        action_results.append(
+                            (
+                                device_name,
+                                f"sample rate {result.observed_sample_rate_hertz} Hz and topology (verified)",
+                            )
+                        )
+                    else:
+                        action_results.append(
+                            (
+                                device_name,
+                                f"sample rate already {result.observed_sample_rate_hertz} Hz (verified; no write sent)",
+                            )
+                        )
+                    continue
+                if action == "receiver_subscriptions":
+                    try:
+                        result = await reconcile_receiver_subscriptions(
+                            application,
+                            device,
+                            payload,
+                        )
+                    except MUTATION_ERRORS as exception:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"receiver subscriptions: FAILED ({exception})",
+                            )
+                        )
+                        continue
+
+                    if result.unchanged and not result.verified and not result.failures:
+                        action_results.append(
+                            (
+                                device_name,
+                                f"receiver subscriptions already match ({len(result.unchanged)} channels)",
+                            )
+                        )
+                    for receiver_channel_number, desired_source in sorted(result.verified.items()):
+                        if desired_source is None:
+                            description = f"receiver channel {receiver_channel_number} unsubscribed"
+                        else:
+                            description = (
+                                f"receiver channel {receiver_channel_number} <- {desired_source[0]}@{desired_source[1]}"
+                            )
+                        action_results.append((device_name, f"{description} (verified)"))
+                    for receiver_channel_number, detail in sorted(result.failures.items()):
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"receiver channel {receiver_channel_number}: FAILED ({detail})",
+                            )
+                        )
+                    continue
+                if action == "transmitter_channel_names":
+                    try:
+                        result = await reconcile_transmitter_channel_names(
+                            application,
+                            device,
+                            payload,
+                        )
+                    except MUTATION_ERRORS as exception:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"transmitter channel names: FAILED ({exception})",
+                            )
+                        )
+                        continue
+
+                    if result.unchanged and not result.verified and not result.failures:
+                        action_results.append(
+                            (
+                                device_name,
+                                f"transmitter channel names already match ({len(result.unchanged)} channels)",
+                            )
+                        )
+                    for transmitter_channel_number, channel_name in sorted(result.verified.items()):
+                        action_results.append(
+                            (
+                                device_name,
+                                f"transmitter channel {transmitter_channel_number}: {channel_name} (verified)",
+                            )
+                        )
+                    for transmitter_channel_number, detail in sorted(result.failures.items()):
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"transmitter channel {transmitter_channel_number}: FAILED ({detail})",
+                            )
+                        )
+                    continue
+
+                try:
+                    if action == "preferred_leader":
+                        await application.set_preferred_leader(device, payload)
+                    elif action == "encoding":
+                        await application.set_encoding(device, payload)
+                    elif action == "latency":
+                        await application.set_latency(device, payload)
+                    else:
+                        interface_mode, static_configuration = payload
+                        await application.set_interface(device, interface_mode, static_configuration)
+                except MUTATION_ERRORS as exception:
+                    failures += 1
+                    action_results.append(
+                        (
+                            device_name,
+                            f"{action_label}: FAILED to send request: {exception}",
+                        )
+                    )
+                    continue
+
+                if action in ("encoding", "latency"):
+                    if action == "encoding":
+                        expected = config["encoding"]
+                        success = f"encoding {expected}-bit"
+                    else:
+                        expected = int(round(config["latency"] * 1_000_000))
+                        success = f"latency {config['latency']:g} ms"
+                    result = await readback_after_notification(
+                        partial(_read_audio_setting, action, application, device),
+                        expected,
+                    )
+                    if result.matched:
+                        action_results.append((device_name, f"{success} (verified)"))
+                        continue
+
+                    failures += 1
+                    if result.observed_available:
+                        detail = f"device reports {result.observed!r}"
+                    else:
+                        detail = f"fresh readback was unavailable: {result.error}"
+                    action_results.append(
+                        (
+                            device_name,
+                            f"{success}: FAILED ({detail})",
+                        )
+                    )
+                    continue
+
+                if action == "preferred_leader":
+                    expected = config["preferred_leader"]
+                    enabled = "on" if expected else "off"
+                    result = await readback_after_notification(
+                        lambda device=device: _read_preferred_leader(application, device),
+                        expected,
+                    )
+                    if result.matched:
+                        action_results.append(
+                            (
+                                device_name,
+                                f"preferred leader {enabled} (verified)",
+                            )
+                        )
+                    elif result.observed_available:
+                        failures += 1
+                        action_results.append(
+                            (
+                                device_name,
+                                f"preferred leader {enabled}: FAILED (device reports {result.observed!r})",
+                            )
+                        )
+                    else:
+                        detail = f": {result.error}" if result.error is not None else ""
+                        action_results.append(
+                            (
+                                device_name,
+                                f"preferred leader {enabled} requested; not verified "
+                                f"(fresh readback unavailable{detail})",
+                            )
+                        )
+                    continue
+
+                mode = config["interface_mode"]
+                expected = _expected_interface_config(config)
+                result = await readback_after_notification(
+                    lambda device=device, expected=expected: _read_interface_config(application, device, expected),
+                    expected,
+                )
+                if device.interface_pending_config is not None:
+                    needs_reboot.append(device_name)
+                if result.matched:
+                    action_results.append((device_name, f"interface {mode} (verified)"))
+                elif result.observed_available:
+                    action_results.append(
+                        (
+                            device_name,
+                            f"interface {mode} requested; not verified "
+                            f"(device currently reports {result.observed!r}; reboot may be pending)",
+                        )
+                    )
+                else:
+                    detail = f": {result.error}" if result.error is not None else ""
+                    action_results.append(
+                        (
+                            device_name,
+                            f"interface {mode} requested; not verified "
+                            f"(fresh readback unavailable{detail}; reboot may be pending)",
+                        )
+                    )
+    finally:
+        pass
+
+    typer.echo("\nPreset load summary:", err=True)
+    for device_name, result in action_results:
+        typer.echo(f"  {device_name}: {result}", err=True)
+
+    if needs_reboot:
+        typer.echo(
+            f"\nReboot required: {', '.join(dict.fromkeys(needs_reboot))}",
+            err=True,
+        )
+    if failures:
+        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("load", help="Apply a saved preset to the devices it names.")
@@ -380,536 +764,7 @@ def preset_load(
         show_preset_dry_run(preset_devices)
         return
 
-    async def _apply():
-        from netaudio._common import (
-            _command_context,
-            _get_arc_port,
-            readback_after_notification,
-            send_and_wait_for_notification,
-        )
-        from netaudio._common_selection import filter_devices
-        from netaudio.cli import state as cli_state
-        from netaudio.commands.subscription import reconcile_receiver_subscriptions
-        from netaudio.dante.device_commands import DanteDeviceCommands
-        from netaudio.dante.transmitter_channel_name_reconciliation import (
-            reconcile_transmitter_channel_names,
-        )
-        from netaudio.dante.services.notification import (
-            NOTIFICATION_CLOCKING_STATUS,
-            NOTIFICATION_ENCODING_STATUS,
-            NOTIFICATION_INTERFACE_STATUS,
-            NOTIFICATION_LATENCY_CHANGE,
-            NOTIFICATION_SETTINGS_CHANGE,
-        )
-
-        async with _command_context() as (devices, send):
-            devices = filter_devices(devices)
-            if not devices:
-                typer.echo("Error: no devices matched the global filters.", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            commands = DanteDeviceCommands()
-            devices_by_name: dict[str, list] = {}
-            for server_name, device in devices.items():
-                if device.name:
-                    devices_by_name.setdefault(device.name, []).append((server_name, device))
-
-            matched = []
-            unmatched_preset_names = []
-            for device_name, config in preset_devices.items():
-                candidates = devices_by_name.get(device_name, [])
-                if not candidates:
-                    unmatched_preset_names.append(device_name)
-                    continue
-                if len(candidates) > 1:
-                    servers = ", ".join(server_name for server_name, _ in candidates)
-                    typer.echo(
-                        f"Error: preset device name {device_name!r} is ambiguous: {servers}",
-                        err=True,
-                    )
-                    raise typer.Exit(code=ExitCode.ERROR)
-                server_name, device = candidates[0]
-                matched.append((device_name, server_name, device, config))
-
-            filters_active = bool(cli_state.names or cli_state.hosts or cli_state.server_names or cli_state.macs)
-            if unmatched_preset_names and not filters_active:
-                typer.echo(
-                    "Error: preset load was refused before sending any changes because "
-                    "these preset devices were not found:",
-                    err=True,
-                )
-                for device_name in unmatched_preset_names:
-                    typer.echo(f"  - {device_name}", err=True)
-                typer.echo(
-                    "Use global device filters to intentionally load only a selected subset.",
-                    err=True,
-                )
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            if not matched:
-                typer.echo(
-                    "Error: no selected devices have matching entries in this preset.",
-                    err=True,
-                )
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            preflight_errors = []
-            plans = []
-            for device_name, server_name, device, config in matched:
-                unsupported = _unsupported_load_fields(config)
-                if unsupported:
-                    preflight_errors.append(f"{device_name}: unsupported fields: {', '.join(unsupported)}")
-                    continue
-                try:
-                    _validate_supported_config(device_name, config, device)
-                    actions = []
-                    if "sample_rate" in config:
-                        actions.append(("sample_rate", config["sample_rate"], None))
-                    if "encoding" in config:
-                        packet, _, port = commands.command_set_encoding(config["encoding"])
-                        actions.append(("encoding", packet, port))
-                    if "latency" in config:
-                        packet, _ = commands.command_set_latency(config["latency"])
-                        actions.append(("latency", packet, _get_arc_port(device)))
-                    if "preferred_leader" in config:
-                        packet, _, port = commands.command_set_preferred_leader(config["preferred_leader"])
-                        actions.append(("preferred_leader", packet, port))
-                    if "transmitter_channel_names" in config:
-                        await device.get_tx_channels()
-                        available_transmitter_channels = {
-                            channel.number for channel in (device.tx_channels or {}).values()
-                        }
-                        for transmitter_channel_number, channel_name in config["transmitter_channel_names"].items():
-                            if transmitter_channel_number not in available_transmitter_channels:
-                                raise ValueError(f"transmitter channel {transmitter_channel_number} is unavailable")
-                            commands.command_set_channel_name(
-                                "tx",
-                                transmitter_channel_number,
-                                channel_name,
-                            )
-                        actions.append(
-                            (
-                                "transmitter_channel_names",
-                                config["transmitter_channel_names"],
-                                None,
-                            )
-                        )
-                    if "rx_subscriptions" in config:
-                        await device.get_rx_channels()
-                        available_receiver_channels = {
-                            channel.number for channel in (device.rx_channels or {}).values()
-                        }
-                        desired_sources = {}
-                        for receiver_channel_number, subscription in config["rx_subscriptions"].items():
-                            if receiver_channel_number not in available_receiver_channels:
-                                raise ValueError(f"receiver channel {receiver_channel_number} is unavailable")
-                            if subscription is None:
-                                desired_sources[receiver_channel_number] = None
-                            else:
-                                transmitter_device_name = subscription["tx_device"]
-                                if transmitter_device_name == ".":
-                                    transmitter_device_name = device_name
-                                desired_sources[receiver_channel_number] = (
-                                    subscription["tx_channel"],
-                                    transmitter_device_name,
-                                )
-
-                        removals = [
-                            receiver_channel_number
-                            for receiver_channel_number, desired_source in desired_sources.items()
-                            if desired_source is None
-                        ]
-                        additions = [
-                            (receiver_channel_number, desired_source[0], desired_source[1])
-                            for receiver_channel_number, desired_source in desired_sources.items()
-                            if desired_source is not None
-                        ]
-                        for batch_start in range(0, len(removals), 16):
-                            commands.command_remove_subscriptions(removals[batch_start : batch_start + 16])
-                        for batch_start in range(0, len(additions), 16):
-                            commands.command_add_subscriptions(additions[batch_start : batch_start + 16])
-                        actions.append(("receiver_subscriptions", desired_sources, None))
-                    if "interface_mode" in config:
-                        mode = config["interface_mode"]
-                        if mode in ("dynamic", "dhcp"):
-                            packet, _, port = commands.command_set_interface_dhcp()
-                        else:
-                            packet, _, port = commands.command_set_interface_static(
-                                config["ip_address"],
-                                config["netmask"],
-                                config["dns_server"],
-                                config["gateway"],
-                            )
-                        actions.append(("interface", packet, port))
-                    plans.append((device_name, server_name, device, config, actions))
-                except Exception as exception:
-                    preflight_errors.append(f"{device_name}: {exception}")
-
-            if preflight_errors:
-                typer.echo(
-                    "Error: preset load was refused before sending any changes:",
-                    err=True,
-                )
-                for error in preflight_errors:
-                    typer.echo(f"  - {error}", err=True)
-                raise typer.Exit(code=ExitCode.ERROR)
-
-            needs_fresh_state = any(
-                action in ("preferred_leader", "interface") for _, _, _, _, actions in plans for action, _, _ in actions
-            )
-            readback_application = None
-            readback_start_error = None
-            if needs_fresh_state:
-                try:
-                    readback_application = await _start_preset_readback_application()
-                    application_devices = readback_application.devices
-                    if isinstance(application_devices, dict):
-                        for _, server_name, device, _, _ in plans:
-                            application_devices[server_name] = device
-                except Exception as exception:
-                    readback_start_error = exception
-
-            needs_reboot = []
-            failures = 0
-            action_results = []
-            try:
-                for device_name, server_name, device, config, actions in plans:
-                    if not actions:
-                        action_results.append((device_name, "no supported changes"))
-                        continue
-
-                    for action, payload, port in actions:
-                        action_label = action.replace("_", " ")
-                        if action == "sample_rate":
-                            try:
-                                result = await change_sample_rate_with_command_sender(
-                                    send,
-                                    device,
-                                    payload,
-                                    confirm_destructive=confirm_destructive,
-                                )
-                            except SampleRateTopologyChangedButUnverifiedError as exception:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate: CHANGED BUT UNVERIFIED ({exception})",
-                                    )
-                                )
-                                continue
-                            except SampleRateTopologyMutationOutcomeUnknownError as exception:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate: MUTATION OUTCOME UNKNOWN ({exception})",
-                                    )
-                                )
-                                continue
-                            except Exception as exception:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate: REFUSED ({exception})",
-                                    )
-                                )
-                                continue
-                            if result.changed:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate {result.observed_sample_rate_hertz} Hz and topology (verified)",
-                                    )
-                                )
-                            else:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"sample rate already {result.observed_sample_rate_hertz} Hz "
-                                        "(verified; no write sent)",
-                                    )
-                                )
-                            continue
-                        if action == "receiver_subscriptions":
-                            try:
-                                result = await reconcile_receiver_subscriptions(
-                                    send,
-                                    device,
-                                    payload,
-                                )
-                            except Exception as exception:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"receiver subscriptions: FAILED ({exception})",
-                                    )
-                                )
-                                continue
-
-                            if result.unchanged and not result.verified and not result.failures:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"receiver subscriptions already match ({len(result.unchanged)} channels)",
-                                    )
-                                )
-                            for receiver_channel_number, desired_source in sorted(result.verified.items()):
-                                if desired_source is None:
-                                    description = f"receiver channel {receiver_channel_number} unsubscribed"
-                                else:
-                                    description = (
-                                        f"receiver channel {receiver_channel_number} <- "
-                                        f"{desired_source[0]}@{desired_source[1]}"
-                                    )
-                                action_results.append((device_name, f"{description} (verified)"))
-                            for receiver_channel_number, detail in sorted(result.failures.items()):
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"receiver channel {receiver_channel_number}: FAILED ({detail})",
-                                    )
-                                )
-                            continue
-                        if action == "transmitter_channel_names":
-                            try:
-                                result = await reconcile_transmitter_channel_names(
-                                    send,
-                                    device,
-                                    payload,
-                                )
-                            except Exception as exception:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"transmitter channel names: FAILED ({exception})",
-                                    )
-                                )
-                                continue
-
-                            if result.unchanged and not result.verified and not result.failures:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"transmitter channel names already match ({len(result.unchanged)} channels)",
-                                    )
-                                )
-                            for transmitter_channel_number, channel_name in sorted(result.verified.items()):
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"transmitter channel {transmitter_channel_number}: {channel_name} (verified)",
-                                    )
-                                )
-                            for transmitter_channel_number, detail in sorted(result.failures.items()):
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"transmitter channel {transmitter_channel_number}: FAILED ({detail})",
-                                    )
-                                )
-                            continue
-
-                        packet = payload
-                        try:
-                            notification_ids = {
-                                "encoding": (
-                                    NOTIFICATION_ENCODING_STATUS,
-                                    NOTIFICATION_SETTINGS_CHANGE,
-                                ),
-                                "latency": (
-                                    NOTIFICATION_LATENCY_CHANGE,
-                                    NOTIFICATION_SETTINGS_CHANGE,
-                                ),
-                                "preferred_leader": (
-                                    NOTIFICATION_CLOCKING_STATUS,
-                                    NOTIFICATION_SETTINGS_CHANGE,
-                                ),
-                                "interface": (
-                                    NOTIFICATION_INTERFACE_STATUS,
-                                    NOTIFICATION_SETTINGS_CHANGE,
-                                ),
-                            }[action]
-                            if action == "preferred_leader":
-                                await send_and_wait_for_notification(
-                                    send,
-                                    packet,
-                                    device.ipv4,
-                                    port,
-                                    notification_ids,
-                                    expect_response=False,
-                                    repeat=3,
-                                    interval_ms=500,
-                                )
-                            elif action == "encoding":
-                                await send_and_wait_for_notification(
-                                    send,
-                                    packet,
-                                    device.ipv4,
-                                    port,
-                                    notification_ids,
-                                    expect_response=False,
-                                )
-                            else:
-                                await send_and_wait_for_notification(
-                                    send,
-                                    packet,
-                                    device.ipv4,
-                                    port,
-                                    notification_ids,
-                                    expect_response=False,
-                                )
-                        except Exception as exception:
-                            failures += 1
-                            action_results.append(
-                                (
-                                    device_name,
-                                    f"{action_label}: FAILED to send request: {exception}",
-                                )
-                            )
-                            continue
-
-                        if action in ("encoding", "latency"):
-                            if action == "encoding":
-                                expected = config["encoding"]
-                                success = f"encoding {expected}-bit"
-                            else:
-                                expected = int(round(config["latency"] * 1_000_000))
-                                success = f"latency {config['latency']:g} ms"
-                            result = await readback_after_notification(
-                                partial(_read_audio_setting, action, send, device),
-                                expected,
-                            )
-                            if result.matched:
-                                action_results.append((device_name, f"{success} (verified)"))
-                                continue
-
-                            failures += 1
-                            if result.observed_available:
-                                detail = f"device reports {result.observed!r}"
-                            else:
-                                detail = f"fresh readback was unavailable: {result.error}"
-                            action_results.append(
-                                (
-                                    device_name,
-                                    f"{success}: FAILED ({detail})",
-                                )
-                            )
-                            continue
-
-                        if action == "preferred_leader":
-                            expected = config["preferred_leader"]
-                            enabled = "on" if expected else "off"
-                            if readback_application is None:
-                                reason = (
-                                    f" (readback unavailable: {readback_start_error})" if readback_start_error else ""
-                                )
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"preferred leader {enabled} requested; not verified{reason}",
-                                    )
-                                )
-                                continue
-
-                            result = await readback_after_notification(
-                                lambda application=readback_application, device=device: _read_preferred_leader(
-                                    application, device
-                                ),
-                                expected,
-                            )
-                            if result.matched:
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"preferred leader {enabled} (verified)",
-                                    )
-                                )
-                            elif result.observed_available:
-                                failures += 1
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"preferred leader {enabled}: FAILED (device reports {result.observed!r})",
-                                    )
-                                )
-                            else:
-                                detail = f": {result.error}" if result.error is not None else ""
-                                action_results.append(
-                                    (
-                                        device_name,
-                                        f"preferred leader {enabled} requested; not verified "
-                                        f"(fresh readback unavailable{detail})",
-                                    )
-                                )
-                            continue
-
-                        mode = config["interface_mode"]
-                        if readback_application is None:
-                            reason = f" (readback unavailable: {readback_start_error})" if readback_start_error else ""
-                            action_results.append(
-                                (
-                                    device_name,
-                                    f"interface {mode} requested; not verified{reason}",
-                                )
-                            )
-                            continue
-
-                        expected = _expected_interface_config(config)
-                        result = await readback_after_notification(
-                            lambda application=readback_application, device=device, expected=expected: (
-                                _read_interface_config(application, device, expected)
-                            ),
-                            expected,
-                        )
-                        if device.interface_pending_config is not None:
-                            needs_reboot.append(device_name)
-                        if result.matched:
-                            action_results.append((device_name, f"interface {mode} (verified)"))
-                        elif result.observed_available:
-                            action_results.append(
-                                (
-                                    device_name,
-                                    f"interface {mode} requested; not verified "
-                                    f"(device currently reports {result.observed!r}; reboot may be pending)",
-                                )
-                            )
-                        else:
-                            detail = f": {result.error}" if result.error is not None else ""
-                            action_results.append(
-                                (
-                                    device_name,
-                                    f"interface {mode} requested; not verified "
-                                    f"(fresh readback unavailable{detail}; reboot may be pending)",
-                                )
-                            )
-            finally:
-                if readback_application is not None:
-                    try:
-                        await readback_application.shutdown()
-                    except Exception as exception:
-                        typer.echo(
-                            f"Warning: could not stop preset readback service: {exception}",
-                            err=True,
-                        )
-
-            typer.echo("\nPreset load summary:", err=True)
-            for device_name, result in action_results:
-                typer.echo(f"  {device_name}: {result}", err=True)
-
-            if needs_reboot:
-                typer.echo(
-                    f"\nReboot required: {', '.join(dict.fromkeys(needs_reboot))}",
-                    err=True,
-                )
-            if failures:
-                raise typer.Exit(code=ExitCode.ERROR)
-
-    asyncio.run(_apply())
+    run_command(run_preset_load, preset_devices, confirm_destructive)
 
 
 @app.command("show", help="Show what a saved preset would apply, without changing anything.")

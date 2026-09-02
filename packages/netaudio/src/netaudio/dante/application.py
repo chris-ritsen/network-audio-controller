@@ -1,36 +1,108 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import time
+from collections.abc import Awaitable, Callable
 
-from netaudio.dante.application_operations import DanteApplicationOperations
+from netaudio.dante.capability_partition import (
+    CapabilityPartitionExport,
+    parse_capability_partition_export,
+)
+from netaudio.dante.conmon_export import ConmonExport, ConmonExportUnavailableError
 from netaudio.dante.const import (
+    BLUETOOTH_MODEL_IDS,
+    DEVICE_ARC_PORT,
     SERVICE_ARC,
     SERVICE_CMC,
     SERVICE_DBC,
     SERVICES,
 )
+from netaudio.dante.core_transport import CoreTransport
+from netaudio.dante.diagnostic_logs import (
+    DeviceLogExport,
+    apply_device_audio_capabilities,
+    parse_device_log_export,
+)
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
 from netaudio.dante.latency import nanoseconds_to_milliseconds
+from netaudio.dante.link_status import LinkStatusObservation
+from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
+    NOTIFICATION_LATENCY_CHANGE,
+    NOTIFICATION_PROPERTY_CHANGE,
+    NOTIFICATION_ROUTING_DEVICE_CHANGE,
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_RX_FLOW_CHANGE,
+    NOTIFICATION_SETTINGS_CHANGE,
+    NOTIFICATION_TX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_LABEL_CHANGE,
     DanteNotificationService,
-    NOTIFICATION_NAMES,
+    mutate_and_wait_for_capability_value,
+    mutate_and_wait_for_clear_configuration_status,
+    request_and_wait_for_conmon_export,
+    send_and_wait_for_gain_status,
+)
+from netaudio.dante.services.notification_packet_handlers import (
+    STATUS_KIND_BLUETOOTH,
+    STATUS_KIND_ENCODING,
+    STATUS_KIND_GAIN,
+    STATUS_KIND_SAMPLE_RATE,
+    STATUS_KIND_SAMPLE_RATE_PULLUP,
 )
 from netaudio.dante.services.settings import DanteSettingsService
+from netaudio.dante.state import DanteStateService, apply_device_status
 
 logger = logging.getLogger("netaudio")
 
+CHANNEL_NAME_NOTIFICATION_IDS = {
+    "rx": (NOTIFICATION_RX_CHANNEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE),
+    "tx": (NOTIFICATION_TX_CHANNEL_CHANGE, NOTIFICATION_TX_LABEL_CHANGE, NOTIFICATION_PROPERTY_CHANGE),
+}
+DEVICE_NAME_NOTIFICATION_IDS = (NOTIFICATION_ROUTING_DEVICE_CHANGE, NOTIFICATION_SETTINGS_CHANGE)
+SUBSCRIPTION_NOTIFICATION_IDS = (
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_RX_FLOW_CHANGE,
+    NOTIFICATION_ROUTING_DEVICE_CHANGE,
+)
 
-class DanteApplication(DanteApplicationOperations):
-    def __init__(self, packet_store=None, dissect=False):
-        self.devices: dict = {}
-        self.dispatcher = DanteEventDispatcher()
-        self.settings = DanteSettingsService(packet_store=packet_store, dissect=dissect)
+
+class CapabilityProbeTimeout(RuntimeError):
+    pass
+
+
+def _clock_status_snapshot(device) -> dict:
+    return {
+        "clock_frequency_offset_parts_per_billion": device.clock_frequency_offset_parts_per_billion,
+        "clock_identity": device.clock_identity,
+        "clock_port_records": device.clock_port_records,
+        "clock_port_state_code": device.clock_port_state_code,
+        "clock_role": device.clock_role,
+        "clock_source_code": device.clock_source_code,
+        "clock_subdomain": device.clock_subdomain,
+        "leader_clock_identity": device.leader_clock_identity,
+        "preferred_leader": device.preferred_leader,
+    }
+
+
+class DanteApplication:
+    def __init__(self, packet_store=None, dissect=False, session_id=None):
         from netaudio.common.app_config import settings as app_settings
 
-        self.cmc = DanteCMCService(packet_store=packet_store, interface_name=app_settings.interface, dissect=dissect)
+        self.devices: dict = {}
+        self.dispatcher = DanteEventDispatcher()
+        self._packet_store = packet_store
+        self._dissect = dissect
+        self.capture_session_id: int | None = session_id
+        self._capture_queue: asyncio.Queue | None = None
+        self._capture_loop: asyncio.AbstractEventLoop | None = None
+        self._capture_writer_task: asyncio.Task | None = None
+        self.transport = CoreTransport(observer=self._observe_wire if (packet_store is not None or dissect) else None)
+        self.settings = DanteSettingsService(self.transport)
+        self.cmc = DanteCMCService(self.transport, interface_name=app_settings.interface)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
             device_lookup=self._device_by_ip,
@@ -38,16 +110,10 @@ class DanteApplication(DanteApplicationOperations):
             interface_ip=app_settings.interface_ip,
             dissect=dissect,
         )
+        self.notifications.session_id = session_id
+        self.state = DanteStateService(self)
         self._browser = None
         self._started = False
-        self._notification_handlers: dict[int, list] = {}
-        self._packet_store = packet_store
-        self._dissect = dissect
-        self.capture_session_id: int | None = None
-        self.core_observer = self._record_core_traffic if (packet_store is not None or dissect) else None
-        self._capture_queue: asyncio.Queue | None = None
-        self._capture_loop: asyncio.AbstractEventLoop | None = None
-        self._capture_writer_task: asyncio.Task | None = None
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     def _capability_probe_lock(self, capability_name: str, device_ip_address: str) -> asyncio.Lock:
@@ -58,14 +124,13 @@ class DanteApplication(DanteApplicationOperations):
             self._capability_probe_locks[lock_key] = lock
         return lock
 
-    def _record_core_traffic(self, packet, response, device_ip, port):
+    def _observe_wire(self, payload: bytes, device_ip: str, port: int, direction: str) -> None:
         loop = self._capture_loop
         queue = self._capture_queue
         if loop is None or queue is None:
             return
-        loop.call_soon_threadsafe(queue.put_nowait, (packet, device_ip, port, "request", "netaudio_request"))
-        if response is not None:
-            loop.call_soon_threadsafe(queue.put_nowait, (response, device_ip, port, "response", "netaudio_response"))
+        source_type = "netaudio_request" if direction == "request" else "netaudio_response"
+        loop.call_soon_threadsafe(queue.put_nowait, (payload, device_ip, port, direction, source_type))
 
     async def _capture_writer(self) -> None:
         from netaudio._capture import _dissect, _record
@@ -80,44 +145,35 @@ class DanteApplication(DanteApplicationOperations):
             if self._packet_store is not None:
                 _record(self._packet_store, self.capture_session_id, payload, device_ip, port, direction, source_type)
 
-    def on_notification(self, notification_id: int, callback) -> None:
-        if notification_id not in self._notification_handlers:
-            self._notification_handlers[notification_id] = []
-        self._notification_handlers[notification_id].append(callback)
+    def arc_port_for_address(self, device_ip_address: str) -> int:
+        device = self._device_by_ip(device_ip_address)
+        if device is None:
+            return DEVICE_ARC_PORT
+        return self.get_arc_port(device) or DEVICE_ARC_PORT
 
-    async def _dispatch_notification(self, event) -> None:
-        notification_id = event.data.get("notification_id")
-        if notification_id is None:
-            return
+    async def execute(self, device_ip_address, specification: dict) -> bytes | None:
+        address = str(device_ip_address)
+        return await self.transport.execute(address, specification, arc_port=self.arc_port_for_address(address))
 
-        handlers = self._notification_handlers.get(notification_id)
-        if handlers:
-            for handler in handlers:
-                try:
-                    await handler(event)
-                except Exception:
-                    notification_name = NOTIFICATION_NAMES.get(notification_id, f"0x{notification_id:04X}")
-                    logger.exception(f"Error in notification handler for {notification_name}")
-        else:
-            notification_name = event.data.get("notification_name", f"0x{notification_id:04X}")
-            logger.debug(f"Unhandled notification: {notification_name} from {event.server_name}")
+    def attach_devices(self, devices: dict) -> None:
+        for server_name, device in devices.items():
+            device._app = self
+            self.devices[server_name] = device
 
     async def startup(self) -> None:
         if self._started:
             return
 
         self._started = True
-        if self.core_observer is not None:
+        if self.transport.observer is not None:
             self._capture_loop = asyncio.get_running_loop()
             self._capture_queue = asyncio.Queue()
             self._capture_writer_task = asyncio.create_task(self._capture_writer())
 
         try:
-            self.dispatcher.on(EventType.NOTIFICATION_RECEIVED, self._dispatch_notification)
+            self.state.attach()
             await self.dispatcher.start()
             await self.notifications.start()
-            await self.settings.start()
-            await self.cmc.start()
         except BaseException:
             await self.shutdown()
             raise
@@ -129,7 +185,6 @@ class DanteApplication(DanteApplicationOperations):
 
         await self.notifications.stop()
         await self.cmc.stop()
-        await self.settings.stop()
         await self.dispatcher.stop()
 
         if self._capture_writer_task is not None:
@@ -145,10 +200,12 @@ class DanteApplication(DanteApplicationOperations):
         if self._browser:
             try:
                 await self._browser.async_close()
-            except Exception:
-                logger.exception("Failed to close discovery browser")
+            except OSError as exception:
+                logger.warning(f"Failed to close discovery browser: {exception}")
             self._browser = None
 
+        self.transport.close()
+        self._capability_probe_locks.clear()
         self._started = False
         logger.info("DanteApplication shut down")
 
@@ -224,7 +281,7 @@ class DanteApplication(DanteApplicationOperations):
         async def resolve_arc_service(zeroconf, service_type, service_name):
             try:
                 service = await browser.async_parse_netaudio_service(zeroconf, service_type, service_name)
-            except Exception as exception:
+            except (OSError, ValueError) as exception:
                 logger.warning(f"Failed to resolve {service_name}: {exception}")
                 return
             if service is not None and not arc_service_future.done():
@@ -372,7 +429,7 @@ class DanteApplication(DanteApplicationOperations):
                     existing.services = device.services
 
             self.devices[server_name] = existing
-            self.notifications.apply_pending_for_device(existing)
+            self.state.apply_pending_for_device(existing)
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_UPDATED,
@@ -384,7 +441,7 @@ class DanteApplication(DanteApplicationOperations):
             device._app = self
             device.update_last_seen()
             self.devices[server_name] = device
-            self.notifications.apply_pending_for_device(device)
+            self.state.apply_pending_for_device(device)
             self.dispatcher.emit_nowait(
                 DanteEvent(
                     type=EventType.DEVICE_DISCOVERED,
@@ -554,141 +611,87 @@ class DanteApplication(DanteApplicationOperations):
                 request_attempts=request_attempts,
             )
             if include_channels:
-                await self._apply_avio_status_pages(device)
-        except Exception as exception:
+                await self.apply_avio_status_pages(device)
+        except (RuntimeError, OSError) as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
 
-    async def _apply_avio_status_pages(self, device) -> None:
-        try:
-            receiver_flow_page = await device.operations.query_receiver_flow_status_2809()
-        except RuntimeError:
-            receiver_flow_page = None
-        if receiver_flow_page is not None:
-            device.apply_receiver_flow_status_page(receiver_flow_page)
-        try:
-            transmitter_channel_page = await device.operations.query_transmitter_channel_status_2809()
-        except RuntimeError:
-            transmitter_channel_page = None
-        if transmitter_channel_page is not None:
-            device.apply_transmitter_channel_status_page(transmitter_channel_page)
-        try:
-            transmitter_flow_page = await device.operations.query_transmitter_flow_status_2809()
-        except RuntimeError:
-            transmitter_flow_page = None
-        if transmitter_flow_page is not None:
-            device.apply_transmitter_flow_status_page(transmitter_flow_page)
-        try:
-            receiver_channel_page = await device.operations.query_receiver_channel_status_2809()
-        except RuntimeError:
-            receiver_channel_page = None
-        if receiver_channel_page is not None:
-            device.apply_receiver_channel_status_page(receiver_channel_page)
+    @staticmethod
+    async def apply_avio_status_pages(device) -> None:
+        pages = (
+            (device.operations.query_receiver_flow_status_2809, device.apply_receiver_flow_status_page),
+            (device.operations.query_transmitter_channel_status_2809, device.apply_transmitter_channel_status_page),
+            (device.operations.query_transmitter_flow_status_2809, device.apply_transmitter_flow_status_page),
+            (device.operations.query_receiver_channel_status_2809, device.apply_receiver_channel_status_page),
+        )
+        for query, apply in pages:
+            try:
+                page = await query()
+            except RuntimeError as exception:
+                logger.debug(f"{query.__name__} unavailable for {device.server_name}: {exception}")
+                continue
+            if page is not None:
+                apply(page)
+
+    async def _probe_all(
+        self,
+        kind: str,
+        probe,
+        devices: dict | None,
+        timeout: float,
+        description: str,
+        skip_device=None,
+    ) -> None:
+        target_devices = self.devices if devices is None else devices
+        probe_tasks = {}
+        for device in target_devices.values():
+            if not device.ipv4 or (skip_device is not None and skip_device(device)):
+                continue
+            device_ip_address = str(device.ipv4)
+            if device_ip_address in probe_tasks:
+                continue
+            probe_tasks[device_ip_address] = asyncio.create_task(probe(device_ip_address, timeout=timeout))
+
+        if not probe_tasks:
+            return
+
+        logger.debug(f"Probed {description} for {len(probe_tasks)} device addresses")
+        results = await asyncio.gather(*probe_tasks.values(), return_exceptions=True)
+        response_count = 0
+        for device_ip_address, result in zip(probe_tasks, results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, CapabilityProbeTimeout):
+                logger.debug(f"{description} probe timed out for {device_ip_address}")
+                continue
+            if isinstance(result, Exception):
+                logger.warning(f"Failed to probe {description} for {device_ip_address}: {result}")
+                continue
+            response_count += 1
+        logger.debug(f"{description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded")
 
     async def _probe_interface_status(self, timeout: float = 3.0, devices: dict | None = None) -> None:
-        target_devices = self.devices if devices is None else devices
-        waiters = {}
-        for device in target_devices.values():
-            device_ip = str(device.ipv4) if device.ipv4 else None
-            if device_ip:
-                waiter = self.notifications.register_interface_waiter(device_ip)
-                waiters[device_ip] = waiter
-                self.settings.probe_interface_status(device_ip)
-
-        if not waiters:
-            return
-
-        logger.debug(f"Probed interface status for {len(waiters)} devices")
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.debug("Interface status probe did not receive every response")
-        finally:
-            for device_ip in waiters:
-                self.notifications.unregister_interface_waiter(device_ip)
-
-        populated = sum(1 for device in target_devices.values() if device.interfaces)
-        logger.debug(f"Interface status: {populated}/{len(waiters)} devices responded")
+        await self._probe_all("interface", self.probe_interface_status, devices, timeout, "interface status")
 
     async def _probe_preferred_leader_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
-        target_devices = self.devices if devices is None else devices
-        waiters = {}
-        for device in target_devices.values():
-            if device.preferred_leader is not None:
-                continue
-            device_ip = str(device.ipv4) if device.ipv4 else None
-            if device_ip:
-                waiter = self.notifications.register_preferred_leader_waiter(device_ip)
-                waiters[device_ip] = waiter
-                self.settings.probe_preferred_leader(device_ip)
-
-        if not waiters:
-            return
-
-        logger.debug(f"Probed preferred leader for {len(waiters)} devices")
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.debug("Preferred leader probe did not receive every response")
-        finally:
-            for device_ip in waiters:
-                result = self.notifications.get_preferred_leader_result(device_ip)
-                if result is not None:
-                    device = self._device_by_ip(device_ip)
-                    if device:
-                        device.preferred_leader = result
-                self.notifications.unregister_preferred_leader_waiter(device_ip)
-
-        populated = sum(1 for device in target_devices.values() if device.preferred_leader is not None)
-        logger.debug(f"Preferred leader: {populated}/{len(target_devices)} devices have data")
+        await self._probe_all(
+            "preferred_leader",
+            self.probe_preferred_leader_state,
+            devices,
+            timeout,
+            "preferred leader",
+            skip_device=lambda device: device.preferred_leader is not None,
+        )
 
     async def _probe_aes67_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
-        target_devices = self.devices if devices is None else devices
-        waiters = {}
-        for device in target_devices.values():
-            if device.aes67_current is not None:
-                continue
-            device_ip = str(device.ipv4) if device.ipv4 else None
-            if device_ip:
-                waiter = self.notifications.register_aes67_waiter(device_ip)
-                waiters[device_ip] = waiter
-                self.settings.probe_aes67(device_ip)
-
-        if not waiters:
-            return
-
-        logger.debug(f"Probed AES67 for {len(waiters)} devices")
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*(waiter.wait() for waiter in waiters.values()), return_exceptions=True),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.debug("AES67 probe did not receive every response")
-        finally:
-            for device_ip in waiters:
-                result = self.notifications.get_aes67_result(device_ip)
-                if result is not None:
-                    aes67_current, aes67_configured = result
-                    device = self._device_by_ip(device_ip)
-                    if device:
-                        if aes67_current is not None:
-                            device.aes67_current = aes67_current
-                        if aes67_configured is not None:
-                            device.aes67_configured = aes67_configured
-                self.notifications.unregister_aes67_waiter(device_ip)
-
-        populated = sum(1 for device in target_devices.values() if device.aes67_current is not None)
-        logger.debug(f"AES67: {populated}/{len(target_devices)} devices have data")
+        await self._probe_all(
+            "aes67",
+            self.probe_aes67_state,
+            devices,
+            timeout,
+            "AES67",
+            skip_device=lambda device: device.aes67_current is not None,
+        )
 
     async def _probe_capabilities_all(
         self,
@@ -719,10 +722,13 @@ class DanteApplication(DanteApplicationOperations):
         probe_results = await asyncio.gather(*probe_tasks.values(), return_exceptions=True)
         response_count = 0
         for device_ip_address, result in zip(probe_tasks, probe_results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, CapabilityProbeTimeout):
+                logger.debug(f"{capability_description} probe timed out for {device_ip_address}")
+                continue
             if isinstance(result, Exception):
                 logger.warning(f"Failed to probe {capability_description} for {device_ip_address}: {result}")
-                continue
-            if result is None:
                 continue
             response_count += 1
             current_value, supported_values = result
@@ -776,13 +782,19 @@ class DanteApplication(DanteApplicationOperations):
 
     @staticmethod
     def _apply_sample_rate_capability(device, current_sample_rate: int, supported_sample_rates: list[int]) -> None:
-        device.sample_rate = current_sample_rate
-        device.supported_sample_rates = supported_sample_rates
+        apply_device_status(
+            device,
+            STATUS_KIND_SAMPLE_RATE,
+            {"sample_rate": current_sample_rate, "supported_sample_rates": supported_sample_rates},
+        )
 
     @staticmethod
     def _apply_encoding_capability(device, current_encoding: int, supported_encodings: list[int]) -> None:
-        device.encoding = current_encoding
-        device.supported_encodings = supported_encodings
+        apply_device_status(
+            device,
+            STATUS_KIND_ENCODING,
+            {"encoding": current_encoding, "supported_encodings": supported_encodings},
+        )
 
     @staticmethod
     def _apply_sample_rate_pullup_capability(
@@ -790,11 +802,799 @@ class DanteApplication(DanteApplicationOperations):
         current_raw_value: int,
         supported_raw_values: list[int],
     ) -> None:
-        device.sample_rate_pullup_raw_value = current_raw_value
-        device.supported_sample_rate_pullup_raw_values = supported_raw_values
+        apply_device_status(
+            device,
+            STATUS_KIND_SAMPLE_RATE_PULLUP,
+            {
+                "sample_rate_pullup_raw_value": current_raw_value,
+                "supported_sample_rate_pullup_raw_values": supported_raw_values,
+            },
+        )
 
     @staticmethod
     def _apply_gain_capability(device, device_type: str, channel_levels: list[int]) -> None:
-        device.gain_device_type = device_type
-        device.gain_levels = channel_levels
-        device.supported_gain_levels = list(SUPPORTED_GAIN_LEVELS)
+        apply_device_status(
+            device,
+            STATUS_KIND_GAIN,
+            {
+                "gain_device_type": device_type,
+                "gain_levels": channel_levels,
+                "supported_gain_levels": list(SUPPORTED_GAIN_LEVELS),
+            },
+        )
+
+    async def _probe_once(
+        self,
+        capability_name: str,
+        device_ip_address: str,
+        send_probe: Callable[[str], Awaitable[None]],
+        timeout: float,
+        description: str,
+    ):
+        async with self._capability_probe_lock(capability_name, device_ip_address):
+            waiter = self.notifications.register_waiter(capability_name, device_ip_address)
+            try:
+                await send_probe(device_ip_address)
+                try:
+                    await asyncio.wait_for(waiter.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    if waiter.latest_result is None:
+                        raise CapabilityProbeTimeout(
+                            f"{description} readback timed out for {device_ip_address}"
+                        ) from None
+                if waiter.latest_result is None:
+                    raise RuntimeError(f"{description} readback was unavailable for {device_ip_address}")
+                return waiter.latest_result
+            finally:
+                self.notifications.unregister_waiter(waiter)
+
+    async def _probe_with_retries(
+        self,
+        capability_name: str,
+        device_ip_address: str,
+        send_probe: Callable[[str], Awaitable[None]],
+        timeout: float,
+        description: str,
+    ):
+        async with self._capability_probe_lock(capability_name, device_ip_address):
+            waiter = self.notifications.register_waiter(capability_name, device_ip_address)
+            try:
+                event_loop = asyncio.get_running_loop()
+                deadline = event_loop.time() + timeout
+                attempt_count = 3
+                for attempt_number in range(attempt_count):
+                    await send_probe(device_ip_address)
+                    remaining_time = max(0.0, deadline - event_loop.time())
+                    if remaining_time == 0:
+                        break
+                    if attempt_number == attempt_count - 1:
+                        attempt_timeout = remaining_time
+                    else:
+                        attempt_timeout = min(remaining_time, timeout / 4)
+                    try:
+                        await asyncio.wait_for(waiter.wait(), timeout=attempt_timeout)
+                    except asyncio.TimeoutError:
+                        continue
+                    if waiter.latest_result is not None:
+                        return waiter.latest_result
+                    waiter.clear()
+                if waiter.latest_result is None:
+                    raise CapabilityProbeTimeout(f"{description} readback timed out for {device_ip_address}")
+                return waiter.latest_result
+            finally:
+                self.notifications.unregister_waiter(waiter)
+
+    async def mutate_and_wait_for_notification(
+        self,
+        device,
+        mutate: Callable[[], Awaitable[object]],
+        notification_ids,
+        timeout: float = 2.0,
+    ):
+        device_ip_address = str(device.ipv4)
+        waiter = self.notifications.register_notification_waiter(device_ip_address, notification_ids)
+        try:
+            response = await mutate()
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.debug(f"No mutation notification from {device_ip_address} within {timeout}s")
+            return response
+        finally:
+            self.notifications.unregister_waiter(waiter)
+
+    async def mutate_and_wait_for_capability_value(
+        self,
+        device,
+        mutate: Callable[[], Awaitable[object]],
+        capability_name: str,
+        expected_value: int,
+        probe_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
+        timeout: float = 2.0,
+    ) -> tuple[int, list[int]] | None:
+        async def mutate_without_result() -> None:
+            await mutate()
+
+        return await mutate_and_wait_for_capability_value(
+            self.notifications,
+            capability_name,
+            str(device.ipv4),
+            expected_value,
+            mutate_without_result,
+            probe_status,
+            timeout,
+        )
+
+    async def probe_link_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> LinkStatusObservation:
+        return await self._probe_once(
+            "link_status",
+            device_ip_address,
+            self.settings.probe_link_status,
+            timeout,
+            "link status",
+        )
+
+    async def probe_switch_configuration(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> dict:
+        return await self._probe_once(
+            "switch_configuration",
+            device_ip_address,
+            self.settings.probe_switch_configuration,
+            timeout,
+            "switch configuration",
+        )
+
+    async def probe_interface_status(self, device_ip_address: str, timeout: float = 2.0) -> list[dict]:
+        return await self._probe_once(
+            "interface",
+            device_ip_address,
+            self.settings.probe_interface_status,
+            timeout,
+            "interface status",
+        )
+
+    async def probe_clear_configuration_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> dict:
+        return await self._probe_once(
+            "clear_configuration_status",
+            device_ip_address,
+            self.settings.probe_clear_configuration_status,
+            timeout,
+            "clear-configuration status",
+        )
+
+    async def probe_lock_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> LockStatusObservation:
+        return await self._probe_once(
+            "lock_status",
+            device_ip_address,
+            self.settings.probe_lock_reset_status,
+            timeout,
+            "lock status",
+        )
+
+    async def probe_bluetooth_status(self, device, timeout: float = 2.0) -> dict:
+        device_ip_address = str(device.ipv4)
+        status = await self._probe_once(
+            "bluetooth_status",
+            device_ip_address,
+            self.settings.request_bluetooth_status,
+            timeout,
+            "bluetooth status",
+        )
+        apply_device_status(device, STATUS_KIND_BLUETOOTH, status)
+        return status
+
+    async def clear_configuration(
+        self,
+        device_ip_address: str,
+        preserve_internet_protocol_settings: bool,
+        timeout: float = 2.0,
+    ) -> dict:
+        expected_action_result_code = 2 if preserve_internet_protocol_settings else 1
+        command = (
+            self.settings.clear_all_configuration_preserving_internet_protocol_settings
+            if preserve_internet_protocol_settings
+            else self.settings.clear_all_configuration
+        )
+
+        async def mutate() -> None:
+            await command(device_ip_address)
+
+        async with self._capability_probe_lock("clear_configuration_action", device_ip_address):
+            status = await mutate_and_wait_for_clear_configuration_status(
+                self.notifications,
+                device_ip_address,
+                expected_action_result_code,
+                mutate,
+                timeout,
+            )
+        if status is None:
+            raise CapabilityProbeTimeout(f"clear-configuration status timed out for {device_ip_address}")
+        if status["action_result_code"] != expected_action_result_code:
+            raise RuntimeError(
+                f"clear-configuration returned result {status['action_result_code']} "
+                f"instead of {expected_action_result_code} for {device_ip_address}"
+            )
+        return status
+
+    async def export_device_logs(
+        self,
+        device_ip_address: str,
+        timeout: float = 15.0,
+    ) -> DeviceLogExport:
+        device_ip_address = str(device_ip_address)
+
+        async def request() -> None:
+            await self.settings.request_device_log_export(device_ip_address)
+
+        try:
+            export = await self._export_conmon_data(
+                device_ip_address,
+                b"LOGS",
+                1,
+                request,
+                timeout,
+                "device log export",
+            )
+        except ConmonExportUnavailableError:
+            device = self._device_by_ip(device_ip_address)
+            if device is not None:
+                device.diagnostic_log_export_supported = False
+            raise
+        result = parse_device_log_export(export)
+        device = self._device_by_ip(device_ip_address)
+        if device is not None:
+            apply_device_audio_capabilities(device, result.audio_capabilities)
+        return result
+
+    async def export_capability_partition(
+        self,
+        device_ip_address: str,
+        timeout: float = 15.0,
+    ) -> CapabilityPartitionExport:
+        device_ip_address = str(device_ip_address)
+
+        async def request() -> None:
+            await self.settings.request_capability_partition_export(device_ip_address)
+
+        export = await self._export_conmon_data(
+            device_ip_address,
+            b"CAP1",
+            2,
+            request,
+            timeout,
+            "CAP1 partition export",
+        )
+        return parse_capability_partition_export(export)
+
+    async def _export_conmon_data(
+        self,
+        device_ip_address: str,
+        expected_echoed_tag: bytes,
+        expected_selector_value: int,
+        request,
+        timeout: float,
+        operation_name: str,
+    ) -> ConmonExport:
+        async with self._capability_probe_lock("conmon_export", device_ip_address):
+            result = await request_and_wait_for_conmon_export(
+                self.notifications,
+                device_ip_address,
+                expected_echoed_tag,
+                expected_selector_value,
+                request,
+                timeout,
+            )
+        if result is None:
+            raise CapabilityProbeTimeout(f"{operation_name} timed out for {device_ip_address}")
+        return result
+
+    async def probe_sample_rate_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]]:
+        return await self._probe_with_retries(
+            "sample_rate",
+            str(device_ip_address),
+            self.settings.probe_sample_rate,
+            timeout,
+            "sample rate",
+        )
+
+    async def probe_encoding_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]]:
+        return await self._probe_with_retries(
+            "encoding",
+            str(device_ip_address),
+            self.settings.probe_encoding,
+            timeout,
+            "encoding",
+        )
+
+    async def probe_sample_rate_pullup_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> tuple[int, list[int]]:
+        return await self._probe_with_retries(
+            "sample_rate_pullup",
+            str(device_ip_address),
+            self.settings.probe_sample_rate_pullup,
+            timeout,
+            "sample rate pull-up",
+        )
+
+    async def probe_gain_status(
+        self,
+        device_ip_address: str,
+        timeout: float = 2.0,
+    ) -> tuple[str, list[int]]:
+        device_ip_address = str(device_ip_address)
+        async with self._capability_probe_lock("gain", device_ip_address):
+            result = await send_and_wait_for_gain_status(
+                self.notifications,
+                device_ip_address,
+                lambda: self.settings.probe_gain_level(device_ip_address),
+                timeout,
+            )
+        if result is None:
+            raise CapabilityProbeTimeout(f"gain status readback timed out for {device_ip_address}")
+        return result
+
+    async def set_sample_rate(
+        self,
+        device,
+        sample_rate_hertz: int,
+        confirm_destructive: bool = False,
+        timeout: float = 4.0,
+    ):
+        from netaudio.dante.sample_rate_topology import change_sample_rate_topology_safe
+
+        device_ip_address = str(device.ipv4)
+
+        async def probe():
+            return await self.probe_sample_rate_status(device_ip_address, timeout=timeout)
+
+        async def mutate() -> None:
+            await self.settings.set_sample_rate(device_ip_address, sample_rate_hertz)
+
+        async with device.topology_mutation_lock:
+            return await change_sample_rate_topology_safe(
+                device,
+                sample_rate_hertz,
+                probe,
+                mutate,
+                confirm_destructive=confirm_destructive,
+            )
+
+    async def set_encoding(self, device, encoding: int, timeout: float = 2.0) -> tuple[int, list[int]] | None:
+        if isinstance(encoding, bool) or not isinstance(encoding, int) or not 0 < encoding <= 0xFFFFFFFF:
+            raise ValueError("encoding must be an integer from 1 through 4294967295")
+        supported_encodings = device.supported_encodings
+        if supported_encodings is not None and encoding not in supported_encodings:
+            raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
+        device_ip_address = str(device.ipv4)
+
+        async def mutate() -> None:
+            await self.settings.set_encoding(device_ip_address, encoding)
+
+        result = await self.mutate_and_wait_for_capability_value(
+            device,
+            mutate,
+            "encoding",
+            encoding,
+            lambda: self.probe_encoding_status(device_ip_address, timeout=timeout),
+            timeout,
+        )
+        if result is not None:
+            self._apply_encoding_capability(device, *result)
+        return result
+
+    async def set_sample_rate_pullup(
+        self,
+        device,
+        raw_value: int,
+        timeout: float = 4.0,
+    ) -> tuple[int, list[int]] | None:
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int) or not 0 <= raw_value <= 0xFFFFFFFF:
+            raise ValueError("raw_value must be an integer from 0 through 4294967295")
+        supported_raw_values = device.supported_sample_rate_pullup_raw_values
+        if supported_raw_values is not None and raw_value not in supported_raw_values:
+            raise ValueError(
+                f"requested sample rate pull-up value {raw_value} is not supported; "
+                f"device reports {supported_raw_values}"
+            )
+        device_ip_address = str(device.ipv4)
+
+        async def mutate() -> None:
+            await self.settings.set_sample_rate_pullup(device_ip_address, raw_value)
+
+        result = await self.mutate_and_wait_for_capability_value(
+            device,
+            mutate,
+            "sample_rate_pullup_raw_value",
+            raw_value,
+            lambda: self.probe_sample_rate_pullup_status(device_ip_address, timeout=timeout),
+            timeout,
+        )
+        if result is not None:
+            self._apply_sample_rate_pullup_capability(device, *result)
+        return result
+
+    async def set_gain_level(
+        self,
+        device,
+        channel_number: int,
+        gain_level: int,
+        device_type: str,
+        timeout: float = 4.0,
+    ) -> tuple[str, list[int]] | None:
+        if device_type not in ("input", "output"):
+            raise ValueError("device_type must be 'input' or 'output'")
+        if isinstance(channel_number, bool) or not isinstance(channel_number, int) or not 1 <= channel_number <= 0xFFFF:
+            raise ValueError("channel_number must be an integer from 1 through 65535")
+        if isinstance(gain_level, bool) or not isinstance(gain_level, int) or gain_level not in SUPPORTED_GAIN_LEVELS:
+            raise ValueError("gain_level must be an integer from 1 through 5")
+        if device.gain_device_type is not None and device.gain_device_type != device_type:
+            raise ValueError(f"device reports {device.gain_device_type} gain controls, not {device_type}")
+        if device.supported_gain_levels is not None and gain_level not in device.supported_gain_levels:
+            raise ValueError(
+                f"requested gain level {gain_level} is not supported; device reports {device.supported_gain_levels}"
+            )
+
+        device_ip_address = str(device.ipv4)
+        async with self._capability_probe_lock("gain", device_ip_address):
+            result = await send_and_wait_for_gain_status(
+                self.notifications,
+                device_ip_address,
+                lambda: self.settings.set_gain_level(
+                    device_ip_address,
+                    channel_number,
+                    gain_level,
+                    device_type,
+                ),
+                timeout,
+                expected_device_type=device_type,
+                channel_number=channel_number,
+                expected_level=gain_level,
+            )
+            if result is not None:
+                observed_device_type, channel_levels = result
+                self._apply_gain_capability(device, observed_device_type, channel_levels)
+            return result
+
+    async def set_interface_dhcp(self, device_ip_address: str, timeout: float = 2.0) -> list[dict] | None:
+        device_ip_address = str(device_ip_address)
+        return await self._mutate_and_take_result(
+            "interface",
+            device_ip_address,
+            lambda: self.settings.set_interface_dhcp(device_ip_address),
+            timeout,
+        )
+
+    async def set_interface_static(
+        self,
+        device_ip_address: str,
+        ip_address: str,
+        netmask: str,
+        dns_server: str,
+        gateway: str,
+        timeout: float = 2.0,
+    ) -> list[dict] | None:
+        device_ip_address = str(device_ip_address)
+        return await self._mutate_and_take_result(
+            "interface",
+            device_ip_address,
+            lambda: self.settings.set_interface_static(device_ip_address, ip_address, netmask, dns_server, gateway),
+            timeout,
+        )
+
+    async def _mutate_and_take_result(
+        self,
+        kind: str,
+        device_ip_address: str,
+        mutate: Callable[[], Awaitable[None]],
+        timeout: float,
+    ):
+        waiter = self.notifications.register_waiter(kind, device_ip_address)
+        try:
+            await mutate()
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.debug(f"{kind} write verification timeout for {device_ip_address}")
+            return waiter.latest_result
+        finally:
+            self.notifications.unregister_waiter(waiter)
+
+    async def set_preferred_leader(
+        self,
+        device,
+        is_preferred: bool,
+        timeout: float = 2.0,
+    ) -> bool | None:
+        device_ip_address = str(device.ipv4)
+
+        async def mutate() -> None:
+            await self.settings.set_preferred_leader(device_ip_address, is_preferred)
+            await self.settings.probe_preferred_leader(device_ip_address)
+
+        return await self._mutate_and_take_result("preferred_leader", device_ip_address, mutate, timeout)
+
+    async def probe_clocking_status(self, device, timeout: float = 3.0) -> dict:
+        device_ip_address = str(device.ipv4)
+        async with self._capability_probe_lock("clock_status", device_ip_address):
+            waiter = self.notifications.register_waiter("preferred_leader", device_ip_address)
+            try:
+                await self.settings.refresh_clock_status(device_ip_address)
+                try:
+                    await asyncio.wait_for(waiter.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    logger.debug(f"Clock status probe timed out for {device_ip_address}")
+                    if device.clock_source_code is None:
+                        raise CapabilityProbeTimeout(f"clock status probe timed out for {device_ip_address}") from None
+            finally:
+                self.notifications.unregister_waiter(waiter)
+        if device.clock_source_code is None:
+            raise RuntimeError(f"clock status readback was unavailable for {device_ip_address}")
+        return _clock_status_snapshot(device)
+
+    async def set_clock_source(self, device, clock_source: int, timeout: float = 4.0) -> int | None:
+        if isinstance(clock_source, bool) or not isinstance(clock_source, int) or not 0 <= clock_source <= 0xFFFF:
+            raise ValueError("clock_source must be an integer from 0 through 65535")
+        await self.settings.set_clock_source(str(device.ipv4), clock_source)
+        parsed = await self.probe_clocking_status(device, timeout=timeout)
+        return parsed["clock_source_code"]
+
+    async def set_clock_subdomain(self, device, subdomain, timeout: float = 4.0) -> bytes | None:
+        from netaudio.dante.clock_config import clock_subdomain_bytes
+
+        normalized = clock_subdomain_bytes(subdomain)
+        if normalized is None:
+            raise ValueError("clock subdomain must be at most 16 bytes")
+        await self.settings.set_clock_subdomain(str(device.ipv4), normalized)
+        parsed = await self.probe_clocking_status(device, timeout=timeout)
+        clock_subdomain = parsed.get("clock_subdomain")
+        return bytes(clock_subdomain) if clock_subdomain is not None else None
+
+    async def set_aes67_enabled(self, device, is_enabled: bool, timeout: float = 2.0):
+        device_ip_address = str(device.ipv4)
+
+        async def mutate() -> None:
+            await self.settings.enable_aes67(device_ip_address, is_enabled)
+            await self.settings.probe_aes67(device_ip_address)
+
+        return await self._mutate_and_take_result("aes67", device_ip_address, mutate, timeout)
+
+    async def set_aes67_multicast_prefix(self, device, prefix: str) -> str | None:
+        from netaudio.dante.device import device_advertises_aes67_multicast_prefix
+
+        try:
+            normalized_prefix = str(ipaddress.IPv4Address(prefix))
+        except (ipaddress.AddressValueError, ValueError) as exception:
+            raise ValueError("AES67 multicast prefix must be an IPv4 address") from exception
+        if not device_advertises_aes67_multicast_prefix(device):
+            raise ValueError("device does not advertise an AES67 multicast prefix")
+        await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.set_aes67_multicast_prefix(normalized_prefix),
+            (NOTIFICATION_SETTINGS_CHANGE,),
+        )
+        await device.operations.get_aes67_configured()
+        return device.aes67_multicast_prefix
+
+    async def set_latency(self, device, milliseconds: float):
+        return await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.set_latency(milliseconds),
+            (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
+        )
+
+    async def set_device_name(self, device, name: str):
+        return await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.set_name(name),
+            DEVICE_NAME_NOTIFICATION_IDS,
+        )
+
+    async def reset_device_name(self, device):
+        return await device.operations.reset_name()
+
+    async def set_channel_name(self, device, channel_type: str, channel_number: int, name: str):
+        return await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.set_channel_name(channel_type, channel_number, name),
+            CHANNEL_NAME_NOTIFICATION_IDS[channel_type],
+        )
+
+    async def reset_channel_name(self, device, channel_type: str, channel_number: int):
+        return await device.operations.reset_channel_name(channel_type, channel_number)
+
+    async def add_subscriptions(self, device, records):
+        return await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.add_subscriptions_by_name(records),
+            SUBSCRIPTION_NOTIFICATION_IDS,
+        )
+
+    async def remove_subscriptions(self, device, channel_numbers):
+        return await self.mutate_and_wait_for_notification(
+            device,
+            lambda: device.operations.remove_subscriptions_by_number(channel_numbers),
+            SUBSCRIPTION_NOTIFICATION_IDS,
+        )
+
+    async def identify(self, device) -> None:
+        await self.settings.identify(str(device.ipv4))
+
+    async def reboot(self, device) -> None:
+        await device.operations.reboot()
+
+    async def factory_reset(self, device) -> None:
+        await device.operations.factory_reset()
+
+    async def set_interface(self, device, mode: str, static_configuration: dict | None = None) -> list[dict] | None:
+        device_ip_address = str(device.ipv4)
+        if mode == "dhcp":
+            return await self.set_interface_dhcp(device_ip_address)
+        return await self.set_interface_static(
+            device_ip_address,
+            static_configuration["ip_address"],
+            static_configuration["netmask"],
+            static_configuration["dns_server"],
+            static_configuration["gateway"],
+        )
+
+    async def _query_settings_fields(self, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
+        tasks = [
+            self.probe_bluetooth_status(device)
+            for device in target_devices.values()
+            if device.ipv4 and device.model_id in BLUETOOTH_MODEL_IDS
+        ]
+        if not tasks:
+            return
+        for result in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, Exception):
+                logger.debug(f"Bluetooth status unavailable: {result}")
+
+    async def _query_conmon_all(self, timeout: float = 10.0, devices: dict | None = None) -> None:
+        target_devices = self.devices if devices is None else devices
+        deadline = time.monotonic() + timeout
+
+        incomplete_devices = []
+
+        for device in target_devices.values():
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                logger.debug("Conmon query timeout reached, skipping remaining devices")
+                break
+
+            device_ip = str(device.ipv4) if device.ipv4 else None
+
+            if not device_ip or not device.mac_address:
+                continue
+
+            waiter = self.notifications.register_conmon_waiter(device_ip)
+
+            try:
+                await self._send_conmon_query_for_device(device, self.settings.request_make_model)
+                await self._send_conmon_query_for_device(device, self.settings.request_dante_model)
+
+                per_device_timeout = min(remaining, 1.0)
+
+                try:
+                    await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
+                    logger.debug(f"Conmon responses received for {device.server_name}")
+                except asyncio.TimeoutError:
+                    logger.debug(f"Conmon query partial/timeout for {device.server_name}")
+                    received = self.notifications._conmon_received.get(device_ip, set())
+
+                    if len(received) < 2:
+                        incomplete_devices.append(device)
+            finally:
+                self.notifications.unregister_conmon_waiter(device_ip)
+
+        for retry in range(2):
+            if not incomplete_devices:
+                break
+
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                break
+
+            still_incomplete = []
+
+            for device in incomplete_devices:
+                remaining = deadline - time.monotonic()
+
+                if remaining <= 0:
+                    break
+
+                device_ip = str(device.ipv4)
+                needs_make_model = not device.dante_model
+                needs_dante_model = not device.dante_model_id
+                expected_count = int(needs_make_model) + int(needs_dante_model)
+
+                if expected_count == 0:
+                    continue
+
+                waiter = self.notifications.register_conmon_waiter(device_ip, expected_count=expected_count)
+
+                try:
+                    if needs_make_model:
+                        await self._send_conmon_query_for_device(device, self.settings.request_make_model)
+
+                    if needs_dante_model:
+                        await self._send_conmon_query_for_device(device, self.settings.request_dante_model)
+
+                    per_device_timeout = min(remaining, 2.0)
+
+                    try:
+                        await asyncio.wait_for(waiter.wait(), timeout=per_device_timeout)
+                        logger.debug(f"Conmon retry {retry + 1} succeeded for {device.server_name}")
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Conmon retry {retry + 1} timeout for {device.server_name}")
+
+                        if not device.dante_model_id:
+                            still_incomplete.append(device)
+                finally:
+                    self.notifications.unregister_conmon_waiter(device_ip)
+
+            incomplete_devices = still_incomplete
+
+    async def _send_conmon_query_for_device(self, device, request: Callable[[str, str], Awaitable[None]]) -> None:
+        from netaudio import core
+
+        if not device.ipv4 or not device.mac_address:
+            return
+
+        mac_hex = device.mac_address.replace(":", "").replace("-", "")
+
+        if len(mac_hex) == 16 and mac_hex[6:10].upper() == "FFFE":
+            mac_hex = mac_hex[:6] + mac_hex[10:]
+        elif len(mac_hex) == 16 and mac_hex.upper().endswith("0000"):
+            mac_hex = mac_hex[:12]
+
+        try:
+            await request(str(device.ipv4), mac_hex)
+        except (core.NetaudioCoreError, OSError) as exception:
+            logger.warning(f"Failed to send conmon {request.__name__} to {device.server_name}: {exception}")
+
+    async def probe_preferred_leader_state(self, device_ip_address: str, timeout: float = 2.0) -> bool | None:
+        return await self._probe_once(
+            "preferred_leader",
+            str(device_ip_address),
+            self.settings.probe_preferred_leader,
+            timeout,
+            "preferred leader",
+        )
+
+    async def probe_aes67_state(self, device_ip_address: str, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
+        return await self._probe_once(
+            "aes67",
+            str(device_ip_address),
+            self.settings.probe_aes67,
+            timeout,
+            "AES67 status",
+        )
+
+    def _device_by_ip(self, ip_str: str):
+        for device in self.devices.values():
+            if device.ipv4 and str(device.ipv4) == ip_str:
+                return device
+        return None

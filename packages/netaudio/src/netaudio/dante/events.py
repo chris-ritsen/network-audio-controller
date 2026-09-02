@@ -13,6 +13,7 @@ logger = logging.getLogger("netaudio")
 class EventType(Enum):
     DEVICE_DISCOVERED = auto()
     DEVICE_REMOVED = auto()
+    DEVICE_STATUS_RECEIVED = auto()
     DEVICE_UPDATED = auto()
     METER_VALUES = auto()
     NOTIFICATION_RECEIVED = auto()

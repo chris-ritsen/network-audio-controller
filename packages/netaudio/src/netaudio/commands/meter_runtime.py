@@ -41,13 +41,13 @@ async def _consume_events(
             model.connection_status = "disconnected"
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except (OSError, RuntimeError, TimeoutError, ValueError):
             model.connection_status = "reconnecting"
         try:
             cache = await cache_reader()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except (OSError, RuntimeError, TimeoutError, ValueError):
             cache = None
         if isinstance(cache, dict):
             for server_name, sample in cache.items():
@@ -501,14 +501,19 @@ async def _cleanup_meter_runtime(
         )
 
 
+@dataclass(frozen=True)
+class MeterViewOptions:
+    channel_patterns: list[str] | None = None
+    detailed: bool = False
+    no_color: bool = False
+    show_rx: bool = True
+    show_tx: bool = True
+
+
 async def run_meter_tui(
     devices: dict,
+    options: MeterViewOptions,
     *,
-    show_tx: bool,
-    show_rx: bool,
-    channel_patterns: list[str] | None,
-    detailed: bool,
-    no_color: bool,
     terminal: MeterTerminal | None = None,
     stream_factory: Callable[[], AsyncIterator[dict]] | None = None,
     cache_reader: Callable[[], Awaitable[dict[str, dict] | None]] | None = None,
@@ -524,16 +529,16 @@ async def run_meter_tui(
     terminal = terminal or MeterTerminal()
     model = MeterViewModel(
         devices,
-        show_tx=show_tx,
-        show_rx=show_rx,
-        channel_patterns=channel_patterns,
+        show_tx=options.show_tx,
+        show_rx=options.show_rx,
+        channel_patterns=options.channel_patterns,
     )
     viewport = MeterViewport()
     consumer = asyncio.create_task(_consume_events(model, stream_factory, cache_reader))
     client_id = f"meter_tui:{os.getpid()}:{uuid.uuid4().hex[:8]}"
-    metering = _MeteringState.create(devices, model, start_metering, client_id, detailed)
+    metering = _MeteringState.create(devices, model, start_metering, client_id, options.detailed)
     interaction = _MeterInteraction(model, viewport)
-    runtime = _MeterRuntime(terminal, metering, interaction, no_color)
+    runtime = _MeterRuntime(terminal, metering, interaction, options.no_color)
 
     try:
         await runtime.run()

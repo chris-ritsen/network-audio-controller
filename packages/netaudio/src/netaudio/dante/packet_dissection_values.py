@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import struct
 
-from netaudio.dante.packet_dissection_models import CONMON_MESSAGE_NAMES, DECIMAL_FIELD_NAMES, NANOSECOND_FIELD_NAMES
+from netaudio.dante.const import CONMON_MESSAGE_NAMES
+from netaudio.dante.packet_dissection_models import DECIMAL_FIELD_NAMES, NANOSECOND_FIELD_NAMES
 
 
 def _format_ns(value: int) -> str:

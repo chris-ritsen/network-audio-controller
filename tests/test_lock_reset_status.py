@@ -1,18 +1,18 @@
 import json
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 import netaudio._common as common_module
 from netaudio import core
-from netaudio.dante.application import DanteApplication
+from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
-from netaudio.dante.services.notification import DanteNotificationService
+from tests.status_test_support import application_with_device, count_events, receive_packets
 
 
 LOCK_RESET_STATUS_QUERY = bytes.fromhex("ffff002018c100003e42274cff240000417564696e617465073a100800000064")
@@ -139,35 +139,25 @@ def test_passive_lock_state_uses_presence_word_independently_of_status_code():
     assert parsed_unknown["is_locked"] is None
 
 
-def test_notification_service_tracks_passive_lock_transitions():
+def test_state_service_tracks_passive_lock_transitions():
     device_ip_address = "192.168.1.18"
-    device = DanteDevice(server_name="avio-aes3.local.")
-    device.name = "avio-aes3"
-    device.ipv4 = device_ip_address
-    dispatcher = MagicMock()
-    service = DanteNotificationService(
-        dispatcher=dispatcher,
-        device_lookup=lambda ip_address: device if ip_address == device_ip_address else None,
-    )
+    application, device = application_with_device("avio-aes3.local.", device_ip_address)
 
-    service._on_packet(AVIO_UNLOCKED_LOCK_RESET_STATUS, (device_ip_address, 8702))
+    events = receive_packets(application, [AVIO_UNLOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
     assert device.is_locked is False
-
-    service._on_packet(AVIO_LOCKED_LOCK_RESET_STATUS, (device_ip_address, 8702))
+    events += receive_packets(application, [AVIO_LOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
     assert device.is_locked is True
-
-    service._on_packet(A32_UNLOCKED_LOCK_RESET_STATUS, (device_ip_address, 8702))
+    events += receive_packets(application, [A32_UNLOCKED_LOCK_RESET_STATUS], (device_ip_address, 8702))
     assert device.is_locked is False
 
-    emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
-    assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 3
+    assert count_events(events, EventType.DEVICE_UPDATED) == 3
 
 
 @pytest.mark.asyncio
 async def test_lock_status_probe_waits_for_publication_observed_after_request():
     application = DanteApplication()
     device_ip_address = "10.0.2.15"
-    application.settings.probe_lock_reset_status = MagicMock(
+    application.settings.probe_lock_reset_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             A32_UNLOCKED_LOCK_RESET_STATUS,
             (ip_address, 8702),
@@ -179,27 +169,29 @@ async def test_lock_status_probe_waits_for_publication_observed_after_request():
     assert result.is_locked is False
     assert result.lock_state_code == 0
     assert datetime.fromisoformat(result.observed_at).tzinfo is not None
-    application.settings.probe_lock_reset_status.assert_called_once_with(device_ip_address)
-    assert not application.notifications._waiters.is_registered("lock_status", device_ip_address)
+    application.settings.probe_lock_reset_status.assert_awaited_once_with(device_ip_address)
+    assert not application.notifications.is_waiting("lock_status", device_ip_address)
 
 
 @pytest.mark.asyncio
 async def test_lock_status_probe_timeout_never_returns_a_previous_observation():
     application = DanteApplication()
     device_ip_address = "10.0.2.15"
-    application.notifications._waiters._results[("lock_status", device_ip_address)] = object()
-    application.settings.probe_lock_reset_status = MagicMock()
+    application.notifications._on_packet(A32_UNLOCKED_LOCK_RESET_STATUS, (device_ip_address, 8702))
+    application.settings.probe_lock_reset_status = AsyncMock()
 
-    result = await application.probe_lock_status(device_ip_address, timeout=0.001)
+    with pytest.raises(CapabilityProbeTimeout, match="lock status readback timed out"):
+        await application.probe_lock_status(device_ip_address, timeout=0.001)
 
-    assert result is None
-    assert not application.notifications._waiters.is_registered("lock_status", device_ip_address)
-    assert application.notifications.get_lock_status_result(device_ip_address) is None
+    assert not application.notifications.is_waiting("lock_status", device_ip_address)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("probe_result", [None, RuntimeError("socket unavailable")])
-async def test_enrich_lock_states_clears_cached_state_without_fresh_observation(monkeypatch, probe_result):
+@pytest.mark.parametrize(
+    "probe_result",
+    [CapabilityProbeTimeout("lock status readback timed out"), RuntimeError("socket unavailable")],
+)
+async def test_enrich_lock_states_clears_cached_state_without_fresh_observation(probe_result):
     device = DanteDevice(server_name="device.local.")
     device.name = "device"
     device.ipv4 = "192.0.2.10"
@@ -207,24 +199,19 @@ async def test_enrich_lock_states_clears_cached_state_without_fresh_observation(
 
     application = SimpleNamespace(
         devices={},
-        startup=AsyncMock(),
-        shutdown=AsyncMock(),
-        probe_lock_status=AsyncMock(
-            side_effect=probe_result if isinstance(probe_result, BaseException) else None,
-            return_value=None if isinstance(probe_result, BaseException) else probe_result,
-        ),
+        probe_lock_status=AsyncMock(side_effect=probe_result),
     )
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda: application)
 
-    await common_module._enrich_lock_states({device.server_name: device})
+    failures = await common_module._enrich_lock_states(application, {device.server_name: device})
 
     assert device.is_locked is None
+    assert "is_locked" in device.failed_queries
+    assert list(failures) == [device.server_name]
     application.probe_lock_status.assert_awaited_once_with("192.0.2.10", timeout=4.0)
-    application.shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_enrich_lock_states_applies_unknown_fresh_observation_without_packet_handler_side_effect(monkeypatch):
+async def test_enrich_lock_states_applies_unknown_fresh_observation_without_packet_handler_side_effect():
     device = DanteDevice(server_name="device.local.")
     device.name = "device"
     device.ipv4 = "192.0.2.10"
@@ -232,68 +219,40 @@ async def test_enrich_lock_states_applies_unknown_fresh_observation_without_pack
     observation = SimpleNamespace(is_locked=None)
     application = SimpleNamespace(
         devices={},
-        startup=AsyncMock(),
-        shutdown=AsyncMock(),
         probe_lock_status=AsyncMock(return_value=observation),
     )
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda: application)
 
-    await common_module._enrich_lock_states({device.server_name: device})
+    failures = await common_module._enrich_lock_states(application, {device.server_name: device})
 
     assert device.is_locked is None
-    application.shutdown.assert_awaited_once()
+    assert failures == {}
 
 
-@pytest.mark.asyncio
-async def test_single_lock_status_probe_fails_closed_and_shuts_down_after_startup_error(monkeypatch):
-    application = SimpleNamespace(
-        startup=AsyncMock(side_effect=RuntimeError("bind failed")),
-        shutdown=AsyncMock(),
-        probe_lock_status=AsyncMock(),
-    )
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda: application)
-
-    result = await common_module._probe_lock_status_once("192.0.2.10")
-
-    assert result is None
-    application.probe_lock_status.assert_not_awaited()
-    application.shutdown.assert_awaited_once()
-
-
-def test_notification_service_applies_lock_reset_status_once_and_serializes_it():
+def test_state_service_applies_lock_reset_status_once_and_serializes_it():
     device_ip_address = "192.168.1.18"
-    device = DanteDevice(server_name="virtual-a32.local.")
-    device.name = "virtual-a32"
-    device.ipv4 = device_ip_address
-    dispatcher = MagicMock()
-    service = DanteNotificationService(
-        dispatcher=dispatcher,
-        device_lookup=lambda ip_address: device if ip_address == device_ip_address else None,
-    )
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
     response = LOCK_RESET_STATUS_FOUR
     expected = core.parse_response("lock_reset_status", response)
 
-    service._on_packet(response, (device_ip_address, 8702))
-    service._on_packet(response, (device_ip_address, 8702))
+    events = receive_packets(application, [response, response], (device_ip_address, 8702))
 
     assert device.lock_reset_status == expected
     assert device.is_locked is False
-    emitted_events = [call.args[0] for call in dispatcher.emit_nowait.call_args_list]
-    assert sum(event.type == EventType.DEVICE_UPDATED for event in emitted_events) == 1
+    assert count_events(events, EventType.DEVICE_UPDATED) == 1
     serialized = DanteDeviceSerializer.to_json(device)
     assert serialized["lock_reset_status"] == expected
     restored = DanteDeviceSerializer.device_from_json(json.loads(json.dumps(serialized)))
     assert restored.lock_reset_status == expected
 
 
-def test_notification_service_applies_status_received_before_discovery():
+def test_state_service_applies_status_received_before_discovery():
     device_ip_address = "10.0.2.15"
-    service = DanteNotificationService(dispatcher=MagicMock())
-    service._on_packet(LOCK_RESET_STATUS_ZERO, (device_ip_address, 8702))
+    application = DanteApplication()
+    receive_packets(application, [LOCK_RESET_STATUS_ZERO], (device_ip_address, 8702))
     device = DanteDevice(server_name="virtual-a32.local.")
     device.ipv4 = device_ip_address
 
-    service.apply_pending_for_device(device)
+    application.register_device(device.server_name, device)
 
     assert device.lock_reset_status == core.parse_response("lock_reset_status", LOCK_RESET_STATUS_ZERO)
     assert device.is_locked is False

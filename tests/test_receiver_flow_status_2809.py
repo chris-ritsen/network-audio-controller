@@ -102,24 +102,14 @@ def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
 
 @pytest.mark.asyncio
 async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_rejection():
-    successful_device = SimpleNamespace(
-        commands=DanteDeviceCommands(),
-        dante_command=AsyncMock(return_value=_packet(0x3600, 4)),
-    )
+    successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 4)))
     successful_operation = DanteDeviceOperations(successful_device)
 
     page = await successful_operation.query_receiver_flow_status_2809()
 
     assert page["flows"][0]["destination_internet_protocol_version_four_address"] == "192.168.1.61"
-    command_arguments = successful_device.commands.command_query_receiver_flow_status_2809()
-    successful_device.dante_command.assert_awaited_once_with(
-        *command_arguments,
-        logical_command_name="query_receiver_flow_status_2809",
-    )
+    successful_device.execute.assert_awaited_once_with({"command": "query_receiver_flow_status_2809"})
 
-    rejected_device = SimpleNamespace(
-        commands=DanteDeviceCommands(),
-        dante_command=AsyncMock(return_value=_packet(0x3600, 14)),
-    )
+    rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 14)))
     with pytest.raises(RuntimeError, match="result 0x0030"):
         await DanteDeviceOperations(rejected_device).query_receiver_flow_status_2809()

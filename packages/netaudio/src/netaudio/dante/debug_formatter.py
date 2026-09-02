@@ -1,5 +1,3 @@
-import struct
-import sys
 from functools import lru_cache
 
 from netaudio.common.app_config import settings as app_settings
@@ -7,6 +5,24 @@ from netaudio.dante.clean_labels import (
     load_clean_labels,
     load_clean_subscription_status_labels,
 )
+from netaudio.dante.const import (
+    ARC_PROTOCOL_IDS,
+    BUILTIN_ARC_OPCODE_NAMES,
+    BUILTIN_OPCODE_NAMES,
+    PROTOCOL_NAMES,
+    RESULT_CODE_NAMES,
+)
+
+__all__ = [
+    "Colors",
+    "PROTOCOL_NAMES",
+    "RESULT_CODE_NAMES",
+    "get_opcode_name",
+    "get_settings_message_type_name",
+    "get_string_at_offset",
+    "get_subscription_status_name",
+    "get_subscription_status_state",
+]
 
 
 class Colors:
@@ -53,30 +69,6 @@ class Colors:
 
 C = Colors()
 
-PROTOCOL_NAMES = {
-    0x1200: "PROTOCOL_CMC",
-    0x2729: "PROTOCOL_ARC_2729",
-    0x27FF: "PROTOCOL_ARC",
-    0x2801: "PROTOCOL_ARC_2801",
-    0x2809: "PROTOCOL_ARC_SETTINGS",
-    0xFFFF: "PROTOCOL_SETTINGS",
-}
-
-OPCODE_NAMES_BY_PROTOCOL = {}
-SETTINGS_MESSAGE_TYPE_NAMES = {}
-BUILTIN_ARC_OPCODE_NAMES = {
-    0x1000: "channel_count",
-    0x1002: "device_name",
-    0x2000: "transmitter_channels",
-    0x2010: "transmitter_channel_names",
-    0x3000: "receiver_channels",
-}
-BUILTIN_OPCODE_NAMES = {
-    (0x2809, 0x1001): "set_device_name",
-    (0x2809, 0x3400): "receiver_channel_status",
-    (0x2809, 0x3600): "receiver_flow_status",
-}
-
 
 @lru_cache(maxsize=1)
 def _external_labels():
@@ -94,9 +86,8 @@ def get_opcode_name(protocol, opcode):
     if external_label:
         return external_label
 
-    arc_protocols = (0x2729, 0x27FF, 0x2801, 0x2809)
-    if protocol in arc_protocols:
-        for fallback_protocol in arc_protocols:
+    if protocol in ARC_PROTOCOL_IDS:
+        for fallback_protocol in ARC_PROTOCOL_IDS:
             if fallback_protocol != protocol:
                 external_label = opcode_labels.get((fallback_protocol, opcode))
                 if external_label:
@@ -116,13 +107,6 @@ def get_settings_message_type_name(message_type):
         return external_label
 
     return f"msg:0x{message_type:04X}"
-
-
-RESULT_NAMES = {
-    0x0001: "RESULT_CODE_SUCCESS",
-    0x0022: "RESULT_CODE_ERROR",
-    0x8112: "RESULT_CODE_SUCCESS_EXTENDED",
-}
 
 
 def get_subscription_status_name(status_code):
@@ -167,262 +151,3 @@ def get_string_at_offset(data: bytes, offset: int) -> str:
         end = len(data)
 
     return data[offset:end].decode("utf-8", errors="replace")
-
-
-def format_hex(data: bytes) -> str:
-    return " ".join(f"{b:02X}" for b in data)
-
-
-def print_field(offset: int, length: int, raw: bytes, name: str, value: str, color: str = None):
-    if color is None:
-        color = C.WHITE
-    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
-    hex_str = format_hex(raw)
-    print(f"  {offset_str} {hex_str:20s}  {color}{name:28s}{C.RESET} = {value}", file=sys.stderr)
-
-
-def print_const(offset: int, length: int, raw: bytes, const_name: str):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
-    hex_str = f"{C.YELLOW}{C.BOLD}{format_hex(raw)}{C.RESET}"
-    print(f"  {offset_str} {hex_str:30s}  {C.YELLOW}{const_name}{C.RESET}", file=sys.stderr)
-
-
-def print_pointer(offset: int, length: int, raw: bytes, name: str, ptr_value: int, body: bytes):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
-    hex_str = f"{C.MAGENTA}{format_hex(raw)}{C.RESET}"
-
-    string_offset = ptr_value - 10
-
-    if 0 <= string_offset < len(body):
-        resolved = get_string_at_offset(body, string_offset)
-
-        if resolved:
-            end_offset = string_offset + len(resolved)
-            string_bytes = body[string_offset:end_offset]
-            string_hex = format_hex(string_bytes)
-
-            ptr_str = f'{C.DIM}-> @{ptr_value}:{C.RESET} {C.DIM}{string_hex}{C.RESET} {C.CYAN}"{resolved}"{C.RESET}'
-        else:
-            ptr_str = f"{C.DIM}-> @{ptr_value} (empty){C.RESET}"
-    else:
-        ptr_str = f"{C.DIM}-> @{ptr_value}{C.RESET}"
-
-    print(f"  {offset_str} {hex_str:30s}  {C.MAGENTA}{name:28s}{C.RESET} {ptr_str}", file=sys.stderr)
-
-
-def print_record_separator(num: int, record_type: str):
-    print(f"\n  {C.BLUE}{C.BOLD}Record {num}{C.RESET} {C.DIM}({record_type}){C.RESET}", file=sys.stderr)
-
-
-def print_sample_rate_offset(offset: int, length: int, raw: bytes, name: str, offset_value: int, body: bytes):
-    offset_str = f"{C.DIM}[{offset:3d}:{offset + length:3d}]{C.RESET}"
-    hex_str = f"{C.MAGENTA}{format_hex(raw)}{C.RESET}"
-
-    body_offset = offset_value - 10
-
-    if 0 <= body_offset and body_offset + 4 <= len(body):
-        sample_rate_bytes = body[body_offset : body_offset + 4]
-        sample_rate = struct.unpack(">I", sample_rate_bytes)[0]
-        raw_hex = format_hex(sample_rate_bytes)
-        result_str = f"{C.DIM}-> @{offset_value}:{C.RESET} {C.DIM}{raw_hex}{C.RESET} {C.CYAN}{sample_rate} Hz{C.RESET}"
-    else:
-        result_str = f"{C.DIM}-> @{offset_value} (out of bounds){C.RESET}"
-
-    print(f"  {offset_str} {hex_str:30s}  {C.MAGENTA}{name:28s}{C.RESET} {result_str}", file=sys.stderr)
-
-
-def format_hex_dump(data: bytes, highlights: list = None, bytes_per_line: int = 16):
-    if highlights is None:
-        highlights = []
-
-    for line_start in range(0, len(data), bytes_per_line):
-        line_end = min(line_start + bytes_per_line, len(data))
-        result = []
-
-        for i in range(line_start, line_end):
-            color = C.DIM
-            for start, end, c in highlights:
-                if start <= i < end:
-                    color = c
-                    break
-            result.append(f"{color}{data[i]:02X}{C.RESET}")
-
-        print(f"  {' '.join(result)}", file=sys.stderr)
-
-
-def format_channel_count_body(body: bytes):
-    print(f"\n  {C.DIM}Parsed (Channel Count):{C.RESET}", file=sys.stderr)
-
-    if len(body) < 14:
-        return
-
-    unknown0 = struct.unpack(">H", body[0:2])[0]
-    tx = struct.unpack(">H", body[2:4])[0]
-    rx = struct.unpack(">H", body[4:6])[0]
-    unknown1 = struct.unpack(">H", body[6:8])[0]
-    unknown2 = struct.unpack(">H", body[8:10])[0]
-    unknown3 = struct.unpack(">H", body[10:12])[0]
-    unknown4 = struct.unpack(">H", body[12:14])[0]
-
-    print_field(10, 2, body[0:2], "unknown", f"0x{unknown0:04X}", C.DIM)
-    print_field(12, 2, body[2:4], "tx_count", str(tx), C.BLUE)
-    print_field(14, 2, body[4:6], "rx_count", str(rx), C.BLUE)
-    print_field(16, 2, body[6:8], "unknown", f"0x{unknown1:04X}", C.DIM)
-    print_field(18, 2, body[8:10], "unknown", f"0x{unknown2:04X}", C.DIM)
-    print_field(20, 2, body[10:12], "unknown", f"0x{unknown3:04X}", C.DIM)
-    print_field(22, 2, body[12:14], "unknown", f"0x{unknown4:04X}", C.DIM)
-
-
-def format_tx_friendly_names_body(body: bytes):
-    print(f"\n  {C.DIM}Parsed (TX Channel Friendly Names):{C.RESET}", file=sys.stderr)
-
-    if len(body) < 2:
-        return
-
-    record_size = 6
-    header_size = 2
-    record_start = header_size
-    record_index = 0
-    last_channel = None
-
-    while record_start + record_size <= len(body):
-        record = body[record_start : record_start + record_size]
-        channel_num = struct.unpack(">H", record[0:2])[0]
-
-        if channel_num == 0:
-            break
-
-        if last_channel is not None and channel_num != last_channel + 1:
-            break
-
-        name_ptr = struct.unpack(">H", record[4:6])[0]
-
-        if name_ptr < 10 + record_start + record_size:
-            break
-
-        unknown = struct.unpack(">H", record[2:4])[0]
-
-        print_record_separator(record_index + 1, "TX Channel")
-        print_field(10 + record_start, 2, record[0:2], "channel_number", str(channel_num), C.BLUE)
-        print_field(10 + record_start + 2, 2, record[2:4], "unknown", f"0x{unknown:04X}", C.DIM)
-        print_pointer(10 + record_start + 4, 2, record[4:6], "name_offset", name_ptr, body)
-
-        last_channel = channel_num
-        record_start += record_size
-        record_index += 1
-
-
-def format_tx_channels_body(body: bytes):
-    print(f"\n  {C.DIM}Parsed (TX Channels):{C.RESET}", file=sys.stderr)
-
-    if len(body) < 2:
-        return
-
-    record_size = 8
-    header_size = 2
-    record_start = header_size
-    record_index = 0
-    last_channel = None
-    first_channel_group = None
-
-    while record_start + record_size <= len(body):
-        record = body[record_start : record_start + record_size]
-        channel_num = struct.unpack(">H", record[0:2])[0]
-
-        if channel_num == 0:
-            break
-
-        if last_channel is not None and channel_num != last_channel + 1:
-            break
-
-        name_ptr = struct.unpack(">H", record[6:8])[0]
-
-        if name_ptr > 0 and name_ptr < 10 + record_start + record_size:
-            break
-
-        unknown = struct.unpack(">H", record[2:4])[0]
-        channel_group = struct.unpack(">H", record[4:6])[0]
-
-        if first_channel_group is None:
-            first_channel_group = channel_group
-
-        if channel_group != first_channel_group:
-            break
-
-        print_record_separator(record_index + 1, "TX Channel")
-        print_field(10 + record_start, 2, record[0:2], "channel_number", str(channel_num), C.BLUE)
-        print_field(10 + record_start + 2, 2, record[2:4], "unknown", f"0x{unknown:04X}", C.DIM)
-
-        print_sample_rate_offset(10 + record_start + 4, 2, record[4:6], "sample_rate_offset", channel_group, body)
-
-        print_pointer(10 + record_start + 6, 2, record[6:8], "name_offset", name_ptr, body)
-
-        last_channel = channel_num
-        record_start += record_size
-        record_index += 1
-
-
-def format_rx_channels_body(body: bytes):
-    print(f"\n  {C.DIM}Parsed (RX Channels):{C.RESET}", file=sys.stderr)
-
-    if len(body) < 2:
-        return
-
-    record_size = 20
-    header_size = 2
-    record_start = header_size
-    record_index = 0
-    last_channel = None
-
-    while record_start + record_size <= len(body):
-        record = body[record_start : record_start + record_size]
-        channel_num = struct.unpack(">H", record[0:2])[0]
-
-        if channel_num == 0:
-            break
-
-        if last_channel is not None and channel_num != last_channel + 1:
-            break
-
-        rx_channel_ptr = struct.unpack(">H", record[10:12])[0]
-
-        if rx_channel_ptr > 0 and rx_channel_ptr < 10 + record_start + record_size:
-            break
-
-        unknown = struct.unpack(">H", record[2:4])[0]
-        sample_rate_offset_val = struct.unpack(">H", record[4:6])[0]
-        tx_channel_offset = struct.unpack(">H", record[6:8])[0]
-        tx_device_offset = struct.unpack(">H", record[8:10])[0]
-        status = struct.unpack(">H", record[12:14])[0]
-        sub_status = struct.unpack(">H", record[14:16])[0]
-
-        print_record_separator(record_index + 1, "RX Channel")
-        print_field(10 + record_start, 2, record[0:2], "channel_number", str(channel_num), C.BLUE)
-        print_field(10 + record_start + 2, 2, record[2:4], "unknown", f"0x{unknown:04X}", C.DIM)
-
-        if record_index == 0 and tx_device_offset != 0:
-            print_sample_rate_offset(
-                10 + record_start + 4, 2, record[4:6], "sample_rate_offset", sample_rate_offset_val, body
-            )
-        else:
-            print_field(10 + record_start + 4, 2, record[4:6], "unknown", f"0x{sample_rate_offset_val:04X}", C.DIM)
-
-        print_pointer(10 + record_start + 6, 2, record[6:8], "tx_channel_offset", tx_channel_offset, body)
-        print_pointer(10 + record_start + 8, 2, record[8:10], "tx_device_offset", tx_device_offset, body)
-        print_pointer(10 + record_start + 10, 2, record[10:12], "rx_channel_offset", rx_channel_ptr, body)
-        print_field(10 + record_start + 12, 2, record[12:14], "status", f"0x{status:04X}", C.DIM)
-
-        sub_name = get_subscription_status_name(sub_status)
-        sub_state = get_subscription_status_state(sub_status)
-
-        if sub_state == "connected":
-            print(
-                f"  {C.DIM}[{10 + record_start + 14:3d}:{10 + record_start + 16:3d}]{C.RESET} {C.GREEN}{C.BOLD}{format_hex(record[14:16])}{C.RESET}  {C.GREEN}subscription_status          {C.RESET} = {sub_name}",
-                file=sys.stderr,
-            )
-        else:
-            print_field(10 + record_start + 14, 2, record[14:16], "subscription_status", sub_name, C.YELLOW)
-
-        last_channel = channel_num
-        record_start += record_size
-        record_index += 1

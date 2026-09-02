@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Awaitable, Callable
 
+from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
 
 
@@ -375,7 +376,7 @@ async def capture_sample_rate_topology(
 ) -> SampleRateTopologySnapshot:
     try:
         await device.get_rx_channels()
-    except Exception as exception:
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyReadbackError(f"fresh receiver inventory failed: {exception}") from exception
     receiver_channel_numbers = set(device.rx_channels)
     expected_receiver_channel_numbers = set(range(1, capacity.receive_channel_count + 1))
@@ -582,7 +583,7 @@ async def change_sample_rate_topology_safe(
         )
     try:
         await mutate()
-    except Exception as exception:
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyMutationOutcomeUnknownError(
             f"sample-rate mutation failed after it was attempted; device state is unknown: {exception}",
             preflight,
@@ -602,7 +603,7 @@ async def change_sample_rate_topology_safe(
         resulting_capacity = _capacity_for_rate(device, observed_sample_rate_hertz)
         resulting_snapshot = await capture_sample_rate_topology(device, resulting_capacity)
         _verify_resulting_topology(preflight, resulting_snapshot)
-    except Exception as exception:
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyChangedButUnverifiedError(
             f"sample-rate change was sent, but complete post-write verification failed: {exception}",
             preflight,
@@ -616,29 +617,3 @@ async def change_sample_rate_topology_safe(
         observed_supported_sample_rates_hertz=observed_supported_sample_rates_hertz,
         resulting_snapshot=resulting_snapshot,
     )
-
-
-async def change_sample_rate_with_command_sender(
-    sender,
-    device,
-    sample_rate_hertz: int,
-    confirm_destructive: bool = False,
-    timeout: float = 4.0,
-) -> SampleRateTopologyChangeResult:
-    device_ip_address = str(device.ipv4)
-
-    async def probe():
-        return await sender.probe_sample_rate_status(device_ip_address, timeout=timeout)
-
-    async def mutate():
-        packet, _, port = device.commands.command_set_sample_rate(sample_rate_hertz)
-        await sender(packet, device_ip_address, port, expect_response=False)
-
-    async with device.topology_mutation_lock:
-        return await change_sample_rate_topology_safe(
-            device,
-            sample_rate_hertz,
-            probe,
-            mutate,
-            confirm_destructive=confirm_destructive,
-        )

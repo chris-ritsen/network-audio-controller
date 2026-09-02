@@ -1,9 +1,9 @@
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from netaudio._common import CapabilityProbeTimeout, CoreCommandSender
+from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio import core
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
@@ -91,16 +91,16 @@ def test_notification_waiter_returns_typed_link_status():
         dispatcher=DanteEventDispatcher(),
         device_lookup=lambda address: device if address == device_ip_address else None,
     )
-    waiter = service.register_link_status_waiter(device_ip_address)
+    waiter = service.register_waiter("link_status", device_ip_address)
 
     service._on_packet(LX_DANTE_PACKET, (device_ip_address, 8702))
 
     assert waiter.is_set()
-    result = service.get_link_status_result(device_ip_address)
+    result = waiter.latest_result
     assert isinstance(result, LinkStatusObservation)
     assert result.records[0].record_size_bytes == 52
     assert result.records[0].label is None
-    service.unregister_link_status_waiter(device_ip_address)
+    service.unregister_waiter(waiter)
 
 
 def test_notification_waiter_ignores_link_status_from_another_source():
@@ -109,13 +109,13 @@ def test_notification_waiter_ignores_link_status_from_another_source():
         dispatcher=DanteEventDispatcher(),
         device_lookup=lambda address: _device("AD4D", address),
     )
-    waiter = service.register_link_status_waiter(device_ip_address)
+    waiter = service.register_waiter("link_status", device_ip_address)
 
     service._on_packet(AD4D_PACKET, ("192.0.2.11", 8702))
 
     assert not waiter.is_set()
-    assert service.get_link_status_result(device_ip_address) is None
-    service.unregister_link_status_waiter(device_ip_address)
+    assert waiter.latest_result is None
+    service.unregister_waiter(waiter)
 
 
 @pytest.mark.asyncio
@@ -124,7 +124,7 @@ async def test_application_probe_waits_for_link_status_publication():
     device_ip_address = "192.0.2.10"
     device = _device("A32 Dante AD/DA Converter", device_ip_address)
     application.devices[device.server_name] = device
-    application.settings.probe_link_status = MagicMock(
+    application.settings.probe_link_status = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(A32_PACKET, (address, 8702))
     )
 
@@ -134,38 +134,19 @@ async def test_application_probe_waits_for_link_status_publication():
     assert result.records[0].label == "selected_link"
     assert result.records[1].label == "switch_port_0"
     assert result.records[2].label == "switch_port_3"
-    application.settings.probe_link_status.assert_called_once_with(device_ip_address)
-    assert not application.notifications._waiters.is_registered("link_status", device_ip_address)
+    application.settings.probe_link_status.assert_awaited_once_with(device_ip_address)
+    assert not application.notifications.is_waiting("link_status", device_ip_address)
 
 
 @pytest.mark.asyncio
-async def test_application_probe_timeout_returns_no_snapshot_and_unregisters_waiter():
+async def test_application_probe_timeout_raises_and_unregisters_waiter():
     application = DanteApplication()
     device_ip_address = "192.0.2.10"
-    application.notifications._waiters._results[("link_status", device_ip_address)] = object()
-    application.settings.probe_link_status = MagicMock()
-
-    result = await application.probe_link_status(device_ip_address, timeout=0.01)
-
-    assert result is None
-    application.settings.probe_link_status.assert_called_once_with(device_ip_address)
-    assert not application.notifications._waiters.is_registered("link_status", device_ip_address)
-    assert application.notifications.get_link_status_result(device_ip_address) is None
-
-
-@pytest.mark.asyncio
-async def test_core_command_sender_timeout_raises_and_unregisters_waiter():
-    class NoResponseCoreCommandSender(CoreCommandSender):
-        async def __call__(self, packet, device_ip_address, port, **request_options):
-            return None
-
-    device_ip_address = "192.0.2.10"
-    sender = NoResponseCoreCommandSender()
-    sender._notifications = DanteNotificationService(dispatcher=DanteEventDispatcher())
-    sender._notifications._waiters._results[("link_status", device_ip_address)] = object()
+    application.notifications._on_packet(A32_PACKET, (device_ip_address, 8702))
+    application.settings.probe_link_status = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="link status readback timed out"):
-        await sender.probe_link_status(device_ip_address, timeout=0.01)
+        await application.probe_link_status(device_ip_address, timeout=0.01)
 
-    assert not sender._notifications._waiters.is_registered("link_status", device_ip_address)
-    assert sender._notifications.get_link_status_result(device_ip_address) is None
+    application.settings.probe_link_status.assert_awaited_once_with(device_ip_address)
+    assert not application.notifications.is_waiting("link_status", device_ip_address)

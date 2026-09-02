@@ -461,7 +461,7 @@ class ShureManager:
             if connection is not None:
                 await connection.close()
             raise
-        except Exception as exception:
+        except (OSError, TimeoutError) as exception:
             if connection is not None:
                 await connection.close()
             logger.debug(f"Failed to connect Shure device {ip_address}: {exception}")

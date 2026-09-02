@@ -59,7 +59,7 @@ class DaemonConfigurationHandlers:
         if not isinstance(expected, bool):
             await self._send_json(writer, {"error": "preferred must be a boolean"}, 400)
             return
-        observed = await self.application.set_preferred_leader_state(str(device.ipv4), expected)
+        observed = await self.application.set_preferred_leader(device, expected)
         if observed is None:
             await self._send_json(writer, {"error": "preferred leader readback was unavailable"}, 504)
             return
@@ -81,7 +81,7 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": "clock_source must be an integer from 0 through 65535"}, 400)
             return
         try:
-            observed = await self.application.set_clock_source_state(device, clock_source)
+            observed = await self.application.set_clock_source(device, clock_source)
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
@@ -113,7 +113,7 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": str(exception)}, 400)
             return
         try:
-            observed = await self.application.set_clock_subdomain_state(device, requested)
+            observed = await self.application.set_clock_subdomain(device, requested)
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
@@ -171,7 +171,7 @@ class DaemonConfigurationHandlers:
         if not isinstance(expected, bool):
             await self._send_json(writer, {"error": "enabled must be a boolean"}, 400)
             return
-        result = await self.application.set_aes67_state(device, expected)
+        result = await self.application.set_aes67_enabled(device, expected)
         configured = result[1] if result is not None else None
         if configured is None:
             await self._send_json(writer, {"error": "AES67 readback was unavailable"}, 504)
@@ -204,7 +204,7 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": "prefix must be an IPv4 address"}, 400)
             return
         try:
-            observed = await self.application.set_aes67_multicast_prefix_state(device, prefix)
+            observed = await self.application.set_aes67_multicast_prefix(device, prefix)
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
@@ -241,7 +241,7 @@ class DaemonConfigurationHandlers:
             )
             return
         try:
-            result = await self.application.set_sample_rate_pullup_state(device, raw_value)
+            result = await self.application.set_sample_rate_pullup(device, raw_value)
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return

@@ -98,7 +98,7 @@ def _open_trusted_evidence_root(path: Path) -> TrustedEvidenceRoot:
             path=absolute_path,
             file_descriptor=directory_descriptor,
         )
-    except Exception:
+    except BaseException:
         os.close(directory_descriptor)
         raise
 

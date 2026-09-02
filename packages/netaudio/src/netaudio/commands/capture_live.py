@@ -25,14 +25,14 @@ from netaudio.commands.capture_helpers import (
 from netaudio.capture.packets import _label_packet, _print_packet_table_header
 from netaudio.common.app_config import get_available_interfaces
 from netaudio.common.app_config import settings as app_settings
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketRecord, PacketStore
 from netaudio.icons import icon
 
 
 async def _replay_packet(
     packet_id: int, store: PacketStore, interface: str, tshark_duration: float, dump: bool = False
 ):
-    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.capture.daemon import PacketLine, _print_packet_line
     from netaudio.dante.tshark_capture import TsharkCapture
 
     packet = store.get_packet(packet_id)
@@ -104,15 +104,17 @@ async def _replay_packet(
     local_port = send_socket.getsockname()[1]
 
     sent_id = store.store_packet(
-        payload=payload,
-        source_type="replay_request",
-        src_ip=local_ip,
-        src_port=local_port,
-        dst_ip=destination_ip,
-        dst_port=destination_port,
-        device_ip=destination_ip,
-        direction="request",
-        timestamp_ns=send_timestamp,
+        PacketRecord(
+            payload=payload,
+            source_type="replay_request",
+            src_ip=local_ip,
+            src_port=local_port,
+            dst_ip=destination_ip,
+            dst_port=destination_port,
+            device_ip=destination_ip,
+            direction="request",
+            timestamp_ns=send_timestamp,
+        )
     )
 
     print("Packets")
@@ -120,14 +122,16 @@ async def _replay_packet(
 
     if sent_id:
         _print_packet_line(
-            sent_id,
-            send_timestamp,
-            local_ip,
-            local_port,
-            destination_ip,
-            destination_port,
-            "request",
-            payload,
+            PacketLine(
+                destination_ip=destination_ip,
+                destination_port=destination_port,
+                direction="request",
+                packet_id=sent_id,
+                payload=payload,
+                source_ip=local_ip,
+                source_port=local_port,
+                timestamp_ns=send_timestamp,
+            ),
             dump=dump,
         )
 
@@ -137,27 +141,31 @@ async def _replay_packet(
         reply_ip, reply_port = reply_addr
 
         reply_id = store.store_packet(
-            payload=reply_data,
-            source_type="replay_response",
-            src_ip=reply_ip,
-            src_port=reply_port,
-            dst_ip=local_ip,
-            dst_port=local_port,
-            device_ip=reply_ip,
-            direction="response",
-            timestamp_ns=reply_timestamp,
+            PacketRecord(
+                payload=reply_data,
+                source_type="replay_response",
+                src_ip=reply_ip,
+                src_port=reply_port,
+                dst_ip=local_ip,
+                dst_port=local_port,
+                device_ip=reply_ip,
+                direction="response",
+                timestamp_ns=reply_timestamp,
+            )
         )
 
         if reply_id:
             _print_packet_line(
-                reply_id,
-                reply_timestamp,
-                reply_ip,
-                reply_port,
-                local_ip,
-                local_port,
-                "response",
-                reply_data,
+                PacketLine(
+                    destination_ip=local_ip,
+                    destination_port=local_port,
+                    direction="response",
+                    packet_id=reply_id,
+                    payload=reply_data,
+                    source_ip=reply_ip,
+                    source_port=reply_port,
+                    timestamp_ns=reply_timestamp,
+                ),
                 dump=dump,
             )
     except socket.timeout:
@@ -175,14 +183,16 @@ async def _replay_packet(
 
         for captured_packet_id, fields in received_packets:
             _print_packet_line(
-                captured_packet_id,
-                fields.get("timestamp_ns", time.time_ns()),
-                fields.get("src_ip", "?"),
-                fields.get("src_port", 0),
-                fields.get("dst_ip", "?"),
-                fields.get("dst_port", 0),
-                fields.get("direction"),
-                fields.get("payload", b""),
+                PacketLine(
+                    destination_ip=fields.get("dst_ip", "?"),
+                    destination_port=fields.get("dst_port", 0),
+                    direction=fields.get("direction"),
+                    packet_id=captured_packet_id,
+                    payload=fields.get("payload", b""),
+                    source_ip=fields.get("src_ip", "?"),
+                    source_port=fields.get("src_port", 0),
+                    timestamp_ns=fields.get("timestamp_ns", time.time_ns()),
+                ),
                 dump=dump,
             )
 
@@ -254,7 +264,7 @@ def live(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.capture.daemon import CaptureDaemon
+    from netaudio.capture.daemon import CaptureDaemon, CaptureDaemonOptions
 
     from netaudio.cli import state as cli_state
 
@@ -309,26 +319,28 @@ def live(
     resolved_ingress_stream = _coalesce(ingress_stream, capture_cfg.get("ingress_stream"))
 
     daemon = CaptureDaemon(
-        db_path=resolved_db,
-        interface=resolved_interface,
-        use_tshark=tshark,
-        use_multicast=multicast,
-        device_filter=device or [],
-        opcode_filter=opcode or [],
-        export_dir=export_dir,
-        live=show,
-        dump=dump,
-        dissect=cli_state.dissect,
-        metering=metering,
-        tcp=tcp,
-        session_id=session_id,
-        session_name=session_name,
-        redis_host=resolved_redis_host,
-        redis_port=resolved_redis_port,
-        redis_db=resolved_redis_db,
-        redis_password=resolved_redis_password,
-        redis_socket=resolved_redis_socket,
-        ingress_stream=str(resolved_ingress_stream) if resolved_ingress_stream is not None else None,
+        CaptureDaemonOptions(
+            db_path=resolved_db,
+            device_filter=device or [],
+            dissect=cli_state.dissect,
+            dump=dump,
+            export_dir=export_dir,
+            ingress_stream=str(resolved_ingress_stream) if resolved_ingress_stream is not None else None,
+            interface=resolved_interface,
+            live=show,
+            metering=metering,
+            opcode_filter=opcode or [],
+            redis_db=resolved_redis_db,
+            redis_host=resolved_redis_host,
+            redis_password=resolved_redis_password,
+            redis_port=resolved_redis_port,
+            redis_socket=resolved_redis_socket,
+            session_id=session_id,
+            session_name=session_name,
+            tcp=tcp,
+            use_multicast=multicast,
+            use_tshark=tshark,
+        )
     )
 
     original_sigint = signal.getsignal(signal.SIGINT)

@@ -1,18 +1,24 @@
 import asyncio
 import struct
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+
+from netaudio import core
+from netaudio.dante.application import CapabilityProbeTimeout
+from tests.status_test_support import application_with_device, deliver_status_events, receive_packets
 
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.services.notification import (
+from netaudio.dante.const import (
     CONMON_CLOCK_PORT_STATE_OFFSET,
     CONMON_OPCODE_PTP_CLOCK_STATUS,
     CONMON_PREFERRED_LEADER_OFFSET,
+)
+from netaudio.dante.services.notification import (
     DanteNotificationService,
 )
 
@@ -115,14 +121,13 @@ class TestPreferredLeaderFromConmon0x0020:
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.34"
 
-        waiter = service.register_preferred_leader_waiter(device_ip)
+        waiter = service.register_waiter("preferred_leader", device_ip)
         packet = self._build_conmon_0020_packet(0x01)
         service._on_packet(packet, (device_ip, 1030))
 
         await asyncio.wait_for(waiter.wait(), timeout=1)
-        result = service.get_preferred_leader_result(device_ip)
-        assert result is True
-        service.unregister_preferred_leader_waiter(device_ip)
+        assert waiter.latest_result is True
+        service.unregister_waiter(waiter)
 
     @pytest.mark.asyncio
     async def test_preferred_leader_off(self):
@@ -130,103 +135,50 @@ class TestPreferredLeaderFromConmon0x0020:
         service = DanteNotificationService(dispatcher=dispatcher)
         device_ip = "192.168.1.34"
 
-        waiter = service.register_preferred_leader_waiter(device_ip)
+        waiter = service.register_waiter("preferred_leader", device_ip)
         packet = self._build_conmon_0020_packet(0x00)
         service._on_packet(packet, (device_ip, 1030))
 
         await asyncio.wait_for(waiter.wait(), timeout=1)
-        result = service.get_preferred_leader_result(device_ip)
-        assert result is False
-        service.unregister_preferred_leader_waiter(device_ip)
+        assert waiter.latest_result is False
+        service.unregister_waiter(waiter)
 
     @pytest.mark.asyncio
-    async def test_clock_status_refresh_updates_device_from_paired_publication(self, monkeypatch):
-        device = DanteDevice()
-        device.ipv4 = "192.168.1.34"
+    async def test_probe_clocking_status_applies_the_paired_publication(self):
+        application, device = application_with_device("avio-bt-1.local.", "192.168.1.34")
+        packet = (
+            Path(__file__).parent / "fixtures" / "clock_leader_association" / "follower-domain-a-0020.bin"
+        ).read_bytes()
         calls = []
-        parsed_response = {
-            "preferred_leader": True,
-            "clock_source_code": 0xDED4,
-            "clock_subdomain": [0] * 16,
-            "clock_frequency_offset_parts_per_billion": -12,
-            "clock_port_state_code": 6,
-            "clock_role": "Leader",
-            "clock_port_records": [],
-            "clock_identity": [0, 29, 193, 80, 105, 46],
-            "leader_clock_identity": [0, 29, 193, 80, 105, 46],
-        }
 
-        def refresh(host_mac, sequence):
-            calls.append((host_mac, sequence))
-            return b"refresh", None, 8700
+        async def refresh(device_ip_address, host_mac=None, sequence=0x0021):
+            calls.append((device_ip_address, sequence))
+            application.notifications._on_packet(packet, (device_ip_address, 8702))
+            await deliver_status_events(application)
 
-        async def run_query(_query):
-            return parsed_response
+        application.settings.refresh_clock_status = refresh
 
-        device.commands.command_refresh_clock_status = refresh
-        monkeypatch.setattr(asyncio, "to_thread", run_query)
+        parsed = await application.probe_clocking_status(device)
 
-        result = await device.get_clocking_status(
-            host_mac=b"\x10\x20\x30\x40\x50\x60",
-            sequence=0x0021,
-        )
-
-        assert result == parsed_response
-        assert calls == [(b"\x10\x20\x30\x40\x50\x60", 0x0021)]
-        assert device.preferred_leader is True
-        assert device.clock_source_code == 0xDED4
-        assert device.clock_subdomain == bytes(16)
-        assert device.clock_frequency_offset_parts_per_billion == -12
-        assert device.clock_port_state_code == 6
-        assert device.clock_role == "Leader"
-        assert device.clock_port_records == []
-        assert device.clock_identity == "001dc150692e"
+        expected = core.parse_response("ptp_clock_status", packet)
+        assert calls == [("192.168.1.34", 0x0021)]
+        assert parsed["clock_source_code"] == expected["clock_source_code"]
+        assert parsed["preferred_leader"] == expected["preferred_leader"]
+        assert parsed["clock_role"] == expected["clock_role"]
+        assert device.clock_source_code == expected["clock_source_code"]
+        assert device.clock_identity == "001dc1510295"
         assert device.leader_clock_identity == "001dc150692e"
 
     @pytest.mark.asyncio
-    async def test_probe_clocking_status_uses_settings_refresh_and_publication(self):
-        from netaudio._common import CoreCommandSender
+    async def test_probe_clocking_status_times_out_without_any_publication(self):
+        application, device = application_with_device("avio-bt-1.local.", "192.168.1.61")
+        application.settings.refresh_clock_status = AsyncMock()
 
-        device = DanteDevice()
-        device.ipv4 = "192.168.1.61"
-        device.name = "avio-bt-1"
-        sender = CoreCommandSender(devices={"bt": device})
+        with pytest.raises(CapabilityProbeTimeout, match="clock status probe timed out"):
+            await application.probe_clocking_status(device, timeout=0.01)
 
-        class FakeWaiter:
-            def __init__(self):
-                self.wait = AsyncMock()
-
-        waiter = FakeWaiter()
-        notifications = SimpleNamespace(
-            register_preferred_leader_waiter=MagicMock(return_value=waiter),
-            unregister_preferred_leader_waiter=MagicMock(),
-        )
-        settings_service = SimpleNamespace(refresh_clock_status=MagicMock())
-
-        async def ensure_notifications():
-            return notifications
-
-        async def ensure_settings():
-            return settings_service
-
-        sender._ensure_notifications = ensure_notifications
-        sender._ensure_settings_service = ensure_settings
-
-        def refresh(_device_ip):
-            device.clock_source_code = 0
-            device.clock_subdomain = bytes(16)
-
-        settings_service.refresh_clock_status.side_effect = refresh
-
-        parsed = await sender.probe_clocking_status(device)
-
-        assert parsed["clock_source_code"] == 0
-        assert parsed["clock_identity"] is None
-        assert parsed["leader_clock_identity"] is None
-        settings_service.refresh_clock_status.assert_called_once_with("192.168.1.61")
-        notifications.register_preferred_leader_waiter.assert_called_once_with("192.168.1.61")
-        waiter.wait.assert_awaited()
-        notifications.unregister_preferred_leader_waiter.assert_called_once_with("192.168.1.61")
+        application.settings.refresh_clock_status.assert_awaited_once_with("192.168.1.61")
+        assert not application.notifications.is_waiting("preferred_leader", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):
         from netaudio import core
@@ -240,60 +192,12 @@ class TestPreferredLeaderFromConmon0x0020:
         assert parsed["clock_role"] == "Follower"
         assert parsed["clock_port_records"] is None
 
-    def test_clock_status_refresh_does_not_bind_the_settings_port(self, monkeypatch):
-        device = DanteDevice()
-        device.ipv4 = "192.168.1.61"
-        bound_addresses = []
-        sent = []
-
-        class FakeSocket:
-            def __init__(self, *_arguments, **_keyword_arguments):
-                self.timeout = None
-
-            def setsockopt(self, *_arguments, **_keyword_arguments):
-                return None
-
-            def bind(self, address):
-                bound_addresses.append(address)
-
-            def settimeout(self, timeout):
-                self.timeout = timeout
-
-            def sendto(self, packet, address):
-                sent.append((packet, address))
-
-            def recvfrom(self, _size):
-                return (b"publication", ("192.168.1.61", 8702))
-
-            def close(self):
-                return None
-
-        monkeypatch.setattr("netaudio.dante.device.socket.socket", FakeSocket)
-        parsed = device._receive_solicited_control_publication(
-            b"refresh",
-            "192.168.1.61",
-            lambda data: {"ok": data == b"publication"},
-        )
-
-        assert parsed == {"ok": True}
-        assert sent == [(b"refresh", ("192.168.1.61", 8700))]
-        assert ("", 8700) not in bound_addresses
-        assert ("0.0.0.0", 8700) not in bound_addresses
-
-    def test_updates_device_directly(self):
-        dispatcher = DanteEventDispatcher()
-        device = DanteDevice()
-        device.name = "test"
-        device.ipv4 = "192.168.1.34"
+    def test_updates_device_through_the_state_service(self):
+        application, device = application_with_device("test.local.", "192.168.1.34", name="test")
         device.preferred_leader = None
 
-        service = DanteNotificationService(
-            dispatcher=dispatcher,
-            device_lookup=lambda ip: device if ip == "192.168.1.34" else None,
-        )
-
         packet = self._build_conmon_0020_packet(0x01)
-        service._on_packet(packet, ("192.168.1.34", 1030))
+        receive_packets(application, [packet], ("192.168.1.34", 1030))
         assert device.preferred_leader is True
 
     def test_opcode_constant(self):
