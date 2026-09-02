@@ -19,6 +19,7 @@ from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
+from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
@@ -80,7 +81,7 @@ async def _bounded(awaitable, timeout: float):
     return task.result()
 
 
-class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
+class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, DaemonManagedHandlers):
     def __init__(
         self,
         application,
@@ -91,8 +92,10 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
         on_shutdown=None,
         mark_offline=None,
         forget_device=None,
+        managed_inventory=None,
     ):
         self.application = application
+        self.managed_inventory = managed_inventory
         self.state = state
         self.metering = metering
         self.shure = shure
@@ -139,9 +142,11 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
             "/report-unresponsive": self._handle_report_unresponsive,
             "/flows/create": self._handle_create_tx_flow,
             "/flows/delete": self._handle_delete_tx_flow,
+            "/ddm/graphql": self._handle_ddm_graphql,
+            "/ddm/refresh": self._handle_ddm_refresh,
             "/shutdown": self._handle_shutdown,
         }
-        self.post_body_optional = {"/refresh", "/shutdown"}
+        self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
         self.loopback_only_paths = {"/shutdown"}
 
     async def start(self):
@@ -225,11 +230,9 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
         self._events_registered = False
 
     async def _on_device_event(self, event: DanteEvent):
-        device = self.application.devices.get(event.server_name)
-        if not device:
+        device_json = self._serialized_devices().get(event.server_name)
+        if not device_json:
             return
-
-        device_json = DanteDeviceSerializer.to_json(device)
 
         await self._broadcast_sse(
             {
@@ -295,6 +298,31 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
                 "value": event.data.get("value"),
             }
         )
+
+    def _serialized_devices(self) -> dict[str, dict]:
+        if self.managed_inventory is not None and self.managed_inventory.enabled:
+            return self.managed_inventory.serialize_devices(self.application.devices)
+        return {
+            server_name: DanteDeviceSerializer.to_json(device)
+            for server_name, device in self.application.devices.items()
+        }
+
+    def _snapshot_payload(self) -> dict:
+        shure_state = {}
+        if self.shure:
+            shure_state = {mac: device.to_json() for mac, device in self.shure.devices.items()}
+        metering_state = self.metering.get_cached_levels_by_server() if self.metering else {}
+        return {
+            "event": "snapshot",
+            "devices": self._serialized_devices(),
+            "shure_devices": shure_state,
+            "metering": metering_state,
+        }
+
+    async def publish_inventory_snapshot(self) -> None:
+        if not self.sse_clients:
+            return
+        await self._broadcast_sse(self._snapshot_payload())
 
     async def _broadcast_sse(self, data):
         payload = f"data: {json.dumps(data, default=str)}\n\n".encode()
@@ -573,6 +601,12 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
                 await self._handle_get_shure_device(writer, path[len("/shure/devices/") :])
             elif path == "/devices":
                 await self._handle_get_devices(writer)
+            elif path == "/ddm/devices":
+                await self._handle_get_ddm_devices(writer)
+            elif path == "/ddm/domains":
+                await self._handle_get_ddm_domains(writer)
+            elif path == "/ddm/status":
+                await self._handle_get_ddm_status(writer)
             elif path.startswith("/devices/"):
                 await self._handle_get_device(writer, unquote(path[len("/devices/") :]))
             elif path.startswith("/interfaces/"):
@@ -633,18 +667,7 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
     async def _handle_sse(self, writer, reader):
         client = None
         try:
-            full_state = {
-                server_name: DanteDeviceSerializer.to_json(device)
-                for server_name, device in self.application.devices.items()
-            }
-            shure_state = {}
-            if self.shure:
-                shure_state = {mac: device.to_json() for mac, device in self.shure.devices.items()}
-            metering_state = self.metering.get_cached_levels_by_server() if self.metering else {}
-
-            initial = (
-                f"data: {json.dumps({'event': 'snapshot', 'devices': full_state, 'shure_devices': shure_state, 'metering': metering_state}, default=str)}\n\n"
-            ).encode()
+            initial = f"data: {json.dumps(self._snapshot_payload(), default=str)}\n\n".encode()
 
             client = _SseClient(writer=writer)
             client.queue.put_nowait(initial)

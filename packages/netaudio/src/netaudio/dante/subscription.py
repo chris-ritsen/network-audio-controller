@@ -17,6 +17,9 @@ class DanteSubscription:
         self._tx_channel_name = None
         self._tx_device = None
         self._tx_device_name = None
+        self.ddm_status = None
+        self.ddm_status_message = None
+        self.ddm_summary = None
 
     @property
     def has_configured_source(self) -> bool:
@@ -40,6 +43,8 @@ class DanteSubscription:
 
     def status_text(self):
         if self.status_code is None:
+            if self.ddm_summary or self.ddm_status:
+                return (self.ddm_summary or self.ddm_status,)
             return ("status:unknown",)
         return SUBSCRIPTION_STATUS_LABELS.get(
             self.status_code,

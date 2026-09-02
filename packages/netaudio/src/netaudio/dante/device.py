@@ -124,6 +124,29 @@ class DanteDevice:
         self.sample_rate_channel_capacities: list[dict] | None = None
         self.failed_queries: set[str] = set()
 
+        self.availability_state: str | None = None
+        self.control_transports: list[str] | None = None
+        self.ddm_capabilities: dict | None = None
+        self.ddm_clock_preferences: dict | None = None
+        self.ddm_clocking_state: dict | None = None
+        self.ddm_connection_last_changed: str | None = None
+        self.ddm_connection_state: str | None = None
+        self.ddm_device_id: str | None = None
+        self.ddm_domain_id: str | None = None
+        self.ddm_domain_name: str | None = None
+        self.ddm_enrolment_state: str | None = None
+        self.ddm_identity: dict | None = None
+        self.ddm_inputs: list[dict] | None = None
+        self.ddm_last_sync: float | None = None
+        self.ddm_outputs: list[dict] | None = None
+        self.ddm_parameters: list[dict] | None = None
+        self.ddm_status: dict | None = None
+        self.direct_control_available: bool | None = None
+        self.field_sources: dict[str, str] | None = None
+        self.inventory_id: str | None = None
+        self.inventory_sources: list[str] | None = None
+        self.management_state: str | None = None
+
         self._app = app
         self._own_transport: CoreTransport | None = None
         self._topology_mutation_lock = DeferredAsyncioLock()
@@ -236,6 +259,8 @@ class DanteDevice:
 
     @property
     def transport(self) -> CoreTransport:
+        if self.direct_control_available is False:
+            raise RuntimeError(f"{self.name or self.server_name} is only reachable through the Managed API")
         if self._app is not None:
             return self._app.transport
         if self._own_transport is None:

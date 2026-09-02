@@ -14,8 +14,8 @@ logger = logging.getLogger("netaudio")
 
 DAEMON_HOST = "127.0.0.1"
 EVENT_STREAM_CLOSE_TIMEOUT = 1.0
-EVENT_STREAM_LINE_LIMIT = 1024 * 1024
-EVENT_STREAM_EVENT_LIMIT = 4 * 1024 * 1024
+EVENT_STREAM_EVENT_LIMIT = 32 * 1024 * 1024
+EVENT_STREAM_LINE_LIMIT = EVENT_STREAM_EVENT_LIMIT + 1024
 
 
 def daemon_port() -> int:
@@ -124,6 +124,34 @@ async def get_device_summaries_from_daemon() -> dict | None:
     return data
 
 
+async def execute_ddm_graphql_on_daemon(
+    query: str,
+    variables: dict | None = None,
+    operation_name: str | None = None,
+    timeout: float = 30.0,
+) -> tuple[int | None, dict | None]:
+    body = {"query": query, "variables": variables or {}}
+    if operation_name is not None:
+        body["operation_name"] = operation_name
+    status, data = await _daemon_request("POST", "/ddm/graphql", body, timeout=timeout)
+    return status, data if isinstance(data, dict) else None
+
+
+async def get_ddm_devices_from_daemon() -> dict | None:
+    status, data = await _daemon_request("GET", "/ddm/devices")
+    return data if status == 200 and isinstance(data, dict) else None
+
+
+async def get_ddm_domains_from_daemon() -> list | None:
+    status, data = await _daemon_request("GET", "/ddm/domains")
+    return data if status == 200 and isinstance(data, list) else None
+
+
+async def get_ddm_status_from_daemon() -> dict | None:
+    status, data = await _daemon_request("GET", "/ddm/status")
+    return data if status == 200 and isinstance(data, dict) else None
+
+
 async def get_shure_devices_from_daemon() -> dict | None:
     status, data = await _daemon_request("GET", "/shure/devices")
     if status != 200:
@@ -141,6 +169,11 @@ async def refresh_clock_on_daemon(device_name: str) -> dict | None:
     if status != 200 or not isinstance(data, dict):
         return None
     return data
+
+
+async def refresh_ddm_inventory_on_daemon() -> tuple[int | None, dict | None]:
+    status, data = await _daemon_request("POST", "/ddm/refresh", {}, timeout=30.0)
+    return status, data if isinstance(data, dict) else None
 
 
 async def meter_snapshot_from_daemon(server_name: str) -> dict | None:

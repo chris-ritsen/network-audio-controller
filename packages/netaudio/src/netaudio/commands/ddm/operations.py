@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import enum
+import inspect
+import json
+import re
+from dataclasses import dataclass
+from typing import Any, Optional
+
+import typer
+
+from netaudio.commands.ddm.render import render_result
+from netaudio.commands.ddm.transport import execute, fail
+from netaudio.ddm import Field, InputValidationError, InputValue, Schema, TypeReference, command_name
+
+PYTHON_SCALAR_TYPES = {"Boolean": bool, "Float": float, "ID": str, "Int": int, "String": str}
+SENTENCE_END = re.compile(r"(?<=[.!?])\s|\n")
+
+
+def summary(description: str | None) -> str:
+    text = " ".join((description or "").split())
+    if not text:
+        return ""
+    return SENTENCE_END.split(text, maxsplit=1)[0].strip()
+
+
+@dataclass(frozen=True)
+class OptionSpecification:
+    graphql_name: str
+    identifier: str
+    is_json: bool
+    reference: TypeReference
+
+
+def _identifier(graphql_name: str) -> str:
+    return re.sub(r"\W", "_", command_name(graphql_name))
+
+
+def _enum_type(schema: Schema, name: str) -> type[enum.Enum]:
+    values = schema.type(name).enum_values
+    return enum.Enum(name, {value: value for value in values}, type=str)
+
+
+def _leaf_python_type(schema: Schema, reference: TypeReference) -> type | None:
+    schema_type = schema.type(reference.named)
+    if schema_type.kind == "ENUM":
+        return _enum_type(schema, schema_type.name)
+    if schema_type.kind == "SCALAR":
+        return PYTHON_SCALAR_TYPES.get(schema_type.name, str)
+    return None
+
+
+def _option(schema: Schema, value: InputValue) -> tuple[type, Any, OptionSpecification]:
+    reference = value.type
+    required = reference.is_required
+    unwrapped = reference.unwrapped
+    flag = f"--{command_name(value.name)}"
+    rendered = reference.render()
+    description = f"{summary(value.description)} " if value.description else ""
+    if unwrapped.kind == "LIST":
+        item = (unwrapped.of_type or unwrapped).unwrapped
+        item_type = _leaf_python_type(schema, item)
+        if item_type is not None:
+            annotation: Any = list[item_type] if required else Optional[list[item_type]]
+            default = typer.Option(... if required else None, flag, help=f"[{rendered}] {description}Repeatable.")
+            return annotation, default, OptionSpecification(value.name, _identifier(value.name), False, reference)
+        fields = ", ".join(f"{field.name}: {field.type.render()}" for field in schema.type(item.named).input_fields)
+        annotation = str if required else Optional[str]
+        default = typer.Option(
+            ... if required else None,
+            flag,
+            help=f"[{rendered}] {description}JSON list of objects with fields {fields}.",
+        )
+        return annotation, default, OptionSpecification(value.name, _identifier(value.name), True, reference)
+    leaf_type = _leaf_python_type(schema, unwrapped)
+    if leaf_type is not None:
+        annotation = leaf_type if required else Optional[leaf_type]
+        default = typer.Option(... if required else None, flag, help=f"[{rendered}] {description}".rstrip())
+        return annotation, default, OptionSpecification(value.name, _identifier(value.name), False, reference)
+    fields = ", ".join(f"{field.name}: {field.type.render()}" for field in schema.type(unwrapped.named).input_fields)
+    annotation = str if required else Optional[str]
+    default = typer.Option(
+        ... if required else None,
+        flag,
+        help=f"{description}JSON object with fields {fields} ({rendered}).",
+    )
+    return annotation, default, OptionSpecification(value.name, _identifier(value.name), True, reference)
+
+
+def _plain_value(value: Any) -> Any:
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, list):
+        return [_plain_value(item) for item in value]
+    return value
+
+
+def _decode_json(specification: OptionSpecification, value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exception:
+        fail(f"--{command_name(specification.graphql_name)} must be valid JSON: {exception}")
+
+
+def _flattened_input(schema: Schema, field: Field) -> InputValue | None:
+    if len(field.arguments) != 1:
+        return None
+    argument = field.arguments[0]
+    if argument.name != "input" or schema.type(argument.type.named).kind != "INPUT_OBJECT":
+        return None
+    return argument
+
+
+def _help_text(schema: Schema, operation: str, field: Field) -> str:
+    del schema
+    text = summary(field.description) or f"{operation.capitalize()} {field.name}."
+    text = f"{text} Returns {field.type.render()}."
+    if field.is_deprecated:
+        text = f"{text} Deprecated."
+    return text
+
+
+def register_operation(group: typer.Typer, schema: Schema, operation: str, field: Field) -> None:
+    flattened = _flattened_input(schema, field)
+    values = tuple(schema.type(flattened.type.named).input_fields) if flattened else field.arguments
+    parameters = []
+    annotations: dict[str, Any] = {}
+    specifications: list[OptionSpecification] = []
+    for value in values:
+        annotation, default, specification = _option(schema, value)
+        parameters.append(
+            inspect.Parameter(
+                specification.identifier,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=annotation,
+            )
+        )
+        annotations[specification.identifier] = annotation
+        specifications.append(specification)
+    parameters.append(
+        inspect.Parameter(
+            "print_query",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=typer.Option(
+                False,
+                "--print-query",
+                help="Print the GraphQL document and variables instead of sending them.",
+            ),
+            annotation=bool,
+        )
+    )
+    annotations["print_query"] = bool
+    document = schema.operation_document(operation, field)
+    result_type = field.type.named
+
+    def callback(**arguments: Any) -> None:
+        print_query = arguments.pop("print_query", False)
+        provided: dict[str, Any] = {}
+        for specification in specifications:
+            raw = arguments.get(specification.identifier)
+            if raw is None:
+                continue
+            provided[specification.graphql_name] = (
+                _decode_json(specification, raw) if specification.is_json else _plain_value(raw)
+            )
+        try:
+            if flattened is not None:
+                variables = {"input": schema.coerce_input(flattened.type, provided, "input")}
+            else:
+                variables = {
+                    argument.name: schema.coerce_input(argument.type, provided.get(argument.name), argument.name)
+                    for argument in field.arguments
+                    if argument.name in provided or argument.type.is_required
+                }
+        except InputValidationError as exception:
+            fail(str(exception))
+        if print_query:
+            typer.echo(document)
+            typer.echo(json.dumps(variables, indent=2, sort_keys=True))
+            return
+        response = execute(document, variables, field.name[:1].upper() + field.name[1:])
+        render_result(response, field.name, result_type)
+
+    callback.__signature__ = inspect.Signature(parameters)
+    callback.__annotations__ = annotations
+    callback.__name__ = _identifier(field.name)
+    callback.__doc__ = _help_text(schema, operation, field)
+    group.command(command_name(field.name), help=_help_text(schema, operation, field))(callback)
+
+
+def register_schema_operations(group: typer.Typer, schema: Schema) -> None:
+    for field in schema.query_fields:
+        register_operation(group, schema, "query", field)
+    for field in schema.mutation_fields:
+        register_operation(group, schema, "mutation", field)
+
+
+__all__ = ["register_operation", "register_schema_operations"]

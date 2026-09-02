@@ -230,6 +230,7 @@ def _global_options(
 from netaudio.commands import channel, flow, key, report, server, shure, status, subscription, virtual
 from netaudio.commands.capture.cli import app as capture_app
 from netaudio.commands.config.cli import top_app as config_app
+from netaudio.commands.ddm import app as ddm_app
 from netaudio.commands.device.cli import app as device_app
 from netaudio.commands.device.clock import clock as device_clock
 from netaudio.commands.device.lock import lock_app
@@ -254,6 +255,7 @@ app.add_typer(channel.app, name="channel")
 app.command("clock")(device_clock)
 app.add_typer(config_app, name="config")
 app.add_typer(server.app, name="daemon")
+app.add_typer(ddm_app, name="ddm")
 app.add_typer(device_app, name="device")
 app.add_typer(flow.app, name="flow")
 app.add_typer(lab_app, name="lab")
