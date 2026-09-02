@@ -27,7 +27,7 @@ class TestDanteApplication:
         application = DanteApplication()
         assert application.devices == {}
         assert application.dispatcher is not None
-        assert application.settings is not None
+        assert application.commands is not None
         assert application.cmc is not None
         assert application.notifications is not None
 
@@ -258,11 +258,11 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("sample_rate", device_ip_address, (48_000, [44_100, 48_000]))
 
-        application.settings.probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_sample_rates_all(timeout=0.1)
 
-        application.settings.probe_sample_rate.assert_called_once_with("192.168.1.108")
+        application.send_probe_sample_rate.assert_called_once_with("192.168.1.108")
         assert online_device.sample_rate == 48_000
         assert online_device.supported_sample_rates == [44_100, 48_000]
         assert duplicate_address_device.sample_rate == 48_000
@@ -277,7 +277,7 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("sample_rate", device_ip_address, (48_000, [48_000]))
 
-        application.settings.probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
 
         result = await application.probe_sample_rate_status("192.168.1.108", timeout=0.1)
 
@@ -295,12 +295,12 @@ class TestDanteApplication:
             if probe_count == 2:
                 application.notifications.notify_waiters("sample_rate", device_ip_address, (48_000, [48_000]))
 
-        application.settings.probe_sample_rate = AsyncMock(side_effect=respond_to_second_probe)
+        application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_second_probe)
 
         result = await application.probe_sample_rate_status("192.168.1.108", timeout=0.1)
 
         assert result == (48_000, [48_000])
-        assert application.settings.probe_sample_rate.call_count == 2
+        assert application.send_probe_sample_rate.call_count == 2
         assert not application.notifications.is_waiting("sample_rate", "192.168.1.108")
 
     @pytest.mark.asyncio
@@ -314,12 +314,12 @@ class TestDanteApplication:
             if probe_count == 3:
                 application.notifications.notify_waiters("sample_rate", device_ip_address, (48_000, [48_000]))
 
-        application.settings.probe_sample_rate = AsyncMock(side_effect=respond_to_third_probe)
+        application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_third_probe)
 
         result = await application.probe_sample_rate_status("192.168.1.108", timeout=0.1)
 
         assert result == (48_000, [48_000])
-        assert application.settings.probe_sample_rate.call_count == 3
+        assert application.send_probe_sample_rate.call_count == 3
         assert not application.notifications.is_waiting("sample_rate", "192.168.1.108")
 
     @pytest.mark.asyncio
@@ -338,7 +338,7 @@ class TestDanteApplication:
                 ),
             )
 
-        application.settings.probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_sample_rate = AsyncMock(side_effect=respond_to_probe)
 
         results = await asyncio.gather(
             application.probe_sample_rate_status("192.168.1.108", timeout=0.1),
@@ -346,7 +346,7 @@ class TestDanteApplication:
         )
 
         assert results == [(48_000, [48_000]), (96_000, [48_000, 96_000])]
-        assert application.settings.probe_sample_rate.call_count == 2
+        assert application.send_probe_sample_rate.call_count == 2
 
     @pytest.mark.asyncio
     async def test_probe_encodings_all_probes_online_devices_and_applies_advertised_results(self):
@@ -371,11 +371,11 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("encoding", device_ip_address, (24, [24, 16, 32]))
 
-        application.settings.probe_encoding = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_encoding = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_encodings_all(timeout=0.1)
 
-        application.settings.probe_encoding.assert_called_once_with("192.168.1.108")
+        application.send_probe_encoding.assert_called_once_with("192.168.1.108")
         assert online_device.encoding == 24
         assert online_device.supported_encodings == [24, 16, 32]
         assert duplicate_address_device.encoding == 24
@@ -390,7 +390,7 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("encoding", device_ip_address, (24, [24]))
 
-        application.settings.probe_encoding = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_encoding = AsyncMock(side_effect=respond_to_probe)
 
         result = await application.probe_encoding_status("192.168.1.108", timeout=0.1)
 
@@ -408,7 +408,7 @@ class TestDanteApplication:
                 "encoding", device_ip_address, (current_encoding, supported_encodings)
             )
 
-        application.settings.probe_encoding = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_encoding = AsyncMock(side_effect=respond_to_probe)
 
         results = await asyncio.gather(
             application.probe_encoding_status("192.168.1.108", timeout=0.1),
@@ -416,7 +416,7 @@ class TestDanteApplication:
         )
 
         assert results == [(24, [24]), (16, [24, 16, 32])]
-        assert application.settings.probe_encoding.call_count == 2
+        assert application.send_probe_encoding.call_count == 2
 
     @pytest.mark.asyncio
     async def test_probe_gain_levels_all_probes_online_devices_and_applies_results(self):
@@ -441,11 +441,11 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("gain", device_ip_address, ("input", [5, 1]))
 
-        application.settings.probe_gain_level = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_gain_level = AsyncMock(side_effect=respond_to_probe)
 
         await application._probe_gain_levels_all(timeout=0.1)
 
-        application.settings.probe_gain_level.assert_called_once_with("192.168.1.108")
+        application.send_probe_gain_level.assert_called_once_with("192.168.1.108")
         assert online_device.gain_device_type == "input"
         assert online_device.gain_levels == [5, 1]
         assert online_device.supported_gain_levels == [1, 2, 3, 4, 5]
@@ -460,7 +460,7 @@ class TestDanteApplication:
         def respond_to_probe(device_ip_address):
             application.notifications.notify_waiters("gain", device_ip_address, ("output", [4, 4]))
 
-        application.settings.probe_gain_level = AsyncMock(side_effect=respond_to_probe)
+        application.send_probe_gain_level = AsyncMock(side_effect=respond_to_probe)
 
         result = await application.probe_gain_status("192.168.1.108", timeout=0.1)
 
@@ -482,7 +482,7 @@ class TestDanteApplication:
             assert device_type == "input"
             application.notifications.notify_waiters("gain", device_ip_address, ("input", [3, 1]))
 
-        application.settings.set_gain_level = AsyncMock(side_effect=respond_to_write)
+        application.send_set_gain_level = AsyncMock(side_effect=respond_to_write)
 
         result = await application.set_gain_level(device, 1, 3, "input", timeout=0.1)
 
@@ -502,19 +502,19 @@ class TestDanteApplication:
         def respond_with_unchanged_status(device_ip_address, channel_number, gain_level, device_type):
             application.notifications.notify_waiters("gain", device_ip_address, ("input", [5, 1]))
 
-        application.settings.set_gain_level = AsyncMock(side_effect=respond_with_unchanged_status)
+        application.send_set_gain_level = AsyncMock(side_effect=respond_with_unchanged_status)
 
         result = await application.set_gain_level(device, 1, 3, "input", timeout=0.04)
 
         assert result == ("input", [5, 1])
         assert device.gain_levels == [5, 1]
-        assert application.settings.set_gain_level.call_count == 3
+        assert application.send_set_gain_level.call_count == 3
         assert not application.notifications.is_waiting("gain", "192.168.1.108")
 
     @pytest.mark.asyncio
     async def test_set_gain_level_state_rejects_direction_before_sending(self):
         application = DanteApplication()
-        application.settings.set_gain_level = AsyncMock()
+        application.send_set_gain_level = AsyncMock()
         device = DanteDevice(server_name="avio-input.local.")
         device.ipv4 = "192.168.1.108"
         device.gain_device_type = "input"
@@ -522,7 +522,7 @@ class TestDanteApplication:
         with pytest.raises(ValueError, match="input gain controls"):
             await application.set_gain_level(device, 1, 3, "output", timeout=0.1)
 
-        application.settings.set_gain_level.assert_not_called()
+        application.send_set_gain_level.assert_not_called()
 
     def test_get_arc_port(self):
         application = DanteApplication()

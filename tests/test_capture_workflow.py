@@ -3,12 +3,11 @@ import json
 import struct
 import tarfile
 
-from typer.testing import CliRunner
-
-from netaudio.commands import capture as capture_commands
-from netaudio.commands import fact as fact_commands
-from netaudio.commands import provenance as provenance_commands
-from netaudio.commands.capture_helpers import _parse_field_spec
+from netaudio.commands.capture import cli as capture_commands
+from netaudio.commands.capture.options import _parse_field_spec
+from netaudio.commands.fact import cli as fact_commands
+from netaudio.commands.provenance import bundles as provenance_bundles
+from netaudio.commands.provenance import cli as provenance_commands
 from netaudio.dante.fact_store import (
     FactRecord,
     FactUpdate,
@@ -21,7 +20,7 @@ from netaudio.dante.fact_store import (
 )
 from netaudio.dante.packet_store import ArtifactRecord, PacketQuery, PacketRecord, PacketStore
 from netaudio.dante.protocol_verifier import export_session_bundle
-
+from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -478,7 +477,7 @@ def test_curated_artifact_is_copied_into_verified_bundle(tmp_path):
     assert len(artifacts) == 1
     assert artifacts[0]["content"] == artifact_content
 
-    manifest, files = provenance_commands._load_bundle(bundle_path)
+    manifest, files = provenance_bundles._load_bundle(bundle_path)
     artifact_entry = manifest["artifacts"][0]
     sample_entry = manifest["samples"][0]
     assert manifest["format_version"] == 2
@@ -486,7 +485,7 @@ def test_curated_artifact_is_copied_into_verified_bundle(tmp_path):
     assert artifact_entry["sha256"] == hashlib.sha256(artifact_content).hexdigest()
     assert files[artifact_entry["file"]] == artifact_content
     assert sample_entry["sha256"] == hashlib.sha256(build_arc_packet(0x3000)).hexdigest()
-    assert provenance_commands._verify_single_bundle(bundle_path) is True
+    assert provenance_bundles._verify_single_bundle(bundle_path) is True
 
 
 def test_exact_captured_payload_can_be_ingested_with_original_metadata(tmp_path):
@@ -542,7 +541,7 @@ def test_exact_captured_payload_can_be_ingested_with_original_metadata(tmp_path)
     assert packet["source_host"] == "macbook"
     assert packet["timestamp_ns"] == 1786750000000000000
     assert markers[0]["data"]["source_payload"]["sha256"] == hashlib.sha256(payload).hexdigest()
-    assert provenance_commands._verify_single_bundle(bundle_path) is True
+    assert provenance_bundles._verify_single_bundle(bundle_path) is True
 
 
 def test_exact_packets_can_be_copied_from_a_read_only_capture_database(tmp_path):
@@ -721,7 +720,7 @@ def test_bundle_verification_rejects_modified_artifact(tmp_path):
     artifact_file = bundle_directory / manifest["artifacts"][0]["file"]
     artifact_file.write_bytes(b"modified")
 
-    assert provenance_commands._verify_single_bundle(bundle_directory) is False
+    assert provenance_bundles._verify_single_bundle(bundle_directory) is False
 
 
 def test_empty_bundle_fails_verification_and_audit(tmp_path):
@@ -738,8 +737,8 @@ def test_empty_bundle_fails_verification_and_audit(tmp_path):
         )
     )
 
-    assert provenance_commands._verify_single_bundle(bundle_path) is False
-    assert provenance_commands._audit_single_bundle(bundle_path) is False
+    assert provenance_bundles._verify_single_bundle(bundle_path) is False
+    assert provenance_bundles._audit_single_bundle(bundle_path) is False
 
 
 def test_evidence_output_uses_conmon_message_type(tmp_path):
@@ -849,3 +848,157 @@ def test_check_facts_does_not_fail_quarantined_facts(tmp_path):
     assert results[0]["status"] == "quarantined"
     assert results[0]["errors"] == []
     assert results[0]["quarantine_reason"] == "no curated provenance bundle"
+
+
+def _select_json_output(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    monkeypatch.setattr(state, "output_format", OutputFormat.json)
+
+
+def _seed_session_with_evidence(database_path):
+    packet_store = PacketStore(db_path=str(database_path))
+    session_id = packet_store.start_session(name="structured", started_ns=100)
+    packet_id = packet_store.store_packet(
+        PacketRecord(
+            payload=build_arc_packet(0x1002),
+            source_type="tshark",
+            session_id=session_id,
+            timestamp_ns=200,
+            src_ip="192.168.1.10",
+            src_port=40000,
+            dst_ip="192.168.1.20",
+            dst_port=4440,
+            direction="request",
+        )
+    )
+    packet_store.add_marker(
+        session_id=session_id,
+        marker_type="evidence",
+        label="device_name",
+        note="request observed",
+        data={"packet_ids": [packet_id]},
+        timestamp_ns=250,
+    )
+    packet_store.end_session(session_id, ended_ns=300)
+    return packet_store, session_id, packet_id
+
+
+def test_session_commands_emit_json_when_json_output_is_selected(tmp_path, monkeypatch):
+    _select_json_output(monkeypatch)
+    database_path = tmp_path / "capture.sqlite"
+    packet_store, session_id, packet_id = _seed_session_with_evidence(database_path)
+    packet_store.close()
+
+    listed = runner.invoke(capture_commands.app, ["session", "list", "--db", str(database_path)])
+    assert listed.exit_code == 0, listed.output
+    assert [session["id"] for session in json.loads(listed.output)] == [session_id]
+
+    shown = runner.invoke(
+        capture_commands.app, ["session", "show", "--db", str(database_path), "--id", str(session_id)]
+    )
+    assert shown.exit_code == 0, shown.output
+    shown_data = json.loads(shown.output)
+    assert shown_data["id"] == session_id
+    assert shown_data["markers"][0]["label"] == "device_name"
+    assert shown_data["markers"][0]["data"] == {"packet_ids": [packet_id]}
+
+    packets = runner.invoke(
+        capture_commands.app, ["session", "packets", "--db", str(database_path), "--id", str(session_id)]
+    )
+    assert packets.exit_code == 0, packets.output
+    packets_data = json.loads(packets.output)
+    assert packets_data["total"] == 1
+    assert packets_data["packets"][0]["id"] == packet_id
+    assert packets_data["packets"][0]["payload_hex"] == build_arc_packet(0x1002).hex()
+
+
+def test_packet_commands_emit_json_when_json_output_is_selected(tmp_path, monkeypatch):
+    _select_json_output(monkeypatch)
+    database_path = tmp_path / "capture.sqlite"
+    packet_store, session_id, packet_id = _seed_session_with_evidence(database_path)
+    packet_store.close()
+
+    listed = runner.invoke(
+        capture_commands.app, ["packet", "list", "--db", str(database_path), "--session", "structured"]
+    )
+    assert listed.exit_code == 0, listed.output
+    listed_data = json.loads(listed.output)
+    assert listed_data["session_id"] == session_id
+    assert [packet["id"] for packet in listed_data["packets"]] == [packet_id]
+
+    shown = runner.invoke(capture_commands.app, ["packet", "show", "--db", str(database_path), str(packet_id)])
+    assert shown.exit_code == 0, shown.output
+    shown_data = json.loads(shown.output)
+    assert shown_data[0]["id"] == packet_id
+    assert shown_data[0]["direction"] == "request"
+    assert shown_data[0]["src_ip"] == "192.168.1.10"
+
+
+def test_provenance_bundle_commands_emit_json_when_json_output_is_selected(tmp_path, monkeypatch):
+    _select_json_output(monkeypatch)
+    database_path = tmp_path / "capture.sqlite"
+    packet_store, session_id, packet_id = _seed_session_with_evidence(database_path)
+    bundle_path = export_session_bundle(packet_store, session_id, output_dir=str(tmp_path))
+    packet_store.close()
+
+    verified = runner.invoke(provenance_commands.app, ["verify", str(bundle_path)])
+    assert verified.exit_code == 0, verified.output
+    verified_data = json.loads(verified.output)
+    assert verified_data["passed"] == 1
+    assert verified_data["bundles"][0]["verified_packets"] == 1
+    assert verified_data["bundles"][0]["packets"][0]["status"] == "ok"
+
+    audited = runner.invoke(provenance_commands.app, ["audit", str(bundle_path)])
+    assert audited.exit_code == 0, audited.output
+    audited_data = json.loads(audited.output)
+    assert audited_data["bundles"][0]["passed"] is True
+    assert audited_data["bundles"][0]["summary"]["verified_packets"] == 1
+    assert [event["event"] for event in audited_data["bundles"][0]["timeline"]] == ["packet", "marker"]
+
+    shown = runner.invoke(provenance_commands.app, ["show", str(bundle_path)])
+    assert shown.exit_code == 0, shown.output
+    shown_data = json.loads(shown.output)
+    assert shown_data["session_id"] == session_id
+    assert shown_data["markers"][0]["label"] == "device_name"
+
+    analyzed = runner.invoke(provenance_commands.app, ["analyze", str(bundle_path)])
+    assert analyzed.exit_code == 0, analyzed.output
+    analyzed_data = json.loads(analyzed.output)
+    assert analyzed_data["session_name"] == "structured"
+    assert analyzed_data["sample_count"] == 1
+
+
+def test_provenance_export_emits_json_when_json_output_is_selected(tmp_path, monkeypatch):
+    _select_json_output(monkeypatch)
+    database_path = tmp_path / "capture.sqlite"
+    packet_store, session_id, _ = _seed_session_with_evidence(database_path)
+    packet_store.close()
+
+    exported = runner.invoke(
+        provenance_commands.app,
+        ["export", "--db", str(database_path), "--session-id", str(session_id), "--out", str(tmp_path / "bundles")],
+    )
+    assert exported.exit_code == 0, exported.output
+    exported_data = json.loads(exported.output)
+    assert exported_data["session_id"] == session_id
+    assert exported_data["evidence_packets"] == 1
+    assert exported_data["bundle"].startswith(str(tmp_path / "bundles"))
+
+
+def test_verify_text_output_is_unchanged_in_plain_mode(tmp_path):
+    database_path = tmp_path / "capture.sqlite"
+    packet_store, session_id, _ = _seed_session_with_evidence(database_path)
+    bundle_path = export_session_bundle(packet_store, session_id, output_dir=str(tmp_path))
+    packet_store.close()
+
+    verified = runner.invoke(provenance_commands.app, ["verify", str(bundle_path)])
+    assert verified.exit_code == 0, verified.output
+    assert "RESULT: PASS — all 1 packets verified, 0 observations recorded" in verified.output
+
+    audited = runner.invoke(provenance_commands.app, ["audit", str(bundle_path)])
+    assert audited.exit_code == 0, audited.output
+    assert "PROVENANCE AUDIT: structured" in audited.output
+    assert "EVIDENCE PACKET [request]" in audited.output
+    assert "EVIDENCE: device_name" in audited.output
+    assert "RESULT: PASS" in audited.output
