@@ -663,9 +663,13 @@ impl CommandSpec {
                     interval_ms: 0,
                 },
             ),
-            CommandSpec::CapabilityPartitionExport { .. } | CommandSpec::DeviceLogExport { .. } => {
-                (Settings, Request)
-            }
+            CommandSpec::CapabilityPartitionExport { .. } | CommandSpec::DeviceLogExport { .. } => (
+                Settings,
+                Fire {
+                    repeat: 1,
+                    interval_ms: 0,
+                },
+            ),
             CommandSpec::CmcRegister { .. } => (Control, Request),
             CommandSpec::EnableAes67 { .. } => (
                 Settings,
