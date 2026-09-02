@@ -191,20 +191,20 @@ def parse_device_audio_capabilities(archive_payload: bytes) -> Optional[DeviceAu
     )
 
 
-def apply_device_audio_capabilities(device, capabilities: Optional[DeviceAudioCapabilities]) -> None:
-    device.diagnostic_log_export_supported = True
+def device_audio_capability_fields(capabilities: Optional[DeviceAudioCapabilities]) -> dict:
+    fields = {"diagnostic_log_export_supported": True}
     if capabilities is None:
-        return
+        return fields
     if capabilities.license_signature_length_bytes is not None:
-        device.license_signature_length_bytes = capabilities.license_signature_length_bytes
+        fields["license_signature_length_bytes"] = capabilities.license_signature_length_bytes
     if capabilities.licensed_receive_channel_count is not None:
-        device.licensed_receive_channel_count = capabilities.licensed_receive_channel_count
+        fields["licensed_receive_channel_count"] = capabilities.licensed_receive_channel_count
     if capabilities.licensed_transmit_channel_count is not None:
-        device.licensed_transmit_channel_count = capabilities.licensed_transmit_channel_count
+        fields["licensed_transmit_channel_count"] = capabilities.licensed_transmit_channel_count
     if capabilities.licensed_redundancy_enabled is not None:
-        device.licensed_redundancy_enabled = capabilities.licensed_redundancy_enabled
+        fields["licensed_redundancy_enabled"] = capabilities.licensed_redundancy_enabled
     if capabilities.channel_capacities:
-        device.sample_rate_channel_capacities = [
+        fields["sample_rate_channel_capacities"] = [
             {
                 "sample_rate_hertz": capacity.sample_rate_hertz,
                 "receive_channel_count": capacity.receive_channel_count,
@@ -212,6 +212,7 @@ def apply_device_audio_capabilities(device, capabilities: Optional[DeviceAudioCa
             }
             for capacity in capabilities.channel_capacities
         ]
+    return fields
 
 
 def write_device_log_archive(output_path: Path, archive_payload: bytes) -> None:

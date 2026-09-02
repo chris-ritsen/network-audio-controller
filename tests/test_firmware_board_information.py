@@ -9,16 +9,19 @@ requires_firmware_image_publication = pytest.mark.skipif(
     reason="Brooklyn II image publication requires Linux or macOS",
 )
 
-from netaudio.commands import firmware_parser
-from netaudio.commands.firmware import (
+from netaudio.commands.firmware import parser as firmware_parser
+from netaudio.commands.firmware.constants import (
     BROOKLYN2_BOARD_INFORMATION_PARTITION_OFFSET,
     BROOKLYN2_BOARD_INFORMATION_PARTITION_SIZE,
+)
+from netaudio.commands.firmware.image import _build_brooklyn2_image
+from netaudio.commands.firmware.models import (
     _brooklyn2_board_information_manifest,
     _build_brooklyn2_board_information_partition,
-    _build_brooklyn2_image,
     _load_brooklyn2_board_information_descriptor,
-    _publish_output_directory_without_replacement,
 )
+from netaudio.commands.firmware.parser import _publish_output_directory_without_replacement
+
 from tests.firmware_test_support import (
     build_board_information_descriptor,
     build_expected_board_information_partition,

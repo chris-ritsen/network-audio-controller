@@ -3,19 +3,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
-from netaudio._common import readback_after_notification
-from netaudio._common_selection import parse_channel_reference
+from netaudio.cli_support.execution import readback_after_notification
+from netaudio.cli_support.selection import parse_channel_reference
 from netaudio.commands import channel as channel_commands
-from netaudio.commands import device as device_commands
+from netaudio.commands.device import cli as device_commands
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.core_transport import CoreTransport
-from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.services.notification import (
     DanteNotificationService,
     mutate_and_wait_for_capability_value,
 )
+
 from tests.cli_test_support import FakeApplication, FakeChannelDevice, FakeDevice, invoke
 
 
@@ -207,9 +206,9 @@ async def test_operations_aes67_getter_updates_configured_state():
             "28090094180011000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000300000064000000650222138c0212003083210090000f4240000f4240000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480"
         )
     )
-    operations = DanteDeviceOperations(device)
+    application = DanteApplication()
 
-    assert await operations.get_aes67_configured() is True
+    assert await application.get_aes67_configured(device) is True
     assert device.aes67_configured is True
     assert device.aes67_multicast_prefix == "239.69.0.0"
     assert device.executed == [{"command": "query_latency_config"}]
@@ -223,10 +222,10 @@ async def test_reboot_operation_registers_with_active_application_before_sending
     async def require_registration(device_ip_address, host_media_access_control_address):
         calls.append(("registration", device_ip_address, host_media_access_control_address))
 
-    device.application = SimpleNamespace(cmc=SimpleNamespace(require_registration=require_registration))
-    operations = DanteDeviceOperations(device)
+    application = DanteApplication()
+    application.cmc = SimpleNamespace(require_registration=require_registration)
 
-    await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
+    await application.reboot(device, host_mac=b"\x01\x02\x03\x04\x05\x06")
 
     assert calls == [("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06")]
     assert device.executed == [{"command": "reboot", "host_mac": "010203040506"}]
@@ -240,57 +239,25 @@ async def test_factory_reset_operation_registers_before_sending():
     async def require_registration(device_ip_address, host_media_access_control_address):
         calls.append(("registration", device_ip_address, host_media_access_control_address))
 
-    device.application = SimpleNamespace(cmc=SimpleNamespace(require_registration=require_registration))
-    operations = DanteDeviceOperations(device)
+    application = DanteApplication()
+    application.cmc = SimpleNamespace(require_registration=require_registration)
 
-    await operations.factory_reset(host_mac=b"\x01\x02\x03\x04\x05\x06")
+    await application.factory_reset(device, host_mac=b"\x01\x02\x03\x04\x05\x06")
 
     assert calls == [("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06")]
     assert device.executed == [{"command": "factory_reset", "host_mac": "010203040506"}]
 
 
 @pytest.mark.asyncio
-async def test_reboot_operation_owns_temporary_registration_service_without_active_application(monkeypatch):
-    calls = []
-    device = RecordingDevice()
-
-    class OperationService:
-        def __init__(self, transport, host_media_access_control_address):
-            calls.append(("created", host_media_access_control_address))
-
-        async def require_registration(self, device_ip_address, host_media_access_control_address):
-            calls.append(("registration", device_ip_address, host_media_access_control_address))
-
-        async def stop(self):
-            calls.append(("stopped",))
-
-    from netaudio.dante.services import cmc as control_monitoring_module
-
-    monkeypatch.setattr(control_monitoring_module, "DanteCMCService", OperationService)
-    operations = DanteDeviceOperations(device)
-
-    await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
-
-    assert calls == [
-        ("created", b"\x01\x02\x03\x04\x05\x06"),
-        ("registration", "192.168.1.61", b"\x01\x02\x03\x04\x05\x06"),
-        ("stopped",),
-    ]
-    assert device.executed == [{"command": "reboot", "host_mac": "010203040506"}]
-
-
-@pytest.mark.asyncio
 async def test_reboot_operation_does_not_send_when_registration_fails():
     device = RecordingDevice()
-    device.application = SimpleNamespace(
-        cmc=SimpleNamespace(
-            require_registration=AsyncMock(side_effect=RuntimeError("CMC registration failed for 192.168.1.61"))
-        )
+    application = DanteApplication()
+    application.cmc = SimpleNamespace(
+        require_registration=AsyncMock(side_effect=RuntimeError("CMC registration failed for 192.168.1.61"))
     )
-    operations = DanteDeviceOperations(device)
 
     with pytest.raises(RuntimeError, match="CMC registration failed for 192.168.1.61"):
-        await operations.reboot(host_mac=b"\x01\x02\x03\x04\x05\x06")
+        await application.reboot(device, host_mac=b"\x01\x02\x03\x04\x05\x06")
 
     assert device.executed == []
 
@@ -331,22 +298,28 @@ def test_identify_all_sends_to_every_matched_device():
 @pytest.mark.asyncio
 async def test_encoding_operation_rejects_known_unsupported_value_without_sending():
     device = RecordingDevice(supported_encodings=[24])
-    operations = DanteDeviceOperations(device)
+    application = DanteApplication()
+    application.transport = SimpleNamespace(execute=AsyncMock(return_value=None))
 
     with pytest.raises(ValueError, match="requested encoding 32 is not supported"):
-        await operations.set_encoding(32)
+        await application.send_set_encoding(device, 32)
 
-    assert device.executed == []
+    application.transport.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("supported_encodings", [[16, 24, 32], None])
 async def test_encoding_operation_sends_supported_or_unknown_value(supported_encodings):
     device = RecordingDevice(supported_encodings=supported_encodings)
-    operations = DanteDeviceOperations(device)
+    application = DanteApplication()
+    application.transport = SimpleNamespace(execute=AsyncMock(return_value=None))
 
-    assert await operations.set_encoding(32) is None
-    assert device.executed == [{"command": "set_encoding", "encoding": 32}]
+    assert await application.send_set_encoding(device, 32) is None
+    [(address, specification)] = [call.args for call in application.transport.execute.await_args_list]
+    assert address == "192.168.1.61"
+    assert specification["command"] == "set_encoding"
+    assert specification["encoding"] == 32
+    assert 1 <= specification["sequence"] <= 0xFFFF
 
 
 def test_device_name_only_reports_success_after_matching_readback():

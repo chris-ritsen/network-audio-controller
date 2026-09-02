@@ -5,10 +5,11 @@ from typing import NoReturn, Optional
 
 import typer
 
-from netaudio._common import readback_after_notification, run_command
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-from netaudio._common_output import output_table
-from netaudio._common_selection import (
+from netaudio._exit_codes import ExitCode
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.execution import readback_after_notification, run_command
+from netaudio.cli_support.output import output_table
+from netaudio.cli_support.selection import (
     filter_devices,
     match_device_identifier,
     parse_qualified_channel,
@@ -16,8 +17,7 @@ from netaudio._common_selection import (
     select_device,
     sort_devices,
 )
-from netaudio._exit_codes import ExitCode
-from netaudio.commands.config_readback import MUTATION_ERRORS
+from netaudio.commands.config.readback import MUTATION_ERRORS
 from netaudio.icons import icon
 
 app = typer.Typer(help="Manage audio subscriptions.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
@@ -228,7 +228,7 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
         typer.echo("No active subscriptions.")
         return
 
-    from netaudio._common import ansi
+    from netaudio.cli_support.execution import ansi
     from netaudio.icons import SEVERITY_PRESENTATION, severity_icon
 
     def _status_label(code: int):
@@ -331,6 +331,79 @@ def _bulk_pairs(tx_device, rx_device, count: int, offset_tx: int, offset_rx: int
     return pairs
 
 
+@dataclass(frozen=True)
+class BulkSubscriptionPair:
+    expected_signature: tuple[str, str]
+    rx_channel_name: str
+    rx_channel_number: int
+    tx_channel_name: str
+
+    def label(self, rx_device_name: str, tx_device_name: str) -> str:
+        return f"{self.rx_channel_name}@{rx_device_name} <- {self.tx_channel_name}@{tx_device_name}"
+
+
+@dataclass(frozen=True)
+class BulkSubscriptionPlan:
+    modified: list[BulkSubscriptionPair]
+    rx_device_name: str
+    tx_device_name: str
+    unchanged: list[BulkSubscriptionPair]
+
+
+BULK_SUBSCRIPTION_BATCH_SIZE = 16
+
+
+def _plan_bulk_subscriptions(tx_device, rx_device, count: int, offset_tx: int, offset_rx: int) -> BulkSubscriptionPlan:
+    modified = []
+    unchanged = []
+    for tx_channel, rx_channel in _bulk_pairs(tx_device, rx_device, count, offset_tx, offset_rx):
+        tx_channel_name = tx_channel.friendly_name or tx_channel.name
+        if not tx_channel_name:
+            _fail(f"TX channel {tx_channel.number} has no Dante name")
+        pair = BulkSubscriptionPair(
+            expected_signature=(tx_channel_name, tx_device.name),
+            rx_channel_name=rx_channel.friendly_name or rx_channel.name,
+            rx_channel_number=rx_channel.number,
+            tx_channel_name=tx_channel_name,
+        )
+        if _subscription_signature(rx_device, rx_channel.number) == pair.expected_signature:
+            unchanged.append(pair)
+        else:
+            modified.append(pair)
+    return BulkSubscriptionPlan(
+        modified=modified, rx_device_name=rx_device.name, tx_device_name=tx_device.name, unchanged=unchanged
+    )
+
+
+async def _apply_bulk_subscription_batch(application, rx_device, plan: BulkSubscriptionPlan, batch) -> int:
+    subscriptions = [(pair.rx_channel_number, pair.tx_channel_name, plan.tx_device_name) for pair in batch]
+    expected = {pair.rx_channel_number: pair.expected_signature for pair in batch}
+    try:
+        await application.add_subscriptions(rx_device, subscriptions)
+    except MUTATION_ERRORS as error:
+        for pair in batch:
+            typer.echo(
+                f"{icon('fail')}FAILED {pair.label(plan.rx_device_name, plan.tx_device_name)}: {error}",
+                err=True,
+            )
+        return len(batch)
+
+    result = await _verify_subscriptions(rx_device, expected)
+    observed = result.observed if isinstance(result.observed, dict) else {}
+    failures = 0
+    for pair in batch:
+        if observed.get(pair.rx_channel_number) == pair.expected_signature:
+            typer.echo(f"MODIFIED {pair.label(plan.rx_device_name, plan.tx_device_name)} (verified)")
+            continue
+        failures += 1
+        detail = repr(observed.get(pair.rx_channel_number)) if result.observed_available else "unavailable"
+        typer.echo(
+            f"{icon('fail')}FAILED {pair.label(plan.rx_device_name, plan.tx_device_name)}: fresh readback was {detail}",
+            err=True,
+        )
+    return failures
+
+
 async def run_subscription_add_bulk(
     application,
     devices,
@@ -349,68 +422,16 @@ async def run_subscription_add_bulk(
         _fail(f"could not read current subscriptions from {_device_label(rx_device)} before making changes: {error}")
     _index_fresh_subscriptions(rx_device)
 
-    pairs = _bulk_pairs(tx_device, rx_device, count, offset_tx, offset_rx)
-
-    modified_pairs = []
-    for tx_channel, rx_channel in pairs:
-        tx_channel_name = tx_channel.friendly_name or tx_channel.name
-        if not tx_channel_name:
-            _fail(f"TX channel {tx_channel.number} has no Dante name")
-        expected_signature = (tx_channel_name, tx_device.name)
-        rx_channel_name = rx_channel.friendly_name or rx_channel.name
-        if _subscription_signature(rx_device, rx_channel.number) == expected_signature:
-            typer.echo(
-                f"UNCHANGED {rx_channel_name}@{rx_device.name} <- {tx_channel_name}@{tx_device.name} (already subscribed)"
-            )
-        else:
-            modified_pairs.append((tx_channel, rx_channel))
-
-    if not modified_pairs:
+    plan = _plan_bulk_subscriptions(tx_device, rx_device, count, offset_tx, offset_rx)
+    for pair in plan.unchanged:
+        typer.echo(f"UNCHANGED {pair.label(plan.rx_device_name, plan.tx_device_name)} (already subscribed)")
+    if not plan.modified:
         return
 
-    batch_size = 16
     failures = 0
-    for batch_start in range(0, len(modified_pairs), batch_size):
-        batch = modified_pairs[batch_start : batch_start + batch_size]
-        subscriptions = []
-        expected = {}
-        for tx_channel, rx_channel in batch:
-            tx_channel_name = tx_channel.friendly_name or tx_channel.name
-            subscriptions.append((rx_channel.number, tx_channel_name, tx_device.name))
-            expected[rx_channel.number] = (tx_channel_name, tx_device.name)
-
-        try:
-            await application.add_subscriptions(rx_device, subscriptions)
-        except MUTATION_ERRORS as error:
-            failures += len(batch)
-            for tx_channel, rx_channel in batch:
-                tx_channel_name = tx_channel.friendly_name or tx_channel.name
-                rx_channel_name = rx_channel.friendly_name or rx_channel.name
-                typer.echo(
-                    f"{icon('fail')}FAILED {rx_channel_name}@{rx_device.name} <- {tx_channel_name}@{tx_device.name}: {error}",
-                    err=True,
-                )
-            continue
-
-        result = await _verify_subscriptions(rx_device, expected)
-        observed = result.observed if isinstance(result.observed, dict) else {}
-        for tx_channel, rx_channel in batch:
-            tx_channel_name = tx_channel.friendly_name or tx_channel.name
-            rx_channel_name = rx_channel.friendly_name or rx_channel.name
-            expected_signature = expected[rx_channel.number]
-            if observed.get(rx_channel.number) == expected_signature:
-                typer.echo(
-                    f"MODIFIED {rx_channel_name}@{rx_device.name} <- {tx_channel_name}@{tx_device.name} (verified)"
-                )
-                continue
-
-            failures += 1
-            detail = repr(observed.get(rx_channel.number)) if result.observed_available else "unavailable"
-            typer.echo(
-                f"{icon('fail')}FAILED {rx_channel_name}@{rx_device.name} <- "
-                f"{tx_channel_name}@{tx_device.name}: fresh readback was {detail}",
-                err=True,
-            )
+    for batch_start in range(0, len(plan.modified), BULK_SUBSCRIPTION_BATCH_SIZE):
+        batch = plan.modified[batch_start : batch_start + BULK_SUBSCRIPTION_BATCH_SIZE]
+        failures += await _apply_bulk_subscription_batch(application, rx_device, plan, batch)
 
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)

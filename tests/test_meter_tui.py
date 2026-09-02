@@ -5,23 +5,24 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from rich.cells import cell_len
-
-from netaudio.commands.meter_tui import (
-    KeyDecoder,
+from netaudio.commands.meter.models import (
     MeterFilterDialog,
     MeterRow,
     MeterRowKey,
     MeterViewModel,
     MeterViewport,
+    automatic_detailed_metering_targets,
+    format_meter_sample,
+)
+from netaudio.commands.meter.rendering import (
     _dbfs_label,
     _meter_bar,
     _state_label,
-    automatic_detailed_metering_targets,
-    format_meter_sample,
-    render_meter_frame,
     render_meter_filter_prompt,
+    render_meter_frame,
 )
+from netaudio.commands.meter.terminal import KeyDecoder
+from rich.cells import cell_len
 
 
 def _channel(number: int, name: str, friendly_name: str | None = None):

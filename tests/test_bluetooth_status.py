@@ -20,7 +20,7 @@ def _publish_on_request(application, packets):
         for packet in packets:
             application.notifications._on_packet(packet, (device_ip_address, 8702))
 
-    application.settings.request_bluetooth_status = request_bluetooth_status
+    application.send_bluetooth_status_request = request_bluetooth_status
 
 
 def test_probe_bluetooth_status_ignores_non_bluetooth_publications(load_fixture):

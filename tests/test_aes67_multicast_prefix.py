@@ -78,13 +78,14 @@ async def test_set_aes67_multicast_prefix_state_writes_and_reads_back():
     device.ipv4 = "192.0.2.10"
     device.aes67_multicast_prefix = "239.69.0.0"
 
-    async def readback():
+    async def readback(_device):
         device.aes67_multicast_prefix = "239.238.0.0"
         return False
 
-    device.operations.set_aes67_multicast_prefix = AsyncMock()
-    device.operations.get_aes67_configured = AsyncMock(side_effect=readback)
+    device.execute = AsyncMock()
+    application = DanteApplication()
+    application.get_aes67_configured = AsyncMock(side_effect=readback)
 
-    observed = await DanteApplication().set_aes67_multicast_prefix(device, "239.238.0.0")
-    device.operations.set_aes67_multicast_prefix.assert_awaited_once_with("239.238.0.0")
+    observed = await application.set_aes67_multicast_prefix(device, "239.238.0.0")
+    device.execute.assert_awaited_once_with({"command": "set_aes67_multicast_prefix", "prefix": "239.238.0.0"})
     assert observed == "239.238.0.0"

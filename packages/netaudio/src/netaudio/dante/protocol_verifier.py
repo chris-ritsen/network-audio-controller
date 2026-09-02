@@ -9,12 +9,13 @@ from dataclasses import replace
 from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
-from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.common.manifest import manifest_bytes, write_manifest
-from netaudio.dante.packet_header import parse_packet_header
-from netaudio.dante.packet_store import PacketQuery, PacketRecord, PacketStore
-from netaudio.dante.packet_store_common import extract_evidence_packet_ids, safe_name as _safe_name
+from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.core_transport import CoreTransport
+from netaudio.dante.dissection.header import parse_packet_header
+from netaudio.dante.packet_store import PacketQuery, PacketRecord, PacketStore
+from netaudio.dante.packet_store.payloads import extract_evidence_packet_ids
+from netaudio.dante.packet_store.payloads import safe_name as _safe_name
 
 logger = logging.getLogger("netaudio")
 
@@ -60,9 +61,9 @@ def export_session_bundle(
     packet_ids: set | None = None,
     bundle_format: str = "tar.gz",
 ) -> Path:
+    import io
     import tarfile
     import zipfile
-    import io
 
     session = store.get_session(session_id)
     session_name = session["name"] if session else f"session_{session_id}"
