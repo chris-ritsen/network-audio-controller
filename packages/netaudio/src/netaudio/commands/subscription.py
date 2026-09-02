@@ -231,9 +231,10 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
     from netaudio.cli_support.execution import ansi
     from netaudio.icons import SEVERITY_PRESENTATION, severity_icon
 
-    def _status_label(code: int):
+    def _status_label(subscription):
+        code = subscription.status_code
         if SUBSCRIPTION_STATUS_INFO.get(code) is None:
-            return ""
+            return subscription.ddm_summary or subscription.ddm_status or ""
         entry = subscription_status_entry(code)
         severity = str(entry["severity"])
         label = subscription_status_label(code)
@@ -254,7 +255,7 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
                 subscription.rx_device_name or "",
                 (subscription.tx_channel_name or "") if configured else "",
                 (subscription.tx_device_name or "") if configured else "",
-                _status_label(subscription.status_code),
+                _status_label(subscription),
             ]
         )
 

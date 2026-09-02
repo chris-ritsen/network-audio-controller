@@ -7,7 +7,6 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
 from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.lock import validate_pin
-from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
@@ -51,25 +50,29 @@ class DaemonDeviceHandlers:
         await self._send_json(writer, device.to_json())
 
     async def _handle_get_devices(self, writer):
-        devices_json = {
-            server_name: DanteDeviceSerializer.to_json(device)
-            for server_name, device in self.application.devices.items()
-        }
-        await self._send_json(writer, devices_json)
+        await self._send_json(writer, self._serialized_devices())
 
     async def _handle_get_device(self, writer, server_name):
-        device = self.application.devices.get(server_name)
-        if not device:
-            for name, candidate in self.application.devices.items():
-                if candidate.name and candidate.name.lower() == server_name.lower():
-                    device = candidate
+        devices = self._serialized_devices()
+        device_json = devices.get(server_name)
+        if device_json is None:
+            lowered = server_name.lower()
+            for candidate in devices.values():
+                identifiers = (
+                    candidate.get("ddm_device_id"),
+                    candidate.get("inventory_id"),
+                    candidate.get("ipv4"),
+                    candidate.get("name"),
+                )
+                if any(isinstance(value, str) and value.lower() == lowered for value in identifiers):
+                    device_json = candidate
                     break
 
-        if not device:
+        if device_json is None:
             await self._send_json(writer, {"error": "device not found"}, 404)
             return
 
-        await self._send_json(writer, DanteDeviceSerializer.to_json(device))
+        await self._send_json(writer, device_json)
 
     async def _handle_forget_device(self, writer, device_name):
         device = self._find_device(device_name)
