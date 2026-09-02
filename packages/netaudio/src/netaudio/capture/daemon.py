@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import asyncio
 import datetime
 import json
@@ -17,15 +18,22 @@ from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketRecord, PacketStore
 from netaudio.dante.tshark_capture import TsharkCapture
 
 logger = logging.getLogger("netaudio")
 
 try:
     from redis import Redis
+    from redis.exceptions import RedisError
 except ImportError:
     Redis = None
+
+    class RedisError(Exception):
+        pass
+
+
+REDIS_ERRORS: tuple[type[BaseException], ...] = (OSError, RedisError)
 
 from netaudio.icons import icon
 from netaudio.capture.packets import (
@@ -79,7 +87,7 @@ def _get_redis_client(
             try:
                 cached.ping()
                 return cached
-            except Exception:
+            except REDIS_ERRORS:
                 del _redis_client_cache[cache_key]
 
         if resolved_socket:
@@ -106,7 +114,7 @@ def _get_redis_client(
         _LAST_REDIS_ERROR = None
         _redis_client_cache[cache_key] = client
         return client
-    except Exception as exception:
+    except (OSError, ValueError, RedisError) as exception:
         _LAST_REDIS_ERROR = f"{type(exception).__name__}: {exception}"
         return None
 
@@ -123,41 +131,59 @@ def _resolve_devices_from_redis(redis_client):
             if data and data.get("ipv4"):
                 name = data.get("name") or key.rsplit(":", 1)[-1]
                 mapping[name] = data["ipv4"]
-    except Exception:
+    except (OSError, ValueError, RedisError):
         logger.exception("Failed to resolve daemon devices from Redis")
     return mapping
 
 
-def _print_packet_line(
-    packet_id,
-    timestamp_ns,
-    source_ip,
-    source_port,
-    destination_ip,
-    destination_port,
-    direction,
-    payload,
-    dump=False,
-    source_endpoint: str | None = None,
-    destination_endpoint: str | None = None,
-    dissect_mode=False,
-):
-    timestamp = datetime.datetime.fromtimestamp(timestamp_ns / 1e9)
+@dataclass(frozen=True)
+class PacketLine:
+    destination_ip: str | None
+    destination_port: int | None
+    direction: str | None
+    packet_id: int
+    payload: bytes
+    source_ip: str | None
+    source_port: int | None
+    timestamp_ns: int
+    destination_endpoint: str | None = None
+    source_endpoint: str | None = None
+
+    @classmethod
+    def from_row(cls, row: dict) -> PacketLine:
+        payload = row.get("payload") or b""
+        if isinstance(payload, str):
+            payload = bytes.fromhex(payload)
+        return cls(
+            destination_ip=row.get("dst_ip"),
+            destination_port=row.get("dst_port"),
+            direction=row.get("direction"),
+            packet_id=int(row["id"]),
+            payload=payload,
+            source_ip=row.get("src_ip"),
+            source_port=row.get("src_port"),
+            timestamp_ns=int(row["timestamp_ns"]),
+        )
+
+
+def _print_packet_line(line: PacketLine, dump=False, dissect_mode=False):
+    timestamp = datetime.datetime.fromtimestamp(line.timestamp_ns / 1e9)
     timestamp_str = timestamp.strftime("%H:%M:%S.%f")[:-3]
 
-    size = len(payload)
-    info_str = _label_packet(payload, include_code=True)
+    size = len(line.payload)
+    info_str = _label_packet(line.payload, include_code=True)
     if not info_str:
-        info_str = PORT_LABELS.get(destination_port) or PORT_LABELS.get(source_port, "")
+        info_str = PORT_LABELS.get(line.destination_port) or PORT_LABELS.get(line.source_port, "")
 
+    direction = line.direction
     arrow = "->" if direction == "request" else "<-" if direction == "response" else "**"
     direction_label = direction or "multicast"
     direction_icon = icon("tx") if direction == "request" else icon("rx") if direction == "response" else icon("packet")
-    source = source_endpoint or _format_endpoint(source_ip, source_port)
-    destination = destination_endpoint or _format_endpoint(destination_ip, destination_port)
+    source = line.source_endpoint or _format_endpoint(line.source_ip, line.source_port)
+    destination = line.destination_endpoint or _format_endpoint(line.destination_ip, line.destination_port)
 
     print(
-        f"  {direction_icon}{packet_id:<6d}  {timestamp_str:12s}  "
+        f"  {direction_icon}{line.packet_id:<6d}  {timestamp_str:12s}  "
         f"{source:>{PACKET_ENDPOINT_WIDTH}s} {arrow} {destination:<{PACKET_ENDPOINT_WIDTH}s}  "
         f"{direction_label:>10s}  {size:5d}B  {info_str}"
     )
@@ -165,35 +191,57 @@ def _print_packet_line(
     if dissect_mode:
         from netaudio.dante.packet_dissection_rendering import dissect_and_render
 
-        print(dissect_and_render(payload))
+        print(dissect_and_render(line.payload))
     elif dump:
-        print(_hexdump(payload))
+        print(_hexdump(line.payload))
+
+
+@dataclass(frozen=True)
+class CaptureDaemonOptions:
+    db_path: str
+    device_filter: list | None = None
+    dissect: bool = False
+    dump: bool = False
+    export_dir: str | None = None
+    ingress_stream: str | None = None
+    interface: str = "en0"
+    live: bool = True
+    metering: bool = False
+    opcode_filter: list | None = None
+    redis_db: int | None = None
+    redis_host: str | None = None
+    redis_password: str | None = None
+    redis_port: int | None = None
+    redis_socket: str | None = None
+    session_id: int | None = None
+    session_name: str | None = None
+    tcp: bool = False
+    use_multicast: bool = True
+    use_tshark: bool = True
 
 
 class CaptureDaemon:
-    def __init__(
-        self,
-        db_path: str,
-        interface: str = "en0",
-        use_tshark: bool = True,
-        use_multicast: bool = True,
-        device_filter: list = None,
-        opcode_filter: list = None,
-        export_dir: str = None,
-        live: bool = True,
-        dump: bool = False,
-        dissect: bool = False,
-        metering: bool = False,
-        tcp: bool = False,
-        session_id: int | None = None,
-        session_name: str | None = None,
-        redis_host: str | None = None,
-        redis_port: int | None = None,
-        redis_db: int | None = None,
-        redis_password: str | None = None,
-        redis_socket: str | None = None,
-        ingress_stream: str | None = None,
-    ):
+    def __init__(self, options: CaptureDaemonOptions):
+        db_path = options.db_path
+        interface = options.interface
+        use_tshark = options.use_tshark
+        use_multicast = options.use_multicast
+        device_filter = options.device_filter
+        opcode_filter = options.opcode_filter
+        export_dir = options.export_dir
+        live = options.live
+        dump = options.dump
+        dissect = options.dissect
+        metering = options.metering
+        tcp = options.tcp
+        session_id = options.session_id
+        session_name = options.session_name
+        redis_host = options.redis_host
+        redis_port = options.redis_port
+        redis_db = options.redis_db
+        redis_password = options.redis_password
+        redis_socket = options.redis_socket
+        ingress_stream = options.ingress_stream
         self.stop_event = Event()
         self.store = PacketStore(db_path=db_path)
         self.interface = interface
@@ -263,7 +311,7 @@ class CaptureDaemon:
 
         try:
             self._ingress_redis.xadd(self.ingress_stream, event, maxlen=200000, approximate=True)
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             print(f"Capture: Redis ingress stream publish failed: {exception}", file=sys.stderr)
 
     def _publish_marker_to_ingress_stream(
@@ -296,24 +344,26 @@ class CaptureDaemon:
 
         try:
             self._ingress_redis.xadd(self.ingress_stream, event, maxlen=200000, approximate=True)
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             print(f"Capture: Redis ingress stream marker publish failed: {exception}", file=sys.stderr)
 
     def _print_packet(self, packet_id, fields):
         self._packet_count += 1
         payload = fields.get("payload", b"")
         _print_packet_line(
-            packet_id=packet_id,
-            timestamp_ns=fields.get("timestamp_ns") or time.time_ns(),
-            source_ip=fields.get("src_ip"),
-            source_port=fields.get("src_port"),
-            destination_ip=fields.get("dst_ip"),
-            destination_port=fields.get("dst_port"),
-            direction=fields.get("direction"),
-            payload=payload,
+            PacketLine(
+                destination_endpoint=self._label_endpoint(fields.get("dst_ip"), fields.get("dst_port")),
+                destination_ip=fields.get("dst_ip"),
+                destination_port=fields.get("dst_port"),
+                direction=fields.get("direction"),
+                packet_id=packet_id,
+                payload=payload,
+                source_endpoint=self._label_endpoint(fields.get("src_ip"), fields.get("src_port")),
+                source_ip=fields.get("src_ip"),
+                source_port=fields.get("src_port"),
+                timestamp_ns=fields.get("timestamp_ns") or time.time_ns(),
+            ),
             dump=self.dump,
-            source_endpoint=self._label_endpoint(fields.get("src_ip"), fields.get("src_port")),
-            destination_endpoint=self._label_endpoint(fields.get("dst_ip"), fields.get("dst_port")),
             dissect_mode=self.dissect,
         )
 
@@ -344,19 +394,21 @@ class CaptureDaemon:
                     device_name = self._ip_to_name.get(source_host)
 
                     packet_id = self.store.store_packet(
-                        payload=data,
-                        source_type="multicast",
-                        src_ip=source_host,
-                        src_port=source_port,
-                        dst_ip=group,
-                        dst_port=port,
-                        device_name=device_name,
-                        device_ip=source_host,
-                        multicast_group=group,
-                        multicast_port=port,
-                        session_id=self.session_id,
-                        timestamp_ns=timestamp_ns,
-                        interface=self.interface,
+                        PacketRecord(
+                            payload=data,
+                            source_type="multicast",
+                            src_ip=source_host,
+                            src_port=source_port,
+                            dst_ip=group,
+                            dst_port=port,
+                            device_name=device_name,
+                            device_ip=source_host,
+                            multicast_group=group,
+                            multicast_port=port,
+                            session_id=self.session_id,
+                            timestamp_ns=timestamp_ns,
+                            interface=self.interface,
+                        )
                     )
 
                     if packet_id and self.live:
@@ -397,7 +449,7 @@ class CaptureDaemon:
                         break
                     print(f"Capture: Socket error on {group}:{port}: {exception}", file=sys.stderr)
                     time.sleep(1)
-                except Exception as exception:
+                except OSError as exception:
                     print(f"Capture: Error on {group}:{port}: {exception}", file=sys.stderr)
                     traceback.print_exc()
                     time.sleep(1)

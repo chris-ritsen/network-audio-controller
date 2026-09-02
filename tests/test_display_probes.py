@@ -81,17 +81,16 @@ async def test_enrich_clock_fields_skips_devices_the_daemon_already_described(mo
     unknown = _device("unknown.local.", ipv4="192.0.2.11")
     probed = []
 
-    class Sender:
-        async def probe_clocking_status(self, device):
-            probed.append(device.server_name)
-            raise common_module.CapabilityProbeTimeout("clock status probe timed out")
+    async def probe_clocking_status(device):
+        probed.append(device.server_name)
+        raise common_module.CapabilityProbeTimeout("clock status probe timed out")
 
-        async def close(self):
-            pass
+    application = SimpleNamespace(probe_clocking_status=probe_clocking_status)
 
-    monkeypatch.setattr(common_module, "_make_core_sender", lambda devices=None: Sender())
-
-    failures = await common_module._enrich_clock_fields({"described.local.": described, "unknown.local.": unknown})
+    failures = await common_module._enrich_clock_fields(
+        application,
+        {"described.local.": described, "unknown.local.": unknown},
+    )
 
     assert probed == ["unknown.local."]
     assert list(failures) == ["unknown.local."]
@@ -105,14 +104,13 @@ async def test_enrich_lock_states_only_unknown_skips_daemon_supplied_values(monk
     described.is_locked = False
     unknown = _device("unknown.local.", ipv4="192.0.2.11")
     application = SimpleNamespace(
-        devices={},
-        startup=AsyncMock(),
-        shutdown=AsyncMock(),
-        probe_lock_status=AsyncMock(return_value=None),
+        probe_lock_status=AsyncMock(
+            side_effect=common_module.CapabilityProbeTimeout("lock status readback timed out"),
+        ),
     )
-    monkeypatch.setattr(common_module, "_make_dante_application", lambda: application)
 
     failures = await common_module._enrich_lock_states(
+        application,
         {"described.local.": described, "unknown.local.": unknown},
         only_unknown=True,
     )
@@ -131,18 +129,23 @@ async def test_load_display_devices_warns_once_per_explicitly_selected_unreachab
     async def daemon_devices():
         return {"ghost.local.": device}
 
-    async def enrich_clock(devices):
+    async def enrich_clock(application, devices):
         return {"ghost.local.": common_module.CapabilityProbeTimeout("clock status probe timed out")}
 
-    async def enrich_lock(devices, only_unknown=False):
+    async def enrich_lock(application, devices, only_unknown=False):
         return {"ghost.local.": common_module.CapabilityProbeTimeout("lock status probe timed out")}
 
+    async def populate_controls(devices):
+        return None
+
+    application = SimpleNamespace(attach_devices=lambda devices: None)
     monkeypatch.setattr(common_module, "get_devices_from_daemon", daemon_devices)
+    monkeypatch.setattr(common_module, "_populate_controls", populate_controls)
     monkeypatch.setattr(common_module, "_enrich_clock_fields", enrich_clock)
     monkeypatch.setattr(common_module, "_enrich_lock_states", enrich_lock)
 
     with caplog.at_level("DEBUG", logger="netaudio"):
-        devices = await common_module._load_display_devices()
+        devices = await common_module._load_display_devices(application)
 
     assert list(devices) == ["ghost.local."]
     warnings = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
@@ -151,6 +154,6 @@ async def test_load_display_devices_warns_once_per_explicitly_selected_unreachab
     caplog.clear()
     state.names = []
     with caplog.at_level("DEBUG", logger="netaudio"):
-        await common_module._load_display_devices()
+        await common_module._load_display_devices(application)
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
     assert "Could not reach ghost.local. (192.0.2.99): clock status probe timed out" in caplog.text

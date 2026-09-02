@@ -1,18 +1,24 @@
-from contextlib import asynccontextmanager
+import asyncio
 from types import SimpleNamespace
 
 import pytest
-
-from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from typer.testing import CliRunner
 
-from netaudio import _common, _common_output
+from netaudio import _common_output
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.commands import preset as preset_commands
-from netaudio.commands import subscription as subscription_commands
+from tests.cli_test_support import FakeApplication
 from tests.test_cli_mutation_safety import _channel, _subscription
 
-
 runner = CliRunner()
+
+
+class PresetApplication(FakeApplication):
+    async def probe_preferred_leader_state(self, device_ip_address, timeout=2.0):
+        raise RuntimeError("synthetic readback service unavailable")
+
+    async def probe_interface_status(self, device_ip_address, timeout=2.0):
+        raise RuntimeError("synthetic readback service unavailable")
 
 
 @pytest.fixture(autouse=True)
@@ -33,15 +39,6 @@ def reset_cli_state(monkeypatch):
     from netaudio.cli import OutputFormat
 
     state.output_format = OutputFormat.plain
-
-    async def unavailable_preset_readback():
-        raise RuntimeError("synthetic readback service unavailable")
-
-    monkeypatch.setattr(
-        preset_commands,
-        "_start_preset_readback_application",
-        unavailable_preset_readback,
-    )
     try:
         yield state
     finally:
@@ -164,21 +161,18 @@ def _preset_transmitter_device(name, routing_name_state):
     return device
 
 
-def _install_preset_context(monkeypatch, devices, send):
-    async def probe_sample_rate_status(device_ip_address, timeout=4.0):
-        assert timeout == 4.0
-        device = next(device for device in devices.values() if str(device.ipv4) == str(device_ip_address))
-        settings = await device.operations.get_device_settings()
-        sample_rate = settings["sample_rate"]
-        return sample_rate, device.supported_sample_rates or [sample_rate]
+def _install_preset_context(monkeypatch, devices, application=None):
+    application = PresetApplication(devices) if application is None else application
 
-    send.probe_sample_rate_status = probe_sample_rate_status
+    def run_command(run, *arguments, **options):
+        return asyncio.run(run(application, devices, *arguments, **options))
 
-    @asynccontextmanager
-    async def command_context():
-        yield devices, send
+    monkeypatch.setattr(preset_commands, "run_command", run_command)
+    return application
 
-    monkeypatch.setattr(_common, "_command_context", command_context)
+
+def _sent_operations(application):
+    return [sent.operation for sent in application.sent]
 
 
 def test_preset_save_refuses_overwrite_before_discovery(monkeypatch, tmp_path):
@@ -186,13 +180,11 @@ def test_preset_save_refuses_overwrite_before_discovery(monkeypatch, tmp_path):
     output.write_text("original")
     entered = False
 
-    @asynccontextmanager
-    async def command_context():
+    def run_command(run, *arguments, **options):
         nonlocal entered
         entered = True
-        yield {}, None
 
-    monkeypatch.setattr(_common, "_command_context", command_context)
+    monkeypatch.setattr(preset_commands, "run_command", run_command)
 
     result = runner.invoke(preset_commands.app, ["save", str(output)])
 
@@ -207,10 +199,7 @@ def test_preset_force_save_failure_preserves_existing_file(monkeypatch, tmp_path
     output.write_text("original")
     devices = {"device.local.": SimpleNamespace(name="Device")}
 
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
+    _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
         _common_output,
         "format_devices_xml",
@@ -238,10 +227,7 @@ def test_preset_force_replaces_existing_file(monkeypatch, tmp_path):
     output.write_text("original")
     devices = {"device.local.": SimpleNamespace(name="Device")}
 
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
+    _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
         _common_output,
         "format_devices_xml",
@@ -262,10 +248,7 @@ def test_preset_save_publishes_complete_file_atomically(monkeypatch, tmp_path):
     output = tmp_path / "new.xml"
     devices = {"device.local.": SimpleNamespace(name="Device")}
 
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
+    _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
         _common_output,
         "format_devices_xml",
@@ -329,18 +312,14 @@ def test_preset_marks_additional_interfaces_unsupported(monkeypatch, tmp_path):
     )
     _write_preset(preset, [{"name": "Device", "interface": interfaces}])
     devices = {"device.local.": _preset_device("Device")}
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "unsupported fields: additional network interfaces" in result.output
-    assert sends == []
+    assert application.sent == []
 
 
 def test_preset_preflights_all_matches_before_any_send(monkeypatch, tmp_path):
@@ -356,42 +335,29 @@ def test_preset_preflights_all_matches_before_any_send(monkeypatch, tmp_path):
         "first.local.": _preset_device("First"),
         "second.local.": _preset_device("Second", supported_encodings=[16]),
     }
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "refused before sending any changes" in result.output
     assert "Second: device reports supported encodings [16]; 24 is not supported" in result.output
-    assert sends == []
+    assert application.sent == []
 
 
 def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_path):
     preset = tmp_path / "audio-settings.xml"
     _write_preset(preset, [{"name": "Device", "encoding": 24, "latency_us": 150}])
     device = _preset_device("Device", encoding=24, active_latency_ns=150_000)
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    async def probe_encoding_status(_ipv4):
-        return device.encoding, device.supported_encodings
-
-    send.probe_encoding_status = probe_encoding_status
-    _install_preset_context(monkeypatch, {"device.local.": device}, send)
+    application = _install_preset_context(monkeypatch, {"device.local.": device})
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
     assert "encoding 24-bit (verified)" in result.output
     assert "latency 0.15 ms (verified)" in result.output
-    assert len(sends) == 2
+    assert _sent_operations(application) == ["set_encoding", "set_latency"]
 
 
 def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path):
@@ -418,44 +384,28 @@ def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path):
         2: ("Tx2", "Transmitter"),
     }
     receiver_device = _preset_receiver_device("Receiver", source_state)
-    sent_packets = []
 
-    def build_removals(_self, receiver_channel_numbers):
-        assert receiver_channel_numbers == [2]
-        return b"remove", None
-
-    def build_additions(_self, subscriptions):
-        assert subscriptions == [(1, "NewTx", "Transmitter")]
-        return b"add", None
-
-    monkeypatch.setattr(
-        subscription_commands.DanteDeviceCommands,
-        "command_remove_subscriptions",
-        build_removals,
-    )
-    monkeypatch.setattr(
-        subscription_commands.DanteDeviceCommands,
-        "command_add_subscriptions",
-        build_additions,
-    )
-
-    async def send(packet, *_args, **_kwargs):
-        sent_packets.append(packet)
-        if packet == b"remove":
+    class ReconcilingApplication(PresetApplication):
+        async def remove_subscriptions(self, device, channel_numbers):
+            assert list(channel_numbers) == [2]
             source_state[2] = None
-        elif packet == b"add":
-            source_state[1] = ("NewTx", "Transmitter")
+            return self._record("remove_subscriptions", device, tuple(channel_numbers))
 
-    _install_preset_context(
+        async def add_subscriptions(self, device, records):
+            assert list(records) == [(1, "NewTx", "Transmitter")]
+            source_state[1] = ("NewTx", "Transmitter")
+            return self._record("add_subscriptions", device, tuple(records))
+
+    application = _install_preset_context(
         monkeypatch,
         {"receiver.local.": receiver_device},
-        send,
+        ReconcilingApplication({"receiver.local.": receiver_device}),
     )
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert sent_packets == [b"remove", b"add"]
+    assert _sent_operations(application) == ["remove_subscriptions", "add_subscriptions"]
     assert "receiver channel 1 <- NewTx@Transmitter (verified)" in result.output
     assert "receiver channel 2 unsubscribed (verified)" in result.output
 
@@ -471,28 +421,34 @@ def test_preset_load_reconciles_transmitter_channel_names(monkeypatch, tmp_path)
     )
     routing_name_state = {1: "Old-1", 2: "Current-2"}
     transmitter_device = _preset_transmitter_device("Transmitter", routing_name_state)
-    sent_packets = []
-    frontend_response = bytes.fromhex(
-        "280900a42852240000010000000000000202003c007c00030000bb80010100180400001800180004626c7565746f6f74683a6c656674004c6566740014140001000000030001000000000007000000000028001800000000000000370000000000000000626c7565746f6f74683a726967687400526967687400000014140002000000030002000000000007000000000064001800000000000000740000000000000000"
-    )
+    probes = []
 
-    async def send(packet, *_args, **_kwargs):
-        sent_packets.append(packet)
-        opcode = int.from_bytes(packet[6:8], "big")
-        if opcode == 0x2400:
-            return frontend_response
-        if opcode == 0x2013:
-            routing_name_state[1] = "New-1"
+    async def resolve_channel_name_protocol_identifier(channel_type):
+        probes.append(channel_type)
+        transmitter_device.transmitter_channel_name_protocol_identifier = 0x2809
+        return 0x2809
+
+    transmitter_device.operations.resolve_channel_name_protocol_identifier = resolve_channel_name_protocol_identifier
+
+    class RenamingApplication(PresetApplication):
+        async def set_channel_name(self, device, channel_type, channel_number, name):
+            routing_name_state[channel_number] = name
+            self._record("set_channel_name", device, channel_type, channel_number, name)
             return bytes.fromhex("2809000c0302201300010000")
-        raise AssertionError(f"unexpected opcode 0x{opcode:04X}")
 
-    _install_preset_context(monkeypatch, {"transmitter.local.": transmitter_device}, send)
+    application = _install_preset_context(
+        monkeypatch,
+        {"transmitter.local.": transmitter_device},
+        RenamingApplication({"transmitter.local.": transmitter_device}),
+    )
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert [int.from_bytes(packet[6:8], "big") for packet in sent_packets] == [0x2400, 0x2013]
-    assert int.from_bytes(sent_packets[1][0:2], "big") == 0x2809
+    assert probes == ["tx"]
+    assert [(sent.operation, sent.arguments) for sent in application.sent] == [
+        ("set_channel_name", ("tx", 1, "New-1")),
+    ]
     assert "transmitter channel 1: New-1 (verified)" in result.output
 
 
@@ -503,19 +459,15 @@ def test_preset_transmitter_name_preflight_rejects_missing_channel(monkeypatch, 
         [{"number": 3, "name": "Missing"}],
     )
     transmitter_device = _preset_transmitter_device("Transmitter", {1: "One", 2: "Two"})
-    sent_packets = []
 
-    async def send(packet, *_args, **_kwargs):
-        sent_packets.append(packet)
-
-    _install_preset_context(monkeypatch, {"transmitter.local.": transmitter_device}, send)
+    application = _install_preset_context(monkeypatch, {"transmitter.local.": transmitter_device})
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "transmitter channel 3 is unavailable" in result.output
     assert "refused before sending any changes" in result.output
-    assert sent_packets == []
+    assert application.sent == []
 
 
 def test_preset_subscription_preflight_rejects_missing_receiver_channel(monkeypatch, tmp_path):
@@ -540,23 +492,15 @@ def test_preset_subscription_preflight_rejects_missing_receiver_channel(monkeypa
         "Receiver",
         {1: None, 2: None},
     )
-    sent_packets = []
 
-    async def send(packet, *_args, **_kwargs):
-        sent_packets.append(packet)
-
-    _install_preset_context(
-        monkeypatch,
-        {"receiver.local.": receiver_device},
-        send,
-    )
+    application = _install_preset_context(monkeypatch, {"receiver.local.": receiver_device})
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "receiver channel 3 is unavailable" in result.output
     assert "refused before sending any changes" in result.output
-    assert sent_packets == []
+    assert application.sent == []
 
 
 def test_preset_subscription_reconciliation_is_idempotent(monkeypatch, tmp_path):
@@ -582,21 +526,13 @@ def test_preset_subscription_reconciliation_is_idempotent(monkeypatch, tmp_path)
         "Receiver",
         {1: ("Tx1", "Transmitter"), 2: None},
     )
-    sent_packets = []
 
-    async def send(packet, *_args, **_kwargs):
-        sent_packets.append(packet)
-
-    _install_preset_context(
-        monkeypatch,
-        {"receiver.local.": receiver_device},
-        send,
-    )
+    application = _install_preset_context(monkeypatch, {"receiver.local.": receiver_device})
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert sent_packets == []
+    assert application.sent == []
     assert "receiver subscriptions already match (2 channels)" in result.output
 
 
@@ -610,19 +546,15 @@ def test_preset_refuses_unmatched_devices_without_explicit_filter(monkeypatch, t
         ],
     )
     devices = {"online.local.": _preset_device("Online")}
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "these preset devices were not found" in result.output
     assert "Offline" in result.output
-    assert sends == []
+    assert application.sent == []
 
 
 def test_preset_filters_devices_before_unsupported_preflight(
@@ -648,12 +580,12 @@ def test_preset_filters_devices_before_unsupported_preflight(
     async def send(*args, **kwargs):
         sends.append((args, kwargs))
 
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert sends == []
+    assert application.sent == []
     assert "sample rate already 48000 Hz (verified; no write sent)" in result.output
     assert "Excluded" not in result.output
 
@@ -668,17 +600,13 @@ def test_preset_accepts_nonstandard_sample_rate_advertised_by_device(monkeypatch
             supported_sample_rates=[48000, 384000],
         )
     }
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert sends == []
+    assert application.sent == []
     assert "sample rate already 384000 Hz (verified; no write sent)" in result.output
 
 
@@ -689,11 +617,8 @@ def test_preset_routes_sample_rate_through_shared_safe_operation(monkeypatch, tm
     devices = {"device.local.": device}
     calls = []
 
-    async def send(*_args, **_kwargs):
-        raise AssertionError("the shared no-op result must not send")
-
-    async def change_sample_rate(sender, target_device, sample_rate, confirm_destructive=False, timeout=4.0):
-        calls.append((sender, target_device, sample_rate, confirm_destructive, timeout))
+    async def change_sample_rate(target_device, sample_rate, confirm_destructive=False, timeout=4.0):
+        calls.append((target_device, sample_rate, confirm_destructive, timeout))
         preflight = SimpleNamespace()
         return SimpleNamespace(
             changed=False,
@@ -701,12 +626,8 @@ def test_preset_routes_sample_rate_through_shared_safe_operation(monkeypatch, tm
             observed_sample_rate_hertz=48_000,
         )
 
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        preset_commands,
-        "change_sample_rate_with_command_sender",
-        change_sample_rate,
-    )
+    application = _install_preset_context(monkeypatch, devices)
+    application.set_sample_rate = change_sample_rate
 
     result = runner.invoke(
         preset_commands.app,
@@ -714,7 +635,8 @@ def test_preset_routes_sample_rate_through_shared_safe_operation(monkeypatch, tm
     )
 
     assert result.exit_code == 0
-    assert calls == [(send, device, 48_000, True, 4.0)]
+    assert calls == [(device, 48_000, True, 4.0)]
+    assert application.sent == []
     assert "sample rate already 48000 Hz (verified; no write sent)" in result.output
 
 
@@ -727,18 +649,14 @@ def test_preset_rejects_sample_rate_missing_from_device_capabilities(monkeypatch
             supported_sample_rates=[48000],
         )
     }
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "device reports supported sample rates [48000]" in result.output
-    assert sends == []
+    assert application.sent == []
 
 
 def test_preset_preflight_rejects_incomplete_static_interface(monkeypatch, tmp_path):
@@ -746,18 +664,14 @@ def test_preset_preflight_rejects_incomplete_static_interface(monkeypatch, tmp_p
     interface = '<interface><ipv4_address mode="static"><ip_address>192.0.2.9</ip_address></ipv4_address></interface>'
     _write_preset(preset, [{"name": "Device", "interface": interface}])
     devices = {"device.local.": _preset_device("Device")}
-    sends = []
 
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
     assert "static interface is missing" in result.output
-    assert sends == []
+    assert application.sent == []
 
 
 def test_preset_reports_unverified_requests_honestly(monkeypatch, tmp_path):
@@ -768,22 +682,15 @@ def test_preset_reports_unverified_requests_honestly(monkeypatch, tmp_path):
         [{"name": "Device", "preferred": True, "interface": interface}],
     )
     devices = {"device.local.": _preset_device("Device")}
-    sends = []
-
-    async def send(*args, **kwargs):
-        sends.append((args, kwargs))
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        "netaudio.dante.services.cmc._get_host_mac",
-        lambda *_args: b"\x02\x00\x00\x00\x00\x01",
-    )
+    application = _install_preset_context(monkeypatch, devices)
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert len(sends) == 2
-    assert all(kwargs["expect_response"] is False for _, kwargs in sends)
+    assert [(sent.operation, sent.arguments) for sent in application.sent] == [
+        ("set_preferred_leader", (True,)),
+        ("set_interface", ("dhcp", None)),
+    ]
     assert "preferred leader on requested; not verified" in result.output
     assert "interface dynamic requested; not verified" in result.output
     assert "applied" not in result.output.lower()
@@ -812,9 +719,7 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
     device.interface_pending_config = pending_interface_config
     devices = {"device.local.": device}
 
-    class ReadbackApplication:
-        shutdown_called = False
-
+    class ReadbackApplication(PresetApplication):
         async def probe_preferred_leader_state(self, _device_ip, timeout):
             assert timeout == 1.0
             return True
@@ -823,27 +728,7 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
             assert timeout == 1.0
             return [{"mode": "dynamic", "ip_address": "192.0.2.40"}]
 
-        async def shutdown(self):
-            self.shutdown_called = True
-
-    readback = ReadbackApplication()
-
-    async def start_readback():
-        return readback
-
-    async def send(*_args, **_kwargs):
-        return None
-
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        preset_commands,
-        "_start_preset_readback_application",
-        start_readback,
-    )
-    monkeypatch.setattr(
-        "netaudio.dante.services.cmc._get_host_mac",
-        lambda *_args: b"\x02\x00\x00\x00\x00\x01",
-    )
+    _install_preset_context(monkeypatch, devices, ReadbackApplication(devices))
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
@@ -852,7 +737,6 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
     assert "interface dynamic (verified)" in result.output
     assert "requested; not verified" not in result.output
     assert ("Reboot required: Device" in result.output) is expects_reboot
-    assert readback.shutdown_called
 
 
 def test_preset_summary_reports_partial_failure_and_continues(
@@ -865,11 +749,6 @@ def test_preset_summary_reports_partial_failure_and_continues(
         [{"name": "Device", "sample_rate": 48000, "preferred": True}],
     )
     devices = {"device.local.": _preset_device("Device")}
-    send_count = 0
-
-    async def send(*_args, **_kwargs):
-        nonlocal send_count
-        send_count += 1
 
     async def fail_sample_rate(*_args, **_kwargs):
         from netaudio.dante.sample_rate_topology import SampleRateTopologyMutationOutcomeUnknownError
@@ -880,17 +759,13 @@ def test_preset_summary_reports_partial_failure_and_continues(
             preflight,
         )
 
-    _install_preset_context(monkeypatch, devices, send)
-    monkeypatch.setattr(
-        preset_commands,
-        "change_sample_rate_with_command_sender",
-        fail_sample_rate,
-    )
+    application = _install_preset_context(monkeypatch, devices)
+    application.set_sample_rate = fail_sample_rate
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
-    assert send_count == 1
+    assert _sent_operations(application) == ["set_preferred_leader"]
     assert "Preset load summary:" in result.output
     assert "sample rate: MUTATION OUTCOME UNKNOWN" in result.output
     assert "synthetic send failure" in result.output

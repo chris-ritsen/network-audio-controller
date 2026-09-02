@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+import struct
 import tarfile
 import time
 from pathlib import Path
@@ -65,21 +67,21 @@ def _migrate_confidence(fact: dict):
         ]
 
 
-def add_fact(
-    path: Path,
-    category: str,
-    key: str,
-    name: str,
-    note: str | None = None,
-    body: str | None = None,
-    fields: list[dict] | None = None,
-    evidence: list[str] | None = None,
-    confidence: str = "verified",
-    supersedes: str | None = None,
-    protocol_id: int | list[int] | None = None,
-    match_offset: int | None = None,
-    match_size: int | None = None,
-) -> dict:
+@dataclass(frozen=True)
+class FactRecord:
+    name: str
+    body: str | None = None
+    confidence: str = "verified"
+    evidence: list[str] | None = None
+    fields: list[dict] | None = None
+    match_offset: int | None = None
+    match_size: int | None = None
+    note: str | None = None
+    protocol_id: int | list[int] | None = None
+    supersedes: str | None = None
+
+
+def add_fact(path: Path, category: str, key: str, record: FactRecord) -> dict:
     data = _load_facts(path)
     fk = _fact_key(category, key)
 
@@ -88,39 +90,26 @@ def add_fact(
     fact = {
         "category": category,
         "key": key,
-        "name": name,
-        "note": note,
-        "fields": fields or [],
-        "evidence": evidence or [],
-        "confidence_log": [{"level": confidence, "timestamp_ns": time.time_ns()}],
+        "name": record.name,
+        "note": record.note,
+        "fields": record.fields or [],
+        "evidence": record.evidence or [],
+        "confidence_log": [{"level": record.confidence, "timestamp_ns": time.time_ns()}],
         "added_ns": time.time_ns(),
     }
 
-    if protocol_id is not None:
-        fact["protocol_id"] = protocol_id
-    elif existing and "protocol_id" in existing:
-        fact["protocol_id"] = existing["protocol_id"]
+    for field_name in ("body", "match_offset", "match_size", "protocol_id"):
+        value = getattr(record, field_name)
+        if value is not None:
+            fact[field_name] = value
+        elif existing and field_name in existing:
+            fact[field_name] = existing[field_name]
 
-    if match_offset is not None:
-        fact["match_offset"] = match_offset
-    elif existing and "match_offset" in existing:
-        fact["match_offset"] = existing["match_offset"]
-
-    if match_size is not None:
-        fact["match_size"] = match_size
-    elif existing and "match_size" in existing:
-        fact["match_size"] = existing["match_size"]
-
-    if body is not None:
-        fact["body"] = body
-    elif existing and "body" in existing:
-        fact["body"] = existing["body"]
-
-    if supersedes:
-        fact["supersedes"] = supersedes
+    if record.supersedes:
+        fact["supersedes"] = record.supersedes
 
     if existing:
-        fact["evidence"] = _merge_evidence(existing.get("evidence", []), evidence or [])
+        fact["evidence"] = _merge_evidence(existing.get("evidence", []), record.evidence or [])
         _migrate_confidence(existing)
         existing_confidence_log = existing.get("confidence_log", [])
         if existing_confidence_log:
@@ -150,22 +139,22 @@ def _merge_evidence(existing: list[str], new: list[str]) -> list[str]:
     return merged
 
 
-def update_fact(
-    path: Path,
-    category: str,
-    key: str,
-    name: str | None = None,
-    note: str | None = None,
-    body: str | None = None,
-    fields: list[dict] | None = None,
-    evidence: list[str] | None = None,
-    confidence: str | None = None,
-    supersedes: str | None = None,
-    protocol_id: int | list[int] | None = None,
-    match_offset: int | None = None,
-    match_size: int | None = None,
-    replace_evidence: bool = False,
-) -> dict | None:
+@dataclass(frozen=True)
+class FactUpdate:
+    body: str | None = None
+    confidence: str | None = None
+    evidence: list[str] | None = None
+    fields: list[dict] | None = None
+    match_offset: int | None = None
+    match_size: int | None = None
+    name: str | None = None
+    note: str | None = None
+    protocol_id: int | list[int] | None = None
+    replace_evidence: bool = False
+    supersedes: str | None = None
+
+
+def update_fact(path: Path, category: str, key: str, update: FactUpdate) -> dict | None:
     data = _load_facts(path)
     fk = _fact_key(category, key)
     fact = data["facts"].get(fk)
@@ -185,29 +174,17 @@ def update_fact(
         }
     )
 
-    if name is not None:
-        fact["name"] = name
-    if note is not None:
-        fact["note"] = note
-    if body is not None:
-        fact["body"] = body
-    if fields is not None:
-        fact["fields"] = fields
-    if confidence is not None:
-        _append_confidence(fact, confidence)
-    if supersedes is not None:
-        fact["supersedes"] = supersedes
-    if protocol_id is not None:
-        fact["protocol_id"] = protocol_id
-    if match_offset is not None:
-        fact["match_offset"] = match_offset
-    if match_size is not None:
-        fact["match_size"] = match_size
-    if evidence:
-        if replace_evidence:
-            fact["evidence"] = list(evidence)
+    for field_name in ("body", "fields", "match_offset", "match_size", "name", "note", "protocol_id", "supersedes"):
+        value = getattr(update, field_name)
+        if value is not None:
+            fact[field_name] = value
+    if update.confidence is not None:
+        _append_confidence(fact, update.confidence)
+    if update.evidence:
+        if update.replace_evidence:
+            fact["evidence"] = list(update.evidence)
         else:
-            fact["evidence"] = _merge_evidence(fact.get("evidence", []), evidence)
+            fact["evidence"] = _merge_evidence(fact.get("evidence", []), update.evidence)
 
     data["facts"][fk] = fact
     _save_facts(data, path)
@@ -554,8 +531,6 @@ def _load_bundle(bundle_path: Path) -> tuple[dict, dict[str, bytes]]:
 
 
 def _extract_field_value(payload: bytes, field: dict) -> tuple[object, str]:
-    import struct
-
     offset = field.get("offset", 0)
     length = field.get("length", 0)
     dtype = field.get("dtype", "")
@@ -610,7 +585,7 @@ def _verify_field(payload: bytes, field: dict) -> dict:
 
     try:
         actual, actual_display = _extract_field_value(payload, field)
-    except Exception as exc:
+    except (LookupError, ValueError, struct.error) as exc:
         return {
             "ok": False,
             "name": name,

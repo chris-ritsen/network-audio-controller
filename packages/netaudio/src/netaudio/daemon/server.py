@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import sys
 import time
 from collections.abc import Coroutine
 from typing import Any, Awaitable, cast
 
-from zeroconf import ServiceStateChange
+from zeroconf import Error as ZeroconfError, ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsyncioLock
@@ -24,7 +25,6 @@ from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.const import SERVICES
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.state import DanteStateService
 
 
 class DaemonAlreadyRunningError(Exception):
@@ -33,8 +33,12 @@ class DaemonAlreadyRunningError(Exception):
 
 try:
     import redis.asyncio as aioredis
+    from redis.exceptions import RedisError
+
+    REDIS_ERRORS: tuple[type[BaseException], ...] = (OSError, RedisError)
 except ImportError:
     aioredis = None
+    REDIS_ERRORS = (OSError,)
 
 try:
     from netaudio.daemon.dbus_service import DBusService as _DBusService
@@ -110,14 +114,12 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             else:
                 logger.info("Capture: enabled but no active session")
 
-        self.application = DanteApplication(packet_store=self._packet_store, dissect=dissect)
-
-        if self._packet_store and self._session_id:
-            self.application.capture_session_id = self._session_id
-            for service in [self.application.settings, self.application.cmc, self.application.notifications]:
-                service.session_id = self._session_id
-
-        self.state = DanteStateService(self.application)
+        self.application = DanteApplication(
+            packet_store=self._packet_store,
+            dissect=dissect,
+            session_id=self._session_id,
+        )
+        self.state = self.application.state
         self.zeroconf = None
         self.browser = None
         self.running = False
@@ -198,18 +200,18 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             await cast(Awaitable[Any], candidate.ping())
             try:
                 await candidate.config_set("notify-keyspace-events", "Kgh$")
-            except Exception as exception:
+            except REDIS_ERRORS as exception:
                 logger.warning(
                     f"Could not set Redis keyspace notification config, relying on server config: {exception}"
                 )
             self._redis = candidate
             logger.info("Connected to Redis")
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.info(f"Redis not available, continuing without it: {exception}")
             if candidate is not None:
                 try:
                     await candidate.aclose()
-                except Exception as close_exception:
+                except REDIS_ERRORS as close_exception:
                     logger.warning(f"Redis failed-connect cleanup error: {close_exception}", exc_info=True)
             self._redis = None
 
@@ -237,7 +239,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                     },
                 ),
             )
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.warning(f"Redis publish error for {device.server_name}: {exception}")
 
     async def _delete_device_from_redis(self, server_name):
@@ -247,7 +249,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         key = f"netaudio:daemon:device:{server_name}"
         try:
             await self._redis.delete(key)
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.warning(f"Redis delete error for {server_name}: {exception}")
 
     def _load_shure_correlations(self):
@@ -314,7 +316,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         try:
             await self._redis.set(f"netaudio:shure:{mac}", json.dumps(data))
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.warning(f"Redis publish error for Shure {mac}: {exception}")
 
     async def _publish_shure_meters_to_redis(self, mac, data):
@@ -323,7 +325,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         try:
             await self._redis.set(f"netaudio:shure:meters:{mac}", json.dumps(data))
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.warning(f"Redis meter publish error for Shure {mac}: {exception}")
 
     async def _delete_shure_from_redis(self, mac):
@@ -332,7 +334,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         try:
             await self._redis.delete(f"netaudio:shure:{mac}", f"netaudio:shure:meters:{mac}")
-        except Exception as exception:
+        except REDIS_ERRORS as exception:
             logger.warning(f"Redis delete error for Shure {mac}: {exception}")
 
     async def _on_shure_discovered(self, event: DanteEvent):
@@ -550,7 +552,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if browser:
             try:
                 await browser.async_cancel()
-            except Exception as exception:
+            except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"mDNS browser close error: {exception}", exc_info=True)
 
         zeroconf = self.zeroconf
@@ -558,57 +560,57 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if zeroconf:
             try:
                 await zeroconf.async_close()
-            except Exception as exception:
+            except (OSError, RuntimeError, ZeroconfError) as exception:
                 logger.warning(f"Zeroconf close error: {exception}", exc_info=True)
 
         if self._dbus:
             try:
                 await self._dbus.stop()
-            except Exception as exception:
+            except (OSError, RuntimeError) as exception:
                 logger.warning(f"D-Bus stop error: {exception}", exc_info=True)
             self._dbus = None
 
         if self.heartbeat:
             try:
                 await self.heartbeat.stop()
-            except Exception as exception:
+            except (OSError, RuntimeError) as exception:
                 logger.warning(f"Heartbeat stop error: {exception}", exc_info=True)
             self.heartbeat = None
 
         if self.shure:
             try:
                 await self.shure.stop()
-            except Exception as exception:
+            except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
 
         if self.http_api:
             try:
                 await self.http_api.stop()
-            except Exception as exception:
+            except (OSError, RuntimeError) as exception:
                 logger.warning(f"Daemon HTTP API stop error: {exception}", exc_info=True)
 
         if self.metering:
             try:
                 await self.metering.stop()
-            except Exception as exception:
+            except (OSError, RuntimeError) as exception:
                 logger.warning(f"Metering stop error: {exception}", exc_info=True)
 
         if self._redis:
             try:
                 await self._redis.aclose()
-            except Exception as exception:
+            except REDIS_ERRORS as exception:
                 logger.warning(f"Redis close error: {exception}", exc_info=True)
             self._redis = None
 
         try:
             await self.application.shutdown()
-        except Exception as exception:
+        except (OSError, RuntimeError) as exception:
             logger.warning(f"Application shutdown error: {exception}", exc_info=True)
 
         if self._packet_store:
             try:
                 self._packet_store.close()
-            except Exception as exception:
+            except (OSError, sqlite3.Error) as exception:
                 logger.warning(f"Packet store close error: {exception}", exc_info=True)
             self._packet_store = None
 
@@ -860,7 +862,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 self._refresh_status_fields()
             except asyncio.CancelledError:
                 break
-            except Exception as exception:
+            except (OSError, RuntimeError, TimeoutError) as exception:
                 logger.warning(f"Revalidation loop error: {exception}", exc_info=True)
 
 

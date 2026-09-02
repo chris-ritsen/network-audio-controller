@@ -4,7 +4,7 @@ import asyncio
 
 import typer
 
-from netaudio._common import _command_context, CapabilityProbeTimeout
+from netaudio._common import CapabilityProbeTimeout, run_command
 from netaudio._common_cli import _get_state
 from netaudio._common_output import output_table
 from netaudio._common_selection import filter_devices, sort_devices
@@ -112,6 +112,55 @@ def _without_port_column(headers: list[str], rows: list[list[str]]) -> tuple[lis
     )
 
 
+async def run_network_status(application, devices, timeout: float) -> None:
+    dissect = _get_state().dissect
+    filtered = filter_devices(devices)
+    if not filtered:
+        typer.echo("Error: no devices matched.", err=True)
+        raise typer.Exit(code=1)
+
+    async def probe(server_name, device):
+        if device.ipv4 is None:
+            return server_name, device, None, None
+
+        async def capture(operation):
+            try:
+                return await operation(str(device.ipv4), timeout=timeout)
+            except CapabilityProbeTimeout:
+                return None
+
+        link_status, switch_configuration = await asyncio.gather(
+            capture(application.probe_link_status),
+            capture(application.probe_switch_configuration),
+        )
+        return server_name, device, link_status, switch_configuration
+
+    results = await asyncio.gather(*(probe(server_name, device) for server_name, device in sort_devices(filtered)))
+    headers = NETWORK_STATUS_HEADERS + NETWORK_STATUS_DISSECT_HEADERS if dissect else NETWORK_STATUS_HEADERS
+    rows = []
+    json_data = {}
+    for server_name, device, link_status, switch_configuration in results:
+        device_name = device.name or server_name
+        address = str(device.ipv4) if device.ipv4 is not None else None
+        json_data[server_name] = {
+            "available": link_status is not None or switch_configuration is not None,
+            "dante_model": device.dante_model,
+            "ipv4": address,
+            "kind": device.kind,
+            "link_status": link_status.to_dict() if link_status is not None else None,
+            "link_status_available": link_status is not None,
+            "manufacturer": device.manufacturer,
+            "name": device.name,
+            "server_name": server_name,
+            "switch_configuration": switch_configuration,
+            "switch_configuration_available": switch_configuration is not None,
+        }
+        rows.extend(network_status_rows(device_name, address or "", link_status, switch_configuration, dissect))
+
+    headers, rows = _without_port_column(headers, rows)
+    output_table(headers, rows, json_data=json_data)
+
+
 def network_status(
     timeout: float = typer.Option(
         2.0,
@@ -121,56 +170,4 @@ def network_status(
     ),
 ):
     """Probe Controller-compatible link and switch-configuration status."""
-
-    async def run():
-        dissect = _get_state().dissect
-        async with _command_context() as (devices, send):
-            filtered = filter_devices(devices)
-            if not filtered:
-                typer.echo("Error: no devices matched.", err=True)
-                raise typer.Exit(code=1)
-
-            async def probe(server_name, device):
-                if device.ipv4 is None:
-                    return server_name, device, None, None
-
-                async def capture(operation):
-                    try:
-                        return await operation(device.ipv4, timeout=timeout)
-                    except CapabilityProbeTimeout:
-                        return None
-
-                link_status, switch_configuration = await asyncio.gather(
-                    capture(send.probe_link_status),
-                    capture(send.probe_switch_configuration),
-                )
-                return server_name, device, link_status, switch_configuration
-
-            results = await asyncio.gather(
-                *(probe(server_name, device) for server_name, device in sort_devices(filtered))
-            )
-            headers = NETWORK_STATUS_HEADERS + NETWORK_STATUS_DISSECT_HEADERS if dissect else NETWORK_STATUS_HEADERS
-            rows = []
-            json_data = {}
-            for server_name, device, link_status, switch_configuration in results:
-                device_name = device.name or server_name
-                address = str(device.ipv4) if device.ipv4 is not None else None
-                json_data[server_name] = {
-                    "available": link_status is not None or switch_configuration is not None,
-                    "dante_model": device.dante_model,
-                    "ipv4": address,
-                    "kind": device.kind,
-                    "link_status": link_status.to_dict() if link_status is not None else None,
-                    "link_status_available": link_status is not None,
-                    "manufacturer": device.manufacturer,
-                    "name": device.name,
-                    "server_name": server_name,
-                    "switch_configuration": switch_configuration,
-                    "switch_configuration_available": switch_configuration is not None,
-                }
-                rows.extend(network_status_rows(device_name, address or "", link_status, switch_configuration, dissect))
-
-            headers, rows = _without_port_column(headers, rows)
-            output_table(headers, rows, json_data=json_data)
-
-    asyncio.run(run())
+    run_command(run_network_status, timeout)

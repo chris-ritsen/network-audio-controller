@@ -1,20 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import time
-from unittest.mock import AsyncMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from typer.testing import CliRunner
-
-from netaudio.cli import OutputFormat, app, state
-from netaudio.commands.device_meter import meter_callback
+from netaudio.cli import OutputFormat, state
+from netaudio.commands.device_meter import run_meter
+from netaudio.commands.meter_runtime import MeterViewOptions
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
-
-
-runner = CliRunner()
+from tests.cli_test_support import invoke
 
 
 def _device() -> DanteDevice:
@@ -43,21 +41,28 @@ def _sample(source: str = "signal_presence") -> dict:
 
 def _patch_daemon(monkeypatch, *, source: str = "signal_presence"):
     device = _device()
-    get_devices = AsyncMock(return_value={device.server_name: device})
     get_cache = AsyncMock(return_value={device.server_name: _sample(source)})
     start = AsyncMock(return_value=True)
     stop = AsyncMock(return_value=True)
-    monkeypatch.setattr("netaudio.daemon.client.get_devices_from_daemon", get_devices)
     monkeypatch.setattr("netaudio.daemon.client.meter_cache_from_daemon", get_cache)
     monkeypatch.setattr("netaudio.daemon.client.meter_start_on_daemon", start)
     monkeypatch.setattr("netaudio.daemon.client.meter_stop_on_daemon", stop)
     return device, get_cache, start, stop
 
 
-def test_passive_json_snapshot_reads_cache_without_start_or_stop(monkeypatch):
-    device, get_cache, start, stop = _patch_daemon(monkeypatch)
+def _meter(device, options: MeterViewOptions, timeout: float = 0, snapshot: bool = False):
+    return invoke(run_meter, SimpleNamespace(), {device.server_name: device}, options, timeout, snapshot)
 
-    result = runner.invoke(app, ["--json", "meter", "--timeout", "0"])
+
+def _set_output(monkeypatch, output_format: OutputFormat):
+    monkeypatch.setattr(state, "output_format", output_format)
+
+
+def test_passive_json_snapshot_reads_cache_without_start_or_stop(monkeypatch, reset_cli_state):
+    device, get_cache, start, stop = _patch_daemon(monkeypatch)
+    _set_output(monkeypatch, OutputFormat.json)
+
+    result = _meter(device, MeterViewOptions())
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -72,10 +77,11 @@ def test_passive_json_snapshot_reads_cache_without_start_or_stop(monkeypatch):
     stop.assert_not_awaited()
 
 
-def test_detailed_snapshot_uses_unique_balanced_reference(monkeypatch):
+def test_detailed_snapshot_uses_unique_balanced_reference(monkeypatch, reset_cli_state):
     device, _get_cache, start, stop = _patch_daemon(monkeypatch, source="detailed")
+    _set_output(monkeypatch, OutputFormat.plain)
 
-    result = runner.invoke(app, ["--no-color", "meter", "--snapshot", "--detailed", "--timeout", "0"])
+    result = _meter(device, MeterViewOptions(detailed=True, no_color=True), snapshot=True)
 
     assert result.exit_code == 0, result.output
     assert "[detailed]" in result.output
@@ -88,14 +94,15 @@ def test_detailed_snapshot_uses_unique_balanced_reference(monkeypatch):
     assert start_client_id.startswith("meter_snapshot:")
 
 
-def test_detailed_snapshot_ignores_passive_cache_until_detailed_arrives(monkeypatch):
+def test_detailed_snapshot_ignores_passive_cache_until_detailed_arrives(monkeypatch, reset_cli_state):
     device, get_cache, start, stop = _patch_daemon(monkeypatch)
     get_cache.side_effect = [
         {device.server_name: _sample("signal_presence")},
         {device.server_name: _sample("detailed")},
     ]
+    _set_output(monkeypatch, OutputFormat.json)
 
-    result = runner.invoke(app, ["--json", "meter", "--detailed", "--timeout", "0.2"])
+    result = _meter(device, MeterViewOptions(detailed=True), timeout=0.2)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)[device.server_name]["metering_source"] == "detailed"
@@ -104,7 +111,7 @@ def test_detailed_snapshot_ignores_passive_cache_until_detailed_arrives(monkeypa
     stop.assert_awaited_once()
 
 
-def test_json_snapshot_applies_direction_and_channel_filters(monkeypatch):
+def test_json_snapshot_applies_direction_and_channel_filters(monkeypatch, reset_cli_state):
     device, get_cache, start, stop = _patch_daemon(monkeypatch)
     rx_channel = DanteChannel()
     rx_channel.number = 3
@@ -115,8 +122,9 @@ def test_json_snapshot_applies_direction_and_channel_filters(monkeypatch):
     sample["rx"] = {3: 0x7B}
     sample["rx_signal_presence"] = {3: "signal_present"}
     get_cache.return_value = {device.server_name: sample}
+    _set_output(monkeypatch, OutputFormat.json)
 
-    result = runner.invoke(app, ["--json", "meter", "--rx", "--channel", "3", "--timeout", "0"])
+    result = _meter(device, MeterViewOptions(channel_patterns=["3"], show_tx=False))
 
     assert result.exit_code == 0, result.output
     levels = json.loads(result.output)[device.server_name]
@@ -132,12 +140,13 @@ def test_json_snapshot_applies_direction_and_channel_filters(monkeypatch):
     stop.assert_not_awaited()
 
 
-def test_interactive_meter_rejects_non_tty_without_starting_metering(monkeypatch):
-    _device_value, _get_cache, start, stop = _patch_daemon(monkeypatch)
+def test_interactive_meter_rejects_non_tty_without_starting_metering(monkeypatch, reset_cli_state):
+    device, _get_cache, start, stop = _patch_daemon(monkeypatch)
     run_tui = AsyncMock()
     monkeypatch.setattr("netaudio.commands.meter_tui.run_meter_tui", run_tui)
+    _set_output(monkeypatch, OutputFormat.plain)
 
-    result = runner.invoke(app, ["meter"])
+    result = _meter(device, MeterViewOptions(), timeout=3.0)
 
     assert result.exit_code == 1
     assert "Interactive meter requires a TTY" in result.output
@@ -146,45 +155,29 @@ def test_interactive_meter_rejects_non_tty_without_starting_metering(monkeypatch
     stop.assert_not_awaited()
 
 
-def test_interactive_meter_forwards_simple_view_options(monkeypatch):
+def test_interactive_meter_forwards_simple_view_options(monkeypatch, reset_cli_state):
     device, get_cache, start, stop = _patch_daemon(monkeypatch)
     run_tui = AsyncMock()
     monkeypatch.setattr("netaudio.commands.meter_tui.run_meter_tui", run_tui)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    for field_name in ("names", "hosts", "server_names", "macs"):
-        monkeypatch.setattr(state, field_name, [])
-    monkeypatch.setattr(state, "output_format", OutputFormat.plain)
-    monkeypatch.setattr(state, "no_color", True)
+    _set_output(monkeypatch, OutputFormat.plain)
+    options = MeterViewOptions(channel_patterns=["Shel*"], detailed=True, no_color=True, show_rx=False)
 
-    meter_callback(
-        SimpleNamespace(invoked_subcommand=None),
-        timeout=0,
-        tx=True,
-        rx=False,
-        channel=["Shel*"],
-        snapshot=False,
-        detailed=True,
-    )
+    asyncio.run(run_meter(SimpleNamespace(), {device.server_name: device}, options, 0, False))
 
-    run_tui.assert_awaited_once_with(
-        {device.server_name: device},
-        show_tx=True,
-        show_rx=False,
-        channel_patterns=["Shel*"],
-        detailed=True,
-        no_color=True,
-    )
+    run_tui.assert_awaited_once_with({device.server_name: device}, options)
     get_cache.assert_not_awaited()
     start.assert_not_awaited()
     stop.assert_not_awaited()
 
 
-def test_passive_cache_timeout_never_starts_or_stops(monkeypatch):
-    _device_value, get_cache, start, stop = _patch_daemon(monkeypatch)
+def test_passive_cache_timeout_never_starts_or_stops(monkeypatch, reset_cli_state):
+    device, get_cache, start, stop = _patch_daemon(monkeypatch)
     get_cache.return_value = {}
+    _set_output(monkeypatch, OutputFormat.json)
 
-    result = runner.invoke(app, ["--json", "meter", "--timeout", "0"])
+    result = _meter(device, MeterViewOptions())
 
     assert result.exit_code == 1
     assert "No fresh metering data" in result.output

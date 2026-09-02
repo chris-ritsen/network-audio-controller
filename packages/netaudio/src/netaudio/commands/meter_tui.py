@@ -17,7 +17,7 @@ from netaudio.commands.meter_rendering import (
     render_meter_filter_prompt,
     render_meter_frame,
 )
-from netaudio.commands.meter_runtime import run_meter_tui, stop_metering_attempts
+from netaudio.commands.meter_runtime import MeterViewOptions, run_meter_tui, stop_metering_attempts
 from netaudio.commands.meter_terminal import KeyDecoder, MeterTerminal
 
 
@@ -30,6 +30,7 @@ __all__ = [
     "MeterRowKey",
     "MeterTerminal",
     "MeterViewModel",
+    "MeterViewOptions",
     "MeterViewport",
     "_dbfs_label",
     "_meter_bar",

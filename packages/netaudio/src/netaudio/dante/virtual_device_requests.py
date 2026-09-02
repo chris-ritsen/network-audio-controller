@@ -7,11 +7,16 @@ import struct
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
+    MCAST_HEADER_LENGTH,
     MULTICAST_GROUP_CONTROL_MONITORING,
+    PROTOCOL_ARC_2729,
+    PROTOCOL_ARC_2809,
     PROTOCOL_ID,
     RESULT_CODE_SUCCESS,
+    ArcOpcode as Opcode,
+    ProtocolId as Protocol,
 )
-from netaudio.dante.virtual_device_protocol import MCAST_HEADER_LENGTH, Opcode, Protocol
+from netaudio.dante.packet_header import parse_packet_header
 
 
 logger = logging.getLogger("netaudio")
@@ -27,10 +32,16 @@ class VirtualDeviceRequestHandler:
         if start_code in (0xFFFF, 0xFFFE) and len(data) >= MCAST_HEADER_LENGTH:
             return self._handle_mcast_format_request(data, addr)
 
-        length, seqnum, opcode1, opcode2 = struct.unpack(">HHHH", data[2:10])
+        header = parse_packet_header(data)
+        if header is None:
+            return None
+        length = header["length"]
+        seqnum = header["transaction_id"]
+        opcode1 = header["opcode"]
+        opcode2 = header["result_code"]
         content = data[10:]
 
-        if start_code in (PROTOCOL_ID, 0x2729, 0x2809):
+        if start_code in (PROTOCOL_ID, PROTOCOL_ARC_2729, PROTOCOL_ARC_2809):
             handler = self._opcode_handlers.get(opcode1)
             if handler:
                 return handler(self, seqnum, data, start_code)
@@ -465,7 +476,7 @@ class VirtualDeviceRequestHandler:
         return self._build_response(transaction_id, 0x2204, body, protocol_id)
 
     def _handle_channel_name_set(self, transaction_id: int, data: bytes, protocol_id: int = PROTOCOL_ID) -> bytes:
-        opcode = struct.unpack(">H", data[6:8])[0]
+        opcode = parse_packet_header(data)["opcode"]
         body = data[10:]
         if len(body) >= 4:
             ch_num = struct.unpack(">H", body[0:2])[0]

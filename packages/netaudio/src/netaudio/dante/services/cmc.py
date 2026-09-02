@@ -6,13 +6,10 @@ import socket
 import struct
 import sys
 
-from netaudio.dante.const import DEVICE_CONTROL_PORT
-from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.service import DanteUnicastService
+from netaudio.core.binding import NetaudioCoreError
+from netaudio.dante.core_transport import CoreTransport
 
 logger = logging.getLogger("netaudio")
-
-CMC_PORT = DEVICE_CONTROL_PORT
 
 SIOCGIFADDR = 0x8915
 SIOCGIFHWADDR = 0x8927
@@ -93,7 +90,7 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
                 except (OSError, subprocess.TimeoutExpired, ValueError) as exception:
                     logger.warning(f"Could not read interface {interface}: {exception}")
                     continue
-    except Exception:
+    except (OSError, ValueError):
         logger.exception("Failed to derive host MAC address from network interfaces")
 
     import uuid
@@ -101,16 +98,14 @@ def _get_host_mac(interface_name: str | None = None) -> bytes:
     return uuid.getnode().to_bytes(6, "big")
 
 
-class DanteCMCService(DanteUnicastService):
+class DanteCMCService:
     def __init__(
         self,
-        packet_store=None,
+        transport: CoreTransport,
         interface_name: str | None = None,
-        dissect=False,
         host_media_access_control_address: bytes | None = None,
     ):
-        super().__init__(packet_store=packet_store, dissect=dissect)
-        self._commands = DanteDeviceCommands()
+        self._transport = transport
         self._sequence_counter = 0
         self._registered_devices: set[str] = set()
         self._heartbeat_task: asyncio.Task | None = None
@@ -122,18 +117,11 @@ class DanteCMCService(DanteUnicastService):
 
     @property
     def host_media_access_control_address(self) -> bytes:
-        """Return the host address used in CMC registration and metering commands."""
         return self._host_media_access_control_address
 
-    def _build_registration_packet(
-        self,
-        sequence: int,
-        host_media_access_control_address: bytes | None = None,
-    ) -> bytes:
-        return self._commands.command_cmc_register(
-            sequence,
-            host_media_access_control_address or self._host_media_access_control_address,
-        )
+    @property
+    def registered_devices(self) -> frozenset[str]:
+        return frozenset(self._registered_devices)
 
     @staticmethod
     def _registration_response_is_successful(sequence: int, response: bytes | None) -> bool:
@@ -152,17 +140,19 @@ class DanteCMCService(DanteUnicastService):
         device_ip: str,
         host_media_access_control_address: bytes | None = None,
     ) -> bytes | None:
+        from netaudio import core
+
         sequence = self._sequence_counter
         self._sequence_counter = (self._sequence_counter + 1) & 0xFFFF
-
-        packet = self._build_registration_packet(sequence, host_media_access_control_address)
-        response = await self.request(
-            packet,
-            device_ip,
-            CMC_PORT,
-            timeout=1.0,
-            logical_command_name="cmc_register",
-        )
+        host_mac = host_media_access_control_address or self._host_media_access_control_address
+        try:
+            response = await self._transport.execute(
+                str(device_ip),
+                {"command": "cmc_register", "host_mac": host_mac.hex(), "sequence": sequence},
+            )
+        except core.NetaudioCoreError as exception:
+            logger.debug(f"CMC registration request failed for {device_ip}: {exception}")
+            response = None
 
         if self._registration_response_is_successful(sequence, response):
             self._registered_devices.add(device_ip)
@@ -197,7 +187,7 @@ class DanteCMCService(DanteUnicastService):
                     await self.register_all(device_ips)
             except asyncio.CancelledError:
                 break
-            except Exception as exception:
+            except (OSError, RuntimeError, NetaudioCoreError) as exception:
                 logger.warning(f"CMC heartbeat error: {exception}", exc_info=True)
 
     async def stop(self) -> None:
@@ -209,9 +199,8 @@ class DanteCMCService(DanteUnicastService):
                 pass
             self._heartbeat_task = None
         self._registered_devices.clear()
-        await super().stop()
 
-    def start_metering(
+    async def start_metering(
         self,
         device_ip: str,
         device_name: str,
@@ -219,12 +208,19 @@ class DanteCMCService(DanteUnicastService):
         mac,
         port: int,
     ) -> None:
-        command_args = self._commands.command_metering_start(device_name, ipv4, mac, port)
-        packet = command_args[0]
-        target_port = command_args[2] or CMC_PORT
-        self.send(packet, device_ip, target_port)
+        await self._transport.execute(
+            str(device_ip),
+            {
+                "command": "metering_start",
+                "device_name": device_name,
+                "ipv4": str(ipv4) if ipv4 else "",
+                "mac": mac.hex() if isinstance(mac, bytes) else mac,
+                "port": port,
+                "timeout": True,
+            },
+        )
 
-    def stop_metering(
+    async def stop_metering(
         self,
         device_ip: str,
         device_name: str,
@@ -232,7 +228,11 @@ class DanteCMCService(DanteUnicastService):
         mac,
         port: int,
     ) -> None:
-        command_args = self._commands.command_metering_stop(device_name, ipv4, mac, port)
-        packet = command_args[0]
-        target_port = command_args[2] or CMC_PORT
-        self.send(packet, device_ip, target_port)
+        await self._transport.execute(
+            str(device_ip),
+            {
+                "command": "metering_stop",
+                "device_name": device_name,
+                "mac": mac.hex() if isinstance(mac, bytes) else mac,
+            },
+        )

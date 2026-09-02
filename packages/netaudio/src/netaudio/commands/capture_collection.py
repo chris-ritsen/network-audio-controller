@@ -31,7 +31,7 @@ from netaudio.commands.capture_helpers import (
 )
 from netaudio.capture.packets import _packet_fingerprint, _print_packet_table_header
 from netaudio.commands.capture_live import _resolve_redis_for_capture
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketRecord, PacketStore
 
 
 @app.command("collect", help="Consume packets from a Redis stream into the capture database.")
@@ -70,7 +70,7 @@ def collect(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.capture.daemon import REDIS_ERRORS, PacketLine, _print_packet_line
 
     _require_positive_session_id(session_id, "--session-id")
     if session_id is not None and session is not None:
@@ -196,7 +196,7 @@ def collect(
                         ts = fields.get("timestamp_ns")
                         if ts:
                             timestamp_ns = int(ts)
-                    except Exception:
+                    except (TypeError, ValueError):
                         timestamp_ns = None
 
                     inferred_session_id = None
@@ -204,7 +204,7 @@ def collect(
                         raw_session = fields.get("session_id")
                         if raw_session not in (None, ""):
                             inferred_session_id = int(raw_session)
-                    except Exception:
+                    except (TypeError, ValueError):
                         inferred_session_id = None
 
                     target_session_id = _resolve_target_session_id(inferred_session_id)
@@ -230,7 +230,7 @@ def collect(
                                     marker_data = parsed
                                 else:
                                     marker_data = {"value": parsed}
-                            except Exception:
+                            except ValueError:
                                 marker_data = {"raw": data_json}
 
                         marker_id = store.add_marker(
@@ -264,7 +264,7 @@ def collect(
                                     str(resolved_publish_stream), event, maxlen=publish_maxlen, approximate=True
                                 )
                                 published_markers += 1
-                            except Exception as exception:
+                            except REDIS_ERRORS as exception:
                                 print(f"Capture: unified marker publish failed: {exception}", file=sys.stderr)
                         continue
 
@@ -311,30 +311,34 @@ def collect(
                         recent_order.append((effective_timestamp_ns, fingerprint, source_host))
 
                     packet_id = store.store_packet(
-                        payload=payload,
-                        source_type=fields.get("source_type") or "redis_capture",
-                        src_ip=src_ip,
-                        src_port=src_port,
-                        dst_ip=dst_ip,
-                        dst_port=dst_port,
-                        device_ip=fields.get("device_ip") or None,
-                        direction=direction,
-                        session_id=target_session_id,
-                        timestamp_ns=effective_timestamp_ns,
-                        source_host=source_host,
+                        PacketRecord(
+                            payload=payload,
+                            source_type=fields.get("source_type") or "redis_capture",
+                            src_ip=src_ip,
+                            src_port=src_port,
+                            dst_ip=dst_ip,
+                            dst_port=dst_port,
+                            device_ip=fields.get("device_ip") or None,
+                            direction=direction,
+                            session_id=target_session_id,
+                            timestamp_ns=effective_timestamp_ns,
+                            source_host=source_host,
+                        )
                     )
                     if packet_id:
                         total_packets += 1
                         if live:
                             _print_packet_line(
-                                packet_id=packet_id,
-                                timestamp_ns=effective_timestamp_ns,
-                                source_ip=src_ip or "?",
-                                source_port=src_port or 0,
-                                destination_ip=dst_ip or "?",
-                                destination_port=dst_port or 0,
-                                direction=direction,
-                                payload=payload,
+                                PacketLine(
+                                    destination_ip=dst_ip or "?",
+                                    destination_port=dst_port or 0,
+                                    direction=direction,
+                                    packet_id=packet_id,
+                                    payload=payload,
+                                    source_ip=src_ip or "?",
+                                    source_port=src_port or 0,
+                                    timestamp_ns=effective_timestamp_ns,
+                                ),
                                 dump=dump,
                             )
                         else:
@@ -365,7 +369,7 @@ def collect(
                                     str(resolved_publish_stream), event, maxlen=publish_maxlen, approximate=True
                                 )
                                 published_packets += 1
-                            except Exception as exception:
+                            except REDIS_ERRORS as exception:
                                 print(f"Capture: unified packet publish failed: {exception}", file=sys.stderr)
             if once:
                 break
@@ -397,7 +401,7 @@ def follow(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.capture.daemon import PacketLine, _print_packet_line
 
     profile_cfg, _ = _load_capture_profile(config, profile)
     capture_cfg = _as_dict(profile_cfg.get("capture"))
@@ -484,14 +488,16 @@ def follow(
                     packet_id = total_packets + 1
 
                 _print_packet_line(
-                    packet_id=packet_id,
-                    timestamp_ns=timestamp_ns,
-                    source_ip=src_ip,
-                    source_port=src_port,
-                    destination_ip=dst_ip,
-                    destination_port=dst_port,
-                    direction=direction,
-                    payload=payload,
+                    PacketLine(
+                        destination_ip=dst_ip,
+                        destination_port=dst_port,
+                        direction=direction,
+                        packet_id=packet_id,
+                        payload=payload,
+                        source_ip=src_ip,
+                        source_port=src_port,
+                        timestamp_ns=timestamp_ns,
+                    ),
                     dump=dump,
                 )
                 total_packets += 1

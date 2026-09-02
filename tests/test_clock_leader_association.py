@@ -11,9 +11,8 @@ from netaudio.cli import OutputFormat, state
 from netaudio.commands.device_clock import _matching_leader_name, clock
 from netaudio.dante.clock_identity import canonical_clock_identity
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.services.notification import DanteNotificationService
-
+from netaudio.dante.application import DanteApplication
+from tests.status_test_support import receive_packets
 
 runner = CliRunner()
 clock_app = typer.Typer()
@@ -62,7 +61,7 @@ def test_identity_association_distinguishes_two_simultaneous_leaders(monkeypatch
         ),
     }
 
-    async def load_display_devices():
+    async def load_display_devices(application):
         return devices
 
     monkeypatch.setattr(common_module, "_load_display_devices", load_display_devices)
@@ -132,21 +131,21 @@ def test_physical_follower_publications_track_selected_leader_identity():
 
 def test_notification_state_tracks_the_physical_follower_transition():
     device = clock_device("follower.local.", "follower", "Follower")
-    dispatcher = DanteEventDispatcher()
-    service = DanteNotificationService(
-        dispatcher=dispatcher,
-        device_lookup=lambda address: device if address == "192.168.1.94" else None,
-    )
+    device.ipv4 = "192.168.1.94"
+    application = DanteApplication()
+    application.attach_devices({device.server_name: device})
 
-    service._on_packet(
-        (FIXTURE_DIRECTORY / "follower-domain-a-0020.bin").read_bytes(),
+    receive_packets(
+        application,
+        [(FIXTURE_DIRECTORY / "follower-domain-a-0020.bin").read_bytes()],
         ("192.168.1.94", 8700),
     )
     assert device.clock_identity == "001dc1510295"
     assert device.leader_clock_identity == "001dc150692e"
 
-    service._on_packet(
-        (FIXTURE_DIRECTORY / "follower-domain-b-0020.bin").read_bytes(),
+    receive_packets(
+        application,
+        [(FIXTURE_DIRECTORY / "follower-domain-b-0020.bin").read_bytes()],
         ("192.168.1.94", 8700),
     )
     assert device.clock_identity == "001dc1510295"

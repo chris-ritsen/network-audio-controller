@@ -72,7 +72,7 @@ def fact_add(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.dante.fact_store import add_fact
+    from netaudio.dante.fact_store import FactRecord, add_fact
 
     facts_path = _resolve_facts_path()
     fields_parsed = [_parse_field_spec(f) for f in field] if field else []
@@ -114,19 +114,21 @@ def fact_add(
         parsed_match_size = int(match_parts[1]) if len(match_parts) > 1 else 2
 
     fact = add_fact(
-        path=facts_path,
-        category=category,
-        key=key,
-        name=name,
-        note=note,
-        body=resolved_body,
-        fields=fields_parsed,
-        evidence=evidence or [],
-        confidence=confidence,
-        supersedes=supersedes,
-        protocol_id=parsed_protocol_id,
-        match_offset=parsed_match_offset,
-        match_size=parsed_match_size,
+        facts_path,
+        category,
+        key,
+        FactRecord(
+            name,
+            body=resolved_body,
+            confidence=confidence,
+            evidence=evidence or [],
+            fields=fields_parsed,
+            match_offset=parsed_match_offset,
+            match_size=parsed_match_size,
+            note=note,
+            protocol_id=parsed_protocol_id,
+            supersedes=supersedes,
+        ),
     )
 
     print(f"{icon('info')}Fact: {category}:{key} = {name}")
@@ -200,7 +202,7 @@ def fact_update(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
-    from netaudio.dante.fact_store import get_confidence, get_fact, update_fact
+    from netaudio.dante.fact_store import FactUpdate, get_confidence, get_fact, update_fact
 
     facts_path = _resolve_facts_path()
     if clear_fields and field:
@@ -249,20 +251,22 @@ def fact_update(
         parsed_match_size = int(match_parts[1]) if len(match_parts) > 1 else 2
 
     fact = update_fact(
-        path=facts_path,
-        category=category,
-        key=key,
-        name=name,
-        note=note,
-        body=resolved_body,
-        fields=fields_parsed,
-        evidence=evidence,
-        confidence=confidence,
-        supersedes=supersedes,
-        protocol_id=parsed_protocol_id,
-        match_offset=parsed_match_offset,
-        match_size=parsed_match_size,
-        replace_evidence=replace_evidence,
+        facts_path,
+        category,
+        key,
+        FactUpdate(
+            body=resolved_body,
+            confidence=confidence,
+            evidence=evidence,
+            fields=fields_parsed,
+            match_offset=parsed_match_offset,
+            match_size=parsed_match_size,
+            name=name,
+            note=note,
+            protocol_id=parsed_protocol_id,
+            replace_evidence=replace_evidence,
+            supersedes=supersedes,
+        ),
     )
 
     if fact is None:
@@ -365,13 +369,13 @@ def fact_show(
     ),
 ):
     from netaudio.dante.fact_store import (
-        get_fact,
-        get_confidence,
-        _parse_evidence_ref,
-        _find_bundle,
         _field_applies_to_direction,
+        _find_bundle,
         _load_bundle,
+        _parse_evidence_ref,
         _verify_field,
+        get_confidence,
+        get_fact,
     )
 
     facts_path = _resolve_facts_path()

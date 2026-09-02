@@ -10,6 +10,7 @@ import pytest
 from netaudio.commands.meter_tui import (
     MOUSE_WHEEL_ROWS,
     MeterTerminal,
+    MeterViewOptions,
     MeterViewport,
     run_meter_tui,
     stop_metering_attempts,
@@ -32,11 +33,7 @@ async def test_tui_does_not_stop_auto_detailed_device_if_terminal_never_opens():
     with pytest.raises(OSError, match="terminal unavailable"):
         await run_meter_tui(
             {"lx.local.": _device("lx.local.", "lx-dante", model_id="LX-DANTE")},
-            show_tx=True,
-            show_rx=True,
-            channel_patterns=None,
-            detailed=False,
-            no_color=True,
+            MeterViewOptions(no_color=True),
             terminal=BrokenTerminal(),
             stream_factory=_one_sample_stream("lx.local."),
             start_metering=start_metering,
@@ -125,11 +122,7 @@ async def test_mouse_wheel_moves_through_meter_rows(monkeypatch):
                 tx={number: _channel(number, f"Channel {number}") for number in range(1, 9)},
             )
         },
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream(server_name),
         start_metering=AsyncMock(return_value=True),
@@ -176,11 +169,7 @@ async def test_passive_tui_uses_async_events_and_never_starts_or_stops_detailed_
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream(server_name),
         start_metering=start_metering,
@@ -225,11 +214,7 @@ async def test_default_tui_starts_and_stops_detailed_metering_for_lx_dante_and_a
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("avio.local."),
         start_metering=start_metering,
@@ -259,11 +244,7 @@ async def test_lx_only_tui_is_labeled_detailed_not_mixed():
                 model_id="LX-DANTE",
             )
         },
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream(server_name),
         start_metering=AsyncMock(return_value=True),
@@ -294,11 +275,7 @@ async def test_tui_filter_form_changes_device_and_direction_without_restarting()
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("alpha.local."),
         start_metering=AsyncMock(return_value=True),
@@ -333,11 +310,7 @@ async def test_filter_enter_pins_highlighted_device_when_query_matches_multiple_
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=False,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True, show_rx=False),
         terminal=terminal,
         stream_factory=_one_sample_stream("avio-input.local."),
         start_metering=AsyncMock(return_value=True),
@@ -359,11 +332,7 @@ async def test_blank_filter_enter_keeps_all_devices_visible():
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=False,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True, show_rx=False),
         terminal=terminal,
         stream_factory=_one_sample_stream("alpha.local."),
         start_metering=AsyncMock(return_value=True),
@@ -385,11 +354,7 @@ async def test_typed_filter_previews_in_meter_list_and_escape_restores_previous_
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("alpha.local."),
         start_metering=AsyncMock(return_value=True),
@@ -425,11 +390,7 @@ async def test_enter_pins_selected_device_and_backspace_or_escape_undoes_it(clea
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("alpha.local."),
         start_metering=AsyncMock(return_value=True),
@@ -456,11 +417,7 @@ async def test_slash_search_selects_channel_keeps_rows_and_n_and_navigate_matche
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("alpha.local."),
         start_metering=AsyncMock(return_value=True),
@@ -504,11 +461,7 @@ async def test_escape_from_search_prompt_restores_previous_search():
 
     await run_meter_tui(
         {"device.local.": device},
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("device.local."),
         start_metering=AsyncMock(return_value=True),
@@ -546,11 +499,7 @@ async def test_passive_tui_falls_back_to_cache_without_starting_or_stopping():
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=empty_stream,
         cache_reader=cache_reader,
@@ -585,11 +534,7 @@ async def test_detailed_tui_stops_every_attempted_start_even_when_an_acknowledge
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=True,
-        no_color=True,
+        MeterViewOptions(detailed=True, no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream("first.local."),
         start_metering=start_metering,
@@ -649,11 +594,7 @@ async def test_passive_tui_escalates_to_detailed_for_devices_with_no_samples(mon
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_silent_stream(),
         start_metering=start_metering,
@@ -691,11 +632,7 @@ async def test_passive_tui_does_not_escalate_for_devices_with_fresh_passive_samp
 
     await run_meter_tui(
         devices,
-        show_tx=True,
-        show_rx=True,
-        channel_patterns=None,
-        detailed=False,
-        no_color=True,
+        MeterViewOptions(no_color=True),
         terminal=terminal,
         stream_factory=_one_sample_stream(server_name),
         start_metering=start_metering,

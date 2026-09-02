@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import gzip
-import json
 import hashlib
 import logging
 import os
 import socket
-
+from dataclasses import replace
 from pathlib import Path
 
 from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
-from netaudio.dante.packet_store import PacketStore, _parse_header
+from netaudio.common.manifest import manifest_bytes, write_manifest
+from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.packet_store import PacketQuery, PacketRecord, PacketStore
 from netaudio.dante.packet_store_common import extract_evidence_packet_ids, safe_name as _safe_name
-from netaudio.dante.service import DanteUnicastService
+from netaudio.dante.core_transport import CoreTransport
 
 logger = logging.getLogger("netaudio")
 
@@ -136,7 +137,7 @@ def export_session_bundle(
         manifest["markers"].append(marker_entry)
 
     def _build_sample_entry(packet_row):
-        header = _parse_header(packet_row["payload"])
+        header = parse_packet_header(packet_row["payload"])
         protocol_id = header["protocol_id"] if header else packet_row.get("protocol_id")
         opcode = header["opcode"] if header else packet_row.get("opcode")
         direction = packet_row.get("direction", "unknown")
@@ -182,8 +183,7 @@ def export_session_bundle(
         manifest["artifacts"].append(_artifact_manifest_entry(artifact, filename))
         file_entries[filename] = artifact["content"]
 
-    manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8") + b"\n"
-    file_entries["manifest.json"] = manifest_bytes
+    file_entries["manifest.json"] = manifest_bytes(manifest)
 
     if bundle_format == "zip":
         bundle_path = output_path / f"{bundle_name}.zip"
@@ -233,7 +233,7 @@ class ProtocolVerifier:
         self._record = record
         self._category = category
         self._packet_store: PacketStore | None = None
-        self._service: DanteUnicastService | None = None
+        self._transport: CoreTransport | None = None
         self._session_id: int | None = None
         self._source_host: str | None = None
         self._evidence_packet_ids: set[int] = set()
@@ -247,8 +247,8 @@ class ProtocolVerifier:
         return self._packet_store
 
     @property
-    def service(self) -> DanteUnicastService | None:
-        return self._service
+    def transport(self) -> CoreTransport | None:
+        return self._transport
 
     async def __aenter__(self):
         self._source_host = socket.gethostname()
@@ -271,9 +271,7 @@ class ProtocolVerifier:
                 },
             )
 
-        self._service = DanteUnicastService(packet_store=self._packet_store)
-        self._service.session_id = self._session_id
-        await self._service.start()
+        self._transport = CoreTransport(observer=self._observe_wire if self._packet_store is not None else None)
 
         self.marker("session_started", marker_type="system", note="ProtocolVerifier session started")
 
@@ -282,8 +280,9 @@ class ProtocolVerifier:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.marker("session_stopped", marker_type="system", note="ProtocolVerifier session ended")
 
-        if self._service is not None:
-            await self._service.stop()
+        if self._transport is not None:
+            self._transport.close()
+            self._transport = None
 
         if self._packet_store is not None and self._session_id is not None:
             self._packet_store.end_session(self._session_id)
@@ -323,23 +322,10 @@ class ProtocolVerifier:
 
     def include_evidence(
         self,
+        query: PacketQuery,
         label: str | None = None,
         note: str | None = None,
-        device_ip: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        source_type: str | None = None,
-        session_id: int | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        payload_hex_contains: str | None = None,
-        min_length: int | None = None,
-        max_length: int | None = None,
         time_window: bool = False,
-        limit: int = 10000,
     ) -> list[dict]:
         if self._packet_store is None:
             return []
@@ -347,27 +333,13 @@ class ProtocolVerifier:
         if time_window and self._session_id is not None:
             session = self._packet_store.get_session(self._session_id)
             if session:
-                if start_ns is None:
-                    start_ns = session["started_ns"]
-                if end_ns is None and session.get("ended_ns"):
-                    end_ns = session["ended_ns"]
+                query = replace(
+                    query,
+                    start_ns=session["started_ns"] if query.start_ns is None else query.start_ns,
+                    end_ns=session.get("ended_ns") if query.end_ns is None else query.end_ns,
+                )
 
-        packets = self._packet_store.query_packets(
-            device_ip=device_ip,
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            opcode=opcode,
-            protocol_id=protocol_id,
-            direction=direction,
-            source_type=source_type,
-            session_id=session_id,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            payload_hex_contains=payload_hex_contains,
-            min_length=min_length,
-            max_length=max_length,
-            limit=limit,
-        )
+        packets = self._packet_store.query_packets(query)
 
         for packet in packets:
             self._evidence_packet_ids.add(packet["id"])
@@ -379,11 +351,11 @@ class ProtocolVerifier:
                 note=note or f"Included {len(packets)} evidence packets",
                 data={
                     "query": {
-                        "device_ip": device_ip,
-                        "opcode": opcode,
-                        "protocol_id": protocol_id,
-                        "direction": direction,
-                        "payload_hex_contains": payload_hex_contains,
+                        "device_ip": query.device_ip,
+                        "direction": query.direction,
+                        "opcode": query.opcode,
+                        "payload_hex_contains": query.payload_hex_contains,
+                        "protocol_id": query.protocol_id,
                     },
                     "packet_count": len(packets),
                     "packet_ids": [p["id"] for p in packets],
@@ -392,6 +364,34 @@ class ProtocolVerifier:
 
         return packets
 
+    def _observe_wire(self, payload: bytes, device_ip: str, port: int, direction: str) -> None:
+        if direction == "request":
+            self._packet_store.store_packet(
+                PacketRecord(
+                    payload=payload,
+                    source_type="netaudio_request",
+                    device_name=self._device_name,
+                    device_ip=device_ip,
+                    dst_ip=device_ip,
+                    dst_port=port,
+                    direction="request",
+                    session_id=self._session_id,
+                )
+            )
+            return
+        self._packet_store.store_packet(
+            PacketRecord(
+                payload=payload,
+                source_type="netaudio_response",
+                device_name=self._device_name,
+                device_ip=device_ip,
+                src_ip=device_ip,
+                src_port=port,
+                direction="response",
+                session_id=self._session_id,
+            )
+        )
+
     async def send(
         self,
         packet: bytes,
@@ -399,16 +399,22 @@ class ProtocolVerifier:
         timeout: float = 2.0,
         label: str | None = None,
     ) -> bytes | None:
+        from netaudio import core
+
         if label:
             self.marker(f"send_{label}", marker_type="step", note=f"Sending packet: {label}")
 
-        response = await self._service.request(
-            packet=packet,
-            device_ip=self._device_ip,
-            port=port,
-            timeout=timeout,
-            device_name=self._device_name,
-        )
+        try:
+            response = await self._transport.call(
+                self._device_ip,
+                lambda client: client.request(packet, port),
+                timeout_milliseconds=int(timeout * 1000),
+                attempts=1,
+            )
+        except core.NetaudioCoreError as exception:
+            if exception.status != core.STATUS_TIMEOUT:
+                raise
+            response = None
 
         if label:
             received = response is not None
@@ -443,7 +449,7 @@ class ProtocolVerifier:
         return await self.send(packet, port, timeout=timeout, label=label)
 
     def _build_sample(self, packet_row, evidence=False):
-        header = _parse_header(packet_row["payload"])
+        header = parse_packet_header(packet_row["payload"])
         protocol_id = header["protocol_id"] if header else packet_row.get("protocol_id")
         opcode = header["opcode"] if header else packet_row.get("opcode")
         direction = packet_row.get("direction", "unknown")
@@ -500,9 +506,7 @@ class ProtocolVerifier:
         target_path.mkdir(parents=True, exist_ok=True)
 
         session_packets = self._packet_store.get_session_packets(
-            session_id=self._session_id,
-            limit=10000,
-            ascending=True,
+            PacketQuery(session_id=self._session_id, limit=10000, ascending=True)
         )
 
         session_packet_ids = {p["id"] for p in session_packets}
@@ -570,10 +574,7 @@ class ProtocolVerifier:
                 artifact_file.write(artifact["content"])
             manifest["artifacts"].append(_artifact_manifest_entry(artifact, filename))
 
-        manifest_path = target_path / "manifest.json"
-        with open(manifest_path, "w") as manifest_file:
-            json.dump(manifest, manifest_file, indent=2)
-            manifest_file.write("\n")
+        write_manifest(target_path, manifest)
 
         total = len(session_packets) + len(evidence_packets)
         logger.info(

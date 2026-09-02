@@ -91,7 +91,12 @@ async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_c
         "properties": [{"property_id": 0x8020, "flags": 0x0001}],
         "aes67_supported": False,
     }
-    monkeypatch.setattr(device, "_core_client_for_request", lambda *arguments: core_client)
+    device.ipv4 = "192.0.2.10"
+
+    async def call_core(operation, **_options):
+        return operation(core_client)
+
+    monkeypatch.setattr(device, "call_core", call_core)
 
     controls = await device.fetch_controls_data()
 

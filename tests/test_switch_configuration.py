@@ -1,10 +1,10 @@
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from netaudio import core
-from netaudio._common import CapabilityProbeTimeout, CoreCommandSender
+from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device_commands import DanteDeviceCommands
@@ -48,64 +48,42 @@ def test_switch_configuration_parser_preserves_choices_and_unmapped_fields():
 def test_notification_waiter_is_source_matched():
     device_ip_address = "192.0.2.10"
     service = DanteNotificationService(dispatcher=DanteEventDispatcher())
-    waiter = service.register_switch_configuration_waiter(device_ip_address)
+    waiter = service.register_waiter("switch_configuration", device_ip_address)
 
     service._on_packet(PACKET, ("192.0.2.11", 8702))
 
     assert not waiter.is_set()
-    assert service.get_switch_configuration_result(device_ip_address) is None
+    assert waiter.latest_result is None
 
     service._on_packet(PACKET, (device_ip_address, 8702))
 
     assert waiter.is_set()
-    assert service.get_switch_configuration_result(device_ip_address)["choices"][0]["label"] == "Switched"
-    service.unregister_switch_configuration_waiter(device_ip_address)
+    assert waiter.latest_result["choices"][0]["label"] == "Switched"
+    service.unregister_waiter(waiter)
 
 
 @pytest.mark.asyncio
 async def test_application_probe_waits_for_switch_configuration_publication():
     application = DanteApplication()
     device_ip_address = "192.0.2.10"
-    application.settings.probe_switch_configuration = MagicMock(
+    application.settings.probe_switch_configuration = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(PACKET, (address, 8702))
     )
 
     result = await application.probe_switch_configuration(device_ip_address)
 
     assert result["mode_codes_at_record_offsets_20_and_22"] == [1, 1]
-    application.settings.probe_switch_configuration.assert_called_once_with(device_ip_address)
-    assert not application.notifications._waiters.is_registered("switch_configuration", device_ip_address)
+    application.settings.probe_switch_configuration.assert_awaited_once_with(device_ip_address)
+    assert not application.notifications.is_waiting("switch_configuration", device_ip_address)
 
 
 @pytest.mark.asyncio
-async def test_core_command_sender_returns_switch_configuration_publication():
-    class ResponseCoreCommandSender(CoreCommandSender):
-        async def __call__(self, packet, device_ip_address, port, **request_options):
-            self._notifications._on_packet(PACKET, (str(device_ip_address), 8702))
-            return None
-
+async def test_application_probe_timeout_is_fail_closed():
+    application = DanteApplication()
     device_ip_address = "192.0.2.10"
-    sender = ResponseCoreCommandSender()
-    sender._notifications = DanteNotificationService(dispatcher=DanteEventDispatcher())
-
-    result = await sender.probe_switch_configuration(device_ip_address)
-
-    assert result["choices"][1]["label"] == "Split/Redundant"
-    assert not sender._notifications._waiters.is_registered("switch_configuration", device_ip_address)
-
-
-@pytest.mark.asyncio
-async def test_core_command_sender_timeout_is_fail_closed():
-    class NoResponseCoreCommandSender(CoreCommandSender):
-        async def __call__(self, packet, device_ip_address, port, **request_options):
-            return None
-
-    device_ip_address = "192.0.2.10"
-    sender = NoResponseCoreCommandSender()
-    sender._notifications = DanteNotificationService(dispatcher=DanteEventDispatcher())
+    application.settings.probe_switch_configuration = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="switch configuration readback timed out"):
-        await sender.probe_switch_configuration(device_ip_address, timeout=0.01)
+        await application.probe_switch_configuration(device_ip_address, timeout=0.01)
 
-    assert not sender._notifications._waiters.is_registered("switch_configuration", device_ip_address)
-    assert sender._notifications.get_switch_configuration_result(device_ip_address) is None
+    assert not application.notifications.is_waiting("switch_configuration", device_ip_address)

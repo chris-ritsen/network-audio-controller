@@ -204,7 +204,7 @@ def provenance_label(
     for token in set_opcode or []:
         try:
             key, value = _parse_set_opcode(token)
-        except Exception as exception:
+        except ValueError as exception:
             raise typer.Exit(f"invalid --set-opcode {token!r}: {exception}")
         opcode_labels[key] = value
         changed = True
@@ -212,7 +212,7 @@ def provenance_label(
     for token in set_message or []:
         try:
             key, value = _parse_set_message(token)
-        except Exception as exception:
+        except ValueError as exception:
             raise typer.Exit(f"invalid --set-message {token!r}: {exception}")
         message_labels[key] = value
         changed = True
@@ -220,7 +220,7 @@ def provenance_label(
     for token in set_status or []:
         try:
             key, value = _parse_set_status(token)
-        except Exception as exception:
+        except ValueError as exception:
             raise typer.Exit(f"invalid --set-status {token!r}: {exception}")
         status_labels[key] = value
         changed = True

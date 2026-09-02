@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import os
+from dataclasses import dataclass
 
 from netaudio.dante.packet_store_common import (
     SESSION_MEMBERSHIP_SQL,
@@ -9,6 +10,29 @@ from netaudio.dante.packet_store_common import (
     extract_evidence_packet_ids,
     safe_name as _safe_name,
 )
+
+
+@dataclass(frozen=True)
+class PacketQuery:
+    ascending: bool = True
+    device_ip: str | None = None
+    device_name: str | None = None
+    direction: str | None = None
+    dst_ip: str | None = None
+    end_ns: int | None = None
+    limit: int = 10000
+    max_length: int | None = None
+    min_length: int | None = None
+    offset: int = 0
+    opcode: int | None = None
+    payload_contains: str | None = None
+    payload_hex_contains: str | None = None
+    port: int | None = None
+    protocol_id: int | None = None
+    session_id: int | None = None
+    source_type: str | None = None
+    src_ip: str | None = None
+    start_ns: int | None = None
 
 
 class PacketStoreQueries:
@@ -91,232 +115,96 @@ class PacketStoreQueries:
         markers = self.get_markers(session_id, marker_types=["evidence"])
         return len(extract_evidence_packet_ids(markers))
 
-    def _apply_packet_filters(
-        self,
-        query: str,
-        params: list,
-        device_ip: str | None = None,
-        device_name: str | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        payload_contains: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        port: int | None = None,
-    ) -> tuple[str, list]:
-        if device_ip:
+    def _apply_packet_filters(self, query: str, params: list, filters: PacketQuery) -> tuple[str, list]:
+        if filters.device_ip:
             query += " AND (src_ip = ? OR dst_ip = ?)"
-            params.extend([device_ip, device_ip])
+            params.extend([filters.device_ip, filters.device_ip])
 
-        if src_ip:
+        if filters.src_ip:
             query += " AND src_ip = ?"
-            params.append(src_ip)
+            params.append(filters.src_ip)
 
-        if dst_ip:
+        if filters.dst_ip:
             query += " AND dst_ip = ?"
-            params.append(dst_ip)
+            params.append(filters.dst_ip)
 
-        if port is not None:
+        if filters.port is not None:
             query += " AND (src_port = ? OR dst_port = ?)"
-            params.extend([port, port])
+            params.extend([filters.port, filters.port])
 
-        if device_name:
+        if filters.device_name:
             query += " AND device_name = ?"
-            params.append(device_name)
+            params.append(filters.device_name)
 
-        if start_ns is not None:
+        if filters.start_ns is not None:
             query += " AND timestamp_ns >= ?"
-            params.append(start_ns)
+            params.append(filters.start_ns)
 
-        if end_ns is not None:
+        if filters.end_ns is not None:
             query += " AND timestamp_ns <= ?"
-            params.append(end_ns)
+            params.append(filters.end_ns)
 
-        if opcode is not None:
+        if filters.opcode is not None:
             query += " AND opcode = ?"
-            params.append(opcode)
+            params.append(filters.opcode)
 
-        if protocol_id is not None:
+        if filters.protocol_id is not None:
             query += " AND protocol_id = ?"
-            params.append(protocol_id)
+            params.append(filters.protocol_id)
 
-        if direction is not None:
-            if direction == "__null__":
+        if filters.direction is not None:
+            if filters.direction == "__null__":
                 query += " AND direction IS NULL"
             else:
                 query += " AND direction = ?"
-                params.append(direction)
+                params.append(filters.direction)
 
-        if payload_contains is not None:
-            search_hex = payload_contains.encode().hex()
+        if filters.payload_contains is not None:
+            search_hex = filters.payload_contains.encode().hex()
             query += " AND decompress_hex(payload) LIKE ?"
             params.append(f"%{search_hex}%")
 
         return query, params
 
-    def get_session_packet_count_filtered(
-        self,
-        session_id: int,
-        device_ip: str | None = None,
-        device_name: str | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        payload_contains: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        port: int | None = None,
-    ) -> int:
+    def get_session_packet_count_filtered(self, filters: PacketQuery) -> int:
         query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
-        params: list = [session_id, session_id]
-        query, params = self._apply_packet_filters(
-            query,
-            params,
-            device_ip=device_ip,
-            device_name=device_name,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=opcode,
-            protocol_id=protocol_id,
-            direction=direction,
-            payload_contains=payload_contains,
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            port=port,
-        )
+        params: list = [filters.session_id, filters.session_id]
+        query, params = self._apply_packet_filters(query, params, filters)
         row = self._conn.execute(query, params).fetchone()
         return int(row["count"]) if row else 0
 
-    def get_session_packets(
-        self,
-        session_id: int,
-        device_ip: str | None = None,
-        device_name: str | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        payload_contains: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        port: int | None = None,
-        limit: int = 200,
-        offset: int = 0,
-        ascending: bool = True,
-    ) -> list[dict]:
+    def get_session_packets(self, filters: PacketQuery) -> list[dict]:
         query = f"SELECT * FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
-        params: list = [session_id, session_id]
-        query, params = self._apply_packet_filters(
-            query,
-            params,
-            device_ip=device_ip,
-            device_name=device_name,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=opcode,
-            protocol_id=protocol_id,
-            direction=direction,
-            payload_contains=payload_contains,
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            port=port,
-        )
-        order = "ASC" if ascending else "DESC"
+        params: list = [filters.session_id, filters.session_id]
+        query, params = self._apply_packet_filters(query, params, filters)
+        order = "ASC" if filters.ascending else "DESC"
         query += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        params.extend([filters.limit, filters.offset])
 
         rows = self._conn.execute(query, params).fetchall()
         return self._decode_packet_rows(rows)
 
-    def search_packets(
-        self,
-        session_id: int | None = None,
-        device_ip: str | None = None,
-        device_name: str | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        payload_contains: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        port: int | None = None,
-        limit: int = 200,
-        offset: int = 0,
-        ascending: bool = True,
-    ) -> list[dict]:
-        if session_id is not None:
-            query = f"SELECT * FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
-            params: list = [session_id, session_id]
+    def _session_scoped_query(self, selection: str, query: PacketQuery) -> tuple[str, list]:
+        if query.session_id is not None:
+            sql = f"SELECT {selection} FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
+            params: list = [query.session_id, query.session_id]
         else:
-            query = "SELECT * FROM packets WHERE 1=1"
+            sql = f"SELECT {selection} FROM packets WHERE 1=1"
             params = []
-        query, params = self._apply_packet_filters(
-            query,
-            params,
-            device_ip=device_ip,
-            device_name=device_name,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=opcode,
-            protocol_id=protocol_id,
-            direction=direction,
-            payload_contains=payload_contains,
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            port=port,
-        )
-        order = "ASC" if ascending else "DESC"
-        query += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        return self._apply_packet_filters(sql, params, query)
 
-        rows = self._conn.execute(query, params).fetchall()
+    def search_packets(self, query: PacketQuery) -> list[dict]:
+        sql, params = self._session_scoped_query("*", query)
+        order = "ASC" if query.ascending else "DESC"
+        sql += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
+        params.extend([query.limit, query.offset])
+
+        rows = self._conn.execute(sql, params).fetchall()
         return self._decode_packet_rows(rows)
 
-    def search_packets_count(
-        self,
-        session_id: int | None = None,
-        device_ip: str | None = None,
-        device_name: str | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        payload_contains: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        port: int | None = None,
-    ) -> int:
-        if session_id is not None:
-            query = f"SELECT COUNT(*) AS count FROM packets WHERE {SESSION_MEMBERSHIP_SQL}"
-            params: list = [session_id, session_id]
-        else:
-            query = "SELECT COUNT(*) AS count FROM packets WHERE 1=1"
-            params = []
-        query, params = self._apply_packet_filters(
-            query,
-            params,
-            device_ip=device_ip,
-            device_name=device_name,
-            start_ns=start_ns,
-            end_ns=end_ns,
-            opcode=opcode,
-            protocol_id=protocol_id,
-            direction=direction,
-            payload_contains=payload_contains,
-            src_ip=src_ip,
-            dst_ip=dst_ip,
-            port=port,
-        )
-        row = self._conn.execute(query, params).fetchone()
+    def search_packets_count(self, query: PacketQuery) -> int:
+        sql, params = self._session_scoped_query("COUNT(*) AS count", query)
+        row = self._conn.execute(sql, params).fetchone()
         return int(row["count"]) if row else 0
 
     def get_marker_timestamp(
@@ -373,86 +261,67 @@ class PacketStoreQueries:
         resp_path = self.export_fixture(row["correlated_packet_id"], output_dir)
         return (req_path, resp_path)
 
-    def query_packets(
-        self,
-        device_ip: str | None = None,
-        src_ip: str | None = None,
-        dst_ip: str | None = None,
-        opcode: int | None = None,
-        protocol_id: int | None = None,
-        direction: str | None = None,
-        source_type: str | None = None,
-        session_id: int | None = None,
-        start_ns: int | None = None,
-        end_ns: int | None = None,
-        payload_hex_contains: str | None = None,
-        min_length: int | None = None,
-        max_length: int | None = None,
-        limit: int = 10000,
-        offset: int = 0,
-        ascending: bool = True,
-    ) -> list[dict]:
-        query = "SELECT * FROM packets WHERE 1=1"
+    def query_packets(self, query: PacketQuery) -> list[dict]:
+        sql = "SELECT * FROM packets WHERE 1=1"
         params: list = []
 
-        if device_ip:
-            query += " AND (device_ip = ? OR src_ip = ? OR dst_ip = ?)"
-            params.extend([device_ip, device_ip, device_ip])
+        if query.device_ip:
+            sql += " AND (device_ip = ? OR src_ip = ? OR dst_ip = ?)"
+            params.extend([query.device_ip, query.device_ip, query.device_ip])
 
-        if src_ip:
-            query += " AND src_ip = ?"
-            params.append(src_ip)
+        if query.src_ip:
+            sql += " AND src_ip = ?"
+            params.append(query.src_ip)
 
-        if dst_ip:
-            query += " AND dst_ip = ?"
-            params.append(dst_ip)
+        if query.dst_ip:
+            sql += " AND dst_ip = ?"
+            params.append(query.dst_ip)
 
-        if opcode is not None:
-            query += " AND opcode = ?"
-            params.append(opcode)
+        if query.opcode is not None:
+            sql += " AND opcode = ?"
+            params.append(query.opcode)
 
-        if protocol_id is not None:
-            query += " AND protocol_id = ?"
-            params.append(protocol_id)
+        if query.protocol_id is not None:
+            sql += " AND protocol_id = ?"
+            params.append(query.protocol_id)
 
-        if direction:
-            query += " AND direction = ?"
-            params.append(direction)
+        if query.direction:
+            sql += " AND direction = ?"
+            params.append(query.direction)
 
-        if source_type:
-            query += " AND source_type = ?"
-            params.append(source_type)
+        if query.source_type:
+            sql += " AND source_type = ?"
+            params.append(query.source_type)
 
-        if session_id is not None:
-            query += f" AND {SESSION_MEMBERSHIP_SQL}"
-            params.append(session_id)
-            params.append(session_id)
+        if query.session_id is not None:
+            sql += f" AND {SESSION_MEMBERSHIP_SQL}"
+            params.extend([query.session_id, query.session_id])
 
-        if start_ns is not None:
-            query += " AND timestamp_ns >= ?"
-            params.append(start_ns)
+        if query.start_ns is not None:
+            sql += " AND timestamp_ns >= ?"
+            params.append(query.start_ns)
 
-        if end_ns is not None:
-            query += " AND timestamp_ns <= ?"
-            params.append(end_ns)
+        if query.end_ns is not None:
+            sql += " AND timestamp_ns <= ?"
+            params.append(query.end_ns)
 
-        if payload_hex_contains:
-            query += " AND decompress_hex(payload) LIKE ?"
-            params.append(f"%{payload_hex_contains.lower()}%")
+        if query.payload_hex_contains:
+            sql += " AND decompress_hex(payload) LIKE ?"
+            params.append(f"%{query.payload_hex_contains.lower()}%")
 
-        if min_length is not None:
-            query += " AND length(payload) >= ?"
-            params.append(min_length)
+        if query.min_length is not None:
+            sql += " AND length(payload) >= ?"
+            params.append(query.min_length)
 
-        if max_length is not None:
-            query += " AND length(payload) <= ?"
-            params.append(max_length)
+        if query.max_length is not None:
+            sql += " AND length(payload) <= ?"
+            params.append(query.max_length)
 
-        order = "ASC" if ascending else "DESC"
-        query += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
+        order = "ASC" if query.ascending else "DESC"
+        sql += f" ORDER BY timestamp_ns {order}, id {order} LIMIT ? OFFSET ?"
+        params.extend([query.limit, query.offset])
 
-        rows = self._conn.execute(query, params).fetchall()
+        rows = self._conn.execute(sql, params).fetchall()
         return self._decode_packet_rows(rows)
 
     def get_stats(self):

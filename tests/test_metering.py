@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -40,7 +40,7 @@ def make_manager():
     )
     application = SimpleNamespace(
         devices={"avio-bt-1": device},
-        cmc=SimpleNamespace(start_metering=MagicMock(), stop_metering=MagicMock()),
+        cmc=SimpleNamespace(start_metering=AsyncMock(), stop_metering=AsyncMock()),
         dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
     )
     return MeteringManager(application), application, device

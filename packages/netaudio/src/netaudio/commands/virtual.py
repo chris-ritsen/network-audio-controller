@@ -238,7 +238,7 @@ def _startup_claim():
                 with os.fdopen(descriptor, "w", encoding="utf-8") as output:
                     output.write(payload)
                 break
-            except Exception:
+            except BaseException:
                 _remove_startup_claim(token)
                 raise
     else:
@@ -422,7 +422,7 @@ def _start_background_claimed(
             with open(LOGFILE, "w", encoding="utf-8") as log_file:
                 process = subprocess.Popen(command, stdout=log_file, stderr=log_file, **popen_options)
             message = _wait_for_startup(process, readiness_listener, token)
-        except Exception:
+        except BaseException:
             if process is not None:
                 _terminate_spawned_process(process)
             raise

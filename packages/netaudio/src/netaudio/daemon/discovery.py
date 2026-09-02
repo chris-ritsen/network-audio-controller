@@ -62,7 +62,7 @@ class DanteDiscoveryMixin:
 
             device, is_new = await self._device_for_service(service)
             device_changed = self._attach_service(device, service)
-            self._apply_service_properties(device, service)
+            await self._apply_service_properties(device, service)
 
             await self._publish_device_to_redis(device)
 
@@ -157,9 +157,9 @@ class DanteDiscoveryMixin:
         device.services[service.instance_name] = service.device_data()
         return device_changed
 
-    def _apply_service_properties(self, device, service):
+    async def _apply_service_properties(self, device, service):
         properties = service.properties
-        self._apply_cmc_identity(device, service)
+        await self._apply_cmc_identity(device, service)
 
         if "model" in properties:
             device.model_id = properties["model"]
@@ -176,7 +176,7 @@ class DanteDiscoveryMixin:
         if "latency_ns" in properties:
             device.latency = nanoseconds_to_milliseconds(properties["latency_ns"])
 
-    def _apply_cmc_identity(self, device, service):
+    async def _apply_cmc_identity(self, device, service):
         if service.service_type != SERVICE_CMC or "id" not in service.properties:
             return
 
@@ -185,9 +185,9 @@ class DanteDiscoveryMixin:
             return
 
         if not device.dante_model:
-            self.application._send_conmon_query_for_device(device, "make_model")
+            await self.application._send_conmon_query_for_device(device, self.application.settings.request_make_model)
         if not device.dante_model_id:
-            self.application._send_conmon_query_for_device(device, "dante_model")
+            await self.application._send_conmon_query_for_device(device, self.application.settings.request_dante_model)
             self._spawn_background(
                 self.state.retry_conmon_query(service.server_name),
                 name=f"retry-conmon:{service.server_name}",

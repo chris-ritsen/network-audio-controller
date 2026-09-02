@@ -1,16 +1,15 @@
 import struct
 
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.services.notification import (
+from netaudio.dante.const import (
     CLOCK_PORT_ROLE_MAP,
     CLOCK_PORT_STATE_FOLLOWER,
     CLOCK_PORT_STATE_LEADER,
     CONMON_CLOCK_FREQUENCY_OFFSET_PARTS_PER_BILLION_OFFSET,
     CONMON_CLOCK_PORT_STATE_OFFSET,
     CONMON_PREFERRED_LEADER_OFFSET,
-    DanteNotificationService,
 )
+from tests.status_test_support import application_with_device, receive_packets
 
 
 class TestClockPortStateFromConmon0x0020:
@@ -58,18 +57,10 @@ class TestClockPortStateFromConmon0x0020:
         assert CLOCK_PORT_ROLE_MAP.get(0x0001) is None
 
     def test_device_gets_leader_from_0x0020(self):
-        dispatcher = DanteEventDispatcher()
-        device = DanteDevice()
-        device.name = "test"
-        device.ipv4 = "192.168.1.108"
-
-        service = DanteNotificationService(
-            dispatcher=dispatcher,
-            device_lookup=lambda ip: device if ip == "192.168.1.108" else None,
-        )
+        application, device = application_with_device("test.local.", "192.168.1.108", name="test")
 
         packet = self._build_conmon_0020_packet(CLOCK_PORT_STATE_LEADER, preferred_leader_byte=0x01)
-        service._on_packet(packet, ("192.168.1.108", 1030))
+        receive_packets(application, [packet], ("192.168.1.108", 1030))
         assert device.clock_frequency_offset_parts_per_billion == -25_473
         assert device.clock_port_state_code == 0x0006
         assert device.clock_role == "Leader"
@@ -77,38 +68,22 @@ class TestClockPortStateFromConmon0x0020:
         assert device.clock_source_code == 0
 
     def test_device_gets_follower_from_0x0020(self):
-        dispatcher = DanteEventDispatcher()
-        device = DanteDevice()
-        device.name = "test"
-        device.ipv4 = "192.168.1.34"
-
-        service = DanteNotificationService(
-            dispatcher=dispatcher,
-            device_lookup=lambda ip: device if ip == "192.168.1.34" else None,
-        )
+        application, device = application_with_device("test.local.", "192.168.1.34", name="test")
 
         packet = self._build_conmon_0020_packet(CLOCK_PORT_STATE_FOLLOWER, preferred_leader_byte=0x00)
-        service._on_packet(packet, ("192.168.1.34", 1030))
+        receive_packets(application, [packet], ("192.168.1.34", 1030))
         assert device.clock_frequency_offset_parts_per_billion == -25_473
         assert device.clock_port_state_code == 0x0009
         assert device.clock_role == "Follower"
         assert device.preferred_leader is False
 
     def test_unknown_state_preserves_raw_code_and_clears_derived_role(self):
-        dispatcher = DanteEventDispatcher()
-        device = DanteDevice()
-        device.name = "test"
-        device.ipv4 = "192.168.1.1"
+        application, device = application_with_device("test.local.", "192.168.1.1", name="test")
         device.clock_port_state_code = CLOCK_PORT_STATE_LEADER
         device.clock_role = "Leader"
 
-        service = DanteNotificationService(
-            dispatcher=dispatcher,
-            device_lookup=lambda ip: device if ip == "192.168.1.1" else None,
-        )
-
         packet = self._build_conmon_0020_packet(0x0001)
-        service._on_packet(packet, ("192.168.1.1", 1030))
+        receive_packets(application, [packet], ("192.168.1.1", 1030))
         assert device.clock_port_state_code == 0x0001
         assert device.clock_role is None
 
