@@ -10,6 +10,11 @@ from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 from netaudio._common_output import output_table
 from netaudio._common_selection import filter_devices
 from netaudio._exit_codes import ExitCode
+from netaudio.commands.device_display import (
+    format_encoding,
+    format_latency_nanoseconds,
+    format_sample_rate_hertz,
+)
 from netaudio.dante import flows
 from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
 
@@ -52,7 +57,7 @@ async def _detect_flow_protocol(application, device, arc_port):
 async def _get_device_and_app():
     devices = await _discover()
     server_name, device = _resolve_one(filter_devices(devices))
-    await _populate_controls({server_name: device}, strict=False)
+    await _populate_controls({server_name: device})
     return None, device, _get_arc_port(device)
 
 
@@ -116,8 +121,8 @@ def flow_list():
                     str(flow["flow_number"]),
                     flow_type,
                     channel_list or str(flow.get("channel_count") or ""),
-                    str(flow["sample_rate"]),
-                    str(flow["encoding"]),
+                    format_sample_rate_hertz(flow["sample_rate"]),
+                    format_encoding(flow["encoding"]),
                 ]
                 if include_status_endpoint:
                     destination_address = flow.get("destination_internet_protocol_version_four_address")
@@ -167,7 +172,7 @@ def receiver_flow_list():
                 "Sample Rate",
                 "Encoding",
                 "Frames/Packet",
-                "Latency (ns)",
+                "Latency",
             ]
 
             if not receiver_flows:
@@ -210,17 +215,23 @@ def receiver_flow_list():
                             if receiver_flow["destination_user_datagram_port"] is not None
                             else "unknown"
                         ),
-                        str(
-                            receiver_flow["sample_rate"] if receiver_flow.get("sample_rate") is not None else "unknown"
+                        (
+                            format_sample_rate_hertz(receiver_flow["sample_rate"])
+                            if receiver_flow.get("sample_rate") is not None
+                            else "unknown"
                         ),
-                        str(receiver_flow["encoding"] if receiver_flow.get("encoding") is not None else "unknown"),
+                        (
+                            format_encoding(receiver_flow["encoding"])
+                            if receiver_flow.get("encoding") is not None
+                            else "unknown"
+                        ),
                         (
                             str(receiver_flow["frames_per_packet"])
                             if receiver_flow.get("frames_per_packet") is not None
                             else "unknown"
                         ),
                         (
-                            str(receiver_flow["latency_nanoseconds"])
+                            format_latency_nanoseconds(receiver_flow["latency_nanoseconds"])
                             if receiver_flow.get("latency_nanoseconds") is not None
                             else "unknown"
                         ),
