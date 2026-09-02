@@ -169,6 +169,23 @@ def _managed_channels(device: Device) -> dict:
     return {"receivers": receivers, "transmitters": transmitters}
 
 
+MANAGED_SUBSCRIPTION_SEVERITIES = {"connected": "ok", "error": "error", "warning": "warning"}
+
+
+def _managed_subscription_status(channel) -> dict:
+    summary = channel.summary.casefold() if isinstance(channel.summary, str) and channel.summary else None
+    state = summary or "unknown"
+    return {
+        "code": None,
+        "detail": channel.status_message,
+        "icon": "",
+        "label": channel.summary or channel.status or "unknown",
+        "severity": MANAGED_SUBSCRIPTION_SEVERITIES.get(state, "info"),
+        "state": state,
+        "status": channel.status,
+    }
+
+
 def _managed_subscriptions(device: Device) -> list[dict]:
     subscriptions = []
     for channel in device.rx_channels or ():
@@ -181,7 +198,7 @@ def _managed_subscriptions(device: Device) -> list[dict]:
                 "rx_device": _managed_name(device),
                 "tx_channel": channel.subscribed_channel,
                 "tx_device": channel.subscribed_device,
-                "status": None,
+                "status": _managed_subscription_status(channel),
                 "ddm_status": channel.status,
                 "ddm_status_message": channel.status_message,
                 "ddm_summary": channel.summary,
