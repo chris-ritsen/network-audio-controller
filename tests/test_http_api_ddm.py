@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from tests.http_api_test_support import FakeWriter, make_device, make_http_server
+from netaudio.dante.device import DanteDevice
 from netaudio.ddm import GraphQLResult, TransportError
 
 
@@ -101,7 +102,9 @@ async def test_ddm_refresh_reports_the_inventory_status():
 
 @pytest.mark.asyncio
 async def test_daemon_device_records_keep_legacy_key_aliases_for_fleet_consumers():
-    device = make_device()
+    device = DanteDevice(server_name="dev1")
+    device.name = "Device1"
+    device.ipv4 = "192.168.1.50"
     device.sample_rate = 48000
     device.latency = 1.0
     server = make_http_server(devices={"dev1": device})
