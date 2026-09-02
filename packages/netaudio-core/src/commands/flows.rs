@@ -35,7 +35,7 @@ pub fn build_query_tx_flows_from(
             let mut body = [0u8; 6];
             body[1] = 0x01;
             body[2..4].copy_from_slice(&starting_flow.to_be_bytes());
-            protocol_packet(
+            arc_packet_with_reserved_word(
                 flow_protocol_id,
                 OPCODE_QUERY_TX_FLOWS,
                 &body,
@@ -45,7 +45,7 @@ pub fn build_query_tx_flows_from(
         PROTOCOL_ARC_2809 if starting_flow == 1 => {
             let mut body = [0u8; 24];
             body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
-            protocol_packet(
+            arc_packet_with_reserved_word(
                 flow_protocol_id,
                 OPCODE_QUERY_TX_FLOWS_2809,
                 &body,
@@ -81,7 +81,7 @@ fn build_channel_status_query(
     if protocol_id == PROTOCOL_ARC_2809 {
         body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
     }
-    protocol_packet(protocol_id, opcode, &body, transaction_id)
+    arc_packet_with_reserved_word(protocol_id, opcode, &body, transaction_id)
 }
 
 pub fn build_query_transmitter_channel_status(
@@ -158,7 +158,7 @@ pub fn build_reconcile_transmitter_channel_names_2809(
         body.push(0);
     }
 
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_ARC_2809,
         OPCODE_RECONCILE_TRANSMITTER_CHANNEL_NAMES_2809,
         &body,
@@ -195,7 +195,7 @@ pub fn build_query_receiver_flow_status_2809(
     let mut body = [0u8; 24];
     body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
     body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_ARC_2809,
         OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809,
         &body,
@@ -223,7 +223,7 @@ pub fn build_set_receiver_channel_name_2809(
     body.extend_from_slice(name.as_bytes());
     body.push(0);
 
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_ARC_2809,
         OPCODE_SET_RECEIVER_CHANNEL_NAME_2809,
         &body,
@@ -241,7 +241,7 @@ pub fn build_query_receiver_flows(
     let mut body = [0u8; 6];
     body[1] = 0x01;
     body[2..4].copy_from_slice(&starting_flow.to_be_bytes());
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_DANTE_FLOW,
         OPCODE_QUERY_RECEIVER_FLOWS,
         &body,
@@ -261,7 +261,7 @@ pub fn build_query_transmit_channel_capabilities(
     body[0..2].copy_from_slice(&1u16.to_be_bytes());
     body[2..4].copy_from_slice(&starting_channel_identifier.to_be_bytes());
     body[4..6].copy_from_slice(&maximum_channel_count.to_be_bytes());
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_DANTE_FLOW,
         OPCODE_QUERY_TRANSMIT_CHANNEL_CAPABILITIES,
         &body,
@@ -270,7 +270,7 @@ pub fn build_query_transmit_channel_capabilities(
 }
 
 pub fn build_query_receiver_port_ranges(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    protocol_packet(
+    arc_packet_with_reserved_word(
         PROTOCOL_DANTE_FLOW,
         OPCODE_QUERY_RECEIVER_PORT_RANGES,
         &[],
@@ -336,7 +336,7 @@ pub fn build_create_tx_flow(
     body.extend(std::iter::repeat_n(0, 14));
     body.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
 
-    protocol_packet(flow_protocol_id, create_opcode, &body, transaction_id)
+    arc_packet_with_reserved_word(flow_protocol_id, create_opcode, &body, transaction_id)
 }
 
 pub fn build_delete_tx_flow(
@@ -356,13 +356,18 @@ pub fn build_delete_tx_flow(
         body[6..8].copy_from_slice(&1u16.to_be_bytes());
         body[8..10].copy_from_slice(&3u16.to_be_bytes());
         body[12..14].copy_from_slice(&flow_slot.to_be_bytes());
-        return protocol_packet(flow_protocol_id, delete_opcode, &body, transaction_id);
+        return arc_packet_with_reserved_word(
+            flow_protocol_id,
+            delete_opcode,
+            &body,
+            transaction_id,
+        );
     }
     let mut body = Vec::new();
     body.extend_from_slice(&0x0001u16.to_be_bytes());
     body.extend_from_slice(&0u16.to_be_bytes());
     body.extend_from_slice(&flow_slot.to_be_bytes());
-    protocol_packet(flow_protocol_id, delete_opcode, &body, transaction_id)
+    arc_packet_with_reserved_word(flow_protocol_id, delete_opcode, &body, transaction_id)
 }
 
 #[cfg(test)]
