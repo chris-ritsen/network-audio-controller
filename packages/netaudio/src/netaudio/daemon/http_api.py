@@ -8,7 +8,7 @@ import logging
 import socket
 import time
 from dataclasses import dataclass, field
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 import ifaddr
 from zeroconf import IPVersion, ServiceInfo
@@ -80,13 +80,24 @@ async def _bounded(awaitable, timeout: float):
 
 
 class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
-    def __init__(self, application, state, metering=None, shure=None, port=None, on_shutdown=None, mark_offline=None):
+    def __init__(
+        self,
+        application,
+        state,
+        metering=None,
+        shure=None,
+        port=None,
+        on_shutdown=None,
+        mark_offline=None,
+        forget_device=None,
+    ):
         self.application = application
         self.state = state
         self.metering = metering
         self.shure = shure
         self.on_shutdown = on_shutdown
         self.mark_offline = mark_offline or application.mark_device_offline
+        self.forget_device = forget_device or application.unregister_device
         self.port: int = int(port if port is not None else DEFAULT_DAEMON_PORT)
         self.tcp_server = None
         self.zeroconf = None
@@ -575,6 +586,16 @@ class DaemonHTTPServer(DaemonDeviceHandlers, DaemonConfigurationHandlers):
                 await self._handle_metering_cache(writer)
             elif path.startswith("/metering/snapshot/"):
                 await self._handle_metering_snapshot(writer, unquote(path[len("/metering/snapshot/") :]))
+            else:
+                await self._send_json(writer, {"error": "not found"}, 404)
+            return
+
+        if method == "DELETE":
+            route, _, query = path.partition("?")
+            if route == "/devices":
+                await self._handle_forget_devices(writer, parse_qs(query))
+            elif route.startswith("/devices/"):
+                await self._handle_forget_device(writer, unquote(route[len("/devices/") :]))
             else:
                 await self._send_json(writer, {"error": "not found"}, 404)
             return

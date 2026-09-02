@@ -9,6 +9,7 @@ import typer
 
 logger = logging.getLogger("netaudio")
 
+from netaudio.dante.conmon_export import ConmonExportUnavailableError
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_operations import (
     core_lock_device,
@@ -175,9 +176,10 @@ def device_show():
 
         include_channels = state.output_format in (OutputFormat.json, OutputFormat.yaml, OutputFormat.xml)
         server_name, device = await _load_device_for_show(include_channels=include_channels)
-        from netaudio._common import _enrich_lock_states
+        from netaudio._common import _enrich_lock_states, _log_unreachable
 
-        await _enrich_lock_states({server_name: device})
+        for _, reason in (await _enrich_lock_states({server_name: device}, only_unknown=True)).items():
+            _log_unreachable(device, reason)
         data = DanteDeviceSerializer.to_json(device)
         output_table(
             ["Field", "Value"],
@@ -217,7 +219,7 @@ def device_capabilities(
                 raise typer.Exit(code=1)
             try:
                 result = await send.export_device_logs(device.ipv4, timeout=timeout)
-            except (CapabilityProbeTimeout, DeviceLogExportError) as exception:
+            except (CapabilityProbeTimeout, ConmonExportUnavailableError, DeviceLogExportError) as exception:
                 typer.echo(f"Error: {exception}", err=True)
                 raise typer.Exit(code=1) from None
             capabilities = result.audio_capabilities
@@ -287,9 +289,8 @@ def reboot(
     """Reboot a device."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices)
-        filtered = filter_devices(devices)
+        filtered = filter_devices(await _discover())
+        await _populate_controls(filtered)
         if not filtered:
             typer.echo("Error: no devices matched.", err=True)
             raise typer.Exit(code=1)
@@ -324,9 +325,8 @@ def factory_reset(
     """Erase all retained configuration and request a factory reset."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices)
-        filtered = filter_devices(devices)
+        filtered = filter_devices(await _discover())
+        await _populate_controls(filtered)
         if not filtered:
             typer.echo("Error: no devices matched.", err=True)
             raise typer.Exit(code=1)
@@ -490,13 +490,13 @@ def lock_status():
     """Show device lock status."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices, strict=False)
-        filtered = filter_devices(devices)
+        filtered = filter_devices(await _discover())
+        await _populate_controls(filtered)
 
-        from netaudio._common import _enrich_lock_states
+        from netaudio._common import _enrich_lock_states, _log_unreachable
 
-        await _enrich_lock_states(filtered)
+        for server_name, reason in (await _enrich_lock_states(filtered)).items():
+            _log_unreachable(filtered[server_name], reason)
 
         if not filtered:
             typer.echo("Error: no devices found.", err=True)

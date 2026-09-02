@@ -8,7 +8,6 @@ from typing import Optional
 
 import typer
 
-from netaudio.capture.daemon import _print_packet_line
 from netaudio.capture.display import (
     _follow_session_timeline,
     _print_marker_row,
@@ -423,6 +422,8 @@ def session_packets(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
+    from netaudio.capture.daemon import _print_packet_line
+
     from netaudio.cli import state as cli_state
 
     _require_positive_session_id(id, "--id")

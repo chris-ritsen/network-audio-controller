@@ -9,8 +9,8 @@ from typing import Optional
 import typer
 from click.core import ParameterSource
 
-from netaudio import __version__
 from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+from netaudio._exit_codes import ExitCode
 from netaudio.common.app_config import settings
 
 logger = logging.getLogger("netaudio")
@@ -18,6 +18,8 @@ logger = logging.getLogger("netaudio")
 
 def _version_callback(value: bool):
     if value:
+        from netaudio import __version__
+
         typer.echo(f"netaudio {__version__}")
         raise typer.Exit()
 
@@ -124,6 +126,7 @@ app = typer.Typer(
     help="CLI for managing network audio devices.",
     context_settings=HELP_CONTEXT_SETTINGS,
     invoke_without_command=True,
+    pretty_exceptions_enable=False,
 )
 
 
@@ -290,5 +293,18 @@ app.add_typer(subscription.app, name="subscription")
 app.add_typer(virtual.app, name="virtual")
 
 
+def error_message(exception: BaseException) -> str:
+    message = str(exception).strip()
+    if message:
+        return message
+    return type(exception).__name__
+
+
 def main():
-    app()
+    try:
+        app()
+    except Exception as exception:
+        if settings.debug:
+            raise
+        typer.echo(f"Error: {error_message(exception)}", err=True)
+        raise SystemExit(int(ExitCode.ERROR)) from None
