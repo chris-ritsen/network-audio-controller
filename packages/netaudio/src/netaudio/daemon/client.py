@@ -103,6 +103,20 @@ async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
     return devices
 
 
+async def forget_devices_on_daemon(
+    *,
+    device_name: str | None = None,
+    emulated: bool = False,
+    offline: bool = False,
+) -> tuple[int | None, dict | None]:
+    if device_name is not None:
+        path = f"/devices/{quote(device_name, safe='')}"
+    else:
+        selections = [name for name, selected in (("emulated", emulated), ("offline", offline)) if selected]
+        path = f"/devices?selection={','.join(selections)}"
+    return await _daemon_request("DELETE", path)
+
+
 async def get_device_summaries_from_daemon() -> dict | None:
     status, data = await _daemon_request("GET", "/devices")
     if status != 200:

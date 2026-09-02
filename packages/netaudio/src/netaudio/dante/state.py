@@ -2,6 +2,7 @@ import asyncio
 import logging
 import struct
 
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante import flows
 from netaudio.dante.const import BLUETOOTH_MODEL_IDS
 from netaudio.dante.device_parser import DanteDeviceParser
@@ -518,12 +519,56 @@ class DanteStateService:
                     except Exception as exception:
                         logger.warning(f"Error probing interface status for {server_name}: {exception}")
 
+                await self._refresh_clock_status(device, "device discovered")
+                await self._refresh_lock_status(device, "device discovered")
+
             logger.info(f"Fetched controls for {server_name}")
             self._emit_device_updated(device)
         except Exception as exception:
             logger.warning(f"Error fetching controls for {server_name}: {exception}")
         finally:
             self._populating.discard(server_name)
+
+    async def refresh_status_fields(self, server_name: str, reason: str) -> None:
+        device = self.devices.get(server_name)
+        if not device or not device.online or not device.ipv4:
+            return
+        async with self._lock_for(server_name):
+            clock_changed = await self._refresh_clock_status(device, reason)
+            lock_changed = await self._refresh_lock_status(device, reason)
+        if clock_changed or lock_changed:
+            self._emit_device_updated(device)
+
+    async def _refresh_clock_status(self, device, reason: str) -> bool:
+        before = (device.clock_role, device.clock_source_code)
+        try:
+            parsed = await self.application.probe_clocking_status(device)
+        except Exception as exception:
+            logger.warning(f"Error probing clock status for {device.server_name} ({reason}): {exception}")
+            return False
+        if parsed is None:
+            logger.debug(f"Clock status probe timed out for {device.server_name} ({reason})")
+            return False
+        return (device.clock_role, device.clock_source_code) != before
+
+    async def _refresh_lock_status(self, device, reason: str) -> bool:
+        try:
+            observation = await self.application.probe_lock_status(
+                str(device.ipv4),
+                timeout=app_settings.lock_state_timeout,
+            )
+        except Exception as exception:
+            logger.warning(f"Error probing lock status for {device.server_name} ({reason}): {exception}")
+            return False
+        if observation is None:
+            logger.debug(f"Lock status probe timed out for {device.server_name} ({reason})")
+            return False
+        changed = (
+            device.is_locked is not observation.is_locked or device.lock_reset_status != observation.lock_reset_status
+        )
+        device.is_locked = observation.is_locked
+        device.lock_reset_status = observation.lock_reset_status
+        return changed
 
     async def retry_conmon_query(self, server_name: str) -> None:
         for attempt, timeout in enumerate(CONMON_RETRY_TIMEOUTS, 1):

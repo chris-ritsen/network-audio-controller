@@ -38,6 +38,8 @@ def make_application(devices):
         probe_gain_status=AsyncMock(return_value=None),
         probe_preferred_leader_state=AsyncMock(return_value=None),
         probe_interface_status=AsyncMock(return_value=None),
+        probe_clocking_status=AsyncMock(return_value=None),
+        probe_lock_status=AsyncMock(return_value=None),
         _send_conmon_query_for_device=MagicMock(),
         on_notification=MagicMock(),
     )

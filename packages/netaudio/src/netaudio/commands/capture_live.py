@@ -11,8 +11,6 @@ from typing import Optional
 
 import typer
 
-from netaudio.capture import daemon as capture_daemon
-from netaudio.capture.daemon import CaptureDaemon, _get_redis_client, _print_packet_line
 from netaudio.capture.display import _emdash
 from netaudio.capture.interfaces import _default_interface
 from netaudio.commands.capture_app import app
@@ -28,13 +26,15 @@ from netaudio.capture.packets import _label_packet, _print_packet_table_header
 from netaudio.common.app_config import get_available_interfaces
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.packet_store import PacketStore
-from netaudio.dante.tshark_capture import TsharkCapture
 from netaudio.icons import icon
 
 
 async def _replay_packet(
     packet_id: int, store: PacketStore, interface: str, tshark_duration: float, dump: bool = False
 ):
+    from netaudio.capture.daemon import _print_packet_line
+    from netaudio.dante.tshark_capture import TsharkCapture
+
     packet = store.get_packet(packet_id)
     if not packet:
         print(f"Error: Packet #{packet_id} not found in database.", file=sys.stderr)
@@ -197,6 +197,9 @@ def _resolve_redis_for_capture(
     redis_password: Optional[str],
     redis_socket: Optional[str],
 ):
+    from netaudio.capture import daemon as capture_daemon
+    from netaudio.capture.daemon import _get_redis_client
+
     client = _get_redis_client(
         host=redis_host,
         port=redis_port,
@@ -251,6 +254,8 @@ def live(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
+    from netaudio.capture.daemon import CaptureDaemon
+
     from netaudio.cli import state as cli_state
 
     _require_positive_session_id(session_id, "--session-id")

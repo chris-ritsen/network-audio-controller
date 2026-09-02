@@ -10,6 +10,8 @@ from netaudio._common_selection import sort_devices
 from netaudio.commands.device_display import (
     _device_active_latency,
     _device_encoding,
+    device_list_headers,
+    device_list_row,
     format_encoding,
     format_latency_milliseconds,
     format_lock_state,
@@ -103,9 +105,10 @@ def _visible_shure_summaries(shure_summaries: dict) -> list[dict]:
     return sorted(visible, key=lambda entry: (entry.get("name") or "").lower())
 
 
-async def _gather_status() -> tuple[list[list[str]], list[list[str]], dict]:
+async def _gather_status(verbose: bool = False) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
     from netaudio.daemon.client import daemon_is_accessible, get_shure_devices_from_daemon
 
+    dante_headers = device_list_headers(True) if verbose else list(DANTE_STATUS_HEADERS)
     dante_rows: list[list[str]] = []
     shure_rows: list[list[str]] = []
     json_data: dict = {}
@@ -124,8 +127,11 @@ async def _gather_status() -> tuple[list[list[str]], list[list[str]], dict]:
     json_data["dante"] = {
         server_name: DanteDeviceSerializer.to_json(device) for server_name, device in visible_dante.items()
     }
-    for _, device in sort_devices(visible_dante):
-        dante_rows.append(_dante_row_from_device(device))
+    for server_name, device in sort_devices(visible_dante):
+        if verbose:
+            dante_rows.append(device_list_row(server_name, device, verbose=True))
+        else:
+            dante_rows.append(_dante_row_from_device(device))
 
     if shure_summaries:
         visible_shure = _visible_shure_summaries(shure_summaries)
@@ -135,7 +141,7 @@ async def _gather_status() -> tuple[list[list[str]], list[list[str]], dict]:
         }
         shure_rows = [_shure_row(summary) for summary in visible_shure]
 
-    return dante_rows, shure_rows, json_data
+    return dante_headers, dante_rows, shure_rows, json_data
 
 
 def status(
@@ -147,7 +153,7 @@ def status(
     if json_flag:
         state.output_format = OutputFormat.json
 
-    dante_rows, shure_rows, json_data = asyncio.run(_gather_status())
+    dante_headers, dante_rows, shure_rows, json_data = asyncio.run(_gather_status(verbose=state.verbose))
 
     if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
         output_single(json_data)
@@ -166,6 +172,6 @@ def status(
         return
 
     if dante_rows:
-        output_table(DANTE_STATUS_HEADERS, dante_rows)
+        output_table(dante_headers, dante_rows, omit_empty_columns=state.verbose)
     if shure_rows:
         output_table(SHURE_STATUS_HEADERS, shure_rows, title="Shure")
