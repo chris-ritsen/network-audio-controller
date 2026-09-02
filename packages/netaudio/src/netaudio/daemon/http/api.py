@@ -20,7 +20,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
-from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.device_serializer import DanteDeviceSerializer, with_legacy_field_names
 from netaudio.dante.events import DanteEvent, EventType
 
 logger = logging.getLogger("netaudio")
@@ -301,11 +301,13 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
 
     def _serialized_devices(self) -> dict[str, dict]:
         if self.managed_inventory is not None and self.managed_inventory.enabled:
-            return self.managed_inventory.serialize_devices(self.application.devices)
-        return {
-            server_name: DanteDeviceSerializer.to_json(device)
-            for server_name, device in self.application.devices.items()
-        }
+            records = self.managed_inventory.serialize_devices(self.application.devices)
+        else:
+            records = {
+                server_name: DanteDeviceSerializer.to_json(device)
+                for server_name, device in self.application.devices.items()
+            }
+        return {server_name: with_legacy_field_names(record) for server_name, record in records.items()}
 
     def _snapshot_payload(self) -> dict:
         shure_state = {}
