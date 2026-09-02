@@ -227,6 +227,8 @@ def _log_unreachable(device: DanteDevice, reason: object) -> None:
 
 def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[str, DanteDevice]:
     explicit = _explicit_selection()
+    if explicit:
+        devices = filter_devices(devices)
     candidates: dict[str, DanteDevice] = {}
     for server_name, device in devices.items():
         if device.ipv4 is None:
@@ -244,6 +246,8 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
 
 async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
     explicit = _explicit_selection()
+    if explicit:
+        devices = filter_devices(devices)
     unpopulated = []
     for device in devices.values():
         if device.tx_channels or device.rx_channels or not device.ipv4:
