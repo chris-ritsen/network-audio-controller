@@ -4,6 +4,7 @@ DEVICE_SCALAR_FIELDS = (
     "aes67_current",
     "aes67_multicast_prefix",
     "aes67_supported",
+    "availability_state",
     "bit_depth",
     "bluetooth_connected",
     "bluetooth_device",
@@ -17,16 +18,36 @@ DEVICE_SCALAR_FIELDS = (
     "clock_source_code",
     "clock_subdomain",
     "configured_latency",
+    "control_transports",
     "dante_model",
     "dante_model_id",
+    "ddm_capabilities",
+    "ddm_clock_preferences",
+    "ddm_clocking_state",
+    "ddm_connection_last_changed",
+    "ddm_connection_state",
+    "ddm_device_id",
+    "ddm_domain_id",
+    "ddm_domain_name",
+    "ddm_enrolment_state",
+    "ddm_identity",
+    "ddm_inputs",
+    "ddm_last_sync",
+    "ddm_outputs",
+    "ddm_parameters",
+    "ddm_status",
     "default_latency",
     "diagnostic_log_export_supported",
+    "direct_control_available",
     "encoding",
+    "field_sources",
     "firmware_version",
     "gain_device_type",
     "gain_levels",
     "interface_pending_config",
     "interfaces",
+    "inventory_id",
+    "inventory_sources",
     "is_locked",
     "last_seen",
     "latency",
@@ -38,6 +59,7 @@ DEVICE_SCALAR_FIELDS = (
     "link_speed_mbps",
     "lock_reset_status",
     "mac_address",
+    "management_state",
     "manufacturer",
     "max_latency",
     "min_latency",
@@ -72,6 +94,28 @@ DEVICE_SCALAR_FIELDS = (
     "tx_count_raw",
     "tx_flow_count",
 )
+
+CHANNEL_OPTIONAL_FIELDS = (
+    "bit_depth",
+    "ddm_can_subscribe_self",
+    "ddm_channel_id",
+    "ddm_enabled",
+    "ddm_encryption_policy",
+    "ddm_encryption_scheme",
+    "ddm_media_type",
+    "ddm_signal_presence",
+    "ddm_status",
+    "ddm_status_message",
+    "ddm_summary",
+    "factory_name",
+    "friendly_name",
+    "muted",
+    "samples_per_frame",
+    "status_text",
+    "volume",
+)
+
+SUBSCRIPTION_MANAGED_FIELDS = ("ddm_status", "ddm_status_message", "ddm_summary")
 
 DEVICE_JSON_FIELD_NAMES = {
     "active_latency": "active_latency_ms",
@@ -117,11 +161,9 @@ class DanteDeviceSerializer:
             field_value = getattr(device, field_name)
             if field_value is None and field_name != "is_locked":
                 continue
-            json_field_name = device_json_field_name(field_name)
             if isinstance(field_value, (bytes, bytearray)):
-                as_json[json_field_name] = list(field_value)
-            else:
-                as_json[json_field_name] = field_value
+                field_value = list(field_value)
+            as_json[device_json_field_name(field_name)] = field_value
 
         if device.is_licensed is not None:
             as_json["is_licensed"] = device.is_licensed
@@ -190,13 +232,8 @@ class DanteDeviceSerializer:
             channel.device = device
             channel.number = int(number_key)
             channel.name = channel_json.get("name")
-            channel.friendly_name = channel_json.get("friendly_name")
-            channel.factory_name = channel_json.get("factory_name")
-            channel.status_text = channel_json.get("status_text")
-            channel.volume = channel_json.get("volume")
-            channel.muted = channel_json.get("muted")
-            channel.bit_depth = channel_json.get("bit_depth")
-            channel.samples_per_frame = channel_json.get("samples_per_frame")
+            for field_name in CHANNEL_OPTIONAL_FIELDS:
+                setattr(channel, field_name, channel_json.get(field_name))
             channels[channel.number] = channel
         return channels
 
@@ -209,6 +246,8 @@ class DanteDeviceSerializer:
         subscription.rx_device_name = entry.get("rx_device")
         subscription.tx_channel_name = entry.get("tx_channel")
         subscription.tx_device_name = entry.get("tx_device")
+        for field_name in SUBSCRIPTION_MANAGED_FIELDS:
+            setattr(subscription, field_name, entry.get(field_name))
         status = entry.get("status")
         if status:
             subscription.status_code = status.get("code")
@@ -230,19 +269,13 @@ class DanteDeviceSerializer:
             gain_level_label = channel.device.gain_level_label_for_channel(channel.number, channel.channel_type)
 
         optional_fields = [
-            ("bit_depth", channel.bit_depth),
-            ("factory_name", channel.factory_name),
-            ("friendly_name", channel.friendly_name),
+            *((field_name, getattr(channel, field_name)) for field_name in CHANNEL_OPTIONAL_FIELDS),
             ("gain_level", gain_level),
             ("gain_level_label", gain_level_label),
-            ("muted", channel.muted),
-            ("samples_per_frame", channel.samples_per_frame),
-            ("status_text", channel.status_text),
-            ("volume", channel.volume),
         ]
 
         for field_name, field_value in optional_fields:
-            if field_value:
+            if field_value is not None:
                 as_json[field_name] = field_value
 
         return {key: as_json[key] for key in sorted(as_json.keys())}
@@ -291,6 +324,10 @@ class DanteDeviceSerializer:
             "tx_channel": subscription.tx_channel_name,
             "tx_device": subscription.tx_device_name,
         }
+        for field_name in SUBSCRIPTION_MANAGED_FIELDS:
+            field_value = getattr(subscription, field_name)
+            if field_value is not None:
+                as_json[field_name] = field_value
 
         if (
             subscription.rx_channel_status_code is not None
