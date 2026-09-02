@@ -5,7 +5,8 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_operations import DanteDeviceOperations, channel_status_query_specification
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.commands import channel_status_query_specification
 
 
 def _rename_specification(name: str, protocol_id: int) -> dict:
@@ -131,9 +132,9 @@ def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
 @pytest.mark.asyncio
 async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_rejection():
     successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(2)), services={})
-    successful_operation = DanteDeviceOperations(successful_device)
+    successful_operation = DanteApplication()
 
-    page = await successful_operation.query_transmitter_channel_status_2809()
+    page = await successful_operation.query_transmitter_channel_status_2809(successful_device)
 
     assert [record["channel_name"] for record in page["records"]] == ["bluetooth:left", "bluetooth:right"]
     assert successful_device.transmitter_channel_name_protocol_identifier == 0x2809
@@ -141,7 +142,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(8)), services={})
     with pytest.raises(RuntimeError, match="result 0x0030"):
-        await DanteDeviceOperations(rejected_device).query_transmitter_channel_status_2809()
+        await DanteApplication().query_transmitter_channel_status_2809(rejected_device)
 
 
 @pytest.mark.asyncio
@@ -151,10 +152,10 @@ async def test_transmitter_rename_selects_and_caches_2809_after_successful_statu
         execute=AsyncMock(side_effect=[_packet(2), rename_response, rename_response]),
         transmitter_channel_name_protocol_identifier=None,
     )
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
-    first_response = await operation.set_channel_name("tx", 1, "bluetooth:left")
-    second_response = await operation.set_channel_name("tx", 1, "bluetooth:left")
+    first_response = await operation.send_set_channel_name(device, "tx", 1, "bluetooth:left")
+    second_response = await operation.send_set_channel_name(device, "tx", 1, "bluetooth:left")
 
     assert first_response == rename_response
     assert second_response == rename_response
@@ -174,9 +175,9 @@ async def test_transmitter_rename_selects_2729_after_authentic_a32_frontend_reje
         execute=AsyncMock(side_effect=[_packet(8), rename_response]),
         transmitter_channel_name_protocol_identifier=None,
     )
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
-    response = await operation.set_channel_name("tx", 1, "Output-1")
+    response = await operation.send_set_channel_name(device, "tx", 1, "Output-1")
 
     assert response == rename_response
     assert device.transmitter_channel_name_protocol_identifier == 0x2729

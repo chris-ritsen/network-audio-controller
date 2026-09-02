@@ -77,7 +77,7 @@ def _record(store, session_id, payload, device_ip, port, direction, source_type)
 def _dissect(payload, device_ip, port, direction):
     try:
         from netaudio.common.app_config import settings
-        from netaudio.dante.packet_dissection_rendering import dissect_and_render, format_dissect_label
+        from netaudio.dante.dissection.rendering import dissect_and_render, format_dissect_label
 
         color = not settings.no_color
         label = format_dissect_label(direction, f"{device_ip}:{port}", color=color)

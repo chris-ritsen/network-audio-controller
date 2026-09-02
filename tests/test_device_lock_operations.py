@@ -1,7 +1,7 @@
 import pytest
 
 from netaudio import core
-from netaudio.dante.device_operations import (
+from netaudio.dante.lock import (
     LOCK_OPERATION_LOCK,
     LOCK_OPERATION_UNLOCK,
     _device_lock_operation,
