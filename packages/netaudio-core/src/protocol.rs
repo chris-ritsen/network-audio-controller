@@ -99,22 +99,55 @@ pub fn validate_conmon_envelope(data: &[u8], expected_opcode: u16) -> Option<()>
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetaudioError {
-    NameTooLong,
-    NameInvalidHyphen,
-    NameInvalidChars,
-    SubscriptionCount,
-    InvalidPage,
-    InvalidSubscriptionChannel,
-    PacketTooLarge,
     InvalidChannel,
-    InvalidLatency,
-    InvalidSampleRate,
     InvalidEncoding,
-    InvalidGainLevel,
-    InvalidFlowSlot,
     InvalidFlowProtocol,
+    InvalidFlowSlot,
+    InvalidGainLevel,
+    InvalidLatency,
+    InvalidPage,
+    InvalidSampleRate,
     InvalidSequence,
+    InvalidSubscriptionChannel,
+    NameInvalidChars,
+    NameInvalidHyphen,
+    NameTooLong,
+    PacketTooLarge,
+    SubscriptionCount,
     UnsupportedProtocolOperation,
+}
+
+impl std::fmt::Display for NetaudioError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            NetaudioError::InvalidChannel => {
+                "channel number must be at least 1 and fit the protocol"
+            }
+            NetaudioError::InvalidEncoding => "encoding value must be nonzero",
+            NetaudioError::InvalidFlowProtocol => "flow protocol must be 0x2729, 0x2801, or 0x2809",
+            NetaudioError::InvalidFlowSlot => "flow slot must be from 1 through 32",
+            NetaudioError::InvalidGainLevel => "gain level must be an integer from 1 through 5",
+            NetaudioError::InvalidLatency => {
+                "latency must be finite, nonnegative, and fit on the wire"
+            }
+            NetaudioError::InvalidPage => "page exceeds the protocol channel range",
+            NetaudioError::InvalidSampleRate => "sample rate must be nonzero",
+            NetaudioError::InvalidSequence => {
+                "message_id must be nonzero; omit it to let a client assign one"
+            }
+            NetaudioError::InvalidSubscriptionChannel => {
+                "subscription receiver channel must fit in one byte"
+            }
+            NetaudioError::NameInvalidChars => "name contains unsupported characters",
+            NetaudioError::NameInvalidHyphen => "name cannot begin or end with a hyphen",
+            NetaudioError::NameTooLong => "name exceeds 31 characters",
+            NetaudioError::PacketTooLarge => "command packet exceeds the protocol length limit",
+            NetaudioError::SubscriptionCount => "subscription count must be 1-16",
+            NetaudioError::UnsupportedProtocolOperation => {
+                "the selected protocol does not support this operation"
+            }
+        })
+    }
 }
 
 fn validate_dante_name_with_character_policy(
@@ -171,34 +204,81 @@ pub fn validate_dante_channel_reference(name: &str) -> Result<(), NetaudioError>
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArcHeader {
+    pub message_id: u16,
+    pub opcode: u16,
+    pub protocol_id: u16,
+}
+
+impl ArcHeader {
+    pub fn packet(&self, body: &[u8]) -> Result<Vec<u8>, NetaudioError> {
+        frame_packet(self.protocol_id, &[self.message_id, self.opcode], body)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConmonHeader {
+    pub message_id: u16,
+    pub protocol_id: u16,
+}
+
+impl ConmonHeader {
+    pub fn packet(&self, body: &[u8]) -> Result<Vec<u8>, NetaudioError> {
+        frame_packet(self.protocol_id, &[self.message_id], body)
+    }
+}
+
+fn frame_packet(
+    protocol_id: u16,
+    header_words: &[u16],
+    body: &[u8],
+) -> Result<Vec<u8>, NetaudioError> {
+    let header_length = 4usize
+        .checked_add(
+            header_words
+                .len()
+                .checked_mul(2)
+                .ok_or(NetaudioError::PacketTooLarge)?,
+        )
+        .ok_or(NetaudioError::PacketTooLarge)?;
+    let length = header_length
+        .checked_add(body.len())
+        .ok_or(NetaudioError::PacketTooLarge)?;
+    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
+    let mut packet = Vec::with_capacity(length);
+    packet.extend_from_slice(&protocol_id.to_be_bytes());
+    packet.extend_from_slice(&encoded_length.to_be_bytes());
+    for word in header_words {
+        packet.extend_from_slice(&word.to_be_bytes());
+    }
+    packet.extend_from_slice(body);
+    Ok(packet)
+}
+
 pub fn build_control_packet(
     opcode: u16,
     payload: &[u8],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_control_packet_for_protocol(PROTOCOL_ID, opcode, payload, transaction_id)
+    build_control_packet_for_protocol(PROTOCOL_ID, opcode, payload, message_id)
 }
 
 pub fn build_control_packet_for_protocol(
     protocol_id: u16,
     opcode: u16,
     payload: &[u8],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let length = 8usize
-        .checked_add(payload.len())
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
-    let mut packet = Vec::with_capacity(length);
-    packet.extend_from_slice(&protocol_id.to_be_bytes());
-    packet.extend_from_slice(&encoded_length.to_be_bytes());
-    packet.extend_from_slice(&transaction_id.to_be_bytes());
-    packet.extend_from_slice(&opcode.to_be_bytes());
-    packet.extend_from_slice(payload);
-    Ok(packet)
+    ArcHeader {
+        message_id,
+        opcode,
+        protocol_id,
+    }
+    .packet(payload)
 }
 
-pub fn build_set_device_name(name: &str, transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+pub fn build_set_device_name(name: &str, message_id: u16) -> Result<Vec<u8>, NetaudioError> {
     validate_dante_name(name)?;
 
     let name_bytes = name.as_bytes();
@@ -211,7 +291,7 @@ pub fn build_set_device_name(name: &str, transaction_id: u16) -> Result<Vec<u8>,
         PROTOCOL_ARC_2809,
         OPCODE_DEVICE_NAME_SET,
         &payload,
-        transaction_id,
+        message_id,
     )
 }
 
