@@ -12,14 +12,20 @@ fn route_for(json: &str) -> (Target, IoMode) {
 }
 
 #[test]
-fn conmon_export_commands_route_to_the_settings_port_and_wait_for_a_reply() {
+fn conmon_export_commands_fire_to_the_settings_port_without_waiting() {
     for json in [
         r#"{"command":"device_log_export"}"#,
         r#"{"command":"capability_partition_export"}"#,
     ] {
         assert_eq!(
             route_for(json),
-            (Target::Settings, IoMode::Request),
+            (
+                Target::Settings,
+                IoMode::Fire {
+                    repeat: 1,
+                    interval_ms: 0
+                }
+            ),
             "{json}"
         );
     }
