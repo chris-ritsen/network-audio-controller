@@ -1,9 +1,11 @@
 use super::*;
 
-pub(super) fn parse_mac(value: &Option<String>, default: [u8; 6]) -> Result<[u8; 6], SpecError> {
+pub(super) fn parse_mac(
+    value: &Option<String>,
+    default: Option<[u8; 6]>,
+) -> Result<[u8; 6], SpecError> {
     match value {
-        None if default != [0u8; 6] => Ok(default),
-        None => Err(SpecError::InvalidMac),
+        None => default.ok_or(SpecError::InvalidMac),
         Some(text) => parse_mac_required(text),
     }
 }

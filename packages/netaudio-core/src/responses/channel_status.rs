@@ -82,6 +82,18 @@ pub fn parse_transmitter_channel_name_reconciliation_2809(
     })
 }
 
+fn modern_arc_page_counts(body: &[u8]) -> Option<(u8, u8)> {
+    if body.len() < 8 {
+        return None;
+    }
+    let page_capacity = *body.get(6)?;
+    let reported_record_count = *body.get(7)?;
+    if page_capacity == 0 || reported_record_count > page_capacity {
+        return None;
+    }
+    Some((page_capacity, reported_record_count))
+}
+
 pub fn parse_transmitter_channel_status_page_2809(
     response: &[u8],
 ) -> Option<TransmitterChannelStatusPage2809> {
@@ -91,67 +103,22 @@ pub fn parse_transmitter_channel_status_page_2809(
         &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
     let body = envelope.body;
-    if body.len() < 8 {
-        return None;
-    }
-
-    let page_capacity = *body.get(6)?;
-    let reported_record_count = *body.get(7)?;
-    if page_capacity == 0 || reported_record_count > page_capacity {
-        return None;
-    }
-
-    let pointer_table_end = TRANSMITTER_CHANNEL_STATUS_POINTER_TABLE_OFFSET
-        .checked_add(usize::from(reported_record_count).checked_mul(2)?)?;
-    response.get(TRANSMITTER_CHANNEL_STATUS_POINTER_TABLE_OFFSET..pointer_table_end)?;
-
-    let mut record_pointers = Vec::with_capacity(usize::from(reported_record_count));
-    let mut seen_record_pointers = HashSet::with_capacity(usize::from(reported_record_count));
-    for index in 0..reported_record_count {
-        let pointer_offset = TRANSMITTER_CHANNEL_STATUS_POINTER_TABLE_OFFSET
-            .checked_add(usize::from(index).checked_mul(2)?)?;
-        let record_pointer = read_u16(response, pointer_offset)?;
-        let record_offset = usize::from(record_pointer);
-        let record_end = record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE)?;
-        if record_offset < pointer_table_end
-            || record_end > response.len()
-            || !seen_record_pointers.insert(record_pointer)
-        {
-            return None;
-        }
-        record_pointers.push(record_pointer);
-    }
-
-    let mut sorted_ranges: Vec<(usize, usize)> = record_pointers
-        .iter()
-        .map(|pointer| {
-            let start = usize::from(*pointer);
-            (start, start + TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE)
-        })
-        .collect();
-    sorted_ranges.sort_unstable();
-    if sorted_ranges
-        .windows(2)
-        .any(|ranges| ranges[0].1 > ranges[1].0)
-    {
-        return None;
-    }
-
-    let mut records = Vec::with_capacity(usize::from(reported_record_count));
-    let mut channel_numbers = HashSet::with_capacity(usize::from(reported_record_count));
-    let mut media_identities = HashSet::with_capacity(usize::from(reported_record_count));
-    for record_pointer in record_pointers {
-        let record = parse_transmitter_channel_status_record_2809(
-            response,
-            record_pointer,
-            pointer_table_end,
-        )?;
+    let (page_capacity, reported_record_count) = modern_arc_page_counts(body)?;
+    let records = parse_pointer_table_page(
+        response,
+        MODERN_ARC_POINTER_TABLE_OFFSET,
+        reported_record_count,
+        |_| TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE,
+        parse_transmitter_channel_status_record_2809,
+    )?;
+    let mut channel_numbers = HashSet::with_capacity(records.len());
+    let mut media_identities = HashSet::with_capacity(records.len());
+    for record in &records {
         if !channel_numbers.insert(record.channel_number)
             || !media_identities.insert((record.media_type, record.media_local_channel_id))
         {
             return None;
         }
-        records.push(record);
     }
 
     Some(TransmitterChannelStatusPage2809 {
@@ -168,80 +135,108 @@ pub fn parse_transmitter_channel_status_page_2809(
     })
 }
 
-fn parse_transmitter_channel_status_record_2809(
+struct ChannelStatusRecordPrefix2809<'a> {
+    channel_number: u16,
+    encoding: u16,
+    format_descriptor: &'a [u8],
+    format_pointer: u16,
+    friendly_channel_name: String,
+    friendly_channel_name_pointer: u16,
+    media_local_channel_id: u16,
+    media_type: u16,
+    name: String,
+    name_pointer: u16,
+    record: &'a [u8],
+    record_type_code: u16,
+    sample_rate: u32,
+}
+
+fn parse_channel_status_record_prefix_2809(
     response: &[u8],
     record_pointer: u16,
+    record_size: usize,
     minimum_pointer: usize,
-) -> Option<TransmitterChannelStatus2809> {
+) -> Option<ChannelStatusRecordPrefix2809<'_>> {
     let record_offset = usize::from(record_pointer);
-    let record_end = record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE)?;
+    let record_end = record_offset.checked_add(record_size)?;
     let record = response.get(record_offset..record_end)?;
-    let channel_number = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER)?,
-    )?;
+    let channel_number = read_u16(record, CHANNEL_STATUS_RECORD_CHANNEL_NUMBER)?;
     if channel_number == 0 {
         return None;
     }
-    let media_type = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_TYPE)?,
-    )?;
-    let media_local_channel_id = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID)?,
-    )?;
+    let media_type = read_u16(record, CHANNEL_STATUS_RECORD_MEDIA_TYPE)?;
+    let media_local_channel_id = read_u16(record, CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID)?;
     if media_type == 0 || media_local_channel_id == 0 {
         return None;
     }
 
-    let channel_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_NAME_POINTER)?,
-    )?;
-    let channel_name =
-        required_status_string_at_pointer(response, channel_name_pointer, minimum_pointer)?;
-    let format_pointer = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_FORMAT_POINTER)?,
-    )?;
+    let name_pointer = read_u16(record, CHANNEL_STATUS_RECORD_NAME_POINTER)?;
+    let name = required_status_string_at_pointer(response, name_pointer, minimum_pointer)?;
+    let format_pointer = read_u16(record, CHANNEL_STATUS_RECORD_FORMAT_POINTER)?;
     let format_offset = usize::from(format_pointer);
     if format_offset < minimum_pointer {
         return None;
     }
-    let format_descriptor = response
-        .get(format_offset..format_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_FORMAT_SIZE)?)?;
+    let format_descriptor =
+        response.get(format_offset..format_offset.checked_add(CHANNEL_STATUS_FORMAT_SIZE)?)?;
     let sample_rate = read_u32(format_descriptor, 0)?;
     let encoding = read_u16(format_descriptor, 6)?;
     if sample_rate == 0 || encoding == 0 {
         return None;
     }
 
-    let friendly_channel_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(TRANSMITTER_CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER)?,
-    )?;
+    let friendly_channel_name_pointer =
+        read_u16(record, CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER)?;
     let friendly_channel_name = required_status_string_at_pointer(
         response,
         friendly_channel_name_pointer,
         minimum_pointer,
     )?;
 
+    Some(ChannelStatusRecordPrefix2809 {
+        channel_number,
+        encoding,
+        format_descriptor,
+        format_pointer,
+        friendly_channel_name,
+        friendly_channel_name_pointer,
+        media_local_channel_id,
+        media_type,
+        name,
+        name_pointer,
+        record,
+        record_type_code: read_u16(record, 0)?,
+        sample_rate,
+    })
+}
+
+fn parse_transmitter_channel_status_record_2809(
+    response: &[u8],
+    record_pointer: u16,
+    minimum_pointer: usize,
+) -> Option<TransmitterChannelStatus2809> {
+    let prefix = parse_channel_status_record_prefix_2809(
+        response,
+        record_pointer,
+        TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE,
+        minimum_pointer,
+    )?;
+
     Some(TransmitterChannelStatus2809 {
         record_pointer,
-        record_type_code: read_u16(record, 0)?,
-        channel_number,
-        media_type,
-        media_local_channel_id,
-        channel_name_pointer,
-        channel_name,
-        format_pointer,
-        format_descriptor_hexadecimal: bytes_to_hex(format_descriptor),
-        sample_rate,
-        encoding,
-        friendly_channel_name_pointer,
-        friendly_channel_name,
-        raw_record_hexadecimal: bytes_to_hex(record),
+        record_type_code: prefix.record_type_code,
+        channel_number: prefix.channel_number,
+        media_type: prefix.media_type,
+        media_local_channel_id: prefix.media_local_channel_id,
+        channel_name_pointer: prefix.name_pointer,
+        channel_name: prefix.name,
+        format_pointer: prefix.format_pointer,
+        format_descriptor_hexadecimal: bytes_to_hex(prefix.format_descriptor),
+        sample_rate: prefix.sample_rate,
+        encoding: prefix.encoding,
+        friendly_channel_name_pointer: prefix.friendly_channel_name_pointer,
+        friendly_channel_name: prefix.friendly_channel_name,
+        raw_record_hexadecimal: bytes_to_hex(prefix.record),
     })
 }
 
@@ -254,64 +249,22 @@ pub fn parse_receiver_channel_status_page_2809(
         &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
     let body = envelope.body;
-    if body.len() < 8 {
-        return None;
-    }
-
-    let page_capacity = *body.get(6)?;
-    let reported_record_count = *body.get(7)?;
-    if page_capacity == 0 || reported_record_count > page_capacity {
-        return None;
-    }
-
-    let pointer_table_end = RECEIVER_CHANNEL_STATUS_POINTER_TABLE_OFFSET
-        .checked_add(usize::from(reported_record_count).checked_mul(2)?)?;
-    response.get(RECEIVER_CHANNEL_STATUS_POINTER_TABLE_OFFSET..pointer_table_end)?;
-
-    let mut record_pointers = Vec::with_capacity(usize::from(reported_record_count));
-    let mut seen_record_pointers = HashSet::with_capacity(usize::from(reported_record_count));
-    for index in 0..reported_record_count {
-        let pointer_offset = RECEIVER_CHANNEL_STATUS_POINTER_TABLE_OFFSET
-            .checked_add(usize::from(index).checked_mul(2)?)?;
-        let record_pointer = read_u16(response, pointer_offset)?;
-        let record_offset = usize::from(record_pointer);
-        let record_end = record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_SIZE)?;
-        if record_offset < pointer_table_end
-            || record_end > response.len()
-            || !seen_record_pointers.insert(record_pointer)
-        {
-            return None;
-        }
-        record_pointers.push(record_pointer);
-    }
-
-    let mut sorted_ranges: Vec<(usize, usize)> = record_pointers
-        .iter()
-        .map(|pointer| {
-            let start = usize::from(*pointer);
-            (start, start + RECEIVER_CHANNEL_STATUS_RECORD_SIZE)
-        })
-        .collect();
-    sorted_ranges.sort_unstable();
-    if sorted_ranges
-        .windows(2)
-        .any(|ranges| ranges[0].1 > ranges[1].0)
-    {
-        return None;
-    }
-
-    let mut records = Vec::with_capacity(usize::from(reported_record_count));
-    let mut channel_numbers = HashSet::with_capacity(usize::from(reported_record_count));
-    let mut media_identities = HashSet::with_capacity(usize::from(reported_record_count));
-    for record_pointer in record_pointers {
-        let record =
-            parse_receiver_channel_status_record_2809(response, record_pointer, pointer_table_end)?;
+    let (page_capacity, reported_record_count) = modern_arc_page_counts(body)?;
+    let records = parse_pointer_table_page(
+        response,
+        MODERN_ARC_POINTER_TABLE_OFFSET,
+        reported_record_count,
+        |_| RECEIVER_CHANNEL_STATUS_RECORD_SIZE,
+        parse_receiver_channel_status_record_2809,
+    )?;
+    let mut channel_numbers = HashSet::with_capacity(records.len());
+    let mut media_identities = HashSet::with_capacity(records.len());
+    for record in &records {
         if !channel_numbers.insert(record.channel_number)
             || !media_identities.insert((record.media_type, record.media_local_channel_id))
         {
             return None;
         }
-        records.push(record);
     }
 
     Some(ReceiverChannelStatusPage2809 {
@@ -333,102 +286,48 @@ fn parse_receiver_channel_status_record_2809(
     record_pointer: u16,
     minimum_pointer: usize,
 ) -> Option<ReceiverChannelStatus2809> {
-    let record_offset = usize::from(record_pointer);
-    let record_end = record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_SIZE)?;
-    let record = response.get(record_offset..record_end)?;
-    let channel_number = read_u16(
+    let prefix = parse_channel_status_record_prefix_2809(
         response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_CHANNEL_NUMBER)?,
-    )?;
-    if channel_number == 0 {
-        return None;
-    }
-    let media_type = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_TYPE)?,
-    )?;
-    let media_local_channel_id = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID)?,
-    )?;
-    if media_type == 0 || media_local_channel_id == 0 {
-        return None;
-    }
-
-    let local_channel_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_LOCAL_NAME_POINTER)?,
-    )?;
-    let local_channel_name =
-        required_status_string_at_pointer(response, local_channel_name_pointer, minimum_pointer)?;
-    let format_pointer = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_FORMAT_POINTER)?,
-    )?;
-    let format_offset = usize::from(format_pointer);
-    if format_offset < minimum_pointer {
-        return None;
-    }
-    let format_descriptor = response
-        .get(format_offset..format_offset.checked_add(RECEIVER_CHANNEL_STATUS_FORMAT_SIZE)?)?;
-    let sample_rate = read_u32(format_descriptor, 0)?;
-    let encoding = read_u16(format_descriptor, 6)?;
-    if sample_rate == 0 || encoding == 0 {
-        return None;
-    }
-
-    let friendly_channel_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER)?,
-    )?;
-    let friendly_channel_name = required_status_string_at_pointer(
-        response,
-        friendly_channel_name_pointer,
+        record_pointer,
+        RECEIVER_CHANNEL_STATUS_RECORD_SIZE,
         minimum_pointer,
     )?;
+    let record = prefix.record;
     let source_channel_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_CHANNEL_POINTER)?,
+        record,
+        RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_CHANNEL_POINTER,
     )?;
     let source_channel_name =
         optional_status_string_at_pointer(response, source_channel_name_pointer, minimum_pointer)?;
-    let source_device_name_pointer = read_u16(
-        response,
-        record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_DEVICE_POINTER)?,
-    )?;
+    let source_device_name_pointer =
+        read_u16(record, RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_DEVICE_POINTER)?;
     let source_device_name =
         optional_status_string_at_pointer(response, source_device_name_pointer, minimum_pointer)?;
 
     Some(ReceiverChannelStatus2809 {
         record_pointer,
-        record_type_code: read_u16(record, 0)?,
-        channel_number,
-        media_type,
-        media_local_channel_id,
-        local_channel_name_pointer,
-        local_channel_name,
-        format_pointer,
-        format_descriptor_hexadecimal: bytes_to_hex(format_descriptor),
-        sample_rate,
-        encoding,
-        friendly_channel_name_pointer,
-        friendly_channel_name,
+        record_type_code: prefix.record_type_code,
+        channel_number: prefix.channel_number,
+        media_type: prefix.media_type,
+        media_local_channel_id: prefix.media_local_channel_id,
+        local_channel_name_pointer: prefix.name_pointer,
+        local_channel_name: prefix.name,
+        format_pointer: prefix.format_pointer,
+        format_descriptor_hexadecimal: bytes_to_hex(prefix.format_descriptor),
+        sample_rate: prefix.sample_rate,
+        encoding: prefix.encoding,
+        friendly_channel_name_pointer: prefix.friendly_channel_name_pointer,
+        friendly_channel_name: prefix.friendly_channel_name,
         source_channel_name_pointer,
         source_channel_name,
         source_device_name_pointer,
         source_device_name,
         subscription_status_code: read_u16(
-            response,
-            record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_SUBSCRIPTION_STATUS)?,
+            record,
+            RECEIVER_CHANNEL_STATUS_RECORD_SUBSCRIPTION_STATUS,
         )?,
-        receiver_status_code: read_u16(
-            response,
-            record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_RECEIVER_STATUS)?,
-        )?,
-        status_flags: read_u16(
-            response,
-            record_offset.checked_add(RECEIVER_CHANNEL_STATUS_RECORD_STATUS_FLAGS)?,
-        )?,
+        receiver_status_code: read_u16(record, RECEIVER_CHANNEL_STATUS_RECORD_RECEIVER_STATUS)?,
+        status_flags: read_u16(record, RECEIVER_CHANNEL_STATUS_RECORD_STATUS_FLAGS)?,
         raw_record_hexadecimal: bytes_to_hex(record),
     })
 }
@@ -473,53 +372,20 @@ pub fn parse_receiver_flow_status_page_2809(response: &[u8]) -> Option<ReceiverF
         return None;
     }
 
-    let pointer_table_end = RECEIVER_FLOW_STATUS_POINTER_TABLE_OFFSET
-        .checked_add(usize::from(reported_flow_count).checked_mul(2)?)?;
-    response.get(RECEIVER_FLOW_STATUS_POINTER_TABLE_OFFSET..pointer_table_end)?;
-
-    let mut record_pointers = Vec::with_capacity(usize::from(reported_flow_count));
-    let mut seen_record_pointers = HashSet::with_capacity(usize::from(reported_flow_count));
-    for index in 0..reported_flow_count {
-        let pointer_offset = RECEIVER_FLOW_STATUS_POINTER_TABLE_OFFSET
-            .checked_add(usize::from(index).checked_mul(2)?)?;
-        let record_pointer = read_u16(response, pointer_offset)?;
-        let record_offset = usize::from(record_pointer);
-        let record_end = record_offset.checked_add(RECEIVER_FLOW_STATUS_RECORD_SIZE)?;
-        if record_offset < pointer_table_end
-            || record_end > response.len()
-            || !seen_record_pointers.insert(record_pointer)
-        {
-            return None;
-        }
-        record_pointers.push(record_pointer);
-    }
-
-    let mut sorted_ranges: Vec<(usize, usize)> = record_pointers
-        .iter()
-        .map(|pointer| {
-            let start = usize::from(*pointer);
-            (start, start + RECEIVER_FLOW_STATUS_RECORD_SIZE)
-        })
-        .collect();
-    sorted_ranges.sort_unstable();
-    if sorted_ranges
-        .windows(2)
-        .any(|ranges| ranges[0].1 > ranges[1].0)
-    {
-        return None;
-    }
-
-    let mut flows = Vec::with_capacity(usize::from(reported_flow_count));
-    let mut flow_numbers = HashSet::with_capacity(usize::from(reported_flow_count));
-    for record_pointer in record_pointers {
-        let flow =
-            parse_receiver_flow_status_record_2809(response, record_pointer, pointer_table_end)?;
+    let flows = parse_pointer_table_page(
+        response,
+        MODERN_ARC_POINTER_TABLE_OFFSET,
+        reported_flow_count,
+        |_| RECEIVER_FLOW_STATUS_RECORD_SIZE,
+        parse_receiver_flow_status_record_2809,
+    )?;
+    let mut flow_numbers = HashSet::with_capacity(flows.len());
+    for flow in &flows {
         if flow.flow_number > u16::from(maximum_flow_slots)
             || !flow_numbers.insert(flow.flow_number)
         {
             return None;
         }
-        flows.push(flow);
     }
 
     Some(ReceiverFlowStatusPage2809 {
