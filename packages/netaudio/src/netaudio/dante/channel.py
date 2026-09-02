@@ -13,6 +13,16 @@ class DanteChannel:
         self._bit_depth = None
         self._samples_per_frame = None
         self._flags = None
+        self.ddm_can_subscribe_self = None
+        self.ddm_channel_id = None
+        self.ddm_enabled = None
+        self.ddm_encryption_policy = None
+        self.ddm_encryption_scheme = None
+        self.ddm_media_type = None
+        self.ddm_signal_presence = None
+        self.ddm_status = None
+        self.ddm_status_message = None
+        self.ddm_summary = None
 
     def __str__(self):
         if self.friendly_name:

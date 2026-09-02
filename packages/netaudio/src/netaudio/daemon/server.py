@@ -19,6 +19,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.http.api import DaemonHTTPServer
+from netaudio.daemon.managed_inventory import ManagedInventoryService
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.dante.application import DanteApplication
@@ -86,10 +87,21 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._packet_store = None
         self._session_id = None
 
-        from netaudio.common.config_loader import load_capture_profile, load_daemon_config, resolve_db_from_config
+        from netaudio.common.config_loader import (
+            default_config_path,
+            load_capture_profile,
+            load_config_document,
+            load_daemon_config,
+            resolve_db_from_config,
+        )
+        from netaudio.common.managed_api import resolve_managed_api_configuration
 
         profile_cfg, _ = load_capture_profile(None, None)
         app_settings.stale_device_minutes = _stale_device_minutes_from_config(load_daemon_config())
+        managed_configuration = resolve_managed_api_configuration(
+            load_config_document(),
+            base_directory=default_config_path().parent,
+        )
 
         lock_key_value = profile_cfg.get("device_lock_key")
         if lock_key_value:
@@ -132,6 +144,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._stop_lock = DeferredAsyncioLock()
         self._stop_complete = False
         self.metering = MeteringManager(self.application)
+        self.managed_inventory = ManagedInventoryService(managed_configuration)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
         self.http_api = DaemonHTTPServer(
             self.application,
@@ -142,7 +155,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             on_shutdown=self.request_shutdown,
             mark_offline=self.mark_device_offline,
             forget_device=self.forget_device,
+            managed_inventory=self.managed_inventory,
         )
+        self.managed_inventory.set_callback(self._on_managed_inventory_changed)
         self.heartbeat: DanteHeartbeatService | None = None
         self._revalidate_task: asyncio.Task | None = None
         self._pending_offline_tasks: dict[str, asyncio.Task] = {}
@@ -242,6 +257,24 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             )
         except REDIS_ERRORS as exception:
             logger.warning(f"Redis publish error for {device.server_name}: {exception}")
+
+    async def _on_managed_inventory_changed(self) -> None:
+        await self.http_api.publish_inventory_snapshot()
+        await self._publish_managed_inventory_to_redis()
+
+    async def _publish_managed_inventory_to_redis(self) -> None:
+        if not self._redis:
+            return
+        try:
+            await self._redis.set(
+                "netaudio:daemon:ddm:status", json.dumps(self.managed_inventory.status(), default=str)
+            )
+            await self._redis.set(
+                "netaudio:daemon:ddm:domains", json.dumps(self.managed_inventory.domains(), default=str)
+            )
+            await self._redis.publish("netaudio:daemon:ddm", "updated")
+        except REDIS_ERRORS as exception:
+            logger.warning(f"Redis publish error for Managed API inventory: {exception}")
 
     async def _delete_device_from_redis(self, server_name):
         if not self._redis:
@@ -467,6 +500,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         _sd_notify("STATUS=Starting application...")
         await self.application.startup()
 
+        await self.managed_inventory.start()
+
         await self.metering.start()
 
         if self.shure:
@@ -583,6 +618,11 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self.shure.stop()
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
+
+        try:
+            await self.managed_inventory.stop()
+        except (OSError, RuntimeError) as exception:
+            logger.warning(f"Managed API inventory stop error: {exception}", exc_info=True)
 
         if self.http_api:
             try:

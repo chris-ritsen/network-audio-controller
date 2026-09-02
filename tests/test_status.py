@@ -46,6 +46,7 @@ def test_dante_status_headers_read_left_to_right():
         "Latency",
         "Clock",
         "Lock",
+        "Domain",
         "Last Seen",
     ]
 
