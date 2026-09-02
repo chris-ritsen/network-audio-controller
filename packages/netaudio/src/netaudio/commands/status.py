@@ -31,6 +31,7 @@ DANTE_STATUS_HEADERS = [
     "Latency",
     "Clock",
     "Lock",
+    "Domain",
     "Last Seen",
 ]
 
@@ -77,6 +78,7 @@ def _dante_row_from_device(device) -> list[str]:
         format_latency_milliseconds(_device_active_latency(device)),
         device.clock_role or "",
         format_lock_state(device),
+        device.ddm_domain_name or "",
         _format_timestamp(device.last_seen),
     ]
 

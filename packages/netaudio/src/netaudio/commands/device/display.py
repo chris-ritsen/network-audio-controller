@@ -20,6 +20,7 @@ DEVICE_LIST_COMPACT_HEADERS = [
     "MAC Address",
     "Model",
     "Lock",
+    "Domain",
     "TX",
     "RX",
     "Last Seen",
@@ -462,6 +463,22 @@ def _device_identity_rows(device) -> list[list[str]]:
         rows.append(["Software", device.software_version])
     if device.model_id in BLUETOOTH_MODEL_IDS or device.bluetooth_connected is not None:
         rows.append(["Bluetooth", _format_bluetooth(device)])
+    rows.extend(_device_management_rows(device))
+    return rows
+
+
+def _device_management_rows(device) -> list[list[str]]:
+    rows = []
+    if device.management_state:
+        rows.append(["Management", device.management_state])
+    if device.ddm_domain_name or device.ddm_domain_id:
+        rows.append(["Domain", device.ddm_domain_name or device.ddm_domain_id])
+    if device.ddm_enrolment_state:
+        rows.append(["Domain Enrolment", device.ddm_enrolment_state])
+    if device.ddm_connection_state:
+        rows.append(["Domain Connection", device.ddm_connection_state])
+    if device.control_transports:
+        rows.append(["Control", ", ".join(device.control_transports)])
     return rows
 
 
@@ -630,6 +647,7 @@ def device_list_row(server_name: str, device, verbose: bool) -> list[str]:
         format_mac_address(device.mac_address),
         device.dante_model or device.model_id or "",
         format_lock_state(device),
+        device.ddm_domain_name or "",
         _format_channel_count(device.tx_channels, device.tx_count),
         _format_channel_count(device.rx_channels, device.rx_count),
         format_last_seen(device.last_seen),

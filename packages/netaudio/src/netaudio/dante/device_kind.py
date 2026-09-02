@@ -4,6 +4,7 @@ import ipaddress
 
 DEVICE_KIND_EMULATED = "emulated"
 DEVICE_KIND_HARDWARE = "hardware"
+DEVICE_KIND_MANAGED = "managed"
 DEVICE_KIND_VIRTUAL = "virtual"
 
 EMULATED_DEVICE_NAME_PREFIX = "netaudio-page-probe"
@@ -66,6 +67,8 @@ def _names(device) -> tuple[str, ...]:
 
 
 def device_kind(device) -> str:
+    if getattr(device, "direct_control_available", None) is False:
+        return DEVICE_KIND_MANAGED
     identity_values = _identity_values(device)
     if VIRTUAL_DEVICE_MODEL.casefold() in identity_values or VIRTUAL_DEVICE_MANUFACTURER.casefold() in identity_values:
         return DEVICE_KIND_VIRTUAL
