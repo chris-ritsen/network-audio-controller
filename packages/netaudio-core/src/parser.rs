@@ -282,67 +282,52 @@ pub fn parse_tx_friendly_page(
     )?;
     let body = envelope.body;
     let body_header = body.get(..BODY_HEADER_SIZE)?;
+    let result_code = envelope.result_code;
+    let mut names = Vec::new();
+
     if body_header == [0, 0] {
-        return parse_legacy_tx_friendly_page(
-            response,
-            body,
-            starting_channel,
-            envelope.result_code,
-        );
-    }
-    parse_counted_tx_friendly_page(response, body)
-}
-
-fn parse_legacy_tx_friendly_page(
-    response: &[u8],
-    body: &[u8],
-    starting_channel: u16,
-    result_code: u16,
-) -> Option<Vec<(u16, String)>> {
-    if body.len() == BODY_HEADER_SIZE {
-        return (result_code == RESULT_CODE_SUCCESS).then(Vec::new);
-    }
-    let first_record = body.get(BODY_HEADER_SIZE..BODY_HEADER_SIZE + TX_FRIENDLY_RECORD_SIZE)?;
-    if u16_at(first_record, TX_FRIENDLY_RECORD_CHANNEL_NUMBER) == 0 {
-        return (result_code == RESULT_CODE_SUCCESS
-            && body[BODY_HEADER_SIZE..].iter().all(|byte| *byte == 0))
-        .then(Vec::new);
-    }
-    let first_pointer = usize::from(u16_at(first_record, TX_FRIENDLY_RECORD_NAME_POINTER));
-    let records_start = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE;
-    let record_bytes = first_pointer.checked_sub(records_start)?;
-    if record_bytes == 0 || record_bytes % TX_FRIENDLY_RECORD_SIZE != 0 {
-        return None;
-    }
-    let record_count = record_bytes / TX_FRIENDLY_RECORD_SIZE;
-    if record_count > usize::from(TX_CHANNELS_PER_PAGE)
-        || (result_code == RESULT_CODE_MORE_PAGES
-            && record_count != usize::from(TX_CHANNELS_PER_PAGE))
-    {
-        return None;
-    }
-    let body_records_end = BODY_HEADER_SIZE.checked_add(record_bytes)?;
-    body.get(..body_records_end)?;
-    let mut names = Vec::with_capacity(record_count);
-
-    for index in 0..record_count {
-        let record_offset = BODY_HEADER_SIZE + index * TX_FRIENDLY_RECORD_SIZE;
-        let record = body.get(record_offset..record_offset + TX_FRIENDLY_RECORD_SIZE)?;
-        let channel_number = u16_at(record, TX_FRIENDLY_RECORD_CHANNEL_NUMBER);
-        if channel_number != expected_channel_number(starting_channel, index)? {
+        if body.len() == BODY_HEADER_SIZE {
+            return (result_code == RESULT_CODE_SUCCESS).then(Vec::new);
+        }
+        let first_record =
+            body.get(BODY_HEADER_SIZE..BODY_HEADER_SIZE + TX_FRIENDLY_RECORD_SIZE)?;
+        if u16_at(first_record, TX_FRIENDLY_RECORD_CHANNEL_NUMBER) == 0 {
+            return (result_code == RESULT_CODE_SUCCESS
+                && body[BODY_HEADER_SIZE..].iter().all(|byte| *byte == 0))
+            .then(Vec::new);
+        }
+        let first_pointer = usize::from(u16_at(first_record, TX_FRIENDLY_RECORD_NAME_POINTER));
+        let records_start = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE;
+        let record_bytes = first_pointer.checked_sub(records_start)?;
+        if record_bytes == 0 || record_bytes % TX_FRIENDLY_RECORD_SIZE != 0 {
             return None;
         }
-        let name_pointer = u16_at(record, TX_FRIENDLY_RECORD_NAME_POINTER);
-        let friendly_name = pointed_string(response, name_pointer, first_pointer)?;
-        names.push((channel_number, friendly_name));
+        let record_count = record_bytes / TX_FRIENDLY_RECORD_SIZE;
+        if record_count > usize::from(TX_CHANNELS_PER_PAGE)
+            || (result_code == RESULT_CODE_MORE_PAGES
+                && record_count != usize::from(TX_CHANNELS_PER_PAGE))
+        {
+            return None;
+        }
+        let body_records_end = BODY_HEADER_SIZE.checked_add(record_bytes)?;
+        body.get(..body_records_end)?;
+        names.reserve(record_count);
+        for index in 0..record_count {
+            let record_offset = BODY_HEADER_SIZE + index * TX_FRIENDLY_RECORD_SIZE;
+            let record = body.get(record_offset..record_offset + TX_FRIENDLY_RECORD_SIZE)?;
+            let channel_number = u16_at(record, TX_FRIENDLY_RECORD_CHANNEL_NUMBER);
+            if channel_number != expected_channel_number(starting_channel, index)? {
+                return None;
+            }
+            let name_pointer = u16_at(record, TX_FRIENDLY_RECORD_NAME_POINTER);
+            let friendly_name = pointed_string(response, name_pointer, first_pointer)?;
+            names.push((channel_number, friendly_name));
+        }
+        return Some(names);
     }
 
-    Some(names)
-}
-
-fn parse_counted_tx_friendly_page(response: &[u8], body: &[u8]) -> Option<Vec<(u16, String)>> {
-    let maximum_records = usize::from(*body.first()?);
-    let named_count = usize::from(*body.get(1)?);
+    let maximum_records = usize::from(body_header[0]);
+    let named_count = usize::from(body_header[1]);
     if maximum_records > usize::from(TX_CHANNELS_PER_PAGE) || named_count > maximum_records {
         return None;
     }
@@ -355,9 +340,8 @@ fn parse_counted_tx_friendly_page(response: &[u8], body: &[u8]) -> Option<Vec<(u
         return (body.len() == padded_records_end).then(Vec::new);
     }
     let minimum_name_pointer = RESPONSE_HEADER_SIZE.checked_add(padded_records_end)?;
-    let mut names = Vec::with_capacity(named_count);
+    names.reserve(named_count);
     let mut channel_numbers = HashSet::with_capacity(named_count);
-
     for index in 0..named_count {
         let record_offset = BODY_HEADER_SIZE + index * TX_FRIENDLY_RECORD_SIZE;
         let record = body.get(record_offset..record_offset + TX_FRIENDLY_RECORD_SIZE)?;
@@ -369,7 +353,6 @@ fn parse_counted_tx_friendly_page(response: &[u8], body: &[u8]) -> Option<Vec<(u
         let friendly_name = pointed_string(response, name_pointer, minimum_name_pointer)?;
         names.push((channel_number, friendly_name));
     }
-
     body.get(live_records_end..padded_records_end)?;
     Some(names)
 }
@@ -382,102 +365,88 @@ pub fn parse_tx_info_page(response: &[u8], starting_channel: u16) -> Option<Vec<
     )?;
     let body = envelope.body;
     let body_header = body.get(..BODY_HEADER_SIZE)?;
-    if body_header == [0, 0] {
-        return parse_legacy_tx_info_page(response, body, starting_channel, envelope.result_code);
-    }
-    parse_counted_tx_info_page(response, body, starting_channel, envelope.result_code)
-}
-
-fn parse_legacy_tx_info_page(
-    response: &[u8],
-    body: &[u8],
-    starting_channel: u16,
-    result_code: u16,
-) -> Option<Vec<TxChannel>> {
-    if body.len() == BODY_HEADER_SIZE
-        || (body.len() == BODY_HEADER_SIZE + 4
-            && body[BODY_HEADER_SIZE..BODY_HEADER_SIZE + 2] == [0, 0])
-    {
-        return (result_code == RESULT_CODE_SUCCESS).then(Vec::new);
-    }
+    let result_code = envelope.result_code;
     let mut channels = Vec::new();
-    let mut first_metadata_pointer: Option<u16> = None;
-    let mut name_pointers = Vec::new();
-    let mut minimum_name_pointer = usize::MAX;
-    let mut terminated = false;
-    let mut terminator_body_offset = None;
 
-    for index in 0..usize::from(TX_CHANNELS_PER_PAGE) {
-        let record_offset = BODY_HEADER_SIZE + index * TX_RECORD_SIZE;
-        let record = body.get(record_offset..record_offset + TX_RECORD_SIZE)?;
-        let channel_number = u16_at(record, TX_RECORD_CHANNEL_NUMBER);
-        if channel_number == 0 {
-            terminated = true;
-            terminator_body_offset = Some(record_offset);
-            break;
+    if body_header == [0, 0] {
+        if body.len() == BODY_HEADER_SIZE
+            || (body.len() == BODY_HEADER_SIZE + 4
+                && body[BODY_HEADER_SIZE..BODY_HEADER_SIZE + 2] == [0, 0])
+        {
+            return (result_code == RESULT_CODE_SUCCESS).then(Vec::new);
         }
-        let expected = expected_channel_number(starting_channel, index)?;
-        if channel_number != expected {
+        let mut first_metadata_pointer: Option<u16> = None;
+        let mut name_pointers = Vec::new();
+        let mut minimum_name_pointer = usize::MAX;
+        let mut terminated = false;
+        let mut terminator_body_offset = None;
+
+        for index in 0..usize::from(TX_CHANNELS_PER_PAGE) {
+            let record_offset = BODY_HEADER_SIZE + index * TX_RECORD_SIZE;
+            let record = body.get(record_offset..record_offset + TX_RECORD_SIZE)?;
+            let channel_number = u16_at(record, TX_RECORD_CHANNEL_NUMBER);
+            if channel_number == 0 {
+                terminated = true;
+                terminator_body_offset = Some(record_offset);
+                break;
+            }
+            let expected = expected_channel_number(starting_channel, index)?;
+            if channel_number != expected {
+                return None;
+            }
+
+            let metadata_pointer = u16_at(record, TX_RECORD_CHANNEL_GROUP);
+            match first_metadata_pointer {
+                None => first_metadata_pointer = Some(metadata_pointer),
+                Some(pointer) if metadata_pointer != pointer => return None,
+                _ => {}
+            }
+
+            let name_pointer = u16_at(record, TX_RECORD_NAME_POINTER);
+            let name_pointer_usize = usize::from(name_pointer);
+            if name_pointer == 0 || name_pointer_usize >= response.len() {
+                return None;
+            }
+            minimum_name_pointer = minimum_name_pointer.min(name_pointer_usize);
+            name_pointers.push(name_pointer);
+            channels.push(TxChannel {
+                number: channel_number,
+                name: None,
+                friendly_name: None,
+            });
+        }
+
+        if channels.len() < usize::from(TX_CHANNELS_PER_PAGE) && !terminated {
             return None;
         }
-
-        let metadata_pointer = u16_at(record, TX_RECORD_CHANNEL_GROUP);
-        match first_metadata_pointer {
-            None => first_metadata_pointer = Some(metadata_pointer),
-            Some(pointer) if metadata_pointer != pointer => return None,
-            _ => {}
-        }
-
-        let name_pointer = u16_at(record, TX_RECORD_NAME_POINTER);
-        let name_pointer_usize = usize::from(name_pointer);
-        if name_pointer == 0 || name_pointer_usize >= response.len() {
-            return None;
-        }
-        minimum_name_pointer = minimum_name_pointer.min(name_pointer_usize);
-        name_pointers.push(name_pointer);
-        channels.push(TxChannel {
-            number: channel_number,
-            name: None,
-            friendly_name: None,
-        });
-    }
-
-    if channels.len() < usize::from(TX_CHANNELS_PER_PAGE) && !terminated {
-        return None;
-    }
-    if result_code == RESULT_CODE_MORE_PAGES && channels.len() != usize::from(TX_CHANNELS_PER_PAGE)
-    {
-        return None;
-    }
-    let records_end = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE + channels.len() * TX_RECORD_SIZE;
-    if channels.is_empty() {
-        return None;
-    }
-    if minimum_name_pointer < records_end {
-        return None;
-    }
-    if let Some(terminator_body_offset) = terminator_body_offset {
-        let terminator_absolute = RESPONSE_HEADER_SIZE.checked_add(terminator_body_offset)?;
-        if minimum_name_pointer.checked_sub(terminator_absolute)? != 4
-            || body.get(terminator_body_offset..terminator_body_offset + 2)? != [0, 0]
+        if result_code == RESULT_CODE_MORE_PAGES
+            && channels.len() != usize::from(TX_CHANNELS_PER_PAGE)
         {
             return None;
         }
+        let records_end = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE + channels.len() * TX_RECORD_SIZE;
+        if channels.is_empty() {
+            return None;
+        }
+        if minimum_name_pointer < records_end {
+            return None;
+        }
+        if let Some(terminator_body_offset) = terminator_body_offset {
+            let terminator_absolute = RESPONSE_HEADER_SIZE.checked_add(terminator_body_offset)?;
+            if minimum_name_pointer.checked_sub(terminator_absolute)? != 4
+                || body.get(terminator_body_offset..terminator_body_offset + 2)? != [0, 0]
+            {
+                return None;
+            }
+        }
+        for (channel, pointer) in channels.iter_mut().zip(name_pointers) {
+            channel.name = Some(pointed_string(response, pointer, minimum_name_pointer)?);
+        }
+        return Some(channels);
     }
-    for (channel, pointer) in channels.iter_mut().zip(name_pointers) {
-        channel.name = Some(pointed_string(response, pointer, minimum_name_pointer)?);
-    }
-    Some(channels)
-}
 
-fn parse_counted_tx_info_page(
-    response: &[u8],
-    body: &[u8],
-    starting_channel: u16,
-    result_code: u16,
-) -> Option<Vec<TxChannel>> {
-    let maximum_records = usize::from(*body.first()?);
-    let channel_count = usize::from(*body.get(1)?);
+    let maximum_records = usize::from(body_header[0]);
+    let channel_count = usize::from(body_header[1]);
     if maximum_records > usize::from(TX_CHANNELS_PER_PAGE) || channel_count > maximum_records {
         return None;
     }
@@ -499,7 +468,7 @@ fn parse_counted_tx_info_page(
     let metadata_body_end = metadata_end.checked_sub(RESPONSE_HEADER_SIZE)?;
     body.get(records_end..metadata_body_end)?;
 
-    let mut channels = Vec::with_capacity(channel_count);
+    channels.reserve(channel_count);
     let mut primary_metadata_group_ended = false;
     for index in 0..channel_count {
         let record_offset = BODY_HEADER_SIZE + index * TX_RECORD_SIZE;
