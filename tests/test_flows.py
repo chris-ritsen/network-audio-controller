@@ -186,6 +186,12 @@ def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
     assert flow["flow_type"] == "0x0002"
 
 
+def _run_without_context(run, *arguments, **options):
+    import asyncio
+
+    return asyncio.run(run(None, {}, *arguments, **options))
+
+
 def _flow_list_device():
     from types import SimpleNamespace
 
@@ -200,9 +206,6 @@ def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monke
     from netaudio.commands import flow as flow_commands
 
     device = _flow_list_device()
-
-    async def get_device_and_app():
-        return None, device, 4440
 
     async def query_inventory(device_ip, arc_port, flow_protocol_id):
         assert (device_ip, arc_port, flow_protocol_id) == ("192.0.2.10", 4440, 0x2809)
@@ -221,7 +224,8 @@ def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monke
             "max_flow_slots": 4,
         }
 
-    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device_and_app)
+    monkeypatch.setattr(flow_commands, "_selected_device", lambda _devices: (device, 4440))
+    monkeypatch.setattr(flow_commands, "run_command", _run_without_context)
     monkeypatch.setattr(flows, "query_preferred_tx_flow_inventory", query_inventory)
 
     result = CliRunner().invoke(flow_commands.app, ["list"])
@@ -239,9 +243,6 @@ def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
     from netaudio.commands import flow as flow_commands
 
     device = _flow_list_device()
-
-    async def get_device_and_app():
-        return None, device, 4440
 
     async def query_inventory(queried_device):
         assert queried_device is device
@@ -263,7 +264,8 @@ def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
             "maximum_flow_slots": 2,
         }
 
-    monkeypatch.setattr(flow_commands, "_get_device_and_app", get_device_and_app)
+    monkeypatch.setattr(flow_commands, "_selected_device", lambda _devices: (device, 4440))
+    monkeypatch.setattr(flow_commands, "run_command", _run_without_context)
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query_inventory)
 
     result = CliRunner().invoke(flow_commands.app, ["receiver-list"])

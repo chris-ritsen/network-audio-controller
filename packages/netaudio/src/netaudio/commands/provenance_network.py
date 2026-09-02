@@ -20,7 +20,7 @@ from netaudio.commands.capture_helpers import (
 )
 from netaudio.capture.packets import _compact_hexdump, _hexdump, _label_packet
 from netaudio.commands.provenance_app import app
-from netaudio.dante.packet_store import PacketStore
+from netaudio.dante.packet_store import PacketRecord, PacketStore
 
 
 @app.command("send", help="Send a payload to a device and record the exchange as evidence.")
@@ -115,17 +115,19 @@ def _do_send(
     local_port = send_socket.getsockname()[1]
 
     sent_id = store.store_packet(
-        payload=payload,
-        source_type="provenance_send",
-        src_ip=local_ip,
-        src_port=local_port,
-        dst_ip=device_ip,
-        dst_port=port,
-        device_ip=device_ip,
-        direction="request",
-        timestamp_ns=send_timestamp,
-        session_id=session_id,
-        source_host=source_host,
+        PacketRecord(
+            payload=payload,
+            source_type="provenance_send",
+            src_ip=local_ip,
+            src_port=local_port,
+            dst_ip=device_ip,
+            dst_port=port,
+            device_ip=device_ip,
+            direction="request",
+            timestamp_ns=send_timestamp,
+            session_id=session_id,
+            source_host=source_host,
+        )
     )
 
     info = _label_packet(payload)
@@ -144,17 +146,19 @@ def _do_send(
         reply_ip, reply_port = reply_addr
 
         reply_id = store.store_packet(
-            payload=reply_data,
-            source_type="provenance_send",
-            src_ip=reply_ip,
-            src_port=reply_port,
-            dst_ip=local_ip,
-            dst_port=local_port,
-            device_ip=reply_ip,
-            direction="response",
-            timestamp_ns=reply_timestamp,
-            session_id=session_id,
-            source_host=source_host,
+            PacketRecord(
+                payload=reply_data,
+                source_type="provenance_send",
+                src_ip=reply_ip,
+                src_port=reply_port,
+                dst_ip=local_ip,
+                dst_port=local_port,
+                device_ip=reply_ip,
+                direction="response",
+                timestamp_ns=reply_timestamp,
+                session_id=session_id,
+                source_host=source_host,
+            )
         )
 
         reply_info = _label_packet(reply_data)

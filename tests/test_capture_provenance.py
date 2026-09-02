@@ -11,7 +11,7 @@ from netaudio.capture.provenance import (
     _query_observed_subscription_statuses,
     _write_seed_samples,
 )
-from netaudio.capture.packets import ARC_PROTOCOLS, TARGET_PROTOCOLS
+from netaudio.dante.const import ARC_PROTOCOL_IDS, CAPTURE_PROTOCOL_IDS
 
 
 def test_arc_extended_success_is_not_reported_as_failure():
@@ -21,8 +21,20 @@ def test_arc_extended_success_is_not_reported_as_failure():
 
 
 def _subscription_status_packet(status_code: int) -> bytes:
-    record = struct.pack(">HHHHHHHHI", 1, 0, 0, 0, 0, 0, 0, status_code, 0)
-    body = bytes([1, 1]) + record
+    strings_offset = 10 + 2 + 20
+    record = struct.pack(
+        ">HHHHHHHHI",
+        1,
+        0,
+        0,
+        strings_offset,
+        strings_offset + 4,
+        strings_offset + 8,
+        0,
+        status_code,
+        0,
+    )
+    body = bytes([1, 1]) + record + b"tx1\x00dev\x00rx1\x00"
     return struct.pack(">HHHHH", 0x27FF, 10 + len(body), 1, 0x3000, 1) + body
 
 
@@ -79,7 +91,13 @@ def test_query_observed_subscription_statuses_decompresses_payload():
 
 
 def test_subscription_status_extraction_stops_at_declared_record_count():
-    payload = _subscription_status_packet(0x0004) + struct.pack(">HHHHHHHHI", 2, 0, 0, 0, 0, 0, 0, 0x9999, 0)
+    strings_offset = 10 + 2 + 40
+    first_record = struct.pack(">HHHHHHHHI", 1, 0, 0, strings_offset, strings_offset + 4, strings_offset + 8, 0, 4, 0)
+    second_record = struct.pack(
+        ">HHHHHHHHI", 2, 0, 0, strings_offset, strings_offset + 4, strings_offset + 8, 0, 0x9999, 0
+    )
+    body = bytes([1, 1]) + first_record + second_record + b"tx1\x00dev\x00rx1\x00"
+    payload = struct.pack(">HHHHH", 0x27FF, 10 + len(body), 1, 0x3000, 1) + body
 
     assert _extract_subscription_status_codes(payload) == {0x0004}
 
@@ -114,15 +132,15 @@ def test_seed_samples_write_decompressed_packet_bytes(tmp_path):
 
 
 def test_capture_classifies_all_captured_arc_protocol_variants():
-    assert ARC_PROTOCOLS == (0x2729, 0x27FF, 0x2801, 0x2809)
-    assert set(ARC_PROTOCOLS).issubset(TARGET_PROTOCOLS)
+    assert ARC_PROTOCOL_IDS == (0x2729, 0x27FF, 0x2801, 0x2809)
+    assert set(ARC_PROTOCOL_IDS).issubset(CAPTURE_PROTOCOL_IDS)
 
 
 def test_opcode_label_proof_accepts_evidence_from_every_arc_variant(monkeypatch):
     monkeypatch.setattr(
         provenance,
-        "OPCODE_NAMES_BY_PROTOCOL",
-        {0x2801: {0x2200: "query_tx_flows"}},
+        "_external_labels",
+        lambda: ({(0x2801, 0x2200): "query_tx_flows"}, {}),
     )
 
     assert provenance._check_opcode_labels({(0x2729, 0x2200)}, set()) == []

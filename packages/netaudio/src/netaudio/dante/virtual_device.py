@@ -23,7 +23,7 @@ from netaudio.dante.const import (
     SERVICE_CMC,
 )
 from netaudio.dante.device_kind import VIRTUAL_DEVICE_MANUFACTURER, VIRTUAL_DEVICE_MODEL
-from netaudio.dante.virtual_device_protocol import (
+from netaudio.dante.const import (
     DEVICE_ARC_SECONDARY_PORT,
     MCAST_HEADER_LENGTH,
     PCM_ENCODING_CAPABILITY_BITS,
@@ -120,7 +120,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         try:
             sock.connect((MULTICAST_GROUP_HEARTBEAT, 1))
             return sock.getsockname()[0]
-        except Exception:
+        except OSError:
             return "0.0.0.0"
         finally:
             sock.close()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 
 import typer
@@ -105,7 +104,11 @@ def _visible_shure_summaries(shure_summaries: dict) -> list[dict]:
     return sorted(visible, key=lambda entry: (entry.get("name") or "").lower())
 
 
-async def _gather_status(verbose: bool = False) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
+async def gather_status(
+    application,
+    devices,
+    verbose: bool = False,
+) -> tuple[list[str], list[list[str]], list[list[str]], dict]:
     from netaudio.daemon.client import daemon_is_accessible, get_shure_devices_from_daemon
 
     dante_headers = device_list_headers(True) if verbose else list(DANTE_STATUS_HEADERS)
@@ -120,7 +123,7 @@ async def _gather_status(verbose: bool = False) -> tuple[list[str], list[list[st
     from netaudio._common import _load_display_devices
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
-    devices = await _load_display_devices()
+    devices = await _load_display_devices(application)
     visible_dante = {
         server_name: device for server_name, device in devices.items() if _has_presence(device.online, device.last_seen)
     }
@@ -153,7 +156,13 @@ def status(
     if json_flag:
         state.output_format = OutputFormat.json
 
-    dante_headers, dante_rows, shure_rows, json_data = asyncio.run(_gather_status(verbose=state.verbose))
+    from netaudio._common import run_command
+
+    dante_headers, dante_rows, shure_rows, json_data = run_command(
+        gather_status,
+        verbose=state.verbose,
+        discover_devices=False,
+    )
 
     if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
         output_single(json_data)

@@ -9,7 +9,6 @@ from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyConfirmationRequired,
     SampleRateTopologyMutationOutcomeUnknownError,
     SampleRateTopologyUnsupportedError,
-    change_sample_rate_with_command_sender,
     change_sample_rate_topology_safe,
     preflight_sample_rate_change,
 )
@@ -432,25 +431,25 @@ async def test_non_a32_device_is_refused_without_querying_topology(install_flow_
 
 
 @pytest.mark.asyncio
-async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_building_a_write():
+async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_sending_a_write():
+    from netaudio.dante.application import DanteApplication
+
     device = FakeA32([_phase(1, [])])
     device.dante_model = "Different Device"
+    application = DanteApplication()
 
-    def fail_command_builder(_sample_rate):
-        raise AssertionError("a same-rate no-op must not build a write")
+    async def probe_sample_rate_status(device_ip_address, timeout):
+        assert device_ip_address == "192.0.2.10"
+        assert timeout == 4.0
+        return 96_000, [48_000, 96_000]
 
-    device.commands = SimpleNamespace(command_set_sample_rate=fail_command_builder)
+    async def refuse_write(*_arguments, **_options):
+        raise AssertionError("a same-rate no-op must not send a write")
 
-    class Sender:
-        async def probe_sample_rate_status(self, device_ip_address, timeout):
-            assert device_ip_address == "192.0.2.10"
-            assert timeout == 4.0
-            return 96_000, [48_000, 96_000]
+    application.probe_sample_rate_status = probe_sample_rate_status
+    application.settings.set_sample_rate = refuse_write
 
-        async def __call__(self, *_arguments, **_options):
-            raise AssertionError("a same-rate no-op must not send a write")
-
-    result = await change_sample_rate_with_command_sender(Sender(), device, 96_000)
+    result = await application.set_sample_rate(device, 96_000)
 
     assert result.changed is False
     assert result.observed_sample_rate_hertz == 96_000
@@ -459,46 +458,38 @@ async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_buildin
 
 
 @pytest.mark.asyncio
-async def test_command_sender_wrapper_uses_notification_readback_and_per_device_lock(install_flow_inventory):
+async def test_application_sample_rate_write_uses_notification_readback_and_per_device_lock(install_flow_inventory):
+    from netaudio.dante.application import DanteApplication
+
     device = FakeA32(
         [
             _phase(64, []),
             _phase(32, []),
         ]
     )
-    device.commands = SimpleNamespace(command_set_sample_rate=lambda sample_rate: (b"sample-rate-write", None, 8700))
     install_flow_inventory(device)
+    application = DanteApplication()
     calls = []
 
-    class Sender:
-        async def probe_sample_rate_status(self, device_ip_address, timeout):
-            assert device.topology_mutation_lock.locked()
-            calls.append(("probe", device_ip_address, timeout))
-            return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+    async def probe_sample_rate_status(device_ip_address, timeout):
+        assert device.topology_mutation_lock.locked()
+        calls.append(("probe", device_ip_address, timeout))
+        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
 
-        async def __call__(
-            self,
-            packet,
-            device_ip_address,
-            port,
-            **options,
-        ):
-            assert device.topology_mutation_lock.locked()
-            calls.append(("mutate", packet, device_ip_address, port, options))
-            device.phase_index = 1
+    async def set_sample_rate(device_ip_address, sample_rate):
+        assert device.topology_mutation_lock.locked()
+        calls.append(("mutate", device_ip_address, sample_rate))
+        device.phase_index = 1
 
-    result = await change_sample_rate_with_command_sender(Sender(), device, 96_000)
+    application.probe_sample_rate_status = probe_sample_rate_status
+    application.settings.set_sample_rate = set_sample_rate
+
+    result = await application.set_sample_rate(device, 96_000)
 
     assert result.changed is True
     assert result.observed_sample_rate_hertz == 96_000
     assert calls == [
         ("probe", "192.0.2.10", 4.0),
-        (
-            "mutate",
-            b"sample-rate-write",
-            "192.0.2.10",
-            8700,
-            {"expect_response": False},
-        ),
+        ("mutate", "192.0.2.10", 96_000),
         ("probe", "192.0.2.10", 4.0),
     ]
