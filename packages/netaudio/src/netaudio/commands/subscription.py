@@ -249,9 +249,8 @@ def subscription_list(
         )
         from netaudio.dante.device_serializer import DanteDeviceSerializer
 
-        devices = await _discover()
+        devices = filter_devices(await _discover())
         await _populate_controls(devices)
-        devices = filter_devices(devices)
 
         all_subscriptions = []
 

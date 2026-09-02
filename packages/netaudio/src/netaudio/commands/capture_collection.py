@@ -11,7 +11,6 @@ from typing import Optional
 
 import typer
 
-from netaudio.capture.daemon import _print_packet_line
 from netaudio.commands.capture_app import app
 
 logger = logging.getLogger("netaudio")
@@ -71,6 +70,8 @@ def collect(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
+    from netaudio.capture.daemon import _print_packet_line
+
     _require_positive_session_id(session_id, "--session-id")
     if session_id is not None and session is not None:
         raise typer.Exit("Use either --session-id or --session, not both.")
@@ -396,6 +397,8 @@ def follow(
     config: Optional[str] = typer.Option(None, "--config", help="Capture config TOML path."),
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
+    from netaudio.capture.daemon import _print_packet_line
+
     profile_cfg, _ = _load_capture_profile(config, profile)
     capture_cfg = _as_dict(profile_cfg.get("capture"))
     resolved_stream = _coalesce(stream, capture_cfg.get("unified_stream"), capture_cfg.get("ingress_stream"))

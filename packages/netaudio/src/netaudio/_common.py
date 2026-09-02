@@ -226,7 +226,9 @@ class CoreCommandSender(CoreCapabilityProbeOperations):
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.warning(f"Clock status probe timed out for {device_ip_address}")
+                logger.debug(f"Clock status probe timed out for {device_ip_address}")
+                if device.clock_source_code is None:
+                    raise CapabilityProbeTimeout("clock status probe timed out") from None
         finally:
             notifications.unregister_preferred_leader_waiter(device_ip_address)
         if device.clock_source_code is None:
@@ -518,7 +520,8 @@ async def _probe_lock_status_once(
             await application.shutdown()
         except Exception as exception:
             logger.warning(
-                f"Lock status application shutdown failed for {device_ip_address}: {exception}", exc_info=True
+                f"Lock status application shutdown failed for {device_ip_address}: {exception}",
+                exc_info=settings.debug,
             )
 
 
@@ -627,7 +630,8 @@ async def _load_device_for_show(include_channels: bool) -> tuple[str, DanteDevic
         server_name, device = _resolve_one(selected_devices)
         if include_channels:
             await _populate_controls({server_name: device})
-        await _populate_show_details(device, include_channels=include_channels)
+        if device.online:
+            await _populate_show_details(device, include_channels=include_channels)
         return server_name, device
 
     from netaudio._capture import open_capture_session
@@ -737,7 +741,7 @@ async def _command_context():
                 for device in devices.values():
                     device.rx_channels = {}
                     device.tx_channels = {}
-            await _populate_controls(devices, observer=observer, strict=False)
+            await _populate_controls(devices, observer=observer)
 
         devices = devices or {}
         sender = _make_core_sender(
@@ -757,10 +761,54 @@ async def _command_context():
             store.close()
 
 
-async def _populate_controls(devices: dict[str, DanteDevice], observer=None, strict: bool = True) -> None:
-    unpopulated = [
-        device for device in devices.values() if not device.tx_channels and not device.rx_channels and device.ipv4
-    ]
+def _explicit_selection() -> bool:
+    state = _get_state()
+    return bool(state.names or state.hosts or state.server_names or state.macs)
+
+
+def _device_label(device: DanteDevice) -> str:
+    return device.server_name or device.name or str(device.ipv4)
+
+
+def _unreachable_message(device: DanteDevice, reason: object) -> str:
+    address = str(device.ipv4) if device.ipv4 else "no address"
+    return f"Could not reach {_device_label(device)} ({address}): {reason}"
+
+
+def _log_unreachable(device: DanteDevice, reason: object) -> None:
+    if _explicit_selection():
+        logger.warning(_unreachable_message(device, reason))
+    else:
+        logger.debug(_unreachable_message(device, reason))
+
+
+def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[str, DanteDevice]:
+    explicit = _explicit_selection()
+    candidates: dict[str, DanteDevice] = {}
+    for server_name, device in devices.items():
+        if device.ipv4 is None:
+            continue
+        if not explicit:
+            if not device.online:
+                logger.debug(f"Skipping {probe_name} probe for {_device_label(device)}: device is offline")
+                continue
+            if device.kind == "emulated":
+                logger.debug(f"Skipping {probe_name} probe for {_device_label(device)}: device is emulated")
+                continue
+        candidates[server_name] = device
+    return candidates
+
+
+async def _populate_controls(devices: dict[str, DanteDevice], observer=None) -> None:
+    explicit = _explicit_selection()
+    unpopulated = []
+    for device in devices.values():
+        if device.tx_channels or device.rx_channels or not device.ipv4:
+            continue
+        if not device.online and not explicit:
+            logger.debug(f"Skipping control population for {_device_label(device)}: device is offline")
+            continue
+        unpopulated.append(device)
 
     if not unpopulated:
         return
@@ -778,47 +826,59 @@ async def _populate_controls(devices: dict[str, DanteDevice], observer=None, str
             return_exceptions=True,
         )
 
-    failures = [
-        (device, result) for device, result in zip(unpopulated, population_results) if isinstance(result, BaseException)
-    ]
-    for device, exception in failures:
-        logger.error(
-            f"Failed to populate controls for {device.server_name or device.name}: {exception}",
-            exc_info=(type(exception), exception, exception.__traceback__),
-        )
-    if strict and failures:
-        device, exception = failures[0]
-        raise RuntimeError(
-            f"failed to populate controls for {device.server_name or device.name}: {exception}"
-        ) from exception
+    for device, result in zip(unpopulated, population_results):
+        if not isinstance(result, BaseException):
+            continue
+        if isinstance(result, asyncio.CancelledError):
+            raise result
+        logger.warning(_unreachable_message(device, result))
+        logger.debug(f"Control population failure for {_device_label(device)}", exc_info=result)
+        device.online = False
 
 
-async def _enrich_clock_fields(devices: dict[str, DanteDevice]) -> None:
-    missing = [
-        device
-        for device in devices.values()
-        if device.ipv4 is not None and (device.clock_role is None or device.clock_source_code is None)
-    ]
+async def _enrich_clock_fields(devices: dict[str, DanteDevice]) -> dict[str, BaseException]:
+    missing = {
+        server_name: device
+        for server_name, device in _probe_candidates(devices, "clock status").items()
+        if device.clock_role is None and device.clock_source_code is None
+    }
     if not missing:
-        return
+        return {}
     sender = _make_core_sender(devices=devices)
     try:
-        await asyncio.gather(
-            *[sender.probe_clocking_status(device) for device in missing],
+        results = await asyncio.gather(
+            *[sender.probe_clocking_status(device) for device in missing.values()],
             return_exceptions=True,
         )
     finally:
         await sender.close()
+    failures: dict[str, BaseException] = {}
+    for server_name, result in zip(missing, results):
+        if isinstance(result, asyncio.CancelledError):
+            raise result
+        if isinstance(result, BaseException):
+            failures[server_name] = result
+            missing[server_name].failed_queries.add("clock_status")
+    return failures
 
 
-async def _enrich_lock_states(devices: dict[str, DanteDevice]) -> None:
-    candidates = {server_name: device for server_name, device in devices.items() if device.ipv4 is not None}
+async def _enrich_lock_states(
+    devices: dict[str, DanteDevice],
+    *,
+    only_unknown: bool = False,
+) -> dict[str, BaseException]:
+    candidates = {
+        server_name: device
+        for server_name, device in _probe_candidates(devices, "lock status").items()
+        if not only_unknown or device.is_locked is None
+    }
     if not candidates:
-        return
+        return {}
 
     application = _make_dante_application()
     application.devices.update(candidates)
     await application.startup()
+    failures: dict[str, BaseException] = {}
     try:
         results = await asyncio.gather(
             *[
@@ -830,10 +890,14 @@ async def _enrich_lock_states(devices: dict[str, DanteDevice]) -> None:
             ],
             return_exceptions=True,
         )
-        for device, result in zip(candidates.values(), results):
+        for server_name, device, result in zip(candidates, candidates.values(), results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, BaseException):
-                logger.debug(f"Lock status unavailable for {device.server_name or device.name}: {result}")
+                failures[server_name] = result
                 result = None
+            elif result is None:
+                failures[server_name] = CapabilityProbeTimeout("lock status probe timed out")
             if result is None:
                 device.is_locked = None
                 device.failed_queries.add("is_locked")
@@ -842,17 +906,21 @@ async def _enrich_lock_states(devices: dict[str, DanteDevice]) -> None:
             device.failed_queries.discard("is_locked")
     finally:
         await application.shutdown()
+    return failures
 
 
 async def _load_display_devices(include_channels: bool = False) -> dict[str, DanteDevice]:
     devices = await get_devices_from_daemon()
     if devices is None:
         devices = await _discover()
-        await _populate_controls(devices, strict=False)
+        await _populate_controls(devices)
     devices = filter_devices(devices or {})
     if include_channels:
         for device in devices.values():
             await _populate_show_details(device, include_channels=True)
-    await _enrich_clock_fields(devices)
-    await _enrich_lock_states(devices)
+    unreachable = await _enrich_clock_fields(devices)
+    for server_name, reason in (await _enrich_lock_states(devices, only_unknown=True)).items():
+        unreachable.setdefault(server_name, reason)
+    for server_name, reason in unreachable.items():
+        _log_unreachable(devices[server_name], reason)
     return devices

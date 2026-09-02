@@ -20,7 +20,7 @@ class TestRouting:
     async def test_unknown_method_returns_404(self):
         http_server = make_http_server()
         writer = FakeWriter()
-        await http_server._dispatch("DELETE", "/devices", None, writer)
+        await http_server._dispatch("PUT", "/devices", None, writer)
         status, body = writer.response()
         assert status == 404
 
@@ -52,6 +52,125 @@ class TestRouting:
         assert status == 200
         assert body == {"success": True}
         http_server.state.refresh_all_devices.assert_awaited_once()
+
+
+async def delete(http_server, path):
+    writer = FakeWriter()
+    await http_server._dispatch("DELETE", path, None, writer)
+    return writer.response()
+
+
+class TestForget:
+    @pytest.mark.asyncio
+    async def test_forget_by_server_name_removes_device_and_reports_it(self):
+        device = make_device(server_name="ghost.local.", name="ghost", ipv4="192.0.2.99", online=False)
+        http_server = make_http_server({"ghost.local.": device, "dev1": make_device()})
+
+        status, body = await delete(http_server, "/devices/ghost.local.")
+
+        assert status == 200
+        assert body == {
+            "forgotten": [
+                {
+                    "ipv4": "192.0.2.99",
+                    "kind": "hardware",
+                    "name": "ghost",
+                    "online": False,
+                    "server_name": "ghost.local.",
+                }
+            ]
+        }
+        http_server.application.unregister_device.assert_called_once_with("ghost.local.")
+        assert set(http_server.application.devices) == {"dev1"}
+
+    @pytest.mark.asyncio
+    async def test_forget_by_friendly_name_is_case_insensitive_and_url_decoded(self):
+        device = make_device(server_name="AVIO-1234.local.", name="Avio Usb 1")
+        http_server = make_http_server({"AVIO-1234.local.": device})
+
+        status, body = await delete(http_server, "/devices/avio%20usb%201")
+
+        assert status == 200
+        assert [entry["server_name"] for entry in body["forgotten"]] == ["AVIO-1234.local."]
+
+    @pytest.mark.asyncio
+    async def test_forget_unknown_device_returns_404(self):
+        http_server = make_http_server({"dev1": make_device()})
+
+        status, body = await delete(http_server, "/devices/missing")
+
+        assert status == 404
+        assert body == {"error": "device not found"}
+        http_server.application.unregister_device.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_forget_offline_selection_removes_only_offline_devices(self):
+        online = make_device(server_name="online.local.", name="online")
+        offline = make_device(server_name="offline.local.", name="offline", online=False)
+        http_server = make_http_server({"online.local.": online, "offline.local.": offline})
+
+        status, body = await delete(http_server, "/devices?selection=offline")
+
+        assert status == 200
+        assert [entry["server_name"] for entry in body["forgotten"]] == ["offline.local."]
+        assert set(http_server.application.devices) == {"online.local."}
+
+    @pytest.mark.asyncio
+    async def test_forget_emulated_and_offline_selections_combine(self):
+        hardware = make_device(server_name="hardware.local.", name="hardware")
+        emulated = make_device(server_name="emulated.local.", name="emulated", kind="emulated")
+        offline = make_device(server_name="offline.local.", name="offline", online=False)
+        http_server = make_http_server(
+            {"hardware.local.": hardware, "emulated.local.": emulated, "offline.local.": offline}
+        )
+
+        status, body = await delete(http_server, "/devices?selection=emulated,offline")
+
+        assert status == 200
+        assert sorted(entry["server_name"] for entry in body["forgotten"]) == ["emulated.local.", "offline.local."]
+        assert set(http_server.application.devices) == {"hardware.local."}
+
+    @pytest.mark.asyncio
+    async def test_forget_selection_with_no_match_reports_empty_list(self):
+        http_server = make_http_server({"dev1": make_device()})
+
+        status, body = await delete(http_server, "/devices?selection=emulated")
+
+        assert status == 200
+        assert body == {"forgotten": []}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["/devices", "/devices?selection=", "/devices?selection=stale"])
+    async def test_forget_requires_known_selection(self, path):
+        http_server = make_http_server({"dev1": make_device()})
+
+        status, body = await delete(http_server, path)
+
+        assert status == 400
+        assert body == {"error": "selection must be one or more of: emulated, offline"}
+        http_server.application.unregister_device.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_forget_uses_injected_daemon_hook(self):
+        device = make_device()
+        forgotten = []
+        http_server = make_http_server({"dev1": device})
+        http_server.forget_device = forgotten.append
+
+        status, _ = await delete(http_server, "/devices/dev1")
+
+        assert status == 200
+        assert forgotten == ["dev1"]
+        http_server.application.unregister_device.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_unknown_path_returns_404(self):
+        http_server = make_http_server()
+
+        status, body = await delete(http_server, "/shure/devices/abc")
+
+        assert status == 404
+        assert body == {"error": "not found"}
 
 
 class TestErrorMapping:

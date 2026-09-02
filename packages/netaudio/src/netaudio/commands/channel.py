@@ -57,9 +57,8 @@ def channel_list():
     """List channels on devices."""
 
     async def _run():
-        devices = await _discover()
-        await _populate_controls(devices, strict=False)
-        devices = filter_devices(devices)
+        devices = filter_devices(await _discover())
+        await _populate_controls(devices)
         from netaudio._common import _apply_avio_status_pages
 
         await asyncio.gather(
