@@ -1,6 +1,6 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
 from netaudio.commands.status import (
     DANTE_STATUS_HEADERS,
     _dante_row_from_device,
@@ -95,9 +95,9 @@ def test_dante_status_row_uses_shared_formatters_for_audio_columns():
 
 @pytest.mark.asyncio
 async def test_gather_status_verbose_uses_device_list_layout(monkeypatch):
-    from netaudio import _common as common_module
+    from netaudio.cli_support import execution as common_module
     from netaudio.commands import status as status_module
-    from netaudio.commands.device_display import device_list_headers, device_list_row
+    from netaudio.commands.device.display import device_list_headers, device_list_row
     from netaudio.daemon import client as daemon_client
 
     device = make_status_device()

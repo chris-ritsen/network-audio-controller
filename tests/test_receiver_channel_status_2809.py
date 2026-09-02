@@ -5,7 +5,8 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_operations import DanteDeviceOperations, channel_status_query_specification
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.commands import channel_status_query_specification
 
 
 def _rename_specification(channel_type: str, name: str, protocol_id: int) -> dict:
@@ -184,9 +185,9 @@ def test_2809_transmit_rename_matches_the_causal_avio_request():
 async def test_device_operation_returns_typed_receiver_status_page():
     response = _packet(0x2809, 0x3400, 28738)
     device = SimpleNamespace(execute=AsyncMock(return_value=response), services={})
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
-    page = await operation.query_receiver_channel_status_2809()
+    page = await operation.query_receiver_channel_status_2809(device)
 
     assert page["records"][0]["local_channel_name"] == "mic-mix"
     device.execute.assert_awaited_once_with(channel_status_query_specification("rx"))
@@ -200,10 +201,10 @@ async def test_receiver_rename_selects_and_caches_2809_after_successful_status_p
         execute=AsyncMock(side_effect=[status_response, rename_response, rename_response]),
         receiver_channel_name_protocol_identifier=None,
     )
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
-    first_response = await operation.set_channel_name("rx", 1, "mic-mix")
-    second_response = await operation.set_channel_name("rx", 1, "mic-mix")
+    first_response = await operation.send_set_channel_name(device, "rx", 1, "mic-mix")
+    second_response = await operation.send_set_channel_name(device, "rx", 1, "mic-mix")
 
     assert first_response == rename_response
     assert second_response == rename_response
@@ -224,9 +225,9 @@ async def test_receiver_rename_selects_2729_after_authentic_a32_frontend_rejecti
         execute=AsyncMock(side_effect=[status_response, rename_response]),
         receiver_channel_name_protocol_identifier=None,
     )
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
-    response = await operation.set_channel_name("rx", 1, "Input-1")
+    response = await operation.send_set_channel_name(device, "rx", 1, "Input-1")
 
     assert response == rename_response
     assert device.receiver_channel_name_protocol_identifier == 0x2729
@@ -247,10 +248,10 @@ async def test_receiver_rename_does_not_guess_after_an_indeterminate_frontend_pr
         execute=AsyncMock(return_value=probe_response),
         receiver_channel_name_protocol_identifier=None,
     )
-    operation = DanteDeviceOperations(device)
+    operation = DanteApplication()
 
     with pytest.raises(RuntimeError, match=message):
-        await operation.set_channel_name("rx", 1, "Input-1")
+        await operation.send_set_channel_name(device, "rx", 1, "Input-1")
 
     assert device.execute.await_count == 1
     assert device.receiver_channel_name_protocol_identifier is None

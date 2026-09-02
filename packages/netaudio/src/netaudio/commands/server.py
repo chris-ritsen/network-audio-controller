@@ -10,11 +10,9 @@ logger = logging.getLogger("netaudio")
 
 import typer
 
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-
-from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.daemon import service_install
-
+from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
 from netaudio.icons import icon
 
 app = typer.Typer(help="Manage the netaudio daemon.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
@@ -56,8 +54,8 @@ def _wait_for_startup(daemon_port, timeout=15):
 
 
 def _run_foreground(daemon_port):
-    from netaudio.common.app_config import settings as app_settings
     from netaudio.cli import state
+    from netaudio.common.app_config import settings as app_settings
     from netaudio.daemon.server import run_daemon
 
     effective_port = _effective_daemon_port(daemon_port)

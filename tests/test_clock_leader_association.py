@@ -1,17 +1,17 @@
 import json
 from pathlib import Path
 
+import netaudio.cli_support.execution as common_module
 import pytest
 import typer
-from typer.testing import CliRunner
-
-import netaudio._common as common_module
 from netaudio import core
 from netaudio.cli import OutputFormat, state
-from netaudio.commands.device_clock import _matching_leader_name, clock
+from netaudio.commands.device.clock import _matching_leader_name, clock
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.clock_identity import canonical_clock_identity
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.application import DanteApplication
+from typer.testing import CliRunner
+
 from tests.status_test_support import receive_packets
 
 runner = CliRunner()

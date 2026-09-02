@@ -19,7 +19,8 @@ class _DiscoveryHarness(DanteDiscoveryMixin):
             cmc=SimpleNamespace(register_device=AsyncMock()),
             dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
             get_arc_port=self._arc_port,
-            settings=SimpleNamespace(request_dante_model=AsyncMock(), request_make_model=AsyncMock()),
+            send_dante_model_request=AsyncMock(),
+            send_make_model_request=AsyncMock(),
             _send_conmon_query_for_device=AsyncMock(),
         )
         self.application.register_device = MagicMock(side_effect=self._register_device)
@@ -189,8 +190,8 @@ async def test_new_cmc_service_registers_identity_metadata_and_queries(monkeypat
     daemon.application.register_device.assert_called_once()
     daemon.application.cmc.register_device.assert_awaited_once_with("192.0.2.10")
     assert daemon.application._send_conmon_query_for_device.call_args_list == [
-        call(device, daemon.application.settings.request_make_model),
-        call(device, daemon.application.settings.request_dante_model),
+        call(device, daemon.application.send_make_model_request),
+        call(device, daemon.application.send_dante_model_request),
     ]
     daemon.state.retry_conmon_query.assert_called_once_with("rack.local.")
     assert daemon.spawned == ["retry-conmon:rack.local."]

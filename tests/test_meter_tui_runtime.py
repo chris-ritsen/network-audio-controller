@@ -6,15 +6,10 @@ from collections import deque
 from unittest.mock import AsyncMock
 
 import pytest
+from netaudio.commands.meter.models import MOUSE_WHEEL_ROWS, MeterViewport
+from netaudio.commands.meter.terminal import MeterTerminal
+from netaudio.commands.meter.tui import MeterViewOptions, run_meter_tui, stop_metering_attempts
 
-from netaudio.commands.meter_tui import (
-    MOUSE_WHEEL_ROWS,
-    MeterTerminal,
-    MeterViewOptions,
-    MeterViewport,
-    run_meter_tui,
-    stop_metering_attempts,
-)
 from tests.test_meter_tui import _channel, _device, _sample
 
 
@@ -568,9 +563,9 @@ def _silent_stream():
 
 @pytest.mark.asyncio
 async def test_passive_tui_escalates_to_detailed_for_devices_with_no_samples(monkeypatch):
-    import netaudio.commands.meter_runtime as meter_runtime_module
+    import netaudio.commands.meter.tui as meter_tui_module
 
-    monkeypatch.setattr(meter_runtime_module, "DETAILED_ESCALATION_SECONDS", 0.0)
+    monkeypatch.setattr(meter_tui_module, "DETAILED_ESCALATION_SECONDS", 0.0)
     server_name = "silent.local."
     devices = {
         server_name: _device(
@@ -608,9 +603,9 @@ async def test_passive_tui_escalates_to_detailed_for_devices_with_no_samples(mon
 
 @pytest.mark.asyncio
 async def test_passive_tui_does_not_escalate_for_devices_with_fresh_passive_samples(monkeypatch):
-    import netaudio.commands.meter_runtime as meter_runtime_module
+    import netaudio.commands.meter.tui as meter_tui_module
 
-    monkeypatch.setattr(meter_runtime_module, "DETAILED_ESCALATION_SECONDS", 0.0)
+    monkeypatch.setattr(meter_tui_module, "DETAILED_ESCALATION_SECONDS", 0.0)
     server_name = "input.local."
     devices = {
         server_name: _device(
@@ -646,8 +641,8 @@ async def test_passive_tui_does_not_escalate_for_devices_with_fresh_passive_samp
 def test_posix_eof_decodes_as_quit(monkeypatch):
     terminal = MeterTerminal()
     terminal._fd = 123
-    monkeypatch.setattr("netaudio.commands.meter_terminal.select.select", lambda *_args: ([123], [], []))
-    monkeypatch.setattr("netaudio.commands.meter_terminal.os.read", lambda *_args: b"")
+    monkeypatch.setattr("netaudio.commands.meter.terminal.select.select", lambda *_args: ([123], [], []))
+    monkeypatch.setattr("netaudio.commands.meter.terminal.os.read", lambda *_args: b"")
 
     assert terminal._read_key_blocking(0.1) == "quit"
 
