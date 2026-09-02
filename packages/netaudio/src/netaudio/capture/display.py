@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import datetime
 
-from netaudio._common import ansi
 from netaudio.capture.markers import normalize_marker_type
 from netaudio.capture.packets import _hexdump, _load_fact_labels
+from netaudio.cli_support.execution import ansi
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.packet_store import PacketStore
 from netaudio.icons import icon
@@ -100,15 +100,7 @@ def _print_marker_row(
         if not evidence_packet_ids and marker_data.get("packet_id"):
             evidence_packet_ids = [marker_data["packet_id"]]
 
-    if evidence_packet_ids:
-        evidence_sizes = []
-        for pid in evidence_packet_ids[:20]:
-            pkt = store.get_packet(pid)
-            if pkt:
-                payload = pkt.get("payload", b"")
-                evidence_sizes.append(f"#{pid} {len(payload)}B")
-        if evidence_sizes:
-            header += f"  {ansi('90', f'[{chr(44).join(evidence_sizes)}]')}"
+    header += _evidence_size_summary(store, evidence_packet_ids)
 
     print(f"  {time_str}  {header}  {ansi('90', f'#{marker_id}')}")
 
@@ -124,42 +116,53 @@ def _print_marker_row(
         return
 
     if marker_data and marker.get("marker_type") == "evidence":
-        packet_ids = evidence_packet_ids
-        filters = marker_data.get("filters", {})
+        _print_evidence_packets(store, evidence_packet_ids, marker_data.get("filters", {}), use_dissect)
 
-        if filters:
-            filter_parts = [f"{k}={v}" for k, v in filters.items()]
-            print(f"    filters: {', '.join(filter_parts)}")
 
-        evidence_indent = "      "
-        for pid in packet_ids[:20]:
-            pkt = store.get_packet(pid)
-            if not pkt:
-                continue
-
+def _evidence_size_summary(store: PacketStore, evidence_packet_ids: list[int]) -> str:
+    evidence_sizes = []
+    for pid in evidence_packet_ids[:20]:
+        pkt = store.get_packet(pid)
+        if pkt:
             payload = pkt.get("payload", b"")
-            opcode_hex = ""
+            evidence_sizes.append(f"#{pid} {len(payload)}B")
+    if not evidence_sizes:
+        return ""
+    return f"  {ansi('90', f'[{chr(44).join(evidence_sizes)}]')}"
 
-            if len(payload) >= 8:
-                opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
 
-            pkt_dir = pkt.get("direction") or "multicast"
-            pkt_dir_icon = (
-                icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
-            )
-            src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
-            dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
-            print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
+def _print_evidence_packets(store: PacketStore, packet_ids: list[int], filters: dict, use_dissect: bool) -> None:
+    if filters:
+        filter_parts = [f"{k}={v}" for k, v in filters.items()]
+        print(f"    filters: {', '.join(filter_parts)}")
 
-            if use_dissect:
-                from netaudio.dante.packet_dissection_rendering import dissect_and_render
+    evidence_indent = "      "
+    for pid in packet_ids[:20]:
+        pkt = store.get_packet(pid)
+        if not pkt:
+            continue
 
-                print(dissect_and_render(payload, indent=evidence_indent + "  "))
-            else:
-                print(_hexdump(payload, indent=evidence_indent + "  "))
+        payload = pkt.get("payload", b"")
+        opcode_hex = ""
 
-        if len(packet_ids) > 20:
-            print(f"{'':8s}  {'':26s}  {'':12s}  ... and {len(packet_ids) - 20} more")
+        if len(payload) >= 8:
+            opcode_hex = f"0x{int.from_bytes(payload[6:8], 'big'):04X} "
+
+        pkt_dir = pkt.get("direction") or "multicast"
+        pkt_dir_icon = icon("tx") if pkt_dir == "request" else icon("rx") if pkt_dir == "response" else icon("packet")
+        src = f"{pkt.get('src_ip', '?')}:{pkt.get('src_port', '?')}"
+        dst = f"{pkt.get('dst_ip', '?')}:{pkt.get('dst_port', '?')}"
+        print(f"{evidence_indent}{pkt_dir_icon}#{pid} {pkt_dir:8s} {opcode_hex}{src} -> {dst} {len(payload)}B")
+
+        if use_dissect:
+            from netaudio.dante.dissection.rendering import dissect_and_render
+
+            print(dissect_and_render(payload, indent=evidence_indent + "  "))
+        else:
+            print(_hexdump(payload, indent=evidence_indent + "  "))
+
+    if len(packet_ids) > 20:
+        print(f"{'':8s}  {'':26s}  {'':12s}  ... and {len(packet_ids) - 20} more")
 
 
 def _follow_session_timeline(
@@ -217,7 +220,7 @@ def _follow_session_timeline(
 
 
 def _print_session_evidence(store: PacketStore, sessions: list, has_evidence: bool, no_evidence: bool):
-    from netaudio.dante.packet_dissection_rendering import dissect_and_render
+    from netaudio.dante.dissection.rendering import dissect_and_render
 
     for session in sessions:
         session_id = int(session["id"])

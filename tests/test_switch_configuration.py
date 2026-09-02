@@ -66,14 +66,14 @@ def test_notification_waiter_is_source_matched():
 async def test_application_probe_waits_for_switch_configuration_publication():
     application = DanteApplication()
     device_ip_address = "192.0.2.10"
-    application.settings.probe_switch_configuration = AsyncMock(
+    application.send_probe_switch_configuration = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(PACKET, (address, 8702))
     )
 
     result = await application.probe_switch_configuration(device_ip_address)
 
     assert result["mode_codes_at_record_offsets_20_and_22"] == [1, 1]
-    application.settings.probe_switch_configuration.assert_awaited_once_with(device_ip_address)
+    application.send_probe_switch_configuration.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("switch_configuration", device_ip_address)
 
 
@@ -81,7 +81,7 @@ async def test_application_probe_waits_for_switch_configuration_publication():
 async def test_application_probe_timeout_is_fail_closed():
     application = DanteApplication()
     device_ip_address = "192.0.2.10"
-    application.settings.probe_switch_configuration = AsyncMock()
+    application.send_probe_switch_configuration = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="switch configuration readback timed out"):
         await application.probe_switch_configuration(device_ip_address, timeout=0.01)

@@ -15,7 +15,6 @@ from netaudio.dante.services.notification import (
     NOTIFICATION_NAMES,
 )
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.services.settings import DanteSettingsService
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher, EventType
 from netaudio.dante.services.notification import _gain_status_accepts
@@ -84,18 +83,20 @@ def _executed(transport):
     return [(call.args[0], call.args[1]) for call in transport.execute.await_args_list]
 
 
-class TestDanteSettingsService:
+class TestApplicationSettingsCommands:
     def test_instantiation(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
-        assert service.transport is transport
+        application = DanteApplication()
+        application.transport = transport
+        assert application.transport is transport
 
     @pytest.mark.asyncio
     async def test_identify_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.identify("192.168.1.1")
+        await application.send_identify("192.168.1.1")
 
         [(address, specification)] = _executed(transport)
         assert address == "192.168.1.1"
@@ -105,18 +106,20 @@ class TestDanteSettingsService:
     @pytest.mark.asyncio
     async def test_probe_sample_rate_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.probe_sample_rate("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        await application.send_probe_sample_rate("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         assert _executed(transport) == [("192.168.1.108", {"command": "probe_sample_rate", "host_mac": "102030405060"})]
 
     @pytest.mark.asyncio
     async def test_refresh_clock_status_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.refresh_clock_status(
+        await application.send_refresh_clock_status(
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
             sequence=0x0021,
@@ -132,20 +135,22 @@ class TestDanteSettingsService:
     @pytest.mark.asyncio
     async def test_probe_encoding_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.probe_encoding("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        await application.send_probe_encoding("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         assert _executed(transport) == [("192.168.1.108", {"command": "probe_encoding", "host_mac": "102030405060"})]
 
     @pytest.mark.asyncio
     async def test_sample_rate_pullup_commands_execute_typed_specifications(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
         host_mac = b"\x10\x20\x30\x40\x50\x60"
 
-        await service.probe_sample_rate_pullup("192.168.1.108", host_mac=host_mac)
-        await service.set_sample_rate_pullup("192.168.1.108", 4, host_mac=host_mac)
+        await application.send_probe_sample_rate_pullup("192.168.1.108", host_mac=host_mac)
+        await application.send_set_sample_rate_pullup("192.168.1.108", 4, host_mac=host_mac)
 
         executed = _executed(transport)
         assert executed[0] == ("192.168.1.108", {"command": "probe_sample_rate_pullup", "host_mac": "102030405060"})
@@ -159,9 +164,10 @@ class TestDanteSettingsService:
     @pytest.mark.asyncio
     async def test_probe_lock_reset_status_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.probe_lock_reset_status(
+        await application.send_probe_lock_reset_status(
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
             request_value=100,
@@ -176,9 +182,10 @@ class TestDanteSettingsService:
     @pytest.mark.asyncio
     async def test_probe_gain_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.probe_gain_level("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        await application.send_probe_gain_level("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         [(address, specification)] = _executed(transport)
         assert specification["command"] == "probe_gain_level"
@@ -187,9 +194,10 @@ class TestDanteSettingsService:
     @pytest.mark.asyncio
     async def test_set_gain_executes_typed_command(self):
         transport = _recording_transport()
-        service = DanteSettingsService(transport)
+        application = DanteApplication()
+        application.transport = transport
 
-        await service.set_gain_level(
+        await application.send_set_gain_level(
             "192.168.1.108",
             2,
             5,

@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from netaudio.dante import flows
 
 from tests.http_api_test_support import FakeWriter, get, make_device, make_http_server, post
@@ -93,7 +92,7 @@ class TestSseLifecycle:
 
     @pytest.mark.asyncio
     async def test_bounded_timeout_drains_cancelled_child_finally(self):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         started = asyncio.Event()
         finalized = asyncio.Event()
@@ -113,7 +112,7 @@ class TestSseLifecycle:
 
     @pytest.mark.asyncio
     async def test_bounded_outer_cancellation_drains_cancelled_child_finally(self):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         started = asyncio.Event()
         finalized = asyncio.Event()
@@ -164,7 +163,7 @@ class TestSseLifecycle:
 
     @pytest.mark.asyncio
     async def test_full_client_queue_disconnects_only_that_client(self):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         http_server = make_http_server()
         slow_writer = FakeWriter()
@@ -184,7 +183,7 @@ class TestSseLifecycle:
 
     @pytest.mark.asyncio
     async def test_timed_out_writer_is_removed_without_blocking_broadcast(self, monkeypatch):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         monkeypatch.setattr(http_api_module, "SSE_DRAIN_TIMEOUT_SECONDS", 0.01)
         http_server = make_http_server()
@@ -220,7 +219,7 @@ class TestSseLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_is_idempotent_and_closes_client_tasks(self):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         http_server = make_http_server()
         http_server.tcp_server = FakeTcpServer()
@@ -294,7 +293,7 @@ def _adapter(*addresses, name="en0"):
 
 @pytest.fixture
 def bonjour_http_server(monkeypatch):
-    import netaudio.daemon.http_api as http_api_module
+    import netaudio.daemon.http.api as http_api_module
 
     FakeAsyncZeroconf.instances = []
     FakeAsyncZeroconf.fail_next_register = False
@@ -315,7 +314,7 @@ def bonjour_http_server(monkeypatch):
 class TestBonjourReconcile:
     @pytest.mark.asyncio
     async def test_long_hostname_produces_bounded_stable_service_identity(self, bonjour_http_server, monkeypatch):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         hostname = "sat12-bq150-7dbdb9ac-5e81-4902-96fc-5a5171b62dcd-F2CBA1AA41D9"
         monkeypatch.setattr(http_api_module.socket, "gethostname", lambda: hostname)
@@ -333,7 +332,7 @@ class TestBonjourReconcile:
 
     @pytest.mark.asyncio
     async def test_start_registers_all_non_loopback_ipv4_addresses(self, bonjour_http_server, monkeypatch):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         monkeypatch.setattr(
             http_api_module.ifaddr,
@@ -410,7 +409,7 @@ class TestBonjourReconcile:
 
     @pytest.mark.asyncio
     async def test_selected_interface_limits_registration_addresses(self, bonjour_http_server, monkeypatch):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         monkeypatch.setattr(http_api_module.app_settings, "_interface", "en7", raising=False)
         monkeypatch.setattr(
@@ -450,7 +449,7 @@ class TestBonjourReconcile:
 
     @pytest.mark.asyncio
     async def test_start_failure_closes_tcp_server_and_unregisters_listeners(self, bonjour_http_server, monkeypatch):
-        import netaudio.daemon.http_api as http_api_module
+        import netaudio.daemon.http.api as http_api_module
 
         monkeypatch.setattr(bonjour_http_server, "_get_advertisement_addresses", lambda: ("192.168.1.44",))
         monkeypatch.setattr(

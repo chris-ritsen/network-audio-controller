@@ -4,17 +4,17 @@ from typing import NoReturn
 
 import typer
 
-from netaudio.core.binding import NetaudioCoreError
-from netaudio._common import _get_arc_port, run_command
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-from netaudio._common_output import output_table
-from netaudio._common_selection import filter_devices, select_device
 from netaudio._exit_codes import ExitCode
-from netaudio.commands.device_display import (
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.execution import _get_arc_port, run_command
+from netaudio.cli_support.output import output_table
+from netaudio.cli_support.selection import filter_devices, select_device
+from netaudio.commands.device.display import (
     format_encoding,
     format_latency_nanoseconds,
     format_sample_rate_hertz,
 )
+from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
 from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
 
@@ -86,15 +86,10 @@ async def run_flow_list(application, devices) -> None:
     else:
         headers.append("FPP")
 
-    if not device_flows:
-        from netaudio.cli import OutputFormat, state
-
-        if state.output_format in (OutputFormat.plain, OutputFormat.table, OutputFormat.pretty):
-            if flow_protocol_id == PROTOCOL_ARC_2809 or include_status_endpoint:
-                typer.echo(f"No transmitter flow records reported (capacity {flow_inventory['max_flow_slots']}).")
-            else:
-                typer.echo(f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used).")
-            return
+    if flow_protocol_id == PROTOCOL_ARC_2809 or include_status_endpoint:
+        empty_message = f"No transmitter flow records reported (capacity {flow_inventory['max_flow_slots']})."
+    else:
+        empty_message = f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used)."
 
     rows = []
     for flow in device_flows:
@@ -133,7 +128,7 @@ async def run_flow_list(application, devices) -> None:
             frames_per_packet = flow.get("frames_per_packet")
             row.append(str(frames_per_packet) if frames_per_packet is not None else "unknown")
         rows.append(row)
-    output_table(headers, rows, json_data=flow_inventory)
+    output_table(headers, rows, json_data=flow_inventory, empty_message=empty_message)
 
 
 @app.command("list")
@@ -162,16 +157,7 @@ async def run_receiver_flow_list(application, devices) -> None:
         "Latency",
     ]
 
-    if not receiver_flows:
-        from netaudio.cli import OutputFormat, state
-
-        if state.output_format in (
-            OutputFormat.plain,
-            OutputFormat.table,
-            OutputFormat.pretty,
-        ):
-            typer.echo(f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used).")
-            return
+    empty_message = f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
 
     rows = []
     for receiver_flow in receiver_flows:
@@ -224,7 +210,7 @@ async def run_receiver_flow_list(application, devices) -> None:
                 ),
             ]
         )
-    output_table(headers, rows, json_data=flow_inventory)
+    output_table(headers, rows, json_data=flow_inventory, empty_message=empty_message)
 
 
 @app.command("receiver-list")

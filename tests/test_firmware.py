@@ -4,18 +4,12 @@ import struct
 import zlib
 
 import pytest
+from netaudio.commands.firmware.archive import firmware_extract
+from netaudio.commands.firmware.database import _init_db
+from netaudio.commands.firmware.capabilities import _extract_capability_9
+from netaudio.commands.firmware.constants import DNT_PARSER_VERSION, FIRMWARE_DATABASE_SCHEMA_VERSION, PARTITION_NAMES
+from netaudio.commands.firmware.parser import _load_resume_results, _parse_sections, parse_dnt
 
-from netaudio.commands.firmware import (
-    DNT_PARSER_VERSION,
-    FIRMWARE_DATABASE_SCHEMA_VERSION,
-    PARTITION_NAMES,
-    _extract_capability_9,
-    _init_db,
-    _load_resume_results,
-    _parse_sections,
-    firmware_extract,
-    parse_dnt,
-)
 from tests.firmware_test_support import build_capability_payload, build_dnt, build_partitioned_dnt
 
 

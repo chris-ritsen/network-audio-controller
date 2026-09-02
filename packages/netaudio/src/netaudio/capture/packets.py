@@ -10,7 +10,7 @@ from netaudio.dante.const import (
     PROTOCOL_NAMES,
     PROTOCOL_SETTINGS,
 )
-from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.dissection.header import parse_packet_header
 
 PORT_LABELS = {
     DANTE_CONTROLLER_METERING_PORT: "metering",

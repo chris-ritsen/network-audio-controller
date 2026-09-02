@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 
 app = typer.Typer(help="Lock key management.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 

@@ -1,9 +1,8 @@
 import sys
 
 import pytest
-
-from netaudio import _common as common_module
 from netaudio.cli import error_message, main
+from netaudio.cli_support import execution as common_module
 from netaudio.common.app_config import settings
 
 

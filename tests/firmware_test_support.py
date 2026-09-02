@@ -3,8 +3,7 @@ import json
 import struct
 import zlib
 
-
-from netaudio.commands.firmware import (
+from netaudio.commands.firmware.constants import (
     BROOKLYN2_BOARD_INFORMATION_PARTITION_OFFSET,
     BROOKLYN2_BOARD_INFORMATION_PARTITION_SIZE,
     BROOKLYN2_FLASH_SIZE,

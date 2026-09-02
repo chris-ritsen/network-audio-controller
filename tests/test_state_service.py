@@ -46,11 +46,9 @@ def make_application(devices):
         probe_lock_status=AsyncMock(return_value=None),
         probe_preferred_leader_state=AsyncMock(return_value=None),
         probe_sample_rate_status=AsyncMock(return_value=None),
-        settings=SimpleNamespace(
-            request_bluetooth_status=AsyncMock(),
-            request_dante_model=AsyncMock(),
-            request_make_model=AsyncMock(),
-        ),
+        send_bluetooth_status_request=AsyncMock(),
+        send_dante_model_request=AsyncMock(),
+        send_make_model_request=AsyncMock(),
     )
 
 
@@ -620,14 +618,14 @@ class TestControlNotifications:
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
         state.register()
-        device.operations.get_device_settings = AsyncMock()
+        application.get_device_settings = AsyncMock()
 
         await state.on_device_status(
             status_event("sample_rate", {"sample_rate": 48_000, "supported_sample_rates": [44_100, 48_000]})
         )
 
         application.probe_sample_rate_status.assert_not_awaited()
-        device.operations.get_device_settings.assert_not_awaited()
+        application.get_device_settings.assert_not_awaited()
         assert device.supported_sample_rates == [44_100, 48_000]
         assert [event.type for event in emitted_events(application)] == [EventType.DEVICE_UPDATED]
 
@@ -862,9 +860,7 @@ class TestConmonRetry:
 
         await asyncio.wait_for(state.retry_conmon_query("dev1.local."), timeout=1.0)
 
-        application._send_conmon_query_for_device.assert_awaited_once_with(
-            device, application.settings.request_dante_model
-        )
+        application._send_conmon_query_for_device.assert_awaited_once_with(device, application.send_dante_model_request)
         application.notifications.unregister_waiter.assert_called_once_with(waiter)
 
     @pytest.mark.asyncio

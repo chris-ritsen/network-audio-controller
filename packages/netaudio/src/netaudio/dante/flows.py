@@ -308,13 +308,16 @@ def inventory_from_receiver_flow_status_page(page: dict) -> dict:
 
 
 async def query_preferred_receiver_flow_inventory(device) -> dict | None:
-    try:
-        status_page = await device.operations.query_receiver_flow_status_2809()
-    except RuntimeError:
-        status_page = None
+    application = device.application
+    status_page = None
+    if application is not None:
+        try:
+            status_page = await application.query_receiver_flow_status_2809(device)
+        except RuntimeError:
+            status_page = None
     if status_page is not None:
         return inventory_from_receiver_flow_status_page(status_page)
-    from netaudio._common import _get_arc_port
+    from netaudio.cli_support.execution import _get_arc_port
 
     return await query_receiver_flow_inventory(str(device.ipv4), _get_arc_port(device))
 
