@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+import struct
 from pathlib import Path
 from typing import Optional
+
+from netaudio.core.binding import NetaudioCoreError
 
 logger = logging.getLogger("netaudio")
 
@@ -272,7 +275,7 @@ def _dissect_evidence_packet(provenance_dir, session_ref: str, packet_id: int) -
                     direction = sample.get("direction", "")
                     header = f"{source_endpoint} {'->' if direction == 'request' else '<-' if direction == 'response' else '**'} {destination_endpoint}  {len(payload)}B"
                     return f"{header}\n{rendered}"
-                except Exception:
+                except (LookupError, ValueError, NetaudioCoreError, struct.error):
                     logger.exception("Failed to dissect provenance packet %s", packet_id)
                     return f"{len(payload)}B (dissection failed)"
 

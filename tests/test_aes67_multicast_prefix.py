@@ -75,6 +75,7 @@ async def test_set_aes67_multicast_prefix_state_writes_and_reads_back():
     from netaudio.dante.application import DanteApplication
 
     device = DanteDevice()
+    device.ipv4 = "192.0.2.10"
     device.aes67_multicast_prefix = "239.69.0.0"
 
     async def readback():
@@ -84,6 +85,6 @@ async def test_set_aes67_multicast_prefix_state_writes_and_reads_back():
     device.operations.set_aes67_multicast_prefix = AsyncMock()
     device.operations.get_aes67_configured = AsyncMock(side_effect=readback)
 
-    observed = await DanteApplication().set_aes67_multicast_prefix_state(device, "239.238.0.0")
+    observed = await DanteApplication().set_aes67_multicast_prefix(device, "239.238.0.0")
     device.operations.set_aes67_multicast_prefix.assert_awaited_once_with("239.238.0.0")
     assert observed == "239.238.0.0"

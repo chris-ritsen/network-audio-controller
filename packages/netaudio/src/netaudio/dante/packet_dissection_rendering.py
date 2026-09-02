@@ -285,6 +285,50 @@ def _render_full_colored_hexdump(payload: bytes, byte_color_map: dict[int, str],
     return lines
 
 
+def _flatten_core_fields(value, prefix: str = "") -> list[tuple[str, str]]:
+    if isinstance(value, dict):
+        flattened = []
+        for key in sorted(value):
+            flattened.extend(_flatten_core_fields(value[key], f"{prefix}{key}."))
+        return flattened
+    if isinstance(value, list):
+        if not value:
+            return [(prefix.rstrip("."), "[]")]
+        if all(not isinstance(item, (dict, list)) for item in value):
+            return [(prefix.rstrip("."), ", ".join(str(item) for item in value))]
+        flattened = []
+        for index, item in enumerate(value):
+            flattened.extend(_flatten_core_fields(item, f"{prefix.rstrip('.')}[{index}]."))
+        return flattened
+    if isinstance(value, bool) or value is None:
+        return [(prefix.rstrip("."), str(value).lower())]
+    return [(prefix.rstrip("."), str(value))]
+
+
+def _render_core_fields(dissected: DissectedPacket, indent: str, color: bool, icons: bool) -> list[str]:
+    if dissected.core_kind is None:
+        return []
+    section_icon = "\U000f0169 " if icons else ""
+    label = f"{section_icon}Core fields ({dissected.core_kind})"
+    lines = [""]
+    if color:
+        lines.append(f"{indent}{_COLOR_SECTION}{label}{_RESET}")
+        lines.append(f"{indent}{_COLOR_SEPARATOR}{'─' * 72}{_RESET}")
+    else:
+        lines.append(f"{indent}{label}")
+        lines.append(f"{indent}{'─' * 72}")
+    if dissected.core_fields is None:
+        lines.append(f"{indent}  (core parser rejected this packet)")
+        return lines
+    for field_index, (name, value) in enumerate(_flatten_core_fields(dissected.core_fields)):
+        if color:
+            field_color = _FIELD_PALETTE[field_index % len(_FIELD_PALETTE)]
+            lines.append(f"{indent}  {_COLOR_FIELD_NAME}{name:<40s}{_RESET} = {field_color}{value}{_RESET}")
+        else:
+            lines.append(f"{indent}  {name:<40s} = {value}")
+    return lines
+
+
 def render_dissection(
     dissected: DissectedPacket,
     indent: str = "",
@@ -364,6 +408,8 @@ def render_dissection(
                 field_color = ""
             lines.extend(_render_span_line(span, indent, field_color=field_color, icons=icons))
 
+    lines.extend(_render_core_fields(dissected, indent, color, icons))
+
     if show_unknown_hexdump:
         if color:
             lines.append("")
@@ -406,12 +452,9 @@ def dissect_and_render(
 
 
 def _resolve_icons_setting() -> bool:
-    try:
-        from netaudio.cli import state
+    from netaudio.cli import state
 
-        return state.icons
-    except Exception:
-        return False
+    return state.icons
 
 
 def format_dissect_label(direction: str, address: str, command_name: str = "", color: bool = False) -> str:
