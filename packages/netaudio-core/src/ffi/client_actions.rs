@@ -1,5 +1,8 @@
 use super::*;
 
+use crate::client::fire_repeated;
+use crate::spec::IoMode;
+
 #[no_mangle]
 pub unsafe extern "C" fn netaudio_client_execute(
     client: *mut NetaudioClient,
@@ -8,25 +11,19 @@ pub unsafe extern "C" fn netaudio_client_execute(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
+    guard(|| {
+        let client = unsafe { nonnull_client(client, out_buffer, out_capacity, out_length)? };
+        let json = unsafe { c_string(json)? };
+        let prepared = lock_client(client).prepare_command(json)?;
+        let response = match prepared.io {
+            IoMode::Fire {
+                repeat,
+                interval_ms,
+            } => fire_repeated(repeat, interval_ms, || {
+                lock_client(client).send_prepared(&prepared)
+            })?,
+            IoMode::Request => lock_client(client).request_prepared(&prepared)?,
         };
-        if json.is_null() {
-            return NetaudioStatus::NullPointer;
-        }
-
-        let json = match unsafe { CStr::from_ptr(json) }.to_str() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidUtf8,
-        };
-
-        let response = match lock_client(client).execute(json) {
-            Ok(response) => response,
-            Err(error) => return error.into(),
-        };
-
         unsafe { write_bytes(&response, out_buffer, out_capacity, out_length) }
     })
 }
@@ -42,31 +39,21 @@ pub unsafe extern "C" fn netaudio_lock_token(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        if let Err(status) = unsafe { prepare_output(out_buffer, out_capacity, out_length) } {
-            return status;
+    guard(|| {
+        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
+        if nonce.is_null() || key.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
         }
-        if pin.is_null() || nonce.is_null() || key.is_null() {
-            return NetaudioStatus::NullPointer;
-        }
+        let pin = unsafe { c_string(pin)? };
         if nonce_len != crate::lock::NONCE_LENGTH {
-            return NetaudioStatus::CryptoError;
+            return Err(crate::lock::LockError::InvalidNonce.into());
         }
         if key_len != crate::lock::KEY_LENGTH {
-            return NetaudioStatus::InvalidKey;
+            return Err(crate::lock::LockError::InvalidKey.into());
         }
-        let pin = match unsafe { CStr::from_ptr(pin) }.to_str() {
-            Ok(value) => value,
-            Err(_) => return NetaudioStatus::InvalidUtf8,
-        };
         let nonce = unsafe { std::slice::from_raw_parts(nonce, nonce_len) };
         let key = unsafe { std::slice::from_raw_parts(key, key_len) };
-
-        let token = match crate::lock::compute_token(pin, nonce, key) {
-            Ok(token) => token,
-            Err(error) => return error.into(),
-        };
-
+        let token = crate::lock::compute_token(pin, nonce, key)?;
         unsafe { write_bytes(&token, out_buffer, out_capacity, out_length) }
     })
 }
@@ -81,7 +68,7 @@ pub unsafe extern "C" fn netaudio_client_lock(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| unsafe {
+    guard(|| unsafe {
         lock_or_unlock(
             client,
             pin,
@@ -105,7 +92,7 @@ pub unsafe extern "C" fn netaudio_client_unlock(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| unsafe {
+    guard(|| unsafe {
         lock_or_unlock(
             client,
             pin,
@@ -129,34 +116,23 @@ unsafe fn lock_or_unlock(
     out_capacity: usize,
     out_length: *mut usize,
     locking: bool,
-) -> NetaudioStatus {
-    let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-        Ok(client) => client,
-        Err(status) => return status,
-    };
-    if pin.is_null() || key.is_null() {
-        return NetaudioStatus::NullPointer;
+) -> FfiResult {
+    let client = unsafe { nonnull_client(client, out_buffer, out_capacity, out_length)? };
+    if key.is_null() {
+        return Err(NetaudioStatus::NullPointer.into());
     }
+    let pin = unsafe { c_string(pin)? };
     if key_len != crate::lock::KEY_LENGTH {
-        return NetaudioStatus::InvalidKey;
+        return Err(crate::lock::LockError::InvalidKey.into());
     }
-    let pin = match unsafe { CStr::from_ptr(pin) }.to_str() {
-        Ok(value) => value,
-        Err(_) => return NetaudioStatus::InvalidUtf8,
-    };
     let key = unsafe { std::slice::from_raw_parts(key, key_len) };
 
-    let result = if locking {
-        lock_client(client).lock_device(pin, key)
+    let lock_result = if locking {
+        lock_client(client).lock_device(pin, key)?
     } else {
-        lock_client(client).unlock_device(pin, key)
+        lock_client(client).unlock_device(pin, key)?
     };
-    match result {
-        Ok(lock_result) => unsafe {
-            write_json(&lock_result, out_buffer, out_capacity, out_length)
-        },
-        Err(error) => error.into(),
-    }
+    unsafe { write_json(&lock_result, out_buffer, out_capacity, out_length) }
 }
 
 #[no_mangle]
@@ -172,27 +148,19 @@ pub unsafe extern "C" fn netaudio_client_request(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
+    guard(|| {
+        let client = unsafe { nonnull_client(client, out_buffer, out_capacity, out_length)? };
         if packet.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         let packet = unsafe { std::slice::from_raw_parts(packet, packet_len) };
-
-        let response = match lock_client(client).request_raw(
-            packet,
-            target_port,
-            expect_response,
-            repeat,
-            interval_ms,
-        ) {
-            Ok(response) => response,
-            Err(error) => return error.into(),
+        let response = if expect_response {
+            lock_client(client).request_raw(packet, target_port)?
+        } else {
+            fire_repeated(repeat, interval_ms, || {
+                lock_client(client).send_raw(packet, target_port)
+            })?
         };
-
         unsafe { write_bytes(&response, out_buffer, out_capacity, out_length) }
     })
 }
@@ -201,13 +169,13 @@ pub unsafe extern "C" fn netaudio_client_request(
 pub unsafe extern "C" fn netaudio_client_clear_wire_captures(
     client: *mut NetaudioClient,
 ) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if client.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         let client = unsafe { &*client };
         lock_client(client).clear_wire_captures();
-        NetaudioStatus::Ok
+        Ok(())
     })
 }
 
@@ -218,11 +186,8 @@ pub unsafe extern "C" fn netaudio_client_get_wire_captures_json(
     out_capacity: usize,
     out_length: *mut usize,
 ) -> NetaudioStatus {
-    guard_panic(|| {
-        let client = match unsafe { nonnull_client(client, out_buffer, out_capacity, out_length) } {
-            Ok(client) => client,
-            Err(status) => return status,
-        };
+    guard(|| {
+        let client = unsafe { nonnull_client(client, out_buffer, out_capacity, out_length)? };
         let captures = lock_client(client).wire_captures();
         unsafe { write_json(&captures, out_buffer, out_capacity, out_length) }
     })
@@ -233,9 +198,9 @@ pub unsafe extern "C" fn netaudio_client_set_host_mac(
     client: *mut NetaudioClient,
     host_mac: *const u8,
 ) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if client.is_null() || host_mac.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         let client = unsafe { &*client };
         let mut mac = [0u8; 6];
@@ -243,28 +208,29 @@ pub unsafe extern "C" fn netaudio_client_set_host_mac(
             ptr::copy_nonoverlapping(host_mac, mac.as_mut_ptr(), 6);
         }
         lock_client(client).set_host_mac(mac);
-        NetaudioStatus::Ok
+        Ok(())
     })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn netaudio_host_mac(out_mac: *mut u8) -> NetaudioStatus {
-    guard_panic(|| {
+    guard(|| {
         if out_mac.is_null() {
-            return NetaudioStatus::NullPointer;
+            return Err(NetaudioStatus::NullPointer.into());
         }
         unsafe {
             ptr::write_bytes(out_mac, 0, 6);
         }
-        match crate::netif::discover_host_mac() {
-            Some(mac) => {
-                unsafe {
-                    ptr::copy_nonoverlapping(mac.as_ptr(), out_mac, 6);
-                }
-                NetaudioStatus::Ok
-            }
-            None => NetaudioStatus::IoError,
+        let mac = crate::netif::discover_host_mac().ok_or_else(|| {
+            FfiError::new(
+                NetaudioStatus::IoError,
+                "no interface with a non-zero MAC address routes to the Dante multicast group",
+            )
+        })?;
+        unsafe {
+            ptr::copy_nonoverlapping(mac.as_ptr(), out_mac, 6);
         }
+        Ok(())
     })
 }
 

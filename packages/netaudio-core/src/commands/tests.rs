@@ -42,7 +42,7 @@ fn cmc_register_builder_matches_wire_layout() {
 }
 
 #[test]
-fn channel_count_builder_matches_python_layout() {
+fn channel_count_query_carries_opcode_1000_with_an_empty_reserved_word() {
     let packet = build_channel_count(1).unwrap();
     assert_eq!(
         packet,
@@ -51,7 +51,7 @@ fn channel_count_builder_matches_python_layout() {
 }
 
 #[test]
-fn receivers_builder_matches_python_layout() {
+fn receivers_query_requests_sixteen_channels_from_the_page_start() {
     let packet = build_receivers(0, 0x1234).unwrap();
     assert_eq!(
         packet,
@@ -400,33 +400,43 @@ fn set_latency_rejects_values_that_cannot_be_encoded() {
 #[test]
 fn audio_settings_accept_nonzero_wire_values_without_truncation() {
     for sample_rate in [44_100, 48_000, 192_000, 123_456, u32::MAX] {
-        assert!(build_set_sample_rate(sample_rate).is_ok(), "{sample_rate}");
+        assert!(
+            build_set_sample_rate(sample_rate, 1).is_ok(),
+            "{sample_rate}"
+        );
     }
     assert_eq!(
-        &build_set_sample_rate(u32::MAX).unwrap()[36..40],
+        &build_set_sample_rate(u32::MAX, 1).unwrap()[36..40],
         &u32::MAX.to_be_bytes()
     );
     assert_eq!(
-        build_set_sample_rate(0),
+        build_set_sample_rate(0, 1),
         Err(NetaudioError::InvalidSampleRate)
     );
     assert_eq!(
-        &build_set_sample_rate_with_sequence(48_000, 0x18B1).unwrap()[4..6],
+        &build_set_sample_rate(48_000, 0x18B1).unwrap()[4..6],
         &0x18B1u16.to_be_bytes()
     );
     assert_eq!(
-        build_set_sample_rate_with_sequence(48_000, 0),
+        build_set_sample_rate(48_000, 0),
         Err(NetaudioError::InvalidSequence)
     );
 
     for encoding in [1, 16, 24, 32, 256, u32::MAX] {
-        assert!(build_set_encoding(encoding).is_ok(), "{encoding}");
+        assert!(build_set_encoding(encoding, 1).is_ok(), "{encoding}");
     }
     assert_eq!(
-        &build_set_encoding(u32::MAX).unwrap()[36..40],
+        &build_set_encoding(u32::MAX, 1).unwrap()[36..40],
         &u32::MAX.to_be_bytes()
     );
-    assert_eq!(build_set_encoding(0), Err(NetaudioError::InvalidEncoding));
+    assert_eq!(
+        build_set_encoding(0, 1),
+        Err(NetaudioError::InvalidEncoding)
+    );
+    assert_eq!(
+        build_set_encoding(24, 0),
+        Err(NetaudioError::InvalidSequence)
+    );
 
     assert_eq!(
         build_set_gain_level([1, 2, 3, 4, 5, 6], 1, 0, 1, true),
@@ -847,7 +857,7 @@ fn metering_start_matches_captured_a32_packet_7298185() {
 }
 
 #[test]
-fn delete_tx_flow_matches_python_layout() {
+fn delete_tx_flow_2729_encodes_flow_slot_after_a_unit_count() {
     let packet = build_delete_tx_flow(0x2729, 3, 0).unwrap();
     assert_eq!(
         packet,

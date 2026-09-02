@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::protocol::{
     build_control_packet, build_control_packet_for_protocol, validate_dante_channel_name,
-    validate_dante_channel_reference, validate_dante_name, NetaudioError, OPCODE_CHANNEL_COUNT,
-    OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
-    PROTOCOL_ARC_2809,
+    validate_dante_channel_reference, validate_dante_name, ConmonHeader, NetaudioError,
+    OPCODE_CHANNEL_COUNT, OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO,
+    OPCODE_TX_CHANNEL_NAMES, PROTOCOL_ARC_2809,
 };
 
 pub const PROTOCOL_SETTINGS: u16 = 0xFFFF;
@@ -86,52 +86,38 @@ pub const MIN_GAIN_LEVEL: u8 = 1;
 pub const MAX_GAIN_LEVEL: u8 = 5;
 pub const MAX_LATENCY_MILLISECONDS: f64 = u32::MAX as f64 / 1_000_000.0;
 
-pub fn build_cmc_register(sequence: u16, host_mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
-    let mut payload = Vec::with_capacity(16);
-    payload.extend_from_slice(&sequence.to_be_bytes());
-    payload.extend_from_slice(&0x1001u16.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&host_mac);
-    payload.extend_from_slice(&0u16.to_be_bytes());
-
-    let length = payload
-        .len()
-        .checked_add(4)
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
-    let mut packet = Vec::with_capacity(length);
-    packet.extend_from_slice(&PROTOCOL_CMC.to_be_bytes());
-    packet.extend_from_slice(&encoded_length.to_be_bytes());
-    packet.extend_from_slice(&payload);
-    Ok(packet)
+pub fn build_cmc_register(message_id: u16, host_mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
+    let mut body = Vec::with_capacity(14);
+    body.extend_from_slice(&0x1001u16.to_be_bytes());
+    body.extend_from_slice(&0u32.to_be_bytes());
+    body.extend_from_slice(&host_mac);
+    body.extend_from_slice(&0u16.to_be_bytes());
+    ConmonHeader {
+        message_id,
+        protocol_id: PROTOCOL_CMC,
+    }
+    .packet(&body)
 }
 
 fn settings_packet(
-    command_id: u16,
+    message_id: u16,
     mac: [u8; 6],
     suffix: u8,
     tail: &[u8],
 ) -> Result<Vec<u8>, NetaudioError> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&command_id.to_be_bytes());
-    payload.extend_from_slice(&0u16.to_be_bytes());
-    payload.extend_from_slice(&mac);
-    payload.extend_from_slice(&0u16.to_be_bytes());
-    payload.extend_from_slice(MAGIC_VENDOR);
-    payload.push(VENDOR_SEPARATOR);
-    payload.push(suffix);
-    payload.extend_from_slice(tail);
-
-    let length = payload
-        .len()
-        .checked_add(4)
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
-    let mut packet = Vec::with_capacity(length);
-    packet.extend_from_slice(&PROTOCOL_SETTINGS.to_be_bytes());
-    packet.extend_from_slice(&encoded_length.to_be_bytes());
-    packet.extend_from_slice(&payload);
-    Ok(packet)
+    let mut body = Vec::with_capacity(20 + tail.len());
+    body.extend_from_slice(&0u16.to_be_bytes());
+    body.extend_from_slice(&mac);
+    body.extend_from_slice(&0u16.to_be_bytes());
+    body.extend_from_slice(MAGIC_VENDOR);
+    body.push(VENDOR_SEPARATOR);
+    body.push(suffix);
+    body.extend_from_slice(tail);
+    ConmonHeader {
+        message_id,
+        protocol_id: PROTOCOL_SETTINGS,
+    }
+    .packet(&body)
 }
 
 fn channel_query_payload(starting_channel: u16) -> [u8; 8] {
@@ -147,24 +133,16 @@ fn channel_range_query_payload(starting_channel: u16, ending_channel: u16) -> [u
     payload
 }
 
-fn protocol_packet(
+fn arc_packet_with_reserved_word(
     protocol_id: u16,
     opcode: u16,
     body: &[u8],
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let length = 10usize
-        .checked_add(body.len())
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let encoded_length = u16::try_from(length).map_err(|_| NetaudioError::PacketTooLarge)?;
-    let mut packet = Vec::with_capacity(length);
-    packet.extend_from_slice(&protocol_id.to_be_bytes());
-    packet.extend_from_slice(&encoded_length.to_be_bytes());
-    packet.extend_from_slice(&transaction_id.to_be_bytes());
-    packet.extend_from_slice(&opcode.to_be_bytes());
-    packet.extend_from_slice(&0u16.to_be_bytes());
-    packet.extend_from_slice(body);
-    Ok(packet)
+    let mut payload = Vec::with_capacity(2 + body.len());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(body);
+    build_control_packet_for_protocol(protocol_id, opcode, &payload, message_id)
 }
 
 mod device;

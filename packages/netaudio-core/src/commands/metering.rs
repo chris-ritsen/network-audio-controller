@@ -6,7 +6,7 @@ pub fn build_volume_start(
     mac: [u8; 6],
     port: u16,
     timeout: bool,
-    transaction_id: u16,
+    message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     validate_dante_name(device_name)?;
     let mut name_bytes = device_name.as_bytes().to_vec();
@@ -51,16 +51,11 @@ pub fn build_volume_start(
     body.extend_from_slice(&port.to_be_bytes());
     body.extend(std::iter::repeat_n(0, 10));
 
-    let total_length = 6usize
-        .checked_add(body.len())
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let encoded_length = u16::try_from(total_length).map_err(|_| NetaudioError::PacketTooLarge)?;
-    let mut packet = Vec::with_capacity(total_length);
-    packet.extend_from_slice(&PROTOCOL_CMC.to_be_bytes());
-    packet.extend_from_slice(&encoded_length.to_be_bytes());
-    packet.extend_from_slice(&transaction_id.to_be_bytes());
-    packet.extend_from_slice(&body);
-    Ok(packet)
+    ConmonHeader {
+        message_id,
+        protocol_id: PROTOCOL_CMC,
+    }
+    .packet(&body)
 }
 
 pub fn build_volume_stop(device_name: &str, mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {

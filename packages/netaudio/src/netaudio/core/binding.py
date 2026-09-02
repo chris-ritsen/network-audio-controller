@@ -26,6 +26,7 @@ def _library_names():
     return ("libnetaudio_core.so",)
 
 
+STATUS_INVALID_SEQUENCE = 31
 STATUS_OK = 0
 STATUS_TIMEOUT = 9
 
@@ -63,13 +64,22 @@ _STATUS_NAMES = {
     31: "sequence must be nonzero",
     32: "the selected protocol does not support this operation",
     33: "internal panic",
+    34: "unknown response or page kind",
+    35: "byte buffer has the wrong length",
 }
+
+_MESSAGE_ID_KEYS = ("message_id", "sequence", "transaction_id")
+_message_id_lock = threading.Lock()
+_message_id_counter = 0
 
 
 class NetaudioCoreError(Exception):
     def __init__(self, status: int, context: str = ""):
         self.status = status
+        self.detail = last_error_message()
         message = _STATUS_NAMES.get(status, f"status {status}")
+        if self.detail:
+            message = f"{message} ({self.detail})"
         super().__init__(f"{context}: {message}" if context else message)
 
 
@@ -141,6 +151,8 @@ def _configure(lib):
     ]
     lib.netaudio_build_command.argtypes = [ctypes.c_char_p, *buffer_out]
     lib.netaudio_build_command.restype = ctypes.c_int
+    lib.netaudio_last_error_message.argtypes = buffer_out
+    lib.netaudio_last_error_message.restype = ctypes.c_int
     lib.netaudio_parse_response.argtypes = [
         ctypes.c_char_p,
         ctypes.POINTER(ctypes.c_uint8),
@@ -270,10 +282,38 @@ def _call_buffer(function, *leading_args, capacity=8192):
     return status, bytes(out[: length.value])
 
 
+def last_error_message() -> str:
+    lib = _library
+    if lib is None:
+        return ""
+    capacity = 1024
+    out = (ctypes.c_uint8 * capacity)()
+    length = ctypes.c_size_t(0)
+    status = lib.netaudio_last_error_message(out, capacity, ctypes.byref(length))
+    if status == 6 and length.value > capacity:
+        capacity = length.value
+        out = (ctypes.c_uint8 * capacity)()
+        status = lib.netaudio_last_error_message(out, capacity, ctypes.byref(length))
+    if status != STATUS_OK:
+        return ""
+    return bytes(out[: length.value]).decode("utf-8", errors="replace")
+
+
+def next_message_id() -> int:
+    global _message_id_counter
+    with _message_id_lock:
+        _message_id_counter = (_message_id_counter + 1) & 0xFFFF
+        if _message_id_counter == 0:
+            _message_id_counter = 1
+        return _message_id_counter
+
+
 def build_command(spec: dict) -> bytes:
     lib = require()
-    payload = json.dumps(spec).encode("utf-8")
-    status, data = _call_buffer(lib.netaudio_build_command, payload)
+    status, data = _call_buffer(lib.netaudio_build_command, json.dumps(spec).encode("utf-8"))
+    if status == STATUS_INVALID_SEQUENCE and not any(key in spec for key in _MESSAGE_ID_KEYS):
+        spec = {**spec, "message_id": next_message_id()}
+        status, data = _call_buffer(lib.netaudio_build_command, json.dumps(spec).encode("utf-8"))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"build_command {spec.get('command')}")
     return data
