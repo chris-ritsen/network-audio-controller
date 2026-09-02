@@ -13,7 +13,6 @@ from netaudio.dante.core_transport import (
     CoreTransport,
 )
 from netaudio.dante.device_kind import device_kind
-from netaudio.dante.device_operations import DanteDeviceOperations
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.gain import gain_channel_type, gain_level_choices, gain_level_label
 from netaudio.dante.latency import latency_controls_from_settings, standard_latency_choices_for_range
@@ -129,15 +128,12 @@ class DanteDevice:
         self._own_transport: CoreTransport | None = None
         self._topology_mutation_lock = DeferredAsyncioLock()
 
-        self.operations = DanteDeviceOperations(self)
-
     def __getstate__(self):
         state = self.__dict__.copy()
         for key in (
             "_app",
             "_own_transport",
             "_topology_mutation_lock",
-            "operations",
             "sockets",
         ):
             state.pop(key, None)

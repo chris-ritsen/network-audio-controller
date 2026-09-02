@@ -29,7 +29,6 @@ from netaudio.dante.diagnostic_logs import (
     write_device_log_archive,
 )
 from netaudio.dante.services.notification import DanteNotificationService
-from netaudio.dante.services.settings import DanteSettingsService
 
 
 DEVICE_IP_ADDRESS = "10.0.2.15"
@@ -294,8 +293,8 @@ async def test_export_operations_use_the_shared_transport():
 
         return publish_fragments
 
-    application.settings.request_device_log_export = AsyncMock(side_effect=publish(log_packets))
-    application.settings.request_capability_partition_export = AsyncMock(side_effect=publish(capability_packets))
+    application.send_device_log_export_request = AsyncMock(side_effect=publish(log_packets))
+    application.send_capability_partition_export_request = AsyncMock(side_effect=publish(capability_packets))
 
     log_result = await application.export_device_logs(DEVICE_IP_ADDRESS)
     capability_result = await application.export_capability_partition(DEVICE_IP_ADDRESS)
@@ -309,7 +308,7 @@ async def test_export_operations_use_the_shared_transport():
 async def test_export_times_out_and_recognizes_empty_response():
     application = DanteApplication()
     notifications = application.notifications
-    application.settings.request_device_log_export = AsyncMock()
+    application.send_device_log_export_request = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="device log export timed out"):
         await application.export_device_logs(DEVICE_IP_ADDRESS, timeout=0.001)
@@ -321,7 +320,7 @@ async def test_export_times_out_and_recognizes_empty_response():
     async def publish_empty_response(device_ip_address):
         notifications._on_packet(b"", (device_ip_address, 8700))
 
-    application.settings.request_device_log_export = AsyncMock(side_effect=publish_empty_response)
+    application.send_device_log_export_request = AsyncMock(side_effect=publish_empty_response)
     with pytest.raises(ConmonExportUnavailableError, match="empty response"):
         await application.export_device_logs(DEVICE_IP_ADDRESS)
 
@@ -330,13 +329,14 @@ async def test_export_times_out_and_recognizes_empty_response():
 
 
 @pytest.mark.asyncio
-async def test_settings_service_executes_both_typed_requests():
+async def test_application_executes_both_typed_export_requests():
     transport = SimpleNamespace(execute=AsyncMock(return_value=None))
-    service = DanteSettingsService(transport)
+    application = DanteApplication()
+    application.transport = transport
     host_mac = bytes.fromhex("52550a000202")
 
-    await service.request_device_log_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
-    await service.request_capability_partition_export(DEVICE_IP_ADDRESS, host_mac=host_mac)
+    await application.send_device_log_export_request(DEVICE_IP_ADDRESS, host_mac=host_mac)
+    await application.send_capability_partition_export_request(DEVICE_IP_ADDRESS, host_mac=host_mac)
 
     requests = [request.args for request in transport.execute.await_args_list]
     assert [address for address, _ in requests] == [DEVICE_IP_ADDRESS, DEVICE_IP_ADDRESS]

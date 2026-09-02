@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 
 from netaudio.dante.const import ARC_PROTOCOL_IDS, PROTOCOL_SETTINGS
-from netaudio.dante.packet_header import parse_packet_header
+from netaudio.dante.dissection.header import parse_packet_header
 
 ARC_VOLATILE_OFFSETS = {4, 5}
 CONMON_VOLATILE_OFFSETS = {4, 5}

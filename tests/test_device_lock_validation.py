@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from netaudio.dante.device_operations import DanteDeviceOperations, core_lock_device
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.lock import core_lock_device
 
 
 @pytest.mark.asyncio
@@ -60,10 +61,10 @@ async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_sta
         assert key == b"x" * 32
         return {"status": 0, "lock_state": 1, "success": True, "already": False}
 
-    monkeypatch.setattr("netaudio.dante.device_operations.core_lock_device", fake_core_lock_device)
+    monkeypatch.setattr("netaudio.dante.application.core_lock_device", fake_core_lock_device)
 
     device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=False)
-    result = await DanteDeviceOperations(device).lock_device("1234", b"x" * 32)
+    result = await DanteApplication().lock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True
     assert device.is_locked is False
@@ -77,10 +78,10 @@ async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_s
         assert key == b"x" * 32
         return {"status": 0, "lock_state": 0, "success": True, "already": False}
 
-    monkeypatch.setattr("netaudio.dante.device_operations.core_unlock_device", fake_core_unlock_device)
+    monkeypatch.setattr("netaudio.dante.application.core_unlock_device", fake_core_unlock_device)
 
     device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=True)
-    result = await DanteDeviceOperations(device).unlock_device("1234", b"x" * 32)
+    result = await DanteApplication().unlock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True
     assert device.is_locked is True

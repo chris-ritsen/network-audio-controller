@@ -16,7 +16,7 @@ from netaudio.dante.const import (
     PROTOCOL_ARC_280F,
     SERVICE_ARC,
 )
-from netaudio.dante.device_operations import DanteDeviceOperations
+from netaudio.dante.application import DanteApplication
 from tests.modern_arc_test_support import modern_arc_fixture, modern_arc_payloads
 
 
@@ -93,7 +93,7 @@ async def test_transmitter_operation_fetches_and_merges_all_four_captured_pages(
     responses = modern_arc_payloads("pagination", "transmitter_0x2400", source_port=4_840)
     device = _arc_device("2.8.15", responses)
 
-    result = await DanteDeviceOperations(device).query_transmitter_channel_status_2809()
+    result = await DanteApplication().query_transmitter_channel_status_2809(device)
 
     assert result["protocol_id"] == PROTOCOL_ARC_280F
     assert result["page_count"] == 4
@@ -115,7 +115,7 @@ async def test_receiver_operation_fetches_a_short_final_page_and_merges_all_reco
     responses = modern_arc_payloads("pagination", "receiver_0x3400", source_port=4_840)
     device = _arc_device("2.8.15", responses)
 
-    result = await DanteDeviceOperations(device).query_receiver_channel_status_2809()
+    result = await DanteApplication().query_receiver_channel_status_2809(device)
 
     assert result["protocol_id"] == PROTOCOL_ARC_280F
     assert result["page_count"] == 6

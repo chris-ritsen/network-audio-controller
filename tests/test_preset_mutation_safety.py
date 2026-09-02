@@ -2,11 +2,11 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
+from netaudio.cli_support import output as output_module
+from netaudio.commands.preset import cli as preset_commands
 from typer.testing import CliRunner
 
-from netaudio import _common_output
-from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.commands import preset as preset_commands
 from tests.cli_test_support import FakeApplication
 from tests.test_cli_mutation_safety import _channel, _subscription
 
@@ -99,12 +99,6 @@ def _preset_device(
     supported_encodings=None,
     active_latency_ns=1_000_000,
 ):
-    operations = SimpleNamespace()
-
-    async def get_device_settings():
-        return {"sample_rate": sample_rate, "active_latency_ns": active_latency_ns}
-
-    operations.get_device_settings = get_device_settings
     return SimpleNamespace(
         name=name,
         server_name=f"{name.lower()}.local.",
@@ -114,7 +108,8 @@ def _preset_device(
         encoding=encoding,
         supported_encodings=supported_encodings if supported_encodings is not None else [16, 24, 32],
         interface_pending_config=None,
-        operations=operations,
+        settings={"sample_rate": sample_rate, "active_latency_ns": active_latency_ns},
+        settings_calls=0,
         topology_mutation_lock=DeferredAsyncioLock(),
     )
 
@@ -201,7 +196,7 @@ def test_preset_force_save_failure_preserves_existing_file(monkeypatch, tmp_path
 
     _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
-        _common_output,
+        output_module,
         "format_devices_xml",
         lambda *_args, **_kwargs: "replacement",
     )
@@ -229,7 +224,7 @@ def test_preset_force_replaces_existing_file(monkeypatch, tmp_path):
 
     _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
-        _common_output,
+        output_module,
         "format_devices_xml",
         lambda *_args, **_kwargs: "replacement",
     )
@@ -250,7 +245,7 @@ def test_preset_save_publishes_complete_file_atomically(monkeypatch, tmp_path):
 
     _install_preset_context(monkeypatch, devices)
     monkeypatch.setattr(
-        _common_output,
+        output_module,
         "format_devices_xml",
         lambda *_args, **_kwargs: "complete preset",
     )
@@ -423,14 +418,12 @@ def test_preset_load_reconciles_transmitter_channel_names(monkeypatch, tmp_path)
     transmitter_device = _preset_transmitter_device("Transmitter", routing_name_state)
     probes = []
 
-    async def resolve_channel_name_protocol_identifier(channel_type):
-        probes.append(channel_type)
-        transmitter_device.transmitter_channel_name_protocol_identifier = 0x2809
-        return 0x2809
-
-    transmitter_device.operations.resolve_channel_name_protocol_identifier = resolve_channel_name_protocol_identifier
-
     class RenamingApplication(PresetApplication):
+        async def resolve_channel_name_protocol_identifier(self, device, channel_type):
+            probes.append(channel_type)
+            transmitter_device.transmitter_channel_name_protocol_identifier = 0x2809
+            return 0x2809
+
         async def set_channel_name(self, device, channel_type, channel_number, name):
             routing_name_state[channel_number] = name
             self._record("set_channel_name", device, channel_type, channel_number, name)

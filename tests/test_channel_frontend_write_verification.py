@@ -1,6 +1,8 @@
-from netaudio._common_selection import parse_channel_reference
+from netaudio.cli_support.selection import parse_channel_reference
 from netaudio.commands import channel as channel_commands
-from netaudio.dante.device_operations import DanteDeviceOperations
+from netaudio.dante.application import DanteApplication
+from netaudio.dante.commands import DanteCommands
+
 from tests.cli_test_support import FakeApplication, FakeChannelDevice, invoke
 
 
@@ -11,7 +13,6 @@ class ExecutingChannelDevice(FakeChannelDevice):
         self.transmitter_channel_name_protocol_identifier = None
         self.responses = list(responses)
         self.executed = []
-        self.operations = DanteDeviceOperations(self)
 
     async def execute(self, specification):
         self.executed.append(specification)
@@ -19,8 +20,12 @@ class ExecutingChannelDevice(FakeChannelDevice):
 
 
 class ExecutingApplication(FakeApplication):
+    commands = DanteCommands()
+    resolve_channel_name_protocol_identifier = DanteApplication.resolve_channel_name_protocol_identifier
+    send_set_channel_name = DanteApplication.send_set_channel_name
+
     async def set_channel_name(self, device, channel_type, channel_number, name):
-        return await device.operations.set_channel_name(channel_type, channel_number, name)
+        return await self.send_set_channel_name(device, channel_type, channel_number, name)
 
 
 def _rename(device, channel):

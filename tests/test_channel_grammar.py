@@ -3,16 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 import typer
-from typer.testing import CliRunner
-
-from netaudio._common_selection import (
+from netaudio.cli_support.selection import (
     ChannelReference,
     parse_channel_reference,
     parse_qualified_channel,
     resolve_channel,
 )
-from netaudio.commands import config as config_commands
-from netaudio.commands import preset as preset_commands
+from netaudio.commands.config import cli as config_commands
+from netaudio.commands.preset import cli as preset_commands
+from typer.testing import CliRunner
 
 runner = CliRunner()
 

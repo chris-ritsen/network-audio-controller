@@ -16,8 +16,8 @@ class TestDaemonLockStatus:
         previous_status = {"lock_state_code": 1, "is_locked": True, "status_code": 0}
         device.is_locked = True
         device.lock_reset_status = previous_status
-        device.operations.lock_device.return_value = {"success": False, "error": "locked"}
         http_server = make_http_server({"dev1": device})
+        http_server.application.lock_device.return_value = {"success": False, "error": "locked"}
         monkeypatch.setattr(http_server, "_get_lock_key", lambda: b"key")
 
         status, response = await post(http_server, "/lock", {"device": "dev1", "pin": "1234"})
@@ -33,12 +33,12 @@ class TestDaemonLockStatus:
         device = make_device()
         device.is_locked = True
         device.lock_reset_status = {"lock_state_code": 1, "is_locked": True, "status_code": 0}
-        device.operations.lock_device.return_value = {
+        http_server = make_http_server({"dev1": device})
+        http_server.application.lock_device.return_value = {
             "success": False,
             "status": 9,
             "error": "netaudio_client_lock: device did not respond",
         }
-        http_server = make_http_server({"dev1": device})
         monkeypatch.setattr(http_server, "_get_lock_key", lambda: b"key")
 
         status, response = await post(http_server, "/lock", {"device": "dev1", "pin": "1234"})
@@ -91,7 +91,7 @@ class TestDaemonLockStatus:
         assert response["observation_source"] == "observed_after_0x1008"
         assert device.is_locked is requested_is_locked
         assert device.lock_reset_status["lock_state_code"] == lock_state_code
-        getattr(device.operations, operation_name).assert_awaited_once_with("1234", b"key")
+        getattr(http_server.application, operation_name).assert_awaited_once_with(device, "1234", b"key")
         http_server.application.probe_lock_status.assert_awaited_once_with("192.168.1.50", timeout=4.0)
 
     @pytest.mark.asyncio
@@ -259,11 +259,11 @@ class TestDaemonLockStatus:
         first_probe_started = asyncio.Event()
         release_first_probe = asyncio.Event()
 
-        async def lock_device(pin, key):
+        async def lock_device(_device, pin, key):
             events.append("lock")
             return {"success": True, "lock_state": 1}
 
-        async def unlock_device(pin, key):
+        async def unlock_device(_device, pin, key):
             events.append("unlock")
             return {"success": True, "lock_state": 0}
 
@@ -287,8 +287,8 @@ class TestDaemonLockStatus:
                 observed_at="2026-08-21T20:57:35.396345+00:00",
             )
 
-        device.operations.lock_device = lock_device
-        device.operations.unlock_device = unlock_device
+        http_server.application.lock_device = lock_device
+        http_server.application.unlock_device = unlock_device
         http_server.application.probe_lock_status = probe_lock_status
 
         lock_task = asyncio.create_task(post(http_server, "/lock", {"device": "dev1", "pin": "1234"}))

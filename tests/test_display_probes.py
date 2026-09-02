@@ -2,9 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
-from netaudio import _common as common_module
 from netaudio.cli import state
+from netaudio.cli_support import execution as common_module
 from netaudio.dante.device import DanteDevice
 
 

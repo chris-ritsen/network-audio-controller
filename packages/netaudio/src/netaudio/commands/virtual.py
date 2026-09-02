@@ -18,8 +18,7 @@ from typing import Any, NoReturn, Optional
 
 import typer
 
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
-
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.commands.virtual_process import (
     ProcessRecord,
     VirtualLifecycleError,

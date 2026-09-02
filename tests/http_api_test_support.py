@@ -3,9 +3,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.daemon.http_api import DaemonHTTPServer
+from netaudio.daemon.http.api import DaemonHTTPServer
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.services.notification import DanteNotificationService
 
@@ -78,42 +77,8 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50", kind="h
         gain_levels=None,
         supported_gain_levels=None,
         _arc_port=MagicMock(return_value=4440),
-        operations=MagicMock(),
         topology_mutation_lock=DeferredAsyncioLock(),
     )
-    for method in (
-        "add_subscription_by_name",
-        "add_subscriptions_by_name",
-        "remove_subscription",
-        "remove_subscriptions",
-        "set_name",
-        "reset_name",
-        "set_channel_name",
-        "reset_channel_name",
-        "set_latency",
-        "set_sample_rate",
-        "set_encoding",
-        "reboot",
-        "lock_device",
-        "unlock_device",
-    ):
-        setattr(device.operations, method, AsyncMock(return_value=None))
-    arc_success = bytes.fromhex("27ff000a000010010001")
-    for method in (
-        "add_subscription_by_name",
-        "add_subscriptions_by_name",
-        "remove_subscription",
-        "remove_subscriptions",
-        "set_name",
-        "reset_name",
-        "set_channel_name",
-        "reset_channel_name",
-        "set_latency",
-    ):
-        setattr(device.operations, method, AsyncMock(return_value=arc_success))
-    device.operations.set_gain_level = AsyncMock(return_value=("input", [3]))
-    device.operations.lock_device = AsyncMock(return_value={"success": True, "lock_state": 1})
-    device.operations.unlock_device = AsyncMock(return_value={"success": True, "lock_state": 0})
     return device
 
 
@@ -130,13 +95,25 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
             }
         )
 
+    arc_success = bytes.fromhex("27ff000a000010010001")
     application = SimpleNamespace(
+        add_subscriptions=AsyncMock(return_value=arc_success),
         devices=devices or {},
         dispatcher=MagicMock(),
         identify=AsyncMock(),
+        lock_device=AsyncMock(return_value={"success": True, "lock_state": 1}),
         notifications=notifications,
-        settings=MagicMock(),
         mark_device_offline=MagicMock(),
+        reboot=AsyncMock(return_value=None),
+        remove_subscriptions=AsyncMock(return_value=arc_success),
+        reset_channel_name=AsyncMock(return_value=arc_success),
+        reset_device_name=AsyncMock(return_value=arc_success),
+        send_set_encoding=AsyncMock(return_value=None),
+        set_channel_name=AsyncMock(return_value=arc_success),
+        set_device_name=AsyncMock(return_value=arc_success),
+        set_gain_level=AsyncMock(return_value=("input", [3])),
+        set_latency=AsyncMock(return_value=arc_success),
+        unlock_device=AsyncMock(return_value={"success": True, "lock_state": 0}),
         probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
         set_sample_rate=AsyncMock(side_effect=sample_rate_change_result),
         probe_encoding_status=AsyncMock(return_value=(24, [16, 24, 32])),

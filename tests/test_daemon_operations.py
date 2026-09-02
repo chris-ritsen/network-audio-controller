@@ -15,8 +15,8 @@ class TestRename:
         status, body = await post(http_server, "/rename-device", {"device": "dev1", "name": "Desk-IO"})
         assert status == 200
         assert body == {"success": True}
-        device.operations.set_name.assert_awaited_once_with("Desk-IO")
-        device.operations.reset_name.assert_not_awaited()
+        http_server.application.set_device_name.assert_awaited_once_with(device, "Desk-IO")
+        http_server.application.reset_device_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_rename_device_with_empty_name_resets_name(self):
@@ -25,8 +25,8 @@ class TestRename:
         status, response = await post(http_server, "/rename-device", {"device": "dev1", "name": ""})
         assert status == 200
         assert response == {"success": True}
-        device.operations.reset_name.assert_awaited_once()
-        device.operations.set_name.assert_not_awaited()
+        http_server.application.reset_device_name.assert_awaited_once()
+        http_server.application.set_device_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("body", [{"device": "dev1"}, {"device": "dev1", "name": None}])
@@ -36,8 +36,8 @@ class TestRename:
         status, response = await post(http_server, "/rename-device", body)
         assert status == 400
         assert response == {"error": "name must be a string"}
-        device.operations.reset_name.assert_not_awaited()
-        device.operations.set_name.assert_not_awaited()
+        http_server.application.reset_device_name.assert_not_awaited()
+        http_server.application.set_device_name.assert_not_awaited()
 
 
 class TestSubscribe:
@@ -57,7 +57,7 @@ class TestSubscribe:
         )
         assert status == 200
         assert body == {"success": True}
-        device.operations.add_subscription_by_name.assert_awaited_once_with(3, "Out1", "Mixer")
+        http_server.application.add_subscriptions.assert_awaited_once_with(device, [(3, "Out1", "Mixer")])
 
     @pytest.mark.asyncio
     async def test_single_subscription_missing_fields_returns_400(self):
@@ -65,7 +65,7 @@ class TestSubscribe:
         http_server = make_http_server({"dev1": device})
         status, body = await post(http_server, "/subscribe", {"rx_device": "dev1", "rx_channel": 3})
         assert status == 400
-        device.operations.add_subscription_by_name.assert_not_awaited()
+        http_server.application.add_subscriptions.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_bulk_subscriptions(self):
@@ -84,8 +84,9 @@ class TestSubscribe:
         )
         assert status == 200
         assert body == {"success": True, "count": 2}
-        device.operations.add_subscriptions_by_name.assert_awaited_once_with(
-            [(1, "Out1", "Mixer"), (2, "Out2", "Mixer")]
+        http_server.application.add_subscriptions.assert_awaited_once_with(
+            device,
+            [(1, "Out1", "Mixer"), (2, "Out2", "Mixer")],
         )
 
     @pytest.mark.asyncio
@@ -102,7 +103,7 @@ class TestSubscribe:
         )
         assert status == 400
         assert "invalid subscription entry" in body["error"]
-        device.operations.add_subscriptions_by_name.assert_not_awaited()
+        http_server.application.add_subscriptions.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_bulk_subscription_empty_list_returns_400(self):
@@ -138,7 +139,7 @@ class TestUnsubscribe:
         http_server = make_http_server({"dev1": device})
         status, body = await post(http_server, "/unsubscribe", {"rx_device": "dev1", "rx_channel": 3})
         assert status == 200
-        device.operations.remove_subscription.assert_awaited_once_with(channel)
+        http_server.application.remove_subscriptions.assert_awaited_once_with(device, [3])
 
     @pytest.mark.asyncio
     async def test_bulk_unsubscribe(self):
@@ -149,7 +150,7 @@ class TestUnsubscribe:
         status, body = await post(http_server, "/unsubscribe", {"rx_device": "dev1", "rx_channels": [1, 2]})
         assert status == 200
         assert body == {"success": True, "count": 2}
-        device.operations.remove_subscriptions.assert_awaited_once_with([channels[1], channels[2]])
+        http_server.application.remove_subscriptions.assert_awaited_once_with(device, [1, 2])
 
     @pytest.mark.asyncio
     async def test_bulk_unsubscribe_unknown_channel_returns_404(self):
@@ -159,7 +160,7 @@ class TestUnsubscribe:
         status, body = await post(http_server, "/unsubscribe", {"rx_device": "dev1", "rx_channels": [1, 9]})
         assert status == 404
         assert body == {"error": "rx channel 9 not found"}
-        device.operations.remove_subscriptions.assert_not_awaited()
+        http_server.application.remove_subscriptions.assert_not_awaited()
 
 
 class TestShutdown:

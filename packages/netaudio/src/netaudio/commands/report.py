@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import platform
 import shutil
 import subprocess
@@ -10,7 +9,8 @@ from typing import Any, Optional
 
 import typer
 
-from netaudio._common_cli import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.output import _format_json, output_single, output_table
 
 app = typer.Typer(
     help="Report issues with diagnostic context.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS
@@ -85,9 +85,9 @@ def _gh_authenticated() -> bool:
 
 async def _collect_diagnostics() -> dict:
     from netaudio import __version__
-    from netaudio.dante.application import DanteApplication
     from netaudio.common.app_config import settings
     from netaudio.daemon.client import get_devices_from_daemon
+    from netaudio.dante.application import DanteApplication
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
     diagnostics: dict[str, Any] = {
@@ -108,7 +108,7 @@ async def _collect_diagnostics() -> dict:
         finally:
             await application.shutdown()
 
-    from netaudio._common_selection import filter_devices
+    from netaudio.cli_support.selection import filter_devices
 
     devices = filter_devices(devices or {})
 
@@ -259,7 +259,7 @@ def _format_report(
         "device_count": diagnostics["device_count"],
         "devices": filtered_devices,
     }
-    lines.append(json.dumps(raw, indent=2, default=str))
+    lines.append(_format_json(raw))
     lines.append("```")
     lines.append("")
     lines.append("</details>")
@@ -269,9 +269,10 @@ def _format_report(
 
 def _collect_bundle(session_ref: str) -> tuple[str, int] | None:
     import base64
+    import tempfile
+
     from netaudio.dante.packet_store import PacketStore
     from netaudio.dante.protocol_verifier import export_session_bundle
-    import tempfile
 
     store = PacketStore()
     try:
@@ -357,18 +358,30 @@ def report_create(
             typer.echo(f"Warning: session '{session}' not found, skipping bundle", err=True)
 
     if dry_run:
-        typer.echo(f"Title: {title}")
-        typer.echo("")
-        typer.echo(body)
+        _output_dry_run(title, body)
         return
 
     _submit_issue(title, body)
 
 
+def _output_dry_run(title: str, body: str) -> None:
+    from netaudio.cli import OutputFormat, state
+
+    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
+        output_single({"body": body, "title": title})
+        return
+    typer.echo(f"Title: {title}")
+    typer.echo("")
+    typer.echo(body)
+
+
 @app.command("levels", help="List the privacy levels available for report content.")
 def report_levels():
-    for level in PRIVACY_LEVELS:
-        typer.echo(f"{level}: {PRIVACY_DESCRIPTIONS[level]}")
+    output_table(
+        ["Level", "Description"],
+        [[level, PRIVACY_DESCRIPTIONS[level]] for level in PRIVACY_LEVELS],
+        json_data={level: PRIVACY_DESCRIPTIONS[level] for level in PRIVACY_LEVELS},
+    )
 
 
 def _submit_issue(title: str, body: str) -> None:

@@ -188,8 +188,8 @@ class TestErrorMapping:
     @pytest.mark.asyncio
     async def test_handler_timeout_returns_504(self):
         device = make_device()
-        device.operations.set_latency.side_effect = TimeoutError()
         http_server = make_http_server({"dev1": device})
+        http_server.application.set_latency.side_effect = TimeoutError()
         writer = FakeWriter()
         await http_server._route(
             "POST", "/set-latency", json.dumps({"device": "dev1", "latency": 5}).encode(), writer, None
@@ -203,8 +203,8 @@ class TestMutationVerification:
     @pytest.mark.asyncio
     async def test_arc_mutations_report_device_rejection(self):
         device = make_device()
-        device.operations.set_latency.return_value = bytes.fromhex("27ff000a000010010600")
         http_server = make_http_server({"dev1": device})
+        http_server.application.set_latency.return_value = bytes.fromhex("27ff000a000010010600")
 
         status, response = await post(http_server, "/set-latency", {"device": "dev1", "latency": 1.0})
 
@@ -224,13 +224,13 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True}
-        device.operations.set_gain_level.assert_awaited_once_with(1, 3, "input")
+        http_server.application.set_gain_level.assert_awaited_once_with(device, 1, 3, "input")
 
     @pytest.mark.asyncio
     async def test_gain_mutation_reports_mismatched_readback(self):
         device = make_device()
-        device.operations.set_gain_level.return_value = ("input", [5])
         http_server = make_http_server({"dev1": device})
+        http_server.application.set_gain_level.return_value = ("input", [5])
 
         status, response = await post(
             http_server,
@@ -248,8 +248,8 @@ class TestMutationVerification:
     @pytest.mark.asyncio
     async def test_gain_mutation_reports_missing_readback(self):
         device = make_device()
-        device.operations.set_gain_level.return_value = None
         http_server = make_http_server({"dev1": device})
+        http_server.application.set_gain_level.return_value = None
 
         status, response = await post(
             http_server,
@@ -266,7 +266,7 @@ class TestMutationVerification:
             (
                 "/set-encoding",
                 {"device": "dev1", "encoding": 24},
-                "set_encoding",
+                "send_set_encoding",
                 "probe_encoding_status",
                 (24, [16, 24, 32]),
             ),
@@ -290,7 +290,7 @@ class TestMutationVerification:
         assert status == 200
         assert response == {"success": True}
         requested_value = next(value for field_name, value in body.items() if field_name != "device")
-        getattr(device.operations, method_name).assert_awaited_once_with(requested_value)
+        getattr(http_server.application, method_name).assert_awaited_once_with(device, requested_value)
         getattr(http_server.application, probe_name).assert_awaited_once_with("192.168.1.50")
 
     @pytest.mark.parametrize(
@@ -299,7 +299,7 @@ class TestMutationVerification:
             (
                 "/set-encoding",
                 {"device": "dev1", "encoding": 32},
-                "set_encoding",
+                "send_set_encoding",
                 "probe_encoding_status",
                 "encoding",
                 (24, [16, 24, 32]),
@@ -358,7 +358,7 @@ class TestMutationVerification:
         assert status == 200
         assert response == {"success": True}
         requested_value = next(value for field_name, value in body.items() if field_name != "device")
-        getattr(device.operations, method_name).assert_awaited_once_with(requested_value)
+        getattr(http_server.application, method_name).assert_awaited_once_with(device, requested_value)
 
     @pytest.mark.parametrize(
         ("path", "body", "probe_name", "observed", "supported"),
@@ -425,7 +425,7 @@ class TestMutationVerification:
             (
                 "/set-encoding",
                 {"device": "dev1", "encoding": 32},
-                "set_encoding",
+                "send_set_encoding",
                 "probe_encoding_status",
             ),
         ],
@@ -439,8 +439,8 @@ class TestMutationVerification:
         probe_name,
     ):
         device = make_device()
-        getattr(device.operations, method_name).side_effect = ValueError("requested value is not supported")
         http_server = make_http_server({"dev1": device})
+        getattr(http_server.application, method_name).side_effect = ValueError("requested value is not supported")
 
         status, response = await post(http_server, path, body)
 
@@ -472,7 +472,6 @@ class TestMutationVerification:
             confirm_destructive=True,
             timeout=http_server.audio_capability_verification_timeout,
         )
-        device.operations.set_sample_rate.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_sample_rate_change_returns_preflight_when_confirmation_is_required(self):
@@ -550,14 +549,14 @@ class TestMutationVerification:
 
         assert status == 400
         assert "must be an integer" in response["error"]
-        device.operations.set_sample_rate.assert_not_awaited()
-        device.operations.set_encoding.assert_not_awaited()
+        http_server.application.set_sample_rate.assert_not_awaited()
+        http_server.application.send_set_encoding.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_subscription_rejection_is_not_reported_as_success(self):
         device = make_device()
-        device.operations.add_subscription_by_name.return_value = bytes.fromhex("27ff000a000010010600")
         http_server = make_http_server({"dev1": device})
+        http_server.application.add_subscriptions.return_value = bytes.fromhex("27ff000a000010010600")
 
         status, response = await post(
             http_server,
@@ -578,8 +577,8 @@ class TestMutationVerification:
         device = make_device()
         channel = SimpleNamespace(number=1)
         device.rx_channels = {1: channel}
-        device.operations.remove_subscription.return_value = None
         http_server = make_http_server({"dev1": device})
+        http_server.application.remove_subscriptions.return_value = None
 
         status, response = await post(http_server, "/unsubscribe", {"rx_device": "dev1", "rx_channel": 1})
 
@@ -740,7 +739,7 @@ class TestMutationVerification:
 
         assert status == 202
         assert response == {"accepted": True, "verified": False}
-        device.operations.reboot.assert_awaited_once_with()
+        http_server.application.reboot.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_interface_mismatch_is_conflict(self):
@@ -863,8 +862,8 @@ class TestRenameReset:
 
         assert status == 200
         assert body == {"success": True}
-        device.operations.reset_name.assert_awaited_once_with()
-        device.operations.set_name.assert_not_awaited()
+        http_server.application.reset_device_name.assert_awaited_once_with(device)
+        http_server.application.set_device_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_nonblank_device_name_is_preserved(self):
@@ -874,8 +873,8 @@ class TestRenameReset:
         status, _ = await post(http_server, "/rename-device", {"device": "dev1", "name": "  Stage Rack  "})
 
         assert status == 200
-        device.operations.set_name.assert_awaited_once_with("  Stage Rack  ")
-        device.operations.reset_name.assert_not_awaited()
+        http_server.application.set_device_name.assert_awaited_once_with(device, "  Stage Rack  ")
+        http_server.application.reset_device_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_blank_channel_name_uses_protocol_reset(self):
@@ -888,14 +887,14 @@ class TestRenameReset:
 
         assert status == 200
         assert body == {"success": True}
-        device.operations.reset_channel_name.assert_awaited_once_with("tx", 3)
-        device.operations.set_channel_name.assert_not_awaited()
+        http_server.application.reset_channel_name.assert_awaited_once_with(device, "tx", 3)
+        http_server.application.set_channel_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_locked_name_reset_reports_device_rejection(self):
         device = make_device()
-        device.operations.reset_name.return_value = bytes.fromhex("27ff000a000010010600")
         http_server = make_http_server({"dev1": device})
+        http_server.application.reset_device_name.return_value = bytes.fromhex("27ff000a000010010600")
 
         status, body = await post(http_server, "/rename-device", {"device": "dev1", "name": ""})
 
@@ -906,8 +905,8 @@ class TestRenameReset:
     @pytest.mark.asyncio
     async def test_name_reset_timeout_is_not_reported_as_success(self):
         device = make_device()
-        device.operations.reset_name.return_value = None
         http_server = make_http_server({"dev1": device})
+        http_server.application.reset_device_name.return_value = None
 
         status, body = await post(http_server, "/rename-device", {"device": "dev1", "name": ""})
 
@@ -917,8 +916,8 @@ class TestRenameReset:
     @pytest.mark.asyncio
     async def test_malformed_name_reset_response_is_not_reported_as_success(self):
         device = make_device()
-        device.operations.reset_name.return_value = b"short"
         http_server = make_http_server({"dev1": device})
+        http_server.application.reset_device_name.return_value = b"short"
 
         status, body = await post(http_server, "/rename-device", {"device": "dev1", "name": ""})
 

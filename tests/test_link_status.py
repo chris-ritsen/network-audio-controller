@@ -124,7 +124,7 @@ async def test_application_probe_waits_for_link_status_publication():
     device_ip_address = "192.0.2.10"
     device = _device("A32 Dante AD/DA Converter", device_ip_address)
     application.devices[device.server_name] = device
-    application.settings.probe_link_status = AsyncMock(
+    application.send_probe_link_status = AsyncMock(
         side_effect=lambda address: application.notifications._on_packet(A32_PACKET, (address, 8702))
     )
 
@@ -134,7 +134,7 @@ async def test_application_probe_waits_for_link_status_publication():
     assert result.records[0].label == "selected_link"
     assert result.records[1].label == "switch_port_0"
     assert result.records[2].label == "switch_port_3"
-    application.settings.probe_link_status.assert_awaited_once_with(device_ip_address)
+    application.send_probe_link_status.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("link_status", device_ip_address)
 
 
@@ -143,10 +143,10 @@ async def test_application_probe_timeout_raises_and_unregisters_waiter():
     application = DanteApplication()
     device_ip_address = "192.0.2.10"
     application.notifications._on_packet(A32_PACKET, (device_ip_address, 8702))
-    application.settings.probe_link_status = AsyncMock()
+    application.send_probe_link_status = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="link status readback timed out"):
         await application.probe_link_status(device_ip_address, timeout=0.01)
 
-    application.settings.probe_link_status.assert_awaited_once_with(device_ip_address)
+    application.send_probe_link_status.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("link_status", device_ip_address)

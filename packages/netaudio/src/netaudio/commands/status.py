@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 
 import typer
 
-from netaudio._common_output import output_single, output_table
-from netaudio._common_selection import sort_devices
-from netaudio.commands.device_display import (
+from netaudio.cli_support.output import output_single, output_table
+from netaudio.cli_support.selection import sort_devices
+from netaudio.commands.device.display import (
     _device_active_latency,
     _device_encoding,
     device_list_headers,
@@ -120,7 +120,7 @@ async def gather_status(
     if daemon_is_accessible():
         shure_summaries = await get_shure_devices_from_daemon()
 
-    from netaudio._common import _load_display_devices
+    from netaudio.cli_support.execution import _load_display_devices
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
     devices = await _load_display_devices(application)
@@ -147,16 +147,10 @@ async def gather_status(
     return dante_headers, dante_rows, shure_rows, json_data
 
 
-def status(
-    json_flag: bool = typer.Option(False, "-j", "--json", help="Shorthand for --output=json."),
-):
+def status():
     """Show all discovered network audio devices."""
     from netaudio.cli import OutputFormat, state
-
-    if json_flag:
-        state.output_format = OutputFormat.json
-
-    from netaudio._common import run_command
+    from netaudio.cli_support.execution import run_command
 
     dante_headers, dante_rows, shure_rows, json_data = run_command(
         gather_status,

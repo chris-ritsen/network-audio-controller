@@ -1,22 +1,21 @@
 import csv
 import io
 import json
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-from typer.testing import CliRunner
-
 import netaudio._capture as capture_module
-import netaudio._common as common_module
-from netaudio.commands import device as device_commands
-from netaudio.commands import device_display
-from netaudio.dante.channel import DanteChannel
+import netaudio.cli_support.execution as common_module
+import pytest
+from netaudio.commands.device import cli as device_commands
+from netaudio.commands.device import display as device_display
 from netaudio.dante.application import DanteApplication
+from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
-
+from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -585,19 +584,17 @@ async def test_populate_show_details_fills_clock_prefix_and_avio_pages():
                 or {"clock_source_code": 0, "clock_subdomain": bytes(16)}
             )
         ),
-        apply_avio_status_pages=DanteApplication.apply_avio_status_pages,
+        get_aes67_configured=AsyncMock(
+            side_effect=lambda _device: setattr(device, "aes67_multicast_prefix", "239.69.0.0") or False
+        ),
         probe_sample_rate_status=AsyncMock(side_effect=RuntimeError("unavailable")),
         probe_encoding_status=AsyncMock(side_effect=RuntimeError("unavailable")),
+        query_receiver_channel_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_receiver_flow_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_transmitter_channel_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_transmitter_flow_status_2809=AsyncMock(return_value={"reported_flow_count": 0, "flows": []}),
     )
-    device.operations.get_aes67_configured = AsyncMock(
-        side_effect=lambda: setattr(device, "aes67_multicast_prefix", "239.69.0.0") or False
-    )
-    device.operations.query_receiver_flow_status_2809 = AsyncMock(side_effect=RuntimeError("unsupported"))
-    device.operations.query_transmitter_channel_status_2809 = AsyncMock(side_effect=RuntimeError("unsupported"))
-    device.operations.query_transmitter_flow_status_2809 = AsyncMock(
-        return_value={"reported_flow_count": 0, "flows": []}
-    )
-    device.operations.query_receiver_channel_status_2809 = AsyncMock(side_effect=RuntimeError("unsupported"))
+    application.apply_avio_status_pages = partial(DanteApplication.apply_avio_status_pages, application)
     device.apply_transmitter_flow_status_page = MagicMock()
 
     await common_module._populate_show_details(application, device, include_channels=False)

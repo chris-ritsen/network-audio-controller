@@ -366,7 +366,7 @@ class NotificationPacketHandlers:
 
     def _log_dissected(self, data: bytes, source_ip: str, source_port: int) -> None:
         from netaudio.common.app_config import settings as app_settings
-        from netaudio.dante.packet_dissection_rendering import dissect_and_render, format_dissect_label
+        from netaudio.dante.dissection.rendering import dissect_and_render, format_dissect_label
 
         color = not app_settings.no_color
         label = format_dissect_label("multicast", f"{source_ip}:{source_port}", color=color)

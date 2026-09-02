@@ -17,8 +17,8 @@ from netaudio.dante.const import (
     PROTOCOL_SETTINGS,
 )
 from netaudio.dante.debug_formatter import _external_labels
-from netaudio.dante.packet_header import parse_packet_header
-from netaudio.dante.packet_store import _decompress_payload
+from netaudio.dante.dissection.header import parse_packet_header
+from netaudio.dante.packet_store.payloads import decompress_payload
 
 logger = logging.getLogger("netaudio")
 
@@ -146,7 +146,7 @@ def _query_observed_subscription_statuses(
     stats: dict[int, dict[str, int]] = {}
     for row in rows:
         packet_id = int(row["id"])
-        payload = _decompress_payload(row["payload"])
+        payload = decompress_payload(row["payload"])
         codes = _extract_subscription_status_codes(payload)
         for code in codes:
             entry = stats.get(code)
@@ -200,7 +200,7 @@ def _extract_seed_samples(
     rows: list[dict[str, object]] = []
     for database_row in database_rows:
         sample = dict(database_row)
-        sample["payload"] = _decompress_payload(sample["payload"])
+        sample["payload"] = decompress_payload(sample["payload"])
         rows.append(sample)
 
     arc_protocol_csv = ",".join(str(p) for p in ARC_PROTOCOL_IDS)
@@ -220,7 +220,7 @@ def _extract_seed_samples(
     status_samples_by_code: dict[int, dict[str, object]] = {}
     for row in status_rows:
         packet_id = int(row["id"])
-        payload = _decompress_payload(row["payload"])
+        payload = decompress_payload(row["payload"])
         codes = _extract_subscription_status_codes(payload)
         for status_code in sorted(codes):
             if status_code in status_samples_by_code:

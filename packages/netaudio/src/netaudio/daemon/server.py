@@ -10,21 +10,22 @@ import time
 from collections.abc import Coroutine
 from typing import Any, Awaitable, cast
 
-from zeroconf import Error as ZeroconfError, ServiceStateChange
+from zeroconf import Error as ZeroconfError
+from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsyncioLock
 from netaudio.common.app_config import settings as app_settings
-from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
-from netaudio.daemon.http_api import DaemonHTTPServer
+from netaudio.daemon.http.api import DaemonHTTPServer
+from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
-from netaudio.shure.manager import ShureManager
-from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.const import SERVICES
 from netaudio.dante.events import DanteEvent, EventType
+from netaudio.dante.services.heartbeat import DanteHeartbeatService
+from netaudio.shure.manager import ShureManager
 
 
 class DaemonAlreadyRunningError(Exception):

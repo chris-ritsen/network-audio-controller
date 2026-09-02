@@ -1,8 +1,7 @@
 import struct
 
 import pytest
-
-from netaudio.dante.packet_dissector import dissect
+from netaudio.dante.dissection.dissector import dissect
 
 
 def _arc_packet(protocol_identifier: int, opcode: int, status: int, body: bytes = b"") -> bytes:
@@ -309,8 +308,8 @@ def test_property_directory_dissects_captured_arc_protocol_variants(protocol_ide
 def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):
     from netaudio.capture import packets as capture_packets
     from netaudio.dante import fact_store
+    from netaudio.dante.dissection.dissector import _load_facts_for_packet
     from netaudio.dante.fact_store import FactRecord, add_fact
-    from netaudio.dante.packet_dissector import _load_facts_for_packet
 
     facts_path = tmp_path / "facts.json"
     add_fact(

@@ -47,11 +47,13 @@ logger = logging.getLogger("netaudio")
 CONMON_RETRY_TIMEOUTS = [3, 5, 10]
 
 ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset({"manufacturer"})
+STATUS_KIND_DIAGNOSTIC_LOG_EXPORT = "diagnostic_log_export"
 
 FIELD_STATUS_KINDS = frozenset(
     {
         STATUS_KIND_AES67,
         STATUS_KIND_CLEAR_CONFIGURATION,
+        STATUS_KIND_DIAGNOSTIC_LOG_EXPORT,
         STATUS_KIND_CLOCK,
         STATUS_KIND_ENCODING,
         STATUS_KIND_GAIN,
@@ -545,7 +547,7 @@ class DanteStateService:
 
                 device_ip = str(device.ipv4)
                 if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
-                    await self.application.settings.request_bluetooth_status(device_ip)
+                    await self.application.send_bluetooth_status_request(device_ip)
 
                 await self._probe_with_retries(
                     device,
@@ -636,7 +638,7 @@ class DanteStateService:
                 logger.debug(f"Conmon retry {attempt} for {server_name}")
                 await self.application._send_conmon_query_for_device(
                     device,
-                    self.application.settings.request_dante_model,
+                    self.application.send_dante_model_request,
                 )
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:

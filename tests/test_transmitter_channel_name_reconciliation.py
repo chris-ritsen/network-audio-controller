@@ -3,19 +3,20 @@ from types import SimpleNamespace
 import pytest
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.dante.device_operations import DanteDeviceOperations
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.transmitter_channel_name_reconciliation import (
     reconcile_transmitter_channel_names,
 )
 
 
-class _Application:
+class _Application(DanteApplication):
     def __init__(self):
+        super().__init__()
         self.renames = []
 
     async def set_channel_name(self, device, channel_type, channel_number, name):
         self.renames.append((channel_type, channel_number, name))
-        return await device.operations.set_channel_name(channel_type, channel_number, name)
+        return await self.send_set_channel_name(device, channel_type, channel_number, name)
 
 
 def _device(routing_name_state, respond):
@@ -25,7 +26,6 @@ def _device(routing_name_state, respond):
         topology_mutation_lock=DeferredAsyncioLock(),
         transmitter_channel_name_protocol_identifier=None,
     )
-    device.operations = DanteDeviceOperations(device)
     device.executed = []
 
     async def execute(specification):

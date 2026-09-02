@@ -21,7 +21,7 @@ async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_re
         "available_actions_mask": 3,
         "action_result_code": 0,
     }
-    application.settings.probe_clear_configuration_status = AsyncMock(
+    application.send_probe_clear_configuration_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             TREATMENT_STATUS,
             (ip_address, 8702),
@@ -31,7 +31,7 @@ async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_re
     result = await application.probe_clear_configuration_status(device_ip_address)
 
     assert result == expected_status
-    application.settings.probe_clear_configuration_status.assert_awaited_once_with(device_ip_address)
+    application.send_probe_clear_configuration_status.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("clear_configuration_status", device_ip_address)
 
 
@@ -39,12 +39,12 @@ async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_re
 @pytest.mark.parametrize(
     ("preserve_internet_protocol_settings", "status_packet", "expected_result_code", "method_name"),
     [
-        (False, MODE_ONE_STATUS, 1, "clear_all_configuration"),
+        (False, MODE_ONE_STATUS, 1, "send_clear_all_configuration"),
         (
             True,
             MODE_TWO_STATUS,
             2,
-            "clear_all_configuration_preserving_internet_protocol_settings",
+            "send_clear_all_configuration_preserving_internet_protocol_settings",
         ),
     ],
 )
@@ -62,7 +62,7 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
         application.notifications._on_packet(status_packet, (ip_address, 8702))
 
     command = AsyncMock(side_effect=publish_status)
-    setattr(application.settings, method_name, command)
+    setattr(application, method_name, command)
 
     result = await application.clear_configuration(
         device_ip_address,
@@ -78,7 +78,7 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
 async def test_clear_configuration_rejects_a_nonmatching_status_result():
     application = DanteApplication()
     device_ip_address = "10.0.2.15"
-    application.settings.clear_all_configuration = AsyncMock(
+    application.send_clear_all_configuration = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
             TREATMENT_STATUS,
             (ip_address, 8702),
@@ -98,7 +98,7 @@ async def test_clear_configuration_rejects_a_nonmatching_status_result():
 @pytest.mark.asyncio
 async def test_clear_configuration_times_out_without_any_status():
     application = DanteApplication()
-    application.settings.clear_all_configuration = AsyncMock()
+    application.send_clear_all_configuration = AsyncMock()
 
     with pytest.raises(CapabilityProbeTimeout, match="clear-configuration status timed out"):
         await application.clear_configuration("10.0.2.15", preserve_internet_protocol_settings=False, timeout=0.01)

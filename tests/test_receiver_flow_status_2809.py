@@ -5,7 +5,7 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_operations import DanteDeviceOperations
+from netaudio.dante.application import DanteApplication
 from tests.protocol_test_fixtures import load_protocol_packet
 
 
@@ -103,13 +103,13 @@ def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
 @pytest.mark.asyncio
 async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_rejection():
     successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 4)))
-    successful_operation = DanteDeviceOperations(successful_device)
+    successful_operation = DanteApplication()
 
-    page = await successful_operation.query_receiver_flow_status_2809()
+    page = await successful_operation.query_receiver_flow_status_2809(successful_device)
 
     assert page["flows"][0]["destination_internet_protocol_version_four_address"] == "192.168.1.61"
     successful_device.execute.assert_awaited_once_with({"command": "query_receiver_flow_status_2809"})
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 14)))
     with pytest.raises(RuntimeError, match="result 0x0030"):
-        await DanteDeviceOperations(rejected_device).query_receiver_flow_status_2809()
+        await DanteApplication().query_receiver_flow_status_2809(rejected_device)

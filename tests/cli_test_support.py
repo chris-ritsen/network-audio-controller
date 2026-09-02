@@ -51,29 +51,6 @@ def next_value(value):
     return item
 
 
-class FakeOperations:
-    def __init__(self, *, settings=None, aes67=None):
-        self.settings = settings
-        self.aes67 = aes67
-        self.settings_calls = 0
-        self.aes67_calls = 0
-
-    async def get_device_settings(self):
-        self.settings_calls += 1
-        return next_value(self.settings)
-
-    async def get_latency_settings(self):
-        self.settings_calls += 1
-        return next_value(self.settings)
-
-    async def get_aes67_configured(self):
-        self.aes67_calls += 1
-        return next_value(self.aes67)
-
-    async def resolve_channel_name_protocol_identifier(self, channel_type):
-        return 0x2809
-
-
 class FakeDevice:
     def __init__(
         self,
@@ -123,7 +100,10 @@ class FakeDevice:
         self.tx_channels = {}
         self.rx_channels = {}
         self.subscriptions = []
-        self.operations = FakeOperations(settings=settings, aes67=aes67)
+        self.settings = settings
+        self.aes67 = aes67
+        self.settings_calls = 0
+        self.aes67_calls = 0
         self._name_reads = name_reads
         self.name_read_calls = 0
 
@@ -201,6 +181,21 @@ class FakeApplication:
             return next_value(self.responses)
         return _success_response()
 
+    async def get_aes67_configured(self, device):
+        device.aes67_calls += 1
+        return next_value(device.aes67)
+
+    async def get_device_settings(self, device):
+        device.settings_calls += 1
+        return next_value(device.settings)
+
+    async def get_latency_settings(self, device):
+        device.settings_calls += 1
+        return next_value(device.settings)
+
+    async def resolve_channel_name_protocol_identifier(self, device, channel_type):
+        return 0x2809
+
     async def identify(self, device):
         self._record("identify", device)
 
@@ -237,7 +232,7 @@ class FakeApplication:
 
     async def set_aes67_multicast_prefix(self, device, prefix):
         self._record("set_aes67_multicast_prefix", device, prefix)
-        await device.operations.get_aes67_configured()
+        await self.get_aes67_configured(device)
         return device.aes67_multicast_prefix
 
     async def set_preferred_leader(self, device, is_preferred):
@@ -265,7 +260,7 @@ class FakeApplication:
 
     async def probe_sample_rate_status(self, device_ip_address, timeout=2.0):
         device = self._device_by_ip(device_ip_address)
-        settings = await device.operations.get_device_settings()
+        settings = await self.get_device_settings(device)
         if not isinstance(settings, dict) or settings.get("sample_rate") is None:
             raise RuntimeError("sample rate status unavailable")
         current_sample_rate = settings["sample_rate"]

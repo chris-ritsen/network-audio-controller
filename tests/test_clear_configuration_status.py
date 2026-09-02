@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from netaudio import core
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
-from netaudio.dante.services.settings import DanteSettingsService
 from tests.status_test_support import application_with_device, count_events, receive_packets
 
 
@@ -93,12 +93,13 @@ def test_state_service_applies_and_serializes_clear_configuration_status_once():
 
 
 @pytest.mark.asyncio
-async def test_settings_service_executes_typed_status_probe():
+async def test_application_executes_typed_status_probe():
     transport = SimpleNamespace(execute=AsyncMock(return_value=None))
-    service = DanteSettingsService(transport)
+    application = DanteApplication()
+    application.transport = transport
     host_mac = b"\x10\x20\x30\x40\x50\x60"
 
-    await service.probe_clear_configuration_status("192.168.1.108", host_mac=host_mac)
+    await application.send_probe_clear_configuration_status("192.168.1.108", host_mac=host_mac)
 
     [request] = transport.execute.await_args_list
     address, specification = request.args
@@ -109,13 +110,14 @@ async def test_settings_service_executes_typed_status_probe():
 
 
 @pytest.mark.asyncio
-async def test_settings_service_executes_both_typed_clear_configuration_actions():
+async def test_application_executes_both_typed_clear_configuration_actions():
     transport = SimpleNamespace(execute=AsyncMock(return_value=None))
-    service = DanteSettingsService(transport)
+    application = DanteApplication()
+    application.transport = transport
     host_mac = b"\x10\x20\x30\x40\x50\x60"
 
-    await service.clear_all_configuration("192.168.1.108", host_mac=host_mac)
-    await service.clear_all_configuration_preserving_internet_protocol_settings(
+    await application.send_clear_all_configuration("192.168.1.108", host_mac=host_mac)
+    await application.send_clear_all_configuration_preserving_internet_protocol_settings(
         "192.168.1.108",
         host_mac=host_mac,
     )

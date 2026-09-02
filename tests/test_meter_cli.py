@@ -8,10 +8,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from netaudio.cli import OutputFormat, state
-from netaudio.commands.device_meter import run_meter
-from netaudio.commands.meter_runtime import MeterViewOptions
+from netaudio.commands.meter.cli import run_meter
+from netaudio.commands.meter.tui import MeterViewOptions
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
+
 from tests.cli_test_support import invoke
 
 
@@ -143,7 +144,7 @@ def test_json_snapshot_applies_direction_and_channel_filters(monkeypatch, reset_
 def test_interactive_meter_rejects_non_tty_without_starting_metering(monkeypatch, reset_cli_state):
     device, _get_cache, start, stop = _patch_daemon(monkeypatch)
     run_tui = AsyncMock()
-    monkeypatch.setattr("netaudio.commands.meter_tui.run_meter_tui", run_tui)
+    monkeypatch.setattr("netaudio.commands.meter.tui.run_meter_tui", run_tui)
     _set_output(monkeypatch, OutputFormat.plain)
 
     result = _meter(device, MeterViewOptions(), timeout=3.0)
@@ -158,7 +159,7 @@ def test_interactive_meter_rejects_non_tty_without_starting_metering(monkeypatch
 def test_interactive_meter_forwards_simple_view_options(monkeypatch, reset_cli_state):
     device, get_cache, start, stop = _patch_daemon(monkeypatch)
     run_tui = AsyncMock()
-    monkeypatch.setattr("netaudio.commands.meter_tui.run_meter_tui", run_tui)
+    monkeypatch.setattr("netaudio.commands.meter.tui.run_meter_tui", run_tui)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     _set_output(monkeypatch, OutputFormat.plain)
