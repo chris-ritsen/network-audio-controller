@@ -161,14 +161,19 @@ async def test_control_population_reports_failures_instead_of_discarding_them(ca
     device = make_show_device()
     device.tx_channels = {}
     device.rx_channels = {}
+    device.online = True
     device.populate_from_core = AsyncMock(side_effect=RuntimeError("synthetic population failure"))
 
-    with pytest.raises(RuntimeError, match="failed to populate controls"):
+    with caplog.at_level("WARNING", logger="netaudio"):
         await common_module._populate_controls({device.server_name: device})
 
-    await common_module._populate_controls({device.server_name: device}, strict=False)
-
-    assert "synthetic population failure" in caplog.text
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert warnings[0].getMessage() == (
+        f"Could not reach {device.server_name} ({device.ipv4}): synthetic population failure"
+    )
+    assert warnings[0].exc_info is None
+    assert device.online is False
 
 
 def test_device_show_csv_is_a_two_column_summary(monkeypatch):

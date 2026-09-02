@@ -15,7 +15,6 @@ from netaudio.capture.analysis import (
     _opcode_key,
     _parse_time_to_ns,
 )
-from netaudio.capture.daemon import _print_packet_line
 from netaudio.capture.display import (
     _emdash,
     _print_diff_compact,
@@ -72,6 +71,8 @@ def packet_list(
     profile: Optional[str] = typer.Option(None, "--profile", help="Capture config profile name."),
 ):
     """Search and filter captured packets."""
+    from netaudio.capture.daemon import _print_packet_line
+
     from netaudio.cli import state as cli_state
 
     if tail is not None:

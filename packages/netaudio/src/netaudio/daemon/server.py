@@ -9,9 +9,11 @@ import time
 from collections.abc import Coroutine
 from typing import Any, Awaitable, cast
 
+from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsyncioLock
+from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
@@ -42,6 +44,19 @@ except ImportError:
 logger = logging.getLogger("netaudio")
 
 ONLINE_REVALIDATE_IDLE_SECONDS = 45.0
+REVALIDATE_INTERVAL_SECONDS = 30.0
+STATUS_FIELD_REFRESH_INTERVAL_SECONDS = 300.0
+
+
+def _stale_device_minutes_from_config(daemon_config: dict) -> float:
+    raw_value = daemon_config.get("stale_device_minutes")
+    if raw_value is None:
+        return app_settings.stale_device_minutes
+    if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+        raise ValueError(f"daemon.stale_device_minutes must be a number, got {raw_value!r}")
+    if raw_value < 0:
+        raise ValueError(f"daemon.stale_device_minutes must not be negative, got {raw_value!r}")
+    return float(raw_value)
 
 
 def _probe_device(device_ip: str) -> bool:
@@ -66,11 +81,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._packet_store = None
         self._session_id = None
 
-        from netaudio.common.config_loader import load_capture_profile, resolve_db_from_config
+        from netaudio.common.config_loader import load_capture_profile, load_daemon_config, resolve_db_from_config
 
         profile_cfg, _ = load_capture_profile(None, None)
-
-        from netaudio.common.app_config import settings as app_settings
+        app_settings.stale_device_minutes = _stale_device_minutes_from_config(load_daemon_config())
 
         lock_key_value = profile_cfg.get("device_lock_key")
         if lock_key_value:
@@ -124,6 +138,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             port=self._daemon_port,
             on_shutdown=self.request_shutdown,
             mark_offline=self.mark_device_offline,
+            forget_device=self.forget_device,
         )
         self.heartbeat: DanteHeartbeatService | None = None
         self._revalidate_task: asyncio.Task | None = None
@@ -131,6 +146,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._background_tasks: set[asyncio.Task] = set()
         self._offline_failures: dict[str, int] = {}
         self._offline_candidate_since: dict[str, float] = {}
+        self._last_status_field_refresh_monotonic = time.monotonic()
         self._dbus = None
         self._event_listeners_registered = False
 
@@ -453,8 +469,6 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if self.shure:
             await self.shure.start()
 
-        from netaudio.common.app_config import settings as app_settings
-
         self.heartbeat = DanteHeartbeatService(
             device_by_ip=self.application._device_by_ip,
             get_devices=lambda: self.application.devices,
@@ -466,8 +480,6 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         await self.heartbeat.start()
 
         self._register_event_listeners()
-
-        from netaudio.common.app_config import settings as app_settings
 
         if _DBusService and app_settings.dbus_enabled:
             try:
@@ -599,6 +611,73 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             except Exception as exception:
                 logger.warning(f"Packet store close error: {exception}", exc_info=True)
             self._packet_store = None
+
+    def forget_device(self, server_name: str) -> None:
+        device = self.devices.get(server_name)
+        self.clear_offline_candidate(server_name)
+        self.application.unregister_device(server_name)
+        if device is None or not device.online or not device.ipv4 or not device.services:
+            return
+        self._spawn_background(
+            self._rediscover_forgotten_device(device),
+            name=f"rediscover-forgotten:{server_name}",
+        )
+
+    async def _rediscover_forgotten_device(self, device) -> None:
+        zeroconf = self.zeroconf
+        if zeroconf is None:
+            return
+        device_ip = str(device.ipv4)
+        try:
+            reachable = await asyncio.wait_for(asyncio.to_thread(_probe_device, device_ip), timeout=5.0)
+        except (asyncio.TimeoutError, OSError) as exception:
+            logger.warning(f"Dante probe failed for forgotten device {device.server_name}: {exception}")
+            return
+        if not reachable:
+            logger.info(f"Forgotten device {device.server_name} did not answer; it stays forgotten")
+            return
+        logger.info(f"Forgotten device {device.server_name} is still reachable; rebuilding it from mDNS records")
+        for instance_name, service in device.services.items():
+            await self.handle_service_change(
+                zeroconf.zeroconf,
+                service["type"],
+                instance_name,
+                ServiceStateChange.Added,
+            )
+
+    def _expire_stale_devices(self) -> list[str]:
+        threshold_seconds = app_settings.stale_device_minutes * 60
+        if threshold_seconds <= 0:
+            return []
+        now = time.time()
+        expired = []
+        for server_name, device in list(self.devices.items()):
+            if device.last_seen is None:
+                continue
+            age_seconds = now - device.last_seen
+            if age_seconds < threshold_seconds:
+                continue
+            logger.info(f"Forgetting stale device {server_name}: last seen {age_seconds / 60:.0f} minutes ago")
+            self.forget_device(server_name)
+            expired.append(server_name)
+        return expired
+
+    def _refresh_status_fields(self) -> None:
+        now = time.monotonic()
+        full_refresh = (now - self._last_status_field_refresh_monotonic) >= STATUS_FIELD_REFRESH_INTERVAL_SECONDS
+        if full_refresh:
+            self._last_status_field_refresh_monotonic = now
+        for server_name, device in list(self.devices.items()):
+            if not device.online or not device.ipv4:
+                continue
+            fields_known = device.clock_source_code is not None and device.is_locked is not None
+            if fields_known and not full_refresh:
+                continue
+            reason = "periodic refresh" if full_refresh else "missing status fields"
+            self._spawn_background(
+                self.state.refresh_status_fields(server_name, reason),
+                name=f"refresh-status:{server_name}",
+            )
 
     def clear_offline_candidate(self, server_name: str) -> None:
         self._offline_failures.pop(server_name, None)
@@ -774,9 +853,11 @@ class NetaudioDaemon(DanteDiscoveryMixin):
     async def _revalidate_devices_loop(self) -> None:
         while True:
             try:
-                await asyncio.sleep(30)
+                await asyncio.sleep(REVALIDATE_INTERVAL_SECONDS)
+                self._expire_stale_devices()
                 await self._recover_known_devices(offline_only=True)
                 await self._verify_quiet_online_devices()
+                self._refresh_status_fields()
             except asyncio.CancelledError:
                 break
             except Exception as exception:

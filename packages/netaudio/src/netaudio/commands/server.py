@@ -12,7 +12,7 @@ import typer
 
 from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 
-from netaudio.daemon.client import get_device_summaries_from_daemon, shutdown_daemon
+from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
 from netaudio.daemon import service_install
 
 from netaudio.icons import icon
@@ -234,6 +234,64 @@ def status(
         raise typer.Exit(code=1)
 
     typer.echo(f"{icon('online')}Daemon is running. {len(devices)} device(s) cached.")
+
+
+@app.command()
+def forget(
+    device_name: Optional[str] = typer.Argument(
+        None, help="Device name or mDNS server name to drop from the daemon cache."
+    ),
+    emulated: bool = typer.Option(False, "--emulated", help="Forget every cached emulated device."),
+    offline: bool = typer.Option(False, "--offline", help="Forget every cached device that is currently offline."),
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
+    ),
+):
+    """Drop cached devices from the running daemon."""
+    if device_name is not None and (emulated or offline):
+        typer.echo("Error: give either a device name or --offline/--emulated, not both.", err=True)
+        raise typer.Exit(code=1)
+    if device_name is None and not (emulated or offline):
+        typer.echo("Error: give a device name, --offline, or --emulated.", err=True)
+        raise typer.Exit(code=1)
+
+    effective_port = _effective_daemon_port(daemon_port)
+    _pin_client_port(effective_port)
+    if not _port_in_use(effective_port):
+        typer.echo(f"{icon('offline')}Daemon is not running.", err=True)
+        raise typer.Exit(code=1)
+
+    status, data = asyncio.run(forget_devices_on_daemon(device_name=device_name, emulated=emulated, offline=offline))
+    if status is None:
+        typer.echo("Daemon port is open but the daemon is not responding.", err=True)
+        raise typer.Exit(code=1)
+    error = data.get("error") if isinstance(data, dict) else None
+    if status == 404 and error == "device not found":
+        typer.echo(f"Error: {device_name} is not in the daemon cache.", err=True)
+        raise typer.Exit(code=1)
+    if status == 404:
+        typer.echo(
+            "Error: the running daemon does not support forget; restart it with 'netaudio daemon restart'.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if status != 200:
+        typer.echo(f"Error: {error or f'daemon returned HTTP {status}'}", err=True)
+        raise typer.Exit(code=1)
+
+    forgotten = data.get("forgotten") or [] if isinstance(data, dict) else []
+    if not forgotten:
+        typer.echo("No cached devices matched.")
+        return
+    for entry in forgotten:
+        label = entry.get("name") or entry.get("server_name")
+        details = [
+            entry.get("server_name"),
+            entry.get("ipv4"),
+            entry.get("kind"),
+            "online" if entry.get("online") else "offline",
+        ]
+        typer.echo(f"Forgot {label} ({', '.join(str(detail) for detail in details if detail)})")
 
 
 @app.command()

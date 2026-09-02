@@ -47,6 +47,26 @@ async def test_meter_start_and_stop_report_success(monkeypatch, function_name, p
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("options", "path"),
+    [
+        ({"device_name": "avio usb/1"}, "/devices/avio%20usb%2F1"),
+        ({"emulated": True}, "/devices?selection=emulated"),
+        ({"offline": True}, "/devices?selection=offline"),
+        ({"emulated": True, "offline": True}, "/devices?selection=emulated,offline"),
+    ],
+)
+async def test_forget_devices_on_daemon_builds_delete_paths(monkeypatch, options, path):
+    request = AsyncMock(return_value=(200, {"forgotten": []}))
+    monkeypatch.setattr(daemon_client, "_daemon_request", request)
+
+    result = await daemon_client.forget_devices_on_daemon(**options)
+
+    assert result == (200, {"forgotten": []})
+    request.assert_awaited_once_with("DELETE", path)
+
+
+@pytest.mark.asyncio
 async def test_stream_daemon_events_handles_fragmentation_and_isolates_malformed_json(monkeypatch):
     peer_closed = asyncio.Event()
 

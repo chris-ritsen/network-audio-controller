@@ -49,14 +49,15 @@ class FakeWriter:
         }
 
 
-def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50"):
+def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50", kind="hardware", online=True):
     device = SimpleNamespace(
         server_name=server_name,
         name=name,
         ipv4=ipv4,
+        kind=kind,
         rx_channels={},
         tx_channels={},
-        online=True,
+        online=online,
         interfaces=[],
         link_speed_mbps=None,
         flow_protocol_id=None,
@@ -180,6 +181,9 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
                 }
             ]
         ),
+    )
+    application.unregister_device = MagicMock(
+        side_effect=lambda server_name: application.devices.pop(server_name, None),
     )
     state = SimpleNamespace(
         refresh_device=AsyncMock(),

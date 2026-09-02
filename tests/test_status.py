@@ -1,3 +1,5 @@
+import pytest
+
 from netaudio.commands.status import (
     DANTE_STATUS_HEADERS,
     _dante_row_from_device,
@@ -88,6 +90,35 @@ def test_dante_status_row_uses_shared_formatters_for_audio_columns():
     assert row["Sample Rate"] == "48 kHz"
     assert row["Encoding"] == "PCM24"
     assert row["Latency"] == "1 ms"
+
+
+@pytest.mark.asyncio
+async def test_gather_status_verbose_uses_device_list_layout(monkeypatch):
+    from netaudio import _common as common_module
+    from netaudio.commands import status as status_module
+    from netaudio.commands.device_display import device_list_headers, device_list_row
+    from netaudio.daemon import client as daemon_client
+
+    device = make_status_device()
+    device.online = True
+
+    async def load_display_devices():
+        return {device.server_name: device}
+
+    monkeypatch.setattr(common_module, "_load_display_devices", load_display_devices)
+    monkeypatch.setattr(daemon_client, "daemon_is_accessible", lambda: False)
+
+    headers, rows, shure_rows, json_data = await status_module._gather_status(verbose=True)
+
+    assert headers == device_list_headers(True)
+    assert rows == [device_list_row(device.server_name, device, verbose=True)]
+    assert shure_rows == []
+    assert list(json_data["dante"]) == [device.server_name]
+
+    headers, rows, _, _ = await status_module._gather_status(verbose=False)
+
+    assert headers == DANTE_STATUS_HEADERS
+    assert rows == [_dante_row_from_device(device)]
 
 
 def test_offline_device_without_last_seen_is_not_shown():

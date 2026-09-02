@@ -1,9 +1,4 @@
-from importlib.metadata import version
-
-__version__ = version("netaudio")
-
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.browser import DanteBrowser
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
@@ -16,6 +11,19 @@ __all__ = [
     "DanteDevice",
     "DanteEvent",
     "DanteEventDispatcher",
-    "EventType",
     "DanteSubscription",
+    "EventType",
+    "__version__",
 ]
+
+
+def __getattr__(name: str):
+    if name == "__version__":
+        from importlib.metadata import version
+
+        return version("netaudio")
+    if name == "DanteBrowser":
+        from netaudio.dante.browser import DanteBrowser
+
+        return DanteBrowser
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -13,6 +13,7 @@ logger = logging.getLogger("netaudio")
 DEFAULT_MDNS_TIMEOUT = 5
 DEFAULT_DAEMON_PORT = 9000
 DEFAULT_INTERFACE = None
+DEFAULT_STALE_DEVICE_MINUTES = 60
 
 
 def get_available_interfaces():
@@ -40,6 +41,7 @@ class AppSettings:
         self.daemon_port: int = int(os.environ.get("NETAUDIO_DAEMON_PORT", DEFAULT_DAEMON_PORT))
         self.dbus_enabled: bool = os.environ.get("NETAUDIO_DBUS", "").lower() in ("1", "true", "yes")
         self.lock_state_timeout: float = float(os.environ.get("NETAUDIO_LOCK_STATE_TIMEOUT", 4))
+        self.stale_device_minutes: float = DEFAULT_STALE_DEVICE_MINUTES
         self._device_lock_key: bytes | None = None
         lock_key_value = os.environ.get("NETAUDIO_DEVICE_LOCK_KEY")
         if lock_key_value:

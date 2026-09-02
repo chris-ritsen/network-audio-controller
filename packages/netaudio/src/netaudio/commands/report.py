@@ -12,8 +12,6 @@ import typer
 
 from netaudio._common_cli import HELP_CONTEXT_SETTINGS
 
-from netaudio import __version__
-
 app = typer.Typer(
     help="Report issues with diagnostic context.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS
 )
@@ -86,6 +84,7 @@ def _gh_authenticated() -> bool:
 
 
 async def _collect_diagnostics() -> dict:
+    from netaudio import __version__
     from netaudio.dante.application import DanteApplication
     from netaudio.common.app_config import settings
     from netaudio.daemon.client import get_devices_from_daemon
