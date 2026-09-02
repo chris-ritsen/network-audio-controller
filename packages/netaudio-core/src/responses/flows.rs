@@ -75,46 +75,24 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
         return None;
     }
 
-    let pointer_table_end = TRANSMITTER_FLOW_STATUS_POINTER_TABLE_OFFSET
-        .checked_add(usize::from(reported_flow_count).checked_mul(2)?)?;
-    response.get(TRANSMITTER_FLOW_STATUS_POINTER_TABLE_OFFSET..pointer_table_end)?;
-
-    let mut record_pointers = Vec::with_capacity(usize::from(reported_flow_count));
-    let mut seen_record_pointers = HashSet::with_capacity(usize::from(reported_flow_count));
-    for index in 0..reported_flow_count {
-        let pointer_offset = TRANSMITTER_FLOW_STATUS_POINTER_TABLE_OFFSET
-            .checked_add(usize::from(index).checked_mul(2)?)?;
-        let record_pointer = read_u16(response, pointer_offset)?;
-        let record_offset = usize::from(record_pointer);
-        if record_offset < pointer_table_end || !seen_record_pointers.insert(record_pointer) {
-            return None;
-        }
-        record_pointers.push(record_pointer);
-    }
-
-    let mut flows = Vec::with_capacity(usize::from(reported_flow_count));
-    let mut record_ranges = Vec::with_capacity(usize::from(reported_flow_count));
-    let mut flow_numbers = HashSet::with_capacity(usize::from(reported_flow_count));
-    let mut media_identities = HashSet::with_capacity(usize::from(reported_flow_count));
-    for record_pointer in record_pointers {
-        let flow = parse_transmitter_flow_status_record(response, record_pointer)?;
+    let flows = parse_pointer_table_page(
+        response,
+        MODERN_ARC_POINTER_TABLE_OFFSET,
+        reported_flow_count,
+        |flow: &TransmitterFlowStatus| usize::from(flow.record_length_bytes),
+        |response, record_pointer, _| {
+            parse_transmitter_flow_status_record(response, record_pointer)
+        },
+    )?;
+    let mut flow_numbers = HashSet::with_capacity(flows.len());
+    let mut media_identities = HashSet::with_capacity(flows.len());
+    for flow in &flows {
         if flow.flow_number > u16::from(maximum_flow_slots)
             || !flow_numbers.insert(flow.flow_number)
             || !media_identities.insert((flow.media_type, flow.media_local_flow_id))
         {
             return None;
         }
-        let record_start = usize::from(record_pointer);
-        let record_end = record_start.checked_add(usize::from(flow.record_length_bytes))?;
-        record_ranges.push((record_start, record_end));
-        flows.push(flow);
-    }
-    record_ranges.sort_unstable();
-    if record_ranges
-        .windows(2)
-        .any(|ranges| ranges[0].1 > ranges[1].0)
-    {
-        return None;
     }
 
     Some(TransmitterFlowStatusPage {
