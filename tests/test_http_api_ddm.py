@@ -97,3 +97,17 @@ async def test_ddm_refresh_reports_the_inventory_status():
     inventory.refresh.return_value = False
     status, _ = await _post(server, "/ddm/refresh", b"")
     assert status == 502
+
+
+@pytest.mark.asyncio
+async def test_daemon_device_records_keep_legacy_key_aliases_for_fleet_consumers():
+    device = make_device()
+    device.sample_rate = 48000
+    device.latency = 1.0
+    server = make_http_server(devices={"dev1": device})
+    status, devices = await _get(server, "/devices")
+    assert status == 200
+    record = devices["dev1"]
+    assert record["sample_rate_hz"] == 48000 and record["sample_rate"] == 48000
+    assert record["latency_ms"] == 1.0 and record["latency"] == 1.0
+    assert list(record) == sorted(record)
