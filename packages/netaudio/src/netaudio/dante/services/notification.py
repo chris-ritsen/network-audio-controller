@@ -8,6 +8,7 @@ from dataclasses import dataclass, field as dataclass_field
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
+    DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
     NOTIFICATION_AES67_STATUS,
     NOTIFICATION_CLEAR_CONFIG_STATUS,
@@ -213,6 +214,10 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
+
+    def receive_settings_response(self, data: bytes, source_ip: str) -> None:
+        """Process a native settings publication returned through a managed transport."""
+        self._on_packet(data, (source_ip, DEVICE_SETTINGS_PORT))
 
     def register_waiter(self, kind: str, key: str, accept: Callable[[object], bool] | None = None) -> Waiter:
         waiter = Waiter(kind=kind, key=key, accept=accept)

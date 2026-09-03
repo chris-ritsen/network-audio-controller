@@ -383,7 +383,12 @@ class DaemonConfigurationHandlers:
 
         async with device.topology_mutation_lock:
             result_code = await flows.create_tx_flow(
-                str(device.ipv4), self._flow_arc_port(device), flow_protocol_id, flow_slot, channel_numbers
+                str(device.ipv4),
+                self._flow_arc_port(device),
+                flow_protocol_id,
+                flow_slot,
+                channel_numbers,
+                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
             )
         if result_code is None:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
@@ -435,7 +440,11 @@ class DaemonConfigurationHandlers:
 
         async with device.topology_mutation_lock:
             result_code = await flows.delete_tx_flow(
-                str(device.ipv4), self._flow_arc_port(device), flow_protocol_id, flow_slot
+                str(device.ipv4),
+                self._flow_arc_port(device),
+                flow_protocol_id,
+                flow_slot,
+                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
             )
         if result_code is None:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
@@ -473,14 +482,21 @@ class DaemonConfigurationHandlers:
 
         flow_protocol_id = device.flow_protocol_id
         if flow_protocol_id is None:
-            flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), self._flow_arc_port(device))
+            flow_protocol_id = await flows.detect_flow_protocol(
+                str(device.ipv4),
+                self._flow_arc_port(device),
+                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
+            )
             if flow_protocol_id is None:
                 await self._send_json(writer, {"error": "flow protocol is not supported or did not respond"}, 503)
                 return None
             device.flow_protocol_id = flow_protocol_id
 
         flow_inventory = await flows.query_preferred_tx_flow_inventory(
-            str(device.ipv4), self._flow_arc_port(device), flow_protocol_id
+            str(device.ipv4),
+            self._flow_arc_port(device),
+            flow_protocol_id,
+            **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
         )
         if flow_inventory is None:
             await self._send_json(writer, {"error": "device did not respond"}, 504)

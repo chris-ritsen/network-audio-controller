@@ -185,6 +185,9 @@ class DanteStateService:
         device.update_last_seen()
         return device
 
+    def _has_control_path(self, device) -> bool:
+        return device.requires_managed_control or bool(self.application.get_arc_port(device))
+
     def apply_pending_for_device(self, device) -> None:
         if not device.ipv4:
             return
@@ -237,7 +240,7 @@ class DanteStateService:
         if not device:
             return
 
-        if not self.application.get_arc_port(device):
+        if not self._has_control_path(device):
             return
 
         logger.info(f"Re-fetching {description} for {server_name}")
@@ -276,16 +279,22 @@ class DanteStateService:
         if not device or not device.ipv4:
             return
 
-        arc_port = self.application.get_arc_port(device)
-        if not arc_port:
+        if not self._has_control_path(device):
             return
+        arc_port = self.application.get_arc_port(device)
+        if device.requires_managed_control:
+            arc_port = self.application.arc_port_for_address(str(device.ipv4))
 
         logger.info(f"Re-fetching transmitter flows for {server_name} (transmitter flow changed)")
         async with self._lock_for(server_name):
             try:
                 flow_protocol_identifier = device.flow_protocol_id
                 if flow_protocol_identifier is None:
-                    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), arc_port)
+                    flow_protocol_identifier = await flows.detect_flow_protocol(
+                        str(device.ipv4),
+                        arc_port,
+                        **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
+                    )
                     if flow_protocol_identifier is None:
                         logger.warning(f"No supported transmitter flow frontend for {server_name}")
                         return
@@ -294,6 +303,7 @@ class DanteStateService:
                     str(device.ipv4),
                     arc_port,
                     flow_protocol_identifier,
+                    **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
                 )
                 if flow_inventory is None:
                     logger.warning(f"Transmitter flow inventory unavailable for {server_name}")
@@ -319,7 +329,7 @@ class DanteStateService:
         if not device:
             return
 
-        if not self.application.get_arc_port(device):
+        if not self._has_control_path(device):
             return
 
         logger.info(f"Re-fetching receiver flows for {server_name} (receiver flow changed)")
@@ -438,7 +448,7 @@ class DanteStateService:
         if not device:
             return
 
-        if not self.application.get_arc_port(device):
+        if not self._has_control_path(device):
             return
 
         logger.info(f"Re-fetching AES67 status for {server_name}")
@@ -457,15 +467,18 @@ class DanteStateService:
         if not device:
             return
 
-        if not self.application.get_arc_port(device) or not device.ipv4:
+        if not self._has_control_path(device) or not device.ipv4:
             return
 
         logger.info(f"Re-fetching controls for {server_name}")
         async with self._lock_for(server_name):
             try:
-                controls = await device.fetch_controls_data()
-                if controls:
-                    device.apply_controls(controls)
+                if device.requires_managed_control:
+                    await self.application._populate_device_controls(device)
+                else:
+                    controls = await device.fetch_controls_data()
+                    if controls:
+                        device.apply_controls(controls)
             except (RuntimeError, OSError) as exception:
                 logger.warning(f"Error re-fetching controls for {server_name}: {exception}")
                 return
@@ -496,7 +509,7 @@ class DanteStateService:
             if not has_sub:
                 continue
 
-            if not self.application.get_arc_port(device):
+            if not self._has_control_path(device):
                 continue
 
             logger.info(f"Re-fetching subscriptions for {server_name} (TX device {offline_name} went offline)")
@@ -526,24 +539,27 @@ class DanteStateService:
         if not device or not device.online:
             return
 
-        if not self.application.get_arc_port(device):
+        if not self._has_control_path(device) or not device.ipv4:
             return
 
         self._populating.add(server_name)
 
         try:
             async with self._lock_for(server_name):
-                retries = 3
-                for attempt in range(retries):
-                    controls = await device.fetch_controls_data()
-                    if controls:
-                        device.apply_controls(controls)
+                if device.requires_managed_control:
+                    await self.application._populate_device_controls(device)
+                else:
+                    retries = 3
+                    for attempt in range(retries):
+                        controls = await device.fetch_controls_data()
+                        if controls:
+                            device.apply_controls(controls)
 
-                    if device.name and device.tx_count is not None:
-                        break
+                        if device.name and device.tx_count is not None:
+                            break
 
-                    if attempt < retries - 1:
-                        logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
+                        if attempt < retries - 1:
+                            logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
 
                 device_ip = str(device.ipv4)
                 if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
@@ -578,7 +594,8 @@ class DanteStateService:
                         logger.warning(f"Error probing interface status for {server_name}: {exception}")
 
                 await self._refresh_clock_status(device, "device discovered")
-                await self._refresh_lock_status(device, "device discovered")
+                if not device.requires_managed_control:
+                    await self._refresh_lock_status(device, "device discovered")
 
             logger.info(f"Fetched controls for {server_name}")
             self._emit_device_updated(device)
