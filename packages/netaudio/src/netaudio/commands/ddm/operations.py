@@ -189,11 +189,18 @@ def register_operation(group: typer.Typer, schema: Schema, operation: str, field
     group.command(command_name(field.name), help=_help_text(schema, operation, field))(callback)
 
 
-def register_schema_operations(group: typer.Typer, schema: Schema) -> None:
+def register_schema_operations(
+    group: typer.Typer,
+    schema: Schema,
+    *,
+    excluded_fields: frozenset[str] = frozenset(),
+) -> None:
     for field in schema.query_fields:
-        register_operation(group, schema, "query", field)
+        if field.name not in excluded_fields:
+            register_operation(group, schema, "query", field)
     for field in schema.mutation_fields:
-        register_operation(group, schema, "mutation", field)
+        if field.name not in excluded_fields:
+            register_operation(group, schema, "mutation", field)
 
 
 __all__ = ["register_operation", "register_schema_operations"]
