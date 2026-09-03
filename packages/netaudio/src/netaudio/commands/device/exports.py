@@ -8,9 +8,12 @@ from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
 from netaudio.cli_support.selection import filter_devices, select_device
 
 
-def _addressed_device(filtered_devices):
+def select_export_device(filtered_devices):
     [(server_name, device)] = select_device(filtered_devices)
     device_name = device.name or server_name
+    if getattr(device, "requires_managed_control", False):
+        typer.echo(f"Error: diagnostic export is not available through DDM for {device_name}.", err=True)
+        raise typer.Exit(code=1)
     if device.ipv4 is None:
         typer.echo(f"Error: {device_name} has no control address.", err=True)
         raise typer.Exit(code=1)
@@ -20,7 +23,7 @@ def _addressed_device(filtered_devices):
 async def run_export_logs(application, devices, output: Path, timeout: float) -> None:
     from netaudio.dante.diagnostic_logs import DeviceLogExportError, write_device_log_archive
 
-    device_name, device = _addressed_device(filter_devices(devices))
+    device_name, device = select_export_device(filter_devices(devices))
     try:
         result = await application.export_device_logs(device.ipv4, timeout=timeout)
         write_device_log_archive(output, result.archive_payload)
@@ -48,7 +51,7 @@ async def run_export_capability(application, devices, output: Path, timeout: flo
     from netaudio.dante.capability_partition import write_capability_partition
     from netaudio.dante.conmon_export import ConmonExportError
 
-    device_name, device = _addressed_device(filter_devices(devices))
+    device_name, device = select_export_device(filter_devices(devices))
     try:
         result = await application.export_capability_partition(device.ipv4, timeout=timeout)
         write_capability_partition(output, result.capability_partition)

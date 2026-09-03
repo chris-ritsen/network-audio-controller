@@ -157,7 +157,7 @@ async def test_product_inventory_uses_the_typed_2809_status_parser(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_detection_accepts_2809_only_after_legacy_frontends_fail(monkeypatch):
+async def test_detection_accepts_2809_after_earlier_protocol_identifiers_fail(monkeypatch):
     attempted_protocol_identifiers = []
 
     async def request(device_ip, arc_port, command_specification, timeout_ms, attempts):

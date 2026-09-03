@@ -41,6 +41,9 @@ def _device(*, enrolled=True, direct=True):
     device.name = "managed-device"
     device.ipv4 = "192.0.2.10"
     device.ddm_device_id = "001dc1fffe50692e:0"
+    device.ddm_server_profile = "manager"
+    device.ddm_context = "manager-main"
+    device.ddm_domain_id = "11" * 16
     device.ddm_enrolment_state = "ENROLLED" if enrolled else "UNENROLLED"
     device.management_state = "managed" if enrolled else "unenrolled"
     device.direct_control_available = direct
@@ -50,6 +53,20 @@ def _device(*, enrolled=True, direct=True):
 def test_enrolment_metadata_selects_managed_control_even_when_direct_ip_exists():
     assert device_transport.device_requires_managed_control(_device(enrolled=True, direct=True)) is True
     assert device_transport.device_requires_managed_control(_device(enrolled=False, direct=True)) is False
+
+    enrolled_without_id = _device(enrolled=True, direct=True)
+    enrolled_without_id.ddm_device_id = None
+    assert device_transport.device_requires_managed_control(enrolled_without_id) is True
+
+
+@pytest.mark.asyncio
+async def test_managed_device_without_an_id_fails_closed_instead_of_using_direct_control():
+    device = _device()
+    device.ddm_device_id = None
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
+
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="no DDM device ID"):
+        await transport.execute(device, {"command": "identify"})
 
 
 def test_application_routes_each_managed_device_to_its_originating_server_profile(monkeypatch, tmp_path):
@@ -139,7 +156,7 @@ async def test_managed_arc_normalizes_latency_to_2809_and_uses_controller_servic
             API_KEY,
             "001dc1fffe50692e:0",
             bytes.fromhex("2809000a123411010000"),
-            {},
+            {"expected_domain_id": "11" * 16},
         )
     ]
 
@@ -352,6 +369,114 @@ async def test_ordinary_device_identify_automatically_uses_ddm_for_an_enrolled_d
 
 
 @pytest.mark.asyncio
+async def test_managed_control_fails_closed_when_the_originating_context_is_unknown():
+    managed = SimpleNamespace(execute=AsyncMock(return_value=None))
+    application = DanteApplication(managed_transport=managed)
+    device = _device()
+    device.ddm_context = None
+    application.attach_devices({device.server_name: device})
+
+    with pytest.raises(RuntimeError, match="managed but has no context"):
+        await application.identify(device)
+
+    managed.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_managed_identify_routes_by_device_identity_when_contexts_reuse_an_ip():
+    managed = SimpleNamespace(execute=AsyncMock(return_value=None))
+    application = DanteApplication(managed_transport=managed)
+    east = _device()
+    east.server_name = "east.local."
+    east.ddm_device_id = "001dc1fffe50692e:0"
+    east.ddm_domain_id = "11" * 16
+    west = _device()
+    west.server_name = "west.local."
+    west.ddm_device_id = "001dc1fffe50692f:0"
+    west.ddm_domain_id = "22" * 16
+    application.attach_devices({east.server_name: east, west.server_name: west})
+    application.transport.execute = AsyncMock()
+
+    await application.identify(west)
+
+    managed.execute.assert_awaited_once()
+    assert managed.execute.await_args.args[0] is west
+    application.transport.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_raw_ip_control_is_rejected_when_contexts_reuse_an_ip():
+    application = DanteApplication(managed_transport=SimpleNamespace(execute=AsyncMock()))
+    east = _device()
+    east.server_name = "east.local."
+    west = _device()
+    west.server_name = "west.local."
+    west.ddm_device_id = "001dc1fffe50692f:0"
+    application.attach_devices({east.server_name: east, west.server_name: west})
+    application.transport.execute = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="ambiguous across devices"):
+        await application.send_probe_sample_rate("192.0.2.10")
+
+    application.transport.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_managed_device_without_an_ip_uses_ddm_for_identify_channels_and_name():
+    fresh = SimpleNamespace(
+        name="managed-device",
+        identity=SimpleNamespace(actual_name="Managed Device", default_name="factory-name"),
+    )
+    managed = SimpleNamespace(execute=AsyncMock(return_value=None), fetch_device=AsyncMock(return_value=fresh))
+    application = DanteApplication(managed_transport=managed)
+    application.query_receiver_channel_status_2809 = AsyncMock(
+        return_value={"reported_channel_count": 0, "records": []}
+    )
+    application.query_transmitter_channel_status_2809 = AsyncMock(
+        return_value={"reported_channel_count": 0, "records": []}
+    )
+    application.transport.execute = AsyncMock()
+    device = _device()
+    device.ipv4 = None
+    application.attach_devices({device.server_name: device})
+
+    await application.identify(device)
+    await device.get_rx_channels()
+    await device.get_tx_channels()
+    name = await device.fetch_device_name()
+
+    assert name == "Managed Device"
+    assert managed.execute.await_args.args[0] is device
+    application.query_receiver_channel_status_2809.assert_awaited_once_with(device)
+    application.query_transmitter_channel_status_2809.assert_awaited_once_with(device)
+    managed.fetch_device.assert_awaited_once_with(device)
+    application.transport.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_managed_device_without_an_ip_uses_exact_device_for_clear_configuration():
+    application = DanteApplication(managed_transport=SimpleNamespace(execute=AsyncMock()))
+    device = _device()
+    device.ipv4 = None
+    application.attach_devices({device.server_name: device})
+    key = application._control_key(device)
+
+    async def clear(target):
+        assert target is device
+        application.notifications.notify_waiters(
+            "clear_configuration_status",
+            key,
+            {"action_result_code": 1, "available_actions_mask": 3},
+        )
+
+    application.send_clear_all_configuration = clear
+
+    status = await application.clear_configuration(device, preserve_internet_protocol_settings=False)
+
+    assert status["action_result_code"] == 1
+
+
+@pytest.mark.asyncio
 async def test_managed_settings_publication_is_fed_into_the_normal_status_pipeline():
     publication = bytes.fromhex("ffff001c00010000001dc1fffe50692e417564696e61746507380080")
     managed = SimpleNamespace(execute=AsyncMock(return_value=publication))
@@ -360,9 +485,12 @@ async def test_managed_settings_publication_is_fed_into_the_normal_status_pipeli
     device = _device()
     application.attach_devices({device.server_name: device})
 
-    await application.send_probe_sample_rate(device.ipv4)
+    await application.send_probe_sample_rate(device)
 
-    application.notifications.receive_settings_response.assert_called_once_with(publication, "192.0.2.10")
+    application.notifications.receive_settings_response.assert_called_once_with(
+        publication,
+        "ddm:manager:manager-main:11111111111111111111111111111111:001dc1fffe50692e:0",
+    )
 
 
 @pytest.mark.asyncio
@@ -388,7 +516,7 @@ async def test_managed_control_population_uses_ddm_reads_without_a_local_arc_ser
     managed.fetch_device.assert_awaited_once_with(device)
     application.get_latency_settings.assert_awaited_once_with(device)
     application.apply_avio_status_pages.assert_awaited_once_with(device)
-    application.probe_interface_status.assert_awaited_once_with("192.0.2.10")
+    application.probe_interface_status.assert_awaited_once_with(device)
 
 
 @pytest.mark.asyncio

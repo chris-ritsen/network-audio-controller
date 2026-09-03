@@ -275,7 +275,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             self._config.supported_encodings,
         )
 
-    def _legacy_pcm_capability(self) -> tuple[int, int] | None:
+    def _pcm_property_capability(self) -> tuple[int, int] | None:
         current_encoding_octets = PCM_ENCODING_OCTETS.get(self._config.encoding)
         if current_encoding_octets is None:
             return None
@@ -290,18 +290,18 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         return current_encoding_octets, capability_bitmap
 
     def _pcm_capability_property(self) -> str | None:
-        legacy_pcm_capability = self._legacy_pcm_capability()
-        if legacy_pcm_capability is None:
+        pcm_capability = self._pcm_property_capability()
+        if pcm_capability is None:
             return None
-        current_encoding_octets, capability_bitmap = legacy_pcm_capability
+        current_encoding_octets, capability_bitmap = pcm_capability
 
         return f"{current_encoding_octets} 0x{capability_bitmap:x}"
 
     def _build_channel_metadata(self) -> bytes | None:
-        legacy_pcm_capability = self._legacy_pcm_capability()
-        if legacy_pcm_capability is None:
+        pcm_capability = self._pcm_property_capability()
+        if pcm_capability is None:
             return None
-        _, capability_bitmap = legacy_pcm_capability
+        _, capability_bitmap = pcm_capability
         return struct.pack(
             ">IHHHHHH",
             self._config.sample_rate,
