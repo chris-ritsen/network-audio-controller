@@ -11,7 +11,7 @@ from typing import Optional
 import typer
 
 from netaudio.cli_support.output import output_single, output_table
-from netaudio.commands.ddm.operations import register_schema_operations
+from netaudio.commands.ddm.operations import operation_command_path, register_schema_operations
 from netaudio.commands.ddm.render import report_errors
 from netaudio.commands.ddm.transport import execute, fail
 from netaudio.daemon.client import (
@@ -27,7 +27,6 @@ from netaudio.ddm import (
     Schema,
     SchemaError,
     authenticate_with_password,
-    command_name,
     discover_ddm_servers,
 )
 
@@ -40,7 +39,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 context_app = typer.Typer(help="List and select saved DDM server/domain contexts.", no_args_is_help=True)
+api_app = typer.Typer(
+    help="Use the low-level Dante Managed API. Ordinary device control uses the normal NetAudio commands.",
+    no_args_is_help=True,
+)
 app.add_typer(context_app, name="context")
+app.add_typer(api_app, name="api")
 
 DAEMON_UNAVAILABLE = "netaudio daemon is not running."
 PASSWORD_LOGIN_FIELD = "UserLoginWithPassword"
@@ -248,20 +252,22 @@ def login(
     url: Optional[str] = typer.Option(None, "--url", help="Managed API URL ending in /graphql."),
     server_profile: Optional[str] = typer.Option(
         None,
-        "--server",
+        "--server-profile",
         help="Name for the saved DDM server profile, or an existing profile to update.",
     ),
     domain: Optional[str] = typer.Option(None, "--domain", help="Domain ID or unique domain name."),
-    context_name: Optional[str] = typer.Option(None, "--context-name", help="Name for the saved server/domain context."),
+    context_name: Optional[str] = typer.Option(
+        None, "--context-name", help="Name for the saved server/domain context."
+    ),
+    save_credential_file: Optional[Path] = typer.Option(
+        None,
+        "--save-credential",
+        help="File in which to save the returned Managed API credential.",
+    ),
     credential_file: Optional[Path] = typer.Option(
         None,
         "--credential-file",
-        help="File in which to save the returned Managed API credential.",
-    ),
-    api_key_file: Optional[Path] = typer.Option(
-        None,
-        "--api-key-file",
-        help="Use and save a reference to an existing API-key file instead of password login.",
+        help="Authenticate with an existing Managed API credential file instead of username/password.",
     ),
     make_default: bool = typer.Option(False, "--default", help="Make the saved context the default."),
     discovery_timeout: float = typer.Option(
@@ -289,11 +295,15 @@ def login(
         if service is None:
             fail("the selected DDM server did not advertise a Controller service")
         try:
-            endpoint = ControllerAPIClient(
-                discovered.ipv4_addresses[0],
-                port=service.port,
-                timeout=discovery_timeout,
-            ).endpoints().graphql_url
+            endpoint = (
+                ControllerAPIClient(
+                    discovered.ipv4_addresses[0],
+                    port=service.port,
+                    timeout=discovery_timeout,
+                )
+                .endpoints()
+                .graphql_url
+            )
         except (ControllerServiceError, ValueError) as exception:
             fail(f"could not obtain the Managed API URL from the selected DDM server: {exception}")
     if endpoint is None:
@@ -303,13 +313,13 @@ def login(
         if configured_endpoint != endpoint:
             fail(
                 f"DDM server profile {server_profile!r} already points to {configured_endpoint}; "
-                "choose a new --server name for a different URL"
+                "choose a new --server-profile name for a different URL"
             )
 
     credential = None
-    source_api_key_file = api_key_file.expanduser().resolve() if api_key_file is not None else None
-    if source_api_key_file is not None:
-        client = ManagedAPIClient(endpoint, credential_file=source_api_key_file)
+    source_credential_file = credential_file.expanduser().resolve() if credential_file is not None else None
+    if source_credential_file is not None:
+        client = ManagedAPIClient(endpoint, credential_file=source_credential_file)
     else:
         login_name = username or typer.prompt("Username")
         password = typer.prompt("Password", hide_input=True)
@@ -349,7 +359,7 @@ def login(
                 f"and domain {configured_context.domain_id}; choose a new --context-name"
             )
 
-    destination = source_api_key_file or credential_file
+    destination = source_credential_file or save_credential_file
     if destination is None:
         destination = config_path.parent / "credentials" / f"{server_profile}.credential"
     if credential is not None:
@@ -436,7 +446,7 @@ def context_use(name: str = typer.Argument(..., help="Saved DDM context name."))
     typer.echo(f"Default DDM context is now {name}")
 
 
-@app.command("graphql")
+@api_app.command("graphql", no_args_is_help=True)
 def graphql(
     query: Optional[str] = typer.Argument(None, help="GraphQL document to send. Omit when using --file."),
     file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read the GraphQL document from a file."),
@@ -468,7 +478,7 @@ def graphql(
     output_single(json.dumps(response["data"], indent=2, sort_keys=True))
 
 
-@app.command("schema")
+@api_app.command("schema")
 def schema(
     type_name: Optional[str] = typer.Argument(None, help="Type to describe. Omit to list queries and mutations."),
 ) -> None:
@@ -485,9 +495,13 @@ def schema(
     for operation, fields in (("query", loaded.query_fields), ("mutation", loaded.mutation_fields)):
         for field in fields:
             arguments = ", ".join(f"{argument.name}: {argument.type.render()}" for argument in field.arguments)
-            command = "login" if field.name == PASSWORD_LOGIN_FIELD else command_name(field.name)
+            command = (
+                "ddm login"
+                if field.name == PASSWORD_LOGIN_FIELD
+                else " ".join(operation_command_path(operation, field.name))
+            )
             rows.append([operation, command, field.name, arguments, field.type.render()])
     output_table(["Operation", "Command", "GraphQL Field", "Arguments", "Returns"], rows)
 
 
-register_schema_operations(app, Schema.load(), excluded_fields=frozenset({PASSWORD_LOGIN_FIELD}))
+register_schema_operations(api_app, Schema.load(), excluded_fields=frozenset({PASSWORD_LOGIN_FIELD}))
