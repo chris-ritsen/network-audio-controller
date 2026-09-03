@@ -29,6 +29,25 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             responses::parse_dante_brooklyn_control_protocol_flow_setup_response(bytes),
         ),
         "dante_model" => serialize_optional(kind, responses::parse_dante_model(bytes)),
+        "dapi_device_announcement" => {
+            serialize_optional(kind, crate::dapi::parse_device_announcement(bytes))
+        }
+        "dapi_arc_response" => serialize_optional(kind, crate::dapi::parse_arc_response(bytes)),
+        "dapi_identify_confirmation" => {
+            serialize_optional(kind, crate::dapi::parse_identify_confirmation(bytes))
+        }
+        "dapi_session_description" => {
+            serialize_optional(kind, crate::dapi::parse_session_description(bytes))
+        }
+        "dapi_service_announcement" => {
+            serialize_optional(kind, crate::dapi::parse_service_announcement(bytes))
+        }
+        "dapi_settings_acknowledgement" => {
+            serialize_optional(kind, crate::dapi::parse_settings_acknowledgement(bytes))
+        }
+        "dapi_settings_publication" => {
+            serialize_optional(kind, crate::dapi::parse_settings_publication(bytes))
+        }
         "device_info" => serialize_optional(kind, responses::parse_device_info(bytes)),
         "device_name" => serialize_optional(kind, responses::parse_device_name(bytes)),
         "device_settings" => serialize_optional(kind, responses::parse_device_settings(bytes)),

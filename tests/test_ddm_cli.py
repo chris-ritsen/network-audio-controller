@@ -1,17 +1,19 @@
 import json
+import stat
 
 import click
 import pytest
 from netaudio.cli import app
 from netaudio.commands.ddm import cli as ddm_cli
 from netaudio.commands.ddm import operations
+from netaudio.ddm import AuthenticationError
 from typer.testing import CliRunner
 
 runner = CliRunner()
 
 
-def _invoke(*arguments):
-    return runner.invoke(app, ["ddm", *arguments])
+def _invoke(*arguments, **options):
+    return runner.invoke(app, ["ddm", *arguments], **options)
 
 
 def test_every_schema_operation_is_a_command():
@@ -19,6 +21,236 @@ def test_every_schema_operation_is_a_command():
     assert result.exit_code == 0, result.output
     for expected in ("device-name-set", "devices-enroll", "domain-add", "unenrolled-devices", "me"):
         assert expected in result.output
+
+
+def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tmp_path):
+    captured = {}
+    credential_file = tmp_path / "ddm-token"
+
+    def fake_authenticate(url, username, password, *, allow_insecure_http):
+        captured.update(
+            url=url,
+            username=username,
+            password=password,
+            allow_insecure_http=allow_insecure_http,
+        )
+        return "session-token"
+
+    monkeypatch.setattr(ddm_cli, "authenticate_with_password", fake_authenticate)
+    result = _invoke(
+        "login",
+        "--url",
+        "http://manager.example/graphql",
+        "--username",
+        "operator",
+        "--credential-file",
+        str(credential_file),
+        "--allow-insecure-http",
+        input="private-password\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "url": "http://manager.example/graphql",
+        "username": "operator",
+        "password": "private-password",
+        "allow_insecure_http": True,
+    }
+    assert credential_file.read_text(encoding="ascii") == "session-token\n"
+    assert stat.S_IMODE(credential_file.stat().st_mode) == 0o600
+    assert "session-token" not in result.output
+    assert "private-password" not in result.output
+
+
+def test_password_login_does_not_replace_a_credential_after_rejection(monkeypatch, tmp_path):
+    credential_file = tmp_path / "ddm-token"
+    credential_file.write_text("existing-token\n", encoding="ascii")
+
+    def reject(*arguments, **options):
+        raise AuthenticationError("DDM rejected username/password login")
+
+    monkeypatch.setattr(ddm_cli, "authenticate_with_password", reject)
+    result = _invoke(
+        "login",
+        "--url",
+        "https://manager.example/graphql",
+        "--username",
+        "operator",
+        "--credential-file",
+        str(credential_file),
+        input="private-password\n",
+    )
+
+    assert result.exit_code == 1
+    assert credential_file.read_text(encoding="ascii") == "existing-token\n"
+    assert "private-password" not in result.output
+
+
+def test_generated_password_mutation_is_replaced_by_the_dedicated_login_command():
+    help_result = _invoke("--help")
+    login_help = _invoke("login", "--help")
+
+    assert help_result.exit_code == 0
+    assert "user-login-with-password" not in help_result.output
+    assert "login" in help_result.output
+    assert login_help.exit_code == 0
+    assert "--password" not in login_help.output
+
+
+def test_ddm_discover_renders_correlated_services(monkeypatch):
+    class Service:
+        def __init__(self, port):
+            self.port = port
+
+    class Server:
+        server_name = "ddm.local."
+        ipv4_addresses = ("192.168.1.217",)
+        controller_service = Service(8443)
+        device_service = Service(8000)
+
+        def to_json(self):
+            return {"server_name": self.server_name}
+
+    async def fake_discover(*, timeout, interfaces=None):
+        assert timeout == 0.25
+        assert interfaces is None
+        return (Server(),)
+
+    monkeypatch.setattr(ddm_cli, "discover_ddm_servers", fake_discover)
+
+    result = _invoke("discover", "--timeout", "0.25")
+
+    assert result.exit_code == 0, result.output
+    assert "ddm.local." in result.output
+    assert "192.168.1.217" in result.output
+    assert "8443" in result.output
+    assert "8000" in result.output
+
+
+def test_managed_identify_discovers_ddm_and_keeps_password_out_of_output(monkeypatch):
+    captured = {}
+
+    class Service:
+        port = 8443
+
+    class Server:
+        server_name = "ddm.local."
+        controller_service = Service()
+
+    async def fake_discover(*, timeout, interfaces=None):
+        assert timeout == 2.0
+        assert interfaces is None
+        return (Server(),)
+
+    def fake_identify(server, username, password, device_id, mac, **options):
+        captured.update(
+            server=server,
+            username=username,
+            password=password,
+            device_id=device_id,
+            mac=mac,
+            options=options,
+        )
+
+    monkeypatch.setattr(ddm_cli, "discover_ddm_servers", fake_discover)
+    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: bytes.fromhex("842f5774e86d"))
+    monkeypatch.setattr(ddm_cli, "identify_managed_device", fake_identify)
+
+    result = _invoke(
+        "identify",
+        "001dc1fffe507b8d:0",
+        "--username",
+        "operator",
+        "--insecure-tls",
+        input="private-password\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "server": "ddm.local",
+        "username": "operator",
+        "password": "private-password",
+        "device_id": "001dc1fffe507b8d:0",
+        "mac": bytes.fromhex("842f5774e86d"),
+        "options": {
+            "auth_port": 8443,
+            "timeout": 10.0,
+            "ca_file": None,
+            "insecure_tls": True,
+        },
+    }
+    assert "Identified managed device 001dc1fffe507b8d:0 through ddm.local." in result.output
+    assert "private-password" not in result.output
+
+
+def test_managed_identify_uses_an_explicit_server_without_discovery(monkeypatch):
+    def unexpected_discovery(**options):
+        raise AssertionError("discovery should not run")
+
+    captured = {}
+    monkeypatch.setattr(ddm_cli, "discover_ddm_servers", unexpected_discovery)
+    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
+    monkeypatch.setattr(
+        ddm_cli, "identify_managed_device", lambda *args, **kwargs: captured.update(args=args, kwargs=kwargs)
+    )
+
+    result = _invoke(
+        "identify",
+        "001dc1fffe507b8d",
+        "--username",
+        "operator",
+        "--server",
+        "192.0.2.10",
+        "--auth-port",
+        "9443",
+        input="private-password\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["args"][:4] == ("192.0.2.10", "operator", "private-password", "001dc1fffe507b8d")
+    assert captured["kwargs"]["auth_port"] == 9443
+    assert "private-password" not in result.output
+
+
+def test_managed_identify_accepts_an_api_key_from_a_hidden_prompt(monkeypatch):
+    captured = {}
+    api_key = "00000000-0000-4000-8000-000000000000"
+    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
+    monkeypatch.setattr(
+        ddm_cli,
+        "identify_managed_device_with_api_key",
+        lambda *args, **kwargs: captured.update(args=args, kwargs=kwargs),
+    )
+
+    result = _invoke(
+        "identify",
+        "001dc1fffe507b8d:0",
+        "--api-key",
+        "--server",
+        "192.0.2.10",
+        input=f"{api_key}\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["args"][:3] == ("192.0.2.10", api_key, "001dc1fffe507b8d:0")
+    assert api_key not in result.output
+
+
+def test_managed_identify_rejects_ambiguous_authentication_options(monkeypatch):
+    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
+
+    result = _invoke(
+        "identify",
+        "001dc1fffe507b8d:0",
+        "--username",
+        "operator",
+        "--api-key",
+        "--server",
+        "192.0.2.10",
+    )
+
+    assert result.exit_code == 1
+    assert "not both" in result.output
 
 
 def test_schema_describes_one_type():

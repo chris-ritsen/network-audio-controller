@@ -6,6 +6,7 @@ from collections import deque
 import pytest
 
 from netaudio.ddm import (
+    AuthenticationError,
     CredentialError,
     HTTPResponse,
     HTTPStatusError,
@@ -14,6 +15,7 @@ from netaudio.ddm import (
     ResponseShapeError,
     ResponseTooLargeError,
     TransportError,
+    authenticate_with_password,
 )
 
 
@@ -46,6 +48,100 @@ def _client(*responses, credential=CREDENTIAL, **kwargs):
         **kwargs,
     )
     return client, transport
+
+
+def test_password_login_bootstraps_without_an_authorization_header():
+    transport = FakeTransport(_response({"data": {"UserLoginWithPassword": {"ok": True, "token": "session-token"}}}))
+
+    token = authenticate_with_password(
+        "https://manager.example/graphql",
+        "operator",
+        "private-password",
+        transport=transport,
+    )
+
+    assert token == "session-token"
+    assert len(transport.requests) == 1
+    request = transport.requests[0]
+    assert "Authorization" not in request.headers
+    assert json.loads(request.body) == {
+        "operationName": "UserLoginWithPassword",
+        "query": (
+            "mutation UserLoginWithPassword($input: UserLoginWithPasswordInput!) "
+            "{ UserLoginWithPassword(input: $input) { ok token } }"
+        ),
+        "variables": {"input": {"email": "operator", "password": "private-password"}},
+    }
+
+
+def test_password_login_rejects_http_without_an_explicit_opt_in():
+    transport = FakeTransport(_response({"data": {"UserLoginWithPassword": {"ok": True, "token": "session-token"}}}))
+
+    with pytest.raises(ValueError, match="allow_insecure_http"):
+        authenticate_with_password(
+            "http://manager.example/graphql",
+            "operator",
+            "private-password",
+            transport=transport,
+        )
+
+    assert transport.requests == []
+
+
+def test_password_login_can_explicitly_use_a_lab_http_endpoint():
+    transport = FakeTransport(_response({"data": {"UserLoginWithPassword": {"ok": True, "token": "session-token"}}}))
+
+    token = authenticate_with_password(
+        "http://manager.example/graphql",
+        "operator",
+        "private-password",
+        allow_insecure_http=True,
+        transport=transport,
+    )
+
+    assert token == "session-token"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": {"UserLoginWithPassword": {"ok": False, "token": None}}},
+        {"data": None, "errors": [{"message": "invalid login"}]},
+    ],
+)
+def test_password_login_rejection_does_not_echo_the_password(payload):
+    password = "private-password"
+    transport = FakeTransport(_response(payload))
+
+    with pytest.raises(AuthenticationError) as failure:
+        authenticate_with_password(
+            "https://manager.example/graphql",
+            "operator",
+            password,
+            transport=transport,
+        )
+
+    assert password not in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": {"UserLoginWithPassword": None}},
+        {"data": {"UserLoginWithPassword": {"ok": True, "token": None}}},
+        {"data": {"UserLoginWithPassword": {"ok": "yes", "token": "session-token"}}},
+    ],
+)
+def test_password_login_validates_the_response_shape(payload):
+    transport = FakeTransport(_response(payload))
+
+    with pytest.raises(ResponseShapeError):
+        authenticate_with_password(
+            "https://manager.example/graphql",
+            "operator",
+            "private-password",
+            transport=transport,
+        )
 
 
 def _parameter():

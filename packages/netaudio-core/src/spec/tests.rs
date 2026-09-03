@@ -263,6 +263,54 @@ fn transmitter_names_command_requires_and_encodes_the_full_range() {
 }
 
 #[test]
+fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
+    let cases = [
+        (
+            r#"{"command":"channel_count","protocol_id":10249,"transaction_id":114}"#,
+            "2809000a007210000000",
+        ),
+        (
+            r#"{"command":"property_directory","protocol_id":10249,"transaction_id":115}"#,
+            "2809000a007311020000",
+        ),
+        (
+            r#"{"command":"device_info","protocol_id":10249,"transaction_id":116}"#,
+            "2809000a007410030000",
+        ),
+        (
+            r#"{"command":"transmitter_names","protocol_id":10249,"channel_count":2,"transaction_id":118}"#,
+            "28090010007620100000000100010002",
+        ),
+        (
+            r#"{"command":"query_receiver_port_ranges","protocol_id":10249,"transaction_id":121}"#,
+            "2809000a007933000000",
+        ),
+    ];
+    for (specification, expected_hex) in cases {
+        assert_eq!(
+            build_command_from_json(specification).unwrap(),
+            (0..expected_hex.len())
+                .step_by(2)
+                .map(|index| u8::from_str_radix(&expected_hex[index..index + 2], 16).unwrap())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    assert_eq!(
+        &build_command_from_json(r#"{"command":"channel_count","transaction_id":114}"#).unwrap()
+            [..2],
+        &[0x27, 0xFF]
+    );
+    assert_eq!(
+        &build_command_from_json(
+            r#"{"command":"query_receiver_port_ranges","transaction_id":121}"#,
+        )
+        .unwrap()[..2],
+        &[0x27, 0x29]
+    );
+}
+
+#[test]
 fn receiver_flow_query_command_matches_shipping_controller() {
     let packet = build_command_from_json(
         r#"{"command":"query_receiver_flows","starting_flow":1,"transaction_id":826}"#,
