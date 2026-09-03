@@ -19,23 +19,30 @@ def _command_tree():
     return list(_walk(typer.main.get_command(app), "netaudio"))
 
 
-def test_dash_h_is_help_on_root_and_subcommands():
-    for arguments in (["-h"], ["channel", "-h"], ["lab", "provenance", "-h"], ["lock", "-h"]):
-        result = runner.invoke(app, arguments)
-        assert result.exit_code == 0, arguments
-        assert "Usage:" in result.output, arguments
+COMMAND_TREE = _command_tree()
 
 
 @pytest.mark.parametrize(
     "arguments",
-    [
-        ["channel", "name"],
-        ["ddm", "context", "use"],
-        ["lab", "fact", "show"],
-        ["lock", "key", "set"],
-    ],
+    [[] if path == "netaudio" else path.removeprefix("netaudio ").split() for path, _ in COMMAND_TREE],
+    ids=lambda arguments: " ".join(arguments) or "netaudio",
 )
-def test_bare_commands_with_required_parameters_display_help(arguments):
+def test_dash_h_displays_help_for_every_command(arguments):
+    result = runner.invoke(app, [*arguments, "-h"])
+
+    assert result.exit_code == 0, result.output
+    assert "Usage:" in result.output
+
+
+REQUIRED_PARAMETER_COMMANDS = [
+    path.removeprefix("netaudio ").split()
+    for path, command in COMMAND_TREE
+    if not isinstance(command, click.Group) and any(parameter.required for parameter in command.params)
+]
+
+
+@pytest.mark.parametrize("arguments", REQUIRED_PARAMETER_COMMANDS, ids=lambda arguments: " ".join(arguments))
+def test_every_bare_command_with_required_parameters_displays_help(arguments):
     result = runner.invoke(app, arguments)
 
     assert result.exit_code == 2
@@ -63,7 +70,7 @@ def test_removed_command_paths_are_not_registered(arguments):
 def test_every_argument_has_help():
     missing = [
         f"{path} {parameter.name}"
-        for path, command in _command_tree()
+        for path, command in COMMAND_TREE
         for parameter in command.params
         if isinstance(parameter, click.Argument) and not (getattr(parameter, "help", None) or "").strip()
     ]
@@ -71,14 +78,14 @@ def test_every_argument_has_help():
 
 
 def test_every_command_has_help():
-    missing = [path for path, command in _command_tree() if not (command.help or "").strip()]
+    missing = [path for path, command in COMMAND_TREE if not (command.help or "").strip()]
     assert missing == []
 
 
 def test_every_option_has_help():
     missing = [
         f"{path} {'/'.join(parameter.opts)}"
-        for path, command in _command_tree()
+        for path, command in COMMAND_TREE
         for parameter in command.params
         if isinstance(parameter, click.Option) and not (parameter.help or "").strip()
     ]

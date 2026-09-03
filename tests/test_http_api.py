@@ -1,7 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -291,7 +291,7 @@ class TestMutationVerification:
         assert response == {"success": True}
         requested_value = next(value for field_name, value in body.items() if field_name != "device")
         getattr(http_server.application, method_name).assert_awaited_once_with(device, requested_value)
-        getattr(http_server.application, probe_name).assert_awaited_once_with("192.168.1.50")
+        getattr(http_server.application, probe_name).assert_awaited_once_with(device)
 
     @pytest.mark.parametrize(
         ("path", "body", "method_name", "probe_name", "capability_name", "old_status", "requested_status"),
@@ -785,6 +785,44 @@ class TestMutationVerification:
 
 
 class TestDeviceLookup:
+    def test_managed_inventory_record_is_rehydrated_with_exact_ddm_context(self):
+        http_server = make_http_server()
+        http_server.managed_inventory = SimpleNamespace(enabled=True)
+        http_server._serialized_devices = MagicMock(
+            return_value={
+                "ddm:manager:domain-id:device-id": {
+                    "server_name": "ddm:manager:domain-id:device-id",
+                    "name": "Managed Device",
+                    "online": True,
+                    "ipv4": "None",
+                    "management_state": "managed",
+                    "ddm_enrolment_state": "ENROLLED",
+                    "ddm_device_id": "device-id",
+                    "ddm_server_profile": "manager",
+                    "ddm_context": "main",
+                    "ddm_domain_id": "domain-id",
+                    "direct_control_available": False,
+                }
+            }
+        )
+
+        device = http_server._find_device("device-id")
+
+        assert device is not None
+        assert device.application is http_server.application
+        assert device.requires_managed_control is True
+        assert device.ipv4 is None
+        assert device.ddm_server_profile == "manager"
+        assert device.ddm_context == "main"
+        assert device.ddm_domain_id == "domain-id"
+
+    def test_duplicate_direct_ip_address_is_not_an_implicit_device_selection(self):
+        first = make_device(server_name="first", name="First")
+        second = make_device(server_name="second", name="Second")
+        http_server = make_http_server({"first": first, "second": second})
+
+        assert http_server._find_device("192.168.1.50") is None
+
     @pytest.mark.asyncio
     async def test_interface_status_is_probed_on_demand(self):
         device = make_device()
@@ -801,7 +839,7 @@ class TestDeviceLookup:
             "reboot_required": False,
             "pending_config": None,
         }
-        http_server.application.probe_interface_status.assert_awaited_once_with("192.168.1.50")
+        http_server.application.probe_interface_status.assert_awaited_once_with(device)
         assert device.interfaces == body["interfaces"]
 
     @pytest.mark.asyncio

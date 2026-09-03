@@ -88,6 +88,15 @@ async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_s
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["lock_device", "unlock_device"])
+async def test_application_lock_operations_reject_devices_without_an_address(operation):
+    device = SimpleNamespace(ipv4=None)
+
+    with pytest.raises(RuntimeError, match="no control address"):
+        await getattr(DanteApplication(), operation)(device, "1234", b"x" * 32)
+
+
+@pytest.mark.asyncio
 async def test_core_lock_device_returns_core_error(monkeypatch):
     from netaudio.core import NetaudioCoreError
 

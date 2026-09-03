@@ -16,7 +16,7 @@ class FakeSocket:
     def __enter__(self):
         return self
 
-    def __exit__(self, exception_type, exception, traceback):
+    def __exit__(self, _exception_type, _exception, _traceback):
         return False
 
     def sendall(self, payload):

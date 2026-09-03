@@ -481,28 +481,27 @@ def test_latency_get_fails_when_every_reported_latency_value_is_unavailable():
     assert "latency readback was unavailable" in result.output
 
 
-def test_clock_source_get_is_not_implemented(monkeypatch, reset_cli_state):
-    def should_not_run(*_arguments, **_options):
-        raise AssertionError("clock source must not discover devices")
+def test_clock_source_get_reports_the_raw_code():
+    device = FakeDevice("Clocked")
+    device.clock_source_code = 57044
+    application = FakeApplication({"clocked.local.": device})
 
-    monkeypatch.setattr(config_commands, "run_command", should_not_run)
-
-    result = runner.invoke(config_commands.app, ["clock-source"])
+    result = invoke(config_commands.run_clock_source, application, application.devices, None, False)
 
     assert result.exit_code == 0
-    assert result.output.strip() == "not implemented"
+    assert result.output.strip() == "57044 (0xDED4)"
 
 
-def test_clock_source_set_is_not_implemented(monkeypatch, reset_cli_state):
-    def should_not_run(*_arguments, **_options):
-        raise AssertionError("clock source must not discover devices")
+def test_clock_source_set_requires_matching_readback():
+    device = FakeDevice("Clocked")
+    device.clock_source_code = 0
+    application = FakeApplication({"clocked.local.": device})
 
-    monkeypatch.setattr(config_commands, "run_command", should_not_run)
+    result = invoke(config_commands.run_clock_source, application, application.devices, "0xDED4", False)
 
-    result = runner.invoke(config_commands.app, ["clock-source", "1"])
-
-    assert result.exit_code == 1
-    assert "not implemented" in result.output
+    assert result.exit_code == 0
+    assert result.output.strip() == "Set clock source for Clocked: 57044 (0xDED4) (verified)"
+    assert _operations(application) == ["set_clock_source"]
 
 
 def test_latency_does_not_treat_configured_value_as_applied():
