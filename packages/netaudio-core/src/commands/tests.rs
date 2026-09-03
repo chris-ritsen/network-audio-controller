@@ -682,6 +682,44 @@ fn query_receiver_port_ranges_matches_shipping_controller_request() {
 }
 
 #[test]
+fn managed_status_queries_match_the_captured_2809_packets() {
+    // Explicit Status refresh frames 523, 535, 543, 567, and 597 from
+    // protocol-research run ddm-dapi-arc-read-20260902-01. Source PCAP
+    // SHA-256: fda27481bd7cd64f1450b09d29c88daa6e27c68235b353ccd9adceeb4a512954.
+    assert_eq!(
+        build_channel_count_for_protocol(PROTOCOL_ARC_2809, 0x0072).unwrap(),
+        decode_hexadecimal("2809000a007210000000")
+    );
+    assert_eq!(
+        build_property_directory_for_protocol(PROTOCOL_ARC_2809, 0x0073).unwrap(),
+        decode_hexadecimal("2809000a007311020000")
+    );
+    assert_eq!(
+        build_device_info_for_protocol(PROTOCOL_ARC_2809, 0x0074).unwrap(),
+        decode_hexadecimal("2809000a007410030000")
+    );
+    assert_eq!(
+        build_transmitter_names_for_protocol(PROTOCOL_ARC_2809, 2, 0x0076).unwrap(),
+        decode_hexadecimal("28090010007620100000000100010002")
+    );
+    assert_eq!(
+        build_query_receiver_port_ranges_for_protocol(PROTOCOL_ARC_2809, 0x0079).unwrap(),
+        decode_hexadecimal("2809000a007933000000")
+    );
+
+    for invalid_protocol in [0, 0x2729, 0x2801, 0x280F, u16::MAX] {
+        assert_eq!(
+            build_channel_count_for_protocol(invalid_protocol, 1),
+            Err(NetaudioError::UnsupportedProtocolOperation)
+        );
+    }
+    assert_eq!(
+        build_query_receiver_port_ranges_for_protocol(0x27FF, 1),
+        Err(NetaudioError::UnsupportedProtocolOperation)
+    );
+}
+
+#[test]
 fn flow_builders_reject_unknown_protocols() {
     for protocol in [0, 0x2728, 0x2800, 0x2808, u16::MAX] {
         assert_eq!(

@@ -24,6 +24,13 @@ or internal symbol catalogs, or transfer unsupported proprietary terminology
 into the product. Preserve source, run/frame or timestamp, scope, digest, and
 allowed/excluded evidence when promoting research artifacts.
 
+Shipping DDM support may use the documented Managed API and independently
+derived Controller-compatible network services, including mDNS-discovered
+managed-control transports. Such implementations must stand alone without
+runtime dependence on captures, proprietary applications, process memory, VM
+state, emulator state, or research artifacts; keep version-scoped behavior
+explicit and fail closed on unsupported variants.
+
 Before editing, inspect Git status and preserve every existing dirty or
 untracked path. Stage exact paths only. Never use `git checkout`, `git restore`,
 `git reset`, or an equivalent overwrite without explicit user confirmation
