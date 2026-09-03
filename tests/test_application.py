@@ -476,11 +476,11 @@ class TestDanteApplication:
         device.gain_levels = [5, 1]
         device.supported_gain_levels = [1, 2, 3, 4, 5]
 
-        def respond_to_write(device_ip_address, channel_number, gain_level, device_type):
+        def respond_to_write(target, channel_number, gain_level, device_type):
             assert channel_number == 1
             assert gain_level == 3
             assert device_type == "input"
-            application.notifications.notify_waiters("gain", device_ip_address, ("input", [3, 1]))
+            application.notifications.notify_waiters("gain", application._control_key(target), ("input", [3, 1]))
 
         application.send_set_gain_level = AsyncMock(side_effect=respond_to_write)
 
@@ -499,8 +499,8 @@ class TestDanteApplication:
         device.gain_levels = [5, 1]
         device.supported_gain_levels = [1, 2, 3, 4, 5]
 
-        def respond_with_unchanged_status(device_ip_address, channel_number, gain_level, device_type):
-            application.notifications.notify_waiters("gain", device_ip_address, ("input", [5, 1]))
+        def respond_with_unchanged_status(target, channel_number, gain_level, device_type):
+            application.notifications.notify_waiters("gain", application._control_key(target), ("input", [5, 1]))
 
         application.send_set_gain_level = AsyncMock(side_effect=respond_with_unchanged_status)
 

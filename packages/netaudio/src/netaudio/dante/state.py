@@ -276,14 +276,13 @@ class DanteStateService:
     async def _on_transmitter_flow_changed(self, event: DanteEvent) -> None:
         server_name = event.server_name
         device = self._online_device(server_name)
-        if not device or not device.ipv4:
+        if not device or (not device.requires_managed_control and not device.ipv4):
             return
 
         if not self._has_control_path(device):
             return
-        arc_port = self.application.get_arc_port(device)
-        if device.requires_managed_control:
-            arc_port = self.application.arc_port_for_address(str(device.ipv4))
+        device_address = str(device.ipv4) if device.ipv4 else ""
+        arc_port = self.application.get_arc_port(device) or 0
 
         logger.info(f"Re-fetching transmitter flows for {server_name} (transmitter flow changed)")
         async with self._lock_for(server_name):
@@ -291,7 +290,7 @@ class DanteStateService:
                 flow_protocol_identifier = device.flow_protocol_id
                 if flow_protocol_identifier is None:
                     flow_protocol_identifier = await flows.detect_flow_protocol(
-                        str(device.ipv4),
+                        device_address,
                         arc_port,
                         **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
                     )
@@ -300,7 +299,7 @@ class DanteStateService:
                         return
                     device.flow_protocol_id = flow_protocol_identifier
                 flow_inventory = await flows.query_preferred_tx_flow_inventory(
-                    str(device.ipv4),
+                    device_address,
                     arc_port,
                     flow_protocol_identifier,
                     **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
@@ -363,7 +362,9 @@ class DanteStateService:
         if not device:
             return
         await self.fetch_device_controls(event.server_name)
-        if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and device.ipv4:
+        if event.data.get("notification_id") == NOTIFICATION_CLEAR_CONFIG_STATUS and (
+            device.requires_managed_control or device.ipv4
+        ):
             await asyncio.gather(
                 self._refresh_sample_rate_status(device, "configuration cleared"),
                 self._refresh_encoding_status(device, "configuration cleared"),
@@ -376,7 +377,7 @@ class DanteStateService:
 
     async def _on_sample_rate_status(self, event: DanteEvent) -> None:
         device = self._online_device(event.server_name)
-        if not device or not device.ipv4:
+        if not device or (not device.requires_managed_control and not device.ipv4):
             return
         await self._refresh_sample_rate_status(device, "sample rate changed")
 
@@ -385,11 +386,16 @@ class DanteStateService:
         async with self._lock_for(device.server_name):
             device.apply_controls(unavailable_latency_controls())
             try:
-                controls = await device.fetch_controls_data(include_channels=True)
-                if controls is None:
-                    logger.warning(f"Device controls unavailable for {device.server_name} after sample rate changed")
+                if device.requires_managed_control:
+                    await self.application._populate_device_controls(device, include_channels=True)
                 else:
-                    device.apply_controls(controls)
+                    controls = await device.fetch_controls_data(include_channels=True)
+                    if controls is None:
+                        logger.warning(
+                            f"Device controls unavailable for {device.server_name} after sample rate changed"
+                        )
+                    else:
+                        device.apply_controls(controls)
             except (RuntimeError, OSError) as exception:
                 logger.warning(f"Error re-fetching device controls for {device.server_name}: {exception}")
         self._emit_device_updated(device)
@@ -404,7 +410,7 @@ class DanteStateService:
 
     async def _on_encoding_status(self, event: DanteEvent) -> None:
         device = self._online_device(event.server_name)
-        if not device or not device.ipv4:
+        if not device or (not device.requires_managed_control and not device.ipv4):
             return
         await self._refresh_encoding_status(device, "encoding changed")
 
@@ -427,7 +433,7 @@ class DanteStateService:
     async def _refresh_capability_status(self, device, reason: str, capability_name: str, probe_status) -> None:
         logger.info(f"Re-fetching {capability_name} status for {device.server_name} ({reason})")
         try:
-            await probe_status(str(device.ipv4))
+            await probe_status(device)
         except (RuntimeError, OSError) as exception:
             logger.warning(f"Error re-fetching {capability_name} status for {device.server_name}: {exception}")
 
@@ -438,7 +444,7 @@ class DanteStateService:
             return
 
         logger.info(f"Device rebooted: {server_name}")
-        if device.ipv4:
+        if device.ipv4 and not device.requires_managed_control:
             await self.application.cmc.register_device(str(device.ipv4))
         await self.refetch_device_controls(server_name)
 
@@ -453,7 +459,7 @@ class DanteStateService:
 
         logger.info(f"Re-fetching AES67 status for {server_name}")
         try:
-            await self.application.probe_aes67_state(str(device.ipv4))
+            await self.application.probe_aes67_state(device)
         except (RuntimeError, OSError) as exception:
             logger.warning(f"Error re-fetching AES67 for {server_name}: {exception}")
         await asyncio.gather(
@@ -467,7 +473,7 @@ class DanteStateService:
         if not device:
             return
 
-        if not self._has_control_path(device) or not device.ipv4:
+        if not self._has_control_path(device) or (not device.requires_managed_control and not device.ipv4):
             return
 
         logger.info(f"Re-fetching controls for {server_name}")
@@ -539,7 +545,7 @@ class DanteStateService:
         if not device or not device.online:
             return
 
-        if not self._has_control_path(device) or not device.ipv4:
+        if not self._has_control_path(device) or (not device.requires_managed_control and not device.ipv4):
             return
 
         self._populating.add(server_name)
@@ -561,14 +567,13 @@ class DanteStateService:
                         if attempt < retries - 1:
                             logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
 
-                device_ip = str(device.ipv4)
                 if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
-                    await self.application.send_bluetooth_status_request(device_ip)
+                    await self.application.send_bluetooth_status_request(device)
 
                 await self._probe_with_retries(
                     device,
                     "AES67",
-                    lambda: self.application.probe_aes67_state(device_ip),
+                    lambda: self.application.probe_aes67_state(device),
                 )
 
                 capability_tasks = []
@@ -584,12 +589,12 @@ class DanteStateService:
                 await self._probe_with_retries(
                     device,
                     "preferred leader",
-                    lambda: self.application.probe_preferred_leader_state(device_ip),
+                    lambda: self.application.probe_preferred_leader_state(device),
                 )
 
                 if device.interfaces is None or device.link_speed_mbps is None:
                     try:
-                        await self.application.probe_interface_status(device_ip)
+                        await self.application.probe_interface_status(device)
                     except (RuntimeError, OSError) as exception:
                         logger.warning(f"Error probing interface status for {server_name}: {exception}")
 
@@ -606,11 +611,13 @@ class DanteStateService:
 
     async def refresh_status_fields(self, server_name: str, reason: str) -> None:
         device = self.devices.get(server_name)
-        if not device or not device.online or not device.ipv4:
+        if not device or not device.online or (not device.requires_managed_control and not device.ipv4):
             return
         async with self._lock_for(server_name):
             clock_changed = await self._refresh_clock_status(device, reason)
-            lock_changed = await self._refresh_lock_status(device, reason)
+            lock_changed = False
+            if not device.requires_managed_control:
+                lock_changed = await self._refresh_lock_status(device, reason)
         if clock_changed or lock_changed:
             self._emit_device_updated(device)
 
@@ -645,7 +652,7 @@ class DanteStateService:
             if device.dante_model_id:
                 return
 
-            if not device.ipv4 or not device.mac_address:
+            if device.requires_managed_control or not device.ipv4 or not device.mac_address:
                 return
 
             device_ip = str(device.ipv4)

@@ -50,6 +50,16 @@ def test_operation_documents_select_only_argument_free_leaf_fields(schema):
     assert "(" not in document.split("{", 2)[2]
     mutation = schema.operation_document("mutation", schema.field("mutation", "device-name-set"))
     assert mutation == "mutation DeviceNameSet($input: DeviceNameSetInput!) { DeviceNameSet(input: $input) { ok } }"
+    assert len(document) < 1_500
+    assert "devices { id name" in document
+    assert "devices { id name domain" not in document
+
+
+def test_mutation_documents_omit_secret_results(schema):
+    document = schema.operation_document("mutation", schema.field("mutation", "UserAPIKeyAdd"))
+
+    assert document.endswith("{ UserAPIKeyAdd(input: $input) { ok } }")
+    assert "keyToken" not in document
 
 
 def test_interface_selections_use_inline_fragments_for_possible_types(schema):
