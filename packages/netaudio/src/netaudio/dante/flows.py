@@ -377,6 +377,8 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
             status_page = None
     if status_page is not None:
         return inventory_from_receiver_flow_status_page(status_page)
+    if getattr(device, "requires_managed_control", False):
+        return None
     from netaudio.cli_support.execution import _get_arc_port
 
     return await query_receiver_flow_inventory(str(device.ipv4), _get_arc_port(device))

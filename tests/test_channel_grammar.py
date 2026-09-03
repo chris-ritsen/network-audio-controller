@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 import typer
+from netaudio.cli import app as root_app
 from netaudio.cli_support.selection import (
     ChannelReference,
     parse_channel_reference,
@@ -54,6 +55,17 @@ def test_config_show_reports_missing_file(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert result.output.splitlines()[0] == f"path = {config_path.resolve()}"
     assert "no configuration file" in result.output
+
+
+def test_config_path_remains_available_when_ddm_configuration_is_invalid(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[ddm]\nservers = []\n")
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_path))
+
+    result = runner.invoke(root_app, ["config", "path"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == str(config_path.resolve())
 
 
 def test_parse_channel_reference_accepts_direction_prefix():

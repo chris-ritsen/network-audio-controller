@@ -134,13 +134,13 @@ async def run_network_status(application, devices, timeout: float) -> None:
         raise typer.Exit(code=1)
 
     async def probe(server_name, device):
-        if device.ipv4 is None:
+        if not device.requires_managed_control and device.ipv4 is None:
             return server_name, device, None, None, True
 
         async def capture(operation):
             try:
-                return await operation(str(device.ipv4), timeout=timeout)
-            except (CapabilityProbeTimeout, DAPISessionError):
+                return await operation(device, timeout=timeout)
+            except (CapabilityProbeTimeout, DAPISessionError, RuntimeError, OSError):
                 return None
 
         switch_configuration_applicable = _should_probe_switch_configuration(device)

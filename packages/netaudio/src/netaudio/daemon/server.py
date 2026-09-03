@@ -425,7 +425,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if device:
             device.update_last_seen()
             logger.info(f"Device discovered (event): {event.server_name}")
-            if device.ipv4:
+            if device.ipv4 and not device.requires_managed_control:
                 await self.application.cmc.register_device(str(device.ipv4))
             await self._publish_device_to_redis(device)
             await self._republish_correlated_shure(device)
@@ -659,7 +659,13 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         device = self.devices.get(server_name)
         self.clear_offline_candidate(server_name)
         self.application.unregister_device(server_name)
-        if device is None or not device.online or not device.ipv4 or not device.services:
+        if (
+            device is None
+            or device.requires_managed_control
+            or not device.online
+            or not device.ipv4
+            or not device.services
+        ):
             return
         self._spawn_background(
             self._rediscover_forgotten_device(device),
@@ -711,7 +717,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if full_refresh:
             self._last_status_field_refresh_monotonic = now
         for server_name, device in list(self.devices.items()):
-            if not device.online or not device.ipv4:
+            if not device.online or (not device.requires_managed_control and not device.ipv4):
                 continue
             fields_known = device.clock_source_code is not None and device.is_locked is not None
             if fields_known and not full_refresh:
@@ -731,7 +737,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     def mark_device_offline(self, server_name: str) -> None:
         device = self.devices.get(server_name)
-        if not device or not device.online:
+        if not device or not device.online or device.requires_managed_control:
             return
 
         now = time.monotonic()
@@ -751,7 +757,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     def mark_device_offline_verified(self, server_name: str, reason: str) -> None:
         device = self.devices.get(server_name)
-        if not device or not device.online:
+        if not device or not device.online or device.requires_managed_control:
             return
 
         now = time.monotonic()
@@ -771,6 +777,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         try:
             device = self.devices.get(server_name)
             if device is None or not device.online:
+                return
+            if device.requires_managed_control:
+                self.clear_offline_candidate(server_name)
                 return
 
             failures = self._offline_failures.get(server_name, 0)
@@ -809,7 +818,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if delay > 0:
             await asyncio.sleep(delay)
         device = self.devices.get(server_name)
-        if device is None or device.online:
+        if device is None or device.online or device.requires_managed_control:
             return
 
         device_ip = str(device.ipv4) if device.ipv4 else None
@@ -844,7 +853,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         for server_name, device in list(self.devices.items()):
             if offline_only and device.online:
                 continue
-            if not device.ipv4:
+            if device.requires_managed_control or not device.ipv4:
                 continue
             self._spawn_background(
                 self._recheck_offline_device(server_name, delay=0),
@@ -856,7 +865,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if device is None or not device.online:
             return
 
-        if not device.ipv4:
+        if device.requires_managed_control or not device.ipv4:
             return
 
         last_seen = device.last_seen
@@ -883,7 +892,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         for server_name, device in list(self.devices.items()):
             if not device.online:
                 continue
-            if not device.ipv4:
+            if device.requires_managed_control or not device.ipv4:
                 continue
             last_seen = device.last_seen
             if last_seen is not None and (time.time() - last_seen) < ONLINE_REVALIDATE_IDLE_SECONDS:

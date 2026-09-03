@@ -1,3 +1,5 @@
+import pytest
+
 from netaudio.dante.clock_config import (
     format_clock_source_code,
     format_clock_subdomain,
@@ -27,17 +29,10 @@ def test_parse_clock_source_accepts_decimal_and_hex():
     assert parse_clock_source_selection("0xDED4") == 57044
 
 
-def test_parse_clock_source_rejects_empty_and_out_of_range():
-    try:
-        parse_clock_source_selection("")
-        raise AssertionError("empty clock source must fail")
-    except ValueError:
-        pass
-    try:
-        parse_clock_source_selection("65536")
-        raise AssertionError("oversized clock source must fail")
-    except ValueError:
-        pass
+@pytest.mark.parametrize("value", ["", "65536"])
+def test_parse_clock_source_rejects_empty_and_out_of_range(value):
+    with pytest.raises(ValueError):
+        parse_clock_source_selection(value)
 
 
 def test_parse_clock_subdomain_accepts_unset_ascii_and_explicit_hex():
