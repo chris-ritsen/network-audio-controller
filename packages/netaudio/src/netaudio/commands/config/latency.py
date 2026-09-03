@@ -99,7 +99,7 @@ def _render_all_latency_readings(readings) -> None:
 def _render_one_latency_reading(values: dict) -> None:
     from netaudio.cli import OutputFormat, state
 
-    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml):
+    if state.output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.csv, OutputFormat.yaml):
         output_single(values)
     else:
         labels = (
@@ -122,7 +122,9 @@ async def run_latency(application, devices, value: float | None, all_devices: bo
         if all_devices:
             _render_all_latency_readings(readings)
         else:
-            _render_one_latency_reading(readings[0][2])
+            values = readings[0][2]
+            assert values is not None
+            _render_one_latency_reading(values)
         return
 
     if not math.isfinite(value) or value < 0:
