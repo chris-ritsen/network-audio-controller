@@ -49,7 +49,7 @@ async def _read_capability_status(application, device, kind: str, supported_fiel
         "sample_rate": application.probe_sample_rate_status,
         "sample_rate_pullup": application.probe_sample_rate_pullup_status,
     }[kind]
-    current_value, supported_values = await probe(str(device.ipv4))
+    current_value, supported_values = await probe(device)
     apply_device_status(device, kind, {kind: current_value, supported_field: supported_values})
     return current_value, supported_values
 

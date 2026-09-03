@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from zeroconf import IPVersion, ServiceStateChange
@@ -55,6 +55,13 @@ class _ResolvedService:
     service: DDMService
 
 
+@dataclass
+class _ServiceGroup:
+    addresses: set[str] = field(default_factory=set)
+    controller: DDMService | None = None
+    device: DDMService | None = None
+
+
 def _decode_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
@@ -88,28 +95,28 @@ def _ipv4_addresses(addresses: list[str]) -> tuple[str, ...]:
 
 
 def _merge_services(records: list[_ResolvedService]) -> tuple[DDMServer, ...]:
-    grouped: dict[str, dict[str, object]] = {}
+    grouped: dict[str, _ServiceGroup] = {}
     for record in sorted(
         records, key=lambda item: (item.server_name, item.service.service_type, item.service.instance_name)
     ):
-        group = grouped.setdefault(record.server_name, {"addresses": set()})
-        group["addresses"].update(record.ipv4_addresses)  # type: ignore[union-attr]
+        group = grouped.setdefault(record.server_name, _ServiceGroup())
+        group.addresses.update(record.ipv4_addresses)
         if record.service.service_type == DDM_CONTROLLER_SERVICE:
-            group.setdefault("controller", record.service)
+            if group.controller is None:
+                group.controller = record.service
         elif record.service.service_type == DDM_DEVICE_SERVICE:
-            group.setdefault("device", record.service)
+            if group.device is None:
+                group.device = record.service
 
     servers = []
     for server_name, group in sorted(grouped.items()):
-        addresses = tuple(
-            sorted(group["addresses"], key=lambda address: int(ipaddress.ip_address(address)))  # type: ignore[arg-type]
-        )
+        addresses = tuple(sorted(group.addresses, key=lambda address: int(ipaddress.ip_address(address))))
         servers.append(
             DDMServer(
                 server_name=server_name,
                 ipv4_addresses=addresses,
-                controller_service=group.get("controller"),  # type: ignore[arg-type]
-                device_service=group.get("device"),  # type: ignore[arg-type]
+                controller_service=group.controller,
+                device_service=group.device,
             )
         )
     return tuple(servers)

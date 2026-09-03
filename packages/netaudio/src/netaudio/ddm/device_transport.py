@@ -117,8 +117,6 @@ PREFERRED_LEADER_MUTATION = (
 
 
 def device_requires_managed_control(device) -> bool:
-    if not getattr(device, "ddm_device_id", None):
-        return False
     enrolment = str(getattr(device, "ddm_enrolment_state", "") or "").casefold()
     management = str(getattr(device, "management_state", "") or "").casefold()
     return enrolment in {"enrolled", "managed"} or management == "managed"
@@ -139,7 +137,7 @@ class ManagedDeviceTransport:
         endpoint = urlsplit(configuration.url or "")
         server = endpoint.hostname
         if not server:
-            raise ManagedDeviceControlError("DDM Controller server could not be determined from ddm.url")
+            raise ManagedDeviceControlError("DDM Controller server could not be determined from the server profile URL")
         self.configuration = configuration
         self.server = server
         self.client = client or ManagedAPIClient(

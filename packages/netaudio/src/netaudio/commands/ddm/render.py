@@ -10,6 +10,23 @@ from netaudio.commands.ddm.transport import fail
 
 SCALAR_TYPES = (bool, float, int, str)
 UNSPECIFIED_ADDRESS = "0.0.0.0"
+REDACTED = "[redacted]"
+
+
+def is_sensitive_name(key: str) -> bool:
+    normalized = "".join(character for character in key.casefold() if character.isalnum())
+    return normalized.endswith(("apikey", "authorization", "password", "token", "credential", "secret"))
+
+
+def redact_sensitive_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: REDACTED if is_sensitive_name(str(key)) else redact_sensitive_values(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_sensitive_values(item) for item in value]
+    return value
 
 
 def _scalar(value: Any) -> bool:
@@ -85,20 +102,35 @@ def _object_rows(value: dict) -> tuple[list[str], list[list[str]]]:
     return ["Field", "Value"], rows
 
 
-def report_errors(response: dict) -> None:
+def report_errors(response: dict) -> bool:
+    found = False
     for issue in response.get("errors") or []:
+        found = True
         message = issue.get("message") if isinstance(issue, dict) else str(issue)
         path = issue.get("path") if isinstance(issue, dict) else None
         location = f" at {'.'.join(str(part) for part in path)}" if path else ""
         typer.echo(f"Managed API error{location}: {message}", err=True)
+    return found
 
 
-def render_result(response: dict, field_name: str, type_name: str, title: str | None = None) -> None:
-    report_errors(response)
+def render_result(
+    response: dict,
+    field_name: str,
+    type_name: str,
+    title: str | None = None,
+    *,
+    require_ok: bool = False,
+) -> None:
+    if report_errors(response):
+        fail("the Managed API request failed")
     data = response.get("data")
     if data is None or field_name not in data:
         fail("the Managed API returned no data")
-    value = data[field_name]
+    value = redact_sensitive_values(data[field_name])
+    if require_ok and (not isinstance(value, dict) or value.get("ok") is not True):
+        error = value.get("error") if isinstance(value, dict) else None
+        detail = error.get("message") if isinstance(error, dict) else None
+        fail(f"{field_name} did not confirm success" + (f": {detail}" if detail else ""))
     if isinstance(value, list):
         items = [item for item in value if isinstance(item, dict)]
         if type_name == "Domain":
@@ -110,14 +142,10 @@ def render_result(response: dict, field_name: str, type_name: str, title: str | 
         output_table(headers, rows, json_data=value, title=title, empty_message=f"No {field_name} returned.")
         return
     if isinstance(value, dict):
-        if value.get("ok") is False:
-            error = value.get("error")
-            detail = error.get("message") if isinstance(error, dict) else None
-            fail(f"{field_name} was rejected" + (f": {detail}" if detail else ""))
         headers, rows = _object_rows(value)
         output_table(headers, rows, json_data=value, title=title)
         return
     output_single(json.dumps(value))
 
 
-__all__ = ["render_result", "report_errors"]
+__all__ = ["is_sensitive_name", "redact_sensitive_values", "render_result", "report_errors"]
