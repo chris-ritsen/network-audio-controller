@@ -337,3 +337,13 @@ def output_single(data: Any, device: Optional[DanteDevice] = None) -> None:
         _render_structured(data, devices)
         return
     typer.echo(data)
+
+
+def output_value(label: str, key: str, value: Any, formatted_value: Any = None) -> None:
+    from netaudio.cli import OutputFormat
+
+    if _get_state().output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.csv, OutputFormat.yaml):
+        output_single({key: value})
+        return
+    display_value = value if formatted_value is None else formatted_value
+    typer.echo(f"{label}: {display_value}")

@@ -15,6 +15,17 @@ from netaudio.ddm import Field, InputValidationError, InputValue, Schema, TypeRe
 
 PYTHON_SCALAR_TYPES = {"Boolean": bool, "Float": float, "ID": str, "Int": int, "String": str}
 SENTENCE_END = re.compile(r"(?<=[.!?])\s|\n")
+MUTATION_RESOURCES = (
+    "admin",
+    "clocking-group",
+    "device",
+    "devices",
+    "domain",
+    "fqdn",
+    "license",
+    "user",
+)
+QUERY_COMMAND_NAMES = {"me": "current-user"}
 
 
 def summary(description: str | None) -> str:
@@ -34,6 +45,34 @@ class OptionSpecification:
 
 def _identifier(graphql_name: str) -> str:
     return re.sub(r"\W", "_", command_name(graphql_name))
+
+
+def _action_name(value: str) -> str:
+    for suffix, verb in (
+        ("-configure", "configure"),
+        ("-activate", "activate"),
+        ("-assign", "assign"),
+        ("-remove", "remove"),
+        ("-add", "add"),
+        ("-set", "set"),
+    ):
+        if value.endswith(suffix):
+            subject = value[: -len(suffix)]
+            return f"{verb}-{subject}" if subject else verb
+    return value
+
+
+def operation_command_path(operation: str, graphql_name: str) -> tuple[str, ...]:
+    name = command_name(graphql_name)
+    if operation == "query":
+        return "read", QUERY_COMMAND_NAMES.get(name, name)
+    if operation != "mutation":
+        raise ValueError(f"unsupported GraphQL operation {operation!r}")
+    for resource in MUTATION_RESOURCES:
+        prefix = f"{resource}-"
+        if name.startswith(prefix):
+            return "write", resource, _action_name(name[len(prefix) :])
+    return "write", "other", _action_name(name)
 
 
 def _enum_type(schema: Schema, name: str) -> type[enum.Enum]:
@@ -120,7 +159,14 @@ def _help_text(schema: Schema, operation: str, field: Field) -> str:
     return text
 
 
-def register_operation(group: typer.Typer, schema: Schema, operation: str, field: Field) -> None:
+def register_operation(
+    group: typer.Typer,
+    schema: Schema,
+    operation: str,
+    field: Field,
+    *,
+    command: str | None = None,
+) -> None:
     flattened = _flattened_input(schema, field)
     values = tuple(schema.type(flattened.type.named).input_fields) if flattened else field.arguments
     parameters = []
@@ -186,7 +232,7 @@ def register_operation(group: typer.Typer, schema: Schema, operation: str, field
     callback.__annotations__ = annotations
     callback.__name__ = _identifier(field.name)
     callback.__doc__ = _help_text(schema, operation, field)
-    group.command(command_name(field.name), help=_help_text(schema, operation, field))(callback)
+    group.command(command or command_name(field.name), help=_help_text(schema, operation, field))(callback)
 
 
 def register_schema_operations(
@@ -195,12 +241,33 @@ def register_schema_operations(
     *,
     excluded_fields: frozenset[str] = frozenset(),
 ) -> None:
+    read_group = typer.Typer(help="Run read-only queries from the DDM GraphQL schema.", no_args_is_help=True)
+    write_group = typer.Typer(
+        help="Run DDM GraphQL mutations that can change servers, domains, or devices.",
+        no_args_is_help=True,
+    )
+    group.add_typer(read_group, name="read")
+    group.add_typer(write_group, name="write")
+
     for field in schema.query_fields:
         if field.name not in excluded_fields:
-            register_operation(group, schema, "query", field)
+            _, command = operation_command_path("query", field.name)
+            register_operation(read_group, schema, "query", field, command=command)
+
+    resource_groups: dict[str, typer.Typer] = {}
     for field in schema.mutation_fields:
-        if field.name not in excluded_fields:
-            register_operation(group, schema, "mutation", field)
+        if field.name in excluded_fields:
+            continue
+        _, resource, command = operation_command_path("mutation", field.name)
+        resource_group = resource_groups.get(resource)
+        if resource_group is None:
+            resource_group = typer.Typer(
+                help=f"Run {resource.replace('-', ' ')} mutations from the DDM GraphQL schema.",
+                no_args_is_help=True,
+            )
+            resource_groups[resource] = resource_group
+            write_group.add_typer(resource_group, name=resource)
+        register_operation(resource_group, schema, "mutation", field, command=command)
 
 
-__all__ = ["register_operation", "register_schema_operations"]
+__all__ = ["operation_command_path", "register_operation", "register_schema_operations"]

@@ -334,6 +334,16 @@ def test_device_name_only_reports_success_after_matching_readback():
     assert application.sent[0].arguments == ("New",)
 
 
+def test_single_device_name_read_is_labeled():
+    device = FakeDevice("AVIO")
+    application = FakeApplication({"avio.local.": device})
+
+    result = invoke(device_commands.run_name, application, application.devices, None)
+
+    assert result.exit_code == 0
+    assert result.output == "Device name: AVIO\n"
+
+
 def test_device_name_mismatch_is_not_reported_as_success():
     device = FakeDevice("Old", name_reads="Old")
     application = FakeApplication({"old.local.": device})

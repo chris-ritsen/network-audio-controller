@@ -58,7 +58,7 @@ def test_virtual_device_derives_pcm_metadata_from_configured_capabilities():
     assert configurable_device._build_channel_metadata() == bytes.fromhex("0000bb8001010020040000200020000e")
 
 
-def test_virtual_device_does_not_invent_legacy_metadata_for_unknown_encodings():
+def test_virtual_device_does_not_invent_pcm_metadata_for_unknown_encodings():
     device = VirtualDevice(
         VirtualDeviceConfig(
             encoding=20,
@@ -95,7 +95,7 @@ def test_virtual_device_reports_configured_sample_rate_capabilities():
 def test_virtual_device_settings_distinguish_configured_and_active_latency():
     device = VirtualDevice(
         VirtualDeviceConfig(
-            latency_ns=250_000,
+            configured_latency_ns=250_000,
             active_latency_ns=1_000_000,
         )
     )
@@ -105,7 +105,6 @@ def test_virtual_device_settings_distinguish_configured_and_active_latency():
 
     assert parsed["configured_latency_ns"] == 250_000
     assert parsed["active_latency_ns"] == 1_000_000
-    assert parsed["latency_ns"] == 1_000_000
     assert parsed["default_latency_ns"] == 1_000_000
     assert parsed["min_latency_ns"] == 150_000
     assert parsed["max_latency_ns"] == 21_333_334

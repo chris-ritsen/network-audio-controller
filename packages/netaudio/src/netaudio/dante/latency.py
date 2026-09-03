@@ -48,11 +48,6 @@ def latency_state_from_settings(settings):
         state[nanoseconds_key] = int(nanoseconds) if nanoseconds is not None else None
         state[f"{field_name}_latency_ms"] = optional_nanoseconds_to_milliseconds(nanoseconds)
 
-    if not state and "latency_ns" in settings:
-        nanoseconds = settings["latency_ns"]
-        state["latency_ns"] = int(nanoseconds) if nanoseconds is not None else None
-        state["latency_ms"] = optional_nanoseconds_to_milliseconds(nanoseconds)
-
     minimum = state.get("min_latency_ms")
     maximum = state.get("max_latency_ms")
     choices = standard_latency_choices_for_range(minimum, maximum)
@@ -75,25 +70,19 @@ def latency_controls_from_settings(settings):
     controls = {}
     active_latency_present = "active_latency_ns" in settings
     configured_latency_present = "configured_latency_ns" in settings
-    compatibility_latency_present = "latency_ns" in settings
     active_latency_nanoseconds = settings.get("active_latency_ns")
     configured_latency_nanoseconds = settings.get("configured_latency_ns")
-    compatibility_latency_nanoseconds = settings.get("latency_ns")
 
     if active_latency_present:
         controls["active_latency"] = optional_nanoseconds_to_milliseconds(active_latency_nanoseconds)
 
     if configured_latency_present:
         controls["configured_latency"] = optional_nanoseconds_to_milliseconds(configured_latency_nanoseconds)
-    elif not active_latency_present and compatibility_latency_present:
-        controls["configured_latency"] = optional_nanoseconds_to_milliseconds(compatibility_latency_nanoseconds)
 
     effective_latency_nanoseconds = active_latency_nanoseconds
     if effective_latency_nanoseconds is None:
         effective_latency_nanoseconds = configured_latency_nanoseconds
-    if effective_latency_nanoseconds is None:
-        effective_latency_nanoseconds = compatibility_latency_nanoseconds
-    if active_latency_present or configured_latency_present or compatibility_latency_present:
+    if active_latency_present or configured_latency_present:
         controls["latency"] = optional_nanoseconds_to_milliseconds(effective_latency_nanoseconds)
 
     for field_name in ("default", "min", "max"):

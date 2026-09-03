@@ -110,15 +110,6 @@ def _read_process_record() -> Optional[ProcessRecord]:
         raise VirtualLifecycleError(f"process record {PIDFILE} is empty")
 
     try:
-        legacy_pid = int(raw_record)
-    except ValueError:
-        legacy_pid = None
-    if legacy_pid is not None:
-        if legacy_pid <= 0:
-            raise VirtualLifecycleError(f"process record {PIDFILE} contains an invalid PID")
-        return ProcessRecord(pid=legacy_pid, token=None)
-
-    try:
         process_data = json.loads(raw_record)
         pid = int(process_data["pid"])
         token = process_data["token"]

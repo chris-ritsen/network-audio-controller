@@ -9,7 +9,7 @@ import typer
 from click.core import ParameterSource
 
 from netaudio._exit_codes import ExitCode
-from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS, NetaudioGroup
 from netaudio.common.app_config import settings
 
 logger = logging.getLogger("netaudio")
@@ -114,6 +114,7 @@ def _load_icons_from_config() -> bool:
 
 app = typer.Typer(
     name="netaudio",
+    cls=NetaudioGroup,
     help="CLI for managing network audio devices.",
     context_settings=HELP_CONTEXT_SETTINGS,
     invoke_without_command=True,
