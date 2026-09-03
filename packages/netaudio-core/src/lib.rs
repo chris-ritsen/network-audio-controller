@@ -3,6 +3,7 @@
 pub mod bytes;
 pub mod client;
 pub mod commands;
+pub mod dapi;
 pub mod ffi;
 pub mod heartbeat;
 pub mod heartbeat_clock;

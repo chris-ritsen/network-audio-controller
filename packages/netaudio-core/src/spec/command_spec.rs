@@ -60,6 +60,8 @@ pub(super) enum CommandSpec {
     ChannelCount {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_arc_protocol")]
+        protocol_id: u16,
     },
     ClearAllConfiguration {
         #[serde(default)]
@@ -97,6 +99,8 @@ pub(super) enum CommandSpec {
     DeviceInfo {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_arc_protocol")]
+        protocol_id: u16,
     },
     DeviceLogExport {
         #[serde(default)]
@@ -218,6 +222,8 @@ pub(super) enum CommandSpec {
     PropertyDirectory {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_arc_protocol")]
+        protocol_id: u16,
     },
     QueryLatencyConfig {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -250,6 +256,8 @@ pub(super) enum CommandSpec {
     QueryReceiverPortRanges {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_flow_protocol")]
+        protocol_id: u16,
     },
     QueryTransmitChannelCapabilities {
         #[serde(default)]
@@ -424,6 +432,8 @@ pub(super) enum CommandSpec {
         channel_count: u16,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_arc_protocol")]
+        protocol_id: u16,
     },
     Transmitters {
         #[serde(default)]
@@ -663,13 +673,15 @@ impl CommandSpec {
                     interval_ms: 0,
                 },
             ),
-            CommandSpec::CapabilityPartitionExport { .. } | CommandSpec::DeviceLogExport { .. } => (
-                Settings,
-                Fire {
-                    repeat: 1,
-                    interval_ms: 0,
-                },
-            ),
+            CommandSpec::CapabilityPartitionExport { .. } | CommandSpec::DeviceLogExport { .. } => {
+                (
+                    Settings,
+                    Fire {
+                        repeat: 1,
+                        interval_ms: 0,
+                    },
+                )
+            }
             CommandSpec::CmcRegister { .. } => (Control, Request),
             CommandSpec::EnableAes67 { .. } => (
                 Settings,
@@ -726,7 +738,10 @@ pub(super) fn build_command(
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
-        CommandSpec::ChannelCount { message_id } => commands::build_channel_count(message_id)?,
+        CommandSpec::ChannelCount {
+            message_id,
+            protocol_id,
+        } => commands::build_channel_count_for_protocol(protocol_id, message_id)?,
         CommandSpec::ClearAllConfiguration {
             host_mac,
             message_id,
@@ -757,7 +772,10 @@ pub(super) fn build_command(
             flow_slot,
             message_id,
         } => commands::build_delete_tx_flow(flow_protocol_id, flow_slot, message_id)?,
-        CommandSpec::DeviceInfo { message_id } => commands::build_device_info(message_id)?,
+        CommandSpec::DeviceInfo {
+            message_id,
+            protocol_id,
+        } => commands::build_device_info_for_protocol(protocol_id, message_id)?,
         CommandSpec::DeviceLogExport {
             host_mac,
             message_id,
@@ -847,9 +865,10 @@ pub(super) fn build_command(
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
-        CommandSpec::PropertyDirectory { message_id } => {
-            commands::build_property_directory(message_id)?
-        }
+        CommandSpec::PropertyDirectory {
+            message_id,
+            protocol_id,
+        } => commands::build_property_directory_for_protocol(protocol_id, message_id)?,
         CommandSpec::QueryLatencyConfig { message_id } => {
             commands::build_query_latency_config(message_id)?
         }
@@ -873,9 +892,10 @@ pub(super) fn build_command(
             starting_flow,
             message_id,
         } => commands::build_query_receiver_flows(starting_flow, message_id)?,
-        CommandSpec::QueryReceiverPortRanges { message_id } => {
-            commands::build_query_receiver_port_ranges(message_id)?
-        }
+        CommandSpec::QueryReceiverPortRanges {
+            message_id,
+            protocol_id,
+        } => commands::build_query_receiver_port_ranges_for_protocol(protocol_id, message_id)?,
         CommandSpec::QueryTransmitChannelCapabilities {
             starting_channel_identifier,
             maximum_channel_count,
@@ -1089,7 +1109,10 @@ pub(super) fn build_command(
         CommandSpec::TransmitterNames {
             channel_count,
             message_id,
-        } => commands::build_transmitter_names(channel_count, message_id)?,
+            protocol_id,
+        } => {
+            commands::build_transmitter_names_for_protocol(protocol_id, channel_count, message_id)?
+        }
         CommandSpec::Transmitters {
             page,
             friendly_names,
