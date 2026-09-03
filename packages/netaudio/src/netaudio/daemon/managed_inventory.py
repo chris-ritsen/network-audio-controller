@@ -10,7 +10,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
 
-from netaudio.common.managed_api import ManagedAPIConfiguration
+from netaudio.common.managed_api import DDMConfiguration, DDMContextConfiguration, ManagedAPIConfiguration
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
@@ -27,6 +27,8 @@ class ManagedDeviceObservation:
     domain_name: str | None
     synced_at: float | None = None
     fresh: bool | None = None
+    server_profile: str = "default"
+    context_name: str | None = None
 
 
 def _normalized_mac(value: object) -> str | None:
@@ -43,29 +45,12 @@ def _normalized_mac(value: object) -> str | None:
     return hexadecimal
 
 
-def _normalized_ip(value: object) -> str | None:
-    if not isinstance(value, str) or value in {"", "None"}:
-        return None
-    try:
-        return str(ipaddress.ip_address(value))
-    except ValueError:
-        return None
-
-
 def _direct_macs(record: dict) -> set[str]:
     values: list[object] = [record.get("mac_address")]
     for interface in record.get("interfaces") or []:
         if isinstance(interface, dict):
             values.extend((interface.get("mac_address"), interface.get("macAddress")))
     return {normalized for value in values if (normalized := _normalized_mac(value)) is not None}
-
-
-def _direct_ips(record: dict) -> set[str]:
-    values: list[object] = [record.get("ipv4")]
-    for interface in record.get("interfaces") or []:
-        if isinstance(interface, dict):
-            values.extend((interface.get("address"), interface.get("ip_address")))
-    return {normalized for value in values if (normalized := _normalized_ip(value)) is not None}
 
 
 def _managed_macs(device: Device) -> set[str]:
@@ -78,12 +63,15 @@ def _managed_macs(device: Device) -> set[str]:
 
 
 def _managed_ips(device: Device) -> set[str]:
-    return {
-        normalized
-        for interface in device.interfaces or ()
-        if interface is not None
-        if (normalized := _normalized_ip(interface.address)) is not None
-    }
+    addresses = set()
+    for interface in device.interfaces or ():
+        if interface is None or not interface.address:
+            continue
+        try:
+            addresses.add(str(ipaddress.ip_address(interface.address)))
+        except ValueError:
+            continue
+    return addresses
 
 
 def _unique_cross_source_matches(
@@ -93,13 +81,6 @@ def _unique_cross_source_matches(
     for index, observation in enumerate(observations):
         managed_macs = _managed_macs(observation.device)
         candidates = {key for key, record in direct.items() if managed_macs & _direct_macs(record)}
-        if not candidates:
-            managed_ips = _managed_ips(observation.device)
-            candidates = {
-                key
-                for key, record in direct.items()
-                if managed_ips & _direct_ips(record) and (not managed_macs or not _direct_macs(record))
-            }
         candidate_sets[index] = candidates
 
     matches: dict[int, str] = {}
@@ -113,8 +94,11 @@ def _unique_cross_source_matches(
     return matches
 
 
-def _ddm_key(device_id: str) -> str:
-    return f"{DDM_KEY_PREFIX}{device_id}"
+def _ddm_key(observation: ManagedDeviceObservation) -> str:
+    if observation.server_profile == "default" and observation.context_name is None:
+        return f"{DDM_KEY_PREFIX}{observation.device.id}"
+    domain = observation.domain_id or "unenrolled"
+    return f"{DDM_KEY_PREFIX}{observation.server_profile}:{domain}:{observation.device.id}"
 
 
 def _interface_json(device: Device) -> list[dict] | None:
@@ -211,11 +195,13 @@ def _managed_metadata(observation: ManagedDeviceObservation, synced_at: float) -
     device = observation.device
     connection = device.connection
     return {
-        "inventory_id": _first_value(sorted(_managed_macs(device))) or f"ddm:{device.id}",
+        "inventory_id": _ddm_key(observation),
         "inventory_sources": ["ddm"],
         "management_state": "managed" if observation.domain_id else "unenrolled",
         "control_transports": ["ddm"],
         "ddm_device_id": device.id,
+        "ddm_server_profile": observation.server_profile,
+        "ddm_context": observation.context_name,
         "ddm_domain_id": observation.domain_id,
         "ddm_domain_name": observation.domain_name,
         "ddm_enrolment_state": device.enrolment_state,
@@ -255,7 +241,7 @@ def _managed_device_json(observation: ManagedDeviceObservation, synced_at: float
         "name": _managed_name(device),
         "online": ready,
         "availability_state": availability_state,
-        "server_name": _ddm_key(device.id),
+        "server_name": _ddm_key(observation),
         "services": {},
         "subscriptions": _managed_subscriptions(device),
         "mac_address": mac_address,
@@ -269,6 +255,7 @@ def _managed_device_json(observation: ManagedDeviceObservation, synced_at: float
         "firmware_version": identity.dante_version if identity else None,
         "tx_count": len(device.tx_channels) if device.tx_channels is not None else None,
         "rx_count": len(device.rx_channels) if device.rx_channels is not None else None,
+        "preferred_leader": device.clock_preferences.leader if device.clock_preferences else None,
         "interfaces": interfaces,
         "direct_control_available": False,
         "field_sources": {
@@ -276,6 +263,7 @@ def _managed_device_json(observation: ManagedDeviceObservation, synced_at: float
             "channels": "ddm",
             "subscriptions": "ddm",
             "availability": "ddm",
+            "clock": "ddm",
         },
         **metadata,
     }
@@ -310,6 +298,8 @@ def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
     for key in ("name", "manufacturer", "model", "model_id", "dante_model", "dante_model_id", "ipv4"):
         if merged.get(key) in {None, "", "None"} and managed_record.get(key) not in {None, "", "None"}:
             merged[key] = copy.deepcopy(managed_record[key])
+    if "preferred_leader" in managed_record:
+        merged["preferred_leader"] = managed_record["preferred_leader"]
     merged["online"] = bool(direct_record.get("online") or managed_record.get("online"))
     merged["availability_state"] = "online" if merged["online"] else managed_record.get("availability_state", "offline")
     field_sources = dict(managed_record.get("field_sources") or {})
@@ -382,6 +372,7 @@ class ManagedInventoryService:
         *,
         client: ManagedAPIClient | None = None,
         clock: Callable[[], float] = time.time,
+        contexts: tuple[DDMContextConfiguration, ...] = (),
     ):
         error = configuration.configuration_error
         if error:
@@ -389,6 +380,8 @@ class ManagedInventoryService:
         self.configuration = configuration
         self.client = client or self._make_client(configuration)
         self.clock = clock
+        self.contexts = contexts
+        self._contexts_by_domain = {context.domain_id: context.name for context in contexts}
         self._domains: dict[str, Domain] = {}
         self._unenrolled: dict[str, Device] = {}
         self._task: asyncio.Task | None = None
@@ -546,6 +539,8 @@ class ManagedInventoryService:
                     domain.name,
                     self._domains_last_success,
                     domains_fresh,
+                    self.configuration.name,
+                    self._contexts_by_domain.get(domain.id),
                 )
         unenrolled_fresh = self._root_fresh(self._unenrolled_last_success, self._unenrolled_current)
         for device_id, device in self._unenrolled.items():
@@ -558,6 +553,8 @@ class ManagedInventoryService:
                 None,
                 self._unenrolled_last_success,
                 unenrolled_fresh,
+                self.configuration.name,
+                None,
             )
         return tuple(observations.values())
 
@@ -580,6 +577,7 @@ class ManagedInventoryService:
             "enabled": self.enabled,
             "state": state,
             "url": self.configuration.url,
+            "server_profile": self.configuration.name,
             "refresh_interval": self.configuration.refresh_interval,
             "fresh": self.fresh,
             "authoritative": self.fresh and self._authoritative,
@@ -599,11 +597,110 @@ class ManagedInventoryService:
         }
 
     def domains(self) -> list[dict]:
-        return [asdict(domain) for domain in sorted(self._domains.values(), key=lambda item: item.name or item.id)]
+        result = []
+        for domain in sorted(self._domains.values(), key=lambda item: item.name or item.id):
+            record = asdict(domain)
+            record["ddm_server_profile"] = self.configuration.name
+            record["ddm_context"] = self._contexts_by_domain.get(domain.id)
+            result.append(record)
+        return result
+
+
+class ManagedInventoryRegistry:
+    def __init__(
+        self,
+        configuration: DDMConfiguration,
+        *,
+        services: dict[str, ManagedInventoryService] | None = None,
+    ):
+        self.configuration = configuration
+        contexts_by_server: dict[str, list[DDMContextConfiguration]] = {}
+        for context in configuration.contexts.values():
+            contexts_by_server.setdefault(context.server, []).append(context)
+        self.services = (
+            services
+            if services is not None
+            else {
+                name: ManagedInventoryService(
+                    server,
+                    contexts=tuple(contexts_by_server.get(name, ())),
+                )
+                for name, server in configuration.servers.items()
+            }
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return any(service.enabled for service in self.services.values())
+
+    def set_callback(self, callback: InventoryCallback | None) -> None:
+        for service in self.services.values():
+            service.set_callback(callback)
+
+    async def start(self) -> None:
+        await asyncio.gather(*(service.start() for service in self.services.values()))
+
+    async def stop(self) -> None:
+        await asyncio.gather(*(service.stop() for service in self.services.values()))
+
+    def _selected_service(self, context_name: str | None = None) -> ManagedInventoryService:
+        server = self.configuration.selected_server(context_name)
+        try:
+            return self.services[server.name]
+        except KeyError as error:
+            raise ValueError(f"DDM server profile {server.name!r} is disabled") from error
+
+    def client_for_context(self, context_name: str | None = None) -> ManagedAPIClient:
+        client = self._selected_service(context_name).client
+        if client is None:
+            raise ValueError("Managed API is not configured for the selected context")
+        return client
+
+    async def refresh(self, context_name: str | None = None) -> bool:
+        if context_name is not None:
+            return await self._selected_service(context_name).refresh()
+        results = await asyncio.gather(
+            *(service.refresh() for service in self.services.values() if service.enabled)
+        )
+        return bool(results) and all(results)
+
+    def observations(self) -> tuple[ManagedDeviceObservation, ...]:
+        return tuple(observation for service in self.services.values() for observation in service.observations())
+
+    def serialize_devices(self, direct_devices: dict[str, object]) -> dict[str, dict]:
+        return merge_device_inventory(direct_devices, self.observations(), synced_at=0.0, fresh=False)
+
+    def status(self) -> dict:
+        servers = {name: service.status() for name, service in sorted(self.services.items())}
+        enabled = [status for status in servers.values() if status["enabled"]]
+        if not enabled:
+            state = "disabled"
+        elif any(status["state"] == "degraded" for status in enabled):
+            state = "degraded"
+        elif any(status["state"] == "starting" for status in enabled):
+            state = "starting"
+        else:
+            state = "ready"
+        return {
+            "enabled": bool(enabled),
+            "state": state,
+            "default_context": self.configuration.default_context,
+            "server_count": len(enabled),
+            "domain_count": sum(status["domain_count"] for status in enabled),
+            "device_count": sum(status["device_count"] for status in enabled),
+            "enrolled_device_count": sum(status["enrolled_device_count"] for status in enabled),
+            "unenrolled_device_count": sum(status["unenrolled_device_count"] for status in enabled),
+            "fresh": bool(enabled) and all(status["fresh"] for status in enabled),
+            "servers": servers,
+        }
+
+    def domains(self) -> list[dict]:
+        return [domain for service in self.services.values() for domain in service.domains()]
 
 
 __all__ = [
     "ManagedDeviceObservation",
+    "ManagedInventoryRegistry",
     "ManagedInventoryService",
     "merge_device_inventory",
 ]

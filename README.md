@@ -138,6 +138,75 @@ For the packet-observed frontends, an exact mDNS `arcp_vers` of `2.8.15`
 selects protocol `0x280f`; the existing `2.8.9` frontend uses `0x2809`.
 Unrecognized versions retain the `0x2809` compatibility default.
 
+#### Dante Domain Manager devices
+
+When the daemon's merged inventory marks a device as enrolled, ordinary device
+commands automatically use DDM. Unenrolled devices continue to use their local
+ARC/settings services. A device that has both a local address and enrolled DDM
+metadata still uses DDM, so commands do not accidentally bypass domain policy.
+
+The guided login discovers DDM servers over mDNS when `--url` is omitted,
+authenticates, reads the visible domains, prompts when there is more than one
+choice, and saves the first context as the default:
+
+```bash
+netaudio ddm login --username operator
+netaudio ddm context list
+netaudio ddm context use studio-main
+```
+
+An existing API key can be used without a password prompt:
+
+```bash
+netaudio ddm login --url https://ddm.example/graphql --server studio \
+  --api-key-file ~/.config/netaudio/studio-api-key
+```
+
+Each context binds one server profile, one credential file, and one domain ID.
+The resulting `config.toml` uses this shape:
+
+```toml
+[ddm]
+default_context = "studio-main"
+
+[ddm.servers.studio]
+url = "https://ddm.example/graphql"
+credential_file = "credentials/studio.credential"
+
+[ddm.contexts.studio-main]
+server = "studio"
+domain_id = "0123456789abcdef0123456789abcdef"
+domain_name = "Main Studio"
+```
+
+Use `netaudio --context CONTEXT ...` or `NETAUDIO_CONTEXT` for a one-command
+override. The daemon polls every configured server, while each managed device
+record retains its originating server profile, context, domain ID, and device
+ID. This keeps devices distinct when separate sites reuse names or IP address
+ranges and ensures credentials are sent only to the configured server.
+
+The older single `[ddm]` `url`/`api_key_file` form remains readable as the
+`default` server profile. The URL is used as configured; there are no separate
+certificate, hostname, or internal-port settings.
+
+The documented GraphQL API supplies inventory and device-name, preferred-leader,
+and subscription changes. Capture-derived, version-scoped Controller-service
+support supplies Identify and native ARC/settings requests. The normal CLI paths
+currently cover device/channel/flow status, device and channel names, latency,
+sample rate, encoding, gain, AES67, clock state/subdomain, network interface
+status/configuration, subscriptions, receiver port ranges, and the observed
+modern flow inventory/delete form. Reads were exercised against enrolled AVIO
+input and output adapters; mutation paths retain their normal readback and
+capability checks.
+
+Operations without an established managed request and completion model fail
+closed instead of trying the unmanaged device address. These currently include
+lock/unlock, reboot and factory reset, capability/log exports, modern multicast
+flow creation, channel-name reset, and the legacy transmitter-channel-capability
+query. Sample-rate pull-up is implemented through the managed settings envelope,
+but the tested AVIO family did not publish a response and is reported as
+unavailable.
+
 Run tests:
 
 ```bash

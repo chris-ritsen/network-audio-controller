@@ -178,7 +178,7 @@ class TestPreferredLeaderFromConmon0x0020:
             await application.probe_clocking_status(device, timeout=0.01)
 
         application.send_refresh_clock_status.assert_awaited_once_with("192.168.1.61")
-        assert not application.notifications.is_waiting("preferred_leader", "192.168.1.61")
+        assert not application.notifications.is_waiting("clock_status", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):
         from netaudio import core

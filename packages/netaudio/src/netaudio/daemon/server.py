@@ -19,7 +19,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.http.api import DaemonHTTPServer
-from netaudio.daemon.managed_inventory import ManagedInventoryService
+from netaudio.daemon.managed_inventory import ManagedInventoryRegistry
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.dante.application import DanteApplication
@@ -94,11 +94,11 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             load_daemon_config,
             resolve_db_from_config,
         )
-        from netaudio.common.managed_api import resolve_managed_api_configuration
+        from netaudio.common.managed_api import resolve_ddm_configuration
 
         profile_cfg, _ = load_capture_profile(None, None)
         app_settings.stale_device_minutes = _stale_device_minutes_from_config(load_daemon_config())
-        managed_configuration = resolve_managed_api_configuration(
+        managed_configuration = resolve_ddm_configuration(
             load_config_document(),
             base_directory=default_config_path().parent,
         )
@@ -144,7 +144,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._stop_lock = DeferredAsyncioLock()
         self._stop_complete = False
         self.metering = MeteringManager(self.application)
-        self.managed_inventory = ManagedInventoryService(managed_configuration)
+        self.managed_inventory = ManagedInventoryRegistry(managed_configuration)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
         self.http_api = DaemonHTTPServer(
             self.application,

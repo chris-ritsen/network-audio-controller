@@ -49,14 +49,15 @@ class DaemonDeviceHandlers:
             return
         await self._send_json(writer, device.to_json())
 
-    async def _handle_get_devices(self, writer):
-        await self._send_json(writer, self._serialized_devices())
+    async def _handle_get_devices(self, writer, context_name=None):
+        await self._send_json(writer, self._serialized_devices(context_name))
 
-    async def _handle_get_device(self, writer, server_name):
-        devices = self._serialized_devices()
+    async def _handle_get_device(self, writer, server_name, context_name=None):
+        devices = self._serialized_devices(context_name)
         device_json = devices.get(server_name)
         if device_json is None:
             lowered = server_name.lower()
+            matches = []
             for candidate in devices.values():
                 identifiers = (
                     candidate.get("ddm_device_id"),
@@ -65,8 +66,16 @@ class DaemonDeviceHandlers:
                     candidate.get("name"),
                 )
                 if any(isinstance(value, str) and value.lower() == lowered for value in identifiers):
-                    device_json = candidate
-                    break
+                    matches.append(candidate)
+            if len(matches) > 1:
+                await self._send_json(
+                    writer,
+                    {"error": "multiple devices matched; use the context-qualified inventory ID or server name"},
+                    409,
+                )
+                return
+            if matches:
+                device_json = matches[0]
 
         if device_json is None:
             await self._send_json(writer, {"error": "device not found"}, 404)
@@ -320,6 +329,10 @@ class DaemonDeviceHandlers:
         await self._send_json(writer, {"success": True})
 
     async def _require_arc_write_success(self, writer, response, operation):
+        from netaudio.ddm.device_transport import ManagedOperationResult
+
+        if isinstance(response, ManagedOperationResult):
+            return response.successful
         if not response:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
             return False

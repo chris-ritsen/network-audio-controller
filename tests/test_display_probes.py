@@ -78,6 +78,30 @@ async def test_populate_controls_skips_offline_devices_and_marks_unreachable_dev
 
 
 @pytest.mark.asyncio
+async def test_populate_controls_routes_enrolled_devices_through_the_managed_application():
+    device = _device("managed.local.")
+    device.ddm_device_id = "001dc1fffe50692e:0"
+    device.ddm_enrolment_state = "ENROLLED"
+    device.management_state = "managed"
+    device.tx_channels[1] = SimpleNamespace(name="already-in-inventory")
+    device.populate_from_core = AsyncMock()
+    application = SimpleNamespace(
+        _populate_device_controls=AsyncMock(),
+        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
+        probe_encoding_status=AsyncMock(return_value=(24, [16, 24])),
+    )
+
+    await common_module._populate_controls({device.server_name: device}, application)
+
+    application._populate_device_controls.assert_awaited_once_with(device, include_channels=False)
+    application.probe_sample_rate_status.assert_awaited_once_with(device.ipv4, timeout=2.0)
+    application.probe_encoding_status.assert_awaited_once_with(device.ipv4, timeout=2.0)
+    device.populate_from_core.assert_not_awaited()
+    assert device.sample_rate == 48000
+    assert device.encoding == 24
+
+
+@pytest.mark.asyncio
 async def test_enrich_clock_fields_skips_devices_the_daemon_already_described(monkeypatch):
     described = _device("described.local.")
     described.clock_role = "Follower"

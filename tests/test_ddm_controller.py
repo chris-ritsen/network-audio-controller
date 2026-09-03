@@ -27,7 +27,7 @@ def test_controller_login_negotiates_v2_and_uses_form_data(monkeypatch):
                 }
             ).encode()
 
-    login = Client("ddm.example", insecure_tls=True).login("operator name", "private&value")
+    login = Client("ddm.example").login("operator name", "private&value")
 
     assert login.auth_token == "x" * 43
     assert login.endpoints.service_port == 8001
@@ -44,7 +44,7 @@ def test_controller_login_negotiates_v2_and_uses_form_data(monkeypatch):
 
 
 def test_controller_login_fails_closed_on_an_unobserved_token_shape(monkeypatch):
-    client = controller.ControllerAPIClient("ddm.example", insecure_tls=True)
+    client = controller.ControllerAPIClient("ddm.example")
     responses = iter(
         [
             b'["v2"]',
@@ -329,8 +329,13 @@ def test_api_key_identify_skips_password_login(monkeypatch):
         def __exit__(self, *args):
             return None
 
-        def identify(self, credential, device_id, host_mac):
-            captured.update(credential=credential, device_id=device_id, host_mac=host_mac)
+        def identify(self, credential, device_id, host_mac, expected_domain_id=None):
+            captured.update(
+                credential=credential,
+                device_id=device_id,
+                host_mac=host_mac,
+                expected_domain_id=expected_domain_id,
+            )
 
     monkeypatch.setattr(controller, "ControllerAPIClient", API)
     monkeypatch.setattr(controller, "DAPISession", Session)
@@ -341,12 +346,28 @@ def test_api_key_identify_skips_password_login(monkeypatch):
         api_key,
         "001dc1fffe507b8d:0",
         bytes.fromhex("842f5774e86d"),
-        insecure_tls=True,
     )
 
     assert captured["credential"] == api_key
     assert captured["device_id"] == "001dc1fffe507b8d:0"
     assert captured["session_port"] == 8001
+    assert captured["expected_domain_id"] is None
+
+
+def test_dapi_session_rejects_an_authenticated_domain_other_than_the_selected_context(monkeypatch):
+    session = controller.DAPISession("ddm.example", 8001, ssl.create_default_context())
+    monkeypatch.setattr(controller.core, "build_dapi_session_open", lambda: b"open")
+    monkeypatch.setattr(controller.core, "build_dapi_authentication", lambda credential: b"auth")
+    monkeypatch.setattr(session, "_send", lambda frame: None)
+    monkeypatch.setattr(session, "_read_frame", lambda deadline: b"session")
+    monkeypatch.setattr(
+        session,
+        "_parse",
+        lambda kind, frame: {"domain_id": "00" * 16} if kind == "dapi_session_description" else None,
+    )
+
+    with pytest.raises(controller.DAPISessionError, match="selected domain.*expected"):
+        session._initialize("credential", float("inf"), "11" * 16)
 
 
 @pytest.mark.parametrize(

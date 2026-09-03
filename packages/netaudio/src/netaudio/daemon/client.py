@@ -91,8 +91,9 @@ def daemon_is_accessible() -> bool:
         return probe.connect_ex((DAEMON_HOST, daemon_port())) == 0
 
 
-async def get_devices_from_daemon() -> dict[str, DanteDevice] | None:
-    status, data = await _daemon_request("GET", "/devices")
+async def get_devices_from_daemon(context: str | None = None) -> dict[str, DanteDevice] | None:
+    path = f"/devices?context={quote(context, safe='')}" if context is not None else "/devices"
+    status, data = await _daemon_request("GET", path)
     if status != 200 or data is None:
         return None
 
@@ -129,21 +130,26 @@ async def execute_ddm_graphql_on_daemon(
     variables: dict | None = None,
     operation_name: str | None = None,
     timeout: float = 30.0,
+    context: str | None = None,
 ) -> tuple[int | None, dict | None]:
     body = {"query": query, "variables": variables or {}}
     if operation_name is not None:
         body["operation_name"] = operation_name
+    if context is not None:
+        body["context"] = context
     status, data = await _daemon_request("POST", "/ddm/graphql", body, timeout=timeout)
     return status, data if isinstance(data, dict) else None
 
 
-async def get_ddm_devices_from_daemon() -> dict | None:
-    status, data = await _daemon_request("GET", "/ddm/devices")
+async def get_ddm_devices_from_daemon(context: str | None = None) -> dict | None:
+    path = f"/ddm/devices?context={quote(context, safe='')}" if context is not None else "/ddm/devices"
+    status, data = await _daemon_request("GET", path)
     return data if status == 200 and isinstance(data, dict) else None
 
 
-async def get_ddm_domains_from_daemon() -> list | None:
-    status, data = await _daemon_request("GET", "/ddm/domains")
+async def get_ddm_domains_from_daemon(context: str | None = None) -> list | None:
+    path = f"/ddm/domains?context={quote(context, safe='')}" if context is not None else "/ddm/domains"
+    status, data = await _daemon_request("GET", path)
     return data if status == 200 and isinstance(data, list) else None
 
 
@@ -171,8 +177,9 @@ async def refresh_clock_on_daemon(device_name: str) -> dict | None:
     return data
 
 
-async def refresh_ddm_inventory_on_daemon() -> tuple[int | None, dict | None]:
-    status, data = await _daemon_request("POST", "/ddm/refresh", {}, timeout=30.0)
+async def refresh_ddm_inventory_on_daemon(context: str | None = None) -> tuple[int | None, dict | None]:
+    body = {"context": context} if context is not None else {}
+    status, data = await _daemon_request("POST", "/ddm/refresh", body, timeout=30.0)
     return status, data if isinstance(data, dict) else None
 
 

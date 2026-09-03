@@ -384,13 +384,15 @@ async def capture_sample_rate_topology(
         raise SampleRateTopologyVerificationError(
             "fresh receiver inventory does not match the proven active channel capacity"
         )
-    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), device._arc_port())
+    managed_option = {"device": device} if getattr(device, "requires_managed_control", False) else {}
+    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), device._arc_port(), **managed_option)
     if flow_protocol_identifier is None:
         raise SampleRateTopologyReadbackError("transmitter-flow protocol did not respond")
     flow_inventory = await flows.query_tx_flow_inventory(
         str(device.ipv4),
         device._arc_port(),
         flow_protocol_identifier,
+        **managed_option,
     )
     if flow_inventory is None:
         raise SampleRateTopologyReadbackError("fresh transmitter-flow inventory did not respond")

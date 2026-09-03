@@ -9,7 +9,6 @@ import ssl
 import time
 import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 
 from netaudio import core
@@ -88,18 +87,13 @@ class ControllerAPIClient:
         *,
         port: int = DEFAULT_AUTH_PORT,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
-        ca_file: Path | None = None,
-        insecure_tls: bool = False,
     ):
         if not server or "/" in server:
             raise ValueError("server must be a hostname or IP address")
         self.server = server.rstrip(".")
         self.port = _port(port, "authentication port")
         self.timeout = _validate_timeout(timeout)
-        if insecure_tls:
-            self.ssl_context = ssl._create_unverified_context()
-        else:
-            self.ssl_context = ssl.create_default_context(cafile=str(ca_file) if ca_file else None)
+        self.ssl_context = ssl._create_unverified_context()
 
     def _request(
         self,
@@ -193,6 +187,13 @@ def normalize_device_id(device_id: str) -> str:
     return base
 
 
+def normalize_domain_id(domain_id: str) -> str:
+    normalized = domain_id.lower()
+    if len(normalized) != 32 or any(character not in "0123456789abcdef" for character in normalized):
+        raise ValueError("domain ID must be 32 hexadecimal digits")
+    return normalized
+
+
 def _validate_api_key(api_key: str) -> str:
     try:
         encoded = api_key.encode("ascii")
@@ -229,6 +230,7 @@ class DAPISession:
         self.local_ipv4 = None
         self.wrapper_id = 5
         self.initialized = False
+        self.domain_id: str | None = None
         self.target_selectors: dict[str, int] = {}
 
     def __enter__(self):
@@ -257,6 +259,7 @@ class DAPISession:
             self.socket = None
         self.local_ipv4 = None
         self.initialized = False
+        self.domain_id = None
         self.target_selectors.clear()
 
     def _send(self, frame: bytes) -> None:
@@ -312,8 +315,13 @@ class DAPISession:
             self.wrapper_id = 1
         return self.wrapper_id
 
-    def _initialize(self, credential: str, deadline: float) -> None:
+    def _initialize(self, credential: str, deadline: float, expected_domain_id: str | None = None) -> None:
+        expected_domain = normalize_domain_id(expected_domain_id) if expected_domain_id is not None else None
         if self.initialized:
+            if expected_domain is not None and expected_domain != self.domain_id:
+                raise DAPISessionError(
+                    f"DDM Controller session selected domain {self.domain_id}, expected {expected_domain}"
+                )
             return
         self._send(core.build_dapi_session_open())
         self._send(core.build_dapi_authentication(credential))
@@ -323,9 +331,15 @@ class DAPISession:
             description = self._parse("dapi_session_description", self._read_frame(deadline))
             if description is not None:
                 try:
-                    domain_id = bytes.fromhex(description["domain_id"])
+                    announced_domain = normalize_domain_id(description["domain_id"])
+                    domain_id = bytes.fromhex(announced_domain)
                 except (KeyError, TypeError, ValueError) as exception:
                     raise DAPISessionError("DDM returned an invalid session description") from exception
+                if expected_domain is not None and announced_domain != expected_domain:
+                    raise DAPISessionError(
+                        f"DDM Controller session selected domain {announced_domain}, expected {expected_domain}"
+                    )
+                self.domain_id = announced_domain
         for subscription_id in range(2, 6):
             self._send(core.build_dapi_domain_subscription(domain_id, subscription_id))
         if self.notification_socket is None or self.local_ipv4 is None:
@@ -362,10 +376,16 @@ class DAPISession:
                 if announced_id == target_id:
                     return candidate
 
-    def identify(self, credential: str, device_id: str, host_mac: bytes) -> None:
+    def identify(
+        self,
+        credential: str,
+        device_id: str,
+        host_mac: bytes,
+        expected_domain_id: str | None = None,
+    ) -> None:
         target_id = normalize_device_id(device_id)
         deadline = time.monotonic() + self.timeout
-        self._initialize(credential, deadline)
+        self._initialize(credential, deadline, expected_domain_id)
         target_selector = self._target_selector(target_id, deadline)
 
         self._send(
@@ -381,14 +401,20 @@ class DAPISession:
             if confirmation is not None and confirmation.get("device_id") == target_id:
                 return
 
-    def query_arc(self, credential: str, device_id: str, arc_packet: bytes) -> bytes:
+    def query_arc(
+        self,
+        credential: str,
+        device_id: str,
+        arc_packet: bytes,
+        expected_domain_id: str | None = None,
+    ) -> bytes:
         target_id = normalize_device_id(device_id)
         if len(arc_packet) < 10:
             raise ValueError("ARC request packet is too short")
         expected_transaction_id = int.from_bytes(arc_packet[4:6], "big")
         expected_opcode = int.from_bytes(arc_packet[6:8], "big")
         deadline = time.monotonic() + self.timeout
-        self._initialize(credential, deadline)
+        self._initialize(credential, deadline, expected_domain_id)
         target_selector = self._target_selector(target_id, deadline)
         wrapper_id = self._next_wrapper_id()
         self._send(core.build_dapi_arc_request(target_selector, wrapper_id, arc_packet))
@@ -413,6 +439,7 @@ class DAPISession:
         device_id: str,
         settings_packet: bytes,
         expected_response_opcode: int,
+        expected_domain_id: str | None = None,
     ) -> bytes:
         target_id = normalize_device_id(device_id)
         if (
@@ -422,7 +449,7 @@ class DAPISession:
         ):
             raise ValueError("expected settings response opcode must fit in 16 bits")
         deadline = time.monotonic() + self.timeout
-        self._initialize(credential, deadline)
+        self._initialize(credential, deadline, expected_domain_id)
         target_selector = self._target_selector(target_id, deadline)
         wrapper_id = self._next_wrapper_id()
         self._send(core.build_dapi_settings_request(target_selector, wrapper_id, settings_packet))
@@ -459,15 +486,12 @@ def identify_managed_device(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> None:
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     login = api.login(username, password)
     with DAPISession(
@@ -476,7 +500,7 @@ def identify_managed_device(
         api.ssl_context,
         timeout=timeout,
     ) as session:
-        session.identify(login.auth_token, device_id, host_mac)
+        session.identify(login.auth_token, device_id, host_mac, expected_domain_id)
 
 
 def identify_managed_device_with_api_key(
@@ -487,16 +511,13 @@ def identify_managed_device_with_api_key(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> None:
     api_key = _validate_api_key(api_key)
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     if "v2" not in api.versions():
         raise ControllerServiceError("DDM does not advertise the observed v2 Controller API")
@@ -507,7 +528,7 @@ def identify_managed_device_with_api_key(
         api.ssl_context,
         timeout=timeout,
     ) as session:
-        session.identify(api_key, device_id, host_mac)
+        session.identify(api_key, device_id, host_mac, expected_domain_id)
 
 
 def query_managed_arc(
@@ -519,15 +540,12 @@ def query_managed_arc(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> bytes:
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     login = api.login(username, password)
     with DAPISession(
@@ -536,7 +554,7 @@ def query_managed_arc(
         api.ssl_context,
         timeout=timeout,
     ) as session:
-        return session.query_arc(login.auth_token, device_id, arc_packet)
+        return session.query_arc(login.auth_token, device_id, arc_packet, expected_domain_id)
 
 
 def query_managed_arc_with_api_key(
@@ -547,16 +565,13 @@ def query_managed_arc_with_api_key(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> bytes:
     api_key = _validate_api_key(api_key)
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     if "v2" not in api.versions():
         raise ControllerServiceError("DDM does not advertise the observed v2 Controller API")
@@ -567,7 +582,7 @@ def query_managed_arc_with_api_key(
         api.ssl_context,
         timeout=timeout,
     ) as session:
-        return session.query_arc(api_key, device_id, arc_packet)
+        return session.query_arc(api_key, device_id, arc_packet, expected_domain_id)
 
 
 def query_managed_settings(
@@ -580,15 +595,12 @@ def query_managed_settings(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> bytes:
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     login = api.login(username, password)
     with DAPISession(
@@ -602,6 +614,7 @@ def query_managed_settings(
             device_id,
             settings_packet,
             expected_response_opcode,
+            expected_domain_id,
         )
 
 
@@ -614,16 +627,13 @@ def query_managed_settings_with_api_key(
     *,
     auth_port: int = DEFAULT_AUTH_PORT,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
-    ca_file: Path | None = None,
-    insecure_tls: bool = False,
+    expected_domain_id: str | None = None,
 ) -> bytes:
     api_key = _validate_api_key(api_key)
     api = ControllerAPIClient(
         server,
         port=auth_port,
         timeout=timeout,
-        ca_file=ca_file,
-        insecure_tls=insecure_tls,
     )
     if "v2" not in api.versions():
         raise ControllerServiceError("DDM does not advertise the observed v2 Controller API")
@@ -639,4 +649,5 @@ def query_managed_settings_with_api_key(
             device_id,
             settings_packet,
             expected_response_opcode,
+            expected_domain_id,
         )
