@@ -308,6 +308,26 @@ fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
         .unwrap()[..2],
         &[0x27, 0x29]
     );
+
+    let managed_latency_write = build_command_from_json(
+        r#"{"command":"set_latency","latency":2.0,"protocol_id":10249,"transaction_id":19473}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        &managed_latency_write[..10],
+        &[0x28, 0x09, 0x00, 0x28, 0x4C, 0x11, 0x11, 0x01, 0x00, 0x00]
+    );
+    assert_eq!(
+        &managed_latency_write[32..40],
+        &[0x00, 0x1E, 0x84, 0x80, 0x00, 0x1E, 0x84, 0x80]
+    );
+    assert_eq!(
+        &build_command_from_json(
+            r#"{"command":"set_latency","latency":2.0,"transaction_id":19473}"#
+        )
+        .unwrap()[..2],
+        &[0x27, 0xFF]
+    );
 }
 
 #[test]
