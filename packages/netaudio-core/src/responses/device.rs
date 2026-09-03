@@ -134,7 +134,6 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
     body.get(..values_offset)?;
     let mut settings = DeviceSettings {
         sample_rate: None,
-        latency_ns: None,
         configured_latency_ns: None,
         active_latency_ns: None,
         default_latency_ns: None,
@@ -227,10 +226,6 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
             _ => {}
         }
     }
-
-    settings.latency_ns = settings
-        .active_latency_ns
-        .or(settings.configured_latency_ns);
 
     Some(settings)
 }

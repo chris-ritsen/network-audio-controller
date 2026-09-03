@@ -15,7 +15,7 @@ from netaudio.cli_support.execution import (
     readback_after_notification,
     run_command,
 )
-from netaudio.cli_support.output import output_single, output_table
+from netaudio.cli_support.output import output_table, output_value
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.cli import app as device_config_app
 from netaudio.commands.config.readback import MUTATION_ERRORS
@@ -25,7 +25,6 @@ from netaudio.commands.device.display import (
     _diagnostic_audio_capability_rows,
 )
 from netaudio.commands.device.exports import export_capability, export_logs
-from netaudio.commands.device.lock import lock_app
 from netaudio.commands.device.network_status import network_status
 from netaudio.commands.status import status as status_command
 from netaudio.dante.conmon_export import ConmonExportUnavailableError
@@ -208,7 +207,6 @@ def clear_configuration(
 
 
 app.add_typer(device_config_app, name="config")
-app.add_typer(lock_app, name="lock", hidden=True)
 app.command("export-capability")(export_capability)
 app.command("export-logs")(export_logs)
 app.command("network-status")(network_status)
@@ -218,7 +216,7 @@ async def run_name(application, devices, new_name: str | None) -> None:
     [(server_name, device)] = select_device(filter_devices(devices))
 
     if new_name is None:
-        output_single(device.name)
+        output_value("Device name", "device_name", device.name)
         return
 
     if new_name == "":

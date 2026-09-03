@@ -7,6 +7,7 @@ from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.commands import channel_status_query_specification
+from netaudio.dante.const import SERVICE_ARC
 
 
 def _rename_specification(name: str, protocol_id: int) -> dict:
@@ -29,6 +30,10 @@ def _packet(packet_identifier: int) -> bytes:
     )
 
 
+def _arc_services() -> dict:
+    return {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.9"}}}
+
+
 def test_query_builder_and_command_factory_are_byte_identical_to_shipping_controller():
     expected = _packet(1)
     built = core.build_command(
@@ -49,7 +54,7 @@ def test_query_builder_and_command_factory_are_byte_identical_to_shipping_contro
 def test_parser_exposes_transmitter_names_friendly_names_and_format():
     page = core.parse_response("transmitter_channel_status_page_2809", _packet(2))
 
-    assert page["maximum_transmitter_channels"] == 2
+    assert page["page_capacity"] == 2
     assert page["reported_record_count"] == 2
     assert page["records"] == [
         {
@@ -131,7 +136,7 @@ def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
 
 @pytest.mark.asyncio
 async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_rejection():
-    successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(2)), services={})
+    successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(2)), services=_arc_services())
     successful_operation = DanteApplication()
 
     page = await successful_operation.query_transmitter_channel_status_2809(successful_device)
@@ -140,7 +145,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
     assert successful_device.transmitter_channel_name_protocol_identifier == 0x2809
     successful_device.execute.assert_awaited_once_with(channel_status_query_specification("tx"))
 
-    rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(8)), services={})
+    rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(8)), services=_arc_services())
     with pytest.raises(RuntimeError, match="result 0x0030"):
         await DanteApplication().query_transmitter_channel_status_2809(rejected_device)
 

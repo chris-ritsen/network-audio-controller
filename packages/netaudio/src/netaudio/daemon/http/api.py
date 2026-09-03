@@ -20,7 +20,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
-from netaudio.dante.device_serializer import DanteDeviceSerializer, with_legacy_field_names
+from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
 logger = logging.getLogger("netaudio")
@@ -313,7 +313,7 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
                 for server_name, record in records.items()
                 if not record.get("ddm_device_id") or record.get("ddm_context") == context_name
             }
-        return {server_name: with_legacy_field_names(record) for server_name, record in records.items()}
+        return records
 
     def _snapshot_payload(self) -> dict:
         shure_state = {}
