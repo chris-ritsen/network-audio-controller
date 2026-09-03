@@ -7,6 +7,7 @@ from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.commands import channel_status_query_specification
+from netaudio.dante.const import SERVICE_ARC
 
 
 def _rename_specification(channel_type: str, name: str, protocol_id: int) -> dict:
@@ -34,6 +35,10 @@ def _frontend_boundary_packet(opcode: int, packet_identifier: int) -> bytes:
         "receiver_channel_frontend",
         f"protocol_2809_opcode_{opcode:04x}_id_{packet_identifier}.bin",
     )
+
+
+def _arc_services() -> dict:
+    return {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.9"}}}
 
 
 def test_query_and_rename_builders_are_byte_identical_to_controller_requests():
@@ -95,7 +100,7 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         _packet(0x2809, 0x3400, 28738),
     )
 
-    assert first_page["maximum_receiver_channels"] == 1
+    assert first_page["page_capacity"] == 1
     assert first_page["reported_record_count"] == 1
     assert first_page["records"][0] == {
         "record_pointer": 68,
@@ -152,13 +157,13 @@ def test_parser_handles_subscribed_and_unsubscribed_two_channel_pages():
         _packet(0x2809, 0x3400, 7019),
     )
 
-    assert unsubscribed["maximum_receiver_channels"] == 2
+    assert unsubscribed["page_capacity"] == 2
     assert unsubscribed["reported_record_count"] == 2
     assert [record["channel_number"] for record in unsubscribed["records"]] == [1, 2]
     assert [record["source_channel_name"] for record in unsubscribed["records"]] == [None, None]
     assert [record["subscription_status_code"] for record in unsubscribed["records"]] == [0, 0]
 
-    assert subscribed["maximum_receiver_channels"] == 2
+    assert subscribed["page_capacity"] == 2
     assert subscribed["reported_record_count"] == 2
     assert [record["local_channel_name"] for record in subscribed["records"]] == [
         "mic-mix-1",
@@ -184,7 +189,7 @@ def test_2809_transmit_rename_matches_the_causal_avio_request():
 @pytest.mark.asyncio
 async def test_device_operation_returns_typed_receiver_status_page():
     response = _packet(0x2809, 0x3400, 28738)
-    device = SimpleNamespace(execute=AsyncMock(return_value=response), services={})
+    device = SimpleNamespace(execute=AsyncMock(return_value=response), services=_arc_services())
     operation = DanteApplication()
 
     page = await operation.query_receiver_channel_status_2809(device)

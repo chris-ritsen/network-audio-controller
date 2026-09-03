@@ -260,9 +260,9 @@ def test_matching_name_and_ip_do_not_override_conflicting_macs():
         fresh=True,
     )
 
-    assert set(merged) == {"same.local.", "ddm:managed-1"}
+    assert set(merged) == {"same.local.", "ddm:default:domain-1:managed-1"}
     assert merged["same.local."]["inventory_sources"] == ["direct"]
-    assert merged["ddm:managed-1"]["inventory_sources"] == ["ddm"]
+    assert merged["ddm:default:domain-1:managed-1"]["inventory_sources"] == ["ddm"]
 
 
 def test_missing_managed_mac_does_not_merge_by_ip_across_possible_sites():
@@ -276,9 +276,9 @@ def test_missing_managed_mac_does_not_merge_by_ip_across_possible_sites():
         fresh=True,
     )
 
-    assert set(merged) == {"direct.local.", "ddm:managed-1"}
+    assert set(merged) == {"direct.local.", "ddm:default:domain-1:managed-1"}
     assert merged["direct.local."]["inventory_sources"] == ["direct"]
-    assert merged["ddm:managed-1"]["inventory_sources"] == ["ddm"]
+    assert merged["ddm:default:domain-1:managed-1"]["inventory_sources"] == ["ddm"]
 
 
 def test_ip_fallback_refuses_ambiguous_direct_candidates():
@@ -293,7 +293,7 @@ def test_ip_fallback_refuses_ambiguous_direct_candidates():
         fresh=True,
     )
 
-    assert set(merged) == {"first.local.", "second.local.", "ddm:managed-1"}
+    assert set(merged) == {"first.local.", "second.local.", "ddm:default:domain-1:managed-1"}
     assert all(merged[key]["inventory_sources"] == ["direct"] for key in ("first.local.", "second.local."))
 
 
@@ -316,7 +316,7 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
         fresh=True,
     )
 
-    record = merged["ddm:managed-1"]
+    record = merged["ddm:default:domain-1:managed-1"]
     assert record["name"] == "managed-device"
     assert record["ipv4"] == "192.0.2.50"
     assert record["mac_address"] == "00:11:22:33:44:99"
@@ -384,7 +384,7 @@ def test_ddm_idle_receiver_does_not_create_fake_subscription(status):
         fresh=True,
     )
 
-    assert merged["ddm:managed-1"]["subscriptions"] == []
+    assert merged["ddm:default:domain-1:managed-1"]["subscriptions"] == []
 
 
 @pytest.mark.parametrize("status", ["UNRESOLVED", "PENDING", "ERROR"])
@@ -405,7 +405,7 @@ def test_ddm_receiver_without_source_retains_non_idle_status(status):
         fresh=True,
     )
 
-    subscriptions = merged["ddm:managed-1"]["subscriptions"]
+    subscriptions = merged["ddm:default:domain-1:managed-1"]["subscriptions"]
     assert len(subscriptions) == 1
     assert subscriptions[0]["ddm_status"] == status
 
@@ -422,13 +422,13 @@ def test_ddm_named_subscription_is_retained_when_status_is_none_state():
         fresh=True,
     )
 
-    subscriptions = merged["ddm:managed-1"]["subscriptions"]
+    subscriptions = merged["ddm:default:domain-1:managed-1"]["subscriptions"]
     assert len(subscriptions) == 1
     assert subscriptions[0]["tx_channel"] == "source-channel"
     assert subscriptions[0]["tx_device"] == "source-device"
 
 
-def test_ddm_only_device_omits_malformed_compatibility_address():
+def test_ddm_only_device_omits_malformed_address():
     managed = _managed_device(address="not-an-ip")
 
     merged = merge_device_inventory(
@@ -438,7 +438,7 @@ def test_ddm_only_device_omits_malformed_compatibility_address():
         fresh=True,
     )
 
-    record = merged["ddm:managed-1"]
+    record = merged["ddm:default:domain-1:managed-1"]
     assert record["ipv4"] == "None"
     assert DanteDeviceSerializer.device_from_json(record).ipv4 is None
 
@@ -457,7 +457,7 @@ def test_ddm_availability_preserves_non_ready_states(connection_state, expected_
         fresh=True,
     )
 
-    record = merged["ddm:managed-1"]
+    record = merged["ddm:default:domain-1:managed-1"]
     assert record["online"] is False
     assert record["availability_state"] == expected_state
 
@@ -501,10 +501,10 @@ async def test_partial_refresh_replaces_present_root_and_preserves_omitted_root(
     await service.refresh()
 
     second_records = service.serialize_devices({})
-    assert second_records["ddm:added"]["ddm_last_sync"] == 1001.0
-    assert second_records["ddm:added"]["availability_state"] == "online"
-    assert second_records["ddm:unmanaged-old"]["ddm_last_sync"] == 1000.0
-    assert second_records["ddm:unmanaged-old"]["availability_state"] == "unknown"
+    assert second_records["ddm:default:added-domain:added"]["ddm_last_sync"] == 1001.0
+    assert second_records["ddm:default:added-domain:added"]["availability_state"] == "online"
+    assert second_records["ddm:default:unenrolled:unmanaged-old"]["ddm_last_sync"] == 1000.0
+    assert second_records["ddm:default:unenrolled:unmanaged-old"]["availability_state"] == "unknown"
 
     service.clock.value += 1
     await service.refresh()
@@ -537,7 +537,7 @@ async def test_fresh_unenrolled_root_beats_preserved_stale_domain_record():
 
     observations = service.observations()
     assert [(item.device.id, item.domain_id, item.fresh) for item in observations] == [("moving-device", None, True)]
-    assert service.serialize_devices({})["ddm:moving-device"]["management_state"] == "unenrolled"
+    assert service.serialize_devices({})["ddm:default:unenrolled:moving-device"]["management_state"] == "unenrolled"
 
 
 @pytest.mark.asyncio

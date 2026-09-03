@@ -113,7 +113,6 @@ fn device_settings_decodes_distinct_latency_fields_as_nanoseconds() {
     assert_eq!(settings.default_latency_ns, Some(1_000_000));
     assert_eq!(settings.configured_latency_ns, Some(150_000));
     assert_eq!(settings.active_latency_ns, Some(1_000_000));
-    assert_eq!(settings.latency_ns, Some(1_000_000));
     assert_eq!(settings.max_latency_ns, Some(21_333_334));
     assert_eq!(settings.min_latency_ns, Some(150_000));
 }
@@ -125,7 +124,6 @@ fn device_settings_uses_configured_latency_when_active_is_absent() {
     let settings = parse_device_settings(&response).unwrap();
     assert_eq!(settings.configured_latency_ns, Some(250_000));
     assert_eq!(settings.active_latency_ns, None);
-    assert_eq!(settings.latency_ns, Some(250_000));
 }
 
 fn retained_receive_latency_device_settings_packet() -> Vec<u8> {
@@ -142,7 +140,6 @@ fn device_settings_parses_retained_configured_latency_after_reboot() {
     assert_eq!(settings.active_latency_ns, Some(0));
     assert_eq!(settings.min_latency_ns, Some(250_000));
     assert_eq!(settings.default_latency_ns, Some(1_000_000));
-    assert_eq!(settings.latency_ns, Some(0));
 }
 
 fn retained_one_nanosecond_latency_device_settings_packet() -> Vec<u8> {
@@ -205,7 +202,6 @@ fn device_settings_accepts_captured_2801_response() {
     assert_eq!(settings.default_latency_ns, Some(1_000_000));
     assert_eq!(settings.configured_latency_ns, Some(1_000_000));
     assert_eq!(settings.active_latency_ns, Some(1_000_000));
-    assert_eq!(settings.latency_ns, Some(1_000_000));
     assert_eq!(settings.min_latency_ns, Some(250_000));
     assert_eq!(settings.max_latency_ns, Some(341_333_334));
 }
@@ -232,7 +228,6 @@ fn device_settings_accepts_captured_repeated_zero_placeholders() {
     assert_eq!(settings.default_latency_ns, Some(1_000_000));
     assert_eq!(settings.configured_latency_ns, Some(1_000_000));
     assert_eq!(settings.active_latency_ns, Some(1_000_000));
-    assert_eq!(settings.latency_ns, Some(1_000_000));
     assert_eq!(settings.min_latency_ns, Some(1_000_000));
     assert_eq!(settings.max_latency_ns, Some(10_979_167));
     assert!(settings

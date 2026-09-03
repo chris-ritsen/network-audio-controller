@@ -89,7 +89,7 @@ def test_session_search_includes_secondary_session_links(tmp_path):
     assert packet_count == 1
 
 
-def test_evidence_count_accepts_canonical_and_legacy_markers(tmp_path):
+def test_evidence_count_accepts_only_packet_id_lists(tmp_path):
     packet_store = PacketStore(db_path=str(tmp_path / "capture.sqlite"))
     session_id = packet_store.start_session(name="evidence")
     packet_store.add_marker(
@@ -101,11 +101,11 @@ def test_evidence_count_accepts_canonical_and_legacy_markers(tmp_path):
     packet_store.add_marker(
         session_id=session_id,
         marker_type="evidence",
-        label="legacy",
+        label="singular-field",
         data={"packet_id": 11},
     )
 
-    assert packet_store.get_session_evidence_count(session_id) == 2
+    assert packet_store.get_session_evidence_count(session_id) == 1
     packet_store.close()
 
 
