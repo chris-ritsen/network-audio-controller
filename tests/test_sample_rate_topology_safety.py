@@ -438,8 +438,8 @@ async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_sending
     device.dante_model = "Different Device"
     application = DanteApplication()
 
-    async def probe_sample_rate_status(device_ip_address, timeout):
-        assert device_ip_address == "192.0.2.10"
+    async def probe_sample_rate_status(target, timeout):
+        assert target is device
         assert timeout == 4.0
         return 96_000, [48_000, 96_000]
 
@@ -471,14 +471,14 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
     application = DanteApplication()
     calls = []
 
-    async def probe_sample_rate_status(device_ip_address, timeout):
+    async def probe_sample_rate_status(target, timeout):
         assert device.topology_mutation_lock.locked()
-        calls.append(("probe", device_ip_address, timeout))
+        calls.append(("probe", target, timeout))
         return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
 
-    async def set_sample_rate(device_ip_address, sample_rate):
+    async def set_sample_rate(target, sample_rate):
         assert device.topology_mutation_lock.locked()
-        calls.append(("mutate", device_ip_address, sample_rate))
+        calls.append(("mutate", target, sample_rate))
         device.phase_index = 1
 
     application.probe_sample_rate_status = probe_sample_rate_status
@@ -489,7 +489,7 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
     assert result.changed is True
     assert result.observed_sample_rate_hertz == 96_000
     assert calls == [
-        ("probe", "192.0.2.10", 4.0),
-        ("mutate", "192.0.2.10", 96_000),
-        ("probe", "192.0.2.10", 4.0),
+        ("probe", device, 4.0),
+        ("mutate", device, 96_000),
+        ("probe", device, 4.0),
     ]

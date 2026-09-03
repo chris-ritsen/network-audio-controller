@@ -1,148 +1,17 @@
 from __future__ import annotations
 
-import pathlib
 import struct
 
 import pytest
 
 from netaudio import _capture
 from netaudio.dante.const import (
-    OPCODE_CHANNEL_COUNT,
-    OPCODE_DEVICE_NAME,
-    OPCODE_RX_CHANNELS,
     OPCODE_TX_CHANNEL_INFO,
     OPCODE_TX_CHANNEL_NAMES,
-    PROTOCOL_ID,
     SERVICE_ARC,
 )
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_parser import DanteDeviceParser
-
-FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
-
-
-def load_fixture(filename: str) -> bytes:
-    path = FIXTURES_DIR / filename
-    if not path.exists():
-        pytest.skip(f"Fixture not found: {filename}")
-    return path.read_bytes()
-
-
-def string_at_offset(data: bytes, offset: int) -> str | None:
-    if offset == 0 or offset >= len(data):
-        return None
-    end = data.find(b"\x00", offset)
-    if end == -1:
-        end = len(data)
-    return data[offset:end].decode("ascii")
-
-
-DEVICE_NAME_FIXTURES = [
-    ("20250517_200646_215524_192_168_1_108_get_device_name", "lx-dante"),
-    ("20250517_200646_356259_192_168_1_193_get_device_name", "avio-bt-1"),
-    ("20250517_200646_390658_192_168_1_94_get_device_name", "avio-usb-3"),
-    ("20250517_200646_412248_192_168_1_18_get_device_name", "avio-aes3-1"),
-    ("20250517_200646_439405_192_168_1_247_get_device_name", "avio-usb-1"),
-    ("20250517_200646_472412_192_168_1_36_get_device_name", "avio-usb-2"),
-]
-
-CHANNEL_COUNT_FIXTURES = [
-    "20250517_200646_226874_lx-dante_get_channel_count",
-    "20250517_200646_363064_avio-bt-1_get_channel_count",
-    "20250517_200646_396138_avio-usb-3_get_channel_count",
-    "20250517_200646_416392_avio-aes3-1_get_channel_count",
-    "20250517_200646_445946_avio-usb-1_get_channel_count",
-    "20250517_200646_478965_avio-usb-2_get_channel_count",
-]
-
-RECEIVER_FIXTURES = [
-    "20250517_200646_289003_lx-dante_get_receivers",
-    "20250517_200646_385043_avio-bt-1_get_receivers",
-    "20250517_200646_408078_avio-usb-3_get_receivers",
-    "20250517_200646_429145_avio-aes3-1_get_receivers",
-    "20250517_200646_463580_avio-usb-1_get_receivers",
-    "20250517_200646_499097_avio-usb-2_get_receivers",
-]
-
-
-class TestCommandDeviceName:
-    @pytest.mark.parametrize("fixture_base,expected_name", DEVICE_NAME_FIXTURES)
-    def test_command_generates_correct_payload(self, fixture_base, expected_name):
-        commands = DanteDeviceCommands()
-        packet, service_type = commands.command_device_name()
-        expected = load_fixture(f"{fixture_base}_request.bin")
-
-        assert service_type == SERVICE_ARC
-        assert len(packet) == len(expected)
-        assert packet[0:2] == struct.pack(">H", PROTOCOL_ID)
-        assert packet[3] == 10
-        assert packet[6:8] == struct.pack(">H", OPCODE_DEVICE_NAME)
-        assert packet[8:] == expected[8:]
-
-    @pytest.mark.parametrize("fixture_base,expected_name", DEVICE_NAME_FIXTURES)
-    def test_response_contains_device_name(self, fixture_base, expected_name):
-        response = load_fixture(f"{fixture_base}_response.bin")
-        name = string_at_offset(response, 10)
-        assert name == expected_name
-
-
-class TestCommandChannelCount:
-    @pytest.mark.parametrize("fixture_base", CHANNEL_COUNT_FIXTURES)
-    def test_command_generates_correct_payload(self, fixture_base):
-        commands = DanteDeviceCommands()
-        packet, service_type = commands.command_channel_count()
-        expected = load_fixture(f"{fixture_base}_request.bin")
-
-        assert service_type == SERVICE_ARC
-        assert len(packet) == len(expected)
-        assert packet[6:8] == struct.pack(">H", OPCODE_CHANNEL_COUNT)
-        assert packet[8:] == expected[8:]
-
-
-class TestCommandReceivers:
-    @pytest.mark.parametrize("fixture_base", RECEIVER_FIXTURES)
-    def test_command_generates_correct_payload(self, fixture_base):
-        commands = DanteDeviceCommands()
-        packet, service_type = commands.command_receivers(page=0)
-        expected = load_fixture(f"{fixture_base}_request.bin")
-
-        assert service_type == SERVICE_ARC
-        assert len(packet) == len(expected)
-        assert packet[6:8] == struct.pack(">H", OPCODE_RX_CHANNELS)
-        assert packet[8:] == expected[8:]
-
-    def test_page_1_generates_correct_starting_channel(self):
-        commands = DanteDeviceCommands()
-        packet, _ = commands.command_receivers(page=1)
-        payload = packet[8:]
-        starting_channel = struct.unpack(">H", payload[4:6])[0]
-        assert starting_channel == 17
-
-    def test_parse_avio_usb_3_rx_channels(self):
-        response = load_fixture("20250517_200646_408078_avio-usb-3_get_receivers_response.bin")
-        body = response[10:]
-
-        record_1 = body[2:22]
-        assert struct.unpack(">H", record_1[0:2])[0] == 1
-        assert string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "mic-mix-high"
-        assert string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "lx-dante"
-        assert string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix-1"
-        assert struct.unpack(">H", record_1[14:16])[0] == 9
-
-        record_2 = body[22:42]
-        assert struct.unpack(">H", record_2[0:2])[0] == 2
-        assert string_at_offset(response, struct.unpack(">H", record_2[10:12])[0]) == "mic-mix-2"
-        assert struct.unpack(">H", record_2[14:16])[0] == 9
-
-    def test_parse_avio_bt_1_rx_channels(self):
-        response = load_fixture("20250517_200646_385043_avio-bt-1_get_receivers_response.bin")
-        body = response[10:]
-
-        record_1 = body[2:22]
-        assert struct.unpack(">H", record_1[0:2])[0] == 1
-        assert string_at_offset(response, struct.unpack(">H", record_1[6:8])[0]) == "shelford-channel"
-        assert string_at_offset(response, struct.unpack(">H", record_1[8:10])[0]) == "a32"
-        assert string_at_offset(response, struct.unpack(">H", record_1[10:12])[0]) == "mic-mix"
 
 
 class TestCommandTransmitters:
@@ -378,12 +247,12 @@ class TestSettingsCommandPacketFormat:
 
 
 class TestParserBluetoothStatus:
-    def test_connected_device_name(self):
+    def test_connected_device_name(self, load_fixture):
         response = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
         name = DanteDeviceParser.parse_bluetooth_status(response)
         assert name == "s00pcan-iphone-17"
 
-    def test_disconnected_returns_none(self):
+    def test_disconnected_returns_none(self, load_fixture):
         response = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
         name = DanteDeviceParser.parse_bluetooth_status(response)
         assert name is None

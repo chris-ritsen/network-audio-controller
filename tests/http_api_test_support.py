@@ -97,6 +97,7 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
 
     arc_success = bytes.fromhex("27ff000a000010010001")
     application = SimpleNamespace(
+        _control_key=MagicMock(side_effect=lambda device: str(device.ipv4)),
         add_subscriptions=AsyncMock(return_value=arc_success),
         devices=devices or {},
         dispatcher=MagicMock(),

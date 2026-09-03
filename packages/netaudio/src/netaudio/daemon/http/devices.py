@@ -136,11 +136,11 @@ class DaemonDeviceHandlers:
         if not device.online:
             await self._send_json(writer, {"error": "device is offline"}, 409)
             return
-        if device.ipv4 is None:
+        if not getattr(device, "requires_managed_control", False) and device.ipv4 is None:
             await self._send_json(writer, {"error": "device has no IP address"}, 409)
             return
 
-        interfaces = await self.application.probe_interface_status(str(device.ipv4))
+        interfaces = await self.application.probe_interface_status(device)
         if interfaces is None:
             await self._send_json(writer, {"error": "interface status was not reported"}, 504)
             return
@@ -487,6 +487,9 @@ class DaemonDeviceHandlers:
         if not device.online:
             await self._send_json(writer, {"error": "device is offline"}, 409)
             return None
+        if getattr(device, "requires_managed_control", False):
+            await self._send_json(writer, {"error": "device lock is not available through DDM"}, 409)
+            return None
         if device.ipv4 is None:
             await self._send_json(writer, {"error": "device has no IP address"}, 409)
             return None
@@ -718,19 +721,19 @@ class DaemonDeviceHandlers:
         supported_values_field,
         capability_description,
     ):
-        device_ip_address = str(device.ipv4)
+        target_key = self.application._control_key(device)
 
         async def mutate() -> None:
             await set_value(requested_value)
 
         async def probe():
-            return await probe_status(device_ip_address)
+            return await probe_status(device)
 
         try:
             status = await mutate_and_wait_for_capability_value(
                 self.application.notifications,
                 current_value_field,
-                device_ip_address,
+                target_key,
                 requested_value,
                 mutate,
                 probe,

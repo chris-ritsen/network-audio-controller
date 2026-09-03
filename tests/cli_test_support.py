@@ -94,6 +94,7 @@ class FakeDevice:
         self.aes67_multicast_prefix = None
         self.settings_properties = None
         self.clock_subdomain = None
+        self.clock_source_code = None
         self.preferred_leader = None
         self.interfaces = None
         self.interface_pending_config = None
@@ -173,6 +174,9 @@ class FakeApplication:
                 return device
         return None
 
+    def _device(self, target):
+        return target if hasattr(target, "ipv4") else self._device_by_ip(target)
+
     def _record(self, operation: str, device, *arguments):
         if str(device.ipv4) == self.send_error_for:
             raise OSError("send failed")
@@ -222,7 +226,7 @@ class FakeApplication:
 
     async def set_encoding(self, device, encoding):
         self._record("set_encoding", device, encoding)
-        return await self.probe_encoding_status(device.ipv4)
+        return await self.probe_encoding_status(device)
 
     async def set_sample_rate_pullup(self, device, raw_value):
         return self._record("set_sample_rate_pullup", device, raw_value)
@@ -241,6 +245,11 @@ class FakeApplication:
     async def set_clock_subdomain(self, device, subdomain):
         return self._record("set_clock_subdomain", device, subdomain)
 
+    async def set_clock_source(self, device, source):
+        self._record("set_clock_source", device, source)
+        device.clock_source_code = source
+        return source
+
     async def set_interface(self, device, mode, static_configuration=None):
         return self._record("set_interface", device, mode, static_configuration)
 
@@ -250,36 +259,36 @@ class FakeApplication:
     async def remove_subscriptions(self, device, channel_numbers):
         return self._record("remove_subscriptions", device, tuple(channel_numbers))
 
-    async def clear_configuration(self, device_ip_address, preserve_internet_protocol_settings):
-        device = self._device_by_ip(device_ip_address)
+    async def clear_configuration(self, target, preserve_internet_protocol_settings):
+        device = self._device(target)
         self._record("clear_configuration", device, preserve_internet_protocol_settings)
         return {
             "available_actions_mask": 3,
             "action_result_code": 2 if preserve_internet_protocol_settings else 1,
         }
 
-    async def probe_sample_rate_status(self, device_ip_address, timeout=2.0):
-        device = self._device_by_ip(device_ip_address)
+    async def probe_sample_rate_status(self, target, timeout=2.0):
+        device = self._device(target)
         settings = await self.get_device_settings(device)
         if not isinstance(settings, dict) or settings.get("sample_rate") is None:
             raise RuntimeError("sample rate status unavailable")
         current_sample_rate = settings["sample_rate"]
         return current_sample_rate, device.supported_sample_rates or [current_sample_rate]
 
-    async def probe_encoding_status(self, device_ip_address, timeout=2.0):
-        device = self._device_by_ip(device_ip_address)
+    async def probe_encoding_status(self, target, timeout=2.0):
+        device = self._device(target)
         if device.encoding is None or device.supported_encodings is None:
             raise RuntimeError("encoding status unavailable")
         return device.encoding, device.supported_encodings
 
-    async def probe_sample_rate_pullup_status(self, device_ip_address, timeout=2.0):
-        device = self._device_by_ip(device_ip_address)
+    async def probe_sample_rate_pullup_status(self, target, timeout=2.0):
+        device = self._device(target)
         if device.supported_sample_rate_pullup_raw_values is None:
             raise CapabilityProbeTimeout("sample rate pull-up readback timed out")
         return device.sample_rate_pullup_raw_value, device.supported_sample_rate_pullup_raw_values
 
-    async def probe_gain_status(self, device_ip_address, timeout=2.0):
-        device = self._device_by_ip(device_ip_address)
+    async def probe_gain_status(self, target, timeout=2.0):
+        device = self._device(target)
         status = device.gain_probe_status
         if status is None:
             raise CapabilityProbeTimeout("gain status readback timed out")
@@ -300,10 +309,14 @@ class FakeApplication:
 
         return await fake_sample_rate_change(self, device, sample_rate, confirm_destructive=confirm_destructive)
 
-    async def probe_clocking_status(self, device, timeout=3.0):
-        if device.clock_subdomain is None:
+    async def probe_clocking_status(self, target, timeout=3.0):
+        device = self._device(target)
+        if device.clock_source_code is None and device.clock_subdomain is None:
             raise RuntimeError("clock status readback was unavailable")
-        return {"clock_subdomain": device.clock_subdomain}
+        return {
+            "clock_source_code": device.clock_source_code,
+            "clock_subdomain": device.clock_subdomain,
+        }
 
     async def apply_avio_status_pages(self, device):
         return None

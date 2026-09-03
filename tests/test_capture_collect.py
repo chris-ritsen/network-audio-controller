@@ -14,13 +14,17 @@ class FakeRedisClient:
     def __init__(self, entries):
         self.entries = entries
         self.published = []
+        self.publish_options = []
+        self.read_options = []
         self.reads = 0
 
     def xadd(self, stream, event, maxlen=None, approximate=False):
         self.published.append((stream, event))
+        self.publish_options.append((maxlen, approximate))
         return f"{len(self.published)}-0"
 
     def xread(self, streams, count=None, block=None):
+        self.read_options.append((count, block))
         self.reads += 1
         if self.reads > 1:
             return []
@@ -109,6 +113,8 @@ def test_collect_imports_dedupes_and_publishes(tmp_path, monkeypatch):
     published_events = [event["event"] for _, event in client.published]
     assert published_events == ["packet", "packet", "marker"]
     assert all(stream == "netaudio:unified" for stream, _ in client.published)
+    assert client.publish_options == [(200000, True)] * 3
+    assert client.read_options == [(100, 5000)]
     assert client.published[0][1]["session_id"] == str(session_id)
 
 

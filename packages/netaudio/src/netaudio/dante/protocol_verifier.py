@@ -278,7 +278,7 @@ class ProtocolVerifier:
 
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, _exc_type, _exc_value, _traceback):
         self.marker("session_stopped", marker_type="system", note="ProtocolVerifier session ended")
 
         if self._transport is not None:
