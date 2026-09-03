@@ -95,8 +95,6 @@ def _unique_cross_source_matches(
 
 
 def _ddm_key(observation: ManagedDeviceObservation) -> str:
-    if observation.server_profile == "default" and observation.context_name is None:
-        return f"{DDM_KEY_PREFIX}{observation.device.id}"
     domain = observation.domain_id or "unenrolled"
     return f"{DDM_KEY_PREFIX}{observation.server_profile}:{domain}:{observation.device.id}"
 
@@ -659,9 +657,7 @@ class ManagedInventoryRegistry:
     async def refresh(self, context_name: str | None = None) -> bool:
         if context_name is not None:
             return await self._selected_service(context_name).refresh()
-        results = await asyncio.gather(
-            *(service.refresh() for service in self.services.values() if service.enabled)
-        )
+        results = await asyncio.gather(*(service.refresh() for service in self.services.values() if service.enabled))
         return bool(results) and all(results)
 
     def observations(self) -> tuple[ManagedDeviceObservation, ...]:

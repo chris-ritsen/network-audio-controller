@@ -1,6 +1,32 @@
+import click
+from typer.core import TyperGroup
+
 from netaudio.icons import icon
 
 HELP_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+def enable_required_parameter_help(command: click.Command) -> None:
+    """Make bare parameterized leaf commands display their full help."""
+    if isinstance(command, click.Group):
+        for child in command.commands.values():
+            enable_required_parameter_help(child)
+        return
+    if any(parameter.required for parameter in command.params):
+        command.no_args_is_help = True
+
+
+class NetaudioGroup(TyperGroup):
+    def resolve_command(
+        self,
+        ctx: click.Context,
+        args: list[str],
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        name, command, remaining = super().resolve_command(ctx, args)
+        if command is not None:
+            enable_required_parameter_help(command)
+        return name, command, remaining
+
 
 HEADER_ICONS = {
     "Name": "name",
