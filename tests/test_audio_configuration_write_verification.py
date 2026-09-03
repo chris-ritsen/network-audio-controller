@@ -282,6 +282,60 @@ def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
     }
 
 
+def test_latency_get_xml_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
+    import xml.etree.ElementTree as ET
+
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 150_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 5_000_000,
+        },
+    )
+    application = FakeApplication({"avio.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.xml)
+
+    result = _latency(application, None)
+
+    assert result.exit_code == 0
+    root = ET.fromstring(result.output)
+    assert root.tag == "netaudio"
+    assert root.findtext("active_latency_ms") == "0.15"
+    assert root.findtext("active_latency_ns") == "150000"
+    assert [item.text for item in root.findall("latency_options_ms/item")] == ["0.15", "0.25", "0.5", "1.0", "2.0", "5.0"]
+
+
+def test_latency_get_csv_is_a_labeled_field_value_report(monkeypatch):
+    import csv
+    import io
+
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice(
+        "AVIO",
+        settings={
+            "configured_latency_ns": 250_000,
+            "active_latency_ns": 150_000,
+            "min_latency_ns": 150_000,
+            "max_latency_ns": 5_000_000,
+        },
+    )
+    application = FakeApplication({"avio.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.csv)
+
+    result = _latency(application, None)
+
+    assert result.exit_code == 0
+    rows = list(csv.reader(io.StringIO(result.output)))
+    assert rows[0] == ["Field", "Value"]
+    assert ["active_latency_ms", "0.15"] in rows
+    assert ["active_latency_ns", "150000"] in rows
+
+
 def test_latency_get_surfaces_retained_configured_value_when_active_is_zero():
     device = FakeDevice(
         "AVIO",
