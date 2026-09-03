@@ -369,6 +369,24 @@ fn set_latency_matches_captured_250_microsecond_packet() {
 }
 
 #[test]
+fn set_latency_can_select_the_managed_arc_protocol_without_changing_the_default() {
+    let packet = build_set_latency_for_protocol(PROTOCOL_ARC_2809, 2.0, 0x4C11).unwrap();
+    assert_eq!(
+        &packet[..10],
+        &[0x28, 0x09, 0x00, 0x28, 0x4C, 0x11, 0x11, 0x01, 0x00, 0x00]
+    );
+    assert_eq!(
+        &packet[32..40],
+        &[0x00, 0x1E, 0x84, 0x80, 0x00, 0x1E, 0x84, 0x80]
+    );
+    assert_eq!(&build_set_latency(2.0, 0x4C11).unwrap()[..2], &[0x27, 0xFF]);
+    assert_eq!(
+        build_set_latency_for_protocol(0x2729, 2.0, 0x4C11),
+        Err(NetaudioError::UnsupportedProtocolOperation)
+    );
+}
+
+#[test]
 fn set_latency_preserves_full_nanosecond_high_byte() {
     let packet = build_set_latency(20.3125, 0).unwrap();
     assert_eq!(

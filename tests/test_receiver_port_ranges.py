@@ -30,6 +30,7 @@ def test_receiver_port_range_query_and_parser_match_shipping_controller():
         "first_port_range_end": 0x397F,
         "second_port_range_start": 0x3980,
         "second_port_range_end": 0x39FF,
+        "second_port_range_available": True,
     }
 
 
@@ -93,6 +94,7 @@ async def test_receiver_port_range_product_query_uses_the_controller_request(
         "first_port_range_end": 0x397F,
         "second_port_range_start": 0x3980,
         "second_port_range_end": 0x39FF,
+        "second_port_range_available": True,
     }
     assert command_specifications == [
         {

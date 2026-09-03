@@ -9,6 +9,7 @@ from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, sort_devices
 from netaudio.commands.device.display import format_link_speed_megabits_per_second
+from netaudio.ddm.controller import DAPISessionError
 
 NETWORK_STATUS_HEADERS = [
     "Name",
@@ -74,10 +75,11 @@ def network_status_rows(
     link_status,
     switch_configuration: dict | None,
     dissect: bool,
+    switch_configuration_applicable: bool = True,
 ) -> list[list[str]]:
     switch_mode, switch_mode_codes, available_switch_modes = _switch_mode_summary(switch_configuration, dissect)
     if switch_configuration is None and address:
-        switch_mode = "no response"
+        switch_mode = "no response" if switch_configuration_applicable else "N/A"
     if link_status is None:
         link_label = "no response" if address else ""
         row = [device_name, address, "", link_label, "", switch_mode, available_switch_modes]
@@ -112,6 +114,18 @@ def _without_port_column(headers: list[str], rows: list[list[str]]) -> tuple[lis
     )
 
 
+def _should_probe_switch_configuration(device) -> bool:
+    if not getattr(device, "requires_managed_control", False):
+        return True
+    network_count = getattr(device, "num_networks", None)
+    if isinstance(network_count, int):
+        return network_count > 1
+    interfaces = getattr(device, "interfaces", None)
+    if isinstance(interfaces, list):
+        return len(interfaces) > 1
+    return True
+
+
 async def run_network_status(application, devices, timeout: float) -> None:
     dissect = _get_state().dissect
     filtered = filter_devices(devices)
@@ -121,25 +135,30 @@ async def run_network_status(application, devices, timeout: float) -> None:
 
     async def probe(server_name, device):
         if device.ipv4 is None:
-            return server_name, device, None, None
+            return server_name, device, None, None, True
 
         async def capture(operation):
             try:
                 return await operation(str(device.ipv4), timeout=timeout)
-            except CapabilityProbeTimeout:
+            except (CapabilityProbeTimeout, DAPISessionError):
                 return None
 
-        link_status, switch_configuration = await asyncio.gather(
-            capture(application.probe_link_status),
-            capture(application.probe_switch_configuration),
-        )
-        return server_name, device, link_status, switch_configuration
+        switch_configuration_applicable = _should_probe_switch_configuration(device)
+        if switch_configuration_applicable:
+            link_status, switch_configuration = await asyncio.gather(
+                capture(application.probe_link_status),
+                capture(application.probe_switch_configuration),
+            )
+        else:
+            link_status = await capture(application.probe_link_status)
+            switch_configuration = None
+        return server_name, device, link_status, switch_configuration, switch_configuration_applicable
 
     results = await asyncio.gather(*(probe(server_name, device) for server_name, device in sort_devices(filtered)))
     headers = NETWORK_STATUS_HEADERS + NETWORK_STATUS_DISSECT_HEADERS if dissect else NETWORK_STATUS_HEADERS
     rows = []
     json_data = {}
-    for server_name, device, link_status, switch_configuration in results:
+    for server_name, device, link_status, switch_configuration, switch_configuration_applicable in results:
         device_name = device.name or server_name
         address = str(device.ipv4) if device.ipv4 is not None else None
         json_data[server_name] = {
@@ -153,9 +172,19 @@ async def run_network_status(application, devices, timeout: float) -> None:
             "name": device.name,
             "server_name": server_name,
             "switch_configuration": switch_configuration,
+            "switch_configuration_applicable": switch_configuration_applicable,
             "switch_configuration_available": switch_configuration is not None,
         }
-        rows.extend(network_status_rows(device_name, address or "", link_status, switch_configuration, dissect))
+        rows.extend(
+            network_status_rows(
+                device_name,
+                address or "",
+                link_status,
+                switch_configuration,
+                dissect,
+                switch_configuration_applicable,
+            )
+        )
 
     headers, rows = _without_port_column(headers, rows)
     output_table(headers, rows, json_data=json_data)
