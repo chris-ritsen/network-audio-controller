@@ -1,6 +1,6 @@
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -142,3 +142,49 @@ async def test_refresh_status_fields_targets_online_devices_with_missing_fields(
     for task in list(daemon._background_tasks):
         await task
     assert sorted(refreshed) == [("known.local.", "periodic refresh"), ("missing.local.", "periodic refresh")]
+
+
+def test_managed_device_is_not_marked_offline_by_direct_discovery_failures():
+    managed = _device("managed.local.", age_seconds=60, online=True)
+    managed.management_state = "managed"
+    daemon = _daemon({managed.server_name: managed})
+
+    daemon.mark_device_offline(managed.server_name)
+    daemon.mark_device_offline_verified(managed.server_name, "direct probe")
+
+    assert daemon._offline_failures == {}
+    assert daemon._offline_candidate_since == {}
+    assert daemon._pending_offline_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_managed_device_is_not_sent_to_direct_revalidation(monkeypatch):
+    managed = _device("managed.local.", age_seconds=60, online=True)
+    managed.management_state = "managed"
+    managed.ipv4 = None
+    daemon = _daemon({managed.server_name: managed})
+    direct_probe = MagicMock(side_effect=AssertionError("managed device reached direct probe"))
+    monkeypatch.setattr("netaudio.daemon.server._probe_device", direct_probe)
+    daemon._spawn_background = MagicMock()
+
+    await daemon._verify_quiet_online_device(managed.server_name)
+    await daemon._verify_quiet_online_devices()
+    await daemon._recover_known_devices(offline_only=False)
+
+    direct_probe.assert_not_called()
+    daemon._spawn_background.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_managed_device_without_address_can_refresh_status_fields():
+    managed = _device("managed.local.", age_seconds=0, online=True)
+    managed.management_state = "managed"
+    managed.ipv4 = None
+    daemon = _daemon({managed.server_name: managed})
+    daemon.state = SimpleNamespace(refresh_status_fields=AsyncMock())
+
+    daemon._refresh_status_fields()
+    for task in list(daemon._background_tasks):
+        await task
+
+    daemon.state.refresh_status_fields.assert_awaited_once_with(managed.server_name, "missing status fields")

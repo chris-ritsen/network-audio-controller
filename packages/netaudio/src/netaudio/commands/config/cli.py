@@ -17,7 +17,9 @@ from netaudio.cli_support.output import output_single, output_table, output_valu
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.latency import run_latency
 from netaudio.dante.clock_config import (
+    format_clock_source_code,
     format_clock_subdomain,
+    parse_clock_source_selection,
     parse_clock_subdomain_selection,
 )
 from netaudio.dante.sample_rate_pullup import (
@@ -695,21 +697,58 @@ async def _read_clock_subdomain(application, device):
     return bytes(clock_subdomain)
 
 
-@app.command("clock-source")
-def clock_source(
-    selection: Optional[str] = typer.Argument(None, help="Not implemented."),
-    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
-):
-    """Get or set clock source."""
+async def _read_clock_source(application, device):
+    parsed = await application.probe_clocking_status(device)
+    clock_source = parsed.get("clock_source_code")
+    if clock_source is None:
+        raise RuntimeError("clock source readback was unavailable")
+    return clock_source
+
+
+async def run_clock_source(application, devices, selection: str | None, all_devices: bool) -> None:
+    targets = select_device(filter_devices(devices), allow_many=all_devices)
 
     if selection is None:
-        output_single("not implemented")
+
+        async def _read_target(server_name, device):
+            if device.clock_source_code is None:
+                await _read_clock_source(application, device)
+
+        await _render_cached_reading(
+            targets,
+            all_devices,
+            "clock source",
+            "Clock Source",
+            _read_target,
+            lambda device: format_clock_source_code(device.clock_source_code),
+        )
         return
-    typer.echo(
-        "Error: clock source is not implemented; Controller labels for this field are unnamed.",
-        err=True,
+
+    try:
+        requested_source = parse_clock_source_selection(selection)
+    except ValueError as exception:
+        typer.echo(f"Error: {exception}.", err=True)
+        raise typer.Exit(code=ExitCode.ERROR)
+
+    failures = await _send_verified_change(
+        targets,
+        lambda device: application.set_clock_source(device, requested_source),
+        requested_source,
+        "clock source change",
+        lambda label: f"Set clock source for {label}: {format_clock_source_code(requested_source)} (verified)",
+        read_for=lambda device: _read_clock_source(application, device),
     )
-    raise typer.Exit(code=ExitCode.ERROR)
+    if failures:
+        raise typer.Exit(code=ExitCode.ERROR)
+
+
+@app.command("clock-source")
+def clock_source(
+    selection: Optional[str] = typer.Argument(None, help="Raw source code in decimal or hexadecimal."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+):
+    """Get or set the device's raw clock-source code."""
+    run_command(run_clock_source, selection, all_devices)
 
 
 async def run_clock_subdomain(application, devices, selection: str | None, all_devices: bool) -> None:

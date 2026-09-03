@@ -122,7 +122,7 @@ class DanteApplication:
         self.cmc = DanteCMCService(self.transport, interface_name=app_settings.interface)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
-            device_lookup=self._device_by_ip,
+            device_lookup=self._device_by_control_key,
             packet_store=packet_store,
             interface_ip=app_settings.interface_ip,
             dissect=dissect,
@@ -242,11 +242,63 @@ class DanteApplication:
             if self._packet_store is not None:
                 _record(self._packet_store, self.capture_session_id, payload, device_ip, port, direction, source_type)
 
-    def _device_by_ip(self, ip_str: str):
+    def _devices_by_ip(self, ip_address: str) -> list:
+        return [
+            device
+            for device in self.devices.values()
+            if device.ipv4 is not None and str(device.ipv4) == str(ip_address)
+        ]
+
+    def _device_by_ip(self, ip_address: str):
+        matches = self._devices_by_ip(ip_address)
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _managed_control_key(device) -> str:
+        device_id = getattr(device, "ddm_device_id", None)
+        if not isinstance(device_id, str) or not device_id:
+            raise RuntimeError(f"{device.name or device.server_name} is managed but has no DDM device ID")
+        server = getattr(device, "ddm_server_profile", None)
+        context = getattr(device, "ddm_context", None)
+        domain = getattr(device, "ddm_domain_id", None)
+        missing = [
+            name
+            for name, value in (("server profile", server), ("context", context), ("domain ID", domain))
+            if not isinstance(value, str) or not value
+        ]
+        if missing:
+            fields = ", ".join(missing)
+            raise RuntimeError(f"{device.name or device.server_name} is managed but has no {fields}")
+        return f"ddm:{server}:{context}:{domain}:{device_id}"
+
+    def _control_key(self, target) -> str:
+        if getattr(target, "requires_managed_control", False):
+            return self._managed_control_key(target)
+        if hasattr(target, "_require_address"):
+            return target._require_address()
+        if getattr(target, "ipv4", None) is not None:
+            return str(target.ipv4)
+        return str(target)
+
+    def _device_by_control_key(self, key: str):
         for device in self.devices.values():
-            if device.ipv4 and str(device.ipv4) == ip_str:
-                return device
-        return None
+            if not device.requires_managed_control:
+                continue
+            try:
+                if self._managed_control_key(device) == key:
+                    return device
+            except RuntimeError:
+                continue
+        return self._device_by_ip(key)
+
+    def _control_target(self, target):
+        if hasattr(target, "requires_managed_control"):
+            return target
+        matches = self._devices_by_ip(str(target))
+        if len(matches) > 1:
+            names = ", ".join(sorted(device.server_name or device.name for device in matches))
+            raise RuntimeError(f"control address {target} is ambiguous across devices: {names}")
+        return matches[0] if matches else target
 
     async def _export_conmon_data(
         self,
@@ -273,17 +325,18 @@ class DanteApplication:
     async def _mutate_and_take_result(
         self,
         kind: str,
-        device_ip_address: str,
+        target,
         mutate: Callable[[], Awaitable[None]],
         timeout: float,
     ):
-        waiter = self.notifications.register_waiter(kind, device_ip_address)
+        key = self._control_key(target)
+        waiter = self.notifications.register_waiter(kind, key)
         try:
             await mutate()
             try:
                 await asyncio.wait_for(waiter.wait(), timeout=timeout)
             except asyncio.TimeoutError:
-                logger.debug(f"{kind} write verification timeout for {device_ip_address}")
+                logger.debug(f"{kind} write verification timeout for {key}")
             return waiter.latest_result
         finally:
             self.notifications.unregister_waiter(waiter)
@@ -328,7 +381,7 @@ class DanteApplication:
                 if include_channels:
                     await self.apply_avio_status_pages(device)
                 try:
-                    await self.probe_interface_status(str(device.ipv4))
+                    await self.probe_interface_status(device)
                 except (RuntimeError, OSError) as exception:
                     logger.debug(f"Interface status unavailable for {device.server_name}: {exception}")
                 return
@@ -365,12 +418,15 @@ class DanteApplication:
         target_devices = self.devices if devices is None else devices
         probe_tasks = {}
         for device in target_devices.values():
-            if not device.ipv4 or (skip_device is not None and skip_device(device)):
+            if (not device.requires_managed_control and not device.ipv4) or (
+                skip_device is not None and skip_device(device)
+            ):
                 continue
-            device_ip_address = str(device.ipv4)
-            if device_ip_address in probe_tasks:
+            target = device if device.requires_managed_control else str(device.ipv4)
+            key = self._control_key(target)
+            if key in probe_tasks:
                 continue
-            probe_tasks[device_ip_address] = asyncio.create_task(probe(device_ip_address, timeout=timeout))
+            probe_tasks[key] = asyncio.create_task(probe(target, timeout=timeout))
 
         if not probe_tasks:
             return
@@ -378,14 +434,14 @@ class DanteApplication:
         logger.debug(f"Probed {description} for {len(probe_tasks)} device addresses")
         results = await asyncio.gather(*probe_tasks.values(), return_exceptions=True)
         response_count = 0
-        for device_ip_address, result in zip(probe_tasks, results):
+        for key, result in zip(probe_tasks, results):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, CapabilityProbeTimeout):
-                logger.debug(f"{description} probe timed out for {device_ip_address}")
+                logger.debug(f"{description} probe timed out for {key}")
                 continue
             if isinstance(result, Exception):
-                logger.warning(f"Failed to probe {description} for {device_ip_address}: {result}")
+                logger.warning(f"Failed to probe {description} for {key}: {result}")
                 continue
             response_count += 1
         logger.debug(f"{description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded")
@@ -401,15 +457,20 @@ class DanteApplication:
     ) -> None:
         target_devices = self.devices if devices is None else devices
         probe_tasks = {}
-        target_devices_by_ip_address = {}
+        target_devices_by_key = {}
         for device in target_devices.values():
-            if not device.online or not device.ipv4 or capability_is_known(device):
+            if (
+                not device.online
+                or (not device.requires_managed_control and not device.ipv4)
+                or capability_is_known(device)
+            ):
                 continue
-            device_ip_address = str(device.ipv4)
-            target_devices_by_ip_address.setdefault(device_ip_address, []).append(device)
-            if device_ip_address in probe_tasks:
+            target = device if device.requires_managed_control else str(device.ipv4)
+            key = self._control_key(target)
+            target_devices_by_key.setdefault(key, []).append(device)
+            if key in probe_tasks:
                 continue
-            probe_tasks[device_ip_address] = asyncio.create_task(probe_status(device_ip_address, timeout=timeout))
+            probe_tasks[key] = asyncio.create_task(probe_status(target, timeout=timeout))
 
         if not probe_tasks:
             return
@@ -418,18 +479,18 @@ class DanteApplication:
 
         probe_results = await asyncio.gather(*probe_tasks.values(), return_exceptions=True)
         response_count = 0
-        for device_ip_address, result in zip(probe_tasks, probe_results):
+        for key, result in zip(probe_tasks, probe_results):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, CapabilityProbeTimeout):
-                logger.debug(f"{capability_description} probe timed out for {device_ip_address}")
+                logger.debug(f"{capability_description} probe timed out for {key}")
                 continue
             if isinstance(result, Exception):
-                logger.warning(f"Failed to probe {capability_description} for {device_ip_address}: {result}")
+                logger.warning(f"Failed to probe {capability_description} for {key}: {result}")
                 continue
             response_count += 1
             current_value, supported_values = result
-            for device in target_devices_by_ip_address[device_ip_address]:
+            for device in target_devices_by_key[key]:
                 if device.online:
                     apply_capability(device, current_value, supported_values)
 
@@ -463,24 +524,23 @@ class DanteApplication:
     async def _probe_once(
         self,
         capability_name: str,
-        device_ip_address: str,
-        send_probe: Callable[[str], Awaitable[None]],
+        target,
+        send_probe: Callable[[object], Awaitable[None]],
         timeout: float,
         description: str,
     ):
-        async with self._capability_probe_lock(capability_name, device_ip_address):
-            waiter = self.notifications.register_waiter(capability_name, device_ip_address)
+        key = self._control_key(target)
+        async with self._capability_probe_lock(capability_name, key):
+            waiter = self.notifications.register_waiter(capability_name, key)
             try:
-                await send_probe(device_ip_address)
+                await send_probe(target)
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     if waiter.latest_result is None:
-                        raise CapabilityProbeTimeout(
-                            f"{description} readback timed out for {device_ip_address}"
-                        ) from None
+                        raise CapabilityProbeTimeout(f"{description} readback timed out for {key}") from None
                 if waiter.latest_result is None:
-                    raise RuntimeError(f"{description} readback was unavailable for {device_ip_address}")
+                    raise RuntimeError(f"{description} readback was unavailable for {key}")
                 return waiter.latest_result
             finally:
                 self.notifications.unregister_waiter(waiter)
@@ -518,19 +578,20 @@ class DanteApplication:
     async def _probe_with_retries(
         self,
         capability_name: str,
-        device_ip_address: str,
-        send_probe: Callable[[str], Awaitable[None]],
+        target,
+        send_probe: Callable[[object], Awaitable[None]],
         timeout: float,
         description: str,
     ):
-        async with self._capability_probe_lock(capability_name, device_ip_address):
-            waiter = self.notifications.register_waiter(capability_name, device_ip_address)
+        key = self._control_key(target)
+        async with self._capability_probe_lock(capability_name, key):
+            waiter = self.notifications.register_waiter(capability_name, key)
             try:
                 event_loop = asyncio.get_running_loop()
                 deadline = event_loop.time() + timeout
                 attempt_count = 3
                 for attempt_number in range(attempt_count):
-                    await send_probe(device_ip_address)
+                    await send_probe(target)
                     remaining_time = max(0.0, deadline - event_loop.time())
                     if remaining_time == 0:
                         break
@@ -546,7 +607,7 @@ class DanteApplication:
                         return waiter.latest_result
                     waiter.clear()
                 if waiter.latest_result is None:
-                    raise CapabilityProbeTimeout(f"{description} readback timed out for {device_ip_address}")
+                    raise CapabilityProbeTimeout(f"{description} readback timed out for {key}")
                 return waiter.latest_result
             finally:
                 self.notifications.unregister_waiter(waiter)
@@ -594,7 +655,7 @@ class DanteApplication:
             if deadline - time.monotonic() <= 0:
                 logger.debug("Conmon query timeout reached, skipping remaining devices")
                 break
-            if not device.ipv4 or not device.mac_address:
+            if device.requires_managed_control or not device.ipv4 or not device.mac_address:
                 continue
             if not await self._query_conmon_for_device(device, deadline):
                 incomplete_devices.append(device)
@@ -655,7 +716,7 @@ class DanteApplication:
         tasks = [
             self.probe_bluetooth_status(device)
             for device in target_devices.values()
-            if device.ipv4 and device.model_id in BLUETOOTH_MODEL_IDS
+            if (device.requires_managed_control or device.ipv4) and device.model_id in BLUETOOTH_MODEL_IDS
         ]
         if not tasks:
             return
@@ -684,7 +745,7 @@ class DanteApplication:
     async def _send_conmon_query_for_device(self, device, request: Callable[[str, str], Awaitable[None]]) -> None:
         from netaudio import core
 
-        if not device.ipv4 or not device.mac_address:
+        if device.requires_managed_control or not device.ipv4 or not device.mac_address:
             return
 
         mac_hex = device.mac_address.replace(":", "").replace("-", "")
@@ -710,6 +771,8 @@ class DanteApplication:
         await device.execute(build_specification(host_mac))
 
     def managed_transport(self, device=None):
+        if device is not None and getattr(device, "requires_managed_control", False):
+            self._managed_control_key(device)
         if self._managed_transport is not None:
             return self._managed_transport
 
@@ -751,15 +814,16 @@ class DanteApplication:
     async def execute_managed(self, device, specification: dict) -> bytes | None:
         return await self.managed_transport(device).execute(device, specification)
 
-    async def _send_settings(self, device_ip_address, specification: dict) -> None:
-        address = str(device_ip_address)
-        device = self._device_by_ip(address)
-        if device is not None and device.requires_managed_control:
-            response = await device.execute(specification)
+    async def _send_settings(self, target, specification: dict) -> bytes | None:
+        resolved = self._control_target(target)
+        if getattr(resolved, "requires_managed_control", False):
+            key = self._control_key(resolved)
+            response = await resolved.execute(specification)
             if response is not None:
-                self.notifications.receive_settings_response(response, address)
-            return
-        await self.transport.execute(address, specification)
+                self.notifications.receive_settings_response(response, key)
+            return response
+        address = resolved._require_address() if hasattr(resolved, "_require_address") else str(resolved)
+        return await self.transport.execute(address, specification)
 
     async def add_subscriptions(self, device, records):
         if getattr(device, "requires_managed_control", False):
@@ -782,7 +846,8 @@ class DanteApplication:
             try:
                 page = await query(device)
             except RuntimeError as exception:
-                logger.debug(f"{query.__name__} unavailable for {device.server_name}: {exception}")
+                query_name = getattr(query, "__name__", type(query).__name__)
+                logger.debug(f"{query_name} unavailable for {device.server_name}: {exception}")
                 continue
             if page is not None:
                 apply(page)
@@ -800,10 +865,11 @@ class DanteApplication:
 
     async def clear_configuration(
         self,
-        device_ip_address: str,
+        target,
         preserve_internet_protocol_settings: bool,
         timeout: float = 2.0,
     ) -> dict:
+        key = self._control_key(target)
         expected_action_result_code = 2 if preserve_internet_protocol_settings else 1
         command = (
             self.send_clear_all_configuration_preserving_internet_protocol_settings
@@ -812,22 +878,22 @@ class DanteApplication:
         )
 
         async def mutate() -> None:
-            await command(device_ip_address)
+            await command(target)
 
-        async with self._capability_probe_lock("clear_configuration_action", device_ip_address):
+        async with self._capability_probe_lock("clear_configuration_action", key):
             status = await mutate_and_wait_for_clear_configuration_status(
                 self.notifications,
-                device_ip_address,
+                key,
                 expected_action_result_code,
                 mutate,
                 timeout,
             )
         if status is None:
-            raise CapabilityProbeTimeout(f"clear-configuration status timed out for {device_ip_address}")
+            raise CapabilityProbeTimeout(f"clear-configuration status timed out for {key}")
         if status["action_result_code"] != expected_action_result_code:
             raise RuntimeError(
                 f"clear-configuration returned result {status['action_result_code']} "
-                f"instead of {expected_action_result_code} for {device_ip_address}"
+                f"instead of {expected_action_result_code} for {key}"
             )
         return status
 
@@ -858,7 +924,9 @@ class DanteApplication:
         await browser.async_close()
         self._browser = None
 
-        device_ips = [str(device.ipv4) for device in self.devices.values() if device.ipv4]
+        device_ips = [
+            str(device.ipv4) for device in self.devices.values() if device.ipv4 and not device.requires_managed_control
+        ]
         if device_ips:
             await self.cmc.register_all(device_ips)
 
@@ -984,11 +1052,11 @@ class DanteApplication:
         device = self._apply_discovered_services(server_name, matching_services)
         return {server_name: device}
 
-    async def execute(self, device_ip_address, specification: dict) -> bytes | None:
-        address = str(device_ip_address)
-        device = self._device_by_ip(address)
-        if device is not None and device.requires_managed_control:
-            return await device.execute(specification)
+    async def execute(self, target, specification: dict) -> bytes | None:
+        resolved = self._control_target(target)
+        if getattr(resolved, "requires_managed_control", False):
+            return await resolved.execute(specification)
+        address = resolved._require_address() if hasattr(resolved, "_require_address") else str(resolved)
         return await self.transport.execute(address, specification, arc_port=self.arc_port_for_address(address))
 
     async def export_capability_partition(
@@ -1055,7 +1123,7 @@ class DanteApplication:
     async def get_aes67_configured(self, device):
         from netaudio import core
 
-        if device.ipv4 is None:
+        if not getattr(device, "requires_managed_control", False) and device.ipv4 is None:
             return None
         try:
             response = await device.execute(self.commands.query_latency_config())
@@ -1086,10 +1154,10 @@ class DanteApplication:
         return None
 
     async def get_device_settings(self, device):
-        if device.ipv4 is None:
-            return None
         if getattr(device, "requires_managed_control", False):
             return await self.get_latency_settings(device)
+        if device.ipv4 is None:
+            return None
         settings = await device.call_core(lambda client: client.get_device_settings())
         self._apply_device_settings(device, settings)
         return settings
@@ -1105,7 +1173,7 @@ class DanteApplication:
         return settings
 
     async def identify(self, device) -> None:
-        await self.send_identify(str(device.ipv4))
+        await self.send_identify(device)
 
     async def lock_device(self, device, pin: str, key: bytes) -> dict:
         key_error = _validate_lock_key(key)
@@ -1113,6 +1181,8 @@ class DanteApplication:
             return key_error
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("device lock has no verified DDM operation and was not sent")
+        if getattr(device, "ipv4", None) is None:
+            raise RuntimeError("device has no control address")
         return await core_lock_device(str(device.ipv4), pin, key)
 
     def mark_device_offline(self, server_name: str) -> None:
@@ -1151,13 +1221,15 @@ class DanteApplication:
         probe_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
         timeout: float = 2.0,
     ) -> tuple[int, list[int]] | None:
+        key = self._control_key(device)
+
         async def mutate_without_result() -> None:
             await mutate()
 
         return await mutate_and_wait_for_capability_value(
             self.notifications,
             capability_name,
-            str(device.ipv4),
+            key,
             expected_value,
             mutate_without_result,
             probe_status,
@@ -1232,7 +1304,9 @@ class DanteApplication:
         timeout: float = 2.0,
         include_channels: bool = True,
     ) -> None:
-        device_ip_addresses = [str(device.ipv4) for device in devices.values() if device.ipv4]
+        device_ip_addresses = [
+            str(device.ipv4) for device in devices.values() if device.ipv4 and not device.requires_managed_control
+        ]
         request_timeout_milliseconds = None if include_channels else 500
         request_attempts = None if include_channels else 1
 
@@ -1284,20 +1358,19 @@ class DanteApplication:
             if exception is not None:
                 logger.warning(f"Failed to populate {phase_tasks[task]}: {exception}")
 
-    async def probe_aes67_state(self, device_ip_address: str, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
+    async def probe_aes67_state(self, target, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
         return await self._probe_once(
             "aes67",
-            str(device_ip_address),
+            target,
             self.send_probe_aes67,
             timeout,
             "AES67 status",
         )
 
     async def probe_bluetooth_status(self, device, timeout: float = 2.0) -> dict:
-        device_ip_address = str(device.ipv4)
         status = await self._probe_once(
             "bluetooth_status",
-            device_ip_address,
+            device,
             self.send_bluetooth_status_request,
             timeout,
             "bluetooth status",
@@ -1307,40 +1380,40 @@ class DanteApplication:
 
     async def probe_clear_configuration_status(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> dict:
         return await self._probe_once(
             "clear_configuration_status",
-            device_ip_address,
+            target,
             self.send_probe_clear_configuration_status,
             timeout,
             "clear-configuration status",
         )
 
     async def probe_clocking_status(self, device, timeout: float = 3.0) -> dict:
-        device_ip_address = str(device.ipv4)
-        async with self._capability_probe_lock("clock_status", device_ip_address):
-            waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, device_ip_address)
+        key = self._control_key(device)
+        async with self._capability_probe_lock("clock_status", key):
+            waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, key)
             try:
-                await self.send_refresh_clock_status(device_ip_address)
+                await self.send_refresh_clock_status(device)
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
-                    logger.debug(f"Clock status probe timed out for {device_ip_address}")
+                    logger.debug(f"Clock status probe timed out for {key}")
                     if waiter.latest_result is None:
-                        raise CapabilityProbeTimeout(f"clock status probe timed out for {device_ip_address}") from None
+                        raise CapabilityProbeTimeout(f"clock status probe timed out for {key}") from None
             finally:
                 self.notifications.unregister_waiter(waiter)
         if waiter.latest_result is None:
-            raise RuntimeError(f"clock status readback was unavailable for {device_ip_address}")
+            raise RuntimeError(f"clock status readback was unavailable for {key}")
         apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result)
         return _clock_status_snapshot(device)
 
-    async def probe_encoding_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]]:
+    async def probe_encoding_status(self, target, timeout: float = 2.0) -> tuple[int, list[int]]:
         return await self._probe_with_retries(
             "encoding",
-            str(device_ip_address),
+            target,
             self.send_probe_encoding,
             timeout,
             "encoding",
@@ -1348,25 +1421,25 @@ class DanteApplication:
 
     async def probe_gain_status(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> tuple[str, list[int]]:
-        device_ip_address = str(device_ip_address)
-        async with self._capability_probe_lock("gain", device_ip_address):
+        key = self._control_key(target)
+        async with self._capability_probe_lock("gain", key):
             result = await send_and_wait_for_gain_status(
                 self.notifications,
-                device_ip_address,
-                lambda: self.send_probe_gain_level(device_ip_address),
+                key,
+                lambda: self.send_probe_gain_level(target),
                 timeout,
             )
         if result is None:
-            raise CapabilityProbeTimeout(f"gain status readback timed out for {device_ip_address}")
+            raise CapabilityProbeTimeout(f"gain status readback timed out for {key}")
         return result
 
-    async def probe_interface_status(self, device_ip_address: str, timeout: float = 2.0) -> list[dict]:
+    async def probe_interface_status(self, target, timeout: float = 2.0) -> list[dict]:
         return await self._probe_once(
             "interface",
-            device_ip_address,
+            target,
             self.send_probe_interface_status,
             timeout,
             "interface status",
@@ -1374,12 +1447,12 @@ class DanteApplication:
 
     async def probe_link_status(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> LinkStatusObservation:
         return await self._probe_once(
             "link_status",
-            device_ip_address,
+            target,
             self.send_probe_link_status,
             timeout,
             "link status",
@@ -1387,28 +1460,28 @@ class DanteApplication:
 
     async def probe_lock_status(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> LockStatusObservation:
         return await self._probe_once(
             "lock_status",
-            device_ip_address,
+            target,
             self.send_probe_lock_reset_status,
             timeout,
             "lock status",
         )
 
-    async def probe_preferred_leader_state(self, device_ip_address: str, timeout: float = 2.0) -> bool | None:
-        device = self._device_by_ip(str(device_ip_address))
-        if device is not None and device.requires_managed_control:
-            fresh = await self.managed_transport(device).fetch_device(device)
+    async def probe_preferred_leader_state(self, target, timeout: float = 2.0) -> bool | None:
+        resolved = self._control_target(target)
+        if getattr(resolved, "requires_managed_control", False):
+            fresh = await self.managed_transport(resolved).fetch_device(resolved)
             if fresh.clock_preferences is None or fresh.clock_preferences.leader is None:
-                raise RuntimeError(f"preferred leader readback was unavailable for {device_ip_address}")
-            device.preferred_leader = fresh.clock_preferences.leader
+                raise RuntimeError(f"preferred leader readback was unavailable for {self._control_key(resolved)}")
+            resolved.preferred_leader = fresh.clock_preferences.leader
             return fresh.clock_preferences.leader
         return await self._probe_once(
             "preferred_leader",
-            str(device_ip_address),
+            resolved,
             self.send_probe_preferred_leader,
             timeout,
             "preferred leader",
@@ -1416,21 +1489,21 @@ class DanteApplication:
 
     async def probe_sample_rate_pullup_status(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> tuple[int, list[int]]:
         return await self._probe_with_retries(
             "sample_rate_pullup",
-            str(device_ip_address),
+            target,
             self.send_probe_sample_rate_pullup,
             timeout,
             "sample rate pull-up",
         )
 
-    async def probe_sample_rate_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]]:
+    async def probe_sample_rate_status(self, target, timeout: float = 2.0) -> tuple[int, list[int]]:
         return await self._probe_with_retries(
             "sample_rate",
-            str(device_ip_address),
+            target,
             self.send_probe_sample_rate,
             timeout,
             "sample rate",
@@ -1438,12 +1511,12 @@ class DanteApplication:
 
     async def probe_switch_configuration(
         self,
-        device_ip_address: str,
+        target,
         timeout: float = 2.0,
     ) -> dict:
         return await self._probe_once(
             "switch_configuration",
-            device_ip_address,
+            target,
             self.send_probe_switch_configuration,
             timeout,
             "switch configuration",
@@ -1635,7 +1708,7 @@ class DanteApplication:
         supported_encodings = device.supported_encodings
         if supported_encodings is not None and encoding not in supported_encodings:
             raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
-        await self._send_settings(device.ipv4, self.commands.set_encoding(encoding))
+        await self._send_settings(device, self.commands.set_encoding(encoding))
 
     async def send_set_gain_level(
         self,
@@ -1686,13 +1759,11 @@ class DanteApplication:
         await self._send_settings(device_ip_address, self.commands.set_sample_rate_pullup(raw_value, host_mac))
 
     async def set_aes67_enabled(self, device, is_enabled: bool, timeout: float = 2.0):
-        device_ip_address = str(device.ipv4)
-
         async def mutate() -> None:
-            await self.send_enable_aes67(device_ip_address, is_enabled)
-            await self.send_probe_aes67(device_ip_address)
+            await self.send_enable_aes67(device, is_enabled)
+            await self.send_probe_aes67(device)
 
-        return await self._mutate_and_take_result("aes67", device_ip_address, mutate, timeout)
+        return await self._mutate_and_take_result("aes67", device, mutate, timeout)
 
     async def set_aes67_multicast_prefix(self, device, prefix: str) -> str | None:
         from netaudio.dante.device import device_advertises_aes67_multicast_prefix
@@ -1721,7 +1792,7 @@ class DanteApplication:
     async def set_clock_source(self, device, clock_source: int, timeout: float = 4.0) -> int | None:
         if isinstance(clock_source, bool) or not isinstance(clock_source, int) or not 0 <= clock_source <= 0xFFFF:
             raise ValueError("clock_source must be an integer from 0 through 65535")
-        await self.send_set_clock_source(str(device.ipv4), clock_source)
+        await self.send_set_clock_source(device, clock_source)
         parsed = await self.probe_clocking_status(device, timeout=timeout)
         return parsed["clock_source_code"]
 
@@ -1731,7 +1802,7 @@ class DanteApplication:
         normalized = clock_subdomain_bytes(subdomain)
         if normalized is None:
             raise ValueError("clock subdomain must be at most 16 bytes")
-        await self.send_set_clock_subdomain(str(device.ipv4), normalized)
+        await self.send_set_clock_subdomain(device, normalized)
         parsed = await self.probe_clocking_status(device, timeout=timeout)
         clock_subdomain = parsed.get("clock_subdomain")
         return bytes(clock_subdomain) if clock_subdomain is not None else None
@@ -1754,7 +1825,6 @@ class DanteApplication:
         supported_encodings = device.supported_encodings
         if supported_encodings is not None and encoding not in supported_encodings:
             raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
-        device_ip_address = str(device.ipv4)
 
         async def mutate() -> None:
             await self.send_set_encoding(device, encoding)
@@ -1764,7 +1834,7 @@ class DanteApplication:
             mutate,
             "encoding",
             encoding,
-            lambda: self.probe_encoding_status(device_ip_address, timeout=timeout),
+            lambda: self.probe_encoding_status(device, timeout=timeout),
             timeout,
         )
         if result is not None:
@@ -1792,13 +1862,13 @@ class DanteApplication:
                 f"requested gain level {gain_level} is not supported; device reports {device.supported_gain_levels}"
             )
 
-        device_ip_address = str(device.ipv4)
-        async with self._capability_probe_lock("gain", device_ip_address):
+        key = self._control_key(device)
+        async with self._capability_probe_lock("gain", key):
             result = await send_and_wait_for_gain_status(
                 self.notifications,
-                device_ip_address,
+                key,
                 lambda: self.send_set_gain_level(
-                    device_ip_address,
+                    device,
                     channel_number,
                     gain_level,
                     device_type,
@@ -1814,40 +1884,37 @@ class DanteApplication:
             return result
 
     async def set_interface(self, device, mode: str, static_configuration: dict | None = None) -> list[dict] | None:
-        device_ip_address = str(device.ipv4)
         if mode == "dhcp":
-            return await self.set_interface_dhcp(device_ip_address)
+            return await self.set_interface_dhcp(device)
         return await self.set_interface_static(
-            device_ip_address,
+            device,
             static_configuration["ip_address"],
             static_configuration["netmask"],
             static_configuration["dns_server"],
             static_configuration["gateway"],
         )
 
-    async def set_interface_dhcp(self, device_ip_address: str, timeout: float = 2.0) -> list[dict] | None:
-        device_ip_address = str(device_ip_address)
+    async def set_interface_dhcp(self, target, timeout: float = 2.0) -> list[dict] | None:
         return await self._mutate_and_take_result(
             "interface",
-            device_ip_address,
-            lambda: self.send_set_interface_dhcp(device_ip_address),
+            target,
+            lambda: self.send_set_interface_dhcp(target),
             timeout,
         )
 
     async def set_interface_static(
         self,
-        device_ip_address: str,
+        target,
         ip_address: str,
         netmask: str,
         dns_server: str,
         gateway: str,
         timeout: float = 2.0,
     ) -> list[dict] | None:
-        device_ip_address = str(device_ip_address)
         return await self._mutate_and_take_result(
             "interface",
-            device_ip_address,
-            lambda: self.send_set_interface_static(device_ip_address, ip_address, netmask, dns_server, gateway),
+            target,
+            lambda: self.send_set_interface_static(target, ip_address, netmask, dns_server, gateway),
             timeout,
         )
 
@@ -1869,8 +1936,8 @@ class DanteApplication:
     ) -> bool | None:
         if getattr(device, "requires_managed_control", False):
             await self.managed_transport(device).set_preferred_leader(device, is_preferred)
-            return await self.probe_preferred_leader_state(str(device.ipv4), timeout=timeout)
-        device_ip_address = str(device.ipv4)
+            return await self.probe_preferred_leader_state(device, timeout=timeout)
+        device_ip_address = device._require_address()
 
         async def mutate() -> None:
             await self.send_set_preferred_leader(device_ip_address, is_preferred)
@@ -1887,13 +1954,11 @@ class DanteApplication:
     ):
         from netaudio.dante.sample_rate_topology import change_sample_rate_topology_safe
 
-        device_ip_address = str(device.ipv4)
-
         async def probe():
-            return await self.probe_sample_rate_status(device_ip_address, timeout=timeout)
+            return await self.probe_sample_rate_status(device, timeout=timeout)
 
         async def mutate() -> None:
-            await self.send_set_sample_rate(device_ip_address, sample_rate_hertz)
+            await self.send_set_sample_rate(device, sample_rate_hertz)
 
         async with device.topology_mutation_lock:
             return await change_sample_rate_topology_safe(
@@ -1918,17 +1983,16 @@ class DanteApplication:
                 f"requested sample rate pull-up value {raw_value} is not supported; "
                 f"device reports {supported_raw_values}"
             )
-        device_ip_address = str(device.ipv4)
 
         async def mutate() -> None:
-            await self.send_set_sample_rate_pullup(device_ip_address, raw_value)
+            await self.send_set_sample_rate_pullup(device, raw_value)
 
         result = await self.mutate_and_wait_for_capability_value(
             device,
             mutate,
             "sample_rate_pullup_raw_value",
             raw_value,
-            lambda: self.probe_sample_rate_pullup_status(device_ip_address, timeout=timeout),
+            lambda: self.probe_sample_rate_pullup_status(device, timeout=timeout),
             timeout,
         )
         if result is not None:
@@ -1990,6 +2054,8 @@ class DanteApplication:
             return key_error
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("device unlock has no verified DDM operation and was not sent")
+        if getattr(device, "ipv4", None) is None:
+            raise RuntimeError("device has no control address")
         return await core_unlock_device(str(device.ipv4), pin, key)
 
     def unregister_device(self, server_name: str) -> None:

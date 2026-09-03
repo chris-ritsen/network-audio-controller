@@ -466,21 +466,21 @@ class DanteDevice:
                 subscription.rx_channel_status_code = receiver_status_code
 
     async def get_rx_channels(self):
-        if self.ipv4 is None:
-            return
         if self.requires_managed_control:
             page = await self._require_application().query_receiver_channel_status_2809(self)
             self.apply_receiver_channel_status_page(page)
+            return
+        if self.ipv4 is None:
             return
         records = await self.call_core(lambda client: client.get_rx_channels())
         self.rx_channels, self.subscriptions = self._build_rx_from_records(records)
 
     async def get_tx_channels(self):
-        if self.ipv4 is None:
-            return
         if self.requires_managed_control:
             page = await self._require_application().query_transmitter_channel_status_2809(self)
             self.apply_transmitter_channel_status_page(page)
+            return
+        if self.ipv4 is None:
             return
         records = await self.call_core(lambda client: client.get_tx_channels())
         self.tx_channels = self._build_tx_from_records(records)
@@ -490,13 +490,13 @@ class DanteDevice:
         request_timeout_milliseconds: int | None = None,
         request_attempts: int | None = None,
     ):
-        if self.ipv4 is None:
-            return None
         if self.requires_managed_control:
             fresh = await self._require_application().managed_transport(self).fetch_device(self)
             if fresh.identity is not None:
                 return fresh.identity.actual_name or fresh.identity.default_name or fresh.name
             return fresh.name
+        if self.ipv4 is None:
+            return None
         return await self.call_core(
             lambda client: client.get_device_name(),
             request_timeout_milliseconds=request_timeout_milliseconds,
