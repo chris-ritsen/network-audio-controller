@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from netaudio.cli import state
 from netaudio.cli_support.selection import filter_devices
 from netaudio.dante.device import DanteDevice
@@ -23,5 +25,17 @@ def test_context_filters_managed_devices_but_retains_local_unmanaged_devices():
         }
 
         assert set(filter_devices(devices)) == {"east", "local"}
+    finally:
+        state.ddm_context = original
+
+
+def test_context_filter_does_not_depend_on_a_managed_device_id():
+    original = state.ddm_context
+    try:
+        state.ddm_context = "east-main"
+        incomplete_managed_device = _device("west", "west-main")
+        incomplete_managed_device.ddm_device_id = None
+
+        assert filter_devices({"west": incomplete_managed_device}) == {}
     finally:
         state.ddm_context = original

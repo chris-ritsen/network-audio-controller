@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "status": "regression-only",
+  "notice": "These historical payloads predate the current evidence policy. The source capture, frame numbers, interface, Controller version, firmware versions, and extraction records were not retained. They must not be cited as protocol evidence. They remain only as parser regression inputs.",
+  "filename_timestamp_timezone": "unknown",
+  "fixtures": {
+    "20250517_200646_289003_lx-dante_get_receivers_response.bin": {
+      "sha256": "59d3bcfcf32ecde6674f67d105169c3f56fb8962d40c74eea6e96691156cb745",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_385043_avio-bt-1_get_receivers_response.bin": {
+      "sha256": "abf4feb16e9fb29c7417a1e20542a43f5648e10dc6974ffb0bf7e50518d26f0f",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_408078_avio-usb-3_get_receivers_response.bin": {
+      "sha256": "b4e4eabe34b27da5be122159a462407919791b26babcf57adfae596ea83c0cc3",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_416392_avio-aes3-1_get_channel_count_response.bin": {
+      "sha256": "e3656db5be9155436491c6bcfb77f6e87ef033521cf90eb5a47c4fb2a02c224b",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_429145_avio-aes3-1_get_receivers_response.bin": {
+      "sha256": "e32431d056c9c103b4d58a6015ca0ef7eaade6b945c975eb17b3b5b00b89fc0b",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_445946_avio-usb-1_get_channel_count_response.bin": {
+      "sha256": "d0733eb2c8780570b9a4c53b1c1e74558384aeadfb33f87428280aec6ce9ca74",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_463580_avio-usb-1_get_receivers_response.bin": {
+      "sha256": "ef9e297a10cb088b6850f571d546c576f9365b6a8a0b8173998edf524d845a7a",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_478965_avio-usb-2_get_channel_count_response.bin": {
+      "sha256": "fc93d3303ea9508fec58338924c8a75683193d3d49ffc3c02c97d00de8f3af40",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "20250517_200646_499097_avio-usb-2_get_receivers_response.bin": {
+      "sha256": "829f7ccad89ce09c5f1b167f9eeddb800b06431cef7680f8c28e021a7f45ee8f",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "avio-bt-1_bluetooth_status_connected.bin": {
+      "sha256": "bbf39745e146a76bc92b1e25fa370846a461bbe2a56a0ad335f790f48374fdf3",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "avio-bt-1_bluetooth_status_disconnected.bin": {
+      "sha256": "ac380d95529a2d5e9430777a0a49beedffa60fe2bc24595aef7b410bd7380ada",
+      "source_tree_introduced_by_commit": "4b756cbcaa7078d1fec1a989b1665de387fc5749"
+    },
+    "core_device_info_avio-aes3-1.bin": {
+      "sha256": "b996b0e5a539f0624991f0ad44e8849266cb09bd266e1b5dbd8890f74310c817",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    },
+    "core_device_info_lx-dante.bin": {
+      "sha256": "c7121cdd15aedb342b59048b9856643fc335e1032481bbcd40b9ddf2069379bd",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    },
+    "core_device_name_avio-aes3-1.bin": {
+      "sha256": "a19c8693f98aa265b705acfccc761028f20da04d03ade796255be845fd21baf1",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    },
+    "core_device_settings_avio-aes3-1.bin": {
+      "sha256": "0944d3a22163f5a928a07081ffbc1c40a86e3341db4b1685c92e5bd82283d402",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    },
+    "core_device_settings_lx-dante.bin": {
+      "sha256": "8babfd6febb84826183df482d1887894f98b2899bc618c8265f3162d7f3c171f",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    },
+    "core_latency_config_avio-aes3-1.bin": {
+      "sha256": "6ca7338c999bf9357063d0c60e63fc1cb16c45ce0dd20cac5590eee8b202bded",
+      "source_tree_introduced_by_commit": "a4a02ce3001fd7dd2676fe7454d0f5da177ded24"
+    }
+  }
+}

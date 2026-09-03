@@ -197,7 +197,7 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
 
     if device.gain_levels is None:
         try:
-            device_type, channel_levels = await application.probe_gain_status(str(device.ipv4))
+            device_type, channel_levels = await application.probe_gain_status(device)
         except CapabilityProbeTimeout:
             pass
         except MUTATION_ERRORS as exception:

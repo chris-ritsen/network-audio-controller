@@ -81,7 +81,7 @@ def _get_arc_port(device: DanteDevice) -> int:
 
 
 async def _populate_audio_capabilities(application: DanteApplication, device: DanteDevice) -> None:
-    if device.ipv4 is None:
+    if not device.requires_managed_control and device.ipv4 is None:
         return
     probes = []
     if device.supported_sample_rates is None:
@@ -90,7 +90,7 @@ async def _populate_audio_capabilities(application: DanteApplication, device: Da
         probes.append(("supported_encodings", application.probe_encoding_status, "encoding"))
     for query_name, probe, status_kind in probes:
         try:
-            current_value, supported_values = await probe(device.ipv4, timeout=2.0)
+            current_value, supported_values = await probe(device, timeout=2.0)
         except (RuntimeError, OSError) as exception:
             logger.debug(f"{query_name} unavailable for {device.server_name or device.name}: {exception}")
             device.failed_queries.add(query_name)
@@ -194,7 +194,7 @@ async def _command_context(discover_devices: bool = True):
             devices = {}
             if discover_devices:
                 devices = await _discover_with_application(application)
-                await _populate_controls(devices)
+                await _populate_controls(devices, application)
             yield devices, application
         finally:
             await application.shutdown()
@@ -238,7 +238,7 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
         devices = filter_devices(devices)
     candidates: dict[str, DanteDevice] = {}
     for server_name, device in devices.items():
-        if device.ipv4 is None:
+        if not device.requires_managed_control and device.ipv4 is None:
             continue
         if probe_name == "lock status" and device.requires_managed_control:
             logger.debug(f"Skipping lock status probe for {_device_label(device)}: no verified DDM operation")
@@ -264,7 +264,7 @@ async def _populate_controls(
     population_requests = []
     managed_devices = []
     for device in devices.values():
-        if not device.ipv4:
+        if not device.requires_managed_control and not device.ipv4:
             continue
         if device.requires_managed_control:
             managed_devices.append(device)
@@ -277,8 +277,6 @@ async def _populate_controls(
             continue
         population_requests.append((device, True))
 
-    if managed_devices and application is None:
-        application = managed_devices[0].application
     if managed_devices and application is None:
         raise RuntimeError("managed control population requires a Dante application")
 
@@ -376,7 +374,7 @@ async def _load_display_devices(
     include_channels: bool = False,
 ) -> dict[str, DanteDevice]:
     devices = filter_devices(await _discover_with_application(application))
-    await _populate_controls(devices)
+    await _populate_controls(devices, application)
     if include_channels:
         for device in devices.values():
             await _populate_show_details(application, device, include_channels=True)

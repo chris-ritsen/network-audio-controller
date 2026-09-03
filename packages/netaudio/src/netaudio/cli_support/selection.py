@@ -43,7 +43,7 @@ def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) 
     for server_name, device in devices.items():
         if (
             state.ddm_context
-            and getattr(device, "ddm_device_id", None)
+            and getattr(device, "ddm_context", None) is not None
             and getattr(device, "ddm_context", None) != state.ddm_context
         ):
             continue

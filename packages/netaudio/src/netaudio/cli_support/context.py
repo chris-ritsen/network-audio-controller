@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import click
 from typer.core import TyperGroup
 
@@ -6,14 +8,32 @@ from netaudio.icons import icon
 HELP_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
+def _normalize_no_args_exit_code(command: click.Command) -> None:
+    """Make no-argument help exit with Click's standard usage-error status."""
+    if hasattr(click.exceptions, "NoArgsIsHelpError") or getattr(command, "_netaudio_normalized_no_args_exit", False):
+        return
+
+    original_parse_args = command.parse_args
+
+    def parse_args(ctx: click.Context, args: list[str]) -> list[str]:
+        if not args and command.no_args_is_help and not ctx.resilient_parsing:
+            click.echo(ctx.get_help(), color=ctx.color)
+            ctx.exit(2)
+        return original_parse_args(ctx, args)
+
+    command.parse_args = parse_args
+    command._netaudio_normalized_no_args_exit = True
+
+
 def enable_required_parameter_help(command: click.Command) -> None:
     """Make bare parameterized leaf commands display their full help."""
     if isinstance(command, click.Group):
         for child in command.commands.values():
             enable_required_parameter_help(child)
-        return
-    if any(parameter.required for parameter in command.params):
+    elif any(parameter.required for parameter in command.params):
         command.no_args_is_help = True
+    if command.no_args_is_help:
+        _normalize_no_args_exit_code(command)
 
 
 class NetaudioGroup(TyperGroup):

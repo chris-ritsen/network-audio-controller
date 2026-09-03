@@ -455,7 +455,7 @@ class TestFetchDeviceControls:
 
         await state.fetch_device_controls("dev1.local.")
 
-        application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_sample_rate_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_initial_fetch_preserves_known_sample_rate_capabilities_without_reprobing(self):
@@ -478,7 +478,7 @@ class TestFetchDeviceControls:
 
         await state.fetch_device_controls("dev1.local.")
 
-        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_encoding_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_initial_fetch_preserves_known_encoding_capabilities_without_reprobing(self):
@@ -501,7 +501,7 @@ class TestFetchDeviceControls:
 
         await state.fetch_device_controls("dev1.local.")
 
-        application.probe_gain_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_gain_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_initial_fetch_preserves_known_gain_capabilities_without_reprobing(self):
@@ -608,7 +608,7 @@ class TestControlNotifications:
 
         await state._on_sample_rate_status(event)
 
-        application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_sample_rate_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_typed_sample_rate_status_does_not_probe_again(self):
@@ -779,7 +779,7 @@ class TestControlNotifications:
 
         await state._on_encoding_status(event)
 
-        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_encoding_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_typed_encoding_status_does_not_probe_again(self):
@@ -803,8 +803,8 @@ class TestControlNotifications:
 
         await state._on_aes67_status(event)
 
-        application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
-        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_sample_rate_status.assert_awaited_once_with(device)
+        application.probe_encoding_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_clear_configuration_notification_refreshes_audio_capabilities(self):
@@ -821,8 +821,8 @@ class TestControlNotifications:
         await state._on_device_state_changed(event)
 
         state.fetch_device_controls.assert_awaited_once_with("dev1.local.")
-        application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
-        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_sample_rate_status.assert_awaited_once_with(device)
+        application.probe_encoding_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
     async def test_clear_configuration_status_refreshes_controls_and_capabilities_when_refetching(self):
@@ -837,8 +837,8 @@ class TestControlNotifications:
         )
 
         state.fetch_device_controls.assert_awaited_once_with("dev1.local.")
-        application.probe_sample_rate_status.assert_awaited_once_with("192.168.1.50")
-        application.probe_encoding_status.assert_awaited_once_with("192.168.1.50")
+        application.probe_sample_rate_status.assert_awaited_once_with(device)
+        application.probe_encoding_status.assert_awaited_once_with(device)
 
 
 class TestConmonRetry:

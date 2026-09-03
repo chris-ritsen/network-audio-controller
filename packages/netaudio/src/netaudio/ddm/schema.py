@@ -10,7 +10,7 @@ from typing import Any, Mapping
 BUILTIN_SCALAR_TYPES = frozenset({"Boolean", "Float", "ID", "Int", "String"})
 COMPOSITE_KINDS = frozenset({"INTERFACE", "OBJECT", "UNION"})
 LEAF_KINDS = frozenset({"ENUM", "SCALAR"})
-MAXIMUM_SELECTION_DEPTH = 6
+MAXIMUM_SELECTION_DEPTH = 1
 SCHEMA_RESOURCE = "schema.json"
 
 
@@ -251,10 +251,26 @@ class Schema:
         call = field.name
         if arguments:
             call = f"{call}({arguments})"
-        selection = self.selection_set(field.type.named)
+        selection = self.operation_selection_set(operation, field.type.named)
         if selection:
             call = f"{call} {selection}"
         return f"{head} {{ {call} }}"
+
+    def operation_selection_set(self, operation: str, type_name: str) -> str:
+        if operation != "mutation":
+            return self.selection_set(type_name)
+        schema_type = self.type(type_name)
+        parts = []
+        for field in schema_type.fields:
+            if field.name in {"password", "recoveryCode", "token", "keyToken"}:
+                continue
+            if self.type(field.type.named).kind in LEAF_KINDS:
+                parts.append(field.name)
+            elif field.name == "error":
+                selection = self._field_selection(field, 1, frozenset({type_name}))
+                if selection is not None:
+                    parts.append(selection)
+        return "{ " + " ".join(parts) + " }" if parts else ""
 
     @property
     def query_fields(self) -> tuple[Field, ...]:

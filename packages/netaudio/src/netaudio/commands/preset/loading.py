@@ -299,7 +299,7 @@ async def _read_audio_setting(action, application, device):
 
 
 async def _read_preferred_leader(application, device):
-    state = await application.probe_preferred_leader_state(str(device.ipv4), timeout=1.0)
+    state = await application.probe_preferred_leader_state(device, timeout=1.0)
     if state is None:
         raise RuntimeError("preferred-leader readback was unavailable")
     return state
@@ -319,7 +319,7 @@ def _expected_interface_config(config: dict) -> dict:
 
 
 async def _read_interface_config(application, device, expected: dict):
-    interfaces = await application.probe_interface_status(str(device.ipv4), timeout=1.0)
+    interfaces = await application.probe_interface_status(device, timeout=1.0)
     if not interfaces:
         raise RuntimeError("interface readback was unavailable")
     reported = device.interface_pending_config or interfaces[0]

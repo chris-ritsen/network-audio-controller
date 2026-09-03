@@ -194,21 +194,22 @@ def _global_options(
     state.capture = capture
     state.ddm_context = ddm_context
 
-    try:
-        from netaudio.common.config_loader import default_config_path, load_config_document
-        from netaudio.common.managed_api import resolve_ddm_configuration
+    if ctx.invoked_subcommand != "config":
+        try:
+            from netaudio.common.config_loader import default_config_path, load_config_document
+            from netaudio.common.managed_api import resolve_ddm_configuration
 
-        config_path = default_config_path()
-        ddm_configuration = resolve_ddm_configuration(
-            load_config_document(config_path),
-            base_directory=config_path.parent,
-        )
-        if ddm_context is not None:
-            ddm_configuration.context(ddm_context)
-        else:
-            state.ddm_context = ddm_configuration.default_context
-    except ValueError as exception:
-        raise typer.BadParameter(str(exception), param_hint="--context") from exception
+            config_path = default_config_path()
+            ddm_configuration = resolve_ddm_configuration(
+                load_config_document(config_path),
+                base_directory=config_path.parent,
+            )
+            if ddm_context is not None:
+                ddm_configuration.context(ddm_context)
+            else:
+                state.ddm_context = ddm_configuration.default_context
+        except ValueError as exception:
+            raise typer.BadParameter(str(exception), param_hint="--context") from exception
 
     if not icons:
         icons = _load_icons_from_config()

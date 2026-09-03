@@ -12,7 +12,7 @@ import typer
 
 from netaudio.cli_support.output import output_single, output_table
 from netaudio.commands.ddm.operations import operation_command_path, register_schema_operations
-from netaudio.commands.ddm.render import report_errors
+from netaudio.commands.ddm.render import redact_sensitive_values, report_errors
 from netaudio.commands.ddm.transport import execute, fail
 from netaudio.daemon.client import (
     get_ddm_devices_from_daemon,
@@ -48,6 +48,14 @@ app.add_typer(api_app, name="api")
 
 DAEMON_UNAVAILABLE = "netaudio daemon is not running."
 PASSWORD_LOGIN_FIELD = "UserLoginWithPassword"
+EXCLUDED_GENERATED_FIELDS = frozenset(
+    {
+        PASSWORD_LOGIN_FIELD,
+        "AdminInitialPasswordSet",
+        "DeviceSerialportconfigSet",
+        "UserAPIKeyAdd",
+    }
+)
 
 
 @app.command("discover")
@@ -450,7 +458,12 @@ def context_use(name: str = typer.Argument(..., help="Saved DDM context name."))
 def graphql(
     query: Optional[str] = typer.Argument(None, help="GraphQL document to send. Omit when using --file."),
     file: Optional[Path] = typer.Option(None, "--file", "-f", help="Read the GraphQL document from a file."),
-    variables: Optional[str] = typer.Option(None, "--variables", "-V", help="Variables as a JSON object."),
+    variables_file: Optional[Path] = typer.Option(
+        None,
+        "--variables-file",
+        "-V",
+        help="Read a JSON variables object from a file.",
+    ),
     operation_name: Optional[str] = typer.Option(
         None, "--operation-name", help="Operation to run when the document defines several."
     ),
@@ -464,18 +477,22 @@ def graphql(
     if not query or not query.strip():
         fail("pass a GraphQL document or --file")
     decoded_variables = {}
-    if variables:
+    if variables_file is not None:
         try:
-            decoded_variables = json.loads(variables)
+            decoded_variables = json.loads(variables_file.read_text(encoding="utf-8"))
+        except OSError as exception:
+            fail(f"could not read {variables_file}: {exception}")
         except json.JSONDecodeError as exception:
-            fail(f"--variables must be a JSON object: {exception}")
+            fail(f"--variables-file must contain a JSON object: {exception}")
         if not isinstance(decoded_variables, dict):
-            fail("--variables must be a JSON object")
+            fail("--variables-file must contain a JSON object")
     response = execute(query, decoded_variables, operation_name)
-    report_errors(response)
-    if response.get("data") is None:
+    has_errors = report_errors(response)
+    data = response.get("data")
+    if data is not None:
+        output_single(json.dumps(redact_sensitive_values(data), indent=2, sort_keys=True))
+    if has_errors or data is None:
         raise typer.Exit(code=1)
-    output_single(json.dumps(response["data"], indent=2, sort_keys=True))
 
 
 @api_app.command("schema")
@@ -498,10 +515,14 @@ def schema(
             command = (
                 "ddm login"
                 if field.name == PASSWORD_LOGIN_FIELD
-                else " ".join(operation_command_path(operation, field.name))
+                else (
+                    "not exposed"
+                    if field.name in EXCLUDED_GENERATED_FIELDS
+                    else " ".join(operation_command_path(operation, field.name))
+                )
             )
             rows.append([operation, command, field.name, arguments, field.type.render()])
     output_table(["Operation", "Command", "GraphQL Field", "Arguments", "Returns"], rows)
 
 
-register_schema_operations(api_app, Schema.load(), excluded_fields=frozenset({PASSWORD_LOGIN_FIELD}))
+register_schema_operations(api_app, Schema.load(), excluded_fields=EXCLUDED_GENERATED_FIELDS)

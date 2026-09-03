@@ -16,9 +16,9 @@ def _application_with_device():
 
 
 def _publish_on_request(application, packets):
-    async def request_bluetooth_status(device_ip_address, host_mac=None):
+    async def request_bluetooth_status(device, host_mac=None):
         for packet in packets:
-            application.notifications._on_packet(packet, (device_ip_address, 8702))
+            application.notifications._on_packet(packet, (str(device.ipv4), 8702))
 
     application.send_bluetooth_status_request = request_bluetooth_status
 

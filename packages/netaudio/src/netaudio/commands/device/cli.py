@@ -24,7 +24,7 @@ from netaudio.commands.device.display import (
     _diagnostic_audio_capabilities_data,
     _diagnostic_audio_capability_rows,
 )
-from netaudio.commands.device.exports import export_capability, export_logs
+from netaudio.commands.device.exports import export_capability, export_logs, select_export_device
 from netaudio.commands.device.network_status import network_status
 from netaudio.commands.status import status as status_command
 from netaudio.dante.conmon_export import ConmonExportUnavailableError
@@ -69,17 +69,8 @@ def device_show():
     run_command(run_show, discover_devices=False)
 
 
-def _addressed_device(filtered):
-    [(server_name, device)] = select_device(filtered)
-    device_name = device.name or server_name
-    if device.ipv4 is None:
-        typer.echo(f"Error: {device_name} has no control address.", err=True)
-        raise typer.Exit(code=1)
-    return device_name, device
-
-
 async def run_capabilities(application, devices, timeout: float) -> None:
-    device_name, device = _addressed_device(filter_devices(devices))
+    device_name, device = select_export_device(filter_devices(devices))
     try:
         result = await application.export_device_logs(device.ipv4, timeout=timeout)
     except (CapabilityProbeTimeout, ConmonExportUnavailableError, DeviceLogExportError) as exception:
@@ -175,13 +166,13 @@ def factory_reset(
 
 async def run_clear_configuration(application, devices, mode: ClearConfigurationMode, confirm: str) -> None:
     device_name, device = _confirmed_device(filter_devices(devices), confirm)
-    if device.ipv4 is None:
+    if not getattr(device, "requires_managed_control", False) and device.ipv4 is None:
         typer.echo(f"Error: {device_name} has no control address.", err=True)
         raise typer.Exit(code=1)
 
     preserve_internet_protocol_settings = mode is ClearConfigurationMode.PRESERVE_INTERNET_PROTOCOL_SETTINGS
     status = await application.clear_configuration(
-        str(device.ipv4),
+        device,
         preserve_internet_protocol_settings,
     )
     typer.echo(

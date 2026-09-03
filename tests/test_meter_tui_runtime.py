@@ -477,9 +477,12 @@ async def test_passive_tui_falls_back_to_cache_without_starting_or_stopping():
     start_calls = []
     stop_calls = []
 
-    async def empty_stream():
-        if False:
-            yield {}
+    class EmptyStream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
 
     async def cache_reader():
         return {server_name: _sample(tx={1: 0x7B})}
@@ -496,7 +499,7 @@ async def test_passive_tui_falls_back_to_cache_without_starting_or_stopping():
         devices,
         MeterViewOptions(no_color=True),
         terminal=terminal,
-        stream_factory=empty_stream,
+        stream_factory=lambda: EmptyStream(),
         cache_reader=cache_reader,
         start_metering=start_metering,
         stop_metering=stop_metering,

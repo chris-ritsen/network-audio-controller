@@ -285,11 +285,11 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": "mode must be 'dhcp' or 'static'"}, 400)
             return
 
-        device_ip = str(device.ipv4)
+        target = device
         ip_address = ""
         netmask = ""
         if mode == "dhcp":
-            result = await self.application.set_interface_dhcp(device_ip)
+            result = await self.application.set_interface_dhcp(target)
         else:
             ip_address = params.get("ip")
             netmask = params.get("netmask")
@@ -297,7 +297,7 @@ class DaemonConfigurationHandlers:
                 await self._send_json(writer, {"error": "static mode requires ip, netmask"}, 400)
                 return
             result = await self.application.set_interface_static(
-                device_ip, ip_address, netmask, params.get("dns") or "", params.get("gateway") or ""
+                target, ip_address, netmask, params.get("dns") or "", params.get("gateway") or ""
             )
         if result is None:
             await self._send_json(writer, {"error": "interface readback was unavailable"}, 504)
@@ -476,14 +476,16 @@ class DaemonConfigurationHandlers:
         if not device.online:
             await self._send_json(writer, {"error": "device is offline"}, 503)
             return None
-        if not device.ipv4:
+        if not getattr(device, "requires_managed_control", False) and not device.ipv4:
             await self._send_json(writer, {"error": "device has no control address"}, 503)
             return None
+
+        device_address = str(device.ipv4) if device.ipv4 else ""
 
         flow_protocol_id = device.flow_protocol_id
         if flow_protocol_id is None:
             flow_protocol_id = await flows.detect_flow_protocol(
-                str(device.ipv4),
+                device_address,
                 self._flow_arc_port(device),
                 **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
             )
@@ -493,7 +495,7 @@ class DaemonConfigurationHandlers:
             device.flow_protocol_id = flow_protocol_id
 
         flow_inventory = await flows.query_preferred_tx_flow_inventory(
-            str(device.ipv4),
+            device_address,
             self._flow_arc_port(device),
             flow_protocol_id,
             **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
@@ -516,15 +518,45 @@ class DaemonConfigurationHandlers:
     def _find_device(self, name):
         if not name:
             return None
+
+        managed_inventory = getattr(self, "managed_inventory", None)
+        if managed_inventory is not None and managed_inventory.enabled:
+            records = self._serialized_devices()
+            record = records.get(name)
+            if record is None:
+                lowered = name.lower()
+                matches = [
+                    candidate
+                    for candidate in records.values()
+                    if any(
+                        isinstance(value, str) and value.lower() == lowered
+                        for value in (
+                            candidate.get("ddm_device_id"),
+                            candidate.get("inventory_id"),
+                            candidate.get("ipv4"),
+                            candidate.get("name"),
+                        )
+                    )
+                ]
+                record = matches[0] if len(matches) == 1 else None
+            if record is not None and record.get("management_state") == "managed":
+                from netaudio.dante.device_serializer import DanteDeviceSerializer
+
+                device = DanteDeviceSerializer.device_from_json(record)
+                device._app = self.application
+                return device
+
         device = self.application.devices.get(name)
         if device:
             return device
-        for server_name, candidate in self.application.devices.items():
-            if candidate.name and candidate.name.lower() == name.lower():
-                return candidate
-            if candidate.ipv4 and str(candidate.ipv4) == name:
-                return candidate
-        return None
+        lowered = name.lower()
+        matches = [
+            candidate
+            for candidate in self.application.devices.values()
+            if (candidate.name and candidate.name.lower() == lowered)
+            or (candidate.ipv4 and str(candidate.ipv4) == name)
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     async def _send_json(self, writer, data, status=200):
         body = json.dumps(data, default=str).encode()
