@@ -299,13 +299,19 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
             }
         )
 
-    def _serialized_devices(self) -> dict[str, dict]:
+    def _serialized_devices(self, context_name: str | None = None) -> dict[str, dict]:
         if self.managed_inventory is not None and self.managed_inventory.enabled:
             records = self.managed_inventory.serialize_devices(self.application.devices)
         else:
             records = {
                 server_name: DanteDeviceSerializer.to_json(device)
                 for server_name, device in self.application.devices.items()
+            }
+        if context_name is not None:
+            records = {
+                server_name: record
+                for server_name, record in records.items()
+                if not record.get("ddm_device_id") or record.get("ddm_context") == context_name
             }
         return {server_name: with_legacy_field_names(record) for server_name, record in records.items()}
 
@@ -597,32 +603,35 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
 
     async def _dispatch(self, method, path, body, writer):
         if method == "GET":
-            if path == "/shure/devices":
+            route, _, query_string = path.partition("?")
+            query = parse_qs(query_string)
+            context_name = next(iter(query.get("context", ())), None)
+            if route == "/shure/devices":
                 await self._handle_get_shure_devices(writer)
-            elif path.startswith("/shure/devices/"):
-                await self._handle_get_shure_device(writer, path[len("/shure/devices/") :])
-            elif path == "/devices":
-                await self._handle_get_devices(writer)
-            elif path == "/ddm/devices":
-                await self._handle_get_ddm_devices(writer)
-            elif path == "/ddm/domains":
-                await self._handle_get_ddm_domains(writer)
-            elif path == "/ddm/status":
+            elif route.startswith("/shure/devices/"):
+                await self._handle_get_shure_device(writer, route[len("/shure/devices/") :])
+            elif route == "/devices":
+                await self._handle_get_devices(writer, context_name)
+            elif route == "/ddm/devices":
+                await self._handle_get_ddm_devices(writer, context_name)
+            elif route == "/ddm/domains":
+                await self._handle_get_ddm_domains(writer, context_name)
+            elif route == "/ddm/status":
                 await self._handle_get_ddm_status(writer)
-            elif path.startswith("/devices/"):
-                await self._handle_get_device(writer, unquote(path[len("/devices/") :]))
-            elif path.startswith("/interfaces/"):
-                await self._handle_get_interfaces(writer, unquote(path[len("/interfaces/") :]))
-            elif path.startswith("/lock-status/"):
-                await self._handle_get_lock_status(writer, unquote(path[len("/lock-status/") :]))
-            elif path.startswith("/flows/"):
-                await self._handle_get_tx_flows(writer, unquote(path[len("/flows/") :]))
-            elif path == "/metering/status":
+            elif route.startswith("/devices/"):
+                await self._handle_get_device(writer, unquote(route[len("/devices/") :]), context_name)
+            elif route.startswith("/interfaces/"):
+                await self._handle_get_interfaces(writer, unquote(route[len("/interfaces/") :]))
+            elif route.startswith("/lock-status/"):
+                await self._handle_get_lock_status(writer, unquote(route[len("/lock-status/") :]))
+            elif route.startswith("/flows/"):
+                await self._handle_get_tx_flows(writer, unquote(route[len("/flows/") :]))
+            elif route == "/metering/status":
                 await self._handle_metering_status(writer)
-            elif path == "/metering/cache":
+            elif route == "/metering/cache":
                 await self._handle_metering_cache(writer)
-            elif path.startswith("/metering/snapshot/"):
-                await self._handle_metering_snapshot(writer, unquote(path[len("/metering/snapshot/") :]))
+            elif route.startswith("/metering/snapshot/"):
+                await self._handle_metering_snapshot(writer, unquote(route[len("/metering/snapshot/") :]))
             else:
                 await self._send_json(writer, {"error": "not found"}, 404)
             return

@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 import typer
 
-from netaudio import core
 from netaudio.cli_support.output import output_single, output_table
 from netaudio.commands.ddm.operations import register_schema_operations
 from netaudio.commands.ddm.render import report_errors
@@ -20,25 +20,27 @@ from netaudio.daemon.client import (
     refresh_ddm_inventory_on_daemon,
 )
 from netaudio.ddm import (
+    ControllerAPIClient,
     ControllerServiceError,
     ManagedAPIError,
+    ManagedAPIClient,
     Schema,
     SchemaError,
     authenticate_with_password,
     command_name,
     discover_ddm_servers,
-    identify_managed_device,
-    identify_managed_device_with_api_key,
 )
 
 app = typer.Typer(
     help=(
-        "Discover Dante Domain Manager, use its Controller service, or query its Managed API. "
+        "Discover Dante Domain Manager or query its Managed API. "
         "GraphQL queries and mutations are generated from the bundled schema; status, devices, and refresh "
         "read the daemon's inventory."
     ),
     no_args_is_help=True,
 )
+context_app = typer.Typer(help="List and select saved DDM server/domain contexts.", no_args_is_help=True)
+app.add_typer(context_app, name="context")
 
 DAEMON_UNAVAILABLE = "netaudio daemon is not running."
 PASSWORD_LOGIN_FIELD = "UserLoginWithPassword"
@@ -72,119 +74,78 @@ def discover(
     )
 
 
-def _discovered_controller(timeout: float) -> tuple[str, int]:
+def _ddm_configuration():
+    from netaudio.common.config_loader import default_config_path, load_config_document
+    from netaudio.common.managed_api import resolve_ddm_configuration
+
+    config_path = default_config_path()
+    configuration = resolve_ddm_configuration(
+        load_config_document(config_path),
+        base_directory=config_path.parent,
+    )
+    return configuration, config_path
+
+
+def _active_context() -> str | None:
+    from netaudio.cli_support.context import _get_state
+
+    return _get_state().ddm_context
+
+
+def _slug(value: str, fallback: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip().rstrip(".")).strip(".-")
+    return normalized or fallback
+
+
+def _unused_name(base: str, existing: set[str]) -> str:
+    if base not in existing:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in existing:
+        suffix += 1
+    return f"{base}-{suffix}"
+
+
+def _choose_index(description: str, labels: list[str]) -> int:
+    if len(labels) == 1:
+        return 0
+    typer.echo(f"Available {description}:")
+    for number, label in enumerate(labels, 1):
+        typer.echo(f"  {number}. {label}")
+    selected = typer.prompt(f"Select {description}", type=typer.IntRange(1, len(labels)))
+    return selected - 1
+
+
+def _select_discovered_server(timeout: float):
     try:
         servers = asyncio.run(discover_ddm_servers(timeout=timeout))
     except (OSError, ValueError) as exception:
         fail(f"DDM discovery failed: {exception}")
-    controllers = [server for server in servers if server.controller_service is not None]
-    if not controllers:
-        fail("no DDM Controller service was discovered; pass --server")
-    if len(controllers) > 1:
-        names = ", ".join(server.server_name.rstrip(".") for server in controllers)
-        fail(f"multiple DDM Controller services were discovered ({names}); pass --server")
-    selected = controllers[0]
-    return selected.server_name.rstrip("."), selected.controller_service.port
-
-
-@app.command("identify")
-def identify(
-    device_id: str = typer.Argument(..., help="Managed device ID, with optional :0 process suffix."),
-    username: Optional[str] = typer.Option(
-        None,
-        "--username",
-        "-u",
-        help="DDM username or email address; prompts for its password.",
-    ),
-    api_key: bool = typer.Option(
-        False,
-        "--api-key",
-        help="Prompt for a DDM API key instead of a username and password.",
-    ),
-    api_key_file: Optional[Path] = typer.Option(
-        None,
-        "--api-key-file",
-        help="Read a DDM API key from this file instead of prompting.",
-    ),
-    server: Optional[str] = typer.Option(None, "--server", help="DDM hostname or IP; discovered by mDNS when omitted."),
-    auth_port: Optional[int] = typer.Option(
-        None,
-        "--auth-port",
-        min=1,
-        max=65535,
-        help="DDM HTTPS authentication port; defaults to its advertisement or 8443.",
-    ),
-    timeout: float = typer.Option(10.0, "--timeout", "-t", min=0.1, max=60.0, help="Network timeout in seconds."),
-    ca_file: Optional[Path] = typer.Option(None, "--ca-file", help="CA certificate used to verify DDM TLS."),
-    insecure_tls: bool = typer.Option(
-        False,
-        "--insecure-tls",
-        help="Disable DDM TLS certificate verification. Intended only for isolated labs.",
-    ),
-) -> None:
-    """Authenticate to DDM and identify one enrolled device."""
-    if username is not None and (api_key or api_key_file is not None):
-        fail("pass --username or an API-key option, not both")
-    if api_key and api_key_file is not None:
-        fail("pass --api-key or --api-key-file, not both")
-    if username is None and not api_key and api_key_file is None:
-        fail("pass --username, --api-key, or --api-key-file")
-    selected_server = server
-    selected_port = auth_port
-    if selected_server is None:
-        selected_server, advertised_port = _discovered_controller(min(timeout, 2.0))
-        selected_port = selected_port or advertised_port
-    selected_port = selected_port or 8443
-    mac = core.host_mac()
-    if mac is None:
-        fail("could not determine a host MAC address for the Identify request")
-    try:
-        if username is not None:
-            password = typer.prompt("Password", hide_input=True)
-            identify_managed_device(
-                selected_server,
-                username,
-                password,
-                device_id,
-                mac,
-                auth_port=selected_port,
-                timeout=timeout,
-                ca_file=ca_file,
-                insecure_tls=insecure_tls,
-            )
-        else:
-            if api_key_file is not None:
-                try:
-                    credential = api_key_file.read_text(encoding="ascii").rstrip("\r\n")
-                except (OSError, UnicodeError) as exception:
-                    fail(f"could not read DDM API key from {api_key_file}: {exception}")
-            else:
-                credential = typer.prompt("API key", hide_input=True)
-            identify_managed_device_with_api_key(
-                selected_server,
-                credential,
-                device_id,
-                mac,
-                auth_port=selected_port,
-                timeout=timeout,
-                ca_file=ca_file,
-                insecure_tls=insecure_tls,
-            )
-    except (ControllerServiceError, core.NetaudioCoreError, ValueError) as exception:
-        fail(str(exception))
-    typer.echo(f"Identified managed device {device_id} through {selected_server}.")
-
-
-def _login_configuration() -> tuple[str | None, Path | None]:
-    from netaudio.common.config_loader import default_config_path, load_config_document
-    from netaudio.common.managed_api import resolve_managed_api_configuration
-
-    config_path = default_config_path()
-    configuration = resolve_managed_api_configuration(
-        load_config_document(config_path),
-        base_directory=config_path.parent,
+    candidates = [server for server in servers if server.controller_service and server.ipv4_addresses]
+    if not candidates:
+        fail("no DDM Controller services were discovered; pass --url to connect manually")
+    index = _choose_index(
+        "DDM server",
+        [f"{server.server_name} ({', '.join(server.ipv4_addresses)})" for server in candidates],
     )
-    return configuration.url, configuration.credential_file
+    return candidates[index]
+
+
+def _select_domain(domains, requested: str | None):
+    available = sorted((domain for domain in domains if domain is not None), key=lambda item: item.name or item.id)
+    if not available:
+        fail("the authenticated account cannot see any DDM domains")
+    if requested is not None:
+        exact = [
+            domain
+            for domain in available
+            if domain.id == requested or (domain.name and domain.name.casefold() == requested.casefold())
+        ]
+        if len(exact) != 1:
+            fail(f"domain {requested!r} did not uniquely match an ID or name")
+        return exact[0]
+    index = _choose_index("domain", [f"{domain.name or '(unnamed)'} ({domain.id})" for domain in available])
+    return available[index]
 
 
 def _write_credential_file(path: Path, credential: str) -> None:
@@ -213,7 +174,8 @@ def _write_credential_file(path: Path, credential: str) -> None:
 def _status_rows(result: dict) -> list[list[str]]:
     fields = (
         ("State", result.get("state")),
-        ("Endpoint", result.get("url")),
+        ("Default Context", result.get("default_context")),
+        ("Servers", result.get("server_count")),
         ("Fresh", result.get("fresh")),
         ("Refresh Interval", result.get("refresh_interval")),
         ("Domains", result.get("domain_count")),
@@ -236,14 +198,22 @@ def status() -> None:
 @app.command("devices")
 def devices() -> None:
     """List devices the daemon has seen through the Managed API, merged with direct discovery."""
-    result = asyncio.run(get_ddm_devices_from_daemon())
+    selected_context = _active_context()
+    result = asyncio.run(get_ddm_devices_from_daemon(selected_context))
     if result is None:
         fail(DAEMON_UNAVAILABLE)
     rows = []
-    for key, device in sorted((result or {}).items(), key=lambda item: (item[1].get("name") or item[0]).lower()):
+    selected_devices = {
+        key: device
+        for key, device in (result or {}).items()
+        if selected_context is None or device.get("ddm_context") == selected_context
+    }
+    for key, device in sorted(selected_devices.items(), key=lambda item: (item[1].get("name") or item[0]).lower()):
         rows.append(
             [
                 device.get("name") or key,
+                device.get("ddm_context") or "",
+                device.get("ddm_server_profile") or "",
                 device.get("management_state") or "",
                 device.get("ddm_domain_name") or "",
                 device.get("ddm_connection_state") or "",
@@ -254,9 +224,9 @@ def devices() -> None:
             ]
         )
     output_table(
-        ["Name", "Management", "Domain", "Connection", "IP Address", "TX", "RX", "Control"],
+        ["Name", "Context", "Server", "Management", "Domain", "Connection", "IP Address", "TX", "RX", "Control"],
         rows,
-        json_data=result,
+        json_data=selected_devices,
         empty_message="The daemon has not seen any devices through the Managed API.",
     )
 
@@ -264,7 +234,7 @@ def devices() -> None:
 @app.command("refresh")
 def refresh() -> None:
     """Ask the daemon to re-read the Managed API inventory now."""
-    response_status, result = asyncio.run(refresh_ddm_inventory_on_daemon())
+    response_status, result = asyncio.run(refresh_ddm_inventory_on_daemon(_active_context()))
     if response_status is None or result is None:
         fail(DAEMON_UNAVAILABLE)
     output_table(["Setting", "Value"], _status_rows(result), json_data=result)
@@ -274,45 +244,196 @@ def refresh() -> None:
 
 @app.command("login")
 def login(
-    username: str = typer.Option(..., "--username", "-u", help="DDM username or email address."),
+    username: Optional[str] = typer.Option(None, "--username", "-u", help="DDM username or email address."),
     url: Optional[str] = typer.Option(None, "--url", help="Managed API URL ending in /graphql."),
+    server_profile: Optional[str] = typer.Option(
+        None,
+        "--server",
+        help="Name for the saved DDM server profile, or an existing profile to update.",
+    ),
+    domain: Optional[str] = typer.Option(None, "--domain", help="Domain ID or unique domain name."),
+    context_name: Optional[str] = typer.Option(None, "--context-name", help="Name for the saved server/domain context."),
     credential_file: Optional[Path] = typer.Option(
         None,
         "--credential-file",
         help="File in which to save the returned Managed API credential.",
     ),
-    allow_insecure_http: bool = typer.Option(
-        False,
-        "--allow-insecure-http",
-        help="Allow the password to be sent to an HTTP endpoint. Intended only for isolated labs.",
+    api_key_file: Optional[Path] = typer.Option(
+        None,
+        "--api-key-file",
+        help="Use and save a reference to an existing API-key file instead of password login.",
+    ),
+    make_default: bool = typer.Option(False, "--default", help="Make the saved context the default."),
+    discovery_timeout: float = typer.Option(
+        2.0,
+        "--discovery-timeout",
+        min=0.1,
+        max=60.0,
+        help="Seconds to listen when discovering a server because --url was omitted.",
     ),
 ) -> None:
-    """Log in with a hidden password prompt and save a Managed API credential."""
+    """Discover or select DDM, authenticate, choose a domain, and save a context."""
     try:
-        configured_url, configured_credential_file = _login_configuration()
+        configuration, config_path = _ddm_configuration()
     except ValueError as exception:
         fail(str(exception))
-    endpoint = url or configured_url
-    destination = credential_file or configured_credential_file
+
+    endpoint = url
+    discovered_name = None
+    if endpoint is None and server_profile is not None and server_profile in configuration.servers:
+        endpoint = configuration.server(server_profile).url
     if endpoint is None:
-        fail("pass --url or configure ddm.url")
-    if destination is None:
-        fail("pass --credential-file or configure ddm.api_key_file")
-    password = typer.prompt("Password", hide_input=True)
+        discovered = _select_discovered_server(discovery_timeout)
+        discovered_name = discovered.server_name
+        service = discovered.controller_service
+        if service is None:
+            fail("the selected DDM server did not advertise a Controller service")
+        try:
+            endpoint = ControllerAPIClient(
+                discovered.ipv4_addresses[0],
+                port=service.port,
+                timeout=discovery_timeout,
+            ).endpoints().graphql_url
+        except (ControllerServiceError, ValueError) as exception:
+            fail(f"could not obtain the Managed API URL from the selected DDM server: {exception}")
+    if endpoint is None:
+        fail("could not determine the Managed API URL")
+    if server_profile is not None and server_profile in configuration.servers:
+        configured_endpoint = configuration.server(server_profile).url
+        if configured_endpoint != endpoint:
+            fail(
+                f"DDM server profile {server_profile!r} already points to {configured_endpoint}; "
+                "choose a new --server name for a different URL"
+            )
+
+    credential = None
+    source_api_key_file = api_key_file.expanduser().resolve() if api_key_file is not None else None
+    if source_api_key_file is not None:
+        client = ManagedAPIClient(endpoint, credential_file=source_api_key_file)
+    else:
+        login_name = username or typer.prompt("Username")
+        password = typer.prompt("Password", hide_input=True)
+        try:
+            credential = authenticate_with_password(endpoint, login_name, password)
+        except (ManagedAPIError, ValueError) as exception:
+            fail(str(exception))
+        client = ManagedAPIClient(endpoint, credential=credential)
     try:
-        credential = authenticate_with_password(
-            endpoint,
-            username,
-            password,
-            allow_insecure_http=allow_insecure_http,
-        )
+        inventory = client.inventory()
     except (ManagedAPIError, ValueError) as exception:
         fail(str(exception))
+    if inventory.data is None:
+        messages = "; ".join(issue.message for issue in inventory.errors)
+        fail(messages or "DDM returned no domain inventory")
+    selected_domain = _select_domain(inventory.data.domains or (), domain)
+
+    if server_profile is None:
+        from urllib.parse import urlsplit
+
+        suggested_server = _slug(discovered_name or urlsplit(endpoint).hostname or "ddm", "ddm")
+        matching = [name for name, server in configuration.servers.items() if server.url == endpoint]
+        server_profile = matching[0] if matching else _unused_name(suggested_server, set(configuration.servers))
+    suggested_context = f"{server_profile}-{_slug(selected_domain.name or selected_domain.id, 'domain')}"
+    if context_name is None:
+        matching = [
+            name
+            for name, context in configuration.contexts.items()
+            if context.server == server_profile and context.domain_id == selected_domain.id
+        ]
+        context_name = matching[0] if matching else _unused_name(suggested_context, set(configuration.contexts))
+    elif context_name in configuration.contexts:
+        configured_context = configuration.context(context_name)
+        if configured_context.server != server_profile or configured_context.domain_id != selected_domain.id:
+            fail(
+                f"DDM context {context_name!r} already selects server {configured_context.server!r} "
+                f"and domain {configured_context.domain_id}; choose a new --context-name"
+            )
+
+    destination = source_api_key_file or credential_file
+    if destination is None:
+        destination = config_path.parent / "credentials" / f"{server_profile}.credential"
+    if credential is not None:
+        try:
+            _write_credential_file(destination, credential)
+        except OSError as exception:
+            fail(f"could not save Managed API credential to {destination}: {exception}")
     try:
-        _write_credential_file(destination, credential)
-    except OSError as exception:
-        fail(f"could not save Managed API credential to {destination}: {exception}")
-    typer.echo(f"Saved Managed API credential to {destination}")
+        from netaudio.common.ddm_config_store import save_ddm_context
+
+        save_ddm_context(
+            config_path,
+            server_name=server_profile,
+            url=endpoint,
+            credential_file=destination,
+            context_name=context_name,
+            domain_id=selected_domain.id,
+            domain_name=selected_domain.name,
+            make_default=make_default or configuration.default_context is None,
+        )
+    except (OSError, ValueError) as exception:
+        fail(f"could not save DDM context: {exception}")
+    typer.echo(f"Saved DDM context {context_name} for {selected_domain.name or selected_domain.id} on {server_profile}")
+
+
+@context_app.command("list")
+def context_list() -> None:
+    """List saved DDM server/domain contexts."""
+    try:
+        configuration, _ = _ddm_configuration()
+    except ValueError as exception:
+        fail(str(exception))
+    rows = []
+    records = []
+    for name, context in sorted(configuration.contexts.items()):
+        server = configuration.server(context.server)
+        record = {
+            "name": name,
+            "default": name == configuration.default_context,
+            "server": context.server,
+            "url": server.url,
+            "domain_id": context.domain_id,
+            "domain_name": context.domain_name,
+        }
+        records.append(record)
+        rows.append(
+            [
+                name,
+                "yes" if record["default"] else "",
+                context.server,
+                context.domain_name or "",
+                context.domain_id,
+                server.url or "",
+            ]
+        )
+    output_table(
+        ["Context", "Default", "Server", "Domain", "Domain ID", "URL"],
+        rows,
+        json_data=records,
+        empty_message="No DDM contexts are configured. Run netaudio ddm login.",
+    )
+
+
+@context_app.command("current")
+def context_current() -> None:
+    """Show the context selected by --context, the environment, or configuration."""
+    selected = _active_context()
+    if selected is None:
+        fail("no DDM context is selected")
+    output_single(selected)
+
+
+@context_app.command("use")
+def context_use(name: str = typer.Argument(..., help="Saved DDM context name.")) -> None:
+    """Set the default DDM context."""
+    try:
+        configuration, config_path = _ddm_configuration()
+        configuration.context(name)
+        from netaudio.common.ddm_config_store import set_default_ddm_context
+
+        set_default_ddm_context(config_path, name)
+    except (OSError, ValueError) as exception:
+        fail(str(exception))
+    typer.echo(f"Default DDM context is now {name}")
 
 
 @app.command("graphql")

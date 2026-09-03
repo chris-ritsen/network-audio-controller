@@ -138,6 +138,9 @@ async def run_lock_operation(application, devices, pin: str, *, locking: bool) -
     if device.ipv4 is None:
         typer.echo(f"Error: {device_name} has no control address.", err=True)
         raise typer.Exit(code=1)
+    if getattr(device, "requires_managed_control", False):
+        typer.echo(f"Error: {action} has no verified DDM operation and was not sent.", err=True)
+        raise typer.Exit(code=1)
 
     result = await _standalone_lock_operation(application, str(device.ipv4), pin, lock_key, locking=locking)
 

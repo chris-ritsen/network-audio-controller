@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from netaudio.common.config_loader import default_config_path, load_capture_profile, load_config_document
-from netaudio.common.managed_api import resolve_managed_api_configuration
+from netaudio.common.managed_api import resolve_ddm_configuration, resolve_managed_api_configuration
 
 
 def test_ddm_configuration_loads_from_full_root_not_selected_capture_profile(monkeypatch, tmp_path):
@@ -112,3 +112,104 @@ def test_inline_environment_key_supersedes_profile_key_file():
     assert configuration.credential_file is None
     assert configuration.enabled is True
     assert configuration.configuration_error is None
+
+
+def test_named_servers_and_contexts_bind_domain_to_one_credential(tmp_path):
+    configuration = resolve_ddm_configuration(
+        {
+            "ddm": {
+                "default_context": "east-production",
+                "servers": {
+                    "east": {
+                        "url": "https://east.example/graphql",
+                        "api_key_file": "credentials/east",
+                    },
+                    "west": {
+                        "url": "https://west.example/graphql",
+                        "api_key_file": "credentials/west",
+                    },
+                },
+                "contexts": {
+                    "east-production": {
+                        "server": "east",
+                        "domain_id": "domain-a",
+                        "domain_name": "Production",
+                    },
+                    "west-production": {
+                        "server": "west",
+                        "domain_id": "domain-b",
+                        "domain_name": "Production",
+                    },
+                },
+            }
+        },
+        environ={},
+        base_directory=tmp_path,
+    )
+
+    assert set(configuration.servers) == {"east", "west"}
+    assert configuration.context("east-production").domain_id == "domain-a"
+    assert configuration.context("west-production").domain_id == "domain-b"
+    assert configuration.selected_server().name == "east"
+    assert configuration.selected_server("west-production").name == "west"
+    assert configuration.servers["east"].credential_file == (tmp_path / "credentials" / "east").resolve()
+
+
+def test_multiple_servers_without_a_context_are_ambiguous():
+    configuration = resolve_ddm_configuration(
+        {
+            "ddm": {
+                "servers": {
+                    "one": {"url": "https://one.example/graphql", "api_key": "one"},
+                    "two": {"url": "https://two.example/graphql", "api_key": "two"},
+                }
+            }
+        },
+        environ={},
+    )
+
+    with pytest.raises(ValueError, match="select one with --context"):
+        configuration.selected_server()
+
+
+@pytest.mark.parametrize(
+    "document, message",
+    (
+        (
+            {
+                "ddm": {
+                    "servers": {"manager": {"url": "https://manager.example/graphql", "api_key": "key"}},
+                    "contexts": {"studio": {"server": "missing", "domain_id": "domain"}},
+                }
+            },
+            "unknown server profile",
+        ),
+        (
+            {
+                "ddm": {
+                    "servers": {"manager": {"url": "https://manager.example/graphql", "api_key": "key"}},
+                    "contexts": {"studio": {"server": "manager", "domain_id": ""}},
+                }
+            },
+            "domain_id must be a non-empty string",
+        ),
+    ),
+)
+def test_invalid_context_references_are_rejected(document, message):
+    with pytest.raises(ValueError, match=message):
+        resolve_ddm_configuration(document, environ={})
+
+
+def test_context_aliases_cannot_duplicate_the_same_server_and_domain_target():
+    document = {
+        "ddm": {
+            "servers": {"manager": {"url": "https://manager.example/graphql", "api_key": "key"}},
+            "contexts": {
+                "first": {"server": "manager", "domain_id": "domain-1"},
+                "second": {"server": "manager", "domain_id": "domain-1"},
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="duplicates server and domain target"):
+        resolve_ddm_configuration(document, environ={})

@@ -35,12 +35,19 @@ def _mac_matches(device_mac: str, pattern: str) -> bool:
 def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
     state = _get_state()
 
-    if not state.names and not state.hosts and not state.server_names and not state.macs:
+    if not state.names and not state.hosts and not state.server_names and not state.macs and not state.ddm_context:
         return devices
 
     filtered = {}
 
     for server_name, device in devices.items():
+        if (
+            state.ddm_context
+            and getattr(device, "ddm_device_id", None)
+            and getattr(device, "ddm_context", None) != state.ddm_context
+        ):
+            continue
+
         if include_names and state.names and not any(fnmatch(device.name or "", pat) for pat in state.names):
             continue
 

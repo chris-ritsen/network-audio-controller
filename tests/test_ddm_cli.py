@@ -1,5 +1,6 @@
 import json
 import stat
+from types import SimpleNamespace
 
 import click
 import pytest
@@ -7,6 +8,7 @@ from netaudio.cli import app
 from netaudio.commands.ddm import cli as ddm_cli
 from netaudio.commands.ddm import operations
 from netaudio.ddm import AuthenticationError
+from netaudio.ddm.models import Domain, Inventory
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -26,17 +28,28 @@ def test_every_schema_operation_is_a_command():
 def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tmp_path):
     captured = {}
     credential_file = tmp_path / "ddm-token"
+    config_file = tmp_path / "config.toml"
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
 
-    def fake_authenticate(url, username, password, *, allow_insecure_http):
+    def fake_authenticate(url, username, password):
         captured.update(
             url=url,
             username=username,
             password=password,
-            allow_insecure_http=allow_insecure_http,
         )
         return "session-token"
 
+    class FakeClient:
+        def __init__(self, url, *, credential):
+            assert url == "http://manager.example/graphql"
+            assert credential == "session-token"
+
+        def inventory(self):
+            domain = Domain(id="domain-1", name="Studio", status=None, devices=())
+            return SimpleNamespace(data=Inventory(domains=(domain,), unenrolled_devices=()), errors=())
+
     monkeypatch.setattr(ddm_cli, "authenticate_with_password", fake_authenticate)
+    monkeypatch.setattr(ddm_cli, "ManagedAPIClient", FakeClient)
     result = _invoke(
         "login",
         "--url",
@@ -45,7 +58,6 @@ def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tm
         "operator",
         "--credential-file",
         str(credential_file),
-        "--allow-insecure-http",
         input="private-password\n",
     )
 
@@ -54,17 +66,20 @@ def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tm
         "url": "http://manager.example/graphql",
         "username": "operator",
         "password": "private-password",
-        "allow_insecure_http": True,
     }
     assert credential_file.read_text(encoding="ascii") == "session-token\n"
     assert stat.S_IMODE(credential_file.stat().st_mode) == 0o600
     assert "session-token" not in result.output
     assert "private-password" not in result.output
+    assert "Saved DDM context" in result.output
+    assert 'default_context = "manager.example-Studio"' in config_file.read_text()
 
 
 def test_password_login_does_not_replace_a_credential_after_rejection(monkeypatch, tmp_path):
     credential_file = tmp_path / "ddm-token"
     credential_file.write_text("existing-token\n", encoding="ascii")
+    config_file = tmp_path / "config.toml"
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
 
     def reject(*arguments, **options):
         raise AuthenticationError("DDM rejected username/password login")
@@ -127,130 +142,162 @@ def test_ddm_discover_renders_correlated_services(monkeypatch):
     assert "8000" in result.output
 
 
-def test_managed_identify_discovers_ddm_and_keeps_password_out_of_output(monkeypatch):
-    captured = {}
-
-    class Service:
-        port = 8443
-
-    class Server:
-        server_name = "ddm.local."
-        controller_service = Service()
+def test_login_discovers_server_resolves_graphql_endpoint_and_saves_selected_domain(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.toml"
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
+    discovered = SimpleNamespace(
+        server_name="ddm.local.",
+        ipv4_addresses=("192.168.1.217",),
+        controller_service=SimpleNamespace(port=8443),
+    )
 
     async def fake_discover(*, timeout, interfaces=None):
-        assert timeout == 2.0
+        assert timeout == 0.25
         assert interfaces is None
-        return (Server(),)
+        return (discovered,)
 
-    def fake_identify(server, username, password, device_id, mac, **options):
-        captured.update(
-            server=server,
-            username=username,
-            password=password,
-            device_id=device_id,
-            mac=mac,
-            options=options,
-        )
+    class FakeControllerClient:
+        def __init__(self, server, *, port, timeout):
+            assert (server, port, timeout) == ("192.168.1.217", 8443, 0.25)
+
+        def endpoints(self):
+            return SimpleNamespace(graphql_url="http://ddm.local/graphql")
+
+    class FakeManagedClient:
+        def __init__(self, url, *, credential):
+            assert url == "http://ddm.local/graphql"
+            assert credential == "session-token"
+
+        def inventory(self):
+            domain = Domain(id="domain-1", name="test", status=None, devices=())
+            return SimpleNamespace(data=Inventory(domains=(domain,), unenrolled_devices=()), errors=())
 
     monkeypatch.setattr(ddm_cli, "discover_ddm_servers", fake_discover)
-    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: bytes.fromhex("842f5774e86d"))
-    monkeypatch.setattr(ddm_cli, "identify_managed_device", fake_identify)
+    monkeypatch.setattr(ddm_cli, "ControllerAPIClient", FakeControllerClient)
+    monkeypatch.setattr(ddm_cli, "authenticate_with_password", lambda *_args: "session-token")
+    monkeypatch.setattr(ddm_cli, "ManagedAPIClient", FakeManagedClient)
 
-    result = _invoke(
-        "identify",
-        "001dc1fffe507b8d:0",
-        "--username",
-        "operator",
-        "--insecure-tls",
-        input="private-password\n",
-    )
+    result = _invoke("login", "--username", "admin", "--discovery-timeout", "0.25", input="password\n")
 
     assert result.exit_code == 0, result.output
-    assert captured == {
-        "server": "ddm.local",
-        "username": "operator",
-        "password": "private-password",
-        "device_id": "001dc1fffe507b8d:0",
-        "mac": bytes.fromhex("842f5774e86d"),
-        "options": {
-            "auth_port": 8443,
-            "timeout": 10.0,
-            "ca_file": None,
-            "insecure_tls": True,
-        },
-    }
-    assert "Identified managed device 001dc1fffe507b8d:0 through ddm.local." in result.output
-    assert "private-password" not in result.output
+    document = config_file.read_text()
+    assert '[ddm.servers."ddm.local"]' in document
+    assert 'url = "http://ddm.local/graphql"' in document
+    assert '[ddm.contexts."ddm.local-test"]' in document
+    assert 'domain_id = "domain-1"' in document
+    configuration, _ = ddm_cli._ddm_configuration()
+    assert configuration.context("ddm.local-test").server == "ddm.local"
 
 
-def test_managed_identify_uses_an_explicit_server_without_discovery(monkeypatch):
-    def unexpected_discovery(**options):
-        raise AssertionError("discovery should not run")
+def test_login_can_use_an_existing_api_key_file_without_password_authentication(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.toml"
+    api_key_file = tmp_path / "existing-api-key"
+    api_key_file.write_text("key\n", encoding="ascii")
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
 
-    captured = {}
-    monkeypatch.setattr(ddm_cli, "discover_ddm_servers", unexpected_discovery)
-    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
-    monkeypatch.setattr(
-        ddm_cli, "identify_managed_device", lambda *args, **kwargs: captured.update(args=args, kwargs=kwargs)
-    )
+    class FakeManagedClient:
+        def __init__(self, url, *, credential_file):
+            assert url == "https://manager.example/graphql"
+            assert credential_file == api_key_file
 
-    result = _invoke(
-        "identify",
-        "001dc1fffe507b8d",
-        "--username",
-        "operator",
-        "--server",
-        "192.0.2.10",
-        "--auth-port",
-        "9443",
-        input="private-password\n",
-    )
+        def inventory(self):
+            domain = Domain(id="domain-1", name="Studio", status=None, devices=())
+            return SimpleNamespace(data=Inventory(domains=(domain,), unenrolled_devices=()), errors=())
 
-    assert result.exit_code == 0, result.output
-    assert captured["args"][:4] == ("192.0.2.10", "operator", "private-password", "001dc1fffe507b8d")
-    assert captured["kwargs"]["auth_port"] == 9443
-    assert "private-password" not in result.output
-
-
-def test_managed_identify_accepts_an_api_key_from_a_hidden_prompt(monkeypatch):
-    captured = {}
-    api_key = "00000000-0000-4000-8000-000000000000"
-    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
+    monkeypatch.setattr(ddm_cli, "ManagedAPIClient", FakeManagedClient)
     monkeypatch.setattr(
         ddm_cli,
-        "identify_managed_device_with_api_key",
-        lambda *args, **kwargs: captured.update(args=args, kwargs=kwargs),
+        "authenticate_with_password",
+        lambda *_args: pytest.fail("password authentication should not run"),
     )
 
     result = _invoke(
-        "identify",
-        "001dc1fffe507b8d:0",
-        "--api-key",
+        "login",
+        "--url",
+        "https://manager.example/graphql",
         "--server",
-        "192.0.2.10",
-        input=f"{api_key}\n",
+        "studio",
+        "--api-key-file",
+        str(api_key_file),
     )
 
     assert result.exit_code == 0, result.output
-    assert captured["args"][:3] == ("192.0.2.10", api_key, "001dc1fffe507b8d:0")
-    assert api_key not in result.output
+    assert 'credential_file = "existing-api-key"' in config_file.read_text()
 
 
-def test_managed_identify_rejects_ambiguous_authentication_options(monkeypatch):
-    monkeypatch.setattr(ddm_cli.core, "host_mac", lambda: b"\x01\x02\x03\x04\x05\x06")
+def test_context_commands_list_show_override_and_change_the_default(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[ddm]
+default_context = "east-main"
+
+[ddm.servers.manager]
+url = "https://manager.example/graphql"
+api_key_file = "key"
+
+[ddm.contexts.east-main]
+server = "manager"
+domain_id = "east"
+domain_name = "East"
+
+[ddm.contexts.west-main]
+server = "manager"
+domain_id = "west"
+domain_name = "West"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
+
+    listed = _invoke("context", "list")
+    current = _invoke("context", "current")
+    overridden = runner.invoke(app, ["--context", "west-main", "ddm", "context", "current"])
+    changed = _invoke("context", "use", "west-main")
+
+    assert listed.exit_code == 0 and "east-main" in listed.output and "west-main" in listed.output
+    assert current.exit_code == 0 and current.output.strip() == "east-main"
+    assert overridden.exit_code == 0 and overridden.output.strip() == "west-main"
+    assert changed.exit_code == 0
+    assert 'default_context = "west-main"' in config_file.read_text()
+
+
+def test_login_will_not_retarget_an_existing_server_profile(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[ddm.servers.studio]
+url = "https://expected.example/graphql"
+credential_file = "credential"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
+    monkeypatch.setattr(
+        ddm_cli,
+        "authenticate_with_password",
+        lambda *_args: pytest.fail("authentication must not run against a retargeted profile"),
+    )
 
     result = _invoke(
-        "identify",
-        "001dc1fffe507b8d:0",
+        "login",
+        "--url",
+        "https://wrong.example/graphql",
+        "--server",
+        "studio",
         "--username",
         "operator",
-        "--api-key",
-        "--server",
-        "192.0.2.10",
     )
 
     assert result.exit_code == 1
-    assert "not both" in result.output
+    assert "choose a new --server name" in result.output
+
+
+def test_identify_is_not_a_separate_ddm_command():
+    result = _invoke("identify")
+
+    assert result.exit_code == 2
+    assert "No such command 'identify'" in result.output
 
 
 def test_schema_describes_one_type():
@@ -401,3 +448,26 @@ def test_unconfigured_transport_explains_how_to_configure(monkeypatch):
     monkeypatch.setattr(transport, "execute_ddm_graphql_on_daemon", unavailable)
     with pytest.raises(click.exceptions.Exit):
         transport.execute("{ me { id } }")
+
+
+def test_daemon_graphql_proxy_receives_the_selected_context(monkeypatch):
+    from netaudio.cli import state
+    from netaudio.commands.ddm import transport
+
+    monkeypatch.setattr(transport, "configured_client", lambda: None)
+    captured = {}
+
+    async def execute_on_daemon(query, variables, operation_name, *, context):
+        captured.update(query=query, variables=variables, operation_name=operation_name, context=context)
+        return 200, {"data": {"me": None}, "errors": []}
+
+    monkeypatch.setattr(transport, "execute_ddm_graphql_on_daemon", execute_on_daemon)
+    original = state.ddm_context
+    state.ddm_context = "west-main"
+    try:
+        result = transport.execute("query Me { me { id } }", operation_name="Me")
+    finally:
+        state.ddm_context = original
+
+    assert result["data"] == {"me": None}
+    assert captured["context"] == "west-main"

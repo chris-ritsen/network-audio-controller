@@ -132,6 +132,8 @@ class DanteDevice:
         self.ddm_connection_last_changed: str | None = None
         self.ddm_connection_state: str | None = None
         self.ddm_device_id: str | None = None
+        self.ddm_server_profile: str | None = None
+        self.ddm_context: str | None = None
         self.ddm_domain_id: str | None = None
         self.ddm_domain_name: str | None = None
         self.ddm_enrolment_state: str | None = None
@@ -257,6 +259,17 @@ class DanteDevice:
     def application(self):
         return self._app
 
+    def _require_application(self):
+        if self._app is None:
+            raise RuntimeError(f"{self.name or self.server_name} requires an attached Dante application")
+        return self._app
+
+    @property
+    def requires_managed_control(self) -> bool:
+        from netaudio.ddm.device_transport import device_requires_managed_control
+
+        return device_requires_managed_control(self)
+
     @property
     def transport(self) -> CoreTransport:
         if self.direct_control_available is False:
@@ -273,6 +286,8 @@ class DanteDevice:
         return str(self.ipv4)
 
     async def execute(self, specification: dict) -> bytes | None:
+        if self.requires_managed_control:
+            return await self._require_application().execute_managed(self, specification)
         return await self.transport.execute(self._require_address(), specification, arc_port=self._arc_port())
 
     async def call_core(
@@ -281,6 +296,10 @@ class DanteDevice:
         request_timeout_milliseconds: int | None = None,
         request_attempts: int | None = None,
     ):
+        if self.requires_managed_control:
+            raise RuntimeError(
+                f"{self.name or self.server_name} requires a typed operation supported by the DDM transport"
+            )
         return await self.transport.call(
             self._require_address(),
             operation,
@@ -350,6 +369,9 @@ class DanteDevice:
             channel = self.tx_channels.get(channel_number)
             if channel is None:
                 continue
+            channel_name = record.get("channel_name")
+            if channel_name:
+                channel.name = channel_name
             factory_name = record.get("friendly_channel_name")
             if factory_name:
                 channel.factory_name = factory_name
@@ -396,24 +418,40 @@ class DanteDevice:
             channel = self.rx_channels.get(channel_number)
             if channel is None:
                 continue
+            previous_channel_name = channel.name
+            local_channel_name = record.get("local_channel_name")
+            if local_channel_name:
+                channel.name = local_channel_name
             factory_name = record.get("friendly_channel_name")
             if factory_name:
+                channel.friendly_name = factory_name
                 channel.factory_name = factory_name
             status_code = record.get("subscription_status_code")
             if isinstance(status_code, int):
                 channel.status_code = status_code
             source_device_name = record.get("source_device_name")
             source_channel_name = record.get("source_channel_name")
-            if not source_device_name or not source_channel_name:
-                continue
             subscription = next(
-                (entry for entry in self.subscriptions if entry.rx_channel_name == channel.name),
+                (
+                    entry
+                    for entry in self.subscriptions
+                    if getattr(entry, "_netaudio_rx_channel_number", None) == channel_number
+                    or entry.rx_channel_name in {previous_channel_name, channel.name}
+                ),
                 None,
             )
+            if subscription is None and source_device_name and source_channel_name:
+                subscription = DanteSubscription()
+                subscription.rx_device_name = self.name
+                subscription.rx_channel = channel
+                self.subscriptions.append(subscription)
             if subscription is None:
                 continue
-            if not subscription.tx_device_name or not subscription.tx_channel_name:
+            subscription._netaudio_rx_channel_number = channel_number
+            subscription.rx_channel_name = channel.name
+            if not subscription.tx_device_name:
                 subscription.tx_device_name = source_device_name
+            if not subscription.tx_channel_name:
                 subscription.tx_channel_name = source_channel_name
             if isinstance(status_code, int):
                 subscription.status_code = status_code
@@ -424,11 +462,19 @@ class DanteDevice:
     async def get_rx_channels(self):
         if self.ipv4 is None:
             return
+        if self.requires_managed_control:
+            page = await self._require_application().query_receiver_channel_status_2809(self)
+            self.apply_receiver_channel_status_page(page)
+            return
         records = await self.call_core(lambda client: client.get_rx_channels())
         self.rx_channels, self.subscriptions = self._build_rx_from_records(records)
 
     async def get_tx_channels(self):
         if self.ipv4 is None:
+            return
+        if self.requires_managed_control:
+            page = await self._require_application().query_transmitter_channel_status_2809(self)
+            self.apply_transmitter_channel_status_page(page)
             return
         records = await self.call_core(lambda client: client.get_tx_channels())
         self.tx_channels = self._build_tx_from_records(records)
@@ -440,6 +486,11 @@ class DanteDevice:
     ):
         if self.ipv4 is None:
             return None
+        if self.requires_managed_control:
+            fresh = await self._require_application().managed_transport(self).fetch_device(self)
+            if fresh.identity is not None:
+                return fresh.identity.actual_name or fresh.identity.default_name or fresh.name
+            return fresh.name
         return await self.call_core(
             lambda client: client.get_device_name(),
             request_timeout_milliseconds=request_timeout_milliseconds,

@@ -7,6 +7,24 @@ import netaudio.daemon.client as daemon_client
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("function_name", "path", "payload"),
+    (
+        ("get_devices_from_daemon", "/devices?context=west-main", {}),
+        ("get_ddm_devices_from_daemon", "/ddm/devices?context=west-main", {}),
+        ("get_ddm_domains_from_daemon", "/ddm/domains?context=west-main", []),
+    ),
+)
+async def test_inventory_clients_encode_context_as_request_local_query(monkeypatch, function_name, path, payload):
+    request = AsyncMock(return_value=(200, payload))
+    monkeypatch.setattr(daemon_client, "_daemon_request", request)
+
+    await getattr(daemon_client, function_name)("west-main")
+
+    request.assert_awaited_once_with("GET", path)
+
+
+@pytest.mark.asyncio
 async def test_meter_cache_from_daemon_uses_cache_only_endpoint(monkeypatch):
     request = AsyncMock(
         return_value=(

@@ -44,11 +44,15 @@ def _parse_channel_numbers(value: str) -> list[int]:
         _fail_validation(exception)
 
 
+def _managed_transport_option(device) -> dict:
+    return {"device": device} if getattr(device, "requires_managed_control", False) else {}
+
+
 async def _detect_flow_protocol(application, device, arc_port):
     if device.flow_protocol_id is not None:
         return device.flow_protocol_id
 
-    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port)
+    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port, **_managed_transport_option(device))
     if flow_protocol_id is not None:
         device.flow_protocol_id = flow_protocol_id
     return flow_protocol_id
@@ -71,6 +75,7 @@ async def run_flow_list(application, devices) -> None:
         device_ip,
         arc_port,
         flow_protocol_id,
+        **_managed_transport_option(device),
     )
     if flow_inventory is None:
         typer.echo("Error: failed to query flows.", err=True)
@@ -224,6 +229,7 @@ async def run_receiver_port_ranges(application, devices) -> None:
     port_ranges = await flows.query_receiver_port_ranges(
         str(device.ipv4),
         arc_port,
+        **_managed_transport_option(device),
     )
     if port_ranges is None:
         typer.echo("Error: failed to query receiver port ranges.", err=True)
@@ -233,13 +239,16 @@ async def run_receiver_port_ranges(application, devices) -> None:
             "First",
             str(port_ranges["first_port_range_start"]),
             str(port_ranges["first_port_range_end"]),
-        ],
-        [
-            "Second",
-            str(port_ranges["second_port_range_start"]),
-            str(port_ranges["second_port_range_end"]),
-        ],
+        ]
     ]
+    if port_ranges.get("second_port_range_available", True):
+        rows.append(
+            [
+                "Second",
+                str(port_ranges["second_port_range_start"]),
+                str(port_ranges["second_port_range_end"]),
+            ]
+        )
     output_table(["Range", "Start", "End"], rows, json_data=port_ranges)
 
 
@@ -258,6 +267,7 @@ async def run_transmit_channel_capabilities(
         arc_port,
         starting_channel_identifier,
         maximum_channel_count,
+        **_managed_transport_option(device),
     )
     if capabilities is None:
         typer.echo(
@@ -312,6 +322,7 @@ async def run_flow_create(application, devices, flow_slot: int, channel_numbers:
             device_ip,
             arc_port,
             flow_protocol_id,
+            **_managed_transport_option(device),
         )
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         typer.echo(
@@ -340,6 +351,7 @@ async def run_flow_create(application, devices, flow_slot: int, channel_numbers:
                 flow_protocol_id,
                 flow_slot,
                 channel_numbers,
+                **_managed_transport_option(device),
             )
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         typer.echo(f"Error: flow creation failed: {exception}", err=True)
@@ -389,6 +401,7 @@ async def run_flow_delete(application, devices, flow_slot: int) -> None:
             device_ip,
             arc_port,
             flow_protocol_id,
+            **_managed_transport_option(device),
         )
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         typer.echo(
@@ -413,6 +426,7 @@ async def run_flow_delete(application, devices, flow_slot: int) -> None:
                 arc_port,
                 flow_protocol_id,
                 flow_slot,
+                **_managed_transport_option(device),
             )
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         typer.echo(f"Error: flow deletion failed: {exception}", err=True)

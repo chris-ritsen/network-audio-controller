@@ -74,32 +74,18 @@ def test_password_login_bootstraps_without_an_authorization_header():
     }
 
 
-def test_password_login_rejects_http_without_an_explicit_opt_in():
-    transport = FakeTransport(_response({"data": {"UserLoginWithPassword": {"ok": True, "token": "session-token"}}}))
-
-    with pytest.raises(ValueError, match="allow_insecure_http"):
-        authenticate_with_password(
-            "http://manager.example/graphql",
-            "operator",
-            "private-password",
-            transport=transport,
-        )
-
-    assert transport.requests == []
-
-
-def test_password_login_can_explicitly_use_a_lab_http_endpoint():
+def test_password_login_uses_the_configured_http_url_without_extra_tls_policy():
     transport = FakeTransport(_response({"data": {"UserLoginWithPassword": {"ok": True, "token": "session-token"}}}))
 
     token = authenticate_with_password(
         "http://manager.example/graphql",
         "operator",
         "private-password",
-        allow_insecure_http=True,
         transport=transport,
     )
 
     assert token == "session-token"
+    assert transport.requests[0].url == "http://manager.example/graphql"
 
 
 @pytest.mark.parametrize(

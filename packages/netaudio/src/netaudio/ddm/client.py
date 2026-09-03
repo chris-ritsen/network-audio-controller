@@ -254,15 +254,12 @@ def authenticate_with_password(
     username: str,
     password: str,
     *,
-    allow_insecure_http: bool = False,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     transport: Transport | None = None,
 ) -> str:
     """Exchange a DDM username and password for a Managed API credential."""
-    endpoint = _validate_url(url)
-    if endpoint.scheme != "https" and not allow_insecure_http:
-        raise ValueError("password login over HTTP requires allow_insecure_http=True")
+    _validate_url(url)
     if not isinstance(username, str) or not username:
         raise ValueError("username must be a non-empty string")
     if not isinstance(password, str) or not password:
@@ -336,7 +333,7 @@ class ManagedAPIClient:
     ) -> GraphQLResult:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("GraphQL query must be a non-empty string")
-        credential = self._read_credential()
+        credential = self.read_credential()
         payload: dict[str, Any] = {}
         if operation_name is not None:
             payload["operationName"] = operation_name
@@ -379,7 +376,7 @@ class ManagedAPIClient:
     async def inventory_async(self) -> InventoryResult:
         return await asyncio.to_thread(self.inventory)
 
-    def _read_credential(self) -> str:
+    def read_credential(self) -> str:
         if self._credential is not None:
             return self._credential
         credential_file = self.credential_file

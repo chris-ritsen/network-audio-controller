@@ -65,6 +65,7 @@ from netaudio.dante.services.notification import (
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
     STATUS_KIND_BLUETOOTH,
+    STATUS_KIND_CLOCK,
     STATUS_KIND_ENCODING,
     STATUS_KIND_GAIN,
     STATUS_KIND_SAMPLE_RATE,
@@ -105,7 +106,7 @@ def _clock_status_snapshot(device) -> dict:
 
 
 class DanteApplication:
-    def __init__(self, packet_store=None, dissect=False, session_id=None):
+    def __init__(self, packet_store=None, dissect=False, session_id=None, managed_transport=None):
         from netaudio.common.app_config import settings as app_settings
 
         self.devices: dict = {}
@@ -131,6 +132,8 @@ class DanteApplication:
         self._browser = None
         self._started = False
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._managed_transport = managed_transport
+        self._managed_transports: dict[str, object] = {}
 
     @staticmethod
     def _apply_device_settings(device, settings) -> None:
@@ -313,6 +316,22 @@ class DanteApplication:
         request_attempts: int | None = None,
     ) -> None:
         try:
+            if device.requires_managed_control:
+                fresh = await self.managed_transport(device).fetch_device(device)
+                if fresh.identity is not None:
+                    device.name = fresh.identity.actual_name or fresh.identity.default_name or fresh.name
+                elif fresh.name:
+                    device.name = fresh.name
+                if fresh.clock_preferences is not None:
+                    device.preferred_leader = fresh.clock_preferences.leader
+                await self.get_latency_settings(device)
+                if include_channels:
+                    await self.apply_avio_status_pages(device)
+                try:
+                    await self.probe_interface_status(str(device.ipv4))
+                except (RuntimeError, OSError) as exception:
+                    logger.debug(f"Interface status unavailable for {device.server_name}: {exception}")
+                return
             await device.populate_from_core(
                 include_channels=include_channels,
                 request_timeout_milliseconds=request_timeout_milliseconds,
@@ -681,6 +700,8 @@ class DanteApplication:
             logger.warning(f"Failed to send conmon {request.__name__} to {device.server_name}: {exception}")
 
     async def _send_registered_system_reset(self, device, build_specification, host_mac) -> None:
+        if getattr(device, "requires_managed_control", False):
+            raise RuntimeError("system reset has no verified DDM completion path and was not sent")
         if host_mac is None:
             from netaudio.dante.services.cmc import _get_host_mac
 
@@ -688,10 +709,62 @@ class DanteApplication:
         await self.cmc.require_registration(device._require_address(), host_mac)
         await device.execute(build_specification(host_mac))
 
+    def managed_transport(self, device=None):
+        if self._managed_transport is not None:
+            return self._managed_transport
+
+        from netaudio.common.config_loader import default_config_path, load_config_document
+        from netaudio.common.managed_api import resolve_ddm_configuration
+        from netaudio.ddm.device_transport import ManagedDeviceTransport
+
+        config_path = default_config_path()
+        configuration = resolve_ddm_configuration(
+            load_config_document(config_path),
+            base_directory=config_path.parent,
+        )
+        server_profile = getattr(device, "ddm_server_profile", None)
+        context_name = getattr(device, "ddm_context", None)
+        if context_name is not None:
+            context = configuration.context(context_name)
+            if server_profile is not None and context.server != server_profile:
+                raise RuntimeError(
+                    f"managed device context {context_name!r} belongs to server {context.server!r}, "
+                    f"not {server_profile!r}"
+                )
+            device_domain_id = getattr(device, "ddm_domain_id", None)
+            if device_domain_id is not None and context.domain_id != device_domain_id:
+                raise RuntimeError(
+                    f"managed device context {context_name!r} belongs to domain {context.domain_id}, "
+                    f"not {device_domain_id}"
+                )
+            server = configuration.server(context.server)
+        elif server_profile is not None:
+            server = configuration.server(server_profile)
+        else:
+            server = configuration.selected_server(context_name)
+        transport = self._managed_transports.get(server.name)
+        if transport is None:
+            transport = ManagedDeviceTransport(server)
+            self._managed_transports[server.name] = transport
+        return transport
+
+    async def execute_managed(self, device, specification: dict) -> bytes | None:
+        return await self.managed_transport(device).execute(device, specification)
+
     async def _send_settings(self, device_ip_address, specification: dict) -> None:
-        await self.transport.execute(str(device_ip_address), specification)
+        address = str(device_ip_address)
+        device = self._device_by_ip(address)
+        if device is not None and device.requires_managed_control:
+            response = await device.execute(specification)
+            if response is not None:
+                self.notifications.receive_settings_response(response, address)
+            return
+        await self.transport.execute(address, specification)
 
     async def add_subscriptions(self, device, records):
+        if getattr(device, "requires_managed_control", False):
+            async with device.topology_mutation_lock:
+                return await self.managed_transport(device).set_subscriptions(device, records)
         return await self.mutate_and_wait_for_notification(
             device,
             lambda: self.send_add_subscriptions(device, records),
@@ -913,6 +986,9 @@ class DanteApplication:
 
     async def execute(self, device_ip_address, specification: dict) -> bytes | None:
         address = str(device_ip_address)
+        device = self._device_by_ip(address)
+        if device is not None and device.requires_managed_control:
+            return await device.execute(specification)
         return await self.transport.execute(address, specification, arc_port=self.arc_port_for_address(address))
 
     async def export_capability_partition(
@@ -1012,6 +1088,8 @@ class DanteApplication:
     async def get_device_settings(self, device):
         if device.ipv4 is None:
             return None
+        if getattr(device, "requires_managed_control", False):
+            return await self.get_latency_settings(device)
         settings = await device.call_core(lambda client: client.get_device_settings())
         self._apply_device_settings(device, settings)
         return settings
@@ -1033,6 +1111,8 @@ class DanteApplication:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
+        if getattr(device, "requires_managed_control", False):
+            raise RuntimeError("device lock has no verified DDM operation and was not sent")
         return await core_lock_device(str(device.ipv4), pin, key)
 
     def mark_device_offline(self, server_name: str) -> None:
@@ -1091,6 +1171,8 @@ class DanteApplication:
         notification_ids,
         timeout: float = 2.0,
     ):
+        if getattr(device, "requires_managed_control", False):
+            return await mutate()
         device_ip_address = str(device.ipv4)
         waiter = self.notifications.register_notification_waiter(device_ip_address, notification_ids)
         try:
@@ -1109,7 +1191,7 @@ class DanteApplication:
 
         tasks = []
         for device in devices.values():
-            if self.get_arc_port(device):
+            if device.requires_managed_control or self.get_arc_port(device):
                 tasks.append(self._populate_device_controls(device, include_channels=include_channels))
             else:
                 logger.debug(f"No ARC port for {device.server_name}, skipping controls")
@@ -1131,7 +1213,7 @@ class DanteApplication:
                 )
             ): device
             for device in devices.values()
-            if self.get_arc_port(device)
+            if device.requires_managed_control or self.get_arc_port(device)
         }
         if not name_tasks:
             return
@@ -1170,7 +1252,7 @@ class DanteApplication:
 
         control_coroutines = []
         for device in devices.values():
-            if self.get_arc_port(device):
+            if device.requires_managed_control or self.get_arc_port(device):
                 control_coroutines.append(
                     self._populate_device_controls(
                         device,
@@ -1239,19 +1321,20 @@ class DanteApplication:
     async def probe_clocking_status(self, device, timeout: float = 3.0) -> dict:
         device_ip_address = str(device.ipv4)
         async with self._capability_probe_lock("clock_status", device_ip_address):
-            waiter = self.notifications.register_waiter("preferred_leader", device_ip_address)
+            waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, device_ip_address)
             try:
                 await self.send_refresh_clock_status(device_ip_address)
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     logger.debug(f"Clock status probe timed out for {device_ip_address}")
-                    if device.clock_source_code is None:
+                    if waiter.latest_result is None:
                         raise CapabilityProbeTimeout(f"clock status probe timed out for {device_ip_address}") from None
             finally:
                 self.notifications.unregister_waiter(waiter)
-        if device.clock_source_code is None:
+        if waiter.latest_result is None:
             raise RuntimeError(f"clock status readback was unavailable for {device_ip_address}")
+        apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result)
         return _clock_status_snapshot(device)
 
     async def probe_encoding_status(self, device_ip_address: str, timeout: float = 2.0) -> tuple[int, list[int]]:
@@ -1316,6 +1399,13 @@ class DanteApplication:
         )
 
     async def probe_preferred_leader_state(self, device_ip_address: str, timeout: float = 2.0) -> bool | None:
+        device = self._device_by_ip(str(device_ip_address))
+        if device is not None and device.requires_managed_control:
+            fresh = await self.managed_transport(device).fetch_device(device)
+            if fresh.clock_preferences is None or fresh.clock_preferences.leader is None:
+                raise RuntimeError(f"preferred leader readback was unavailable for {device_ip_address}")
+            device.preferred_leader = fresh.clock_preferences.leader
+            return fresh.clock_preferences.leader
         return await self._probe_once(
             "preferred_leader",
             str(device_ip_address),
@@ -1419,6 +1509,9 @@ class DanteApplication:
             )
 
     async def remove_subscriptions(self, device, channel_numbers):
+        if getattr(device, "requires_managed_control", False):
+            async with device.topology_mutation_lock:
+                return await self.managed_transport(device).remove_subscriptions(device, channel_numbers)
         return await self.mutate_and_wait_for_notification(
             device,
             lambda: self.send_remove_subscriptions(device, channel_numbers),
@@ -1429,6 +1522,8 @@ class DanteApplication:
         return await device.execute(self.commands.reset_channel_name(channel_type, channel_number))
 
     async def reset_device_name(self, device):
+        if getattr(device, "requires_managed_control", False):
+            return await self.managed_transport(device).reset_device_name(device)
         return await device.execute(self.commands.reset_name())
 
     async def resolve_channel_name_protocol_identifier(self, device, channel_type: str):
@@ -1645,6 +1740,8 @@ class DanteApplication:
         error = validate_dante_name(name)
         if error:
             raise ValueError(error)
+        if getattr(device, "requires_managed_control", False):
+            return await self.managed_transport(device).set_device_name(device, name)
         return await self.mutate_and_wait_for_notification(
             device,
             lambda: device.execute(self.commands.set_name(name)),
@@ -1770,6 +1867,9 @@ class DanteApplication:
         is_preferred: bool,
         timeout: float = 2.0,
     ) -> bool | None:
+        if getattr(device, "requires_managed_control", False):
+            await self.managed_transport(device).set_preferred_leader(device, is_preferred)
+            return await self.probe_preferred_leader_state(str(device.ipv4), timeout=timeout)
         device_ip_address = str(device.ipv4)
 
         async def mutate() -> None:
@@ -1888,6 +1988,8 @@ class DanteApplication:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
+        if getattr(device, "requires_managed_control", False):
+            raise RuntimeError("device unlock has no verified DDM operation and was not sent")
         return await core_unlock_device(str(device.ipv4), pin, key)
 
     def unregister_device(self, server_name: str) -> None:

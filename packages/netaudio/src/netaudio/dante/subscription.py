@@ -7,6 +7,7 @@ class DanteSubscription:
     def __init__(self):
         self._error = None
         self._rx_channel = None
+        self._netaudio_rx_channel_number = None
         self._rx_channel_name = None
         self._rx_channel_status_code = None
         self._rx_device = None

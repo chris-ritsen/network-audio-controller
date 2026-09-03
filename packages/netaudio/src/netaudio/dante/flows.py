@@ -106,7 +106,10 @@ async def _request(
     command_specification: dict,
     timeout_ms: int,
     attempts: int,
+    device=None,
 ) -> bytes | None:
+    if device is not None:
+        return await device.execute(command_specification)
     from netaudio import core
 
     def _send():
@@ -123,14 +126,61 @@ async def _request(
         return None
 
 
-async def detect_flow_protocol(device_ip: str, arc_port: int) -> int | None:
-    for flow_protocol_id in FLOW_QUERY_PROTOCOL_IDS:
+async def _request_with_optional_device(
+    device_ip: str,
+    arc_port: int,
+    command_specification: dict,
+    timeout_ms: int,
+    attempts: int,
+    device,
+) -> bytes | None:
+    if device is None:
+        return await _request(
+            device_ip,
+            arc_port,
+            command_specification,
+            timeout_ms=timeout_ms,
+            attempts=attempts,
+        )
+    return await _request(
+        device_ip,
+        arc_port,
+        command_specification,
+        timeout_ms,
+        attempts,
+        device=device,
+    )
+
+
+async def _query_tx_inventory_with_optional_device(
+    device_ip: str,
+    arc_port: int,
+    flow_protocol_id: int,
+    device,
+) -> dict | None:
+    if device is None:
+        return await query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id)
+    return await query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id, device=device)
+
+
+async def detect_flow_protocol(device_ip: str, arc_port: int, *, device=None) -> int | None:
+    protocol_ids = (
+        (PROTOCOL_ARC_2809,) if getattr(device, "requires_managed_control", False) else FLOW_QUERY_PROTOCOL_IDS
+    )
+    for flow_protocol_id in protocol_ids:
         command_specification = {
             "command": "query_tx_flows",
             "flow_protocol_id": flow_protocol_id,
             "starting_flow": 1,
         }
-        response = await _request(device_ip, arc_port, command_specification, timeout_ms=500, attempts=1)
+        response = await _request_with_optional_device(
+            device_ip,
+            arc_port,
+            command_specification,
+            timeout_ms=500,
+            attempts=1,
+            device=device,
+        )
         if response and _parsed_response("result_code", response) in (
             RESULT_CODE_SUCCESS,
             RESULT_CODE_SUCCESS_EXTENDED,
@@ -139,9 +189,9 @@ async def detect_flow_protocol(device_ip: str, arc_port: int) -> int | None:
     return None
 
 
-async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_id: int) -> dict | None:
+async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_id: int, *, device=None) -> dict | None:
     if flow_protocol_id == PROTOCOL_ARC_2809:
-        response = await _request(
+        response = await _request_with_optional_device(
             device_ip,
             arc_port,
             {
@@ -151,6 +201,7 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
             },
             timeout_ms=1000,
             attempts=2,
+            device=device,
         )
         if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
             return None
@@ -204,7 +255,14 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
             "flow_protocol_id": flow_protocol_id,
             "starting_flow": starting_flow,
         }
-        response = await _request(device_ip, arc_port, command_specification, timeout_ms=1000, attempts=2)
+        response = await _request_with_optional_device(
+            device_ip,
+            arc_port,
+            command_specification,
+            timeout_ms=1000,
+            attempts=2,
+            device=device,
+        )
         if not response:
             return None
 
@@ -255,8 +313,8 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
         starting_flow = next_starting_flow
 
 
-async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int) -> list[dict] | None:
-    inventory = await query_tx_flow_inventory(device_ip, arc_port, flow_protocol_id)
+async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int, *, device=None) -> list[dict] | None:
+    inventory = await _query_tx_inventory_with_optional_device(device_ip, arc_port, flow_protocol_id, device)
     return None if inventory is None else inventory["flows"]
 
 
@@ -264,13 +322,20 @@ async def query_preferred_tx_flow_inventory(
     device_ip: str,
     arc_port: int,
     mutation_protocol_id: int,
+    *,
+    device=None,
 ) -> dict | None:
-    status_inventory = await query_tx_flow_inventory(device_ip, arc_port, PROTOCOL_ARC_2809)
+    status_inventory = await _query_tx_inventory_with_optional_device(
+        device_ip,
+        arc_port,
+        PROTOCOL_ARC_2809,
+        device=device,
+    )
     if status_inventory is not None:
         return status_inventory
     if mutation_protocol_id == PROTOCOL_ARC_2809:
         return None
-    return await query_tx_flow_inventory(device_ip, arc_port, mutation_protocol_id)
+    return await _query_tx_inventory_with_optional_device(device_ip, arc_port, mutation_protocol_id, device)
 
 
 def inventory_from_receiver_flow_status_page(page: dict) -> dict:
@@ -361,13 +426,14 @@ async def query_receiver_flow_inventory(device_ip: str, arc_port: int) -> dict |
     return flow_page
 
 
-async def query_receiver_port_ranges(device_ip: str, arc_port: int) -> dict | None:
-    response = await _request(
+async def query_receiver_port_ranges(device_ip: str, arc_port: int, *, device=None) -> dict | None:
+    response = await _request_with_optional_device(
         device_ip,
         arc_port,
         {"command": "query_receiver_port_ranges"},
         timeout_ms=1000,
         attempts=2,
+        device=device,
     )
     if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
         return None
@@ -380,8 +446,10 @@ async def query_transmit_channel_capabilities(
     arc_port: int,
     starting_channel_identifier: int = 1,
     maximum_channel_count: int = 0,
+    *,
+    device=None,
 ) -> dict | None:
-    response = await _request(
+    response = await _request_with_optional_device(
         device_ip,
         arc_port,
         {
@@ -391,6 +459,7 @@ async def query_transmit_channel_capabilities(
         },
         timeout_ms=1000,
         attempts=2,
+        device=device,
     )
     if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
         return None
@@ -404,6 +473,8 @@ async def create_tx_flow(
     flow_protocol_id: int,
     flow_slot: int,
     channels: list[int],
+    *,
+    device=None,
 ) -> int | None:
     require_creatable_flow_protocol(flow_protocol_id)
     command_specification = {
@@ -412,7 +483,9 @@ async def create_tx_flow(
         "flow_slot": flow_slot,
         "channels": list(channels),
     }
-    return await _result_code(device_ip, arc_port, command_specification)
+    if device is None:
+        return await _result_code(device_ip, arc_port, command_specification)
+    return await _result_code(device_ip, arc_port, command_specification, device=device)
 
 
 async def delete_tx_flow(
@@ -420,6 +493,8 @@ async def delete_tx_flow(
     arc_port: int,
     flow_protocol_id: int,
     flow_slot: int,
+    *,
+    device=None,
 ) -> int | None:
     require_deletable_flow_protocol(flow_protocol_id, flow_slot)
     command_specification = {
@@ -427,11 +502,13 @@ async def delete_tx_flow(
         "flow_protocol_id": flow_protocol_id,
         "flow_slot": flow_slot,
     }
-    return await _result_code(device_ip, arc_port, command_specification)
+    if device is None:
+        return await _result_code(device_ip, arc_port, command_specification)
+    return await _result_code(device_ip, arc_port, command_specification, device=device)
 
 
-async def _result_code(device_ip: str, arc_port: int, command_specification: dict) -> int | None:
-    response = await _request(device_ip, arc_port, command_specification, timeout_ms=2000, attempts=2)
+async def _result_code(device_ip: str, arc_port: int, command_specification: dict, *, device=None) -> int | None:
+    response = await _request_with_optional_device(device_ip, arc_port, command_specification, 2000, 2, device)
     if not response:
         return None
     return _parsed_response("result_code", response)
