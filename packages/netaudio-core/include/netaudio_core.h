@@ -164,6 +164,68 @@ NetaudioStatus netaudio_parse_page(const char *kind,
                                    uintptr_t out_capacity,
                                    uintptr_t *out_length);
 
+NetaudioStatus netaudio_dapi_build_session_open(uint8_t *out_buffer,
+                                                uintptr_t out_capacity,
+                                                uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_authentication(const uint8_t *auth_token,
+                                                  uintptr_t auth_token_len,
+                                                  uint8_t *out_buffer,
+                                                  uintptr_t out_capacity,
+                                                  uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_domain_subscription(const uint8_t *domain_id,
+                                                       uintptr_t domain_id_len,
+                                                       uint16_t subscription_id,
+                                                       uint8_t *out_buffer,
+                                                       uintptr_t out_capacity,
+                                                       uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_device_inventory_subscription(const uint8_t *domain_id,
+                                                                 uintptr_t domain_id_len,
+                                                                 uint8_t *out_buffer,
+                                                                 uintptr_t out_capacity,
+                                                                 uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_inventory_initialization(const uint8_t *domain_id,
+                                                            uintptr_t domain_id_len,
+                                                            uint16_t first_message_id,
+                                                            uint16_t notification_port,
+                                                            const uint8_t *local_ipv4,
+                                                            uint8_t *out_buffer,
+                                                            uintptr_t out_capacity,
+                                                            uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_identify(uint16_t target_selector,
+                                            uint16_t wrapper_id,
+                                            uint16_t message_id,
+                                            const uint8_t *host_mac,
+                                            uint8_t *out_buffer,
+                                            uintptr_t out_capacity,
+                                            uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_arc_request(uint16_t target_selector,
+                                               uint16_t wrapper_id,
+                                               const uint8_t *arc_packet,
+                                               uintptr_t arc_packet_len,
+                                               uint8_t *out_buffer,
+                                               uintptr_t out_capacity,
+                                               uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_settings_request(uint16_t target_selector,
+                                                    uint16_t wrapper_id,
+                                                    const uint8_t *settings_packet,
+                                                    uintptr_t settings_packet_len,
+                                                    uint8_t *out_buffer,
+                                                    uintptr_t out_capacity,
+                                                    uintptr_t *out_length);
+
+NetaudioStatus netaudio_dapi_build_service_acknowledgement(const uint8_t *announcement_frame,
+                                                           uintptr_t announcement_frame_len,
+                                                           uint8_t *out_buffer,
+                                                           uintptr_t out_capacity,
+                                                           uintptr_t *out_length);
+
 uint32_t netaudio_abi_version(void);
 
 const char *netaudio_status_name(int32_t status);

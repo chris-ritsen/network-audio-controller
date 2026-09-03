@@ -59,9 +59,16 @@ handoffs may add context or narrow a task, but they may not weaken these rules.
   operational documentation.
 - Research tools and observations are development inputs, not hidden production
   dependencies. Keep experimental paths explicit and opt-in.
-- The shipping DDM client may use only the documented Dante Managed API at the
-  configurable `/graphql` endpoint. It must not use packet capture, process
-  memory, internal ports, VM state, or emulator state at runtime.
+- Shipping DDM functionality may use both the documented Dante Managed API and
+  independently derived Controller-compatible network services, including
+  mDNS-discovered managed-control transports. Undocumented transports must be
+  implemented from permitted evidence, described as version-scoped where the
+  evidence is version-scoped, validate framing and state transitions strictly,
+  and fail closed on unsupported variants.
+- Shipping DDM functionality must not depend on packet capture, process memory,
+  proprietary applications, VM state, emulator state, or research artifacts at
+  runtime. Endpoints and credentials must come from explicit configuration or
+  ordinary network discovery; do not hard-code lab infrastructure.
 - Keep Dante wire-format encoding and parsing in the Rust core unless an
   explicit architecture decision establishes another boundary. Do not create
   silent parallel protocol implementations.

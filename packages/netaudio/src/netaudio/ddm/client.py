@@ -18,6 +18,11 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 MAXIMUM_CREDENTIAL_BYTES = 64 * 1024
 MAXIMUM_RESPONSE_LIMIT_BYTES = 16 * 1024 * 1024
 MAXIMUM_TIMEOUT_SECONDS = 60.0
+PASSWORD_LOGIN_OPERATION_NAME = "UserLoginWithPassword"
+PASSWORD_LOGIN_MUTATION = (
+    "mutation UserLoginWithPassword($input: UserLoginWithPasswordInput!) "
+    "{ UserLoginWithPassword(input: $input) { ok token } }"
+)
 
 
 class ManagedAPIError(RuntimeError):
@@ -25,6 +30,10 @@ class ManagedAPIError(RuntimeError):
 
 
 class CredentialError(ManagedAPIError):
+    pass
+
+
+class AuthenticationError(ManagedAPIError):
     pass
 
 
@@ -178,6 +187,126 @@ def _default_transport(request: ManagedAPIRequest) -> HTTPResponse:
     return HTTPResponse(status=status, body=body)
 
 
+def _send_request(
+    transport: Transport,
+    request: ManagedAPIRequest,
+    max_response_bytes: int,
+) -> HTTPResponse:
+    try:
+        response = transport(request)
+    except ManagedAPIError:
+        raise
+    except (OSError, ValueError, RuntimeError, http.client.HTTPException) as error:
+        raise TransportError(f"Managed API transport failed: {error}") from error
+    if not isinstance(response, HTTPResponse):
+        raise TransportError("Managed API transport returned an invalid response")
+    if (
+        isinstance(response.status, bool)
+        or not isinstance(response.status, int)
+        or not isinstance(response.body, bytes)
+    ):
+        raise TransportError("Managed API transport returned an invalid response")
+    if len(response.body) > max_response_bytes:
+        raise ResponseTooLargeError("Managed API response exceeded the configured limit")
+    if not 200 <= response.status < 300:
+        raise HTTPStatusError(response.status, response.body)
+    return response
+
+
+def _decode_errors(value: Any) -> tuple[GraphQLIssue, ...]:
+    if not isinstance(value, list):
+        raise ResponseShapeError("Managed API GraphQL errors must be a list")
+    if any(not isinstance(item, Mapping) for item in value):
+        raise ResponseShapeError("Managed API GraphQL errors must contain only objects")
+    try:
+        return tuple(GraphQLIssue.from_mapping(item) for item in value)
+    except ModelDecodeError as error:
+        raise ResponseShapeError(str(error)) from error
+
+
+def _decode_json(body: bytes) -> Mapping[str, Any]:
+    try:
+        decoded = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise JSONResponseError("Managed API returned invalid JSON") from error
+    if not isinstance(decoded, Mapping):
+        raise ResponseShapeError("Managed API response must be an object")
+    return decoded
+
+
+def _decode_result(response: HTTPResponse) -> GraphQLResult:
+    decoded = _decode_json(response.body)
+    errors = _decode_errors(decoded.get("errors", []))
+    if "data" not in decoded:
+        if errors:
+            return GraphQLResult(data=None, errors=errors)
+        raise ResponseShapeError("Managed API response omitted data")
+    raw_data = decoded["data"]
+    if raw_data is None:
+        return GraphQLResult(data=None, errors=errors)
+    if not isinstance(raw_data, Mapping):
+        raise ResponseShapeError("Managed API data must be an object or null")
+    return GraphQLResult(data=dict(raw_data), errors=errors)
+
+
+def authenticate_with_password(
+    url: str,
+    username: str,
+    password: str,
+    *,
+    allow_insecure_http: bool = False,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    transport: Transport | None = None,
+) -> str:
+    """Exchange a DDM username and password for a Managed API credential."""
+    endpoint = _validate_url(url)
+    if endpoint.scheme != "https" and not allow_insecure_http:
+        raise ValueError("password login over HTTP requires allow_insecure_http=True")
+    if not isinstance(username, str) or not username:
+        raise ValueError("username must be a non-empty string")
+    if not isinstance(password, str) or not password:
+        raise ValueError("password must be a non-empty string")
+    response_limit = _validate_response_limit(max_response_bytes)
+    request_timeout = _validate_timeout(timeout)
+    body = json.dumps(
+        {
+            "operationName": PASSWORD_LOGIN_OPERATION_NAME,
+            "query": PASSWORD_LOGIN_MUTATION,
+            "variables": {"input": {"email": username, "password": password}},
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = ManagedAPIRequest(
+        url=url,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Connection": "close",
+        },
+        body=body,
+        timeout=request_timeout,
+        max_response_bytes=response_limit,
+    )
+    response = _send_request(transport or _default_transport, request, response_limit)
+    result = _decode_result(response)
+    if result.data is None or result.errors:
+        raise AuthenticationError("DDM rejected username/password login")
+    payload = result.data.get(PASSWORD_LOGIN_OPERATION_NAME)
+    if not isinstance(payload, Mapping):
+        raise ResponseShapeError("Managed API login result must be an object")
+    ok = payload.get("ok")
+    if not isinstance(ok, bool):
+        raise ResponseShapeError("Managed API login result ok must be a boolean")
+    if not ok:
+        raise AuthenticationError("DDM rejected username/password login")
+    token = payload.get("token")
+    try:
+        return _validate_credential(token)
+    except CredentialError as error:
+        raise ResponseShapeError("Managed API login result token is invalid") from error
+
+
 class ManagedAPIClient:
     def __init__(
         self,
@@ -226,8 +355,8 @@ class ManagedAPIClient:
             timeout=self.timeout,
             max_response_bytes=self.max_response_bytes,
         )
-        response = self._send(request)
-        return self._decode_result(response)
+        response = _send_request(self.transport, request, self.max_response_bytes)
+        return _decode_result(response)
 
     async def execute_async(
         self,
@@ -250,20 +379,6 @@ class ManagedAPIClient:
     async def inventory_async(self) -> InventoryResult:
         return await asyncio.to_thread(self.inventory)
 
-    def _decode_result(self, response: HTTPResponse) -> GraphQLResult:
-        decoded = self._decode_json(response.body)
-        errors = self._decode_errors(decoded.get("errors", []))
-        if "data" not in decoded:
-            if errors:
-                return GraphQLResult(data=None, errors=errors)
-            raise ResponseShapeError("Managed API response omitted data")
-        raw_data = decoded["data"]
-        if raw_data is None:
-            return GraphQLResult(data=None, errors=errors)
-        if not isinstance(raw_data, Mapping):
-            raise ResponseShapeError("Managed API data must be an object or null")
-        return GraphQLResult(data=dict(raw_data), errors=errors)
-
     def _read_credential(self) -> str:
         if self._credential is not None:
             return self._credential
@@ -276,50 +391,9 @@ class ManagedAPIClient:
             raise CredentialError("Managed API credential file could not be read") from error
         return _validate_credential(credential)
 
-    def _send(self, request: ManagedAPIRequest) -> HTTPResponse:
-        try:
-            response = self.transport(request)
-        except ManagedAPIError:
-            raise
-        except (OSError, ValueError, RuntimeError, http.client.HTTPException) as error:
-            raise TransportError(f"Managed API transport failed: {error}") from error
-        if not isinstance(response, HTTPResponse):
-            raise TransportError("Managed API transport returned an invalid response")
-        if (
-            isinstance(response.status, bool)
-            or not isinstance(response.status, int)
-            or not isinstance(response.body, bytes)
-        ):
-            raise TransportError("Managed API transport returned an invalid response")
-        if len(response.body) > self.max_response_bytes:
-            raise ResponseTooLargeError("Managed API response exceeded the configured limit")
-        if not 200 <= response.status < 300:
-            raise HTTPStatusError(response.status, response.body)
-        return response
-
-    @staticmethod
-    def _decode_errors(value: Any) -> tuple[GraphQLIssue, ...]:
-        if not isinstance(value, list):
-            raise ResponseShapeError("Managed API GraphQL errors must be a list")
-        if any(not isinstance(item, Mapping) for item in value):
-            raise ResponseShapeError("Managed API GraphQL errors must contain only objects")
-        try:
-            return tuple(GraphQLIssue.from_mapping(item) for item in value)
-        except ModelDecodeError as error:
-            raise ResponseShapeError(str(error)) from error
-
-    @staticmethod
-    def _decode_json(body: bytes) -> Mapping[str, Any]:
-        try:
-            decoded = json.loads(body)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise JSONResponseError("Managed API returned invalid JSON") from error
-        if not isinstance(decoded, Mapping):
-            raise ResponseShapeError("Managed API response must be an object")
-        return decoded
-
 
 __all__ = [
+    "AuthenticationError",
     "CredentialError",
     "GraphQLResult",
     "HTTPResponse",
@@ -333,4 +407,5 @@ __all__ = [
     "ResponseTooLargeError",
     "Transport",
     "TransportError",
+    "authenticate_with_password",
 ]
