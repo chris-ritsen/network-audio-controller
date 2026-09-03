@@ -4,6 +4,24 @@ pub fn build_set_latency(
     latency_milliseconds: f64,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    build_set_latency_for_protocol(
+        crate::protocol::PROTOCOL_ID,
+        latency_milliseconds,
+        transaction_id,
+    )
+}
+
+pub fn build_set_latency_for_protocol(
+    protocol_id: u16,
+    latency_milliseconds: f64,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if !matches!(
+        protocol_id,
+        crate::protocol::PROTOCOL_ID | crate::protocol::PROTOCOL_ARC_2809
+    ) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
     if !latency_milliseconds.is_finite()
         || !(0.0..=MAX_LATENCY_MILLISECONDS).contains(&latency_milliseconds)
     {
@@ -22,7 +40,12 @@ pub fn build_set_latency(
     payload.extend_from_slice(&latency_bytes);
     payload.extend_from_slice(&latency_bytes);
 
-    build_control_packet(OPCODE_DEVICE_SETTINGS_SET, &payload, transaction_id)
+    build_control_packet_for_protocol(
+        protocol_id,
+        OPCODE_DEVICE_SETTINGS_SET,
+        &payload,
+        transaction_id,
+    )
 }
 
 fn build_system_reset(

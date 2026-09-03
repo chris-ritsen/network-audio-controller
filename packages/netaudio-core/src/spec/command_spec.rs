@@ -395,6 +395,8 @@ pub(super) enum CommandSpec {
         latency: f64,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_arc_protocol")]
+        protocol_id: u16,
     },
     SetName {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -1055,7 +1057,8 @@ pub(super) fn build_command(
         CommandSpec::SetLatency {
             latency,
             message_id,
-        } => commands::build_set_latency(latency, message_id)?,
+            protocol_id,
+        } => commands::build_set_latency_for_protocol(protocol_id, latency, message_id)?,
         CommandSpec::SetName { name, message_id } => {
             crate::protocol::build_set_device_name(&name, message_id)?
         }

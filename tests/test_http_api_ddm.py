@@ -16,6 +16,10 @@ class FakeInventory:
     def domains(self):
         return [{"id": "d1", "name": "test", "devices": []}]
 
+    def client_for_context(self, context_name=None):
+        self.selected_context = context_name
+        return self.client
+
     def serialize_devices(self, devices):
         merged = {
             server_name: {"name": device.name, "server_name": server_name, "inventory_sources": ["direct"]}
@@ -84,6 +88,12 @@ async def test_ddm_graphql_proxy_validates_and_forwards():
     )
     assert status == 200 and body == {"data": {"me": None}, "errors": []}
     inventory.client.execute_async.assert_awaited_once_with("query Me { me { id } }", {"a": 1}, "Me")
+    status, _ = await _post(
+        server,
+        "/ddm/graphql",
+        b'{"query": "{ me { id } }", "context": "west-main"}',
+    )
+    assert status == 200 and inventory.selected_context == "west-main"
     inventory.client.execute_async.side_effect = TransportError("Managed API transport failed: down")
     status, body = await _post(server, "/ddm/graphql", b'{"query": "{ me { id } }"}')
     assert status == 502 and "down" in body["error"]
@@ -98,6 +108,41 @@ async def test_ddm_refresh_reports_the_inventory_status():
     inventory.refresh.return_value = False
     status, _ = await _post(server, "/ddm/refresh", b"")
     assert status == 502
+
+
+@pytest.mark.asyncio
+async def test_inventory_get_routes_accept_a_request_local_context_filter():
+    class ContextInventory(FakeInventory):
+        def domains(self):
+            return [
+                {"id": "east", "name": "Main", "devices": [], "ddm_context": "east-main"},
+                {"id": "west", "name": "Main", "devices": [], "ddm_context": "west-main"},
+            ]
+
+        def serialize_devices(self, devices):
+            records = super().serialize_devices(devices)
+            records["ddm:001dc1fffe50692e:0"]["ddm_context"] = "east-main"
+            records["ddm:west:device"] = {
+                "ddm_context": "west-main",
+                "ddm_device_id": "001dc1fffe50692e:0",
+                "inventory_sources": ["ddm"],
+                "name": "west-device",
+                "server_name": "ddm:west:device",
+            }
+            return records
+
+    server = make_http_server(devices={"dev1": make_device()})
+    server.managed_inventory = ContextInventory()
+
+    status, devices = await _get(server, "/devices?context=east-main")
+    domain_status, domains = await _get(server, "/ddm/domains?context=west-main")
+    ambiguous_status, ambiguous = await _get(server, "/devices/001dc1fffe50692e:0")
+    selected_status, selected = await _get(server, "/devices/001dc1fffe50692e:0?context=east-main")
+
+    assert status == 200 and set(devices) == {"dev1", "ddm:001dc1fffe50692e:0"}
+    assert domain_status == 200 and [domain["id"] for domain in domains] == ["west"]
+    assert ambiguous_status == 409 and "context-qualified" in ambiguous["error"]
+    assert selected_status == 200 and selected["ddm_context"] == "east-main"
 
 
 @pytest.mark.asyncio

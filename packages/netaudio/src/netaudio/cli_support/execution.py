@@ -100,8 +100,6 @@ async def _populate_audio_capabilities(application: DanteApplication, device: Da
 
 
 async def _populate_show_details(application: DanteApplication, device: DanteDevice, include_channels: bool) -> None:
-    if device.direct_control_available is False:
-        return
     if device.clock_source_code is None or device.clock_subdomain is None:
         try:
             await application.probe_clocking_status(device)
@@ -109,6 +107,13 @@ async def _populate_show_details(application: DanteApplication, device: DanteDev
         except (RuntimeError, OSError) as exception:
             device.failed_queries.add("clock_status")
             logger.debug(f"Clock status unavailable for {device.server_name or device.name}: {exception}")
+    if device.configured_latency is None:
+        try:
+            await application.get_latency_settings(device)
+            device.failed_queries.discard("latency")
+        except (RuntimeError, OSError) as exception:
+            device.failed_queries.add("latency")
+            logger.debug(f"Latency unavailable for {device.server_name or device.name}: {exception}")
     if device.aes67_multicast_prefix is None and device.aes67_supported is not False:
         try:
             await application.get_aes67_configured(device)
@@ -126,8 +131,8 @@ async def _load_device_for_show(application: DanteApplication, include_channels:
     if devices is not None:
         application.attach_devices(devices)
         [(server_name, device)] = select_device(filter_devices(devices))
-        if include_channels:
-            await _populate_controls({server_name: device})
+        if include_channels or device.requires_managed_control:
+            await _populate_controls({server_name: device}, application)
         if device.online:
             await _populate_show_details(application, device, include_channels=include_channels)
         return server_name, device
@@ -208,7 +213,7 @@ def run_command(run: Callable[..., Awaitable[Any]], *arguments, discover_devices
 
 def _explicit_selection() -> bool:
     state = _get_state()
-    return bool(state.names or state.hosts or state.server_names or state.macs)
+    return bool(state.names or state.hosts or state.server_names or state.macs or state.ddm_context)
 
 
 def _device_label(device: DanteDevice) -> str:
@@ -233,7 +238,10 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
         devices = filter_devices(devices)
     candidates: dict[str, DanteDevice] = {}
     for server_name, device in devices.items():
-        if device.ipv4 is None or device.direct_control_available is False:
+        if device.ipv4 is None:
+            continue
+        if probe_name == "lock status" and device.requires_managed_control:
+            logger.debug(f"Skipping lock status probe for {_device_label(device)}: no verified DDM operation")
             continue
         if not explicit:
             if not device.online:
@@ -246,30 +254,45 @@ def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[
     return candidates
 
 
-async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
+async def _populate_controls(
+    devices: dict[str, DanteDevice],
+    application: DanteApplication | None = None,
+) -> None:
     explicit = _explicit_selection()
     if explicit:
         devices = filter_devices(devices)
-    unpopulated = []
+    population_requests = []
+    managed_devices = []
     for device in devices.values():
-        if device.tx_channels or device.rx_channels or not device.ipv4:
+        if not device.ipv4:
             continue
-        if device.direct_control_available is False:
+        if device.requires_managed_control:
+            managed_devices.append(device)
+            population_requests.append((device, not bool(device.tx_channels or device.rx_channels)))
+            continue
+        if device.tx_channels or device.rx_channels:
             continue
         if not device.online and not explicit:
             logger.debug(f"Skipping control population for {_device_label(device)}: device is offline")
             continue
-        unpopulated.append(device)
+        population_requests.append((device, True))
 
-    if not unpopulated:
-        return
+    if managed_devices and application is None:
+        application = managed_devices[0].application
+    if managed_devices and application is None:
+        raise RuntimeError("managed control population requires a Dante application")
 
     population_results = await asyncio.gather(
-        *(device.populate_from_core() for device in unpopulated),
+        *(
+            application._populate_device_controls(device, include_channels=include_channels)
+            if device.requires_managed_control
+            else device.populate_from_core()
+            for device, include_channels in population_requests
+        ),
         return_exceptions=True,
     )
 
-    for device, result in zip(unpopulated, population_results):
+    for (device, _), result in zip(population_requests, population_results):
         if not isinstance(result, BaseException):
             continue
         if isinstance(result, asyncio.CancelledError):
@@ -277,6 +300,12 @@ async def _populate_controls(devices: dict[str, DanteDevice]) -> None:
         logger.warning(_unreachable_message(device, result))
         logger.debug(f"Control population failure for {_device_label(device)}", exc_info=result)
         device.online = False
+
+    if managed_devices:
+        await asyncio.gather(
+            *(_populate_audio_capabilities(application, device) for device in managed_devices),
+            return_exceptions=True,
+        )
 
 
 async def _enrich_clock_fields(

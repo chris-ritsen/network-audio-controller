@@ -398,7 +398,11 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
         ),
         _ => false,
     };
-    let valid = (is_common_arc_protocol(envelope.protocol_id) && common_opcode) || flow_opcode;
+    let modern_receiver_port_ranges = envelope.protocol_id == PROTOCOL_ARC_2809
+        && envelope.opcode == OPCODE_QUERY_RECEIVER_PORT_RANGES;
+    let valid = (is_common_arc_protocol(envelope.protocol_id) && common_opcode)
+        || flow_opcode
+        || modern_receiver_port_ranges;
     valid.then_some(envelope.result_code)
 }
 

@@ -4,6 +4,7 @@ from netaudio import core
 from netaudio.commands.device.network_status import (
     NETWORK_STATUS_DISSECT_HEADERS,
     NETWORK_STATUS_HEADERS,
+    _should_probe_switch_configuration,
     _without_port_column,
     network_status_rows,
 )
@@ -97,6 +98,40 @@ def test_network_status_rows_report_link_and_switch_mode_in_words():
     assert rows == [
         ["avio-usb-1", "192.168.1.247", "", "up", "100 Mbps", "Switched", "Switched, Split/Redundant"],
     ]
+
+
+def test_managed_single_interface_device_skips_unavailable_switch_probe():
+    device = type(
+        "Device",
+        (),
+        {"requires_managed_control": True, "num_networks": None, "interfaces": [{"address": "192.0.2.1"}]},
+    )()
+
+    assert _should_probe_switch_configuration(device) is False
+    link_status = make_link_status([make_record(0, 0x0028, True, 100)])
+    rows = network_status_rows(
+        "managed-device",
+        "192.0.2.1",
+        link_status,
+        None,
+        dissect=False,
+        switch_configuration_applicable=False,
+    )
+    assert rows[0][5] == "N/A"
+
+
+def test_managed_multi_interface_device_keeps_switch_probe():
+    device = type(
+        "Device",
+        (),
+        {
+            "requires_managed_control": True,
+            "num_networks": 2,
+            "interfaces": [{"address": "192.0.2.1"}, {"address": "192.0.2.2"}],
+        },
+    )()
+
+    assert _should_probe_switch_configuration(device) is True
 
 
 def test_without_port_column_drops_the_column_only_when_no_row_names_a_port():

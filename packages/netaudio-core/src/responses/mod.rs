@@ -426,6 +426,7 @@ pub struct ReceiverPortRanges {
     pub first_port_range_end: u16,
     pub second_port_range_start: u16,
     pub second_port_range_end: u16,
+    pub second_port_range_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

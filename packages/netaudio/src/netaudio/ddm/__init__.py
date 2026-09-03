@@ -22,7 +22,14 @@ from netaudio.ddm.discovery import (
     DDMService,
     discover_ddm_servers,
 )
+from netaudio.ddm.device_transport import (
+    ManagedDeviceControlError,
+    ManagedDeviceTransport,
+    ManagedOperationResult,
+    device_requires_managed_control,
+)
 from netaudio.ddm.controller import (
+    ControllerAPIClient,
     ControllerAuthenticationError,
     ControllerServiceError,
     DAPISessionError,
@@ -80,6 +87,7 @@ __all__ = [
     "ClockingState",
     "CredentialError",
     "ControllerAuthenticationError",
+    "ControllerAPIClient",
     "ControllerServiceError",
     "DAPISessionError",
     "Device",
@@ -107,6 +115,9 @@ __all__ = [
     "ManagedAPIClient",
     "ManagedAPIError",
     "ManagedAPIRequest",
+    "ManagedDeviceControlError",
+    "ManagedDeviceTransport",
+    "ManagedOperationResult",
     "ModelDecodeError",
     "NamedEntity",
     "NetworkInterface",
@@ -124,6 +135,7 @@ __all__ = [
     "TypeReference",
     "command_name",
     "discover_ddm_servers",
+    "device_requires_managed_control",
     "identify_managed_device",
     "identify_managed_device_with_api_key",
     "query_managed_arc",

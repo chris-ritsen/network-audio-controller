@@ -3,9 +3,14 @@ from dataclasses import replace
 
 import pytest
 
-from netaudio.common.managed_api import ManagedAPIConfiguration
+from netaudio.common.managed_api import (
+    DDMConfiguration,
+    DDMContextConfiguration,
+    ManagedAPIConfiguration,
+)
 from netaudio.daemon.managed_inventory import (
     ManagedDeviceObservation,
+    ManagedInventoryRegistry,
     ManagedInventoryService,
     merge_device_inventory,
 )
@@ -13,6 +18,7 @@ from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.ddm import (
+    ClockPreferences,
     Device,
     DeviceConnection,
     DeviceIdentity,
@@ -182,7 +188,16 @@ def _service(client, clock):
 
 def test_mac_correlation_accepts_direct_16_hex_suffix_and_preserves_direct_audio_values():
     direct = _direct_device("direct.local.", mac="0011223344550000")
-    managed = _managed_device(mac="00:11:22:33:44:55")
+    managed = replace(
+        _managed_device(mac="00:11:22:33:44:55"),
+        clock_preferences=ClockPreferences(
+            id="clock-managed-1",
+            external_word_clock=False,
+            leader=True,
+            unicast_clocking=False,
+            v1_unicast_delay_requests=False,
+        ),
+    )
 
     merged = merge_device_inventory(
         {direct.server_name: direct},
@@ -199,6 +214,8 @@ def test_mac_correlation_accepts_direct_16_hex_suffix_and_preserves_direct_audio
     assert record["encoding"] == 24
     assert record["supported_encodings"] == [16, 24, 32]
     assert record["latency_ms"] == 0.25
+    assert record["preferred_leader"] is True
+    assert record["field_sources"]["clock"] == "ddm"
     assert record["field_sources"]["audio_configuration"] == "direct"
     assert record["channels"]["transmitters"][1]["name"] == "direct-tx"
     assert record["channels"]["transmitters"][1]["ddm_signal_presence"] == {
@@ -248,7 +265,7 @@ def test_matching_name_and_ip_do_not_override_conflicting_macs():
     assert merged["ddm:managed-1"]["inventory_sources"] == ["ddm"]
 
 
-def test_missing_managed_mac_allows_unique_ip_fallback():
+def test_missing_managed_mac_does_not_merge_by_ip_across_possible_sites():
     direct = _direct_device("direct.local.", address="192.0.2.30")
     managed = _managed_device(address="192.0.2.30", mac=None)
 
@@ -259,8 +276,9 @@ def test_missing_managed_mac_allows_unique_ip_fallback():
         fresh=True,
     )
 
-    assert list(merged) == ["direct.local."]
-    assert merged["direct.local."]["ddm_device_id"] == "managed-1"
+    assert set(merged) == {"direct.local.", "ddm:managed-1"}
+    assert merged["direct.local."]["inventory_sources"] == ["direct"]
+    assert merged["ddm:managed-1"]["inventory_sources"] == ["ddm"]
 
 
 def test_ip_fallback_refuses_ambiguous_direct_candidates():
@@ -280,7 +298,16 @@ def test_ip_fallback_refuses_ambiguous_direct_candidates():
 
 
 def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_status():
-    managed = _managed_device(address="192.0.2.50", mac="00:11:22:33:44:99")
+    managed = replace(
+        _managed_device(address="192.0.2.50", mac="00:11:22:33:44:99"),
+        clock_preferences=ClockPreferences(
+            id="clock-managed-1",
+            external_word_clock=False,
+            leader=True,
+            unicast_clocking=False,
+            v1_unicast_delay_requests=False,
+        ),
+    )
 
     merged = merge_device_inventory(
         {},
@@ -299,6 +326,7 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
     assert record["product_version"] == "1.2.3"
     assert record["software_version"] == "4.5.6"
     assert record["firmware_version"] == "4.2.4.1"
+    assert record["preferred_leader"] is True
     assert record["ddm_identity"]["dante_hardware_version"] == "4.2.3.4"
     assert record["channels"]["receivers"]["1"] == {
         "name": "managed-rx",
@@ -528,3 +556,53 @@ async def test_failed_graphql_refresh_preserves_last_inventory_and_reports_degra
     assert service.status()["state"] == "degraded"
     assert service.status()["last_error"] == "inventory unavailable"
     assert service.status()["last_success"] == 1000.0
+
+
+@pytest.mark.asyncio
+async def test_registry_keeps_same_device_id_and_ip_distinct_across_servers_and_domains():
+    east_context = DDMContextConfiguration("east-main", "east", "domain-east", "Main")
+    west_context = DDMContextConfiguration("west-main", "west", "domain-west", "Main")
+    east_configuration = ManagedAPIConfiguration(
+        url="https://east.example/graphql",
+        credential="east-key",
+        credential_file=None,
+        refresh_interval=10.0,
+        name="east",
+    )
+    west_configuration = ManagedAPIConfiguration(
+        url="https://west.example/graphql",
+        credential="west-key",
+        credential_file=None,
+        refresh_interval=10.0,
+        name="west",
+    )
+    east_client = FakeClient(
+        _result(domains=(_domain("domain-east", _managed_device("shared", mac="00:11:22:33:44:01")),))
+    )
+    west_client = FakeClient(
+        _result(domains=(_domain("domain-west", _managed_device("shared", mac="00:11:22:33:44:02")),))
+    )
+    east_service = ManagedInventoryService(east_configuration, client=east_client, contexts=(east_context,))
+    west_service = ManagedInventoryService(west_configuration, client=west_client, contexts=(west_context,))
+    configuration = DDMConfiguration(
+        servers={"east": east_configuration, "west": west_configuration},
+        contexts={"east-main": east_context, "west-main": west_context},
+        default_context="east-main",
+    )
+    registry = ManagedInventoryRegistry(
+        configuration,
+        services={"east": east_service, "west": west_service},
+    )
+
+    assert await registry.refresh() is True
+    records = registry.serialize_devices({})
+
+    assert set(records) == {
+        "ddm:east:domain-east:shared",
+        "ddm:west:domain-west:shared",
+    }
+    assert records["ddm:east:domain-east:shared"]["ddm_context"] == "east-main"
+    assert records["ddm:west:domain-west:shared"]["ddm_server_profile"] == "west"
+    assert registry.client_for_context("east-main") is east_client
+    assert registry.client_for_context("west-main") is west_client
+    assert registry.status()["server_count"] == 2
