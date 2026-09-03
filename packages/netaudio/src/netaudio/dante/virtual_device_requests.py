@@ -410,7 +410,7 @@ class VirtualDeviceRequestHandler:
         settings = [
             (0x8020, self._config.sample_rate),
             (0x8204, self._config.default_latency_ns),
-            (0x8205, self._config.latency_ns),
+            (0x8205, self._config.configured_latency_ns),
             (0x8301, int(self._config.active_latency_ns)),
             (0x8302, self._config.maximum_latency_ns),
             (0x8306, self._config.minimum_latency_ns),
@@ -452,7 +452,7 @@ class VirtualDeviceRequestHandler:
         if configured_latency_nanoseconds is None or active_latency_nanoseconds != configured_latency_nanoseconds:
             return self._handle_unsupported(transaction_id, data, protocol_id)
 
-        self._config.latency_ns = configured_latency_nanoseconds
+        self._config.configured_latency_ns = configured_latency_nanoseconds
         self._config.active_latency_ns = active_latency_nanoseconds
         response_body = struct.pack(">BB", 4, 4)
         response_body += struct.pack(">HH", 0x8205, 28)

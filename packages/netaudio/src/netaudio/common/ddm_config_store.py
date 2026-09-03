@@ -15,7 +15,9 @@ _ASSIGNMENT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
 
 def _validate_name(value: str, description: str) -> str:
     if DDM_NAME_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"{description} must start with a letter or digit and contain only letters, digits, ._- characters")
+        raise ValueError(
+            f"{description} must start with a letter or digit and contain only letters, digits, ._- characters"
+        )
     return value
 
 
@@ -126,9 +128,6 @@ def save_ddm_context(
         {
             "url": url,
             "credential_file": credential_value,
-            "api_key_file": None,
-            "api_key": None,
-            "credential": None,
             "enabled": True,
         },
     )

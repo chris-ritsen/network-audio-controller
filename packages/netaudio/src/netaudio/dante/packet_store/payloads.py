@@ -16,8 +16,6 @@ def extract_evidence_packet_ids(markers: list[dict]) -> set[int]:
         if not marker_data:
             continue
         marker_packet_ids = marker_data.get("packet_ids")
-        if marker_packet_ids is None and marker_data.get("packet_id") is not None:
-            marker_packet_ids = [marker_data["packet_id"]]
         for packet_id in marker_packet_ids or []:
             packet_ids.add(int(packet_id))
     return packet_ids

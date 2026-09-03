@@ -136,7 +136,9 @@ Channel records carry `channel_number`, `media_type`, and
 
 For the packet-observed frontends, an exact mDNS `arcp_vers` of `2.8.15`
 selects protocol `0x280f`; the existing `2.8.9` frontend uses `0x2809`.
-Unrecognized versions retain the `0x2809` compatibility default.
+Unrecognized or missing versions fail closed instead of selecting a presumed
+protocol. Enrolled DDM devices use the separately observed `0x2809` managed
+transport contract.
 
 #### Dante Domain Manager devices
 
@@ -155,11 +157,11 @@ netaudio ddm context list
 netaudio ddm context use studio-main
 ```
 
-An existing API key can be used without a password prompt:
+An existing Managed API credential can be used without a password prompt:
 
 ```bash
-netaudio ddm login --url https://ddm.example/graphql --server studio \
-  --api-key-file ~/.config/netaudio/studio-api-key
+netaudio ddm login --url https://ddm.example/graphql --server-profile studio \
+  --credential-file ~/.config/netaudio/studio.credential
 ```
 
 Each context binds one server profile, one credential file, and one domain ID.
@@ -185,9 +187,18 @@ record retains its originating server profile, context, domain ID, and device
 ID. This keeps devices distinct when separate sites reuse names or IP address
 ranges and ensures credentials are sent only to the configured server.
 
-The older single `[ddm]` `url`/`api_key_file` form remains readable as the
-`default` server profile. The URL is used as configured; there are no separate
-certificate, hostname, or internal-port settings.
+The URL is used as configured; there are no separate certificate, hostname, or
+internal-port settings. Low-level Managed API access is grouped by intent and
+resource so it does not overwhelm the ordinary DDM commands:
+
+```bash
+netaudio ddm api read domains
+netaudio ddm api write device set-name --device-id DEVICE_ID --name NAME
+netaudio ddm api schema
+```
+
+Use the normal device commands for ordinary control. `ddm api write` exposes
+schema-derived administrative mutations and should be used deliberately.
 
 The documented GraphQL API supplies inventory and device-name, preferred-leader,
 and subscription changes. Capture-derived, version-scoped Controller-service
@@ -202,7 +213,7 @@ capability checks.
 Operations without an established managed request and completion model fail
 closed instead of trying the unmanaged device address. These currently include
 lock/unlock, reboot and factory reset, capability/log exports, modern multicast
-flow creation, channel-name reset, and the legacy transmitter-channel-capability
+flow creation, channel-name reset, and the `0x2729` transmitter-channel-capability
 query. Sample-rate pull-up is implemented through the managed settings envelope,
 but the tested AVIO family did not publish a response and is reported as
 unavailable.

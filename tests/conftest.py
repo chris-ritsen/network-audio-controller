@@ -5,6 +5,11 @@ import pytest
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def isolate_default_configuration(monkeypatch, tmp_path):
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(tmp_path / "config.toml"))
+
+
 @pytest.fixture
 def load_fixture():
     def _load_fixture(filename: str) -> bytes:

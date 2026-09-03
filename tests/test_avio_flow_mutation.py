@@ -66,7 +66,7 @@ def test_live_aes3_2600_pages_parse_create_and_clear():
     )
     assert after_create["reported_flow_count"] == 1
     flow = after_create["flows"][0]
-    assert flow["flow_number"] == 2
+    assert flow["global_flow_id"] == 2
     assert flow["flow_type"] == "multicast"
     assert flow["destination_internet_protocol_version_four_address"] == "239.255.211.146"
     assert flow["destination_user_datagram_port"] == 4321
@@ -82,7 +82,7 @@ def test_live_aes3_2600_pages_parse_create_and_clear():
         "transmitter_flow_status_page",
         bytes.fromhex(AFTER_CONTROLLER_CREATE),
     )
-    assert after_controller_create["flows"][0]["flow_number"] == 2
+    assert after_controller_create["flows"][0]["global_flow_id"] == 2
     assert after_controller_create["flows"][0]["flow_type"] == "multicast"
 
     after_controller_delete = core.parse_response(

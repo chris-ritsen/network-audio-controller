@@ -136,14 +136,6 @@ def device_json_field_name(field_name: str) -> str:
     return DEVICE_JSON_FIELD_NAMES.get(field_name, field_name)
 
 
-def with_legacy_field_names(record: dict) -> dict:
-    aliased = dict(record)
-    for legacy_name, json_field_name in DEVICE_JSON_FIELD_NAMES.items():
-        if json_field_name in record and legacy_name not in record:
-            aliased[legacy_name] = record[json_field_name]
-    return {key: aliased[key] for key in sorted(aliased)}
-
-
 class DanteDeviceSerializer:
     @staticmethod
     def to_json(device):
@@ -215,8 +207,6 @@ class DanteDeviceSerializer:
             json_field_name = device_json_field_name(field_name)
             if json_field_name in data:
                 setattr(device, field_name, data[json_field_name])
-            elif field_name in data:
-                setattr(device, field_name, data[field_name])
 
         if data.get("interface_reboot_required"):
             device.interface_reboot_required = True

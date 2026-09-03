@@ -115,6 +115,31 @@ def _sample_rate(application, rate, all_devices=False):
     return invoke(config_commands.run_sample_rate, application, application.devices, rate, all_devices, False)
 
 
+def test_single_device_sample_rate_read_is_labeled():
+    device = FakeDevice("AVIO")
+    device.sample_rate = 48_000
+    application = FakeApplication({"avio.local.": device})
+
+    result = _sample_rate(application, None)
+
+    assert result.exit_code == 0
+    assert result.output == "Sample rate: 48000 Hz\n"
+
+
+def test_single_device_sample_rate_json_uses_unit_labeled_key(monkeypatch):
+    from netaudio.cli import OutputFormat, state
+
+    device = FakeDevice("AVIO")
+    device.sample_rate = 48_000
+    application = FakeApplication({"avio.local.": device})
+    monkeypatch.setattr(state, "output_format", OutputFormat.json)
+
+    result = _sample_rate(application, None)
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"sample_rate_hz": 48_000}
+
+
 def test_sample_rate_all_aggregates_readback_failures():
     good = FakeDevice("Good", settings={"sample_rate": 48000}, ipv4="192.0.2.10")
     stale = FakeDevice(
@@ -177,6 +202,16 @@ def _encoding(application, bits, all_devices=False):
     return invoke(config_commands.run_encoding, application, application.devices, bits, all_devices)
 
 
+def test_single_device_encoding_read_is_labeled():
+    device = FakeDevice("AVIO", encoding=24)
+    application = FakeApplication({"avio.local.": device})
+
+    result = _encoding(application, None)
+
+    assert result.exit_code == 0
+    assert result.output == "Encoding: 24-bit\n"
+
+
 def test_encoding_rejects_value_missing_from_advertised_capabilities():
     device = FakeDevice("AVIO", encoding=24, supported_encodings=[24])
     application = FakeApplication({"avio.local.": device})
@@ -220,7 +255,6 @@ def test_latency_get_uses_active_device_readback():
             "default_latency_ns": 1_000_000,
             "configured_latency_ns": 250_000,
             "active_latency_ns": 150_000,
-            "latency_ns": 150_000,
             "min_latency_ns": 150_000,
             "max_latency_ns": 21_333_334,
         },
@@ -250,7 +284,6 @@ def test_latency_get_json_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
             "default_latency_ns": 1_000_000,
             "configured_latency_ns": 250_000,
             "active_latency_ns": 150_000,
-            "latency_ns": 150_000,
             "min_latency_ns": 150_000,
             "max_latency_ns": 21_333_334,
         },
@@ -306,7 +339,14 @@ def test_latency_get_xml_labels_milliseconds_and_raw_nanoseconds(monkeypatch):
     assert root.tag == "netaudio"
     assert root.findtext("active_latency_ms") == "0.15"
     assert root.findtext("active_latency_ns") == "150000"
-    assert [item.text for item in root.findall("latency_options_ms/item")] == ["0.15", "0.25", "0.5", "1.0", "2.0", "5.0"]
+    assert [item.text for item in root.findall("latency_options_ms/item")] == [
+        "0.15",
+        "0.25",
+        "0.5",
+        "1.0",
+        "2.0",
+        "5.0",
+    ]
 
 
 def test_latency_get_csv_is_a_labeled_field_value_report(monkeypatch):
@@ -342,7 +382,6 @@ def test_latency_get_surfaces_retained_configured_value_when_active_is_zero():
         settings={
             "configured_latency_ns": 250_000,
             "active_latency_ns": 0,
-            "latency_ns": 0,
             "min_latency_ns": 1_000_000,
             "max_latency_ns": 20_312_500,
         },
@@ -368,7 +407,6 @@ def test_latency_get_json_surfaces_retained_configured_value(monkeypatch):
         settings={
             "configured_latency_ns": 250_000,
             "active_latency_ns": 0,
-            "latency_ns": 0,
             "min_latency_ns": 1_000_000,
             "max_latency_ns": 20_312_500,
         },
@@ -473,7 +511,6 @@ def test_latency_does_not_treat_configured_value_as_applied():
         settings={
             "configured_latency_ns": 150_000,
             "active_latency_ns": 1_000_000,
-            "latency_ns": 1_000_000,
         },
     )
     application = FakeApplication({"avio.local.": device})
@@ -568,6 +605,17 @@ def test_preferred_leader_write_is_requested_but_not_verified():
     assert result.exit_code == 0
     assert "Preferred leader change requested for AVIO: on; not verified" in result.output
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_preferred_leader", (True,))]
+
+
+def test_single_device_preferred_leader_read_is_labeled():
+    device = FakeDevice("AVIO")
+    device.preferred_leader = False
+    application = FakeApplication({"avio.local.": device})
+
+    result = invoke(config_commands.run_preferred_leader, application, application.devices, None, False)
+
+    assert result.exit_code == 0
+    assert result.output == "Preferred leader: off\n"
 
 
 def test_interface_write_is_requested_but_not_verified():

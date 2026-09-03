@@ -16,7 +16,7 @@ from netaudio.commands.device.display import (
 )
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
-from netaudio.dante.const import PROTOCOL_ARC_2809, RESULT_CODE_SUCCESS
+from netaudio.dante.const import RESULT_CODE_SUCCESS
 
 app = typer.Typer(
     help="Inspect receiver flows and manage transmitter multicast flows on the selected device.",
@@ -81,6 +81,7 @@ async def run_flow_list(application, devices) -> None:
         typer.echo("Error: failed to query flows.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
     device_flows = flow_inventory["flows"]
+    uses_modern_status = "reported_flow_count" in flow_inventory
     include_status_endpoint = any(
         flow.get("destination_internet_protocol_version_four_address") or flow.get("subscriber_device_name")
         for flow in device_flows
@@ -91,14 +92,14 @@ async def run_flow_list(application, devices) -> None:
     else:
         headers.append("FPP")
 
-    if flow_protocol_id == PROTOCOL_ARC_2809 or include_status_endpoint:
+    if uses_modern_status:
         empty_message = f"No transmitter flow records reported (capacity {flow_inventory['max_flow_slots']})."
     else:
         empty_message = f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used)."
 
     rows = []
     for flow in device_flows:
-        channel_numbers = flow.get("channels")
+        channel_numbers = flow.get("populated_transmitter_channel_ids") if uses_modern_status else flow.get("channels")
         channel_list = (
             ", ".join(str(channel_number) for channel_number in channel_numbers)
             if isinstance(channel_numbers, list)
@@ -109,9 +110,10 @@ async def run_flow_list(application, devices) -> None:
             flow_type_code = flow.get("flow_type_code")
             flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown"
         row = [
-            str(flow["flow_number"]),
+            str(flow["global_flow_id"] if uses_modern_status else flow["flow_number"]),
             flow_type,
-            channel_list or str(flow.get("channel_count") or ""),
+            channel_list
+            or str(flow.get("populated_slot_count") if uses_modern_status else flow.get("channel_count") or ""),
             format_sample_rate_hertz(flow["sample_rate"]),
             format_encoding(flow["encoding"]),
         ]

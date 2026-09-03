@@ -144,7 +144,7 @@ fn captured_audio_flow_page_models_global_media_local_and_slots_separately() {
     assert_eq!(page.flows[0].transmitter_channel_ids_by_slot, [5, 6, 7, 8]);
     assert_eq!(page.flows[2].transmitter_channel_ids_by_slot, [7, 8, 0, 0]);
     assert_eq!(page.flows[2].populated_transmitter_channel_ids, [7, 8]);
-    assert_eq!(page.flows[2].channel_count, 2);
+    assert_eq!(page.flows[2].populated_slot_count, 2);
 }
 
 #[test]

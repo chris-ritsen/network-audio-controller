@@ -87,8 +87,8 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
     let mut flow_numbers = HashSet::with_capacity(flows.len());
     let mut media_identities = HashSet::with_capacity(flows.len());
     for flow in &flows {
-        if flow.flow_number > u16::from(maximum_flow_slots)
-            || !flow_numbers.insert(flow.flow_number)
+        if flow.global_flow_id > u16::from(maximum_flow_slots)
+            || !flow_numbers.insert(flow.global_flow_id)
             || !media_identities.insert((flow.media_type, flow.media_local_flow_id))
         {
             return None;
@@ -341,7 +341,6 @@ fn parse_transmitter_flow_status_record(
         record_pointer,
         record_length_bytes,
         global_flow_id,
-        flow_number: global_flow_id,
         media_type,
         media_local_flow_id,
         flow_name_pointer,
@@ -351,7 +350,6 @@ fn parse_transmitter_flow_status_record(
         format_pointer,
         sample_rate,
         encoding,
-        channel_count: populated_slot_count,
         channel_slot_segment_header,
         channel_slot_count,
         transmitter_channel_ids_by_slot,

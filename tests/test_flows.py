@@ -101,18 +101,6 @@ async def test_flow_query_rejects_invalid_pagination(monkeypatch, flow_pages):
 
 
 @pytest.mark.asyncio
-async def test_flow_list_compatibility_wrapper_returns_only_flows(monkeypatch):
-    inventory = {"max_flow_slots": 4, "flows": [{"flow_number": 1}]}
-
-    async def query(device_ip, arc_port, flow_protocol_id):
-        return inventory
-
-    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
-
-    assert await flows.query_tx_flows("192.0.2.10", 4440, 0x2729) == inventory["flows"]
-
-
-@pytest.mark.asyncio
 async def test_preferred_inventory_uses_2809_status_page_when_present(monkeypatch):
     queried = []
 
@@ -124,7 +112,9 @@ async def test_preferred_inventory_uses_2809_status_page_when_present(monkeypatc
                 "reported_flow_count": 1,
                 "flows": [
                     {
-                        "flow_number": 1,
+                        "global_flow_id": 1,
+                        "populated_transmitter_channel_ids": [1],
+                        "populated_slot_count": 1,
                         "flow_type": "unicast",
                         "subscriber_device_name": "lx-dante",
                     }
@@ -212,9 +202,10 @@ def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monke
         return {
             "flows": [
                 {
-                    "flow_number": 2,
+                    "global_flow_id": 2,
                     "flow_type": "multicast",
-                    "channels": [1, 2],
+                    "populated_transmitter_channel_ids": [1, 2],
+                    "populated_slot_count": 2,
                     "sample_rate": 48000,
                     "encoding": 24,
                     "destination_internet_protocol_version_four_address": "239.255.60.163",
@@ -222,6 +213,7 @@ def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monke
                 }
             ],
             "max_flow_slots": 4,
+            "reported_flow_count": 1,
         }
 
     monkeypatch.setattr(flow_commands, "_selected_device", lambda _devices: (device, 4440))
@@ -235,6 +227,44 @@ def test_flow_list_formats_sample_rate_and_encoding_with_shared_formatters(monke
     assert "Sample Rate" in header and "Encoding" in header
     assert "48 kHz" in row and "PCM24" in row
     assert "48000" not in row
+
+
+def test_flow_list_uses_the_returned_status_schema_when_mutations_use_2729(monkeypatch):
+    from typer.testing import CliRunner
+
+    from netaudio.commands import flow as flow_commands
+
+    device = _flow_list_device()
+    device.flow_protocol_id = 0x2729
+
+    async def query_inventory(device_ip, arc_port, flow_protocol_id):
+        assert (device_ip, arc_port, flow_protocol_id) == ("192.0.2.10", 4440, 0x2729)
+        return {
+            "flows": [
+                {
+                    "global_flow_id": 2,
+                    "flow_type": "multicast",
+                    "populated_transmitter_channel_ids": [1, 2],
+                    "populated_slot_count": 2,
+                    "sample_rate": 48_000,
+                    "encoding": 24,
+                    "destination_internet_protocol_version_four_address": "239.255.60.163",
+                    "destination_user_datagram_port": 4321,
+                }
+            ],
+            "max_flow_slots": 4,
+            "reported_flow_count": 1,
+        }
+
+    monkeypatch.setattr(flow_commands, "_selected_device", lambda _devices: (device, 4440))
+    monkeypatch.setattr(flow_commands, "run_command", _run_without_context)
+    monkeypatch.setattr(flows, "query_preferred_tx_flow_inventory", query_inventory)
+
+    result = CliRunner().invoke(flow_commands.app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert " 2 " in result.output
+    assert "1, 2" in result.output
 
 
 def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
