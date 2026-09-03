@@ -270,8 +270,18 @@ pub fn build_query_transmit_channel_capabilities(
 }
 
 pub fn build_query_receiver_port_ranges(transaction_id: u16) -> Result<Vec<u8>, NetaudioError> {
+    build_query_receiver_port_ranges_for_protocol(PROTOCOL_DANTE_FLOW, transaction_id)
+}
+
+pub fn build_query_receiver_port_ranges_for_protocol(
+    protocol_id: u16,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if !matches!(protocol_id, PROTOCOL_DANTE_FLOW | PROTOCOL_ARC_2809) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
     arc_packet_with_reserved_word(
-        PROTOCOL_DANTE_FLOW,
+        protocol_id,
         OPCODE_QUERY_RECEIVER_PORT_RANGES,
         &[],
         transaction_id,
