@@ -13,7 +13,7 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
-from netaudio.cli_support.output import output_single, output_table
+from netaudio.cli_support.output import output_single, output_table, output_value
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.latency import run_latency
 from netaudio.dante.clock_config import (
@@ -39,25 +39,6 @@ top_app = typer.Typer(
 
 VALID_SAMPLE_RATES = [44100, 48000, 88200, 96000, 176400, 192000]
 VALID_ENCODINGS = [16, 24, 32]
-
-MOVED_COMMANDS = ["sample-rate", "encoding", "latency", "aes67"]
-
-
-def _moved_command(name: str):
-    def handler(ctx: typer.Context):
-        typer.echo(f"This command has moved. Use: netaudio device config {name}", err=True)
-        raise typer.Exit(code=1)
-
-    return handler
-
-
-for _name in MOVED_COMMANDS:
-    top_app.command(
-        _name,
-        hidden=True,
-        help=f"Moved to 'netaudio device config {_name}'.",
-        context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
-    )(_moved_command(_name))
 
 
 @top_app.command("edit")
@@ -291,7 +272,8 @@ async def run_sample_rate(application, devices, rate: int | None, all_devices: b
                 [[device.name or server_name, device.sample_rate or ""] for server_name, device in targets],
             )
         else:
-            output_single(targets[0][1].sample_rate)
+            rate_value = targets[0][1].sample_rate
+            output_value("Sample rate", "sample_rate_hz", rate_value, f"{rate_value} Hz" if rate_value else "N/A")
         return
 
     if rate <= 0 or rate > 0xFFFFFFFF:
@@ -458,7 +440,13 @@ async def run_encoding(application, devices, bits: int | None, all_devices: bool
                 ],
             )
         else:
-            output_single(targets[0][1].encoding if targets[0][1].encoding is not None else "N/A")
+            encoding_value = targets[0][1].encoding
+            output_value(
+                "Encoding",
+                "encoding_bits",
+                encoding_value,
+                f"{encoding_value}-bit" if encoding_value is not None else "N/A",
+            )
         return
 
     if bits <= 0 or bits > 0xFFFFFFFF:
@@ -671,7 +659,8 @@ async def run_preferred_leader(application, devices, enabled: str | None, all_de
                 [[device.name or server_name, _preferred_leader_label(device)] for server_name, device in targets],
             )
         else:
-            output_single(_preferred_leader_label(targets[0][1]))
+            preferred = targets[0][1].preferred_leader
+            output_value("Preferred leader", "preferred_leader", preferred, _preferred_leader_label(targets[0][1]))
         return
 
     if enabled.lower() not in ("on", "off"):

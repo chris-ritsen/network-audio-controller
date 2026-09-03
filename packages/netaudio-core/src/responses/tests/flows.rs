@@ -346,7 +346,7 @@ fn tx_flows_parser_preserves_authentic_zero_channel_placeholders() {
 }
 
 #[test]
-fn tx_flows_parser_accepts_paginated_and_alternate_legacy_protocol_responses() {
+fn tx_flows_parser_accepts_paginated_2729_and_2801_responses() {
     let mut response = flow_query_response();
     stamp_arc_response(
         &mut response,
@@ -382,7 +382,7 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     assert_eq!(unicast_page.reported_flow_count, 1);
     let unicast_flow = &unicast_page.flows[0];
     assert_eq!(unicast_flow.record_pointer, 32);
-    assert_eq!(unicast_flow.flow_number, 1);
+    assert_eq!(unicast_flow.global_flow_id, 1);
     assert_eq!(unicast_flow.flow_name_pointer, 22);
     assert_eq!(unicast_flow.flow_name, "1");
     assert_eq!(unicast_flow.flow_type_code, FLOW_TYPE_UNICAST);
@@ -390,7 +390,7 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     assert_eq!(unicast_flow.format_pointer, 24);
     assert_eq!(unicast_flow.sample_rate, 48_000);
     assert_eq!(unicast_flow.encoding, 24);
-    assert_eq!(unicast_flow.channel_count, 2);
+    assert_eq!(unicast_flow.populated_slot_count, 2);
     assert_eq!(unicast_flow.endpoint_descriptor_pointer, 112);
     assert_eq!(
         unicast_flow.endpoint_descriptor_hexadecimal,
@@ -419,11 +419,11 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
         );
     let multicast_page = parse_transmitter_flow_status_page(&multicast).unwrap();
     let multicast_flow = &multicast_page.flows[0];
-    assert_eq!(multicast_flow.flow_number, 2);
+    assert_eq!(multicast_flow.global_flow_id, 2);
     assert_eq!(multicast_flow.flow_name, "2");
     assert_eq!(multicast_flow.flow_type_code, FLOW_TYPE_MULTICAST);
     assert_eq!(multicast_flow.flow_type.as_deref(), Some("multicast"));
-    assert_eq!(multicast_flow.channel_count, 2);
+    assert_eq!(multicast_flow.populated_slot_count, 2);
     assert_eq!(multicast_flow.destination_user_datagram_port, Some(4321));
     assert_eq!(
         multicast_flow

@@ -58,12 +58,22 @@ def test_fixture_records_exact_digest_bound_capture_provenance():
     [
         ("2.8.15", PROTOCOL_ARC_280F),
         ("2.8.9", PROTOCOL_ARC_2809),
-        ("2.8.16", PROTOCOL_ARC_2809),
-        ("invalid", PROTOCOL_ARC_2809),
     ],
 )
 def test_modern_arc_protocol_selection_uses_the_exact_advertised_version(version, expected):
     assert modern_arc_protocol_identifier_for_device(_arc_device(version)) == expected
+
+
+@pytest.mark.parametrize("version", ["2.8.16", "invalid", ""])
+def test_modern_arc_protocol_selection_rejects_unrecognized_versions(version):
+    with pytest.raises(ChannelStatusPaginationError, match="unsupported ARC protocol version"):
+        modern_arc_protocol_identifier_for_device(_arc_device(version))
+
+
+def test_managed_device_uses_observed_2809_protocol_without_mdns_metadata():
+    device = SimpleNamespace(requires_managed_control=True, services={})
+
+    assert modern_arc_protocol_identifier_for_device(device) == PROTOCOL_ARC_2809
 
 
 @pytest.mark.parametrize(
@@ -198,7 +208,7 @@ def test_flow_fixtures_expose_media_identity_and_ordered_audio_slots():
         [1, 3, 2, 4],
         [7, 8, 0, 0],
     ]
-    assert [flow["channel_count"] for flow in baseline["flows"]] == [4, 4, 2]
+    assert [flow["populated_slot_count"] for flow in baseline["flows"]] == [4, 4, 2]
     assert {flow["channel_slot_segment_header"] for flow in baseline["flows"]} == {0x0709}
 
 

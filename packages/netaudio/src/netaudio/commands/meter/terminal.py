@@ -197,7 +197,7 @@ class KeyDecoder:
         return result
 
     def feed_bytes(self, data: bytes, *, text_mode: bool = False) -> list[str]:
-        """Decode terminal bytes, canonicalizing legacy X10 mouse packets first."""
+        """Decode terminal bytes, canonicalizing older X10 mouse packets first."""
         self.byte_buffer += data
         canonical_chunks = []
         cursor = 0

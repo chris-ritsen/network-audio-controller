@@ -18,10 +18,20 @@ def _invoke(*arguments, **options):
     return runner.invoke(app, ["ddm", *arguments], **options)
 
 
+def _invoke_api(*arguments, **options):
+    return _invoke("api", *arguments, **options)
+
+
 def test_every_schema_operation_is_a_command():
-    result = _invoke("schema")
+    result = _invoke_api("schema")
     assert result.exit_code == 0, result.output
-    for expected in ("device-name-set", "devices-enroll", "domain-add", "unenrolled-devices", "me"):
+    for expected in (
+        "write device set-name",
+        "write devices enroll",
+        "write domain add",
+        "read unenrolled-devices",
+        "read current-user",
+    ):
         assert expected in result.output
 
 
@@ -56,7 +66,7 @@ def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tm
         "http://manager.example/graphql",
         "--username",
         "operator",
-        "--credential-file",
+        "--save-credential",
         str(credential_file),
         input="private-password\n",
     )
@@ -91,7 +101,7 @@ def test_password_login_does_not_replace_a_credential_after_rejection(monkeypatc
         "https://manager.example/graphql",
         "--username",
         "operator",
-        "--credential-file",
+        "--save-credential",
         str(credential_file),
         input="private-password\n",
     )
@@ -110,6 +120,34 @@ def test_generated_password_mutation_is_replaced_by_the_dedicated_login_command(
     assert "login" in help_result.output
     assert login_help.exit_code == 0
     assert "--password" not in login_help.output
+    assert "--api-key-file" not in login_help.output
+    assert "--server-profile" in login_help.output
+    assert "--credential-file" in login_help.output
+
+
+def test_managed_api_operations_exist_only_under_the_api_group():
+    top_level = _invoke("schema")
+    nested = _invoke_api("schema")
+
+    assert top_level.exit_code == 2
+    assert "No such command 'schema'" in top_level.output
+    assert nested.exit_code == 0
+
+
+def test_managed_api_help_uses_read_write_and_resource_groups():
+    api_help = _invoke_api("--help")
+    read_help = _invoke_api("read", "--help")
+    write_help = _invoke_api("write", "--help")
+    device_help = _invoke_api("write", "device", "--help")
+    flat_command = _invoke_api("device-name-set")
+
+    assert api_help.exit_code == 0
+    assert "read" in api_help.output and "write" in api_help.output
+    assert "device-name-set" not in api_help.output
+    assert read_help.exit_code == 0 and "current-user" in read_help.output and "domains" in read_help.output
+    assert write_help.exit_code == 0 and "device" in write_help.output and "domain" in write_help.output
+    assert device_help.exit_code == 0 and "set-name" in device_help.output
+    assert flat_command.exit_code == 2 and "No such command 'device-name-set'" in flat_command.output
 
 
 def test_ddm_discover_renders_correlated_services(monkeypatch):
@@ -189,16 +227,16 @@ def test_login_discovers_server_resolves_graphql_endpoint_and_saves_selected_dom
     assert configuration.context("ddm.local-test").server == "ddm.local"
 
 
-def test_login_can_use_an_existing_api_key_file_without_password_authentication(monkeypatch, tmp_path):
+def test_login_can_use_an_existing_credential_file_without_password_authentication(monkeypatch, tmp_path):
     config_file = tmp_path / "config.toml"
-    api_key_file = tmp_path / "existing-api-key"
-    api_key_file.write_text("key\n", encoding="ascii")
+    credential_path = tmp_path / "existing-api-key"
+    credential_path.write_text("key\n", encoding="ascii")
     monkeypatch.setenv("NETAUDIO_CONFIG", str(config_file))
 
     class FakeManagedClient:
         def __init__(self, url, *, credential_file):
             assert url == "https://manager.example/graphql"
-            assert credential_file == api_key_file
+            assert credential_file == credential_path
 
         def inventory(self):
             domain = Domain(id="domain-1", name="Studio", status=None, devices=())
@@ -215,10 +253,10 @@ def test_login_can_use_an_existing_api_key_file_without_password_authentication(
         "login",
         "--url",
         "https://manager.example/graphql",
-        "--server",
+        "--server-profile",
         "studio",
-        "--api-key-file",
-        str(api_key_file),
+        "--credential-file",
+        str(credential_path),
     )
 
     assert result.exit_code == 0, result.output
@@ -234,7 +272,7 @@ default_context = "east-main"
 
 [ddm.servers.manager]
 url = "https://manager.example/graphql"
-api_key_file = "key"
+credential_file = "key"
 
 [ddm.contexts.east-main]
 server = "manager"
@@ -283,14 +321,14 @@ credential_file = "credential"
         "login",
         "--url",
         "https://wrong.example/graphql",
-        "--server",
+        "--server-profile",
         "studio",
         "--username",
         "operator",
     )
 
     assert result.exit_code == 1
-    assert "choose a new --server name" in result.output
+    assert "choose a new --server-profile name" in result.output
 
 
 def test_identify_is_not_a_separate_ddm_command():
@@ -301,17 +339,26 @@ def test_identify_is_not_a_separate_ddm_command():
 
 
 def test_schema_describes_one_type():
-    result = _invoke("schema", "DeviceNameSetInput")
+    result = _invoke_api("schema", "DeviceNameSetInput")
     assert result.exit_code == 0, result.output
     assert "deviceId: ID!" in result.output
     assert "name: String!" in result.output
-    missing = _invoke("schema", "Nope")
+    missing = _invoke_api("schema", "Nope")
     assert missing.exit_code == 1
     assert "unknown type Nope" in missing.output
 
 
 def test_print_query_shows_document_and_flattened_input_variables():
-    result = _invoke("device-name-set", "--device-id", "001dc1fffe50692e:0", "--name", "stage-left", "--print-query")
+    result = _invoke_api(
+        "write",
+        "device",
+        "set-name",
+        "--device-id",
+        "001dc1fffe50692e:0",
+        "--name",
+        "stage-left",
+        "--print-query",
+    )
     assert result.exit_code == 0, result.output
     document, variables = result.output.split("\n", 1)
     assert document == "mutation DeviceNameSet($input: DeviceNameSetInput!) { DeviceNameSet(input: $input) { ok } }"
@@ -320,8 +367,10 @@ def test_print_query_shows_document_and_flattened_input_variables():
 
 def test_json_list_options_are_validated_against_the_schema():
     subscriptions = json.dumps([{"rxChannelIndex": 1, "subscribedDevice": "lx-dante", "subscribedChannel": "01"}])
-    result = _invoke(
-        "device-rx-channels-subscription-set",
+    result = _invoke_api(
+        "write",
+        "device",
+        "set-rx-channels-subscription",
         "--device-id",
         "001dc1fffe50692e:0",
         "--subscriptions",
@@ -336,8 +385,10 @@ def test_json_list_options_are_validated_against_the_schema():
     ]
     assert variables["input"]["allowSubscriptionToNonExistentDevice"] is True
 
-    invalid = _invoke(
-        "device-rx-channels-subscription-set",
+    invalid = _invoke_api(
+        "write",
+        "device",
+        "set-rx-channels-subscription",
         "--device-id",
         "x",
         "--subscriptions",
@@ -347,21 +398,28 @@ def test_json_list_options_are_validated_against_the_schema():
     assert invalid.exit_code == 1
     assert "input.subscriptions[0].rxChannelIndex must be an integer" in invalid.output
 
-    malformed = _invoke(
-        "device-rx-channels-subscription-set", "--device-id", "x", "--subscriptions", "{", "--print-query"
+    malformed = _invoke_api(
+        "write",
+        "device",
+        "set-rx-channels-subscription",
+        "--device-id",
+        "x",
+        "--subscriptions",
+        "{",
+        "--print-query",
     )
     assert malformed.exit_code == 1
     assert "--subscriptions must be valid JSON" in malformed.output
 
 
 def test_required_options_are_enforced_by_the_parser():
-    result = _invoke("device-name-set", "--name", "x", "--print-query")
+    result = _invoke_api("write", "device", "set-name", "--name", "x", "--print-query")
     assert result.exit_code != 0
     assert "--device-id" in result.output
 
 
 def test_query_arguments_become_variables():
-    result = _invoke("domain", "--id", "abc", "--print-query")
+    result = _invoke_api("read", "domain", "--id", "abc", "--print-query")
     assert result.exit_code == 0, result.output
     document, variables = result.output.split("\n", 1)
     assert document.startswith("query Domain($id: ID) { domain(id: $id) {")
@@ -392,7 +450,7 @@ def test_typed_commands_render_tables_from_responses(monkeypatch):
         }
 
     monkeypatch.setattr(operations, "execute", fake_execute)
-    result = _invoke("domains")
+    result = _invoke_api("read", "domains")
     assert result.exit_code == 0, result.output
     assert "test" in result.output and "d1" in result.output
     assert " 1 " in result.output
@@ -403,7 +461,7 @@ def test_rejected_mutations_exit_nonzero_with_the_server_message(monkeypatch):
         return {"data": {"DeviceNameSet": {"ok": False, "error": {"code": "X", "message": "name taken"}}}, "errors": []}
 
     monkeypatch.setattr(operations, "execute", fake_execute)
-    result = _invoke("device-name-set", "--device-id", "d", "--name", "n")
+    result = _invoke_api("write", "device", "set-name", "--device-id", "d", "--name", "n")
     assert result.exit_code == 1
     assert "DeviceNameSet was rejected: name taken" in result.output
 
@@ -413,9 +471,18 @@ def test_graphql_errors_are_reported_and_fail_without_data(monkeypatch):
         return {"data": None, "errors": [{"message": "Unauthorized", "path": ["domains"]}]}
 
     monkeypatch.setattr(ddm_cli, "execute", fake_execute)
-    result = _invoke("graphql", "{ domains { id } }")
+    result = _invoke_api("graphql", "{ domains { id } }")
     assert result.exit_code == 1
     assert "Managed API error at domains: Unauthorized" in result.output
+
+
+def test_bare_graphql_command_displays_help():
+    result = _invoke_api("graphql")
+
+    assert result.exit_code == 2
+    assert "Usage: netaudio ddm api graphql" in result.output
+    assert "--variables" in result.output
+    assert "pass a GraphQL document" not in result.output
 
 
 def test_raw_graphql_passes_variables_and_prints_data(monkeypatch, tmp_path):
@@ -428,11 +495,11 @@ def test_raw_graphql_passes_variables_and_prints_data(monkeypatch, tmp_path):
     monkeypatch.setattr(ddm_cli, "execute", fake_execute)
     document = tmp_path / "query.graphql"
     document.write_text("query Me { me { id } }")
-    result = _invoke("graphql", "--file", str(document), "--variables", '{"a": 1}', "--operation-name", "Me")
+    result = _invoke_api("graphql", "--file", str(document), "--variables", '{"a": 1}', "--operation-name", "Me")
     assert result.exit_code == 0, result.output
     assert captured == {"query": "query Me { me { id } }", "variables": {"a": 1}, "operation_name": "Me"}
     assert json.loads(result.output) == {"me": None}
-    bad = _invoke("graphql", "{ me { id } }", "--variables", "[1]")
+    bad = _invoke_api("graphql", "{ me { id } }", "--variables", "[1]")
     assert bad.exit_code == 1
     assert "--variables must be a JSON object" in bad.output
 
