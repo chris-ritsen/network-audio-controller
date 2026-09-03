@@ -1,4 +1,5 @@
 import click
+import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -19,10 +20,44 @@ def _command_tree():
 
 
 def test_dash_h_is_help_on_root_and_subcommands():
-    for arguments in (["-h"], ["channel", "-h"], ["lab", "provenance", "-h"], ["device", "lock", "-h"]):
+    for arguments in (["-h"], ["channel", "-h"], ["lab", "provenance", "-h"], ["lock", "-h"]):
         result = runner.invoke(app, arguments)
         assert result.exit_code == 0, arguments
         assert "Usage:" in result.output, arguments
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["channel", "name"],
+        ["ddm", "context", "use"],
+        ["lab", "fact", "show"],
+        ["lock", "key", "set"],
+    ],
+)
+def test_bare_commands_with_required_parameters_display_help(arguments):
+    result = runner.invoke(app, arguments)
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Missing" not in result.output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["config", "sample-rate"],
+        ["config", "encoding"],
+        ["config", "latency"],
+        ["config", "aes67"],
+        ["device", "lock"],
+    ],
+)
+def test_removed_command_paths_are_not_registered(arguments):
+    result = runner.invoke(app, arguments)
+
+    assert result.exit_code == 2
+    assert "No such command" in result.output
 
 
 def test_every_argument_has_help():

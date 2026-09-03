@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,12 +32,12 @@ class ManagedAPIConfiguration:
             return None
         if not self.url and not self.credential and self.credential_file is None:
             if self.requested_enabled:
-                return "DDM is enabled but no URL or credential is configured"
+                return "DDM server profile is enabled but has no URL or credential"
             return None
         if not self.url:
-            return "DDM credential is configured but ddm.url is missing"
+            return "DDM server profile has a credential but no URL"
         if not self.credential and self.credential_file is None:
-            return "DDM URL is configured but no credential is available"
+            return "DDM server profile has a URL but no credential"
         if self.credential and self.credential_file is not None:
             return "Configure either a DDM credential value or credential file, not both"
         return None
@@ -76,11 +75,9 @@ class DDMConfiguration:
         selected = context_name or self.default_context
         if selected is not None:
             return self.server(self.context(selected).server)
-        if len(self.servers) == 1:
-            return next(iter(self.servers.values()))
         if not self.servers:
             return ManagedAPIConfiguration(None, None, None, DEFAULT_DDM_REFRESH_INTERVAL)
-        raise ValueError("multiple DDM server profiles are configured; select one with --context")
+        raise ValueError("no DDM context is selected; select one with --context or configure ddm.default_context")
 
 
 def _optional_string(value: object) -> str | None:
@@ -121,8 +118,16 @@ def _optional_bool(value: object, name: str) -> bool | None:
 def _name(value: object, description: str) -> str:
     name = _optional_string(value)
     if name is None or DDM_NAME_PATTERN.fullmatch(name) is None:
-        raise ValueError(f"{description} must start with a letter or digit and contain only letters, digits, ._- characters")
+        raise ValueError(
+            f"{description} must start with a letter or digit and contain only letters, digits, ._- characters"
+        )
     return name
+
+
+def _reject_unknown_keys(mapping: Mapping[str, object], allowed: set[str], description: str) -> None:
+    unknown = sorted(str(key) for key in mapping if key not in allowed)
+    if unknown:
+        raise ValueError(f"unknown {description}: {', '.join(unknown)}")
 
 
 def _server_configuration(
@@ -130,79 +135,36 @@ def _server_configuration(
     mapping: Mapping[str, object],
     *,
     base_directory: Path | None,
-    default_refresh: object = None,
-    default_enabled: object = None,
-    environment: Mapping[str, str] | None = None,
 ) -> ManagedAPIConfiguration:
-    environment = environment or {}
-    url = _optional_string(environment.get("NETAUDIO_DDM_URL")) or _optional_string(mapping.get("url"))
-    environment_credential = _optional_string(environment.get("NETAUDIO_DDM_CREDENTIAL")) or _optional_string(
-        environment.get("NETAUDIO_DDM_API_KEY")
+    _reject_unknown_keys(
+        mapping, {"url", "credential_file", "refresh_interval", "enabled"}, f"ddm.servers.{name} settings"
     )
-    environment_credential_file = _optional_string(
-        environment.get("NETAUDIO_DDM_CREDENTIAL_FILE")
-    ) or _optional_string(environment.get("NETAUDIO_DDM_API_KEY_FILE"))
-    if environment_credential is not None or environment_credential_file is not None:
-        credential = environment_credential
-        credential_file_value = environment_credential_file
-    else:
-        credential = _optional_string(mapping.get("credential")) or _optional_string(mapping.get("api_key"))
-        credential_file_value = _optional_string(mapping.get("credential_file")) or _optional_string(
-            mapping.get("api_key_file")
-        )
+    url = _optional_string(mapping.get("url"))
+    credential_file_value = _optional_string(mapping.get("credential_file"))
     credential_file = Path(credential_file_value).expanduser() if credential_file_value else None
     if credential_file is not None and not credential_file.is_absolute() and base_directory is not None:
         credential_file = (base_directory / credential_file).resolve()
-    enabled_value: object = environment.get("NETAUDIO_DDM_ENABLED")
-    if enabled_value is None:
-        enabled_value = mapping.get("enabled", default_enabled)
-    refresh_value: object = environment.get("NETAUDIO_DDM_REFRESH_INTERVAL")
-    if refresh_value is None:
-        refresh_value = mapping.get(
-            "refresh_interval",
-            mapping.get("refresh_interval_seconds", default_refresh),
-        )
     return ManagedAPIConfiguration(
         url=url,
-        credential=credential,
+        credential=None,
         credential_file=credential_file,
-        refresh_interval=_refresh_interval(refresh_value),
-        requested_enabled=_optional_bool(enabled_value, f"ddm.servers.{name}.enabled"),
+        refresh_interval=_refresh_interval(mapping.get("refresh_interval")),
+        requested_enabled=_optional_bool(mapping.get("enabled"), f"ddm.servers.{name}.enabled"),
         name=name,
     )
 
 
 def resolve_ddm_configuration(
     profile: Mapping[str, object] | None,
-    environ: Mapping[str, str] | None = None,
     base_directory: Path | None = None,
 ) -> DDMConfiguration:
-    environment = os.environ if environ is None else environ
     profile_mapping = profile if isinstance(profile, Mapping) else {}
     ddm_value = profile_mapping.get("ddm")
+    if ddm_value is not None and not isinstance(ddm_value, Mapping):
+        raise ValueError("ddm must be a table")
     ddm_mapping = ddm_value if isinstance(ddm_value, Mapping) else {}
+    _reject_unknown_keys(ddm_mapping, {"default_context", "servers", "contexts"}, "ddm settings")
     servers: dict[str, ManagedAPIConfiguration] = {}
-
-    has_flat_connection = any(
-        _optional_string(environment.get(key)) is not None
-        for key in (
-            "NETAUDIO_DDM_URL",
-            "NETAUDIO_DDM_CREDENTIAL",
-            "NETAUDIO_DDM_CREDENTIAL_FILE",
-            "NETAUDIO_DDM_API_KEY",
-            "NETAUDIO_DDM_API_KEY_FILE",
-        )
-    ) or any(
-        ddm_mapping.get(key) is not None
-        for key in ("url", "credential", "credential_file", "api_key", "api_key_file")
-    )
-    if has_flat_connection or ddm_mapping.get("enabled") is not None:
-        servers["default"] = _server_configuration(
-            "default",
-            ddm_mapping,
-            base_directory=base_directory,
-            environment=environment,
-        )
 
     server_values = ddm_mapping.get("servers")
     if server_values is not None and not isinstance(server_values, Mapping):
@@ -215,8 +177,6 @@ def resolve_ddm_configuration(
             name,
             value,
             base_directory=base_directory,
-            default_refresh=ddm_mapping.get("refresh_interval", ddm_mapping.get("refresh_interval_seconds")),
-            default_enabled=ddm_mapping.get("enabled"),
         )
 
     contexts: dict[str, DDMContextConfiguration] = {}
@@ -228,6 +188,7 @@ def resolve_ddm_configuration(
         name = _name(raw_name, "DDM context name")
         if not isinstance(value, Mapping):
             raise ValueError(f"ddm.contexts.{name} must be a table")
+        _reject_unknown_keys(value, {"server", "domain_id", "domain_name"}, f"ddm.contexts.{name} settings")
         server_name = _name(value.get("server"), f"ddm.contexts.{name}.server")
         if server_name not in servers:
             raise ValueError(f"ddm.contexts.{name} references unknown server profile {server_name!r}")
@@ -255,11 +216,10 @@ def resolve_ddm_configuration(
 
 def resolve_managed_api_configuration(
     profile: Mapping[str, object] | None,
-    environ: Mapping[str, str] | None = None,
     base_directory: Path | None = None,
     context_name: str | None = None,
 ) -> ManagedAPIConfiguration:
-    return resolve_ddm_configuration(profile, environ, base_directory).selected_server(context_name)
+    return resolve_ddm_configuration(profile, base_directory).selected_server(context_name)
 
 
 __all__ = [

@@ -27,9 +27,11 @@ def _arc_version_protocol_identifier(value: object) -> int | None:
 
 
 def modern_arc_protocol_identifier_for_device(device) -> int:
+    if getattr(device, "requires_managed_control", False):
+        return PROTOCOL_ARC_2809
     services = getattr(device, "services", None)
     if not isinstance(services, dict):
-        return PROTOCOL_ARC_2809
+        raise ChannelStatusPaginationError("device has no ARC service metadata")
     for service in services.values():
         if not isinstance(service, dict) or service.get("type") != SERVICE_ARC:
             continue
@@ -39,7 +41,8 @@ def modern_arc_protocol_identifier_for_device(device) -> int:
         protocol_id = _arc_version_protocol_identifier(properties.get("arcp_vers"))
         if protocol_id in MODERN_ARC_PROTOCOL_IDS:
             return protocol_id
-    return PROTOCOL_ARC_2809
+        raise ChannelStatusPaginationError(f"unsupported ARC protocol version {properties.get('arcp_vers')!r}")
+    raise ChannelStatusPaginationError("device has no ARC service metadata")
 
 
 def _record_identity(record: dict) -> tuple[int, int]:

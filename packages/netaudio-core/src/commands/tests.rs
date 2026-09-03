@@ -569,17 +569,17 @@ fn probe_encoding_matches_captured_packet_204680() {
 
 #[test]
 fn query_tx_flows_selects_opcode_per_protocol() {
-    let legacy = build_query_tx_flows(0x2729, 7).unwrap();
+    let arc_2729 = build_query_tx_flows(0x2729, 7).unwrap();
     assert_eq!(
-        legacy,
+        arc_2729,
         [
             0x27, 0x29, 0x00, 0x10, 0x00, 0x07, 0x22, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01,
             0x00, 0x00,
         ]
     );
 
-    let legacy_2801 = build_query_tx_flows(0x2801, 7).unwrap();
-    assert_eq!(&legacy_2801[6..8], &OPCODE_QUERY_TX_FLOWS.to_be_bytes());
+    let arc_2801 = build_query_tx_flows(0x2801, 7).unwrap();
+    assert_eq!(&arc_2801[6..8], &OPCODE_QUERY_TX_FLOWS.to_be_bytes());
 
     let later_page = build_query_tx_flows_from(0x2729, 29, 7).unwrap();
     assert_eq!(&later_page[10..], &[0x00, 0x01, 0x00, 0x1D, 0x00, 0x00]);

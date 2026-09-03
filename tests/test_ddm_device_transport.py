@@ -54,15 +54,19 @@ def test_enrolment_metadata_selects_managed_control_even_when_direct_ip_exists()
 
 def test_application_routes_each_managed_device_to_its_originating_server_profile(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
+    east_credential = tmp_path / "east.credential"
+    west_credential = tmp_path / "west.credential"
+    east_credential.write_text("00000000-0000-4000-8000-000000000001\n", encoding="ascii")
+    west_credential.write_text("00000000-0000-4000-8000-000000000002\n", encoding="ascii")
     config_path.write_text(
         """
 [ddm.servers.east]
 url = "http://east.example/graphql"
-api_key = "00000000-0000-4000-8000-000000000001"
+credential_file = "east.credential"
 
 [ddm.servers.west]
 url = "http://west.example/graphql"
-api_key = "00000000-0000-4000-8000-000000000002"
+credential_file = "west.credential"
 
 [ddm.contexts.east-main]
 server = "east"
@@ -221,7 +225,7 @@ async def test_managed_settings_query_injects_host_mac_and_correlates_the_public
 
 
 @pytest.mark.asyncio
-async def test_managed_transport_fails_closed_before_sending_legacy_or_unverified_actions(monkeypatch):
+async def test_managed_transport_fails_closed_before_sending_unsupported_or_unverified_actions(monkeypatch):
     sent = MagicMock()
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 1)

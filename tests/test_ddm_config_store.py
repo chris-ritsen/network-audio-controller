@@ -5,7 +5,7 @@ from netaudio.common.managed_api import resolve_ddm_configuration
 
 def test_save_context_preserves_unrelated_configuration_and_uses_relative_credential_path(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text('[ui]\nicons = true\n', encoding="utf-8")
+    path.write_text("[ui]\nicons = true\n", encoding="utf-8")
     credential = tmp_path / "credentials" / "studio"
 
     save_ddm_context(
@@ -20,7 +20,7 @@ def test_save_context_preserves_unrelated_configuration_and_uses_relative_creden
     )
 
     document = load_config_document(path)
-    configuration = resolve_ddm_configuration(document, environ={}, base_directory=tmp_path)
+    configuration = resolve_ddm_configuration(document, base_directory=tmp_path)
     assert document["ui"] == {"icons": True}
     assert configuration.default_context == "studio-main"
     assert configuration.servers["studio"].credential_file == credential
@@ -36,11 +36,13 @@ default_context = "old"
 
 [ddm.servers.studio]
 url = "https://old.example/graphql"
-api_key = "remove-me"
+credential_file = "old-key"
+enabled = false
 
 [ddm.servers.other]
 url = "https://other.example/graphql"
-api_key_file = "other-key"
+credential_file = "other-key"
+enabled = true
 
 [ddm.contexts.old]
 server = "studio"

@@ -82,7 +82,7 @@ fn issue_53_tesira_offset_8_is_not_used_as_the_audio_channel_count() {
     assert_eq!(
         page.flows
             .iter()
-            .map(|flow| flow.channel_count)
+            .map(|flow| flow.populated_slot_count)
             .collect::<Vec<_>>(),
         [4, 4, 2]
     );
@@ -97,7 +97,7 @@ fn issue_53_tesira_offset_8_is_not_used_as_the_audio_channel_count() {
         offset_8_values,
         page.flows
             .iter()
-            .map(|flow| flow.channel_count)
+            .map(|flow| flow.populated_slot_count)
             .collect::<Vec<_>>()
     );
 }

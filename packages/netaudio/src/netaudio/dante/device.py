@@ -385,10 +385,8 @@ class DanteDevice:
             if not isinstance(flow, dict):
                 continue
             retained_flow = {
-                "flow_number": flow.get("flow_number"),
                 "flow_type": flow.get("flow_type"),
                 "flow_type_code": flow.get("flow_type_code"),
-                "channel_count": flow.get("channel_count"),
                 "sample_rate": flow.get("sample_rate"),
                 "encoding": flow.get("encoding"),
                 "destination_internet_protocol_version_four_address": flow.get(
@@ -398,17 +396,25 @@ class DanteDevice:
                 "subscriber_device_name": flow.get("subscriber_device_name"),
                 "subscriber_flow_name": flow.get("subscriber_flow_name"),
             }
-            modern_fields = (
-                "global_flow_id",
-                "media_type",
-                "media_local_flow_id",
-                "channel_slot_segment_header",
-                "channel_slot_count",
-                "transmitter_channel_ids_by_slot",
-                "populated_transmitter_channel_ids",
-                "populated_slot_count",
-            )
-            retained_flow.update({field: flow[field] for field in modern_fields if field in flow})
+            if "global_flow_id" in flow:
+                protocol_fields = (
+                    "global_flow_id",
+                    "media_type",
+                    "media_local_flow_id",
+                    "channel_slot_segment_header",
+                    "channel_slot_count",
+                    "transmitter_channel_ids_by_slot",
+                    "populated_transmitter_channel_ids",
+                    "populated_slot_count",
+                )
+            else:
+                protocol_fields = (
+                    "flow_number",
+                    "channel_count",
+                    "channels",
+                    "frames_per_packet",
+                )
+            retained_flow.update({field: flow[field] for field in protocol_fields if field in flow})
             transmitter_flows.append(retained_flow)
         self.transmitter_flows = transmitter_flows
 

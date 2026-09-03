@@ -271,11 +271,11 @@ def _format_transmitter_flow(flow: dict) -> str:
     if flow_type is None:
         flow_type_code = flow.get("flow_type_code")
         flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown"
-    channel_numbers = flow.get("channels")
+    channel_numbers = flow.get("populated_transmitter_channel_ids", flow.get("channels"))
     if isinstance(channel_numbers, list) and channel_numbers:
         channel_text = ",".join(str(channel_number) for channel_number in channel_numbers)
-    elif flow.get("channel_count") is not None:
-        channel_text = f"{flow['channel_count']}ch"
+    elif flow.get("populated_slot_count", flow.get("channel_count")) is not None:
+        channel_text = f"{flow.get('populated_slot_count', flow.get('channel_count'))}ch"
     else:
         channel_text = "unknown channels"
     audio_parts = [
@@ -445,7 +445,7 @@ def _device_channel_count_labels(device) -> tuple[str, str]:
 
 
 def _device_identity_rows(device) -> list[list[str]]:
-    model = device.dante_model or device.model_id or device.model
+    model = device.model or device.dante_model or device.model_id
     manufacturer = device.manufacturer or device.manufacturer_mdns
     rows = [
         ["Name", device.name or "unknown"],
@@ -569,7 +569,7 @@ def _device_transmitter_flow_rows(device) -> list[list[str]]:
         return [["Transmitter Flows", "none"]]
     rows = []
     for flow in device.transmitter_flows:
-        flow_number = flow.get("flow_number")
+        flow_number = flow.get("global_flow_id", flow.get("flow_number"))
         label = f"Transmitter Flow {flow_number}" if flow_number is not None else "Transmitter Flow"
         rows.append([label, _format_transmitter_flow(flow)])
     return rows

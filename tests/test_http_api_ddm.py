@@ -146,7 +146,7 @@ async def test_inventory_get_routes_accept_a_request_local_context_filter():
 
 
 @pytest.mark.asyncio
-async def test_daemon_device_records_keep_legacy_key_aliases_for_fleet_consumers():
+async def test_daemon_device_records_use_only_unit_labeled_keys():
     device = DanteDevice(server_name="dev1")
     device.name = "Device1"
     device.ipv4 = "192.168.1.50"
@@ -156,6 +156,8 @@ async def test_daemon_device_records_keep_legacy_key_aliases_for_fleet_consumers
     status, devices = await _get(server, "/devices")
     assert status == 200
     record = devices["dev1"]
-    assert record["sample_rate_hz"] == 48000 and record["sample_rate"] == 48000
-    assert record["latency_ms"] == 1.0 and record["latency"] == 1.0
+    assert record["sample_rate_hz"] == 48000
+    assert record["latency_ms"] == 1.0
+    assert "sample_rate" not in record
+    assert "latency" not in record
     assert list(record) == sorted(record)

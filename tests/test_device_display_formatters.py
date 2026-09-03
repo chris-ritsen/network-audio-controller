@@ -47,18 +47,14 @@ def make_device() -> DanteDevice:
     return device
 
 
-def test_device_from_json_accepts_unit_suffixed_and_legacy_field_names():
-    unit_suffixed = DanteDeviceSerializer.device_from_json(
+def test_device_from_json_accepts_unit_suffixed_field_names():
+    device = DanteDeviceSerializer.device_from_json(
         {"server_name": "a.local.", "sample_rate_hz": 96_000, "latency_ms": 0.25, "min_latency_ms": 0.15}
     )
-    legacy = DanteDeviceSerializer.device_from_json(
-        {"server_name": "a.local.", "sample_rate": 96_000, "latency": 0.25, "min_latency": 0.15}
-    )
 
-    for device in (unit_suffixed, legacy):
-        assert device.sample_rate == 96_000
-        assert device.latency == 0.25
-        assert device.min_latency == 0.15
+    assert device.sample_rate == 96_000
+    assert device.latency == 0.25
+    assert device.min_latency == 0.15
 
 
 def test_device_json_field_names_state_their_units():

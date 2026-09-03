@@ -226,7 +226,7 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
         for status_flow in status_flows:
             if not isinstance(status_flow, dict):
                 return None
-            flow_number = status_flow.get("flow_number")
+            flow_number = status_flow.get("global_flow_id")
             if (
                 isinstance(flow_number, bool)
                 or not isinstance(flow_number, int)
@@ -311,11 +311,6 @@ async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_i
         if next_starting_flow <= starting_flow or next_starting_flow > max_flow_slots:
             return None
         starting_flow = next_starting_flow
-
-
-async def query_tx_flows(device_ip: str, arc_port: int, flow_protocol_id: int, *, device=None) -> list[dict] | None:
-    inventory = await _query_tx_inventory_with_optional_device(device_ip, arc_port, flow_protocol_id, device)
-    return None if inventory is None else inventory["flows"]
 
 
 async def query_preferred_tx_flow_inventory(

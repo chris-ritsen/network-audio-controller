@@ -75,6 +75,21 @@ handoffs may add context or narrow a task, but they may not weaken these rules.
 - Do not commit proprietary firmware, DDM or Controller binaries, VM images,
   private writable flash, credentials, or unrelated personal infrastructure.
 
+## Interface evolution
+
+- NetAudio is greenfield experimental work and has no compatibility or API
+  stability contract. Do not characterize replacement or removal of an
+  experimental interface as a breaking change.
+- Do not preserve obsolete NetAudio behavior by default. When a CLI command,
+  option, configuration shape, output field, identifier format, or internal API
+  is replaced, remove the superseded path and its tests in the same change.
+- Do not add deprecated aliases, transitional fallbacks, silent migrations, or
+  version-selection defaults unless the current task explicitly requires one.
+- Deliberate support for an older Dante device or wire-protocol revision is
+  interoperability, not a NetAudio compatibility shim. Keep such support only
+  when the revision is identified explicitly; unknown revisions must fail
+  closed instead of selecting a presumed protocol.
+
 ## Live systems and mutations
 
 - Read-only is the default. Do not start, stop, restart, pause, resume, connect,

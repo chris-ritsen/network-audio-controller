@@ -128,7 +128,6 @@ pub struct DeviceInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeviceSettings {
     pub sample_rate: Option<u32>,
-    pub latency_ns: Option<u32>,
     pub configured_latency_ns: Option<u32>,
     pub active_latency_ns: Option<u32>,
     pub default_latency_ns: Option<u32>,
@@ -225,8 +224,6 @@ pub struct TransmitterFlowStatus {
     pub record_pointer: u16,
     pub record_length_bytes: u16,
     pub global_flow_id: u16,
-    /// Compatibility alias for `global_flow_id`.
-    pub flow_number: u16,
     pub media_type: u16,
     pub media_local_flow_id: u16,
     pub flow_name_pointer: u16,
@@ -236,8 +233,6 @@ pub struct TransmitterFlowStatus {
     pub format_pointer: u16,
     pub sample_rate: u32,
     pub encoding: u32,
-    /// Deprecated compatibility count derived from populated channel slots.
-    pub channel_count: u16,
     pub channel_slot_segment_header: Option<u16>,
     pub channel_slot_count: Option<u16>,
     pub transmitter_channel_ids_by_slot: Vec<u16>,
@@ -295,8 +290,6 @@ pub struct TransmitterChannelStatusPage2809 {
     pub result_code: u16,
     pub page_disposition: ModernArcPageDisposition,
     pub page_capacity: u8,
-    /// Deprecated compatibility alias for `page_capacity`.
-    pub maximum_transmitter_channels: u8,
     pub reported_record_count: u8,
     pub records: Vec<TransmitterChannelStatus2809>,
     pub raw_body_hexadecimal: String,
@@ -351,8 +344,6 @@ pub struct ReceiverChannelStatusPage2809 {
     pub result_code: u16,
     pub page_disposition: ModernArcPageDisposition,
     pub page_capacity: u8,
-    /// Deprecated compatibility alias for `page_capacity`.
-    pub maximum_receiver_channels: u8,
     pub reported_record_count: u8,
     pub records: Vec<ReceiverChannelStatus2809>,
     pub raw_body_hexadecimal: String,

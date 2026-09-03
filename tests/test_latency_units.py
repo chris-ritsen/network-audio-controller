@@ -36,7 +36,6 @@ def test_core_device_settings_are_normalized_to_milliseconds():
                 "default_latency_ns": 1_000_000,
                 "configured_latency_ns": 250_000,
                 "active_latency_ns": 150_000,
-                "latency_ns": 150_000,
                 "min_latency_ns": 150_000,
                 "max_latency_ns": 21_333_334,
             },
@@ -53,7 +52,7 @@ def test_core_device_settings_are_normalized_to_milliseconds():
     assert controls["max_latency"] == 21.333334
 
 
-def test_configured_latency_remains_compatibility_latency_when_active_is_unavailable():
+def test_configured_latency_is_effective_when_active_is_unavailable():
     controls = DanteDevice().controls_data_from_core(
         {
             "name": None,
@@ -62,7 +61,6 @@ def test_configured_latency_remains_compatibility_latency_when_active_is_unavail
             "settings": {
                 "configured_latency_ns": 250_000,
                 "active_latency_ns": None,
-                "latency_ns": 250_000,
             },
             "rx": [],
             "tx": [],
@@ -74,31 +72,13 @@ def test_configured_latency_remains_compatibility_latency_when_active_is_unavail
     assert controls["configured_latency"] == 0.25
 
 
-def test_legacy_compatibility_latency_populates_latency_and_configured_latency():
-    controls = DanteDevice().controls_data_from_core(
-        {
-            "name": None,
-            "counts": (0, 0, None),
-            "aes67": None,
-            "settings": {"latency_ns": 1_000_000},
-            "rx": [],
-            "tx": [],
-        }
-    )
-
-    assert controls["latency"] == 1.0
-    assert controls["configured_latency"] == 1.0
-    assert "active_latency" not in controls
-
-
 @pytest.mark.asyncio
-async def test_device_settings_operation_preserves_configured_compatibility_latency():
+async def test_device_settings_operation_uses_configured_latency_when_active_is_unavailable():
     device = DanteDevice()
     core_client = SimpleNamespace(
         get_device_settings=lambda: {
             "configured_latency_ns": 250_000,
             "active_latency_ns": None,
-            "latency_ns": 250_000,
         }
     )
     device.ipv4 = "192.0.2.10"
@@ -194,7 +174,6 @@ def test_explicit_unavailable_latency_fields_clear_stale_device_state():
             "counts": (0, 0, None),
             "aes67": None,
             "settings": {
-                "latency_ns": None,
                 "configured_latency_ns": None,
                 "active_latency_ns": None,
                 "default_latency_ns": None,
