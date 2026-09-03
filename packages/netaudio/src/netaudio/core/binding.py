@@ -12,7 +12,7 @@ logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 3
+ABI_VERSION = 4
 
 LOCK_NONCE_LENGTH = 24
 LOCK_KEY_LENGTH = 32
@@ -177,6 +177,58 @@ def _configure(lib):
         *buffer_out,
     ]
     lib.netaudio_lock_token.restype = ctypes.c_int
+    lib.netaudio_dapi_build_session_open.argtypes = buffer_out
+    lib.netaudio_dapi_build_session_open.restype = ctypes.c_int
+    lib.netaudio_dapi_build_authentication.argtypes = [u8p, ctypes.c_size_t, *buffer_out]
+    lib.netaudio_dapi_build_authentication.restype = ctypes.c_int
+    lib.netaudio_dapi_build_domain_subscription.argtypes = [
+        u8p,
+        ctypes.c_size_t,
+        ctypes.c_uint16,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_domain_subscription.restype = ctypes.c_int
+    lib.netaudio_dapi_build_device_inventory_subscription.argtypes = [
+        u8p,
+        ctypes.c_size_t,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_device_inventory_subscription.restype = ctypes.c_int
+    lib.netaudio_dapi_build_inventory_initialization.argtypes = [
+        u8p,
+        ctypes.c_size_t,
+        ctypes.c_uint16,
+        ctypes.c_uint16,
+        u8p,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_inventory_initialization.restype = ctypes.c_int
+    lib.netaudio_dapi_build_identify.argtypes = [
+        ctypes.c_uint16,
+        ctypes.c_uint16,
+        ctypes.c_uint16,
+        u8p,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_identify.restype = ctypes.c_int
+    lib.netaudio_dapi_build_arc_request.argtypes = [
+        ctypes.c_uint16,
+        ctypes.c_uint16,
+        u8p,
+        ctypes.c_size_t,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_arc_request.restype = ctypes.c_int
+    lib.netaudio_dapi_build_settings_request.argtypes = [
+        ctypes.c_uint16,
+        ctypes.c_uint16,
+        u8p,
+        ctypes.c_size_t,
+        *buffer_out,
+    ]
+    lib.netaudio_dapi_build_settings_request.restype = ctypes.c_int
+    lib.netaudio_dapi_build_service_acknowledgement.argtypes = [u8p, ctypes.c_size_t, *buffer_out]
+    lib.netaudio_dapi_build_service_acknowledgement.restype = ctypes.c_int
 
     lib.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
@@ -367,6 +419,101 @@ def host_mac() -> bytes | None:
     if lib.netaudio_host_mac(out) == STATUS_OK:
         return bytes(out)
     return None
+
+
+def _checked_dapi_frame(function, *arguments) -> bytes:
+    status, frame = _call_buffer(function, *arguments)
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "build DAPI frame")
+    return frame
+
+
+def build_dapi_session_open() -> bytes:
+    return _checked_dapi_frame(require().netaudio_dapi_build_session_open)
+
+
+def build_dapi_authentication(credential: str) -> bytes:
+    encoded = credential.encode("ascii")
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_authentication,
+        _as_buffer(encoded),
+        len(encoded),
+    )
+
+
+def build_dapi_domain_subscription(domain_id: bytes, subscription_id: int) -> bytes:
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_domain_subscription,
+        _as_buffer(domain_id),
+        len(domain_id),
+        subscription_id,
+    )
+
+
+def build_dapi_device_inventory_subscription(domain_id: bytes) -> bytes:
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_device_inventory_subscription,
+        _as_buffer(domain_id),
+        len(domain_id),
+    )
+
+
+def build_dapi_inventory_initialization(
+    domain_id: bytes,
+    first_message_id: int,
+    notification_port: int,
+    local_ipv4: bytes,
+) -> bytes:
+    if len(local_ipv4) != 4:
+        raise ValueError("local IPv4 address must be exactly 4 bytes")
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_inventory_initialization,
+        _as_buffer(domain_id),
+        len(domain_id),
+        first_message_id,
+        notification_port,
+        _as_buffer(local_ipv4),
+    )
+
+
+def build_dapi_identify(target_selector: int, wrapper_id: int, message_id: int, mac: bytes) -> bytes:
+    if len(mac) != 6:
+        raise ValueError("host MAC must be exactly 6 bytes")
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_identify,
+        target_selector,
+        wrapper_id,
+        message_id,
+        _as_buffer(mac),
+    )
+
+
+def build_dapi_arc_request(target_selector: int, wrapper_id: int, arc_packet: bytes) -> bytes:
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_arc_request,
+        target_selector,
+        wrapper_id,
+        _as_buffer(arc_packet),
+        len(arc_packet),
+    )
+
+
+def build_dapi_settings_request(target_selector: int, wrapper_id: int, settings_packet: bytes) -> bytes:
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_settings_request,
+        target_selector,
+        wrapper_id,
+        _as_buffer(settings_packet),
+        len(settings_packet),
+    )
+
+
+def build_dapi_service_acknowledgement(announcement_frame: bytes) -> bytes:
+    return _checked_dapi_frame(
+        require().netaudio_dapi_build_service_acknowledgement,
+        _as_buffer(announcement_frame),
+        len(announcement_frame),
+    )
 
 
 def _as_buffer(data: bytes):
