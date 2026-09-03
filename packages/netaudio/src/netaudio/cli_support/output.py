@@ -1,6 +1,7 @@
 import csv
 import io
 import json as json_module
+import re
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 
@@ -10,6 +11,9 @@ from netaudio import DanteDevice
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import _get_state, _iconize_headers
 from netaudio.dante.latency import milliseconds_to_microseconds
+
+
+_XML_ELEMENT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 
 
 def _format_text(headers: list[str], rows: list[list[str]]) -> str:
@@ -36,6 +40,65 @@ def _format_csv(headers: list[str], rows: list[list[str]]) -> str:
 
 def _format_json(data: Any) -> str:
     return json_module.dumps(data, indent=2, default=str)
+
+
+def _format_csv_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (dict, list, tuple)):
+        return json_module.dumps(value, default=str)
+    return str(value)
+
+
+def _format_single_csv(data: Any) -> str:
+    if isinstance(data, dict):
+        return _format_csv(
+            ["Field", "Value"],
+            [[str(key), _format_csv_value(value)] for key, value in data.items()],
+        )
+    if isinstance(data, (list, tuple)):
+        return _format_csv(["Value"], [[_format_csv_value(value)] for value in data])
+    return _format_csv(["Value"], [[_format_csv_value(data)]])
+
+
+def _xml_element(parent: ET.Element, name: str, value: Any) -> None:
+    if _XML_ELEMENT_NAME_PATTERN.fullmatch(name):
+        element = ET.SubElement(parent, name)
+    else:
+        element = ET.SubElement(parent, "item", key=name)
+
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            _xml_element(element, str(key), nested_value)
+    elif isinstance(value, (list, tuple)):
+        for nested_value in value:
+            _xml_element(element, "item", nested_value)
+    elif value is None:
+        element.set("nil", "true")
+    elif isinstance(value, bool):
+        element.text = str(value).lower()
+    else:
+        element.text = str(value)
+
+
+def _format_xml(data: Any) -> str:
+    root = ET.Element("netaudio")
+    if isinstance(data, dict):
+        for key, value in data.items():
+            _xml_element(root, str(key), value)
+    elif isinstance(data, (list, tuple)):
+        for value in data:
+            _xml_element(root, "item", value)
+    elif data is None:
+        root.set("nil", "true")
+    elif isinstance(data, bool):
+        root.text = str(data).lower()
+    else:
+        root.text = str(data)
+    ET.indent(root, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
 
 
 def _hex_encode(text: str, pad_to: int = 16) -> str:
@@ -218,8 +281,8 @@ def _render_structured(json_data: Any, devices: Optional[dict[str, DanteDevice]]
     output_format = _get_state().output_format
     if output_format == OutputFormat.yaml:
         typer.echo(_format_yaml(json_data))
-    elif output_format == OutputFormat.xml and devices:
-        typer.echo(format_devices_xml(devices))
+    elif output_format == OutputFormat.xml:
+        typer.echo(format_devices_xml(devices) if devices else _format_xml(json_data))
     else:
         typer.echo(_format_json(json_data))
 
@@ -264,6 +327,11 @@ def output_sections(
 
 
 def output_single(data: Any, device: Optional[DanteDevice] = None) -> None:
+    from netaudio.cli import OutputFormat
+
+    if _get_state().output_format == OutputFormat.csv:
+        typer.echo(_format_single_csv(data))
+        return
     if _structured_output_selected():
         devices = {device.server_name or "device": device} if device else None
         _render_structured(data, devices)
