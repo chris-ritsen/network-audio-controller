@@ -60,7 +60,6 @@
     "kind": "device_settings",
     "parsed": {
       "sample_rate": 48000,
-      "latency_ns": 1000000,
       "configured_latency_ns": 1000000,
       "active_latency_ns": 1000000,
       "default_latency_ns": 1000000,
@@ -212,7 +211,6 @@
     "kind": "device_settings",
     "parsed": {
       "sample_rate": 48000,
-      "latency_ns": 1000000,
       "configured_latency_ns": 1000000,
       "active_latency_ns": 1000000,
       "default_latency_ns": 1000000,

@@ -45,7 +45,7 @@ class VirtualDeviceConfig:
     supported_sample_rates: list[int] | None = None
     encoding: int = 24
     supported_encodings: list[int] = field(default_factory=lambda: [24, 16, 32])
-    latency_ns: int = 1_000_000
+    configured_latency_ns: int = 1_000_000
     active_latency_ns: int | None = None
     default_latency_ns: int = 1_000_000
     minimum_latency_ns: int = 150_000
@@ -60,7 +60,7 @@ class VirtualDeviceConfig:
         if self.encoding not in self.supported_encodings:
             raise ValueError("encoding must be present in supported_encodings")
         if self.active_latency_ns is None:
-            self.active_latency_ns = self.latency_ns
+            self.active_latency_ns = self.configured_latency_ns
 
 
 class VirtualDevice(VirtualDeviceRequestHandler):
@@ -417,7 +417,7 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                 "rate": str(self._config.sample_rate),
                 "enc": str(self._config.encoding),
                 "en": str(self._config.encoding),
-                "latency_ns": str(self._config.latency_ns),
+                "latency_ns": str(self._config.configured_latency_ns),
                 "fpp": "32,2",
                 "nchan": "8",
             }
