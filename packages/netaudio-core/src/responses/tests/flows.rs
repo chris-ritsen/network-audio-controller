@@ -192,12 +192,48 @@ fn receiver_port_ranges_parse_controller_and_authentic_firmware_response() {
             first_port_range_end: 0x397F,
             second_port_range_start: 0x3980,
             second_port_range_end: 0x39FF,
+            second_port_range_available: true,
         })
     );
 
     let mut overlapping = response;
     overlapping[14..16].copy_from_slice(&0x397Fu16.to_be_bytes());
     assert_eq!(parse_receiver_port_ranges(&overlapping), None);
+}
+
+#[test]
+fn receiver_port_ranges_parse_managed_modern_responses() {
+    let input_response = decode_hexadecimal("28090012007033000001380038ff390038ff");
+    assert_eq!(
+        parse_result_code(&input_response),
+        Some(RESULT_CODE_SUCCESS)
+    );
+    assert_eq!(
+        parse_receiver_port_ranges(&input_response),
+        Some(ReceiverPortRanges {
+            first_port_range_start: 0x3800,
+            first_port_range_end: 0x38FF,
+            second_port_range_start: 0x3900,
+            second_port_range_end: 0x38FF,
+            second_port_range_available: false,
+        })
+    );
+
+    let output_response = decode_hexadecimal("28090012000333000001380038fd38fe38ff");
+    assert_eq!(
+        parse_result_code(&output_response),
+        Some(RESULT_CODE_SUCCESS)
+    );
+    assert_eq!(
+        parse_receiver_port_ranges(&output_response),
+        Some(ReceiverPortRanges {
+            first_port_range_start: 0x3800,
+            first_port_range_end: 0x38FD,
+            second_port_range_start: 0x38FE,
+            second_port_range_end: 0x38FF,
+            second_port_range_available: true,
+        })
+    );
 }
 
 #[test]
