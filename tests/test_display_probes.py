@@ -94,11 +94,42 @@ async def test_populate_controls_routes_enrolled_devices_through_the_managed_app
     await common_module._populate_controls({device.server_name: device}, application)
 
     application._populate_device_controls.assert_awaited_once_with(device, include_channels=False)
-    application.probe_sample_rate_status.assert_awaited_once_with(device.ipv4, timeout=2.0)
-    application.probe_encoding_status.assert_awaited_once_with(device.ipv4, timeout=2.0)
+    application.probe_sample_rate_status.assert_awaited_once_with(device, timeout=2.0)
+    application.probe_encoding_status.assert_awaited_once_with(device, timeout=2.0)
     device.populate_from_core.assert_not_awaited()
     assert device.sample_rate == 48000
     assert device.encoding == 24
+
+
+@pytest.mark.asyncio
+async def test_populate_controls_requires_the_managed_application_explicitly():
+    device = _device("managed.local.")
+    device.ddm_enrolment_state = "ENROLLED"
+    device.management_state = "managed"
+
+    with pytest.raises(RuntimeError, match="requires a Dante application"):
+        await common_module._populate_controls({device.server_name: device})
+
+
+@pytest.mark.asyncio
+async def test_populate_controls_routes_unaddressed_managed_devices_by_identity():
+    device = _device("managed.local.", ipv4=None)
+    device.ddm_device_id = "001dc1fffe50692e:0"
+    device.ddm_enrolment_state = "ENROLLED"
+    device.management_state = "managed"
+    device.populate_from_core = AsyncMock()
+    application = SimpleNamespace(
+        _populate_device_controls=AsyncMock(),
+        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000])),
+        probe_encoding_status=AsyncMock(return_value=(24, [24])),
+    )
+
+    await common_module._populate_controls({device.server_name: device}, application)
+
+    application._populate_device_controls.assert_awaited_once_with(device, include_channels=True)
+    application.probe_sample_rate_status.assert_awaited_once_with(device, timeout=2.0)
+    application.probe_encoding_status.assert_awaited_once_with(device, timeout=2.0)
+    device.populate_from_core.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -162,7 +193,7 @@ async def test_load_display_devices_warns_once_per_explicitly_selected_unreachab
     async def enrich_lock(application, devices, only_unknown=False):
         return {"ghost.local.": common_module.CapabilityProbeTimeout("lock status probe timed out")}
 
-    async def populate_controls(devices):
+    async def populate_controls(devices, application):
         return None
 
     application = SimpleNamespace(attach_devices=lambda devices: None)

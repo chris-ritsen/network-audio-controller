@@ -151,9 +151,9 @@ class TestPreferredLeaderFromConmon0x0020:
         ).read_bytes()
         calls = []
 
-        async def refresh(device_ip_address, host_mac=None, sequence=0x0021):
-            calls.append((device_ip_address, sequence))
-            application.notifications._on_packet(packet, (device_ip_address, 8702))
+        async def refresh(target, host_mac=None, sequence=0x0021):
+            calls.append((target, sequence))
+            application.notifications._on_packet(packet, (str(target.ipv4), 8702))
             await deliver_status_events(application)
 
         application.send_refresh_clock_status = refresh
@@ -161,7 +161,7 @@ class TestPreferredLeaderFromConmon0x0020:
         parsed = await application.probe_clocking_status(device)
 
         expected = core.parse_response("ptp_clock_status", packet)
-        assert calls == [("192.168.1.34", 0x0021)]
+        assert calls == [(device, 0x0021)]
         assert parsed["clock_source_code"] == expected["clock_source_code"]
         assert parsed["preferred_leader"] == expected["preferred_leader"]
         assert parsed["clock_role"] == expected["clock_role"]
@@ -177,7 +177,7 @@ class TestPreferredLeaderFromConmon0x0020:
         with pytest.raises(CapabilityProbeTimeout, match="clock status probe timed out"):
             await application.probe_clocking_status(device, timeout=0.01)
 
-        application.send_refresh_clock_status.assert_awaited_once_with("192.168.1.61")
+        application.send_refresh_clock_status.assert_awaited_once_with(device)
         assert not application.notifications.is_waiting("clock_status", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):

@@ -22,17 +22,18 @@ def _invoke_api(*arguments, **options):
     return _invoke("api", *arguments, **options)
 
 
-def test_every_schema_operation_is_a_command():
+def test_every_exposed_schema_operation_is_a_command():
     result = _invoke_api("schema")
     assert result.exit_code == 0, result.output
-    for expected in (
-        "write device set-name",
-        "write devices enroll",
-        "write domain add",
-        "read unenrolled-devices",
-        "read current-user",
-    ):
-        assert expected in result.output
+    schema = ddm_cli.Schema.load()
+    for operation_name, fields in (("query", schema.query_fields), ("mutation", schema.mutation_fields)):
+        for field in fields:
+            if field.name in ddm_cli.EXCLUDED_GENERATED_FIELDS:
+                assert "not exposed" in result.output
+                continue
+            command_path = operations.operation_command_path(operation_name, field.name)
+            help_result = _invoke_api(*command_path, "--help")
+            assert help_result.exit_code == 0, (field.name, help_result.output)
 
 
 def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tmp_path):
@@ -365,6 +366,18 @@ def test_print_query_shows_document_and_flattened_input_variables():
     assert json.loads(variables) == {"input": {"deviceId": "001dc1fffe50692e:0", "name": "stage-left"}}
 
 
+def test_generated_boolean_options_accept_true_and_false():
+    base = ("write", "device", "set-video-enabled", "--device-id", "device", "--print-query")
+
+    enabled = _invoke_api(*base, "--enabled")
+    disabled = _invoke_api(*base, "--no-enabled")
+
+    assert enabled.exit_code == 0, enabled.output
+    assert disabled.exit_code == 0, disabled.output
+    assert json.loads(enabled.output.split("\n", 1)[1])["input"]["enabled"] is True
+    assert json.loads(disabled.output.split("\n", 1)[1])["input"]["enabled"] is False
+
+
 def test_json_list_options_are_validated_against_the_schema():
     subscriptions = json.dumps([{"rxChannelIndex": 1, "subscribedDevice": "lx-dante", "subscribedChannel": "01"}])
     result = _invoke_api(
@@ -463,7 +476,37 @@ def test_rejected_mutations_exit_nonzero_with_the_server_message(monkeypatch):
     monkeypatch.setattr(operations, "execute", fake_execute)
     result = _invoke_api("write", "device", "set-name", "--device-id", "d", "--name", "n")
     assert result.exit_code == 1
-    assert "DeviceNameSet was rejected: name taken" in result.output
+    assert "DeviceNameSet did not confirm success: name taken" in result.output
+
+
+@pytest.mark.parametrize("payload", [None, [], {}, {"ok": None}, {"ok": "true"}])
+def test_mutations_require_an_explicit_boolean_success(monkeypatch, payload):
+    monkeypatch.setattr(
+        operations,
+        "execute",
+        lambda *_args, **_kwargs: {"data": {"DeviceNameSet": payload}, "errors": []},
+    )
+
+    result = _invoke_api("write", "device", "set-name", "--device-id", "d", "--name", "n")
+
+    assert result.exit_code == 1
+    assert "did not confirm success" in result.output
+
+
+def test_graphql_errors_make_generated_queries_fail_even_with_partial_data(monkeypatch):
+    monkeypatch.setattr(
+        operations,
+        "execute",
+        lambda *_args, **_kwargs: {
+            "data": {"domains": []},
+            "errors": [{"message": "partial failure", "path": ["domains"]}],
+        },
+    )
+
+    result = _invoke_api("read", "domains")
+
+    assert result.exit_code == 1
+    assert "partial failure" in result.output
 
 
 def test_graphql_errors_are_reported_and_fail_without_data(monkeypatch):
@@ -481,7 +524,7 @@ def test_bare_graphql_command_displays_help():
 
     assert result.exit_code == 2
     assert "Usage: netaudio ddm api graphql" in result.output
-    assert "--variables" in result.output
+    assert "--variables-file" in result.output
     assert "pass a GraphQL document" not in result.output
 
 
@@ -495,13 +538,58 @@ def test_raw_graphql_passes_variables_and_prints_data(monkeypatch, tmp_path):
     monkeypatch.setattr(ddm_cli, "execute", fake_execute)
     document = tmp_path / "query.graphql"
     document.write_text("query Me { me { id } }")
-    result = _invoke_api("graphql", "--file", str(document), "--variables", '{"a": 1}', "--operation-name", "Me")
+    variables = tmp_path / "variables.json"
+    variables.write_text('{"a": 1}')
+    result = _invoke_api(
+        "graphql",
+        "--file",
+        str(document),
+        "--variables-file",
+        str(variables),
+        "--operation-name",
+        "Me",
+    )
     assert result.exit_code == 0, result.output
     assert captured == {"query": "query Me { me { id } }", "variables": {"a": 1}, "operation_name": "Me"}
     assert json.loads(result.output) == {"me": None}
-    bad = _invoke_api("graphql", "{ me { id } }", "--variables", "[1]")
+    variables.write_text("[1]")
+    bad = _invoke_api("graphql", "{ me { id } }", "--variables-file", str(variables))
     assert bad.exit_code == 1
-    assert "--variables must be a JSON object" in bad.output
+    assert "--variables-file must contain a JSON object" in bad.output
+
+
+def test_raw_graphql_redacts_secret_response_fields(monkeypatch):
+    monkeypatch.setattr(
+        ddm_cli,
+        "execute",
+        lambda *_args, **_kwargs: {
+            "data": {
+                "create": {
+                    "keyToken": "do-not-print",
+                    "nested": {"apiKey": "api-secret", "authenticationToken": "also-secret"},
+                }
+            },
+            "errors": [],
+        },
+    )
+
+    result = _invoke_api("graphql", "mutation Create { create }")
+
+    assert result.exit_code == 0
+    assert "do-not-print" not in result.output
+    assert "api-secret" not in result.output
+    assert "also-secret" not in result.output
+    assert result.output.count("[redacted]") == 3
+
+
+def test_destructive_generated_mutations_require_confirmation(monkeypatch):
+    execute = monkeypatch.setattr(operations, "execute", lambda *_args, **_kwargs: pytest.fail("must not send"))
+    del execute
+
+    result = _invoke_api("write", "domain", "remove", "--id", "domain", input="n\n")
+
+    assert result.exit_code == 1
+    assert "Proceed with domain-remove?" in result.output
 
 
 def test_unconfigured_transport_explains_how_to_configure(monkeypatch):

@@ -1,7 +1,9 @@
+import hashlib
 import json
 import sqlite3
 import struct
 import zlib
+from pathlib import Path
 
 from netaudio.capture import provenance
 from netaudio.capture.provenance import (
@@ -144,3 +146,16 @@ def test_opcode_label_proof_accepts_evidence_from_every_arc_variant(monkeypatch)
     )
 
     assert provenance._check_opcode_labels({(0x2729, 0x2200)}, set()) == []
+
+
+def test_historical_regression_fixtures_are_digest_bound_and_explicitly_not_evidence():
+    fixtures_directory = Path(__file__).parent / "fixtures"
+    manifest = json.loads((fixtures_directory / "historical_capture_provenance.json").read_text())
+    historical_files = {path.name for path in fixtures_directory.glob("*.bin")}
+
+    assert manifest["status"] == "regression-only"
+    assert "must not be cited as protocol evidence" in manifest["notice"]
+    assert set(manifest["fixtures"]) == historical_files
+    for filename, provenance_record in manifest["fixtures"].items():
+        assert len(provenance_record["source_tree_introduced_by_commit"]) == 40
+        assert hashlib.sha256((fixtures_directory / filename).read_bytes()).hexdigest() == provenance_record["sha256"]
