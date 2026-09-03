@@ -471,6 +471,10 @@ def _device_management_rows(device) -> list[list[str]]:
     rows = []
     if device.management_state:
         rows.append(["Management", device.management_state])
+    if device.ddm_context:
+        rows.append(["DDM Context", device.ddm_context])
+    if device.ddm_server_profile:
+        rows.append(["DDM Server", device.ddm_server_profile])
     if device.ddm_domain_name or device.ddm_domain_id:
         rows.append(["Domain", device.ddm_domain_name or device.ddm_domain_id])
     if device.ddm_enrolment_state:
