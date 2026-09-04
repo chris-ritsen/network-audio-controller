@@ -27,6 +27,7 @@ from netaudio.dante.const import (
     DEVICE_ARC_PORT,
     OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
     OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
+    PROTOCOL_ARC_2809,
     RESULT_CODE_SUCCESS,
     RESULT_CODE_SUCCESS_EXTENDED,
     SERVICE_ARC,
@@ -110,6 +111,7 @@ class DanteApplication:
         from netaudio.common.app_config import settings as app_settings
 
         self.devices: dict = {}
+        self.media_services: dict[str, dict] = {}
         self.dispatcher = DanteEventDispatcher()
         self._packet_store = packet_store
         self._dissect = dissect
@@ -154,6 +156,12 @@ class DanteApplication:
             self.register_device(server_name, device)
 
         device.services = dict(sorted(device_services.items()))
+        arc_service = next(
+            (service for service in device_services.values() if service["type"] == SERVICE_ARC),
+            None,
+        )
+        if arc_service is not None:
+            device.ipv4 = arc_service["ipv4"]
         for service in device_services.values():
             if not device.ipv4:
                 device.ipv4 = service["ipv4"]
@@ -379,7 +387,7 @@ class DanteApplication:
                     device.preferred_leader = fresh.clock_preferences.leader
                 await self.get_latency_settings(device)
                 if include_channels:
-                    await self.apply_avio_status_pages(device)
+                    await self.apply_modern_arc_status_pages(device)
                 try:
                     await self.probe_interface_status(device)
                 except (RuntimeError, OSError) as exception:
@@ -391,7 +399,7 @@ class DanteApplication:
                 request_attempts=request_attempts,
             )
             if include_channels:
-                await self.apply_avio_status_pages(device)
+                await self.apply_modern_arc_status_pages(device)
         except (RuntimeError, OSError) as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
@@ -616,24 +624,24 @@ class DanteApplication:
         protocol_id = modern_arc_protocol_identifier_for_device(device)
         if channel_type == "rx":
             opcode = OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
-            page_kind = "receiver_channel_status_page_2809"
+            page_kind = "modern_arc_receiver_channel_status_page"
             description = "receiver channel status query"
             cache_attribute = "receiver_channel_name_protocol_identifier"
         else:
             opcode = OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
-            page_kind = "transmitter_channel_status_page_2809"
+            page_kind = "modern_arc_transmitter_channel_status_page"
             description = "transmitter channel status query"
             cache_attribute = "transmitter_channel_name_protocol_identifier"
 
         accumulator = ChannelStatusPageAccumulator(protocol_id, opcode)
         request_range = (1, 1, 0)
         while request_range is not None:
-            media_type, starting_channel_identifier, ending_channel_identifier = request_range
+            media_selector, starting_channel_identifier, ending_channel_identifier = request_range
             response = await device.execute(
                 channel_status_query_specification(
                     channel_type,
                     protocol_id=protocol_id,
-                    media_type=media_type,
+                    media_selector=media_selector,
                     starting_channel_identifier=starting_channel_identifier,
                     ending_channel_identifier=ending_channel_identifier,
                 )
@@ -679,7 +687,7 @@ class DanteApplication:
                 received = self.notifications._conmon_received.get(device_ip, set())
                 return len(received) >= 2
         finally:
-            self.notifications.unregister_conmon_waiter(device_ip)
+            self.notifications.unregister_waiter(waiter)
         return True
 
     async def _retry_conmon_query(self, incomplete_devices: list, deadline: float, retry: int) -> list:
@@ -708,7 +716,7 @@ class DanteApplication:
                     if not device.dante_model_id:
                         still_incomplete.append(device)
             finally:
-                self.notifications.unregister_conmon_waiter(device_ip)
+                self.notifications.unregister_waiter(waiter)
         return still_incomplete
 
     async def _query_settings_fields(self, devices: dict | None = None) -> None:
@@ -726,7 +734,7 @@ class DanteApplication:
             if isinstance(result, Exception):
                 logger.debug(f"Bluetooth status unavailable: {result}")
 
-    async def _query_status_page_2809(self, device, specification, description, page_kind):
+    async def _query_modern_arc_status_page(self, device, specification, description, page_kind):
         from netaudio import core
 
         response = await device.execute(specification)
@@ -742,7 +750,7 @@ class DanteApplication:
             raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
         return self._parse_status_page(response, description, page_kind)
 
-    async def _send_conmon_query_for_device(self, device, request: Callable[[str, str], Awaitable[None]]) -> None:
+    async def _send_conmon_query_for_device(self, device, request: Callable[[object, str], Awaitable[None]]) -> None:
         from netaudio import core
 
         if device.requires_managed_control or not device.ipv4 or not device.mac_address:
@@ -756,7 +764,7 @@ class DanteApplication:
             mac_hex = mac_hex[:12]
 
         try:
-            await request(str(device.ipv4), mac_hex)
+            await request(device, mac_hex)
         except (core.NetaudioCoreError, OSError) as exception:
             logger.warning(f"Failed to send conmon {request.__name__} to {device.server_name}: {exception}")
 
@@ -835,12 +843,12 @@ class DanteApplication:
             SUBSCRIPTION_NOTIFICATION_IDS,
         )
 
-    async def apply_avio_status_pages(self, device) -> None:
+    async def apply_modern_arc_status_pages(self, device) -> None:
         pages = (
-            (self.query_receiver_flow_status_2809, device.apply_receiver_flow_status_page),
-            (self.query_transmitter_channel_status_2809, device.apply_transmitter_channel_status_page),
-            (self.query_transmitter_flow_status_2809, device.apply_transmitter_flow_status_page),
-            (self.query_receiver_channel_status_2809, device.apply_receiver_channel_status_page),
+            (self.query_modern_arc_receiver_flow_status, device.apply_receiver_flow_status_page),
+            (self.query_modern_arc_transmitter_channel_status, device.apply_transmitter_channel_status_page),
+            (self.query_modern_arc_transmitter_flow_status, device.apply_transmitter_flow_status_page),
+            (self.query_modern_arc_receiver_channel_status, device.apply_receiver_channel_status_page),
         )
         for query, apply in pages:
             try:
@@ -851,6 +859,29 @@ class DanteApplication:
                 continue
             if page is not None:
                 apply(page)
+        if getattr(self, "media_services", None):
+            self._attach_media_services(device)
+
+    def _attach_media_services(self, device) -> None:
+        device_names = {str(device.name).casefold(), str(device.server_name).removesuffix(".local.").casefold()}
+        for service in self.media_services.values():
+            service_type = service.get("type")
+            service_name = service.get("name", "")
+            suffix = f".{service_type}"
+            if not service_name.casefold().endswith(suffix.casefold()):
+                continue
+            source_name = service_name[: -len(suffix)]
+            if "@" not in source_name:
+                continue
+            channel_name, source_device_name = source_name.rsplit("@", 1)
+            if source_device_name.casefold() not in device_names:
+                continue
+            channel = next(
+                (entry for entry in device.tx_channels.values() if entry.name == channel_name),
+                None,
+            )
+            if channel is not None:
+                channel.media_service = service
 
     def arc_port_for_address(self, device_ip_address: str) -> int:
         device = self._device_by_ip(device_ip_address)
@@ -1048,7 +1079,9 @@ class DanteApplication:
                 services.append(service)
 
         server_name = arc_service["server_name"]
-        matching_services = {service["name"]: service for service in services if service["server_name"] == server_name}
+        matching_services = {service["name"]: service for service in services}
+        if len({service["server_name"] for service in services}) > 1:
+            server_name = f"{device_name}.local."
         device = self._apply_discovered_services(server_name, matching_services)
         return {server_name: device}
 
@@ -1522,24 +1555,26 @@ class DanteApplication:
             "switch configuration",
         )
 
-    async def query_receiver_channel_status_2809(self, device):
+    async def query_modern_arc_receiver_channel_status(self, device):
         return await self._query_channel_status_pages(device, "rx")
 
-    async def query_receiver_flow_status_2809(self, device):
-        return await self._query_status_page_2809(
+    async def query_modern_arc_receiver_flow_status(self, device):
+        protocol_id = modern_arc_protocol_identifier_for_device(device)
+        return await self._query_modern_arc_status_page(
             device,
-            self.commands.query_receiver_flow_status_2809(),
+            self.commands.query_modern_arc_receiver_flow_status(protocol_id),
             "receiver flow status query",
-            "receiver_flow_status_page_2809",
+            "modern_arc_receiver_flow_status_page",
         )
 
-    async def query_transmitter_channel_status_2809(self, device):
+    async def query_modern_arc_transmitter_channel_status(self, device):
         return await self._query_channel_status_pages(device, "tx")
 
-    async def query_transmitter_flow_status_2809(self, device):
-        return await self._query_status_page_2809(
+    async def query_modern_arc_transmitter_flow_status(self, device):
+        protocol_id = modern_arc_protocol_identifier_for_device(device)
+        return await self._query_modern_arc_status_page(
             device,
-            self.commands.query_transmitter_flow_status_2809(),
+            self.commands.query_modern_arc_transmitter_flow_status(protocol_id),
             "transmitter flow status query",
             "transmitter_flow_status_page",
         )
@@ -1610,14 +1645,69 @@ class DanteApplication:
         if cached_protocol_identifier is not None:
             return cached_protocol_identifier
 
-        response = await device.execute(channel_status_query_specification(channel_type))
+        try:
+            protocol_identifier = modern_arc_protocol_identifier_for_device(device)
+        except RuntimeError:
+            protocol_identifier = PROTOCOL_ARC_2809
+        response = await device.execute(
+            channel_status_query_specification(channel_type, protocol_id=protocol_identifier)
+        )
         protocol_identifier = resolve(response)
         setattr(device, attribute_name, protocol_identifier)
         return protocol_identifier
 
     async def send_add_subscriptions(self, device, records):
         async with device.topology_mutation_lock:
+            if self._uses_modern_arc_280f(device):
+                return await self._send_modern_arc_subscription_records(
+                    device,
+                    [
+                        {
+                            "action": "set",
+                            "rx_channel": rx_channel,
+                            "tx_channel": tx_channel,
+                            "tx_device": tx_device,
+                        }
+                        for rx_channel, tx_channel, tx_device in records
+                    ],
+                )
             return await device.execute(self.commands.add_subscriptions(records))
+
+    @staticmethod
+    def _uses_modern_arc_280f(device) -> bool:
+        return any(
+            service.get("type") == SERVICE_ARC and (service.get("properties") or {}).get("arcp_vers") == "2.8.15"
+            for service in (getattr(device, "services", None) or {}).values()
+            if isinstance(service, dict)
+        )
+
+    async def _send_modern_arc_subscription_records(self, device, records: list[dict]):
+        protocol_id = modern_arc_protocol_identifier_for_device(device)
+        receiver_count = len(device.rx_channels)
+        if receiver_count == 0:
+            raise RuntimeError("modern ARC subscription requires populated receiver channels")
+        page_capacity = min(32, receiver_count)
+        grouped: dict[int, list[dict]] = {}
+        for record in records:
+            channel_number = record["rx_channel"]
+            channel = device.rx_channels.get(channel_number)
+            media_type_code = getattr(channel, "media_type_code", None)
+            if media_type_code not in (3, 4):
+                raise RuntimeError(f"receiver channel {channel_number} has no supported media type")
+            grouped.setdefault(media_type_code, []).append(record)
+
+        response = None
+        for media_type_code, media_records in grouped.items():
+            for start in range(0, len(media_records), page_capacity):
+                response = await device.execute(
+                    self.commands.modern_arc_subscription_page(
+                        protocol_id,
+                        page_capacity,
+                        media_type_code,
+                        media_records[start : start + page_capacity],
+                    )
+                )
+        return response
 
     async def send_bluetooth_status_request(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.bluetooth_status(host_mac))
@@ -1691,6 +1781,11 @@ class DanteApplication:
 
     async def send_remove_subscriptions(self, device, channel_numbers):
         async with device.topology_mutation_lock:
+            if self._uses_modern_arc_280f(device):
+                return await self._send_modern_arc_subscription_records(
+                    device,
+                    [{"action": "clear", "rx_channel": channel_number} for channel_number in channel_numbers],
+                )
             return await device.execute(self.commands.remove_subscriptions(channel_numbers))
 
     async def send_set_channel_name(self, device, channel_type, channel_number, name, protocol_id=None):
@@ -2086,5 +2181,6 @@ class DanteApplication:
 
         if devices:
             self.devices.update(devices)
+        self.media_services = dict(getattr(browser, "media_services", {}))
 
         return self.devices

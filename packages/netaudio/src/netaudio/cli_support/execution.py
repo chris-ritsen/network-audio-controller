@@ -123,7 +123,7 @@ async def _populate_show_details(application: DanteApplication, device: DanteDev
             logger.debug(f"AES67 multicast prefix unavailable for {device.server_name or device.name}: {exception}")
     await _populate_audio_capabilities(application, device)
     if include_channels or device.transmitter_flows is None:
-        await application.apply_avio_status_pages(device)
+        await application.apply_modern_arc_status_pages(device)
 
 
 async def _load_device_for_show(application: DanteApplication, include_channels: bool) -> tuple[str, DanteDevice]:

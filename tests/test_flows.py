@@ -151,11 +151,13 @@ def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
         "maximum_flow_slots": 4,
         "flows": [
             {
-                "flow_number": 2,
+                "global_flow_id": 2,
+                "media_type_code": 3,
+                "media_local_flow_id": 2,
                 "flow_type_code": 0x0002,
                 "local_receiver_channel_count": 2,
                 "receiver_mapping_descriptor_hexadecimal": "00010002",
-                "status_code_at_record_offset_62": 0x0009,
+                "status_code": 0x0009,
                 "destination_internet_protocol_version_four_address": "192.0.2.20",
                 "destination_user_datagram_port": 14336,
                 "sample_rate": 48000,
@@ -171,7 +173,7 @@ def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
     assert "receiver_channel_numbers_by_flow_channel" not in flow
     assert "subscription_status_code" not in flow
     assert flow["receiver_mapping_descriptor_hexadecimal"] == "00010002"
-    assert flow["status_code_at_record_offset_62"] == 0x0009
+    assert flow["status_code"] == 0x0009
     assert flow["local_receiver_channel_count"] == 2
     assert flow["flow_type"] == "0x0002"
 
