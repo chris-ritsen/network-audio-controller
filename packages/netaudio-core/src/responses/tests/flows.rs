@@ -388,8 +388,8 @@ fn transmitter_flow_status_parser_decodes_zero_unicast_and_multicast_records() {
     assert_eq!(unicast_flow.flow_type_code, FLOW_TYPE_UNICAST);
     assert_eq!(unicast_flow.flow_type.as_deref(), Some("unicast"));
     assert_eq!(unicast_flow.format_pointer, 24);
-    assert_eq!(unicast_flow.sample_rate, 48_000);
-    assert_eq!(unicast_flow.encoding, 24);
+    assert_eq!(unicast_flow.sample_rate, Some(48_000));
+    assert_eq!(unicast_flow.encoding, Some(24));
     assert_eq!(unicast_flow.populated_slot_count, 2);
     assert_eq!(unicast_flow.endpoint_descriptor_pointer, 112);
     assert_eq!(
@@ -495,7 +495,7 @@ fn transmitter_channel_status_2809_parser_decodes_shipping_controller_response()
     let response = decode_hexadecimal(
             "280900a42852240000010000000000000202003c007c00030000bb80010100180400001800180004626c7565746f6f74683a6c656674004c6566740014140001000000030001000000000007000000000028001800000000000000370000000000000000626c7565746f6f74683a726967687400526967687400000014140002000000030002000000000007000000000064001800000000000000740000000000000000",
         );
-    let page = parse_transmitter_channel_status_page_2809(&response).unwrap();
+    let page = parse_modern_arc_transmitter_channel_status_page(&response).unwrap();
     assert_eq!(page.page_capacity, 2);
     assert_eq!(page.reported_record_count, 2);
     assert_eq!(page.records.len(), 2);
@@ -511,8 +511,8 @@ fn transmitter_channel_status_2809_parser_decodes_shipping_controller_response()
         left.format_descriptor_hexadecimal,
         "0000bb80010100180400001800180004"
     );
-    assert_eq!(left.sample_rate, 48_000);
-    assert_eq!(left.encoding, 24);
+    assert_eq!(left.sample_rate, Some(48_000));
+    assert_eq!(left.encoding, Some(24));
     assert_eq!(left.friendly_channel_name_pointer, 55);
     assert_eq!(left.friendly_channel_name, "Left");
     assert_eq!(left.raw_record_hexadecimal.len(), 80);
@@ -534,7 +534,7 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
         );
     for length in 0..response.len() {
         assert_eq!(
-            parse_transmitter_channel_status_page_2809(&response[..length]),
+            parse_modern_arc_transmitter_channel_status_page(&response[..length]),
             None
         );
     }
@@ -542,11 +542,8 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
     let mut unknown_record_type = response.clone();
     unknown_record_type[60..62].copy_from_slice(&0x9999u16.to_be_bytes());
     assert_eq!(
-        parse_transmitter_channel_status_page_2809(&unknown_record_type)
-            .unwrap()
-            .records[0]
-            .record_type_code,
-        0x9999
+        parse_modern_arc_transmitter_channel_status_page(&unknown_record_type),
+        None
     );
 
     let mutations = [
@@ -564,13 +561,16 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
     for (start, end, replacement) in mutations {
         let mut malformed = response.clone();
         malformed[start..end].copy_from_slice(&replacement);
-        assert_eq!(parse_transmitter_channel_status_page_2809(&malformed), None);
+        assert_eq!(
+            parse_modern_arc_transmitter_channel_status_page(&malformed),
+            None
+        );
     }
 
     let bodyless_a32_response = decode_hexadecimal("2809000a285224000030");
     assert_eq!(parse_result_code(&bodyless_a32_response), Some(0x0030));
     assert_eq!(
-        parse_transmitter_channel_status_page_2809(&bodyless_a32_response),
+        parse_modern_arc_transmitter_channel_status_page(&bodyless_a32_response),
         None
     );
 }
@@ -578,7 +578,7 @@ fn transmitter_channel_status_2809_parser_rejects_malformed_responses() {
 #[test]
 fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
     let empty = decode_hexadecimal("28090016285636000001000000000000020000020002");
-    let empty_page = parse_receiver_flow_status_page_2809(&empty).unwrap();
+    let empty_page = parse_modern_arc_receiver_flow_status_page(&empty).unwrap();
     assert_eq!(empty_page.maximum_flow_slots, 2);
     assert_eq!(empty_page.reported_flow_count, 0);
     assert!(empty_page.flows.is_empty());
@@ -586,30 +586,31 @@ fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
     let active = decode_hexadecimal(
             "2809007401c93600000100000000000002010020000231000000bb8000000018142200010000000300010000000000010000000000160018000f42400000000000000000000000000a0e000000000000000000000001006c00000000040001010064000008023801c0a8013d0001000200000100",
         );
-    let page = parse_receiver_flow_status_page_2809(&active).unwrap();
+    let page = parse_modern_arc_receiver_flow_status_page(&active).unwrap();
     assert_eq!(page.maximum_flow_slots, 2);
     assert_eq!(page.reported_flow_count, 1);
     assert_eq!(page.flows.len(), 1);
     let flow = &page.flows[0];
     assert_eq!(flow.record_pointer, 32);
     assert_eq!(flow.record_type_code, 0x1422);
-    assert_eq!(flow.flow_number, 1);
-    assert_eq!(flow.channel_count, 1);
+    assert_eq!(flow.global_flow_id, 1);
+    assert_eq!(flow.media_type_code, 3);
+    assert_eq!(flow.media_local_flow_id, 1);
     assert_eq!(flow.flow_type_code, 1);
     assert_eq!(flow.flow_name_pointer, 22);
     assert_eq!(flow.flow_name, "1");
     assert_eq!(flow.format_pointer, 24);
-    assert_eq!(flow.sample_rate, 48_000);
-    assert_eq!(flow.encoding, 24);
-    assert_eq!(flow.latency_nanoseconds, 1_000_000);
+    assert_eq!(flow.sample_rate, Some(48_000));
+    assert_eq!(flow.encoding, Some(24));
+    assert_eq!(flow.latency_nanoseconds, Some(1_000_000));
     assert_eq!(flow.local_receiver_channel_count, 1);
     assert_eq!(flow.receiver_mapping_descriptor_pointer, 108);
     assert_eq!(
         flow.receiver_mapping_descriptor_hexadecimal,
         "0001000200000100"
     );
-    assert_eq!(flow.status_flags_at_record_offset_60, 0x0400);
-    assert_eq!(flow.status_code_at_record_offset_62, 0x0101);
+    assert_eq!(flow.status_flags, 0x0400);
+    assert_eq!(flow.status_code, 0x0101);
     assert_eq!(flow.endpoint_descriptor_hexadecimal, "08023801c0a8013d");
     assert_eq!(flow.destination_user_datagram_port, Some(0x3801));
     assert_eq!(
@@ -623,7 +624,7 @@ fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
     let two_local_receivers = decode_hexadecimal(
             "2809007402d23600000100000000000002010020000231000000bb8000000018142200010000000300010000000000010000000000160018000f42400000000000000000000000000a0e000000000000000000000002006c00000000040001010064000008023801c0a801240001000200000101",
         );
-    let two_receiver_flow = &parse_receiver_flow_status_page_2809(&two_local_receivers)
+    let two_receiver_flow = &parse_modern_arc_receiver_flow_status_page(&two_local_receivers)
         .unwrap()
         .flows[0];
     assert_eq!(two_receiver_flow.local_receiver_channel_count, 2);
@@ -640,7 +641,7 @@ fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
         );
     for length in 0..response.len() {
         assert_eq!(
-            parse_receiver_flow_status_page_2809(&response[..length]),
+            parse_modern_arc_receiver_flow_status_page(&response[..length]),
             None
         );
     }
@@ -648,11 +649,8 @@ fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
     let mut unknown_record_type = response.clone();
     unknown_record_type[32..34].copy_from_slice(&0x9999u16.to_be_bytes());
     assert_eq!(
-        parse_receiver_flow_status_page_2809(&unknown_record_type)
-            .unwrap()
-            .flows[0]
-            .record_type_code,
-        0x9999
+        parse_modern_arc_receiver_flow_status_page(&unknown_record_type),
+        None
     );
 
     let mutations = [
@@ -672,13 +670,13 @@ fn receiver_flow_status_2809_parser_rejects_malformed_responses() {
     for (start, end, replacement) in mutations {
         let mut malformed = response.clone();
         malformed[start..end].copy_from_slice(&replacement);
-        assert_eq!(parse_receiver_flow_status_page_2809(&malformed), None);
+        assert_eq!(parse_modern_arc_receiver_flow_status_page(&malformed), None);
     }
 
     let bodyless_a32_response = decode_hexadecimal("2809000a285636000030");
     assert_eq!(parse_result_code(&bodyless_a32_response), Some(0x0030));
     assert_eq!(
-        parse_receiver_flow_status_page_2809(&bodyless_a32_response),
+        parse_modern_arc_receiver_flow_status_page(&bodyless_a32_response),
         None
     );
 }
@@ -688,7 +686,7 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
     let first = decode_hexadecimal(
             "2809007c284a34000001000000000000010100446d69632d6d69782d68696768006c782d64616e74650000000000bb800101001804000018001800043031004c65667400141c000100000003000100000000000600000000003c002c000000000000003f000000000000000006080000001400210010000002020000",
         );
-    let first_page = parse_receiver_channel_status_page_2809(&first).unwrap();
+    let first_page = parse_modern_arc_receiver_channel_status_page(&first).unwrap();
     assert_eq!(first_page.page_capacity, 1);
     assert_eq!(first_page.reported_record_count, 1);
     assert_eq!(first_page.records.len(), 1);
@@ -703,8 +701,8 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
         first_record.format_descriptor_hexadecimal,
         "0000bb80010100180400001800180004"
     );
-    assert_eq!(first_record.sample_rate, 48_000);
-    assert_eq!(first_record.encoding, 24);
+    assert_eq!(first_record.sample_rate, Some(48_000));
+    assert_eq!(first_record.encoding, Some(24));
     assert_eq!(first_record.friendly_channel_name_pointer, 63);
     assert_eq!(first_record.friendly_channel_name, "Left");
     assert_eq!(first_record.source_channel_name_pointer, 20);
@@ -716,13 +714,13 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
     assert_eq!(first_record.source_device_name.as_deref(), Some("lx-dante"));
     assert_eq!(first_record.subscription_status_code, 0x0010);
     assert_eq!(first_record.receiver_status_code, 0);
-    assert_eq!(first_record.status_flags, 0x0202);
+    assert_eq!(first_record.status_flags, Some(0x0202));
     assert_eq!(first_record.raw_record_hexadecimal.len(), 112);
 
     let second = decode_hexadecimal(
             "28090084284d340000010000000000000101004c6d69632d6d69782d68696768006c782d64616e74650000000000bb800101001804000018001800046d69632d6d6978004c65667400000000141c000100000003000100000000000600000000003c002c0000000000000044000000000000000006080000001400210010000002020000",
         );
-    let second_page = parse_receiver_channel_status_page_2809(&second).unwrap();
+    let second_page = parse_modern_arc_receiver_channel_status_page(&second).unwrap();
     let second_record = &second_page.records[0];
     assert_eq!(second_record.record_pointer, 76);
     assert_eq!(second_record.local_channel_name, "mic-mix");
@@ -730,7 +728,7 @@ fn receiver_channel_status_2809_parser_decodes_controller_rename_readbacks() {
     assert_eq!(second_record.friendly_channel_name, "Left");
     assert_eq!(second_record.subscription_status_code, 0x0010);
     assert_eq!(second_record.receiver_status_code, 0);
-    assert_eq!(second_record.status_flags, 0x0202);
+    assert_eq!(second_record.status_flags, Some(0x0202));
 }
 
 #[test]
@@ -738,7 +736,7 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
     let response = decode_hexadecimal(
             "280900a801f13400000100000000000002020030007000030000bb8001010018040000200020000e303100434831006c141c00010000000300010000000000060000000000280018000000000000002b0000000000000000060800000000000000000000020200003032004348320032141c00020000000300020000000000060000000000680018000000000000006b000000000000000006080000000000000000000002020000",
         );
-    let page = parse_receiver_channel_status_page_2809(&response).unwrap();
+    let page = parse_modern_arc_receiver_channel_status_page(&response).unwrap();
     assert_eq!(page.page_capacity, 2);
     assert_eq!(page.reported_record_count, 2);
     assert_eq!(
@@ -755,7 +753,7 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
     let mut larger_capacity = response.clone();
     larger_capacity[16] = 64;
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&larger_capacity)
+        parse_modern_arc_receiver_channel_status_page(&larger_capacity)
             .unwrap()
             .page_capacity,
         64
@@ -763,7 +761,7 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
 
     for length in 0..response.len() {
         assert_eq!(
-            parse_receiver_channel_status_page_2809(&response[..length]),
+            parse_modern_arc_receiver_channel_status_page(&response[..length]),
             None
         );
     }
@@ -771,38 +769,35 @@ fn receiver_channel_status_2809_parser_handles_two_channels_and_rejects_malforme
     let mut unknown_record_type = response.clone();
     unknown_record_type[48..50].copy_from_slice(&0x9999u16.to_be_bytes());
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&unknown_record_type)
-            .unwrap()
-            .records[0]
-            .record_type_code,
-        0x9999
+        parse_modern_arc_receiver_channel_status_page(&unknown_record_type),
+        None
     );
 
     let mut duplicate_record_pointer = response.clone();
     duplicate_record_pointer[20..22].copy_from_slice(&48u16.to_be_bytes());
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&duplicate_record_pointer),
+        parse_modern_arc_receiver_channel_status_page(&duplicate_record_pointer),
         None
     );
 
     let mut invalid_channel_number = response.clone();
     invalid_channel_number[50..52].copy_from_slice(&0u16.to_be_bytes());
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&invalid_channel_number),
+        parse_modern_arc_receiver_channel_status_page(&invalid_channel_number),
         None
     );
 
     let mut invalid_local_name_pointer = response.clone();
     invalid_local_name_pointer[68..70].copy_from_slice(&0u16.to_be_bytes());
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&invalid_local_name_pointer),
+        parse_modern_arc_receiver_channel_status_page(&invalid_local_name_pointer),
         None
     );
 
     let mut invalid_format_pointer = response;
     invalid_format_pointer[70..72].copy_from_slice(&u16::MAX.to_be_bytes());
     assert_eq!(
-        parse_receiver_channel_status_page_2809(&invalid_format_pointer),
+        parse_modern_arc_receiver_channel_status_page(&invalid_format_pointer),
         None
     );
 }
@@ -929,4 +924,92 @@ fn flow_parser_rejects_duplicate_records_and_truncated_channel_lists() {
     let mut oversized_encoding = flow_query_response();
     oversized_encoding[52..56].copy_from_slice(&65_536u32.to_be_bytes());
     assert_eq!(parse_tx_flows(&oversized_encoding), None);
+}
+
+fn studio_video_packet(name: &str) -> Vec<u8> {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/studio_video_modern_arc.json"
+    ))
+    .unwrap();
+    decode_hexadecimal(fixture["packets"][name]["payload"].as_str().unwrap())
+}
+
+#[test]
+fn modern_arc_280f_video_channel_pages_preserve_media_specific_data() {
+    let transmitter = parse_modern_arc_transmitter_channel_status_page(&studio_video_packet(
+        "transmitter_channel_response",
+    ))
+    .unwrap();
+    let tx = &transmitter.records[0];
+    assert_eq!(transmitter.protocol_id, PROTOCOL_ARC_280F);
+    assert_eq!(tx.record_type_code, 0x1616);
+    assert_eq!(tx.record_length_bytes, 44);
+    assert_eq!(tx.media_type_code, MEDIA_TYPE_VIDEO);
+    assert_eq!(tx.channel_name, "01");
+    assert_eq!(
+        tx.format_descriptor_hexadecimal,
+        "02080000060000000000008200000000"
+    );
+    assert_eq!(tx.sample_rate, None);
+    assert_eq!(tx.encoding, None);
+
+    let receiver = parse_modern_arc_receiver_channel_status_page(&studio_video_packet(
+        "receiver_channel_response",
+    ))
+    .unwrap();
+    let rx = &receiver.records[0];
+    assert_eq!(receiver.protocol_id, PROTOCOL_ARC_280F);
+    assert_eq!(rx.record_type_code, 0x161C);
+    assert_eq!(rx.record_length_bytes, 56);
+    assert_eq!(rx.media_type_code, MEDIA_TYPE_VIDEO);
+    assert_eq!(rx.source_channel_name.as_deref(), Some("01"));
+    assert_eq!(rx.source_device_name.as_deref(), Some("studio-media-b"));
+    assert_eq!(rx.subscription_status_code, 9);
+    assert_eq!(rx.receiver_status_code, 0x0101);
+    assert_eq!(rx.status_flags, None);
+    assert_eq!(rx.sample_rate, None);
+    assert_eq!(rx.encoding, None);
+}
+
+#[test]
+fn modern_arc_280f_video_flow_pages_do_not_mislabel_the_format_as_audio() {
+    let transmitter =
+        parse_transmitter_flow_status_page(&studio_video_packet("transmitter_flow_response"))
+            .unwrap();
+    let tx = &transmitter.flows[0];
+    assert_eq!(tx.media_type_code, MEDIA_TYPE_VIDEO);
+    assert_eq!(tx.record_length_bytes, 74);
+    assert_eq!(
+        tx.format_descriptor_hexadecimal,
+        "02080000060000000000008200000000"
+    );
+    assert_eq!(tx.sample_rate, None);
+    assert_eq!(tx.encoding, None);
+    assert_eq!(tx.channel_slot_count, None);
+
+    let receiver =
+        parse_modern_arc_receiver_flow_status_page(&studio_video_packet("receiver_flow_response"))
+            .unwrap();
+    let rx = &receiver.flows[0];
+    assert_eq!(receiver.protocol_id, PROTOCOL_ARC_280F);
+    assert_eq!(rx.record_type_code, 0x1626);
+    assert_eq!(rx.record_length_bytes, 92);
+    assert_eq!(rx.global_flow_id, 1);
+    assert_eq!(rx.media_type_code, MEDIA_TYPE_VIDEO);
+    assert_eq!(rx.media_local_flow_id, 1);
+    assert_eq!(rx.flow_type_code, 0x8001);
+    assert_eq!(
+        rx.format_descriptor_hexadecimal,
+        "02080000060000000000008200000000"
+    );
+    assert_eq!(rx.sample_rate, None);
+    assert_eq!(rx.encoding, None);
+    assert_eq!(rx.latency_nanoseconds, None);
+    assert_eq!(rx.local_receiver_channel_count, 1);
+    assert_eq!(rx.status_flags, 0x0400);
+    assert_eq!(rx.status_code, 0x0101);
+    assert_eq!(
+        rx.receiver_mapping_descriptor_hexadecimal,
+        "0001000200000100"
+    );
 }

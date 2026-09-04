@@ -429,10 +429,10 @@ async def test_managed_device_without_an_ip_uses_ddm_for_identify_channels_and_n
     )
     managed = SimpleNamespace(execute=AsyncMock(return_value=None), fetch_device=AsyncMock(return_value=fresh))
     application = DanteApplication(managed_transport=managed)
-    application.query_receiver_channel_status_2809 = AsyncMock(
+    application.query_modern_arc_receiver_channel_status = AsyncMock(
         return_value={"reported_channel_count": 0, "records": []}
     )
-    application.query_transmitter_channel_status_2809 = AsyncMock(
+    application.query_modern_arc_transmitter_channel_status = AsyncMock(
         return_value={"reported_channel_count": 0, "records": []}
     )
     application.transport.execute = AsyncMock()
@@ -447,8 +447,8 @@ async def test_managed_device_without_an_ip_uses_ddm_for_identify_channels_and_n
 
     assert name == "Managed Device"
     assert managed.execute.await_args.args[0] is device
-    application.query_receiver_channel_status_2809.assert_awaited_once_with(device)
-    application.query_transmitter_channel_status_2809.assert_awaited_once_with(device)
+    application.query_modern_arc_receiver_channel_status.assert_awaited_once_with(device)
+    application.query_modern_arc_transmitter_channel_status.assert_awaited_once_with(device)
     managed.fetch_device.assert_awaited_once_with(device)
     application.transport.execute.assert_not_awaited()
 
@@ -503,7 +503,7 @@ async def test_managed_control_population_uses_ddm_reads_without_a_local_arc_ser
     managed = SimpleNamespace(fetch_device=AsyncMock(return_value=fresh))
     application = DanteApplication(managed_transport=managed)
     application.get_latency_settings = AsyncMock(return_value={"configured_latency": 1.0})
-    application.apply_avio_status_pages = AsyncMock()
+    application.apply_modern_arc_status_pages = AsyncMock()
     application.probe_interface_status = AsyncMock(return_value=[])
     device = _device()
     device.services = {}
@@ -515,7 +515,7 @@ async def test_managed_control_population_uses_ddm_reads_without_a_local_arc_ser
     assert device.preferred_leader is False
     managed.fetch_device.assert_awaited_once_with(device)
     application.get_latency_settings.assert_awaited_once_with(device)
-    application.apply_avio_status_pages.assert_awaited_once_with(device)
+    application.apply_modern_arc_status_pages.assert_awaited_once_with(device)
     application.probe_interface_status.assert_awaited_once_with(device)
 
 

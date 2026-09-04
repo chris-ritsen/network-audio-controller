@@ -44,7 +44,7 @@ def _arc_services() -> dict:
 def test_query_and_rename_builders_are_byte_identical_to_controller_requests():
     query = core.build_command(
         {
-            "command": "query_receiver_channel_status_2809",
+            "command": "query_modern_arc_receiver_channel_status",
             "transaction_id": 0x284A,
         }
     )
@@ -76,7 +76,7 @@ def test_query_and_rename_builders_are_byte_identical_to_controller_requests():
 
 def test_command_factory_exposes_the_verified_2809_frontend():
     commands = DanteDeviceCommands()
-    query, query_service = commands.command_query_receiver_channel_status_2809(0x284A)
+    query, query_service = commands.command_query_receiver_channel_status(transaction_id=0x284A)
     rename, rename_service = commands.command_set_channel_name(
         "rx",
         1,
@@ -92,11 +92,11 @@ def test_command_factory_exposes_the_verified_2809_frontend():
 
 def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
     first_page = core.parse_response(
-        "receiver_channel_status_page_2809",
+        "modern_arc_receiver_channel_status_page",
         _packet(0x2809, 0x3400, 28729),
     )
     second_page = core.parse_response(
-        "receiver_channel_status_page_2809",
+        "modern_arc_receiver_channel_status_page",
         _packet(0x2809, 0x3400, 28738),
     )
 
@@ -104,9 +104,10 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
     assert first_page["reported_record_count"] == 1
     assert first_page["records"][0] == {
         "record_pointer": 68,
+        "record_length_bytes": 56,
         "record_type_code": 0x141C,
         "channel_number": 1,
-        "media_type": 3,
+        "media_type_code": 3,
         "media_local_channel_id": 1,
         "local_channel_name_pointer": 60,
         "local_channel_name": "01",
@@ -149,11 +150,11 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
 
 def test_parser_handles_subscribed_and_unsubscribed_two_channel_pages():
     unsubscribed = core.parse_response(
-        "receiver_channel_status_page_2809",
+        "modern_arc_receiver_channel_status_page",
         _packet(0x2809, 0x3400, 7013),
     )
     subscribed = core.parse_response(
-        "receiver_channel_status_page_2809",
+        "modern_arc_receiver_channel_status_page",
         _packet(0x2809, 0x3400, 7019),
     )
 
@@ -192,7 +193,7 @@ async def test_device_operation_returns_typed_receiver_status_page():
     device = SimpleNamespace(execute=AsyncMock(return_value=response), services=_arc_services())
     operation = DanteApplication()
 
-    page = await operation.query_receiver_channel_status_2809(device)
+    page = await operation.query_modern_arc_receiver_channel_status(device)
 
     assert page["records"][0]["local_channel_name"] == "mic-mix"
     device.execute.assert_awaited_once_with(channel_status_query_specification("rx"))

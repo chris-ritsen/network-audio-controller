@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::PROTOCOL_ARC_280F;
 
 const SUBSCRIPTION_PACKET_HEADER_SIZE: usize = 8;
 const SUBSCRIPTION_PAYLOAD_PREFIX_SIZE: usize = 4;
@@ -8,6 +9,9 @@ const SUBSCRIPTION_PAGE_CAPACITY: usize = 32;
 const SUBSCRIPTION_PAGE_STRING_TABLE_OFFSET: usize = 0x028C;
 const RECEIVE_CHANNEL_NAME_PAGE_CAPACITY: usize = 32;
 const RECEIVE_CHANNEL_NAME_PAGE_STRING_TABLE_OFFSET: usize = 0x008C;
+const MODERN_ARC_SUBSCRIPTION_RECORD_SIZE: usize = 8;
+const MODERN_ARC_AUDIO_MEDIA_TYPE: u16 = 3;
+const MODERN_ARC_VIDEO_MEDIA_TYPE: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveChannelNamePageRecord {
@@ -79,6 +83,100 @@ pub enum SubscriptionPageRecord {
     Clear {
         rx_channel_number: u16,
     },
+}
+
+pub fn build_modern_arc_subscription_page(
+    protocol_id: u16,
+    page_capacity: u8,
+    media_type_code: u16,
+    records: &[SubscriptionPageRecord],
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    if protocol_id != PROTOCOL_ARC_280F
+        || page_capacity == 0
+        || page_capacity > 32
+        || records.is_empty()
+        || records.len() > usize::from(page_capacity)
+        || !matches!(
+            media_type_code,
+            MODERN_ARC_AUDIO_MEDIA_TYPE | MODERN_ARC_VIDEO_MEDIA_TYPE
+        )
+    {
+        return Err(NetaudioError::InvalidPage);
+    }
+
+    let string_table_offset = 20usize
+        .checked_add(
+            usize::from(page_capacity)
+                .checked_mul(MODERN_ARC_SUBSCRIPTION_RECORD_SIZE)
+                .ok_or(NetaudioError::PacketTooLarge)?,
+        )
+        .ok_or(NetaudioError::PacketTooLarge)?;
+    let mut seen_channels = HashSet::new();
+    let mut encoded_records = Vec::with_capacity(records.len());
+    let mut string_table = Vec::new();
+    let mut string_offsets = HashMap::new();
+
+    for record in records {
+        let (rx_channel_number, tx_channel_pointer, tx_device_pointer) = match record {
+            SubscriptionPageRecord::Set {
+                rx_channel_number,
+                tx_channel_name,
+                tx_device_name,
+            } => {
+                validate_dante_channel_reference(tx_channel_name)?;
+                if tx_device_name != "." {
+                    validate_dante_name(tx_device_name)?;
+                }
+                let intern = |value: &str,
+                              strings: &mut Vec<u8>,
+                              offsets: &mut HashMap<String, u16>|
+                 -> Result<u16, NetaudioError> {
+                    if let Some(offset) = offsets.get(value) {
+                        return Ok(*offset);
+                    }
+                    let pointer = string_table_offset
+                        .checked_add(strings.len())
+                        .and_then(|offset| u16::try_from(offset).ok())
+                        .ok_or(NetaudioError::PacketTooLarge)?;
+                    strings.extend_from_slice(value.as_bytes());
+                    strings.push(0);
+                    offsets.insert(value.to_owned(), pointer);
+                    Ok(pointer)
+                };
+                (
+                    *rx_channel_number,
+                    intern(tx_channel_name, &mut string_table, &mut string_offsets)?,
+                    intern(tx_device_name, &mut string_table, &mut string_offsets)?,
+                )
+            }
+            SubscriptionPageRecord::Clear { rx_channel_number } => (*rx_channel_number, 0, 0),
+        };
+        if rx_channel_number == 0 || !seen_channels.insert(rx_channel_number) {
+            return Err(NetaudioError::InvalidSubscriptionChannel);
+        }
+        encoded_records.push((rx_channel_number, tx_channel_pointer, tx_device_pointer));
+    }
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&[0u8; 8]);
+    payload.extend_from_slice(&0x0800u16.to_be_bytes());
+    payload.push(page_capacity);
+    payload.push(u8::try_from(records.len()).map_err(|_| NetaudioError::SubscriptionCount)?);
+    for (rx_channel_number, tx_channel_pointer, tx_device_pointer) in encoded_records {
+        payload.extend_from_slice(&rx_channel_number.to_be_bytes());
+        payload.extend_from_slice(&media_type_code.to_be_bytes());
+        payload.extend_from_slice(&tx_channel_pointer.to_be_bytes());
+        payload.extend_from_slice(&tx_device_pointer.to_be_bytes());
+    }
+    payload.resize(string_table_offset - SUBSCRIPTION_PACKET_HEADER_SIZE, 0);
+    payload.extend_from_slice(&string_table);
+    build_control_packet_for_protocol(
+        protocol_id,
+        OPCODE_MODERN_ARC_SUBSCRIPTION,
+        &payload,
+        transaction_id,
+    )
 }
 
 fn intern_subscription_page_string(

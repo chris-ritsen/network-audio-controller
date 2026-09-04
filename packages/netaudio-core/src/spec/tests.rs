@@ -348,7 +348,7 @@ fn receiver_flow_query_command_matches_shipping_controller() {
 #[test]
 fn receiver_channel_2809_commands_match_shipping_controller() {
     let transmitter_query = build_command_from_json(
-        r#"{"command":"query_transmitter_channel_status_2809","transaction_id":10322}"#,
+        r#"{"command":"query_modern_arc_transmitter_channel_status","transaction_id":10322}"#,
     )
     .unwrap();
     assert_eq!(
@@ -361,7 +361,7 @@ fn receiver_channel_2809_commands_match_shipping_controller() {
     );
 
     let query = build_command_from_json(
-        r#"{"command":"query_receiver_channel_status_2809","transaction_id":10314}"#,
+        r#"{"command":"query_modern_arc_receiver_channel_status","transaction_id":10314}"#,
     )
     .unwrap();
     assert_eq!(
@@ -374,7 +374,7 @@ fn receiver_channel_2809_commands_match_shipping_controller() {
     );
 
     let receiver_flow_query = build_command_from_json(
-        r#"{"command":"query_receiver_flow_status_2809","transaction_id":10326}"#,
+        r#"{"command":"query_modern_arc_receiver_flow_status","transaction_id":10326}"#,
     )
     .unwrap();
     assert_eq!(

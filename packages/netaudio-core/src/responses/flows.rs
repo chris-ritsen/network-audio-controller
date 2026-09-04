@@ -89,7 +89,7 @@ pub fn parse_transmitter_flow_status_page(response: &[u8]) -> Option<Transmitter
     for flow in &flows {
         if flow.global_flow_id > u16::from(maximum_flow_slots)
             || !flow_numbers.insert(flow.global_flow_id)
-            || !media_identities.insert((flow.media_type, flow.media_local_flow_id))
+            || !media_identities.insert((flow.media_type_code, flow.media_local_flow_id))
         {
             return None;
         }
@@ -229,7 +229,7 @@ fn parse_transmitter_flow_status_record(
         first_segment_end,
         TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER,
     )?;
-    let media_type = transmitter_flow_status_segment_u16(
+    let media_type_code = transmitter_flow_status_segment_u16(
         response,
         record_offset,
         first_segment_end,
@@ -241,7 +241,7 @@ fn parse_transmitter_flow_status_record(
         first_segment_end,
         TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID,
     )?;
-    if global_flow_id == 0 || media_type == 0 || media_local_flow_id == 0 {
+    if global_flow_id == 0 || media_type_code == 0 || media_local_flow_id == 0 {
         return None;
     }
     let flow_type_code = transmitter_flow_status_segment_u16(
@@ -270,12 +270,25 @@ fn parse_transmitter_flow_status_record(
         TRANSMITTER_FLOW_STATUS_RECORD_FORMAT_POINTER,
     )?;
     let format_offset = usize::from(format_pointer);
-    response.get(format_offset..format_offset.checked_add(TRANSMITTER_FLOW_STATUS_FORMAT_SIZE)?)?;
-    let sample_rate = read_u32(response, format_offset)?;
-    let encoding = read_u32(response, format_offset.checked_add(4)?)?;
-    if sample_rate == 0 || encoding == 0 {
+    let format_size = match media_type_code {
+        MEDIA_TYPE_AUDIO => 8,
+        MEDIA_TYPE_VIDEO => 16,
+        _ => return None,
+    };
+    let format_descriptor = response.get(format_offset..format_offset.checked_add(format_size)?)?;
+    if format_offset.checked_add(format_size)? > record_offset {
         return None;
     }
+    let (sample_rate, encoding) = if media_type_code == MEDIA_TYPE_AUDIO {
+        let sample_rate = read_u32(format_descriptor, 0)?;
+        let encoding = read_u32(format_descriptor, 4)?;
+        if sample_rate == 0 || encoding == 0 {
+            return None;
+        }
+        (Some(sample_rate), Some(encoding))
+    } else {
+        (None, None)
+    };
 
     let subscriber_segment_start = *geometry
         .segment_offsets
@@ -327,7 +340,7 @@ fn parse_transmitter_flow_status_record(
         };
 
     let (channel_slot_segment_header, channel_slot_count, transmitter_channel_ids_by_slot) =
-        parse_audio_channel_slot_segment(response, &geometry, media_type)?;
+        parse_audio_channel_slot_segment(response, &geometry, media_type_code)?;
     let populated_transmitter_channel_ids: Vec<u16> = transmitter_channel_ids_by_slot
         .iter()
         .copied()
@@ -341,13 +354,14 @@ fn parse_transmitter_flow_status_record(
         record_pointer,
         record_length_bytes,
         global_flow_id,
-        media_type,
+        media_type_code,
         media_local_flow_id,
         flow_name_pointer,
         flow_name,
         flow_type_code,
         flow_type,
         format_pointer,
+        format_descriptor_hexadecimal: bytes_to_hex(format_descriptor),
         sample_rate,
         encoding,
         channel_slot_segment_header,
