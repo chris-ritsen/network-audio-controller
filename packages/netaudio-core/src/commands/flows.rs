@@ -42,7 +42,9 @@ pub fn build_query_tx_flows_from(
                 transaction_id,
             )
         }
-        PROTOCOL_ARC_2809 if starting_flow == 1 => {
+        flow_protocol_id
+            if crate::protocol::is_modern_arc_protocol(flow_protocol_id) && starting_flow == 1 =>
+        {
             let mut body = [0u8; 24];
             body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
             arc_packet_with_reserved_word(
@@ -52,7 +54,9 @@ pub fn build_query_tx_flows_from(
                 transaction_id,
             )
         }
-        PROTOCOL_ARC_2809 => Err(NetaudioError::InvalidFlowSlot),
+        flow_protocol_id if crate::protocol::is_modern_arc_protocol(flow_protocol_id) => {
+            Err(NetaudioError::InvalidFlowSlot)
+        }
         _ => Err(NetaudioError::InvalidFlowProtocol),
     }
 }
@@ -60,13 +64,13 @@ pub fn build_query_tx_flows_from(
 fn build_channel_status_query(
     protocol_id: u16,
     opcode: u16,
-    media_type: u16,
+    media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if !crate::protocol::is_modern_arc_protocol(protocol_id)
-        || media_type == 0
+        || media_selector == 0
         || starting_channel_identifier == 0
         || (ending_channel_identifier != 0
             && ending_channel_identifier < starting_channel_identifier)
@@ -75,7 +79,7 @@ fn build_channel_status_query(
     }
     let mut body = [0u8; 24];
     body[6..8].copy_from_slice(&1u16.to_be_bytes());
-    body[8..10].copy_from_slice(&media_type.to_be_bytes());
+    body[8..10].copy_from_slice(&media_selector.to_be_bytes());
     body[10..12].copy_from_slice(&starting_channel_identifier.to_be_bytes());
     body[12..14].copy_from_slice(&ending_channel_identifier.to_be_bytes());
     if protocol_id == PROTOCOL_ARC_2809 {
@@ -86,7 +90,7 @@ fn build_channel_status_query(
 
 pub fn build_query_transmitter_channel_status(
     protocol_id: u16,
-    media_type: u16,
+    media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
     transaction_id: u16,
@@ -94,17 +98,11 @@ pub fn build_query_transmitter_channel_status(
     build_channel_status_query(
         protocol_id,
         OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-        media_type,
+        media_selector,
         starting_channel_identifier,
         ending_channel_identifier,
         transaction_id,
     )
-}
-
-pub fn build_query_transmitter_channel_status_2809(
-    transaction_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    build_query_transmitter_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, transaction_id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,15 +164,9 @@ pub fn build_reconcile_transmitter_channel_names_2809(
     )
 }
 
-pub fn build_query_receiver_channel_status_2809(
-    transaction_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    build_query_receiver_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, transaction_id)
-}
-
 pub fn build_query_receiver_channel_status(
     protocol_id: u16,
-    media_type: u16,
+    media_selector: u16,
     starting_channel_identifier: u16,
     ending_channel_identifier: u16,
     transaction_id: u16,
@@ -182,21 +174,27 @@ pub fn build_query_receiver_channel_status(
     build_channel_status_query(
         protocol_id,
         OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
-        media_type,
+        media_selector,
         starting_channel_identifier,
         ending_channel_identifier,
         transaction_id,
     )
 }
 
-pub fn build_query_receiver_flow_status_2809(
+pub fn build_query_receiver_flow_status(
+    protocol_id: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::protocol::is_modern_arc_protocol(protocol_id) {
+        return Err(NetaudioError::InvalidFlowProtocol);
+    }
     let mut body = [0u8; 24];
     body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
-    body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
+    if protocol_id == PROTOCOL_ARC_2809 {
+        body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
+    }
     arc_packet_with_reserved_word(
-        PROTOCOL_ARC_2809,
+        protocol_id,
         OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809,
         &body,
         transaction_id,

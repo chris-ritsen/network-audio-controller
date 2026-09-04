@@ -81,8 +81,8 @@ def test_managed_device_uses_observed_2809_protocol_without_mdns_metadata():
 @pytest.mark.parametrize(
     ("path", "command_name"),
     [
-        ("transmitter_0x2400", "query_transmitter_channel_status_2809"),
-        ("receiver_0x3400", "query_receiver_channel_status_2809"),
+        ("transmitter_0x2400", "query_modern_arc_transmitter_channel_status"),
+        ("receiver_0x3400", "query_modern_arc_receiver_channel_status"),
     ],
 )
 def test_public_command_builder_reproduces_every_captured_280f_request(path, command_name):
@@ -91,7 +91,7 @@ def test_public_command_builder_reproduces_every_captured_280f_request(path, com
             {
                 "command": command_name,
                 "protocol_id": PROTOCOL_ARC_280F,
-                "media_type": int.from_bytes(request[18:20], "big"),
+                    "media_selector": int.from_bytes(request[18:20], "big"),
                 "starting_channel_identifier": int.from_bytes(request[20:22], "big"),
                 "ending_channel_identifier": int.from_bytes(request[22:24], "big"),
                 "transaction_id": int.from_bytes(request[4:6], "big"),
@@ -105,7 +105,7 @@ async def test_transmitter_operation_fetches_and_merges_all_four_captured_pages(
     responses = modern_arc_payloads("pagination", "transmitter_0x2400", source_port=4_840)
     device = _arc_device("2.8.15", responses)
 
-    result = await DanteApplication().query_transmitter_channel_status_2809(device)
+    result = await DanteApplication().query_modern_arc_transmitter_channel_status(device)
 
     assert result["protocol_id"] == PROTOCOL_ARC_280F
     assert result["page_count"] == 4
@@ -127,7 +127,7 @@ async def test_receiver_operation_fetches_a_short_final_page_and_merges_all_reco
     responses = modern_arc_payloads("pagination", "receiver_0x3400", source_port=4_840)
     device = _arc_device("2.8.15", responses)
 
-    result = await DanteApplication().query_receiver_channel_status_2809(device)
+    result = await DanteApplication().query_modern_arc_receiver_channel_status(device)
 
     assert result["protocol_id"] == PROTOCOL_ARC_280F
     assert result["page_count"] == 6
@@ -147,7 +147,7 @@ def test_page_accumulator_rejects_no_progress_conflicts_and_page_limit():
     pages = _parsed_pages(
         "transmitter_0x2400",
         4_840,
-        "transmitter_channel_status_page_2809",
+        "modern_arc_transmitter_channel_status_page",
     )
 
     no_progress = ChannelStatusPageAccumulator(PROTOCOL_ARC_280F, OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809)
@@ -203,7 +203,8 @@ def test_flow_fixtures_expose_media_identity_and_ordered_audio_slots():
     baseline = core.parse_response("transmitter_flow_status_page", baseline_response)
 
     assert [
-        (flow["global_flow_id"], flow["media_type"], flow["media_local_flow_id"]) for flow in baseline["flows"]
+        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"])
+        for flow in baseline["flows"]
     ] == [(1, 3, 1), (2, 3, 2), (3, 3, 3)]
     assert [flow["transmitter_channel_ids_by_slot"] for flow in baseline["flows"]] == [
         [5, 6, 7, 8],
@@ -221,7 +222,10 @@ def test_mixed_media_and_rejected_treatment_keep_media_local_identity_separate()
         source_port=5_040,
     )[-1]
     mixed = core.parse_response("transmitter_flow_status_page", mixed_response)
-    assert [(flow["global_flow_id"], flow["media_type"], flow["media_local_flow_id"]) for flow in mixed["flows"]] == [
+    assert [
+        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"])
+        for flow in mixed["flows"]
+    ] == [
         (1, 3, 1),
         (2, 4, 1),
     ]

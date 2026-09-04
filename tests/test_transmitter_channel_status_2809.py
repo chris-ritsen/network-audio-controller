@@ -38,11 +38,11 @@ def test_query_builder_and_command_factory_are_byte_identical_to_shipping_contro
     expected = _packet(1)
     built = core.build_command(
         {
-            "command": "query_transmitter_channel_status_2809",
+            "command": "query_modern_arc_transmitter_channel_status",
             "transaction_id": 0x2852,
         }
     )
-    command, service = DanteDeviceCommands().command_query_transmitter_channel_status_2809(0x2852)
+    command, service = DanteDeviceCommands().command_query_transmitter_channel_status(transaction_id=0x2852)
 
     assert built == expected
     assert command == expected
@@ -52,16 +52,17 @@ def test_query_builder_and_command_factory_are_byte_identical_to_shipping_contro
 
 
 def test_parser_exposes_transmitter_names_friendly_names_and_format():
-    page = core.parse_response("transmitter_channel_status_page_2809", _packet(2))
+    page = core.parse_response("modern_arc_transmitter_channel_status_page", _packet(2))
 
     assert page["page_capacity"] == 2
     assert page["reported_record_count"] == 2
     assert page["records"] == [
         {
             "record_pointer": 60,
+            "record_length_bytes": 40,
             "record_type_code": 0x1414,
             "channel_number": 1,
-            "media_type": 3,
+            "media_type_code": 3,
             "media_local_channel_id": 1,
             "channel_name_pointer": 40,
             "channel_name": "bluetooth:left",
@@ -75,9 +76,10 @@ def test_parser_exposes_transmitter_names_friendly_names_and_format():
         },
         {
             "record_pointer": 124,
+            "record_length_bytes": 40,
             "record_type_code": 0x1414,
             "channel_number": 2,
-            "media_type": 3,
+            "media_type_code": 3,
             "media_local_channel_id": 2,
             "channel_name_pointer": 100,
             "channel_name": "bluetooth:right",
@@ -103,7 +105,7 @@ def test_parser_handles_all_five_preserved_device_layouts():
     }
 
     for packet_identifier, names in expected_names.items():
-        page = core.parse_response("transmitter_channel_status_page_2809", _packet(packet_identifier))
+        page = core.parse_response("modern_arc_transmitter_channel_status_page", _packet(packet_identifier))
         assert [(record["channel_name"], record["friendly_channel_name"]) for record in page["records"]] == names
         assert [record["channel_number"] for record in page["records"]] == [1, 2]
         assert {record["sample_rate"] for record in page["records"]} == {48_000}
@@ -125,13 +127,13 @@ def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
         malformed = bytearray(successful_response)
         malformed[start:end] = replacement
         with pytest.raises(core.NetaudioCoreError):
-            core.parse_response("transmitter_channel_status_page_2809", bytes(malformed))
+            core.parse_response("modern_arc_transmitter_channel_status_page", bytes(malformed))
 
     a32_response = _packet(8)
     assert a32_response == bytes.fromhex("2809000a285224000030")
     assert core.parse_response("result_code", a32_response) == 0x0030
     with pytest.raises(core.NetaudioCoreError):
-        core.parse_response("transmitter_channel_status_page_2809", a32_response)
+        core.parse_response("modern_arc_transmitter_channel_status_page", a32_response)
 
 
 @pytest.mark.asyncio
@@ -139,7 +141,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
     successful_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(2)), services=_arc_services())
     successful_operation = DanteApplication()
 
-    page = await successful_operation.query_transmitter_channel_status_2809(successful_device)
+    page = await successful_operation.query_modern_arc_transmitter_channel_status(successful_device)
 
     assert [record["channel_name"] for record in page["records"]] == ["bluetooth:left", "bluetooth:right"]
     assert successful_device.transmitter_channel_name_protocol_identifier == 0x2809
@@ -147,7 +149,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(8)), services=_arc_services())
     with pytest.raises(RuntimeError, match="result 0x0030"):
-        await DanteApplication().query_transmitter_channel_status_2809(rejected_device)
+        await DanteApplication().query_modern_arc_transmitter_channel_status(rejected_device)
 
 
 @pytest.mark.asyncio

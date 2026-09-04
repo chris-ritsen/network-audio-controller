@@ -53,7 +53,7 @@ async def test_reconciliation_uses_2729_after_authentic_a32_frontend_rejection()
     routing_name_state = {1: "Old-1"}
 
     def respond(specification):
-        if specification["command"] == "query_transmitter_channel_status_2809":
+        if specification["command"] == "query_modern_arc_transmitter_channel_status":
             return bytes.fromhex("2809000a285224000030")
         if specification["command"] == "set_channel_name":
             routing_name_state[1] = "New-1"
@@ -69,7 +69,7 @@ async def test_reconciliation_uses_2729_after_authentic_a32_frontend_rejection()
     assert result.failures == {}
     assert application.renames == [("tx", 1, "New-1")]
     assert [specification["command"] for specification in device.executed] == [
-        "query_transmitter_channel_status_2809",
+        "query_modern_arc_transmitter_channel_status",
         "set_channel_name",
     ]
     assert device.executed[-1]["protocol_id"] == 0x2729

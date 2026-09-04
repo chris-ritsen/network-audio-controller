@@ -192,3 +192,31 @@ def test_assembling_services_ignores_resolution_added_after_wait_snapshot():
         assert browser.devices == {}
     finally:
         event_loop.close()
+
+
+def test_assembling_media_services_makes_them_available_to_the_application():
+    from netaudio.dante.const import SERVICE_VIDEO
+
+    event_loop = asyncio.new_event_loop()
+    try:
+        resolved_service = event_loop.create_future()
+        service = {
+            "ipv4": "192.0.2.38",
+            "name": f"01@studio-media-b.{SERVICE_VIDEO}",
+            "port": 4555,
+            "properties": {},
+            "server_name": "W.local.",
+            "type": SERVICE_VIDEO,
+        }
+        resolved_service.set_result(service)
+        application = SimpleNamespace(media_services={})
+        browser = DanteBrowser(mdns_timeout=0, app=application)
+        browser.services = [resolved_service]
+
+        browser._assemble_completed_services()
+
+        assert browser.media_services == {service["name"]: service}
+        assert application.media_services == {service["name"]: service}
+        assert browser.devices == {}
+    finally:
+        event_loop.close()

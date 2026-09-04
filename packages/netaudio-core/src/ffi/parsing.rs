@@ -76,16 +76,17 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             serialize_optional(kind, responses::parse_property_directory(bytes))
         }
         "ptp_clock_status" => serialize_optional(kind, responses::parse_ptp_clock_status(bytes)),
-        "receiver_channel_status_page_2809" => serialize_optional(
+        "modern_arc_receiver_channel_status_page" => serialize_optional(
             kind,
-            responses::parse_receiver_channel_status_page_2809(bytes),
+            responses::parse_modern_arc_receiver_channel_status_page(bytes),
         ),
         "receiver_flow_page" => {
             serialize_optional(kind, responses::parse_receiver_flow_page(bytes))
         }
-        "receiver_flow_status_page_2809" => {
-            serialize_optional(kind, responses::parse_receiver_flow_status_page_2809(bytes))
-        }
+        "modern_arc_receiver_flow_status_page" => serialize_optional(
+            kind,
+            responses::parse_modern_arc_receiver_flow_status_page(bytes),
+        ),
         "receiver_port_ranges" => {
             serialize_optional(kind, responses::parse_receiver_port_ranges(bytes))
         }
@@ -113,9 +114,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             kind,
             responses::parse_transmitter_channel_name_reconciliation_2809(bytes),
         ),
-        "transmitter_channel_status_page_2809" => serialize_optional(
+        "modern_arc_transmitter_channel_status_page" => serialize_optional(
             kind,
-            responses::parse_transmitter_channel_status_page_2809(bytes),
+            responses::parse_modern_arc_transmitter_channel_status_page(bytes),
         ),
         "transmitter_flow_status_page" => {
             serialize_optional(kind, responses::parse_transmitter_flow_status_page(bytes))

@@ -50,7 +50,7 @@ def test_receiver_channel_name_uses_2809_after_successful_frontend_probe(reset_c
 
     assert result.exit_code == 0
     assert [specification["command"] for specification in device.executed] == [
-        "query_receiver_channel_status_2809",
+        "query_modern_arc_receiver_channel_status",
         "set_channel_name",
     ]
     assert device.executed[1]["protocol_id"] == 0x2809
@@ -66,7 +66,7 @@ def test_receiver_channel_name_uses_2729_after_authentic_a32_frontend_rejection(
 
     assert result.exit_code == 0
     assert [specification["command"] for specification in device.executed] == [
-        "query_receiver_channel_status_2809",
+        "query_modern_arc_receiver_channel_status",
         "set_channel_name",
     ]
     assert device.executed[1]["protocol_id"] == 0x2729
@@ -84,7 +84,7 @@ def test_transmitter_channel_name_uses_2809_after_successful_frontend_probe(rese
 
     assert result.exit_code == 0
     assert [specification["command"] for specification in device.executed] == [
-        "query_transmitter_channel_status_2809",
+        "query_modern_arc_transmitter_channel_status",
         "set_channel_name",
     ]
     assert device.executed[1]["protocol_id"] == 0x2809
@@ -100,7 +100,7 @@ def test_transmitter_channel_name_uses_2729_after_authentic_a32_frontend_rejecti
 
     assert result.exit_code == 0
     assert [specification["command"] for specification in device.executed] == [
-        "query_transmitter_channel_status_2809",
+        "query_modern_arc_transmitter_channel_status",
         "set_channel_name",
     ]
     assert device.executed[1]["protocol_id"] == 0x2729

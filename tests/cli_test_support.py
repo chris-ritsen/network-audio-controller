@@ -318,5 +318,5 @@ class FakeApplication:
             "clock_subdomain": device.clock_subdomain,
         }
 
-    async def apply_avio_status_pages(self, device):
+    async def apply_modern_arc_status_pages(self, device):
         return None

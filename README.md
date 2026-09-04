@@ -134,6 +134,13 @@ Channel records carry `channel_number`, `media_type`, and
 `media_local_channel_id`; flow records carry `global_flow_id`, `media_type`,
 `media_local_flow_id`, and `transmitter_channel_ids_by_slot`.
 
+Modern ARC channel-status media type codes are `3` for audio, `4` for video,
+and `5` for ancillary data. The ancillary label is a causal black-box finding:
+Dante Controller classified devices publishing code `5` with its ancillary
+capability filter. The finding establishes Controller's interpretation of the
+field; the tested devices were synthetic, so it does not establish which
+physical device families publish ancillary channels.
+
 For the packet-observed frontends, an exact mDNS `arcp_vers` of `2.8.15`
 selects protocol `0x280f`; the existing `2.8.9` frontend uses `0x2809`.
 Unrecognized or missing versions fail closed instead of selecting a presumed

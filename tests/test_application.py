@@ -1,4 +1,5 @@
 import asyncio
+import time
 import warnings
 from unittest.mock import AsyncMock
 
@@ -64,6 +65,33 @@ class TestDanteApplication:
         application.notifications.stop.assert_awaited_once()
         application.cmc.stop.assert_awaited_once()
         application.dispatcher.stop.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_conmon_timeout_unregisters_the_waiter_it_registered(self):
+        application = DanteApplication()
+        device = make_arc_device("device.local.", "192.0.2.10")
+        device.mac_address = "001dc1000010"
+        application._send_conmon_query_for_device = AsyncMock()
+
+        completed = await application._query_conmon_for_device(device, time.monotonic() + 0.01)
+
+        assert completed is False
+        assert not application.notifications.is_waiting("conmon", "192.0.2.10")
+        assert "192.0.2.10" not in application.notifications._conmon_expected_count
+        assert "192.0.2.10" not in application.notifications._conmon_received
+
+    @pytest.mark.asyncio
+    async def test_conmon_query_keeps_device_identity_when_devices_share_an_address(self):
+        application = DanteApplication()
+        first = make_arc_device("first.local.", "192.0.2.10")
+        second = make_arc_device("second.local.", "192.0.2.10")
+        first.mac_address = "001dc1fffe000010"
+        application.devices = {first.server_name: first, second.server_name: second}
+        request = AsyncMock()
+
+        await application._send_conmon_query_for_device(first, request)
+
+        request.assert_awaited_once_with(first, "001dc1000010")
 
     @pytest.mark.asyncio
     async def test_wait_for_discovery_returns_resolved_devices_at_deadline(self, monkeypatch):
@@ -872,9 +900,9 @@ class TestDanteApplication:
 
         devices = await application.discover_named_device("lx-dante", timeout=0.1)
 
-        assert set(devices) == {"device-server.local."}
-        device = devices["device-server.local."]
-        assert device is application.devices["device-server.local."]
+        assert set(devices) == {"lx-dante.local."}
+        device = devices["lx-dante.local."]
+        assert device is application.devices["lx-dante.local."]
         assert device._app is application
         assert str(device.ipv4) == "192.168.1.108"
         assert device.model_id == "LX-DANTE"
@@ -885,7 +913,7 @@ class TestDanteApplication:
         assert set(device.services) == {
             f"lx-dante.{SERVICE_ARC}",
             f"lx-dante.{SERVICE_CMC}",
+            f"lx-dante.{SERVICE_DBC}",
         }
-        assert f"lx-dante.{SERVICE_DBC}" not in device.services
         assert FakeAsyncZeroconf.instances[0].closed is True
         assert application._browser is None

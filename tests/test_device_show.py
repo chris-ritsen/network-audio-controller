@@ -589,12 +589,12 @@ async def test_populate_show_details_fills_clock_prefix_and_avio_pages():
         ),
         probe_sample_rate_status=AsyncMock(side_effect=RuntimeError("unavailable")),
         probe_encoding_status=AsyncMock(side_effect=RuntimeError("unavailable")),
-        query_receiver_channel_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
-        query_receiver_flow_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
-        query_transmitter_channel_status_2809=AsyncMock(side_effect=RuntimeError("unsupported")),
-        query_transmitter_flow_status_2809=AsyncMock(return_value={"reported_flow_count": 0, "flows": []}),
+        query_modern_arc_receiver_channel_status=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_modern_arc_receiver_flow_status=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_modern_arc_transmitter_channel_status=AsyncMock(side_effect=RuntimeError("unsupported")),
+        query_modern_arc_transmitter_flow_status=AsyncMock(return_value={"reported_flow_count": 0, "flows": []}),
     )
-    application.apply_avio_status_pages = partial(DanteApplication.apply_avio_status_pages, application)
+    application.apply_modern_arc_status_pages = partial(DanteApplication.apply_modern_arc_status_pages, application)
     device.apply_transmitter_flow_status_page = MagicMock()
 
     await common_module._populate_show_details(application, device, include_channels=False)

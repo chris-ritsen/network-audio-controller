@@ -124,7 +124,7 @@ impl std::fmt::Display for NetaudioError {
                 "channel number must be at least 1 and fit the protocol"
             }
             NetaudioError::InvalidEncoding => "encoding value must be nonzero",
-            NetaudioError::InvalidFlowProtocol => "flow protocol must be 0x2729, 0x2801, or 0x2809",
+            NetaudioError::InvalidFlowProtocol => "unsupported flow protocol for this operation",
             NetaudioError::InvalidFlowSlot => "flow slot must be from 1 through 32",
             NetaudioError::InvalidGainLevel => "gain level must be an integer from 1 through 5",
             NetaudioError::InvalidLatency => {

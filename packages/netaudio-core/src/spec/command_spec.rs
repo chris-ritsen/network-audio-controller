@@ -229,12 +229,12 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
-    #[serde(rename = "query_receiver_channel_status_2809")]
-    QueryReceiverChannelStatus2809 {
+    #[serde(rename = "query_modern_arc_receiver_channel_status")]
+    QueryModernArcReceiverChannelStatus {
         #[serde(default)]
         ending_channel_identifier: u16,
         #[serde(default = "default_flow_start")]
-        media_type: u16,
+        media_selector: u16,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         #[serde(default = "default_modern_arc_protocol")]
@@ -242,10 +242,12 @@ pub(super) enum CommandSpec {
         #[serde(default = "default_flow_start")]
         starting_channel_identifier: u16,
     },
-    #[serde(rename = "query_receiver_flow_status_2809")]
-    QueryReceiverFlowStatus2809 {
+    #[serde(rename = "query_modern_arc_receiver_flow_status")]
+    QueryModernArcReceiverFlowStatus {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
+        #[serde(default = "default_modern_arc_protocol")]
+        protocol_id: u16,
     },
     QueryReceiverFlows {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -267,12 +269,12 @@ pub(super) enum CommandSpec {
         #[serde(default = "default_flow_start")]
         starting_channel_identifier: u16,
     },
-    #[serde(rename = "query_transmitter_channel_status_2809")]
-    QueryTransmitterChannelStatus2809 {
+    #[serde(rename = "query_modern_arc_transmitter_channel_status")]
+    QueryModernArcTransmitterChannelStatus {
         #[serde(default)]
         ending_channel_identifier: u16,
         #[serde(default = "default_flow_start")]
-        media_type: u16,
+        media_selector: u16,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         #[serde(default = "default_modern_arc_protocol")]
@@ -430,6 +432,16 @@ pub(super) enum CommandSpec {
         message_id: u16,
         records: Vec<SubscriptionPageEntry>,
     },
+    ModernArcSubscriptionPage {
+        #[serde(default = "default_flow_start")]
+        media_type_code: u16,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        page_capacity: u8,
+        #[serde(default = "default_modern_arc_protocol")]
+        protocol_id: u16,
+        records: Vec<SubscriptionPageEntry>,
+    },
     TransmitterNames {
         channel_count: u16,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -495,12 +507,12 @@ impl CommandSpec {
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
             | CommandSpec::PropertyDirectory { message_id, .. }
             | CommandSpec::QueryLatencyConfig { message_id, .. }
-            | CommandSpec::QueryReceiverChannelStatus2809 { message_id, .. }
-            | CommandSpec::QueryReceiverFlowStatus2809 { message_id, .. }
+            | CommandSpec::QueryModernArcReceiverChannelStatus { message_id, .. }
+            | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
             | CommandSpec::QueryReceiverFlows { message_id, .. }
             | CommandSpec::QueryReceiverPortRanges { message_id, .. }
             | CommandSpec::QueryTransmitChannelCapabilities { message_id, .. }
-            | CommandSpec::QueryTransmitterChannelStatus2809 { message_id, .. }
+            | CommandSpec::QueryModernArcTransmitterChannelStatus { message_id, .. }
             | CommandSpec::QueryTxFlows { message_id, .. }
             | CommandSpec::Reboot { message_id, .. }
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
@@ -524,6 +536,7 @@ impl CommandSpec {
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
+            | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
             | CommandSpec::TransmitterNames { message_id, .. }
             | CommandSpec::Transmitters { message_id, .. }
             | CommandSpec::VolumeStart { message_id, .. } => *message_id,
@@ -569,12 +582,12 @@ impl CommandSpec {
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
             | CommandSpec::PropertyDirectory { message_id, .. }
             | CommandSpec::QueryLatencyConfig { message_id, .. }
-            | CommandSpec::QueryReceiverChannelStatus2809 { message_id, .. }
-            | CommandSpec::QueryReceiverFlowStatus2809 { message_id, .. }
+            | CommandSpec::QueryModernArcReceiverChannelStatus { message_id, .. }
+            | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
             | CommandSpec::QueryReceiverFlows { message_id, .. }
             | CommandSpec::QueryReceiverPortRanges { message_id, .. }
             | CommandSpec::QueryTransmitChannelCapabilities { message_id, .. }
-            | CommandSpec::QueryTransmitterChannelStatus2809 { message_id, .. }
+            | CommandSpec::QueryModernArcTransmitterChannelStatus { message_id, .. }
             | CommandSpec::QueryTxFlows { message_id, .. }
             | CommandSpec::Reboot { message_id, .. }
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
@@ -598,6 +611,7 @@ impl CommandSpec {
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
+            | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
             | CommandSpec::TransmitterNames { message_id, .. }
             | CommandSpec::Transmitters { message_id, .. }
             | CommandSpec::VolumeStart { message_id, .. } => Some(message_id),
@@ -623,12 +637,12 @@ impl CommandSpec {
             | CommandSpec::DeviceSettings { .. }
             | CommandSpec::PropertyDirectory { .. }
             | CommandSpec::QueryLatencyConfig { .. }
-            | CommandSpec::QueryReceiverChannelStatus2809 { .. }
-            | CommandSpec::QueryReceiverFlowStatus2809 { .. }
+            | CommandSpec::QueryModernArcReceiverChannelStatus { .. }
+            | CommandSpec::QueryModernArcReceiverFlowStatus { .. }
             | CommandSpec::QueryReceiverFlows { .. }
             | CommandSpec::QueryReceiverPortRanges { .. }
             | CommandSpec::QueryTransmitChannelCapabilities { .. }
-            | CommandSpec::QueryTransmitterChannelStatus2809 { .. }
+            | CommandSpec::QueryModernArcTransmitterChannelStatus { .. }
             | CommandSpec::QueryTxFlows { .. }
             | CommandSpec::ReceiveChannelNamePage2729 { .. }
             | CommandSpec::ReconcileTransmitterChannelNames2809 { .. }
@@ -641,6 +655,7 @@ impl CommandSpec {
             | CommandSpec::SetLatency { .. }
             | CommandSpec::SetName { .. }
             | CommandSpec::SubscriptionPage2729 { .. }
+            | CommandSpec::ModernArcSubscriptionPage { .. }
             | CommandSpec::TransmitterNames { .. }
             | CommandSpec::Transmitters { .. } => (Arc, Request),
             CommandSpec::BluetoothStatus { .. }
@@ -874,22 +889,23 @@ pub(super) fn build_command(
         CommandSpec::QueryLatencyConfig { message_id } => {
             commands::build_query_latency_config(message_id)?
         }
-        CommandSpec::QueryReceiverChannelStatus2809 {
+        CommandSpec::QueryModernArcReceiverChannelStatus {
             protocol_id,
-            media_type,
+            media_selector,
             starting_channel_identifier,
             ending_channel_identifier,
             message_id,
         } => commands::build_query_receiver_channel_status(
             protocol_id,
-            media_type,
+            media_selector,
             starting_channel_identifier,
             ending_channel_identifier,
             message_id,
         )?,
-        CommandSpec::QueryReceiverFlowStatus2809 { message_id } => {
-            commands::build_query_receiver_flow_status_2809(message_id)?
-        }
+        CommandSpec::QueryModernArcReceiverFlowStatus {
+            message_id,
+            protocol_id,
+        } => commands::build_query_receiver_flow_status(protocol_id, message_id)?,
         CommandSpec::QueryReceiverFlows {
             starting_flow,
             message_id,
@@ -907,15 +923,15 @@ pub(super) fn build_command(
             maximum_channel_count,
             message_id,
         )?,
-        CommandSpec::QueryTransmitterChannelStatus2809 {
+        CommandSpec::QueryModernArcTransmitterChannelStatus {
             protocol_id,
-            media_type,
+            media_selector,
             starting_channel_identifier,
             ending_channel_identifier,
             message_id,
         } => commands::build_query_transmitter_channel_status(
             protocol_id,
-            media_type,
+            media_selector,
             starting_channel_identifier,
             ending_channel_identifier,
             message_id,
@@ -1108,6 +1124,38 @@ pub(super) fn build_command(
                 })
                 .collect();
             commands::build_subscription_page_2729(&records, message_id)?
+        }
+        CommandSpec::ModernArcSubscriptionPage {
+            media_type_code,
+            message_id,
+            page_capacity,
+            protocol_id,
+            records,
+        } => {
+            let records: Vec<SubscriptionPageRecord> = records
+                .into_iter()
+                .map(|record| match record {
+                    SubscriptionPageEntry::Set {
+                        rx_channel,
+                        tx_channel,
+                        tx_device,
+                    } => SubscriptionPageRecord::Set {
+                        rx_channel_number: rx_channel,
+                        tx_channel_name: tx_channel,
+                        tx_device_name: tx_device,
+                    },
+                    SubscriptionPageEntry::Clear { rx_channel } => SubscriptionPageRecord::Clear {
+                        rx_channel_number: rx_channel,
+                    },
+                })
+                .collect();
+            commands::build_modern_arc_subscription_page(
+                protocol_id,
+                page_capacity,
+                media_type_code,
+                &records,
+                message_id,
+            )?
         }
         CommandSpec::TransmitterNames {
             channel_count,

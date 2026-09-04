@@ -134,7 +134,7 @@ def test_seed_samples_write_decompressed_packet_bytes(tmp_path):
 
 
 def test_capture_classifies_all_captured_arc_protocol_variants():
-    assert ARC_PROTOCOL_IDS == (0x2729, 0x27FF, 0x2801, 0x2809)
+    assert ARC_PROTOCOL_IDS == (0x2729, 0x27FF, 0x2801, 0x2809, 0x280F)
     assert set(ARC_PROTOCOL_IDS).issubset(CAPTURE_PROTOCOL_IDS)
 
 

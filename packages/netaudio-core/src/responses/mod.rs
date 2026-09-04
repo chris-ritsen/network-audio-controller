@@ -21,7 +21,7 @@ use crate::protocol::{
     is_common_arc_protocol, modern_arc_protocol_opcodes, response_envelope,
     validate_conmon_envelope, validate_response_envelope, OPCODE_CHANNEL_COUNT,
     OPCODE_DEVICE_NAME_SET, OPCODE_RX_CHANNELS, OPCODE_TX_CHANNEL_INFO, OPCODE_TX_CHANNEL_NAMES,
-    PROTOCOL_ARC_2809,
+    PROTOCOL_ARC_2809, PROTOCOL_ARC_280F,
 };
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
@@ -62,9 +62,10 @@ const TRANSMITTER_FLOW_STATUS_ENDPOINT_POINTER: usize = 4;
 const TRANSMITTER_FLOW_STATUS_SLOT_COUNT: usize = 2;
 const TRANSMITTER_FLOW_STATUS_SLOT_IDS: usize = 4;
 const TRANSMITTER_FLOW_STATUS_SLOT_TRAILING_FIELD_SIZE: usize = 2;
-const TRANSMITTER_FLOW_STATUS_FORMAT_SIZE: usize = 8;
 const TRANSMITTER_FLOW_STATUS_ENDPOINT_SIZE: usize = 8;
 const MEDIA_TYPE_AUDIO: u16 = 3;
+const MEDIA_TYPE_VIDEO: u16 = 4;
+const MEDIA_TYPE_ANCILLARY: u16 = 5;
 const CHANNEL_STATUS_RECORD_CHANNEL_NUMBER: usize = 2;
 const CHANNEL_STATUS_RECORD_MEDIA_TYPE: usize = 6;
 const CHANNEL_STATUS_RECORD_MEDIA_LOCAL_ID: usize = 8;
@@ -72,26 +73,13 @@ const CHANNEL_STATUS_RECORD_NAME_POINTER: usize = 20;
 const CHANNEL_STATUS_RECORD_FORMAT_POINTER: usize = 22;
 const CHANNEL_STATUS_RECORD_FRIENDLY_NAME_POINTER: usize = 30;
 const CHANNEL_STATUS_FORMAT_SIZE: usize = 16;
-const TRANSMITTER_CHANNEL_STATUS_RECORD_SIZE: usize = 40;
-const RECEIVER_CHANNEL_STATUS_RECORD_SIZE: usize = 56;
-const RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_CHANNEL_POINTER: usize = 44;
-const RECEIVER_CHANNEL_STATUS_RECORD_SOURCE_DEVICE_POINTER: usize = 46;
-const RECEIVER_CHANNEL_STATUS_RECORD_SUBSCRIPTION_STATUS: usize = 48;
-const RECEIVER_CHANNEL_STATUS_RECORD_RECEIVER_STATUS: usize = 50;
-const RECEIVER_CHANNEL_STATUS_RECORD_STATUS_FLAGS: usize = 52;
-const RECEIVER_FLOW_STATUS_RECORD_SIZE: usize = 84;
 const RECEIVER_FLOW_STATUS_RECORD_FLOW_NUMBER: usize = 2;
-const RECEIVER_FLOW_STATUS_RECORD_CHANNEL_COUNT: usize = 8;
+const RECEIVER_FLOW_STATUS_RECORD_MEDIA_TYPE: usize = 6;
+const RECEIVER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID: usize = 8;
 const RECEIVER_FLOW_STATUS_RECORD_FLOW_TYPE: usize = 14;
 const RECEIVER_FLOW_STATUS_RECORD_NAME_POINTER: usize = 20;
 const RECEIVER_FLOW_STATUS_RECORD_FORMAT_POINTER: usize = 22;
 const RECEIVER_FLOW_STATUS_RECORD_LATENCY: usize = 24;
-const RECEIVER_FLOW_STATUS_RECORD_LOCAL_RECEIVER_COUNT: usize = 52;
-const RECEIVER_FLOW_STATUS_RECORD_MAPPING_POINTER: usize = 54;
-const RECEIVER_FLOW_STATUS_RECORD_STATUS_FLAGS: usize = 60;
-const RECEIVER_FLOW_STATUS_RECORD_STATUS_CODE: usize = 62;
-const RECEIVER_FLOW_STATUS_RECORD_ENDPOINT: usize = 68;
-const RECEIVER_FLOW_STATUS_FORMAT_SIZE: usize = 8;
 const RECEIVER_FLOW_STATUS_MAPPING_SIZE: usize = 8;
 const RECEIVER_FLOW_STATUS_ENDPOINT_SIZE: usize = 8;
 
@@ -224,15 +212,16 @@ pub struct TransmitterFlowStatus {
     pub record_pointer: u16,
     pub record_length_bytes: u16,
     pub global_flow_id: u16,
-    pub media_type: u16,
+    pub media_type_code: u16,
     pub media_local_flow_id: u16,
     pub flow_name_pointer: u16,
     pub flow_name: String,
     pub flow_type_code: u16,
     pub flow_type: Option<String>,
     pub format_pointer: u16,
-    pub sample_rate: u32,
-    pub encoding: u32,
+    pub format_descriptor_hexadecimal: String,
+    pub sample_rate: Option<u32>,
+    pub encoding: Option<u32>,
     pub channel_slot_segment_header: Option<u16>,
     pub channel_slot_count: Option<u16>,
     pub transmitter_channel_ids_by_slot: Vec<u16>,
@@ -258,18 +247,20 @@ pub struct TransmitterFlowStatusPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TransmitterChannelStatus2809 {
+pub struct ModernArcTransmitterChannelStatus {
     pub record_pointer: u16,
+    pub record_length_bytes: u16,
     pub record_type_code: u16,
     pub channel_number: u16,
-    pub media_type: u16,
+    pub media_type_code: u16,
+    pub media_type: String,
     pub media_local_channel_id: u16,
     pub channel_name_pointer: u16,
     pub channel_name: String,
     pub format_pointer: u16,
     pub format_descriptor_hexadecimal: String,
-    pub sample_rate: u32,
-    pub encoding: u16,
+    pub sample_rate: Option<u32>,
+    pub encoding: Option<u16>,
     pub friendly_channel_name_pointer: u16,
     pub friendly_channel_name: String,
     pub raw_record_hexadecimal: String,
@@ -283,7 +274,7 @@ pub enum ModernArcPageDisposition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct TransmitterChannelStatusPage2809 {
+pub struct ModernArcTransmitterChannelStatusPage {
     pub protocol_id: u16,
     pub transaction_id: u16,
     pub opcode: u16,
@@ -291,7 +282,7 @@ pub struct TransmitterChannelStatusPage2809 {
     pub page_disposition: ModernArcPageDisposition,
     pub page_capacity: u8,
     pub reported_record_count: u8,
-    pub records: Vec<TransmitterChannelStatus2809>,
+    pub records: Vec<ModernArcTransmitterChannelStatus>,
     pub raw_body_hexadecimal: String,
 }
 
@@ -312,18 +303,20 @@ pub struct TransmitterChannelNameReconciliation2809 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReceiverChannelStatus2809 {
+pub struct ModernArcReceiverChannelStatus {
     pub record_pointer: u16,
+    pub record_length_bytes: u16,
     pub record_type_code: u16,
     pub channel_number: u16,
-    pub media_type: u16,
+    pub media_type_code: u16,
+    pub media_type: String,
     pub media_local_channel_id: u16,
     pub local_channel_name_pointer: u16,
     pub local_channel_name: String,
     pub format_pointer: u16,
     pub format_descriptor_hexadecimal: String,
-    pub sample_rate: u32,
-    pub encoding: u16,
+    pub sample_rate: Option<u32>,
+    pub encoding: Option<u16>,
     pub friendly_channel_name_pointer: u16,
     pub friendly_channel_name: String,
     pub source_channel_name_pointer: u16,
@@ -332,12 +325,12 @@ pub struct ReceiverChannelStatus2809 {
     pub source_device_name: Option<String>,
     pub subscription_status_code: u16,
     pub receiver_status_code: u16,
-    pub status_flags: u16,
+    pub status_flags: Option<u16>,
     pub raw_record_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReceiverChannelStatusPage2809 {
+pub struct ModernArcReceiverChannelStatusPage {
     pub protocol_id: u16,
     pub transaction_id: u16,
     pub opcode: u16,
@@ -345,28 +338,31 @@ pub struct ReceiverChannelStatusPage2809 {
     pub page_disposition: ModernArcPageDisposition,
     pub page_capacity: u8,
     pub reported_record_count: u8,
-    pub records: Vec<ReceiverChannelStatus2809>,
+    pub records: Vec<ModernArcReceiverChannelStatus>,
     pub raw_body_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReceiverFlowStatus2809 {
+pub struct ModernArcReceiverFlowStatus {
     pub record_pointer: u16,
+    pub record_length_bytes: u16,
     pub record_type_code: u16,
-    pub flow_number: u16,
-    pub channel_count: u16,
+    pub global_flow_id: u16,
+    pub media_type_code: u16,
+    pub media_local_flow_id: u16,
     pub flow_type_code: u16,
     pub flow_name_pointer: u16,
     pub flow_name: String,
     pub format_pointer: u16,
-    pub sample_rate: u32,
-    pub encoding: u32,
-    pub latency_nanoseconds: u32,
+    pub format_descriptor_hexadecimal: String,
+    pub sample_rate: Option<u32>,
+    pub encoding: Option<u32>,
+    pub latency_nanoseconds: Option<u32>,
     pub local_receiver_channel_count: u16,
     pub receiver_mapping_descriptor_pointer: u16,
     pub receiver_mapping_descriptor_hexadecimal: String,
-    pub status_flags_at_record_offset_60: u16,
-    pub status_code_at_record_offset_62: u16,
+    pub status_flags: u16,
+    pub status_code: u16,
     pub endpoint_descriptor_hexadecimal: String,
     pub destination_user_datagram_port: Option<u16>,
     pub destination_internet_protocol_version_four_address: Option<String>,
@@ -374,10 +370,14 @@ pub struct ReceiverFlowStatus2809 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReceiverFlowStatusPage2809 {
+pub struct ModernArcReceiverFlowStatusPage {
+    pub protocol_id: u16,
+    pub transaction_id: u16,
+    pub opcode: u16,
+    pub result_code: u16,
     pub maximum_flow_slots: u8,
     pub reported_flow_count: u8,
-    pub flows: Vec<ReceiverFlowStatus2809>,
+    pub flows: Vec<ModernArcReceiverFlowStatus>,
     pub raw_body_hexadecimal: String,
 }
 

@@ -474,7 +474,7 @@ class TestTxFlows:
             FLOW_QUERY_PROTOCOL_IDS,
         )
 
-        assert FLOW_QUERY_PROTOCOL_IDS == (0x2729, 0x2801, 0x2809)
+        assert FLOW_QUERY_PROTOCOL_IDS == (0x2729, 0x2801, 0x2809, 0x280F)
         assert FLOW_CREATE_PROTOCOL_IDS == (0x2729, 0x2801)
         assert FLOW_DELETE_PROTOCOL_IDS == (0x2729, 0x2801, 0x2809)
 
