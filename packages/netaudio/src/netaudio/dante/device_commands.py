@@ -128,60 +128,55 @@ class DanteDeviceCommands:
     def command_query_receiver_channel_status(
         self,
         protocol_id=PROTOCOL_ARC_2809,
-        media_type=1,
+        media_selector=1,
         starting_channel_identifier=1,
         ending_channel_identifier=0,
         transaction_id=0,
     ):
         return self._arc(
             {
-                "command": "query_receiver_channel_status_2809",
+                "command": "query_modern_arc_receiver_channel_status",
                 "protocol_id": protocol_id,
-                "media_type": media_type,
+                "media_selector": media_selector,
                 "starting_channel_identifier": starting_channel_identifier,
                 "ending_channel_identifier": ending_channel_identifier,
                 "transaction_id": transaction_id,
             }
         )
-
-    def command_query_receiver_channel_status_2809(self, transaction_id=0):
-        return self.command_query_receiver_channel_status(transaction_id=transaction_id)
 
     def command_query_transmitter_channel_status(
         self,
         protocol_id=PROTOCOL_ARC_2809,
-        media_type=1,
+        media_selector=1,
         starting_channel_identifier=1,
         ending_channel_identifier=0,
         transaction_id=0,
     ):
         return self._arc(
             {
-                "command": "query_transmitter_channel_status_2809",
+                "command": "query_modern_arc_transmitter_channel_status",
                 "protocol_id": protocol_id,
-                "media_type": media_type,
+                "media_selector": media_selector,
                 "starting_channel_identifier": starting_channel_identifier,
                 "ending_channel_identifier": ending_channel_identifier,
                 "transaction_id": transaction_id,
             }
         )
 
-    def command_query_transmitter_channel_status_2809(self, transaction_id=0):
-        return self.command_query_transmitter_channel_status(transaction_id=transaction_id)
-
-    def command_query_receiver_flow_status_2809(self, transaction_id=0):
+    def command_query_modern_arc_receiver_flow_status(self, transaction_id=0, protocol_id=PROTOCOL_ARC_2809):
         return self._arc(
             {
-                "command": "query_receiver_flow_status_2809",
+                "command": "query_modern_arc_receiver_flow_status",
+                "protocol_id": protocol_id,
                 "transaction_id": transaction_id,
             }
         )
 
-    def command_query_transmitter_flow_status_2809(self, transaction_id=0):
+    def command_query_modern_arc_transmitter_flow_status(self, transaction_id=0, protocol_id=PROTOCOL_ARC_2809):
         return self._arc(
             {
                 "command": "query_tx_flows",
-                "flow_protocol_id": 0x2809,
+                "flow_protocol_id": protocol_id,
                 "starting_flow": 1,
                 "transaction_id": transaction_id,
             }

@@ -22,7 +22,7 @@ fn payload(path: &[&str]) -> Vec<u8> {
 fn issue_52_tesira_partial_channel_pages_are_valid_and_explicitly_incomplete() {
     let transmitter_response = payload(&["issue_52", "tesira_transmitter_channel_partial_page"]);
     let transmitter_page =
-        parse_transmitter_channel_status_page_2809(&transmitter_response).unwrap();
+        parse_modern_arc_transmitter_channel_status_page(&transmitter_response).unwrap();
     assert_eq!(transmitter_page.protocol_id, PROTOCOL_ARC_2809);
     assert_eq!(transmitter_page.result_code, RESULT_CODE_MORE_PAGES);
     assert_eq!(
@@ -35,7 +35,7 @@ fn issue_52_tesira_partial_channel_pages_are_valid_and_explicitly_incomplete() {
     assert_eq!(transmitter_page.records.last().unwrap().channel_number, 28);
 
     let receiver_response = payload(&["issue_52", "tesira_receiver_channel_partial_page"]);
-    let receiver_page = parse_receiver_channel_status_page_2809(&receiver_response).unwrap();
+    let receiver_page = parse_modern_arc_receiver_channel_status_page(&receiver_response).unwrap();
     assert_eq!(receiver_page.protocol_id, PROTOCOL_ARC_2809);
     assert_eq!(receiver_page.result_code, RESULT_CODE_MORE_PAGES);
     assert_eq!(
@@ -52,7 +52,10 @@ fn issue_52_tesira_partial_channel_pages_are_valid_and_explicitly_incomplete() {
 fn issue_52_unsupported_reply_remains_distinct_from_a_partial_page() {
     let response = payload(&["issue_52", "unsupported_mxwani4_receiver_channel_status"]);
     assert_eq!(parse_result_code(&response), Some(0x0030));
-    assert_eq!(parse_receiver_channel_status_page_2809(&response), None);
+    assert_eq!(
+        parse_modern_arc_receiver_channel_status_page(&response),
+        None
+    );
 }
 
 #[test]
@@ -66,7 +69,7 @@ fn issue_53_tesira_offset_8_is_not_used_as_the_audio_channel_count() {
             .iter()
             .map(|flow| (
                 flow.global_flow_id,
-                flow.media_type,
+                flow.media_type_code,
                 flow.media_local_flow_id
             ))
             .collect::<Vec<_>>(),

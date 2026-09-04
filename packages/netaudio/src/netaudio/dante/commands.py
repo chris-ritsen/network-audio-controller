@@ -20,15 +20,19 @@ def _mac_to_hex(value):
 def channel_status_query_specification(
     channel_type: str,
     protocol_id: int = PROTOCOL_ARC_2809,
-    media_type: int = 1,
+    media_selector: int = 1,
     starting_channel_identifier: int = 1,
     ending_channel_identifier: int = 0,
 ) -> dict:
-    command = "query_receiver_channel_status_2809" if channel_type == "rx" else "query_transmitter_channel_status_2809"
+    command = (
+        "query_modern_arc_receiver_channel_status"
+        if channel_type == "rx"
+        else "query_modern_arc_transmitter_channel_status"
+    )
     return {
         "command": command,
         "ending_channel_identifier": ending_channel_identifier,
-        "media_type": media_type,
+        "media_selector": media_selector,
         "protocol_id": protocol_id,
         "starting_channel_identifier": starting_channel_identifier,
     }
@@ -75,6 +79,21 @@ class DanteCommands:
 
     def add_subscriptions(self, records) -> dict:
         return {"command": "add_subscriptions", "subscriptions": subscription_records(records)}
+
+    def modern_arc_subscription_page(
+        self,
+        protocol_id: int,
+        page_capacity: int,
+        media_type_code: int,
+        records: list[dict],
+    ) -> dict:
+        return {
+            "command": "modern_arc_subscription_page",
+            "protocol_id": protocol_id,
+            "page_capacity": page_capacity,
+            "media_type_code": media_type_code,
+            "records": records,
+        }
 
     def bluetooth_status(self, host_mac=None) -> dict:
         return self._with_host_mac({"command": "bluetooth_status"}, host_mac)
@@ -142,11 +161,11 @@ class DanteCommands:
     def query_latency_config(self) -> dict:
         return {"command": "query_latency_config"}
 
-    def query_receiver_flow_status_2809(self) -> dict:
-        return {"command": "query_receiver_flow_status_2809"}
+    def query_modern_arc_receiver_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
+        return {"command": "query_modern_arc_receiver_flow_status", "protocol_id": protocol_id}
 
-    def query_transmitter_flow_status_2809(self) -> dict:
-        return {"command": "query_tx_flows", "flow_protocol_id": PROTOCOL_ARC_2809, "starting_flow": 1}
+    def query_modern_arc_transmitter_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
+        return {"command": "query_tx_flows", "flow_protocol_id": protocol_id, "starting_flow": 1}
 
     def reboot(self, host_mac: bytes) -> dict:
         return {"command": "reboot", "host_mac": host_mac.hex()}

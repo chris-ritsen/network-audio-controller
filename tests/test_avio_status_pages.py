@@ -10,10 +10,12 @@ def test_receiver_flow_status_page_becomes_receiver_flow_inventory():
             "maximum_flow_slots": 8,
             "flows": [
                 {
-                    "flow_number": 1,
+                    "global_flow_id": 1,
+                    "media_type_code": 3,
+                    "media_local_flow_id": 1,
                     "flow_type_code": 17,
                     "local_receiver_channel_count": 1,
-                    "status_code_at_record_offset_62": 9,
+                    "status_code": 9,
                     "destination_internet_protocol_version_four_address": "239.255.0.1",
                     "destination_user_datagram_port": 5004,
                     "sample_rate": 48000,
@@ -25,7 +27,7 @@ def test_receiver_flow_status_page_becomes_receiver_flow_inventory():
     )
     assert inventory["maximum_flow_slots"] == 8
     assert inventory["flows"][0]["flow_type"] == "0x0011"
-    assert inventory["flows"][0]["status_code_at_record_offset_62"] == 9
+    assert inventory["flows"][0]["status_code"] == 9
     assert "subscription_status_code" not in inventory["flows"][0]
     assert inventory["flows"][0]["sample_rate"] == 48000
 
@@ -66,7 +68,7 @@ def test_receiver_flow_status_page_preserves_complete_records_for_serialization(
     assert DanteDeviceSerializer.to_json(device)["receiver_flows"] == [flow]
 
 
-def test_transmitter_channel_status_page_sets_factory_name_only():
+def test_transmitter_channel_status_page_sets_controller_and_factory_names():
     device = DanteDevice()
     channel = DanteChannel()
     channel.number = 1
@@ -87,7 +89,7 @@ def test_transmitter_channel_status_page_sets_factory_name_only():
     )
 
     assert channel.name == "bluetooth:left"
-    assert channel.friendly_name == "bluetooth:left"
+    assert channel.friendly_name == "Left"
     assert channel.factory_name == "Left"
     assert DanteDeviceSerializer.channel_to_json(channel)["factory_name"] == "Left"
 
@@ -157,7 +159,7 @@ def test_receiver_channel_status_page_fills_empty_subscription_and_factory_name(
     assert subscription.rx_channel_status_code == 257
 
 
-def test_receiver_channel_status_page_does_not_replace_existing_source():
+def test_receiver_channel_status_page_replaces_stale_source_with_authoritative_readback():
     from netaudio.dante.subscription import DanteSubscription
 
     device = DanteDevice()
@@ -186,6 +188,6 @@ def test_receiver_channel_status_page_does_not_replace_existing_source():
     )
 
     assert channel.factory_name == "Left"
-    assert subscription.tx_device_name == "lx-dante"
-    assert subscription.tx_channel_name == "mic-mix:high"
+    assert subscription.tx_device_name == "other-device"
+    assert subscription.tx_channel_name == "other-channel"
     assert subscription.status_code == 9
