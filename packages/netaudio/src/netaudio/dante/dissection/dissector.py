@@ -32,11 +32,11 @@ ARC_RESPONSE_PARSE_KINDS = {
     OPCODE_DEVICE_SETTINGS: "device_settings",
     OPCODE_PROPERTY_DIRECTORY: "property_directory",
     0x2200: "tx_flows",
-    0x2400: "transmitter_channel_status_page_2809",
+    0x2400: "modern_arc_transmitter_channel_status_page",
     0x2600: "transmitter_flow_status_page",
     0x3200: "receiver_flow_page",
-    0x3400: "receiver_channel_status_page_2809",
-    0x3600: "receiver_flow_status_page_2809",
+    0x3400: "modern_arc_receiver_channel_status_page",
+    0x3600: "modern_arc_receiver_flow_status_page",
 }
 
 ARC_RESPONSE_PAGE_KINDS = {

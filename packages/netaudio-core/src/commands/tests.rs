@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::PROTOCOL_ARC_280F;
 use crate::test_support::decode_hexadecimal;
 
 #[test]
@@ -598,7 +599,7 @@ fn query_tx_flows_selects_opcode_per_protocol() {
 #[test]
 fn receiver_channel_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
-        build_query_receiver_channel_status_2809(0x284A).unwrap(),
+        build_query_receiver_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, 0x284A).unwrap(),
         decode_hexadecimal("28090022284a34000000000000000000000100010001000000000000830283060310")
     );
 }
@@ -606,7 +607,7 @@ fn receiver_channel_status_2809_query_matches_shipping_controller_request() {
 #[test]
 fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
-        build_query_transmitter_channel_status_2809(0x2852).unwrap(),
+        build_query_transmitter_channel_status(PROTOCOL_ARC_2809, 1, 1, 0, 0x2852).unwrap(),
         decode_hexadecimal("28090022285224000000000000000000000100010001000000000000830283060310")
     );
 }
@@ -614,7 +615,7 @@ fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
 #[test]
 fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
-        build_query_receiver_flow_status_2809(0x2856).unwrap(),
+        build_query_receiver_flow_status(PROTOCOL_ARC_2809, 0x2856).unwrap(),
         decode_hexadecimal("28090022285636000000000000000000000100010001000000000000830283060310")
     );
 }
@@ -921,6 +922,45 @@ fn delete_tx_flow_2729_encodes_flow_slot_after_a_unit_count() {
             0x27, 0x29, 0x00, 0x10, 0x00, 0x00, 0x22, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
             0x00, 0x03
         ]
+    );
+}
+
+#[test]
+fn modern_arc_280f_queries_and_video_subscription_pages_match_controller_packets() {
+    assert_eq!(
+        build_query_tx_flows(PROTOCOL_ARC_280F, 0x05E9).unwrap(),
+        decode_hexadecimal("280f002205e926000000000000000000000100010001000000000000000000000000")
+    );
+    assert_eq!(
+        build_query_receiver_flow_status(PROTOCOL_ARC_280F, 0x05EA).unwrap(),
+        decode_hexadecimal("280f002205ea36000000000000000000000100010001000000000000000000000000")
+    );
+
+    let set = [SubscriptionPageRecord::Set {
+        rx_channel_number: 1,
+        tx_channel_name: "01".to_owned(),
+        tx_device_name: "studio-media-b".to_owned(),
+    }];
+    assert_eq!(
+        build_modern_arc_subscription_page(PROTOCOL_ARC_280F, 1, 4, &set, 0x05D9).unwrap(),
+        decode_hexadecimal(
+            "280f002e05d9341000000000000000000800010100010004001c001f30310073747564696f2d6d656469612d6200"
+        )
+    );
+    let clear = [SubscriptionPageRecord::Clear {
+        rx_channel_number: 1,
+    }];
+    assert_eq!(
+        build_modern_arc_subscription_page(PROTOCOL_ARC_280F, 1, 4, &clear, 0x05DC).unwrap(),
+        decode_hexadecimal("280f001c05dc34100000000000000000080001010001000400000000")
+    );
+    assert_eq!(
+        build_modern_arc_subscription_page(PROTOCOL_ARC_2809, 1, 4, &clear, 0x05DC),
+        Err(NetaudioError::InvalidPage)
+    );
+    assert_eq!(
+        build_modern_arc_subscription_page(PROTOCOL_ARC_280F, 1, 5, &clear, 0x05DC),
+        Err(NetaudioError::InvalidPage)
     );
 }
 
