@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from netaudio.dante.channel_status_paging import modern_arc_protocol_identifier_for_device
 from netaudio.dante.const import (
     FLOW_CREATE_PROTOCOL_IDS,
     FLOW_DELETE_PROTOCOL_IDS,
     FLOW_QUERY_PROTOCOL_IDS,
+    MODERN_ARC_PROTOCOL_IDS,
     PROTOCOL_ARC_2809,
     RESULT_CODE_SUCCESS,
     RESULT_CODE_SUCCESS_EXTENDED,
@@ -164,9 +166,13 @@ async def _query_tx_inventory_with_optional_device(
 
 
 async def detect_flow_protocol(device_ip: str, arc_port: int, *, device=None) -> int | None:
-    protocol_ids = (
-        (PROTOCOL_ARC_2809,) if getattr(device, "requires_managed_control", False) else FLOW_QUERY_PROTOCOL_IDS
-    )
+    if device is not None:
+        try:
+            protocol_ids = (modern_arc_protocol_identifier_for_device(device),)
+        except RuntimeError:
+            protocol_ids = FLOW_QUERY_PROTOCOL_IDS
+    else:
+        protocol_ids = FLOW_QUERY_PROTOCOL_IDS
     for flow_protocol_id in protocol_ids:
         command_specification = {
             "command": "query_tx_flows",
@@ -190,7 +196,7 @@ async def detect_flow_protocol(device_ip: str, arc_port: int, *, device=None) ->
 
 
 async def query_tx_flow_inventory(device_ip: str, arc_port: int, flow_protocol_id: int, *, device=None) -> dict | None:
-    if flow_protocol_id == PROTOCOL_ARC_2809:
+    if flow_protocol_id in MODERN_ARC_PROTOCOL_IDS:
         response = await _request_with_optional_device(
             device_ip,
             arc_port,
@@ -320,15 +326,16 @@ async def query_preferred_tx_flow_inventory(
     *,
     device=None,
 ) -> dict | None:
+    status_protocol_id = modern_arc_protocol_identifier_for_device(device) if device is not None else PROTOCOL_ARC_2809
     status_inventory = await _query_tx_inventory_with_optional_device(
         device_ip,
         arc_port,
-        PROTOCOL_ARC_2809,
+        status_protocol_id,
         device=device,
     )
     if status_inventory is not None:
         return status_inventory
-    if mutation_protocol_id == PROTOCOL_ARC_2809:
+    if mutation_protocol_id in MODERN_ARC_PROTOCOL_IDS:
         return None
     return await _query_tx_inventory_with_optional_device(device_ip, arc_port, mutation_protocol_id, device)
 
@@ -345,11 +352,13 @@ def inventory_from_receiver_flow_status_page(page: dict) -> dict:
             flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else None
         receiver_flows.append(
             {
-                "flow_number": flow.get("flow_number"),
+                "flow_number": flow.get("global_flow_id"),
+                "media_type_code": flow.get("media_type_code"),
+                "media_local_flow_id": flow.get("media_local_flow_id"),
                 "flow_type": flow_type,
                 "local_receiver_channel_count": local_receiver_channel_count,
                 "receiver_mapping_descriptor_hexadecimal": flow.get("receiver_mapping_descriptor_hexadecimal"),
-                "status_code_at_record_offset_62": flow.get("status_code_at_record_offset_62"),
+                "status_code": flow.get("status_code"),
                 "destination_internet_protocol_version_four_address": flow.get(
                     "destination_internet_protocol_version_four_address"
                 )
@@ -372,7 +381,7 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
     status_page = None
     if application is not None:
         try:
-            status_page = await application.query_receiver_flow_status_2809(device)
+            status_page = await application.query_modern_arc_receiver_flow_status(device)
         except RuntimeError:
             status_page = None
     if status_page is not None:

@@ -63,7 +63,7 @@ def _channel_section(channels: dict, title: str) -> tuple[str, list[str], list[l
 async def run_channel_list(application, devices) -> None:
     devices = filter_devices(devices)
     await asyncio.gather(
-        *[application.apply_avio_status_pages(device) for device in devices.values()],
+        *[application.apply_modern_arc_status_pages(device) for device in devices.values()],
         return_exceptions=True,
     )
 

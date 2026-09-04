@@ -72,7 +72,7 @@ fn captured_channel_pages_preserve_capacity_identity_and_disposition() {
         .iter()
         .map(|packet| {
             assert!(matches!(parse_result_code(packet), Some(1 | 0x8112)));
-            parse_transmitter_channel_status_page_2809(packet).unwrap()
+            parse_modern_arc_transmitter_channel_status_page(packet).unwrap()
         })
         .collect();
     assert_eq!(transmitter_pages.len(), 4);
@@ -87,7 +87,7 @@ fn captured_channel_pages_preserve_capacity_identity_and_disposition() {
         ModernArcPageDisposition::Complete
     );
     assert_eq!(transmitter_pages[2].records[0].channel_number, 33);
-    assert_eq!(transmitter_pages[2].records[0].media_type, 3);
+    assert_eq!(transmitter_pages[2].records[0].media_type_code, 3);
     assert_eq!(transmitter_pages[2].records[0].media_local_channel_id, 33);
     assert_eq!(
         transmitter_pages[3].records.last().unwrap().channel_number,
@@ -96,7 +96,7 @@ fn captured_channel_pages_preserve_capacity_identity_and_disposition() {
 
     let receiver_pages: Vec<_> = payloads(&["pagination", "receiver_0x3400"], Some(4_840))
         .iter()
-        .map(|packet| parse_receiver_channel_status_page_2809(packet).unwrap())
+        .map(|packet| parse_modern_arc_receiver_channel_status_page(packet).unwrap())
         .collect();
     assert_eq!(receiver_pages.len(), 6);
     assert_eq!(receiver_pages[0].page_capacity, 16);
@@ -132,7 +132,7 @@ fn captured_audio_flow_page_models_global_media_local_and_slots_separately() {
             .iter()
             .map(|flow| (
                 flow.global_flow_id,
-                flow.media_type,
+                flow.media_type_code,
                 flow.media_local_flow_id
             ))
             .collect::<Vec<_>>(),
@@ -157,10 +157,10 @@ fn captured_mixed_media_flow_page_accepts_reused_media_local_ids() {
     .unwrap();
     let page = parse_transmitter_flow_status_page(&response).unwrap();
     assert_eq!(page.flows.len(), 2);
-    assert_eq!(page.flows[0].media_type, 3);
+    assert_eq!(page.flows[0].media_type_code, 3);
     assert_eq!(page.flows[0].media_local_flow_id, 1);
     assert_eq!(page.flows[1].global_flow_id, 2);
-    assert_eq!(page.flows[1].media_type, 4);
+    assert_eq!(page.flows[1].media_type_code, 4);
     assert_eq!(page.flows[1].media_local_flow_id, 1);
     assert_eq!(page.flows[1].channel_slot_count, None);
     assert!(page.flows[1].transmitter_channel_ids_by_slot.is_empty());
