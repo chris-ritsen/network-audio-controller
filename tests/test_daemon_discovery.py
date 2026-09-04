@@ -6,7 +6,7 @@ from zeroconf import ServiceStateChange
 
 from netaudio.daemon import discovery
 from netaudio.daemon.discovery import DanteDiscoveryMixin
-from netaudio.dante.const import SERVICE_ARC, SERVICE_CMC
+from netaudio.dante.const import SERVICE_ARC, SERVICE_CMC, SERVICE_VIDEO
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import EventType
 
@@ -289,3 +289,58 @@ async def test_unresolved_first_server_record_does_not_adopt_later_identity(monk
     daemon.application.cmc.register_device.assert_not_awaited()
     assert daemon.cleared_candidates == []
     assert daemon.published == []
+
+
+@pytest.mark.asyncio
+async def test_services_with_different_srv_targets_join_the_same_logical_device(monkeypatch):
+    _install_service_info(monkeypatch, addresses=("192.0.2.107",), port=8802)
+    monkeypatch.setattr(discovery, "notify_systemd", MagicMock())
+    daemon = _DiscoveryHarness()
+    instance_name = "studio-media-b"
+
+    await daemon.handle_service_change(
+        _zeroconf(SimpleNamespace(server="www.local.")),
+        SERVICE_CMC,
+        f"{instance_name}.{SERVICE_CMC}",
+        ServiceStateChange.Added,
+    )
+    device = daemon.devices[f"{instance_name}.local."]
+    device.fetch_device_name = AsyncMock(return_value=None)
+
+    _install_service_info(monkeypatch, addresses=("192.0.2.38",), port=4540)
+    await daemon.handle_service_change(
+        _zeroconf(SimpleNamespace(server="W.local.")),
+        SERVICE_ARC,
+        f"{instance_name}.{SERVICE_ARC}",
+        ServiceStateChange.Added,
+    )
+
+    assert list(daemon.devices) == [f"{instance_name}.local."]
+    assert str(device.ipv4) == "192.0.2.38"
+    assert set(device.services) == {
+        f"{instance_name}.{SERVICE_CMC}",
+        f"{instance_name}.{SERVICE_ARC}",
+    }
+    daemon.application.cmc.register_device.assert_awaited_once_with("192.0.2.107")
+
+
+@pytest.mark.asyncio
+async def test_video_source_service_attaches_without_creating_a_device(monkeypatch):
+    _install_service_info(monkeypatch, addresses=("192.0.2.38",), port=4555)
+    device = DanteDevice(server_name="studio-media-b.local.")
+    daemon = _DiscoveryHarness({"studio-media-b.local.": device})
+    daemon.application._attach_media_services = MagicMock()
+    service_name = f"01@studio-media-b.{SERVICE_VIDEO}"
+
+    await daemon.handle_service_change(
+        _zeroconf(SimpleNamespace(server="W.local.")),
+        SERVICE_VIDEO,
+        service_name,
+        ServiceStateChange.Added,
+    )
+
+    assert list(daemon.devices) == ["studio-media-b.local."]
+    assert daemon.application.media_services[service_name]["ipv4"] == "192.0.2.38"
+    assert daemon.application.media_services[service_name]["port"] == 4555
+    daemon.application._attach_media_services.assert_called_once_with(device)
+    daemon.application.register_device.assert_not_called()

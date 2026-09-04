@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from netaudio.dante.const import (
+    ARC_PROTOCOL_IDS,
     MODERN_ARC_PROTOCOL_IDS,
     PROTOCOL_ARC_2809,
     SERVICE_ARC,
@@ -27,26 +28,38 @@ def _arc_version_protocol_identifier(value: object) -> int | None:
 
 
 def modern_arc_protocol_identifier_for_device(device) -> int:
+    protocol_id = advertised_arc_protocol_identifier_for_device(device)
+    if protocol_id in MODERN_ARC_PROTOCOL_IDS:
+        return protocol_id
+    if protocol_id is None:
+        raise ChannelStatusPaginationError("device has no ARC service metadata")
+    raise ChannelStatusPaginationError(f"unsupported ARC protocol version 0x{protocol_id:04X}")
+
+
+def advertised_arc_protocol_identifier_for_device(device) -> int | None:
     if getattr(device, "requires_managed_control", False):
         return PROTOCOL_ARC_2809
     services = getattr(device, "services", None)
     if not isinstance(services, dict):
-        raise ChannelStatusPaginationError("device has no ARC service metadata")
+        return None
     for service in services.values():
         if not isinstance(service, dict) or service.get("type") != SERVICE_ARC:
             continue
         properties = service.get("properties")
         if not isinstance(properties, dict):
-            continue
-        protocol_id = _arc_version_protocol_identifier(properties.get("arcp_vers"))
-        if protocol_id in MODERN_ARC_PROTOCOL_IDS:
+            return None
+        advertised_version = properties.get("arcp_vers")
+        if advertised_version is None:
+            return None
+        protocol_id = _arc_version_protocol_identifier(advertised_version)
+        if protocol_id in ARC_PROTOCOL_IDS:
             return protocol_id
-        raise ChannelStatusPaginationError(f"unsupported ARC protocol version {properties.get('arcp_vers')!r}")
-    raise ChannelStatusPaginationError("device has no ARC service metadata")
+        raise ChannelStatusPaginationError(f"unsupported ARC protocol version {advertised_version!r}")
+    return None
 
 
 def _record_identity(record: dict) -> tuple[int, int]:
-    media_type = record.get("media_type")
+    media_type = record.get("media_type_code")
     media_local_id = record.get("media_local_channel_id")
     if not isinstance(media_type, int) or not isinstance(media_local_id, int):
         raise ChannelStatusPaginationError("channel page record has no media-aware identity")
@@ -138,7 +151,11 @@ class ChannelStatusPageAccumulator:
         result = dict(self._final_page)
         result["records"] = sorted(
             self._records.values(),
-            key=lambda record: (record["channel_number"], record["media_type"], record["media_local_channel_id"]),
+            key=lambda record: (
+                record["channel_number"],
+                record["media_type_code"],
+                record["media_local_channel_id"],
+            ),
         )
         result["reported_record_count"] = len(result["records"])
         result["total_record_count"] = len(result["records"])

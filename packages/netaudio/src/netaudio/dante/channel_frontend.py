@@ -3,6 +3,7 @@ from __future__ import annotations
 from netaudio.dante.const import (
     PROTOCOL_ARC_2729,
     PROTOCOL_ARC_2809,
+    PROTOCOL_ARC_280F,
     RESULT_CODE_FRONTEND_UNAVAILABLE,
     RESULT_CODE_SUCCESS,
     RESULT_CODE_SUCCESS_EXTENDED,
@@ -47,14 +48,17 @@ def _channel_name_protocol_identifier_from_probe(
         raise ChannelFrontendError(f"{operation} returned an invalid status page") from exception
     if not isinstance(page, dict):
         raise ChannelFrontendError(f"{operation} returned an invalid status page")
-    return PROTOCOL_ARC_2809
+    protocol_id = page.get("protocol_id")
+    if protocol_id not in (PROTOCOL_ARC_2809, PROTOCOL_ARC_280F):
+        raise ChannelFrontendError(f"{operation} returned an unsupported protocol identifier")
+    return protocol_id
 
 
 def receiver_channel_name_protocol_identifier_from_probe(response: bytes | None) -> int:
     return _channel_name_protocol_identifier_from_probe(
         response,
         "receiver channel frontend probe",
-        "receiver_channel_status_page_2809",
+        "modern_arc_receiver_channel_status_page",
     )
 
 
@@ -62,5 +66,5 @@ def transmitter_channel_name_protocol_identifier_from_probe(response: bytes | No
     return _channel_name_protocol_identifier_from_probe(
         response,
         "transmitter channel frontend probe",
-        "transmitter_channel_status_page_2809",
+        "modern_arc_transmitter_channel_status_page",
     )

@@ -7,7 +7,7 @@ from zeroconf import ServiceStateChange
 from zeroconf.asyncio import AsyncServiceInfo
 
 from netaudio.daemon.systemd import notify_systemd
-from netaudio.dante.const import SERVICE_CMC
+from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import nanoseconds_to_milliseconds
@@ -25,6 +25,16 @@ class _DiscoveredService:
     server_name: str
     service_type: str
 
+    @property
+    def device_key(self) -> str:
+        suffix = f".{self.service_type}"
+        logical_name = (
+            self.instance_name[: -len(suffix)]
+            if self.instance_name.casefold().endswith(suffix.casefold())
+            else self.instance_name.rstrip(".")
+        )
+        return f"{logical_name}.local."
+
     def device_data(self):
         return {
             "ipv4": self.address,
@@ -38,9 +48,6 @@ class _DiscoveredService:
 
 class DanteDiscoveryMixin:
     def on_service_state_change(self, zeroconf, service_type, name, state_change):
-        if service_type == "_netaudio-chan._udp.local.":
-            return
-
         logger.debug(f"mDNS event: {state_change.name} - {service_type} - {name}")
 
         self._spawn_background(
@@ -53,11 +60,14 @@ class DanteDiscoveryMixin:
             info = AsyncServiceInfo(service_type, name)
 
             if state_change == ServiceStateChange.Removed:
-                self._handle_removed_service(name)
+                self._handle_removed_service(name, service_type)
                 return
 
             service = await self._resolve_service(zeroconf, info, service_type, name)
             if service is None:
+                return
+            if service.service_type in MEDIA_SERVICE_TYPES:
+                self._attach_media_service(service)
                 return
 
             device, is_new = await self._device_for_service(service)
@@ -66,20 +76,39 @@ class DanteDiscoveryMixin:
 
             await self._publish_device_to_redis(device)
 
-            if await self._refresh_arc_device(device, service.server_name, is_new):
+            if await self._refresh_arc_device(device, service.device_key, is_new):
                 device_changed = True
 
             if device_changed:
-                self._emit_device_updated(device, service.server_name)
+                self._emit_device_updated(device, service.device_key)
 
         except Exception:
             logger.exception(f"Service change error for {name}")
 
-    def _handle_removed_service(self, name):
+    def _handle_removed_service(self, name, service_type):
+        media_services = getattr(self.application, "media_services", None)
+        if isinstance(media_services, dict) and media_services.pop(name, None) is not None:
+            return
         for server_name in list(self.devices.keys()):
-            if name.startswith(server_name.replace(".local.", "")):
+            device = self.devices[server_name]
+            if name in device.services:
                 logger.info(f"Device offline candidate (mDNS removed): {server_name}")
                 self.mark_device_offline(server_name)
+                return
+        suffix = f".{service_type}"
+        if name.casefold().endswith(suffix.casefold()):
+            device_key = f"{name[: -len(suffix)]}.local."
+            if device_key in self.devices:
+                self.mark_device_offline(device_key)
+
+    def _attach_media_service(self, service):
+        if not hasattr(self.application, "media_services"):
+            self.application.media_services = {}
+        self.application.media_services[service.instance_name] = service.device_data()
+        attach = getattr(self.application, "_attach_media_services", None)
+        if attach is not None:
+            for device in self.devices.values():
+                attach(device)
 
     async def _resolve_service(self, zeroconf, info, service_type, name):
         if not await info.async_request(zeroconf, 3000):
@@ -122,36 +151,39 @@ class DanteDiscoveryMixin:
         return decoded
 
     async def _device_for_service(self, service):
-        self.clear_offline_candidate(service.server_name)
-        existing = self.devices.get(service.server_name)
+        device_key = service.device_key
+        self.clear_offline_candidate(device_key)
+        existing = self.devices.get(device_key)
         was_offline = existing is not None and not existing.online
         is_new = existing is None
 
         if is_new or was_offline:
-            new_device = DanteDevice(server_name=service.server_name)
+            new_device = DanteDevice(server_name=device_key)
             new_device.ipv4 = service.address
-            self.application.register_device(service.server_name, new_device)
+            self.application.register_device(device_key, new_device)
             state = "discovered" if is_new else "back online"
-            logger.info(f"Device {state}: {service.server_name}")
+            logger.info(f"Device {state}: {device_key}")
             online = sum(1 for device in self.devices.values() if device.online)
             notify_systemd(f"STATUS={online} device(s) online")
-            if service.address:
-                await self.application.cmc.register_device(service.address)
             if was_offline and self.metering:
-                self.metering.reactivate_device(service.server_name)
+                self.metering.reactivate_device(device_key)
 
-        device = self.devices[service.server_name]
+        if service.address and service.service_type == SERVICE_CMC:
+            await self.application.cmc.register_device(service.address)
+
+        device = self.devices[device_key]
         device.update_last_seen()
         return device, is_new
 
     @staticmethod
     def _attach_service(device, service):
         old_ip = str(device.ipv4) if device.ipv4 else None
-        device_changed = bool(old_ip and old_ip != service.address)
+        device_changed = service.service_type == SERVICE_ARC and bool(old_ip and old_ip != service.address)
         if device_changed:
             logger.info(f"Device {service.server_name} IP changed: {old_ip} -> {service.address}")
 
-        device.ipv4 = service.address
+        if service.service_type == SERVICE_ARC or device.ipv4 is None:
+            device.ipv4 = service.address
         if not device.services:
             device.services = {}
         device.services[service.instance_name] = service.device_data()
@@ -189,8 +221,8 @@ class DanteDiscoveryMixin:
         if not device.dante_model_id:
             await self.application._send_conmon_query_for_device(device, self.application.send_dante_model_request)
             self._spawn_background(
-                self.state.retry_conmon_query(service.server_name),
-                name=f"retry-conmon:{service.server_name}",
+                self.state.retry_conmon_query(service.device_key),
+                name=f"retry-conmon:{service.device_key}",
             )
 
     async def _refresh_arc_device(self, device, server_name, is_new):

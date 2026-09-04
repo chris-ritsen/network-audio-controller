@@ -21,7 +21,7 @@ from zeroconf.asyncio import (
 )
 
 from netaudio.common.app_config import settings as app_settings
-from netaudio.dante.const import SERVICE_CMC, SERVICES
+from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC, SERVICES
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 
@@ -36,6 +36,7 @@ class ZeroconfKwargs(TypedDict, total=False):
 class DanteBrowser:
     def __init__(self, mdns_timeout: float, queue: Queue | None = None, app=None) -> None:
         self._devices: dict = {}
+        self.media_services: dict[str, dict] = {}
         self.services: list[asyncio.Future] = []
         self._state_change_tasks: set[asyncio.Task] = set()
         self.queue: Queue | None = queue
@@ -173,10 +174,7 @@ class DanteBrowser:
         name: str,
         state_change: ServiceStateChange,
     ) -> None:
-        if service_type == "_netaudio-chan._udp.local.":
-            return
-
-        if self.queue is not None:
+        if self.queue is not None and service_type not in MEDIA_SERVICE_TYPES:
             loop = asyncio.get_running_loop()
             state_task = loop.create_task(
                 self.async_parse_state_change(zeroconf, service_type, name, state_change),
@@ -202,7 +200,7 @@ class DanteBrowser:
         name: str,
         state_change: ServiceStateChange,
     ) -> None:
-        if service_type == "_netaudio-chan._udp.local.":
+        if service_type in MEDIA_SERVICE_TYPES:
             return
 
         self.sync_parse_state_change(zeroconf, service_type, name, state_change)
@@ -280,7 +278,7 @@ class DanteBrowser:
         return self.devices
 
     def _assemble_completed_services(self) -> None:
-        device_hosts = {}
+        resolved_services = []
 
         for service_task in self.services:
             if not service_task.done() or service_task.cancelled():
@@ -290,18 +288,16 @@ class DanteBrowser:
                 logger.error("Failed to resolve mDNS service", exc_info=exception)
                 continue
             service = service_task.result()
-            server_name = None
-
             if not service:
                 continue
+            if service.get("type") in MEDIA_SERVICE_TYPES:
+                self.media_services[service["name"]] = service
+                if self._app is not None:
+                    self._app.media_services[service["name"]] = service
+                continue
+            resolved_services.append(service)
 
-            if "server_name" in service:
-                server_name = service["server_name"]
-
-            if not server_name in device_hosts:
-                device_hosts[server_name] = {}
-
-            device_hosts[server_name][service["name"]] = service
+        device_hosts = self._group_device_services(resolved_services)
 
         for hostname, device_services in device_hosts.items():
             try:
@@ -317,6 +313,13 @@ class DanteBrowser:
                     app=self._app,
                 )
                 device.services = device_services
+
+                arc_service = next(
+                    (service for service in device_services.values() if service["type"] == SERVICE_ARC),
+                    None,
+                )
+                if arc_service is not None:
+                    device.ipv4 = arc_service["ipv4"]
 
                 for service_name, service in device_services.items():
                     device.services[service_name] = service
@@ -356,6 +359,24 @@ class DanteBrowser:
                 self.devices[hostname] = device
             except Exception:
                 logger.exception("Failed to assemble discovered Dante device %s", hostname)
+
+    @staticmethod
+    def _service_instance(service: dict) -> str:
+        name = service["name"]
+        service_type = service.get("type")
+        if not service_type:
+            return name.rstrip(".")
+        suffix = f".{service_type}"
+        return name[: -len(suffix)] if name.casefold().endswith(suffix.casefold()) else name.rstrip(".")
+
+    @classmethod
+    def _group_device_services(cls, services: list[dict]) -> dict[str, dict]:
+        grouped: dict[str, dict] = {}
+        for service in services:
+            instance = cls._service_instance(service)
+            key = f"{instance}.local." if service.get("type") else service["server_name"]
+            grouped.setdefault(key, {})[service["name"]] = service
+        return grouped
 
     async def get_services(self) -> None:
         try:
