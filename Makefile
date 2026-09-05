@@ -1,4 +1,4 @@
-.PHONY: core header example example-swift test goldens quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
+.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -43,9 +43,6 @@ dev:
 
 test:
 	uv run pytest -q
-
-goldens: core
-	uv run python scripts/regenerate_core_goldens.py
 
 quality:
 	uv lock --check

@@ -467,16 +467,28 @@ class TestBonjourReconcile:
 
 
 class TestTxFlows:
-    def test_flow_query_and_mutation_protocol_sets_are_distinct(self):
-        from netaudio.dante.const import (
-            FLOW_CREATE_PROTOCOL_IDS,
-            FLOW_DELETE_PROTOCOL_IDS,
-            FLOW_QUERY_PROTOCOL_IDS,
-        )
-
-        assert FLOW_QUERY_PROTOCOL_IDS == (0x2729, 0x2801, 0x2809, 0x280F)
-        assert FLOW_CREATE_PROTOCOL_IDS == (0x2729, 0x2801)
-        assert FLOW_DELETE_PROTOCOL_IDS == (0x2729, 0x2801, 0x2809)
+    @pytest.mark.parametrize(
+        ("protocol", "slot", "create_allowed", "delete_allowed"),
+        [
+            (0x2729, 1, True, True),
+            (0x2801, 1, True, True),
+            (0x2809, 2, False, True),
+            (0x2809, 1, False, False),
+            (0x280F, 2, False, False),
+            (0xFFFF, 2, False, False),
+        ],
+    )
+    def test_flow_mutation_guards(self, protocol, slot, create_allowed, delete_allowed):
+        if create_allowed:
+            flows.require_creatable_flow_protocol(protocol)
+        else:
+            with pytest.raises(flows.FlowValidationError, match="no verified create format"):
+                flows.require_creatable_flow_protocol(protocol)
+        if delete_allowed:
+            flows.require_deletable_flow_protocol(protocol, slot)
+        else:
+            with pytest.raises(flows.FlowValidationError, match="verified delete format"):
+                flows.require_deletable_flow_protocol(protocol, slot)
 
     @staticmethod
     def _flow(slot=17, flow_type="multicast", channels=None):

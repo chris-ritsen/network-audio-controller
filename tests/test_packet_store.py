@@ -1,5 +1,6 @@
 import os
 import struct
+from pathlib import Path
 
 import pytest
 from netaudio.dante import debug_formatter
@@ -149,9 +150,9 @@ class TestCorrelation:
     def test_temporal_correlation(self, store):
         """Multicast packet from device within 100ms of request to that device."""
         req = _make_packet(transaction_id=0x0055)
-        now = 1_000_000_000_000  # 1 second in nanoseconds
+        now = 1_000_000_000
 
-        store.store_packet(
+        req_id = store.store_packet(
             PacketRecord(
                 payload=req,
                 source_type="netaudio_request",
@@ -175,7 +176,7 @@ class TestCorrelation:
 
         packets = store.get_packets()
         mc = next(p for p in packets if p["id"] == mc_id)
-        assert mc["correlated_packet_id"] is not None
+        assert mc["correlated_packet_id"] == req_id
 
     def test_get_correlated_pairs(self, store):
         req = _make_packet(transaction_id=0x0077, opcode=0x3010)
@@ -204,8 +205,11 @@ class TestCorrelation:
         assert len(pairs) == 1
         assert pairs[0][0]["direction"] == "request"
         assert pairs[0][1]["direction"] == "response"
+        assert pairs[0][0]["payload"] == req
+        assert pairs[0][1]["payload"] == resp
 
-    def test_get_correlated_pairs_opcode_filter(self, store):
+    @pytest.mark.parametrize("selected_opcode", [0x3010, 0x1002, 0xFFFF])
+    def test_get_correlated_pairs_opcode_filter(self, store, selected_opcode):
         for opcode in [0x3010, 0x1002]:
             req = _make_packet(transaction_id=opcode, opcode=opcode)
             resp = _make_response(transaction_id=opcode, opcode=opcode)
@@ -228,8 +232,18 @@ class TestCorrelation:
                 )
             )
 
-        pairs = store.get_correlated_pairs(opcode=0x3010)
-        assert len(pairs) == 1
+        pairs = store.get_correlated_pairs(opcode=selected_opcode)
+        expected = (
+            []
+            if selected_opcode == 0xFFFF
+            else [
+                (
+                    _make_packet(transaction_id=selected_opcode, opcode=selected_opcode),
+                    _make_response(transaction_id=selected_opcode, opcode=selected_opcode),
+                )
+            ]
+        )
+        assert [(request["payload"], response["payload"]) for request, response in pairs] == expected
 
 
 class TestExport:
@@ -284,9 +298,10 @@ class TestExport:
         output_dir = str(tmp_path / "pairs")
         result = store.export_correlated_pair(req_id, output_dir)
         assert result is not None
-        assert len(result) == 2
-        assert os.path.exists(result[0])
-        assert os.path.exists(result[1])
+        request_path, response_path = map(Path, result)
+        assert request_path != response_path
+        assert request_path.read_bytes() == req
+        assert response_path.read_bytes() == resp
 
 
 class TestStats:

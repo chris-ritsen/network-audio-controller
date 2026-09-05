@@ -3,10 +3,9 @@ from pathlib import Path
 from netaudio.commands.capture import options as capture_options
 
 
-def test_provenance_defaults_never_write_into_the_source_tree(tmp_path, monkeypatch):
-    provenance_directory = tmp_path / "application-data" / "provenance"
-    monkeypatch.setattr(capture_options, "DEFAULT_PROVENANCE_DIRECTORY", provenance_directory)
-
+def test_provenance_defaults_never_write_into_the_source_tree():
+    provenance_directory = Path.home() / ".local" / "share" / "netaudio" / "provenance"
+    assert capture_options.DEFAULT_PROVENANCE_DIRECTORY == provenance_directory
     assert capture_options._default_provenance_output_dir() == provenance_directory / "fixtures"
     assert capture_options._default_fixture_root() == provenance_directory
     assert capture_options._default_label_overrides_path() == provenance_directory / "label_provenance_overrides.json"
