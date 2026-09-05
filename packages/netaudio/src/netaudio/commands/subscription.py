@@ -209,9 +209,7 @@ def _subscription_has_configured_source(subscription) -> bool:
 
 async def run_subscription_list(application, devices, include_unused: bool) -> None:
     from netaudio.dante.const import (
-        SUBSCRIPTION_STATUS_INFO,
         subscription_status_entry,
-        subscription_status_label,
     )
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
@@ -233,11 +231,15 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
 
     def _status_label(subscription):
         code = subscription.status_code
-        if SUBSCRIPTION_STATUS_INFO.get(code) is None:
-            return subscription.ddm_summary or subscription.ddm_status or ""
-        entry = subscription_status_entry(code)
+        if code is None:
+            return "; ".join(subscription.status_text())
+        entry = subscription_status_entry(code, subscription.rx_channel_status_code)
         severity = str(entry["severity"])
-        label = subscription_status_label(code)
+        label = str(entry["label"])
+        if subscription.status_message:
+            label = "; ".join((label, *subscription.status_message))
+            if severity == "ok":
+                severity = "warning"
         marker = severity_icon(severity)
         color = SEVERITY_PRESENTATION.get(severity, {}).get("color")
         colored_label = ansi(color, label) if color else label

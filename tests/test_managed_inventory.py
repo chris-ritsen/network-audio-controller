@@ -374,6 +374,8 @@ def test_ddm_idle_receiver_does_not_create_fake_subscription(status):
         subscribed_device=None,
         subscribed_channel=None,
         status=status,
+        summary="NONE",
+        status_message="No subscription for this channel",
     )
     managed = replace(managed, rx_channels=(idle_channel,))
 
@@ -515,7 +517,7 @@ async def test_partial_refresh_replaces_present_root_and_preserves_omitted_root(
         ("unmanaged-new", None),
     }
     assert service.status()["state"] == "degraded"
-    assert service.status()["graphql_errors"] == ["one inventory branch failed"]
+    assert service.status()["graphql_errors"] == [{"message": "one inventory branch failed"}]
     assert service.status()["domains_fresh"] is False
     assert service.status()["unenrolled_fresh"] is True
 
@@ -606,3 +608,67 @@ async def test_registry_keeps_same_device_id_and_ip_distinct_across_servers_and_
     assert registry.client_for_context("east-main") is east_client
     assert registry.client_for_context("west-main") is west_client
     assert registry.status()["server_count"] == 2
+
+
+@pytest.mark.parametrize(
+    "status,summary,message",
+    [(None, "ERROR", "Unknown status"), ("DYNAMIC", "WARNING", "Source channel name changed")],
+)
+def test_managed_subscription_keeps_status_summary_and_details_separate(status, summary, message):
+    managed = _managed_device()
+    channel = replace(managed.rx_channels[0], status=status, summary=summary, status_message=message)
+    managed = replace(managed, rx_channels=(channel,))
+    merged = merge_device_inventory({}, (_observation(managed),), synced_at=1234.0, fresh=True)
+    record = merged["ddm:default:domain-1:managed-1"]["subscriptions"][0]
+    assert record["ddm_status"] == status
+    assert record["ddm_summary"] == summary
+    assert record["ddm_status_message"] == message
+    assert record["status"]["status"] == status
+    assert record["status"]["detail"] == message
+    assert record["status"]["code"] is None
+    assert record["status"]["severity"] == summary.lower()
+    assert record["status"]["state"] == ("connected" if status == "DYNAMIC" else "unknown")
+
+
+@pytest.mark.asyncio
+async def test_inventory_service_retains_raw_enum_errors_with_channel_data():
+    issue = GraphQLIssue.from_mapping(
+        {
+            "message": 'Enum "RxChannelStatus" cannot represent value: "?"',
+            "path": ["domains", 0, "devices", 0, "rxChannels", 0, "status"],
+            "locations": [{"line": 80, "column": 5}],
+            "extensions": {"code": "INTERNAL_SERVER_ERROR"},
+        }
+    )
+    managed = _managed_device()
+    managed = replace(
+        managed,
+        rx_channels=(replace(managed.rx_channels[0], status=None, status_message="Unknown status", summary="ERROR"),),
+    )
+    service = _service(FakeClient(_result(domains=(_domain("domain-1", managed),), errors=(issue,))), FakeClock())
+    await service.refresh()
+    assert service.status()["graphql_errors"] == [dict(issue.raw)]
+    assert service.status()["state"] == "degraded"
+    records = service.serialize_devices({})
+    subscription = records["ddm:default:domain-1:managed-1"]["subscriptions"][0]
+    assert subscription["status"]["status"] is None
+    assert subscription["status"]["detail"] == "Unknown status"
+    assert subscription["ddm_summary"] == "ERROR"
+
+
+def test_managed_null_status_without_source_retains_error_information():
+    managed = _managed_device()
+    channel = replace(
+        managed.rx_channels[0],
+        status=None,
+        summary="ERROR",
+        status_message="Unknown status",
+        subscribed_device=None,
+        subscribed_channel=None,
+    )
+    managed = replace(managed, rx_channels=(channel,))
+    merged = merge_device_inventory({}, (_observation(managed),), synced_at=1234.0, fresh=True)
+    subscription = merged["ddm:default:domain-1:managed-1"]["subscriptions"][0]
+    assert subscription["status"]["status"] is None
+    assert subscription["ddm_status_message"] == "Unknown status"
+    assert subscription["ddm_summary"] == "ERROR"
