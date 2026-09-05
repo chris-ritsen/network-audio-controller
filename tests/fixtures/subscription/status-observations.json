@@ -1,0 +1,747 @@
+{
+  "receiver_status_code": 257,
+  "groups": [
+    {
+      "codes": [
+        0
+      ],
+      "api": {
+        "status": "NONE",
+        "statusMessage": "No subscription for this channel",
+        "summary": "NONE"
+      }
+    },
+    {
+      "codes": [
+        1,
+        9
+      ],
+      "api": {
+        "status": "DYNAMIC",
+        "statusMessage": "Active subscription to an automatically configured source flow",
+        "summary": "CONNECTED"
+      }
+    },
+    {
+      "codes": [
+        2
+      ],
+      "api": {
+        "status": "RESOLVED",
+        "statusMessage": "Channel Name has been found, but not yet processed",
+        "summary": "IN_PROGRESS"
+      }
+    },
+    {
+      "codes": [
+        3
+      ],
+      "api": {
+        "status": "RESOLVE_FAIL",
+        "statusMessage": "Error: an error occurred while trying to resolve the channel name",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        4
+      ],
+      "api": {
+        "status": "SUBSCRIBE_SELF",
+        "statusMessage": "Channel is successfully subscribed to own TX channels (local loopback mode)",
+        "summary": "CONNECTED"
+      }
+    },
+    {
+      "codes": [
+        5
+      ],
+      "api": {
+        "status": "RESOLVED_NONE",
+        "statusMessage": "Error: Channel Name explicitly does not exist on this network",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        6,
+        11,
+        12,
+        13,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254
+      ],
+      "api": {
+        "status": null,
+        "statusMessage": "Unknown status",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        7
+      ],
+      "api": {
+        "status": "IDLE",
+        "statusMessage": "A flow has been configured but does not have sufficient information to establish an audio connection",
+        "summary": "NONE"
+      }
+    },
+    {
+      "codes": [
+        8
+      ],
+      "api": {
+        "status": "IN_PROGRESS",
+        "statusMessage": "Channel Name has been found and processed; setting up flow now",
+        "summary": "IN_PROGRESS"
+      }
+    },
+    {
+      "codes": [
+        10
+      ],
+      "api": {
+        "status": "STATIC",
+        "statusMessage": "Active subscription to a manually configured source flow",
+        "summary": "CONNECTED"
+      }
+    },
+    {
+      "codes": [
+        14
+      ],
+      "api": {
+        "status": "MANUAL",
+        "statusMessage": "Manual flow configuration bypassing the standard subscription process",
+        "summary": "CONNECTED"
+      }
+    },
+    {
+      "codes": [
+        15
+      ],
+      "api": {
+        "status": "NO_CONNECTION",
+        "statusMessage": "Error: The name was found but the connection process failed (the receiver could not communicate with the transmitter)",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        16
+      ],
+      "api": {
+        "status": "CHANNEL_FORMAT",
+        "statusMessage": "Error: Channel formats do not match",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        17
+      ],
+      "api": {
+        "status": "BUNDLE_FORMAT",
+        "statusMessage": "Error: Flow formats do not match",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        18
+      ],
+      "api": {
+        "status": "NO_RX",
+        "statusMessage": "Error: Receiver is out of resources (e.g. flows)",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        19
+      ],
+      "api": {
+        "status": "RX_FAIL",
+        "statusMessage": "Error: Receiver couldn't set up the flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        20
+      ],
+      "api": {
+        "status": "NO_TX",
+        "statusMessage": "Error: Transmitter is out of resources (e.g. flows)",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        21
+      ],
+      "api": {
+        "status": "TX_FAIL",
+        "statusMessage": "Error: Transmitter couldn't set up the flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        22
+      ],
+      "api": {
+        "status": "QOS_FAIL_RX",
+        "statusMessage": "Error: Receiver got a QoS failure (too much data) when setting up the flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        23
+      ],
+      "api": {
+        "status": "QOS_FAIL_TX",
+        "statusMessage": "Error: Transmitter got a QoS failure (too much data) when setting up the flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        24
+      ],
+      "api": {
+        "status": "TX_REJECTED_ADDR",
+        "statusMessage": "Error: Tx rejected the address given by rx (usually indicates an ARP failure)",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        25
+      ],
+      "api": {
+        "status": "INVALID_MSG",
+        "statusMessage": "Error: Transmitter rejected the bundle request as invalid",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        26
+      ],
+      "api": {
+        "status": "CHANNEL_LATENCY",
+        "statusMessage": "Error: Tx channel latency higher than maximum supported Rx latency",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        27
+      ],
+      "api": {
+        "status": "CLOCK_DOMAIN",
+        "statusMessage": "Error: Tx and Rx and in different clock subdomains",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        28
+      ],
+      "api": {
+        "status": "UNSUPPORTED",
+        "statusMessage": "Error: Attempt to use an unsupported feature",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        29
+      ],
+      "api": {
+        "status": "RX_LINK_DOWN",
+        "statusMessage": "Error: All Rx links are down",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        30
+      ],
+      "api": {
+        "status": "TX_LINK_DOWN",
+        "statusMessage": "Error: All Tx links are down",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        31
+      ],
+      "api": {
+        "status": "DYNAMIC_PROTOCOL",
+        "statusMessage": "Error: can't find suitable protocol for dynamic connection",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        32
+      ],
+      "api": {
+        "status": "INVALID_CHANNEL",
+        "statusMessage": "Error: Channel does not exist (eg no such local channel)",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        33
+      ],
+      "api": {
+        "status": "TX_SCHEDULER_FAILURE",
+        "statusMessage": "Error: Tx Scheduler failure",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        34
+      ],
+      "api": {
+        "status": "SUBSCRIBE_SELF_POLICY",
+        "statusMessage": "Error: The given subscription to self was disallowed by the device",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        35
+      ],
+      "api": {
+        "status": "TX_NOT_READY",
+        "statusMessage": "Warning: There is an external issue with Tx Channel",
+        "summary": "WARNING"
+      }
+    },
+    {
+      "codes": [
+        36
+      ],
+      "api": {
+        "status": "RX_NOT_READY",
+        "statusMessage": "Warning: There is an external issue with Rx Channel",
+        "summary": "WARNING"
+      }
+    },
+    {
+      "codes": [
+        37
+      ],
+      "api": {
+        "status": "TX_FANOUT_LIMIT_REACHED",
+        "statusMessage": "Error: Tx device cannot support additional unicast flows",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        38
+      ],
+      "api": {
+        "status": "TX_CHANNEL_ENCRYPTED",
+        "statusMessage": "Error: Rx device does not support the signal encryption",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        39
+      ],
+      "api": {
+        "status": "TX_RESPONSE_UNEXPECTED",
+        "statusMessage": "Error: Unexpected response from TX device",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        64
+      ],
+      "api": {
+        "status": "TEMPLATE_MISMATCH_DEVICE",
+        "statusMessage": "Error: Template-based subscription failed: template and subscription device names don't match",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        65
+      ],
+      "api": {
+        "status": "TEMPLATE_MISMATCH_FORMAT",
+        "statusMessage": "Error: Template-based subscription failed: flow and channel formats don't match",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        66
+      ],
+      "api": {
+        "status": "TEMPLATE_MISSING_CHANNEL",
+        "statusMessage": "Error: Template-based subscription failed: the channel is not part of the given multicast flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        67
+      ],
+      "api": {
+        "status": "TEMPLATE_MISMATCH_CONFIG",
+        "statusMessage": "Error: Template-based subscription failed: something else about the template configuration made it impossible to complete the subscription using the given flow",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        68
+      ],
+      "api": {
+        "status": "TEMPLATE_FULL",
+        "statusMessage": "Error: Template-based subscription failed: the unicast template is full",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        69
+      ],
+      "api": {
+        "status": "RX_UNSUPPORTED_SUB_MODE",
+        "statusMessage": "Error: Rx device does not have a supported subscription mode (unicast/multicast) available",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        70
+      ],
+      "api": {
+        "status": "TX_UNSUPPORTED_SUB_MODE",
+        "statusMessage": "Error: Tx device does not have a supported subscription mode (unicast/multicast) available",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        96
+      ],
+      "api": {
+        "status": "TX_ACCESS_CONTROL_DENIED",
+        "statusMessage": "Error: Tx access control denied the request",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        97
+      ],
+      "api": {
+        "status": "TX_ACCESS_CONTROL_PENDING",
+        "statusMessage": "Tx access control request is in progress",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        112
+      ],
+      "api": {
+        "status": "HDCP_NEGOTIATION_FAILED",
+        "statusMessage": "Error: HDCP key negotiation failed",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        113
+      ],
+      "api": {
+        "status": "RX_ENCRYPTION_UNSUPPORTED",
+        "statusMessage": "Error: TX requires encryption but RX does not support any of the requested encryption schemes",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        114
+      ],
+      "api": {
+        "status": "RX_TRANSPORT_UNSUPPORTED",
+        "statusMessage": "Error: TX requires a transport protocol but RX does not support it",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "codes": [
+        255
+      ],
+      "api": {
+        "status": "SYSTEM_FAIL",
+        "statusMessage": "Error: Unexpected system failure",
+        "summary": "ERROR"
+      }
+    }
+  ],
+  "context_records": [
+    {
+      "wire": {
+        "number": 49,
+        "rx_status_code": 0,
+        "subscription_status_code": 1
+      },
+      "api": {
+        "status": "UNRESOLVED",
+        "statusMessage": "Error: Channel Name not yet found on network",
+        "summary": "ERROR"
+      }
+    },
+    {
+      "wire": {
+        "number": 50,
+        "rx_status_code": 0,
+        "subscription_status_code": 1
+      },
+      "api": {
+        "status": "UNRESOLVED",
+        "statusMessage": "Error: Channel Name not yet found on network",
+        "summary": "ERROR"
+      }
+    }
+  ],
+  "enum_error": {
+    "extensions": {
+      "code": "INTERNAL_SERVER_ERROR"
+    },
+    "locations": [
+      {
+        "column": 5,
+        "line": 80
+      }
+    ],
+    "message": "Enum \"RxChannelStatus\" cannot represent value: \"?\"",
+    "path": [
+      "domain",
+      "device",
+      "rxChannels",
+      6,
+      "status"
+    ]
+  }
+}
