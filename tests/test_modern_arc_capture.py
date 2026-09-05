@@ -91,7 +91,7 @@ def test_public_command_builder_reproduces_every_captured_280f_request(path, com
             {
                 "command": command_name,
                 "protocol_id": PROTOCOL_ARC_280F,
-                    "media_selector": int.from_bytes(request[18:20], "big"),
+                "media_selector": int.from_bytes(request[18:20], "big"),
                 "starting_channel_identifier": int.from_bytes(request[20:22], "big"),
                 "ending_channel_identifier": int.from_bytes(request[22:24], "big"),
                 "transaction_id": int.from_bytes(request[4:6], "big"),
@@ -203,8 +203,7 @@ def test_flow_fixtures_expose_media_identity_and_ordered_audio_slots():
     baseline = core.parse_response("transmitter_flow_status_page", baseline_response)
 
     assert [
-        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"])
-        for flow in baseline["flows"]
+        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"]) for flow in baseline["flows"]
     ] == [(1, 3, 1), (2, 3, 2), (3, 3, 3)]
     assert [flow["transmitter_channel_ids_by_slot"] for flow in baseline["flows"]] == [
         [5, 6, 7, 8],
@@ -223,8 +222,7 @@ def test_mixed_media_and_rejected_treatment_keep_media_local_identity_separate()
     )[-1]
     mixed = core.parse_response("transmitter_flow_status_page", mixed_response)
     assert [
-        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"])
-        for flow in mixed["flows"]
+        (flow["global_flow_id"], flow["media_type_code"], flow["media_local_flow_id"]) for flow in mixed["flows"]
     ] == [
         (1, 3, 1),
         (2, 4, 1),
