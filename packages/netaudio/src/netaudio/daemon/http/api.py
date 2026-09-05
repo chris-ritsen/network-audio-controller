@@ -20,6 +20,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
+from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
@@ -36,6 +37,26 @@ AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS = 2
 SERVICE_LABEL_MAXIMUM_BYTES = 63
 DAEMON_SERVICE_INSTANCE_PREFIX = "netaudio-daemon ("
 DAEMON_SERVICE_INSTANCE_SUFFIX = ")"
+
+
+def advertisement_addresses(selected_interface: str | None = None) -> tuple[str, ...]:
+    addresses = set()
+    for adapter in ifaddr.get_adapters():
+        if selected_interface and adapter.nice_name != selected_interface:
+            continue
+        for adapter_ip in adapter.ips:
+            address = adapter_ip.ip
+            if not isinstance(address, str):
+                continue
+            try:
+                parsed = ipaddress.IPv4Address(address)
+            except ipaddress.AddressValueError:
+                continue
+            if parsed.is_loopback or parsed.is_unspecified or parsed.is_multicast:
+                continue
+            addresses.add(str(parsed))
+
+    return tuple(sorted(addresses))
 
 
 def _bounded_service_label(value: str, maximum_bytes: int) -> str:
@@ -81,7 +102,12 @@ async def _bounded(awaitable, timeout: float):
     return task.result()
 
 
-class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, DaemonManagedHandlers):
+class DaemonHTTPServer(
+    DaemonConfigurationHandlers,
+    DaemonDeviceHandlers,
+    DaemonManagedHandlers,
+    DaemonWebHandlers,
+):
     def __init__(
         self,
         application,
@@ -525,24 +551,7 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
         )
 
     def _get_advertisement_addresses(self):
-        selected_interface = app_settings.interface
-        addresses = set()
-        for adapter in ifaddr.get_adapters():
-            if selected_interface and adapter.nice_name != selected_interface:
-                continue
-            for adapter_ip in adapter.ips:
-                address = adapter_ip.ip
-                if not isinstance(address, str):
-                    continue
-                try:
-                    parsed = ipaddress.IPv4Address(address)
-                except ipaddress.AddressValueError:
-                    continue
-                if parsed.is_loopback or parsed.is_unspecified or parsed.is_multicast:
-                    continue
-                addresses.add(str(parsed))
-
-        return tuple(sorted(addresses))
+        return advertisement_addresses(app_settings.interface)
 
     async def handle_connection(self, reader, writer):
         try:
@@ -575,20 +584,20 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
                 if content_length > 0:
                     body = await asyncio.wait_for(reader.readexactly(content_length), timeout=5.0)
 
-            await self._route(method, path, body, writer, reader)
+            await self._route(method, path, body, writer, reader, headers)
 
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError) as exception:
             logger.warning(f"Daemon HTTP API peer disconnected: {exception}")
         except Exception:
             logger.warning("Daemon HTTP API connection error", exc_info=True)
 
-    async def _route(self, method, path, body, writer, reader):
+    async def _route(self, method, path, body, writer, reader, headers=None):
         if method == "GET" and path == "/events":
             await self._handle_sse(writer, reader)
             return
 
         try:
-            await self._dispatch(method, path, body, writer)
+            await self._dispatch(method, path, body, writer, headers)
         except TimeoutError:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
         except Exception as exception:
@@ -601,9 +610,12 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
         except (BrokenPipeError, ConnectionResetError, OSError) as exception:
             logger.warning(f"Daemon HTTP API writer close ended with {exception}")
 
-    async def _dispatch(self, method, path, body, writer):
+    async def _dispatch(self, method, path, body, writer, headers=None):
         if method == "GET":
             route, _, query_string = path.partition("?")
+            if prefers_web_page(headers) and is_application_route(route):
+                await self._handle_web_asset(writer, unquote(route))
+                return
             query = parse_qs(query_string)
             context_name = next(iter(query.get("context", ())), None)
             if route == "/shure/devices":
@@ -633,7 +645,7 @@ class DaemonHTTPServer(DaemonConfigurationHandlers, DaemonDeviceHandlers, Daemon
             elif route.startswith("/metering/snapshot/"):
                 await self._handle_metering_snapshot(writer, unquote(route[len("/metering/snapshot/") :]))
             else:
-                await self._send_json(writer, {"error": "not found"}, 404)
+                await self._handle_web_asset(writer, unquote(route))
             return
 
         if method == "DELETE":

@@ -445,7 +445,7 @@ def test_shure_p10t_channel_optional_fields_are_schema_safe(dbus_interfaces_with
 def test_dbus_object_paths_are_stable_and_collision_resistant(dbus_service_without_dependency):
     module = dbus_service_without_dependency
 
-    assert module._safe_name("rack-a.local.") == module._safe_name("rack-a.local.")
+    assert module._safe_name("rack-a.local.") == "rack_a_local_efcd16cc3150"
     assert module._safe_name("rack-a.local.") != module._safe_name("rack_a.local.")
     assert module._safe_mac("00:0e:dd:00:00:01") == module._safe_mac("00-0e-dd-00-00-01")
     assert module._safe_mac("invalid-a") != module._safe_mac("invalid_a")
