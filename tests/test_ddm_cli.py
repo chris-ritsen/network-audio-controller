@@ -122,7 +122,7 @@ def test_generated_password_mutation_is_replaced_by_the_dedicated_login_command(
     assert login_help.exit_code == 0
     assert "--password" not in login_help.output
     assert "--api-key-file" not in login_help.output
-    assert "--server-profile" in login_help.output
+    assert "--server-profile" in click.unstyle(login_help.output)
     assert "--credential-file" in login_help.output
 
 
@@ -428,7 +428,7 @@ def test_json_list_options_are_validated_against_the_schema():
 def test_required_options_are_enforced_by_the_parser():
     result = _invoke_api("write", "device", "set-name", "--name", "x", "--print-query")
     assert result.exit_code != 0
-    assert "--device-id" in result.output
+    assert "--device-id" in click.unstyle(result.output)
 
 
 def test_query_arguments_become_variables():
@@ -523,7 +523,7 @@ def test_bare_graphql_command_displays_help():
     result = _invoke_api("graphql")
 
     assert result.exit_code == 2
-    assert "Usage: netaudio ddm api graphql" in result.output
+    assert "Usage: netaudio ddm api graphql" in click.unstyle(result.output)
     assert "--variables-file" in result.output
     assert "pass a GraphQL document" not in result.output
 
