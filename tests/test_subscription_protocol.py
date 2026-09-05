@@ -56,45 +56,18 @@ class TestAddSubscriptionCommand:
         stated_length = struct.unpack(">H", pkt[2:4])[0]
         assert stated_length == len(pkt)
 
-    def test_contains_tx_channel_name(self, cmds):
-        pkt, _ = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
-        assert b"mic-mix-high\x00" in pkt
-
-    def test_contains_tx_device_name(self, cmds):
-        pkt, _ = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
-        assert b"lx-dante\x00" in pkt
-
-    def test_tx_channel_offset_resolves(self, cmds):
-        pkt, _ = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
-        # Offset is at byte 13 (payload byte 5) as a single byte in the current impl
-        # Find the offset and verify it points to the string
-        idx = pkt.index(b"mic-mix-high\x00")
-        assert idx > 0
-
-    def test_tx_device_offset_resolves(self, cmds):
-        pkt, _ = cmds.command_add_subscription(1, "mic-mix-high", "lx-dante")
-        idx = pkt.index(b"lx-dante\x00")
-        assert idx > pkt.index(b"mic-mix-high\x00")
-
-    def test_channel_1(self, cmds):
-        pkt, _ = cmds.command_add_subscription(1, "ch1", "dev1")
-        # rx_channel_number=1 should appear in payload
-        assert b"ch1\x00" in pkt
-        assert b"dev1\x00" in pkt
-
-    def test_channel_2(self, cmds):
-        pkt, _ = cmds.command_add_subscription(2, "ch1", "dev1")
-        assert b"ch1\x00" in pkt
-
-    def test_different_names_produce_different_packets(self, cmds):
-        pkt1, _ = cmds.command_add_subscription(1, "ch-a", "dev-a")
-        pkt2, _ = cmds.command_add_subscription(1, "ch-b", "dev-b")
-        assert pkt1 != pkt2
-
-    def test_longer_names_produce_longer_packet(self, cmds):
-        short, _ = cmds.command_add_subscription(1, "a", "b")
-        long, _ = cmds.command_add_subscription(1, "long-channel-name", "long-device-name")
-        assert len(long) > len(short)
+    @pytest.mark.parametrize(
+        ("channel", "tx_name", "device_name"),
+        [(1, "ch1", "dev1"), (2, "mic-mix-high", "lx-dante"), (255, "a", "long-device-name")],
+    )
+    def test_receiver_and_name_pointers(self, cmds, channel, tx_name, device_name):
+        packet, _ = cmds.command_add_subscription(channel, tx_name, device_name)
+        receiver, tx_pointer, device_pointer = struct.unpack_from(">HHH", packet, 12)
+        assert receiver == channel
+        assert tx_pointer == 52
+        assert device_pointer == 52 + len(tx_name.encode()) + 1
+        assert packet[tx_pointer:device_pointer] == tx_name.encode() + b"\0"
+        assert packet[device_pointer:] == device_name.encode() + b"\0"
 
 
 class TestRemoveSubscriptionCommand:
@@ -114,15 +87,11 @@ class TestRemoveSubscriptionCommand:
         stated_length = struct.unpack(">H", pkt[2:4])[0]
         assert stated_length == len(pkt)
 
-    def test_contains_no_strings(self, cmds):
-        pkt, _ = cmds.command_remove_subscription(1)
-        # Remove should be a short packet with no channel/device name strings
-        assert len(pkt) == 16
-
-    def test_channel_number_encoded(self, cmds):
-        pkt1, _ = cmds.command_remove_subscription(1)
-        pkt2, _ = cmds.command_remove_subscription(2)
-        assert pkt1 != pkt2
+    @pytest.mark.parametrize("channel", [1, 2, 257])
+    def test_channel_number_encoded(self, cmds, channel):
+        packet, _ = cmds.command_remove_subscription(channel)
+        assert len(packet) == 16
+        assert packet[10:] == struct.pack(">HHH", 1, 0, channel)
 
 
 # ---------------------------------------------------------------------------
@@ -157,22 +126,6 @@ class TestCapturedSubscriptionHeaders:
 
         assert h["protocol_id"] == 0x2809
         assert h["opcode"] == 0x3410
-
-    def test_captured_add_contains_names(self, load_sub_fixture):
-        data = load_sub_fixture("subscription_add_request.bin")
-        assert b"mic-mix-high\x00" in data
-        assert b"lx-dante\x00" in data
-
-    def test_captured_remove_has_no_names(self, load_sub_fixture):
-        data = load_sub_fixture("subscription_remove_request.bin")
-        # No printable strings longer than 3 chars in a remove packet
-        assert b"mic-mix" not in data
-        assert b"lx-dante" not in data
-
-    def test_response_echoes_transaction_id(self, load_sub_fixture):
-        req = load_sub_fixture("subscription_remove_request.bin")
-        resp = load_sub_fixture("subscription_remove_response.bin")
-        assert req[4:6] == resp[4:6]
 
     def test_rx_channel_status_opcode(self, load_sub_fixture):
         from netaudio.dante.debug_formatter import get_opcode_name

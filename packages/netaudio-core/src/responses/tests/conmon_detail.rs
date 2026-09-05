@@ -323,7 +323,7 @@ fn ptp_clock_status_parses_authentic_variable_port_table() {
 }
 
 #[test]
-fn ptp_clock_status_keeps_scalars_from_live_avio_bluetooth_publication() {
+fn ptp_clock_status_parses_ports_from_live_avio_bluetooth_publication() {
     let data = decode_hexadecimal(
             "ffff00dce1190000001dc1fffe5279b6417564696e6174650738002000000000000300030000009fffff9baf001dc15279b60000001dc10812580000001dc1081258000000010034000900000294000000030d4000000002000000000000000000000000000000000000000100600c000000000c0098002000030000006810000000000101020100000000020009000700010002020202000000000200030003000100030202010000000002000300070003000700b80004001dc1fffe5279b6001dc1fffe081258001dc1fffe081258000100000001000000010000",
         );
@@ -334,7 +334,78 @@ fn ptp_clock_status_keeps_scalars_from_live_avio_bluetooth_publication() {
     assert_eq!(parsed.clock_frequency_offset_parts_per_billion, -25_681);
     assert_eq!(parsed.clock_port_state_code, 0x0009);
     assert_eq!(parsed.clock_role.as_deref(), Some("Follower"));
-    assert_eq!(parsed.clock_port_records, None);
+    let ports = parsed.clock_port_records.unwrap();
+    assert_eq!(ports.len(), 3);
+    assert_eq!(ports[0].record_number, 1);
+    assert_eq!(ports[0].ptp_version, 1);
+    assert_eq!(ports[0].transport_path.as_deref(), Some("multicast"));
+    assert_eq!(ports[0].role.as_deref(), Some("Follower"));
+    assert_eq!(ports[1].ptp_version, 2);
+    assert_eq!(ports[1].transport_path.as_deref(), Some("unicast"));
+    assert_eq!(ports[2].ptp_version, 2);
+    assert_eq!(ports[2].transport_path.as_deref(), Some("multicast"));
+
+    let mut invalid_stride = data.clone();
+    invalid_stride[126] = 15;
+    assert_eq!(
+        parse_ptp_clock_status(&invalid_stride)
+            .unwrap()
+            .clock_port_records,
+        None
+    );
+
+    let mut invalid_target = data.clone();
+    invalid_target[109] = 0x61;
+    assert_eq!(
+        parse_ptp_clock_status(&invalid_target)
+            .unwrap()
+            .clock_port_records,
+        None
+    );
+
+    let mut truncated = data[..175].to_vec();
+    stamp_conmon_response(&mut truncated, CONMON_OPCODE_PTP_CLOCK_STATUS);
+    assert_eq!(
+        parse_ptp_clock_status(&truncated)
+            .unwrap()
+            .clock_port_records,
+        None
+    );
+}
+
+#[test]
+fn ptp_clock_status_parses_fresh_avio_aes3_capture() {
+    let data = decode_hexadecimal(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/clock_status/avio-aes3.hex"
+        ))
+        .trim(),
+    );
+    let parsed = parse_ptp_clock_status(&data).unwrap();
+    let ports = parsed.clock_port_records.unwrap();
+    assert_eq!(ports.len(), 3);
+    assert_eq!(
+        ports
+            .iter()
+            .map(|port| (
+                port.record_number,
+                port.ptp_version,
+                port.transport_path_code,
+                port.state_code
+            ))
+            .collect::<Vec<_>>(),
+        vec![(1, 1, 1, 9), (2, 2, 2, 3), (3, 2, 1, 3)]
+    );
+
+    let mut unknown_variant = data;
+    unknown_variant[24..26].copy_from_slice(&0x0739u16.to_be_bytes());
+    assert_eq!(
+        parse_ptp_clock_status(&unknown_variant)
+            .unwrap()
+            .clock_port_records,
+        None
+    );
 }
 
 #[test]

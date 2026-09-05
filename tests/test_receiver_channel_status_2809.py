@@ -108,6 +108,7 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         "record_type_code": 0x141C,
         "channel_number": 1,
         "media_type_code": 3,
+        "media_type": "audio",
         "media_local_channel_id": 1,
         "local_channel_name_pointer": 60,
         "local_channel_name": "01",
@@ -124,7 +125,7 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         "subscription_status_code": 0x0010,
         "receiver_status_code": 0x0000,
         "status_flags": 0x0202,
-        "raw_record_hexadecimal": first_page["records"][0]["raw_record_hexadecimal"],
+        "raw_record_hexadecimal": _packet(0x2809, 0x3400, 28729)[68:124].hex(),
     }
     assert len(first_page["records"][0]["raw_record_hexadecimal"]) == 112
 
