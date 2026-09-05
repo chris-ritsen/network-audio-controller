@@ -82,7 +82,7 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
             "subscriber_device_name": "lx-dante",
             "subscriber_flow_name_pointer": 129,
             "subscriber_flow_name": "3",
-            "raw_record_hexadecimal": unicast_page["flows"][0]["raw_record_hexadecimal"],
+            "raw_record_hexadecimal": _packet(0x2809, 0x2600, 29630)[32:108].hex(),
         }
     ]
     assert len(unicast_page["flows"][0]["raw_record_hexadecimal"]) == 152
@@ -116,7 +116,7 @@ def test_parser_preserves_zero_unicast_and_multicast_status_records():
         "subscriber_device_name": None,
         "subscriber_flow_name_pointer": 0,
         "subscriber_flow_name": None,
-        "raw_record_hexadecimal": multicast_page["flows"][0]["raw_record_hexadecimal"],
+        "raw_record_hexadecimal": _packet(0x2809, 0x2600, 7675)[32:108].hex(),
     }
 
 

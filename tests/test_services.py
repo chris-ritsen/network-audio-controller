@@ -12,7 +12,6 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.services.notification import (
     DanteNotificationService,
-    NOTIFICATION_NAMES,
 )
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
@@ -84,12 +83,6 @@ def _executed(transport):
 
 
 class TestApplicationSettingsCommands:
-    def test_instantiation(self):
-        transport = _recording_transport()
-        application = DanteApplication()
-        application.transport = transport
-        assert application.transport is transport
-
     @pytest.mark.asyncio
     async def test_identify_executes_typed_command(self):
         transport = _recording_transport()
@@ -360,28 +353,44 @@ class TestDanteNotificationService:
         assert service._multicast_group == "224.0.0.231"
         assert service._multicast_port == 8702
 
-    def test_notification_names(self):
-        assert NOTIFICATION_NAMES[128] == "Sample Rate Status"
-        assert NOTIFICATION_NAMES[130] == "Encoding Status"
-        assert NOTIFICATION_NAMES[257] == "TX Channel Change"
-        assert NOTIFICATION_NAMES[258] == "RX Channel Change"
-        assert NOTIFICATION_NAMES[4103] == "AES67 Status"
-        assert NOTIFICATION_NAMES[CONMON_OPCODE_GAIN_STATUS] == "Gain Status"
+    @pytest.mark.parametrize(
+        "notification_id,name",
+        [
+            (128, "Sample Rate Status"),
+            (130, "Encoding Status"),
+            (257, "TX Channel Change"),
+            (258, "RX Channel Change"),
+            (4103, "AES67 Status"),
+            (4107, "Gain Status"),
+            (0xABCD, "Unknown(0xABCD)"),
+        ],
+    )
+    def test_notification_event_preserves_identity_payload_and_label(self, notification_id, name):
+        application, device = application_with_device("device.local.", "192.0.2.1", name="Test Device")
+        packet = struct.pack(">HH", 0x27FF, 28) + bytes(22) + struct.pack(">H", notification_id)
 
-    def test_set_device_lookup(self):
-        dispatcher = DanteEventDispatcher()
+        [event] = receive_packets(application, [packet], ("192.0.2.1", 8702))
+
+        assert event.type is EventType.NOTIFICATION_RECEIVED
+        assert event.device_name == "Test Device"
+        assert event.server_name == "device.local."
+        assert event.data == {
+            "notification_id": notification_id,
+            "notification_name": name,
+            "raw": packet,
+            "source_ip": "192.0.2.1",
+        }
+
+    @pytest.mark.parametrize("protocol", [0x27FF, 0xFFFF])
+    @pytest.mark.parametrize("length", [0, 1, 3, 4, 10, 26, 27])
+    def test_short_packet_does_not_emit_an_event(self, protocol, length):
+        dispatcher = MagicMock(spec=DanteEventDispatcher)
         service = DanteNotificationService(dispatcher=dispatcher)
+        packet = (struct.pack(">HH", protocol, length) + bytes(24))[:length]
 
-        def lookup(ip):
-            return None
+        service._on_packet(packet, ("192.0.2.1", 8702))
 
-        service.set_device_lookup(lookup)
-        assert service._device_lookup is lookup
-
-    def test_on_packet_short_data(self):
-        dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
-        service._on_packet(b"\x00" * 10, ("192.168.1.1", 8702))
+        dispatcher.emit_nowait.assert_not_called()
 
     def test_routing_capacity_ready_updates_capacity_and_active_counts(self):
         application, device = application_with_device("lx-dante.local.", "192.168.1.108")

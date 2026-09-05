@@ -10,14 +10,6 @@ def dispatcher():
     return DanteEventDispatcher()
 
 
-def test_event_type_enum():
-    assert EventType.DEVICE_DISCOVERED.name == "DEVICE_DISCOVERED"
-    assert EventType.DEVICE_REMOVED.name == "DEVICE_REMOVED"
-    assert EventType.DEVICE_UPDATED.name == "DEVICE_UPDATED"
-    assert EventType.METER_VALUES.name == "METER_VALUES"
-    assert EventType.NOTIFICATION_RECEIVED.name == "NOTIFICATION_RECEIVED"
-
-
 def test_dante_event_defaults():
     event = DanteEvent(type=EventType.DEVICE_DISCOVERED)
     assert event.type == EventType.DEVICE_DISCOVERED
@@ -26,30 +18,39 @@ def test_dante_event_defaults():
     assert event.data == {}
 
 
-def test_dante_event_with_data():
-    event = DanteEvent(
-        type=EventType.DEVICE_UPDATED,
-        device_name="My Device",
-        server_name="device.local.",
-        data={"field": "sample_rate", "value": 48000},
-    )
-    assert event.device_name == "My Device"
-    assert event.server_name == "device.local."
-    assert event.data["field"] == "sample_rate"
-    assert event.data["value"] == 48000
+def test_event_payload_defaults_are_not_shared():
+    first = DanteEvent(type=EventType.DEVICE_UPDATED)
+    second = DanteEvent(type=EventType.DEVICE_UPDATED)
+    first.data["sample_rate"] = 48000
+    assert second.data == {}
 
 
-def test_on_off_callback(dispatcher):
+@pytest.mark.asyncio
+async def test_off_stops_delivery_without_removing_other_listeners(dispatcher):
     received = []
+    retained = []
 
     async def callback(event):
         received.append(event)
 
-    dispatcher.on(EventType.DEVICE_DISCOVERED, callback)
-    assert len(dispatcher._listeners[EventType.DEVICE_DISCOVERED]) == 1
+    async def other_callback(event):
+        retained.append(event)
 
+    dispatcher.on(EventType.DEVICE_DISCOVERED, callback)
+    dispatcher.on(EventType.DEVICE_DISCOVERED, other_callback)
+    before = DanteEvent(type=EventType.DEVICE_DISCOVERED, device_name="before")
+    await dispatcher.start()
+    await dispatcher.emit(before)
+    await dispatcher.stop()  # Drain the queued event before unregistering.
     dispatcher.off(EventType.DEVICE_DISCOVERED, callback)
-    assert len(dispatcher._listeners[EventType.DEVICE_DISCOVERED]) == 0
+    after = DanteEvent(type=EventType.DEVICE_DISCOVERED, device_name="after")
+    await dispatcher.start()
+    try:
+        await dispatcher.emit(after)
+    finally:
+        await dispatcher.stop()
+    assert received == [before]
+    assert retained == [before, after]
 
 
 def test_off_nonexistent_callback(dispatcher):
@@ -210,7 +211,15 @@ async def test_dispatch_loop_error_handling(dispatcher):
 @pytest.mark.asyncio
 async def test_start_stop_idempotent(dispatcher):
     await dispatcher.start()
-    await dispatcher.start()  # Should not raise or create duplicate tasks
-
+    task = dispatcher._dispatch_task
+    try:
+        await dispatcher.start()
+        assert dispatcher._dispatch_task is task
+        assert not task.done()
+    finally:
+        await dispatcher.stop()
+    assert task.done()
+    assert dispatcher._dispatch_task is None
+    assert dispatcher._queue is None
     await dispatcher.stop()
-    await dispatcher.stop()  # Should not raise
+    assert dispatcher._dispatch_task is None

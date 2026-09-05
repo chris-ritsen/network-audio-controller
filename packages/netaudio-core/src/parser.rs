@@ -844,14 +844,8 @@ mod tests {
             let data: Vec<u8> = (0..length)
                 .map(|index| ((index * 31 + length * 47) & 0xFF) as u8)
                 .collect();
-            let result = std::panic::catch_unwind(|| {
-                let _ = parse_channel_count(&data);
-                let _ = parse_channel_audio_metadata(&data);
-                let _ = parse_rx_page(&data, 1);
-                let _ = parse_tx_info_page(&data, 1);
-                let _ = parse_tx_friendly_page(&data, 1);
-            });
-            assert!(result.is_ok(), "length={length}");
+            assert_eq!(parse_channel_count(&data), None, "length={length}");
+            assert_eq!(parse_channel_audio_metadata(&data), None, "length={length}");
             assert_eq!(parse_rx_page(&data, 1), None);
             assert_eq!(parse_tx_info_page(&data, 1), None);
             assert_eq!(parse_tx_friendly_page(&data, 1), None);

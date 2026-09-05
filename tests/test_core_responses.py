@@ -103,7 +103,7 @@ def test_channel_count_rejects_invalid_response_envelope(field, value):
 
 
 @pytest.mark.parametrize("name", sorted(GOLDEN))
-def test_typed_response_parsers_reject_every_truncated_prefix(name):
+def test_typed_response_parsers_reject_truncation_with_original_declared_length(name):
     entry = GOLDEN[name]
     data = response_input_bytes(FIXTURES_DIR, name, entry)
     for length in range(len(data)):
@@ -141,12 +141,29 @@ TX_FRIENDLY_PAGE = bytes.fromhex(
 @pytest.mark.parametrize(
     ("kind", "data"),
     [("rx", RX_PAGE), ("tx_info", TX_INFO_PAGE), ("tx_friendly", TX_FRIENDLY_PAGE)],
+    ids=["rx", "tx-info", "tx-friendly"],
 )
-def test_page_parsers_reject_every_truncated_prefix(kind, data):
+def test_page_parsers_reject_truncation_with_original_declared_length(kind, data):
     for length in range(len(data)):
         with pytest.raises(core.NetaudioCoreError) as exc_info:
             core.parse_page(kind, data[:length], 1)
         assert exc_info.value.status == 10
+
+
+@pytest.mark.parametrize(
+    ("kind", "data"),
+    [("rx", RX_PAGE), ("tx_info", TX_INFO_PAGE), ("tx_friendly", TX_FRIENDLY_PAGE)],
+    ids=["rx", "tx-info", "tx-friendly"],
+)
+@pytest.mark.parametrize("cut", [10, 11, 13, 20, 33, -8])
+def test_page_parsers_reject_incomplete_records_with_consistent_declared_length(kind, data, cut):
+    # These cuts remove required table or string bytes. Some other prefixes
+    # are valid empty pages or merely omit unreferenced trailing data.
+    shortened = bytearray(data[:cut])
+    shortened[2:4] = len(shortened).to_bytes(2, "big")
+    with pytest.raises(core.NetaudioCoreError) as exc_info:
+        core.parse_page(kind, bytes(shortened), 1)
+    assert exc_info.value.status == 10
 
 
 def test_rx_page_gap_and_bad_pointer_do_not_return_partial_records():

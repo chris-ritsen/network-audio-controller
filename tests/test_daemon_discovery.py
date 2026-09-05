@@ -8,22 +8,21 @@ from netaudio.daemon import discovery
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.dante.const import SERVICE_ARC, SERVICE_CMC, SERVICE_VIDEO
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.events import EventType
 
 
 class _DiscoveryHarness(DanteDiscoveryMixin):
     def __init__(self, devices=None):
         devices = {} if devices is None else devices
-        self.application = SimpleNamespace(
-            devices=devices,
-            cmc=SimpleNamespace(register_device=AsyncMock()),
-            dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
-            get_arc_port=self._arc_port,
-            send_dante_model_request=AsyncMock(),
-            send_make_model_request=AsyncMock(),
-            _send_conmon_query_for_device=AsyncMock(),
-        )
-        self.application.register_device = MagicMock(side_effect=self._register_device)
+        self.application = DanteApplication()
+        self.application.attach_devices(devices)
+        self.application.cmc.register_device = AsyncMock()
+        self.application.dispatcher.emit_nowait = MagicMock()
+        self.application.send_dante_model_request = AsyncMock()
+        self.application.send_make_model_request = AsyncMock()
+        self.application._send_conmon_query_for_device = AsyncMock()
+        self.application.register_device = MagicMock(wraps=self.application.register_device)
         self.state = SimpleNamespace(
             retry_conmon_query=AsyncMock(),
             fetch_device_controls=AsyncMock(),
@@ -37,29 +36,6 @@ class _DiscoveryHarness(DanteDiscoveryMixin):
     @property
     def devices(self):
         return self.application.devices
-
-    def _register_device(self, server_name, new_device):
-        existing = self.devices.get(server_name)
-        if existing is None:
-            new_device._app = self.application
-            self.devices[server_name] = new_device
-            return
-
-        if not existing.online:
-            existing.online = True
-            existing.update_last_seen()
-            if new_device.ipv4:
-                existing.ipv4 = new_device.ipv4
-            if new_device.services:
-                existing.services = new_device.services
-        self.devices[server_name] = existing
-
-    @staticmethod
-    def _arc_port(device):
-        for service in device.services.values():
-            if service.get("type") == SERVICE_ARC:
-                return service.get("port")
-        return None
 
     def clear_offline_candidate(self, server_name):
         self.cleared_candidates.append(server_name)
@@ -197,7 +173,10 @@ async def test_new_cmc_service_registers_identity_metadata_and_queries(monkeypat
     assert daemon.spawned == ["retry-conmon:rack.local."]
     assert daemon.published == [device]
     notify.assert_called_once_with("STATUS=1 device(s) online")
-    daemon.application.dispatcher.emit_nowait.assert_not_called()
+    daemon.application.dispatcher.emit_nowait.assert_called_once()
+    event = daemon.application.dispatcher.emit_nowait.call_args.args[0]
+    assert event.type == EventType.DEVICE_DISCOVERED
+    assert event.server_name == "rack.local."
 
 
 @pytest.mark.asyncio
