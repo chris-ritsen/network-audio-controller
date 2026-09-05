@@ -152,5 +152,6 @@ def test_resolve_preset_path_uses_directory_for_bare_names(monkeypatch, tmp_path
 
     assert preset_commands.resolve_preset_path("stage", for_write=True) == tmp_path / "stage.xml"
     assert preset_commands.resolve_preset_path("stage.xml", for_write=True).name == "stage.xml"
-    assert preset_commands.resolve_preset_path("/tmp/x.xml", for_write=False).is_absolute()
+    absolute_path = tmp_path / "x.xml"
+    assert preset_commands.resolve_preset_path(str(absolute_path), for_write=False) == absolute_path
     assert preset_commands.resolve_preset_path("sub/stage", for_write=False).parts[-2:] == ("sub", "stage")
