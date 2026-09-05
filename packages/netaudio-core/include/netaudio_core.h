@@ -239,6 +239,18 @@ NetaudioStatus netaudio_build_command(const char *json,
                                       uintptr_t out_capacity,
                                       uintptr_t *out_length);
 
+NetaudioStatus netaudio_subscription_status(uint16_t code,
+                                            uint16_t receiver_status_code,
+                                            bool has_receiver_status,
+                                            uint8_t *out_buffer,
+                                            uintptr_t out_capacity,
+                                            uintptr_t *out_length);
+
+NetaudioStatus netaudio_subscription_state_for_identifier(const char *identifier,
+                                                          uint8_t *out_buffer,
+                                                          uintptr_t out_capacity,
+                                                          uintptr_t *out_length);
+
 NetaudioStatus netaudio_parse_response(const char *kind,
                                        const uint8_t *data,
                                        uintptr_t data_len,
