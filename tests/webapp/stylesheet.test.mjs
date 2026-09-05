@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { WEBAPP } from "./setup.mjs";
 
@@ -65,7 +66,7 @@ test("mobile layout collapses the sidebar into a drawer", () => {
 });
 
 test("every static class used by the application has a stylesheet rule", () => {
-  const root = new URL(WEBAPP).pathname;
+  const root = fileURLToPath(WEBAPP);
   const files = [];
   const walk = (directory) => {
     for (const entry of readdirSync(directory)) {

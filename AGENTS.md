@@ -139,6 +139,15 @@ handoffs may add context or narrow a task, but they may not weaken these rules.
   harnesses that need lab hardware, VMs, or personal paths live outside this
   repository.
 
+## Release notes and public-facing documentation
+
+- Describe user-visible features, fixes, and necessary installation or upgrade
+  instructions. Do not add internal process commentary about Git history,
+  branch reconciliation, tag signing, agent activity, or release mechanics
+  unless Chris explicitly requests it or users must act on that information.
+- Keep code comments useful: explain non-obvious behavior or constraints, not
+  routine actions, agent decisions, or development-session narration.
+
 ## Validation
 
 - Split modules by responsibility, never by line count. A file named after its
