@@ -20,6 +20,8 @@ from netaudio.core.binding import (
     parse_page,
     parse_response,
     require,
+    subscription_status,
+    subscription_state_for_identifier,
 )
 
 __all__ = [
@@ -44,4 +46,6 @@ __all__ = [
     "parse_page",
     "parse_response",
     "require",
+    "subscription_status",
+    "subscription_state_for_identifier",
 ]

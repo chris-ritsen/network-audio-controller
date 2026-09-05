@@ -530,3 +530,58 @@ def test_graphql_errors_allow_null_inventory_roots(root):
 
     assert result.partial is True
     assert getattr(result.data, "unenrolled_devices" if root == "unenrolledDevices" else root) is None
+
+
+def test_nullable_status_enum_error_retains_channel_and_raw_response():
+    from copy import deepcopy
+    from pathlib import Path
+
+    evidence = json.loads((Path(__file__).parent / "fixtures/subscription/status-observations.json").read_text())
+    unknown = next(group["api"] for group in evidence["groups"] if group["api"]["status"] is None)
+    payload = _inventory_payload()
+    raw_channel = payload["data"]["domains"][0]["devices"][0]["rxChannels"][0]
+    raw_channel.update(unknown)
+    raw_channel["futureField"] = {"available": True}
+    error = deepcopy(evidence["enum_error"])
+    error["path"] = ["domains", 0, "devices", 0, "rxChannels", 0, "status"]
+    payload["errors"] = [error]
+    client, _ = _client(_response(payload))
+
+    result = client.inventory()
+
+    assert result.partial and not result.successful and not result.failed
+    channel = result.data.domains[0].devices[0].rx_channels[0]
+    assert channel.status is None
+    assert channel.status_message == unknown["statusMessage"]
+    assert channel.summary == unknown["summary"]
+    assert channel.subscribed_device == raw_channel["subscribedDevice"]
+    assert channel.subscribed_channel == raw_channel["subscribedChannel"]
+    assert channel.enabled is True
+    assert channel.media_type == "AUDIO"
+    assert channel.signal_presence.level_dbfs == -61.5
+    assert result.raw_data == payload["data"]
+    assert dict(result.errors[0].raw) == error
+
+
+def test_enum_error_does_not_hide_unrelated_response_shape_failure():
+    payload = _inventory_payload()
+    payload["data"]["domains"][0]["devices"][0]["rxChannels"][0]["index"] = "invalid"
+    payload["errors"] = [{"message": 'Enum "RxChannelStatus" cannot represent value: "?"'}]
+    client, _ = _client(_response(payload))
+    with pytest.raises(ResponseShapeError):
+        client.inventory()
+
+
+def test_enum_error_does_not_hide_an_additional_graphql_failure():
+    payload = _inventory_payload()
+    errors = [
+        {"message": 'Enum "RxChannelStatus" cannot represent value: "?"'},
+        {"message": "access denied", "extensions": {"code": "FORBIDDEN"}, "path": ["unenrolledDevices"]},
+    ]
+    payload["errors"] = errors
+    payload["data"]["unenrolledDevices"] = None
+    client, _ = _client(_response(payload))
+    result = client.inventory()
+    assert not result.successful
+    assert result.data.unenrolled_devices is None
+    assert [dict(issue.raw) for issue in result.errors] == errors
