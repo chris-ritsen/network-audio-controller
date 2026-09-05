@@ -43,6 +43,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
       - run: uv run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
 
   build-wheel:
     needs: test

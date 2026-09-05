@@ -232,6 +232,7 @@ def test_managed_success_with_warning_survives_roundtrip_and_text():
     restored = DanteDeviceSerializer._subscription_from_json(subscription.to_json())
     assert restored.status_text() == ("DYNAMIC", "WARNING", "Source name changed")
 
+
 @pytest.mark.parametrize(
     "code,expected",
     [
