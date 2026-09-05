@@ -104,9 +104,7 @@ def test_notification_and_device_serialization_preserve_every_clock_port_record(
 
 
 def test_avio_capture_updates_device_clock_ports():
-    packet = bytes.fromhex(
-        (Path(__file__).parent / "fixtures/clock_status/avio-aes3.hex").read_text()
-    )
+    packet = bytes.fromhex((Path(__file__).parent / "fixtures/clock_status/avio-aes3.hex").read_text())
     assert hashlib.sha256(packet).hexdigest() == "321d937b413ace35bab9e5bd08d9ea53a64e2e334c47bcbf355266433a686b0d"
     application, device = application_with_device("avio-aes3-1", "192.168.1.18")
     receive_packets(application, [packet], ("192.168.1.18", 8700))

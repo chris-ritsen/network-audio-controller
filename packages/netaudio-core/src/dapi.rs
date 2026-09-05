@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::fmt::Write;
 
 const REQUEST_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x26];
 const RESPONSE_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x25];
@@ -90,7 +91,12 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 }
 
 fn hexadecimal(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut text, byte| {
+            write!(text, "{byte:02x}").expect("writing to a String cannot fail");
+            text
+        })
 }
 
 fn aligned_to_four(length: usize) -> Option<usize> {
@@ -125,7 +131,7 @@ fn settings_opcode(packet: &[u8]) -> Option<u16> {
     read_u16(packet, 26)
 }
 
-fn normal_record<'a>(bytes: &'a [u8], family: u16, family_header: [u8; 4]) -> Option<Frame<'a>> {
+fn normal_record(bytes: &[u8], family: u16, family_header: [u8; 4]) -> Option<Frame<'_>> {
     let frame = parse_frame(bytes)?;
     if frame.message_type != NORMAL_MESSAGE
         || bytes.len() < WRAPPER_ID_OFFSET + 4
@@ -200,10 +206,7 @@ pub fn parse_session_description(bytes: &[u8]) -> Option<SessionDescription> {
         return None;
     }
     Some(SessionDescription {
-        domain_id: bytes[66..82]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
+        domain_id: hexadecimal(&bytes[66..82]),
     })
 }
 
