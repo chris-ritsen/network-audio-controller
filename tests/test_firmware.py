@@ -7,7 +7,7 @@ import pytest
 from netaudio.commands.firmware.archive import firmware_extract
 from netaudio.commands.firmware.database import _init_db
 from netaudio.commands.firmware.capabilities import _extract_capability_9
-from netaudio.commands.firmware.constants import DNT_PARSER_VERSION, FIRMWARE_DATABASE_SCHEMA_VERSION, PARTITION_NAMES
+from netaudio.commands.firmware.constants import DNT_PARSER_VERSION, FIRMWARE_DATABASE_SCHEMA_VERSION
 from netaudio.commands.firmware.parser import _load_resume_results, _parse_sections, parse_dnt
 
 from tests.firmware_test_support import build_capability_payload, build_dnt, build_partitioned_dnt
@@ -66,13 +66,20 @@ def test_parse_sections_rejects_section_outside_file():
         _parse_sections(data, 0x80)
 
 
-def test_partition_names_match_updater_partition_identifiers():
-    assert PARTITION_NAMES[1] == "image"
-    assert PARTITION_NAMES[2] == "fpga"
-    assert PARTITION_NAMES[6] == "boot"
-    assert PARTITION_NAMES[9] == "cap1"
-    assert PARTITION_NAMES[11] == "user"
-    assert PARTITION_NAMES[12] == "fpgar3"
+def test_parse_sections_labels_each_partition_in_a_multi_section_table():
+    data = build_partitioned_dnt([(identifier, 0x01020304, b"test") for identifier in [1, 2, 6, 9, 11, 12]])
+    header_length = int.from_bytes(data[4:8], "big")
+
+    sections = _parse_sections(data, header_length)
+
+    assert [(section["partition_id"], section["partition_name"]) for section in sections] == [
+        (1, "image"),
+        (2, "fpga"),
+        (6, "boot"),
+        (9, "cap1"),
+        (11, "user"),
+        (12, "fpgar3"),
+    ]
 
 
 def test_firmware_extract_reads_from_absolute_section_offset(tmp_path):
