@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 from types import SimpleNamespace
 
@@ -79,7 +80,8 @@ def test_password_login_uses_a_hidden_prompt_and_saves_the_token(monkeypatch, tm
         "password": "private-password",
     }
     assert credential_file.read_text(encoding="ascii") == "session-token\n"
-    assert stat.S_IMODE(credential_file.stat().st_mode) == 0o600
+    if os.name == "posix":
+        assert stat.S_IMODE(credential_file.stat().st_mode) == 0o600
     assert "session-token" not in result.output
     assert "private-password" not in result.output
     assert "Saved DDM context" in result.output
