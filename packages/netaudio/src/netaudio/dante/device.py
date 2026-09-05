@@ -389,7 +389,7 @@ class DanteDevice:
     def _apply_modern_arc_channel_metadata(channel, record: dict) -> None:
         media_type_code = record.get("media_type_code")
         channel.media_type_code = media_type_code
-        channel.media_type = MODERN_ARC_MEDIA_TYPE_LABELS.get(media_type_code)
+        channel.media_type = MODERN_ARC_MEDIA_TYPE_LABELS.get(media_type_code) if media_type_code is not None else None
         channel.media_local_id = record.get("media_local_channel_id")
         channel.format_descriptor_hexadecimal = record.get("format_descriptor_hexadecimal")
         channel.sample_rate = record.get("sample_rate")

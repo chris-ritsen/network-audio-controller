@@ -51,3 +51,37 @@ pub unsafe extern "C" fn netaudio_build_command(
         unsafe { write_bytes(&packet, out_buffer, out_capacity, out_length) }
     })
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_subscription_status(
+    code: u16,
+    receiver_status_code: u16,
+    has_receiver_status: bool,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    guard(|| {
+        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
+        let status = crate::subscription_status::decode(
+            code,
+            has_receiver_status.then_some(receiver_status_code),
+        );
+        unsafe { write_json(&status, out_buffer, out_capacity, out_length) }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_subscription_state_for_identifier(
+    identifier: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    guard(|| {
+        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
+        let identifier = unsafe { c_string(identifier)? };
+        let state = crate::subscription_status::state_for_identifier(identifier);
+        unsafe { write_json(&state, out_buffer, out_capacity, out_length) }
+    })
+}
