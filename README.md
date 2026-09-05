@@ -17,6 +17,7 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 
 - AVIO input/output gain control
 - Add/remove subscriptions
+- Browser interface served by the daemon
 - CLI
 - Cross-platform foreground daemon plus installable boot service
 - Device lock/unlock through the native Rust protocol core
@@ -240,6 +241,62 @@ Lint and format:
 uv run ruff check .
 uv run ruff format .
 ```
+
+#### Browser interface
+
+The daemon serves a browser interface from its own HTTP port, so no extra
+process or build step is involved. Start the daemon and open the address it
+reports:
+
+```bash
+netaudio daemon start
+netaudio daemon web --open
+```
+
+The page is a single-page application backed entirely by the daemon HTTP API and
+its `/events` stream, so device, subscription, metering, and Shure state update
+live without polling. It uses real browser history routing, so every view,
+device, and device tab is a linkable address. It follows Dante Controller's
+layout and vocabulary so it is immediately familiar:
+
+- Routing: the full network subscription matrix, Dante receivers down and Dante
+  transmitters across, with devices collapsed by default. Click a device cell to
+  subscribe one-to-one, expand a device to work channel by channel, and filter
+  either axis by device or channel name. The matrix is canvas-rendered and stays
+  responsive across tens of thousands of cells; pending changes, subscribed,
+  warning, and error states are drawn as in Dante Controller.
+- Device info, Clock status, Network status: the network-view tables with the
+  columns Dante Controller operators expect. Every table lets columns be hidden,
+  shown, and dragged into a new order, remembered per table in the browser.
+- Device view: Receive, Transmit, Status, Latency, Device config, Network
+  config, AES67 config, Transmit flows, Device lock, and Domain tabs. Receivers
+  subscribe through a searchable picker; channels can be renamed and gains set
+  where the device supports it.
+- Metering: live meters for every declared channel, drawn on canvas with peak
+  hold. Both metering protocols are surfaced: detailed per-channel levels
+  streamed after an explicit start, and the passive signal-presence records a
+  device already broadcasts.
+- Flows: transmit flow inventory per device, with multicast flow creation and
+  deletion.
+- Domains: Dante Domain Manager status, domains, and the managed inventory.
+- Shure: discovered receivers, channel state, transmitter and battery detail,
+  and live meter values.
+- Events: the daemon event stream, held in memory only and excluding meter
+  samples.
+
+Press Ctrl+K (Command+K on macOS) to jump to any device or view. Defaults show
+what an operator needs; every field the daemon knows remains available behind
+column menus and expandable detail sections, never as raw JSON.
+
+The client is Preact with signals, vendored into the package alongside the rest
+of the assets, so the interface loads with no build step, no bundler, and no
+network access beyond the daemon itself. `make test-webapp` renders every view
+and device tab against captured device records under Node, so template and
+formatting regressions are caught before deployment.
+
+Device mutations use the same verified-write paths as the CLI, so a control that
+reports success has been read back from the device. The daemon binds every
+interface; restrict access at the network layer if that is not wanted.
 
 ### Documentation
 

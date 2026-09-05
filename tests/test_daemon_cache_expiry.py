@@ -18,6 +18,7 @@ def _daemon(devices):
     daemon._offline_failures = {}
     daemon._offline_candidate_since = {}
     daemon._pending_offline_tasks = {}
+    daemon._unreachable_devices_reported = set()
     daemon._background_tasks = set()
     daemon._last_status_field_refresh_monotonic = time.monotonic()
     daemon.running = True

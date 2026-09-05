@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from netaudio.daemon.log_file import daemon_log_path, ensure_log_directory
+
 SYSTEMD_UNIT_NAME = "netaudio.service"
 LAUNCHD_LABEL = "com.netaudio.daemon"
 WINDOWS_TASK_NAME = "netaudio-daemon"
@@ -52,13 +54,7 @@ def service_location() -> str:
 
 
 def spawn_log_path() -> Path:
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Logs" / "netaudio" / "daemon.log"
-    if sys.platform == "win32":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return base / "netaudio" / "daemon.log"
-    base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
-    return base / "netaudio" / "daemon.log"
+    return daemon_log_path()
 
 
 def _systemd_exec_arg(value: str) -> str:
@@ -335,8 +331,7 @@ def windows_task_run() -> None:
 
 
 def spawn_detached(daemon_port: int | None) -> Path:
-    log_path = spawn_log_path()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path = ensure_log_directory()
     command = [executable_path(), "daemon", "run"]
     if daemon_port:
         command.extend(["--port", str(daemon_port)])

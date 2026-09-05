@@ -4,7 +4,7 @@ import pytest
 
 from netaudio import core
 from netaudio.commands.config import cli as config_cli
-from netaudio.dante.const import DEVICE_SETTINGS_PORT
+from netaudio.dante.const import DEVICE_SETTINGS_PORT, SERVICE_ARC
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher, EventType
@@ -41,30 +41,17 @@ class TestAES67ConfiguredFromARC1100:
 
         assert core.parse_response("aes67_configured", response) is None
 
-    def test_query_latency_config_packet_structure(self):
-        commands = DanteDeviceCommands()
-        packet, service, port = commands.command_query_latency_config(transaction_id=0x0745)
-        assert struct.unpack(">H", packet[0:2])[0] == 0x2809
-        assert struct.unpack(">H", packet[2:4])[0] == 58
-        assert struct.unpack(">H", packet[4:6])[0] == 0x0745
-        assert struct.unpack(">H", packet[6:8])[0] == 0x1100
-        assert struct.unpack(">H", packet[8:10])[0] == 0x0000
-        assert port is None
-
-    def test_query_latency_config_packet_length(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_query_latency_config()
-        assert len(packet) == 58
-
     def test_query_latency_config_matches_captured(self):
         commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_query_latency_config(transaction_id=0x0745)
+        packet, service, port = commands.command_query_latency_config(transaction_id=0x0745)
         captured = bytes.fromhex(
             "2809003a07451100000000170201820482050210"
             "021182188219830183028306031003110303802100"
             "f080600022006300640065022202128321"
         )
         assert packet == captured
+        assert service == SERVICE_ARC
+        assert port is None
 
 
 class TestAES67CurrentNewFromConmon1007:
