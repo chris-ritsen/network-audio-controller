@@ -419,15 +419,9 @@ fn set_latency_rejects_values_that_cannot_be_encoded() {
 #[test]
 fn audio_settings_accept_nonzero_wire_values_without_truncation() {
     for sample_rate in [44_100, 48_000, 192_000, 123_456, u32::MAX] {
-        assert!(
-            build_set_sample_rate(sample_rate, 1).is_ok(),
-            "{sample_rate}"
-        );
+        let packet = build_set_sample_rate(sample_rate, 1).unwrap();
+        assert_eq!(&packet[36..40], &sample_rate.to_be_bytes());
     }
-    assert_eq!(
-        &build_set_sample_rate(u32::MAX, 1).unwrap()[36..40],
-        &u32::MAX.to_be_bytes()
-    );
     assert_eq!(
         build_set_sample_rate(0, 1),
         Err(NetaudioError::InvalidSampleRate)
@@ -442,12 +436,9 @@ fn audio_settings_accept_nonzero_wire_values_without_truncation() {
     );
 
     for encoding in [1, 16, 24, 32, 256, u32::MAX] {
-        assert!(build_set_encoding(encoding, 1).is_ok(), "{encoding}");
+        let packet = build_set_encoding(encoding, 1).unwrap();
+        assert_eq!(&packet[36..40], &encoding.to_be_bytes());
     }
-    assert_eq!(
-        &build_set_encoding(u32::MAX, 1).unwrap()[36..40],
-        &u32::MAX.to_be_bytes()
-    );
     assert_eq!(
         build_set_encoding(0, 1),
         Err(NetaudioError::InvalidEncoding)
@@ -848,8 +839,10 @@ fn flow_mutations_reject_slots_outside_device_range() {
     }
 
     for slot in 1..=32 {
-        assert!(build_create_tx_flow(PROTOCOL_DANTE_FLOW_2801, slot, &[1], 0).is_ok());
-        assert!(build_delete_tx_flow(PROTOCOL_DANTE_FLOW, slot, 0).is_ok());
+        let create = build_create_tx_flow(PROTOCOL_DANTE_FLOW_2801, slot, &[1], 0).unwrap();
+        let delete = build_delete_tx_flow(PROTOCOL_DANTE_FLOW, slot, 0).unwrap();
+        assert_eq!(&create[16..18], &slot.to_be_bytes());
+        assert_eq!(&delete[14..16], &slot.to_be_bytes());
     }
 }
 

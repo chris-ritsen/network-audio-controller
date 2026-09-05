@@ -63,6 +63,7 @@ def test_parser_exposes_transmitter_names_friendly_names_and_format():
             "record_type_code": 0x1414,
             "channel_number": 1,
             "media_type_code": 3,
+            "media_type": "audio",
             "media_local_channel_id": 1,
             "channel_name_pointer": 40,
             "channel_name": "bluetooth:left",
@@ -72,7 +73,7 @@ def test_parser_exposes_transmitter_names_friendly_names_and_format():
             "encoding": 24,
             "friendly_channel_name_pointer": 55,
             "friendly_channel_name": "Left",
-            "raw_record_hexadecimal": page["records"][0]["raw_record_hexadecimal"],
+            "raw_record_hexadecimal": _packet(2)[60:100].hex(),
         },
         {
             "record_pointer": 124,
@@ -80,6 +81,7 @@ def test_parser_exposes_transmitter_names_friendly_names_and_format():
             "record_type_code": 0x1414,
             "channel_number": 2,
             "media_type_code": 3,
+            "media_type": "audio",
             "media_local_channel_id": 2,
             "channel_name_pointer": 100,
             "channel_name": "bluetooth:right",
@@ -89,7 +91,7 @@ def test_parser_exposes_transmitter_names_friendly_names_and_format():
             "encoding": 24,
             "friendly_channel_name_pointer": 116,
             "friendly_channel_name": "Right",
-            "raw_record_hexadecimal": page["records"][1]["raw_record_hexadecimal"],
+            "raw_record_hexadecimal": _packet(2)[124:164].hex(),
         },
     ]
     assert all(len(record["raw_record_hexadecimal"]) == 80 for record in page["records"])

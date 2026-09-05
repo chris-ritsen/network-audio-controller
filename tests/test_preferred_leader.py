@@ -13,11 +13,6 @@ from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.const import (
-    CONMON_CLOCK_PORT_STATE_OFFSET,
-    CONMON_OPCODE_PTP_CLOCK_STATUS,
-    CONMON_PREFERRED_LEADER_OFFSET,
-)
 from netaudio.dante.services.notification import (
     DanteNotificationService,
 )
@@ -106,13 +101,13 @@ class TestPreferredLeaderProbePacket:
 
 class TestPreferredLeaderFromConmon0x0020:
     def _build_conmon_0020_packet(self, preferred_leader_byte):
-        packet = bytearray(CONMON_CLOCK_PORT_STATE_OFFSET + 2)
+        packet = bytearray(74)
         struct.pack_into(">H", packet, 0, 0xFFFF)
         struct.pack_into(">H", packet, 2, len(packet))
         packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x18, 0x073A)
         struct.pack_into(">H", packet, 0x1A, 0x0020)
-        packet[CONMON_PREFERRED_LEADER_OFFSET] = preferred_leader_byte
+        packet[0x26] = preferred_leader_byte
         return bytes(packet)
 
     @pytest.mark.asyncio
@@ -190,7 +185,7 @@ class TestPreferredLeaderFromConmon0x0020:
         assert parsed["clock_source_code"] == 0
         assert parsed["preferred_leader"] is False
         assert parsed["clock_role"] == "Follower"
-        assert parsed["clock_port_records"] is None
+        assert len(parsed["clock_port_records"]) == 3
 
     def test_updates_device_through_the_state_service(self):
         application, device = application_with_device("test.local.", "192.168.1.34", name="test")
@@ -199,12 +194,6 @@ class TestPreferredLeaderFromConmon0x0020:
         packet = self._build_conmon_0020_packet(0x01)
         receive_packets(application, [packet], ("192.168.1.34", 1030))
         assert device.preferred_leader is True
-
-    def test_opcode_constant(self):
-        assert CONMON_OPCODE_PTP_CLOCK_STATUS == 0x0020
-
-    def test_offset_constant(self):
-        assert CONMON_PREFERRED_LEADER_OFFSET == 0x26
 
 
 class TestPreferredLeaderDeviceModel:

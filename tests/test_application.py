@@ -1,7 +1,7 @@
 import asyncio
 import time
 import warnings
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -35,19 +35,29 @@ class TestDanteApplication:
     @pytest.mark.asyncio
     async def test_startup_shutdown(self):
         application = DanteApplication()
+        application.notifications.start = AsyncMock()
+        application.notifications.stop = AsyncMock()
         await application.startup()
         assert application._started is True
+        application.notifications.start.assert_awaited_once()
 
         await application.shutdown()
         assert application._started is False
+        application.notifications.stop.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_startup_idempotent(self):
         application = DanteApplication()
+        application.notifications.start = AsyncMock()
         await application.startup()
-        await application.startup()  # Should not raise
-        assert application._started is True
-        await application.shutdown()
+        task = application.dispatcher._dispatch_task
+        try:
+            await application.startup()
+            application.notifications.start.assert_awaited_once()
+            assert application.dispatcher._dispatch_task is task
+            assert application._started is True
+        finally:
+            await application.shutdown()
 
     @pytest.mark.asyncio
     async def test_startup_failure_stops_partially_started_services(self):
@@ -146,8 +156,25 @@ class TestDanteApplication:
     @pytest.mark.asyncio
     async def test_shutdown_idempotent(self):
         application = DanteApplication()
-        await application.shutdown()  # Not started, should not raise
+        application.notifications.start = AsyncMock()
+        application.notifications.stop = AsyncMock()
+        application.cmc.stop = AsyncMock()
+        application.transport.close = MagicMock()
+
         await application.shutdown()
+        application.notifications.stop.assert_not_awaited()
+        application.cmc.stop.assert_not_awaited()
+        application.transport.close.assert_not_called()
+
+        await application.startup()
+        await application.shutdown()
+        await application.shutdown()
+
+        application.notifications.stop.assert_awaited_once()
+        application.cmc.stop.assert_awaited_once()
+        application.transport.close.assert_called_once()
+        assert application._started is False
+        assert application.dispatcher._dispatch_task is None
 
     def test_register_device(self):
         application = DanteApplication()
@@ -232,7 +259,14 @@ class TestDanteApplication:
 
     def test_unregister_nonexistent_device(self):
         application = DanteApplication()
-        application.unregister_device("nonexistent.local.")  # Should not raise
+        device = DanteDevice(server_name="retained.local.")
+        application.attach_devices({device.server_name: device})
+        application.dispatcher.emit_nowait = MagicMock()
+
+        application.unregister_device("nonexistent.local.")
+
+        assert application.devices == {"retained.local.": device}
+        application.dispatcher.emit_nowait.assert_not_called()
 
     def test_mark_device_offline_clears_device_capabilities(self):
         application = DanteApplication()
@@ -643,6 +677,7 @@ class TestDanteApplication:
     @pytest.mark.asyncio
     async def test_startup_attaches_status_application_and_register_enables_refetching(self):
         application = DanteApplication()
+        application.notifications.start = AsyncMock()
         await application.startup()
         try:
             assert (
