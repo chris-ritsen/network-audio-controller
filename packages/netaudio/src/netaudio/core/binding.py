@@ -12,7 +12,7 @@ logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 4
+ABI_VERSION = 5
 
 LOCK_NONCE_LENGTH = 24
 LOCK_KEY_LENGTH = 32
@@ -149,6 +149,10 @@ def _configure(lib):
         ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_size_t),
     ]
+    lib.netaudio_subscription_status.argtypes = [ctypes.c_uint16, ctypes.c_uint16, ctypes.c_bool, *buffer_out]
+    lib.netaudio_subscription_status.restype = ctypes.c_int
+    lib.netaudio_subscription_state_for_identifier.argtypes = [ctypes.c_char_p, *buffer_out]
+    lib.netaudio_subscription_state_for_identifier.restype = ctypes.c_int
     lib.netaudio_build_command.argtypes = [ctypes.c_char_p, *buffer_out]
     lib.netaudio_build_command.restype = ctypes.c_int
     lib.netaudio_last_error_message.argtypes = buffer_out
@@ -726,3 +730,27 @@ class CoreClient:
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
         return json.loads(data)
+
+
+def subscription_status(code: int, receiver_status_code: int | None = None) -> dict:
+    values = (code,) if receiver_status_code is None else (code, receiver_status_code)
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFF:
+            raise ValueError("subscription and receiver status values must be unsigned 16-bit integers")
+    status, data = _call_buffer(
+        require().netaudio_subscription_status, code, receiver_status_code or 0, receiver_status_code is not None
+    )
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "subscription_status")
+    return json.loads(data)
+
+
+def subscription_state_for_identifier(identifier: str | None) -> str:
+    if identifier is None:
+        return "unknown"
+    if not isinstance(identifier, str) or "\0" in identifier:
+        raise ValueError("subscription status identifier must be a string without null bytes")
+    status, data = _call_buffer(require().netaudio_subscription_state_for_identifier, identifier.encode("utf-8"))
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "subscription_state_for_identifier")
+    return json.loads(data)

@@ -58,6 +58,33 @@ To install from AUR, build the package with
 
 Run `netaudio` if installed globally, or `uv run netaudio` from a clone.
 
+#### Subscription status
+
+Subscription JSON keeps the raw 16-bit subscription `status.code`, separate
+`rx_channel_status.code`, and any additional `status_message` warnings. A
+`connected` subscription can carry warnings; it does not prove audio delivery.
+Managed responses retain `ddm_status`, `ddm_status_message` and `ddm_summary`
+separately. Their semantic state comes from the shared Rust definitions, while
+severity follows the managed summary. A null managed status remains unknown,
+with its available message, summary and channel metadata preserved. GraphQL
+errors remain full objects in daemon status and leave inventory degraded;
+unrelated API failures are not treated as successful queries.
+
+Numeric definitions and identifier classification live in `netaudio-core`.
+The Python client requires native ABI 5 for these functions. Source checkouts
+must rebuild the native core after this update. Subscription definitions no
+longer come from the optional local label file.
+
+The [status observation fixture](tests/fixtures/subscription/README.md) records
+the evidence scope: a synthetic 0x0000–0x00ff sweep at receiver health 0x0101,
+observed through one DDM deployment on 2026-09-05. `observed_summary` is populated
+for recognized values in the observed receiver contexts. `interpretation`
+identifies observed pairs, unverified receiver contexts, unknown numeric values,
+or code 1 requiring receiver context. Code 1 resolves to DYNAMIC at health
+0x0101 and UNRESOLVED at health 0x0000; other contexts remain unresolved.
+Higher values keep all bits and remain unknown. The sweep does not establish a
+complete receiver-health precedence rule or naturally occurring hardware faults.
+
 #### Selecting devices and channels
 
 Every command selects devices with the same global filters: `-n/--name`

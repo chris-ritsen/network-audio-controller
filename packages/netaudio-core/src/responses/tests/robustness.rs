@@ -147,7 +147,13 @@ fn hostile_bytes_never_panic_or_decode_as_typed_responses() {
         assert_eq!(parse_sample_rate_pullup_status(&data), None);
         assert_eq!(parse_gain_status(&data), None);
         assert_eq!(parse_metering_frame(&data), None);
-        assert_eq!(parse_dante_brooklyn_control_protocol_flow_setup_request(&data), None);
-        assert_eq!(parse_dante_brooklyn_control_protocol_flow_setup_response(&data), None);
+        assert_eq!(
+            parse_dante_brooklyn_control_protocol_flow_setup_request(&data),
+            None
+        );
+        assert_eq!(
+            parse_dante_brooklyn_control_protocol_flow_setup_response(&data),
+            None
+        );
     }
 }

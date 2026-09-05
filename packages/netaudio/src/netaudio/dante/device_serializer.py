@@ -262,8 +262,7 @@ class DanteDeviceSerializer:
         rx_channel_status = entry.get("rx_channel_status")
         if rx_channel_status:
             subscription.rx_channel_status_code = rx_channel_status.get("code")
-        elif status:
-            subscription.rx_channel_status_code = status.get("code")
+        subscription.status_message = list(entry.get("status_message", []))
         return subscription
 
     @staticmethod
@@ -289,28 +288,16 @@ class DanteDeviceSerializer:
         return {key: as_json[key] for key in sorted(as_json.keys())}
 
     @staticmethod
-    def _status_to_json(code):
-        from netaudio.dante.const import (
-            subscription_status_detail,
-            subscription_status_entry,
-            subscription_status_label,
-        )
+    def _status_to_json(code, receiver_status_code=None):
+        from netaudio.dante.const import subscription_status_entry
         from netaudio.icons import severity_icon
 
         if code is None:
             return None
-
-        entry = subscription_status_entry(code)
-        severity = entry["severity"]
-        return {
-            "code": code,
-            "detail": subscription_status_detail(code),
-            "icon": severity_icon(severity),
-            "label": subscription_status_label(code),
-            "severity": severity,
-            "state": entry["state"],
-            "status": entry.get("status"),
-        }
+        entry = subscription_status_entry(code, receiver_status_code)
+        entry.pop("labels")
+        entry["icon"] = severity_icon(entry["severity"])
+        return entry
 
     @staticmethod
     def _receiver_status_to_json(code):
@@ -328,7 +315,9 @@ class DanteDeviceSerializer:
         as_json = {
             "rx_channel": subscription.rx_channel_name,
             "rx_device": subscription.rx_device_name,
-            "status": DanteDeviceSerializer._status_to_json(subscription.status_code),
+            "status": DanteDeviceSerializer._status_to_json(
+                subscription.status_code, subscription.rx_channel_status_code
+            ),
             "tx_channel": subscription.tx_channel_name,
             "tx_device": subscription.tx_device_name,
         }
@@ -337,10 +326,10 @@ class DanteDeviceSerializer:
             if field_value is not None:
                 as_json[field_name] = field_value
 
-        if (
-            subscription.rx_channel_status_code is not None
-            and subscription.rx_channel_status_code != subscription.status_code
-        ):
+        if subscription.status_message:
+            as_json["status_message"] = list(subscription.status_message)
+
+        if subscription.rx_channel_status_code is not None:
             as_json["rx_channel_status"] = DanteDeviceSerializer._receiver_status_to_json(
                 subscription.rx_channel_status_code
             )
