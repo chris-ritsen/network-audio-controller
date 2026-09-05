@@ -203,11 +203,13 @@ class TestRoutingNotifications:
             data={"notification_id": NOTIFICATION_RX_CHANNEL_CHANGE},
         )
 
-        await state._on_receiver_channel_changed(event)
+        await state._on_notification(event)
 
         device.get_rx_channels.assert_awaited_once()
         device.get_tx_channels.assert_not_awaited()
-        assert len(emitted_events(application)) == 1
+        [updated] = emitted_events(application)
+        assert updated.type is EventType.DEVICE_UPDATED
+        assert updated.server_name == "dev1.local."
 
     @pytest.mark.asyncio
     async def test_transmitter_label_change_refreshes_only_transmitter_channels(self):
@@ -222,11 +224,13 @@ class TestRoutingNotifications:
             data={"notification_id": NOTIFICATION_TX_LABEL_CHANGE},
         )
 
-        await state._on_transmitter_channel_changed(event)
+        await state._on_notification(event)
 
         device.get_tx_channels.assert_awaited_once()
         device.get_rx_channels.assert_not_awaited()
-        assert len(emitted_events(application)) == 1
+        [updated] = emitted_events(application)
+        assert updated.type is EventType.DEVICE_UPDATED
+        assert updated.server_name == "dev1.local."
 
     @pytest.mark.asyncio
     async def test_transmitter_flow_change_detects_frontend_and_refreshes_inventory(self, monkeypatch):
@@ -337,10 +341,12 @@ class TestRoutingNotifications:
             data={"notification_id": NOTIFICATION_RX_FLOW_CHANGE},
         )
 
-        await state._on_receiver_flow_changed(event)
+        await state._on_notification(event)
 
         device.get_rx_channels.assert_awaited_once()
-        assert len(emitted_events(application)) == 1
+        [updated] = emitted_events(application)
+        assert updated.type is EventType.DEVICE_UPDATED
+        assert updated.server_name == "dev1.local."
 
 
 class TestRefetchDeviceControls:
