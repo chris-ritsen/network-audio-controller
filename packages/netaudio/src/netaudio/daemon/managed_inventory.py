@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
 
 from netaudio.common.managed_api import DDMConfiguration, DDMContextConfiguration, ManagedAPIConfiguration
+from netaudio.core import subscription_state_for_identifier
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
@@ -156,13 +157,13 @@ MANAGED_SUBSCRIPTION_SEVERITIES = {"connected": "ok", "error": "error", "warning
 
 def _managed_subscription_status(channel) -> dict:
     summary = channel.summary.casefold() if isinstance(channel.summary, str) and channel.summary else None
-    state = summary or "unknown"
+    state = subscription_state_for_identifier(channel.status)
     return {
         "code": None,
         "detail": channel.status_message,
         "icon": "",
         "label": channel.summary or channel.status or "unknown",
-        "severity": MANAGED_SUBSCRIPTION_SEVERITIES.get(state, "info"),
+        "severity": MANAGED_SUBSCRIPTION_SEVERITIES.get(summary, "info"),
         "state": state,
         "status": channel.status,
     }
@@ -172,7 +173,12 @@ def _managed_subscriptions(device: Device) -> list[dict]:
     subscriptions = []
     for channel in device.rx_channels or ():
         status = channel.status.casefold() if isinstance(channel.status, str) else channel.status
-        if not channel.subscribed_device and not channel.subscribed_channel and status in {None, "none"}:
+        if (
+            not channel.subscribed_device
+            and not channel.subscribed_channel
+            and status in {None, "none"}
+            and channel.summary in {None, "NONE"}
+        ):
             continue
         subscriptions.append(
             {
@@ -388,7 +394,7 @@ class ManagedInventoryService:
         self.last_attempt: float | None = None
         self.last_success: float | None = None
         self.last_error: str | None = None
-        self.graphql_errors: tuple[str, ...] = ()
+        self.graphql_errors: tuple[dict, ...] = ()
         self._authoritative = False
         self._domains_current = False
         self._unenrolled_current = False
@@ -467,12 +473,14 @@ class ManagedInventoryService:
         )
 
     def _apply_result(self, result: InventoryResult) -> bool:
-        self.graphql_errors = tuple(issue.message for issue in result.errors)
+        self.graphql_errors = tuple(dict(issue.raw) for issue in result.errors)
         if result.data is None:
             self._authoritative = False
             self._domains_current = False
             self._unenrolled_current = False
-            self.last_error = "; ".join(self.graphql_errors) or "Managed API returned no inventory data"
+            self.last_error = (
+                "; ".join(issue["message"] for issue in self.graphql_errors) or "Managed API returned no inventory data"
+            )
             return False
         previous = (self._domains.copy(), self._unenrolled.copy())
         observed_at = self.clock()
@@ -491,7 +499,7 @@ class ManagedInventoryService:
         self._authoritative = result.successful
         if result.successful:
             self.last_success = observed_at
-        self.last_error = "; ".join(self.graphql_errors) or None
+        self.last_error = "; ".join(issue["message"] for issue in self.graphql_errors) or None
         return previous != (self._domains, self._unenrolled)
 
     def _root_fresh(self, last_success: float | None, current: bool) -> bool:

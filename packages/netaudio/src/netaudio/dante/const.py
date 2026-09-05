@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 
-from netaudio.dante.clean_labels import load_clean_subscription_status_labels
 from netaudio.dante.subscription_status import (
-    SUBSCRIPTION_STATUS_DEFINITIONS,
     default_status_entry as _builtin_status_entry,
 )
 
@@ -330,100 +328,14 @@ CLOCK_PORT_ROLE_MAP = {
     CLOCK_PORT_STATE_FOLLOWER: "Follower",
 }
 
-_CLEAN_SUBSCRIPTION_STATUS_LABELS = load_clean_subscription_status_labels()
+
+def subscription_status_entry(code: int, receiver_status_code: int | None = None) -> dict[str, object]:
+    return _builtin_status_entry(code, receiver_status_code)
 
 
-def _default_status_entry(code: int) -> dict[str, object]:
-    entry = _builtin_status_entry(code)
-    label = entry["label"]
-    return {
-        "status": entry["status"],
-        "state": entry["state"],
-        "severity": entry["severity"],
-        "label": label,
-        "detail": entry["detail"],
-        "labels": (label,),
-    }
+def subscription_status_label(code: int, receiver_status_code: int | None = None) -> str:
+    return subscription_status_entry(code, receiver_status_code)["label"]
 
 
-def _normalize_status_entry(code: int, entry: dict[str, object] | None) -> dict[str, object]:
-    default = _default_status_entry(code)
-    if not isinstance(entry, dict):
-        return default
-
-    state = entry.get("state")
-    if isinstance(state, str) and state.strip():
-        state = state.strip()
-    else:
-        state = default["state"]
-
-    severity = entry.get("severity")
-    if isinstance(severity, str) and severity.strip():
-        severity = severity.strip()
-    else:
-        severity = default["severity"]
-
-    label = entry.get("label")
-    if isinstance(label, str) and label.strip():
-        label = label.strip()
-    else:
-        label = default["label"]
-
-    detail = entry.get("detail")
-    if not isinstance(detail, str) or not detail:
-        detail = default["detail"]
-
-    labels_value = entry.get("labels")
-    labels: tuple[str, ...] = ()
-    if isinstance(labels_value, list):
-        labels = tuple(value.strip() for value in labels_value if isinstance(value, str) and value.strip())
-    if not labels:
-        labels = (label,)
-
-    return {
-        "status": default["status"],
-        "state": state,
-        "severity": severity,
-        "label": label,
-        "detail": detail,
-        "labels": labels,
-    }
-
-
-def _load_status_catalog() -> dict[int, dict[str, object]]:
-    catalog = {code: _default_status_entry(code) for code in sorted(SUBSCRIPTION_STATUS_DEFINITIONS)}
-    for code, entry in sorted(_CLEAN_SUBSCRIPTION_STATUS_LABELS.items()):
-        catalog[code] = _normalize_status_entry(code, entry)
-    if SUBSCRIPTION_STATUS_NONE not in catalog:
-        catalog[SUBSCRIPTION_STATUS_NONE] = _default_status_entry(SUBSCRIPTION_STATUS_NONE)
-    return catalog
-
-
-_SUBSCRIPTION_STATUS_CATALOG = _load_status_catalog()
-
-SUBSCRIPTION_STATUSES = list(_SUBSCRIPTION_STATUS_CATALOG.keys())
-SUBSCRIPTION_STATUS_ACTIVE = [
-    code for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items() if entry["state"] == "connected"
-]
-SUBSCRIPTION_STATUS_INFO = {
-    code: (entry["state"], entry["label"], entry["detail"]) for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()
-}
-SUBSCRIPTION_STATUS_LABELS = {code: entry["labels"] for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()}
-SUBSCRIPTION_STATUS_SEVERITY = {code: entry["severity"] for code, entry in _SUBSCRIPTION_STATUS_CATALOG.items()}
-
-
-def subscription_status_entry(code: int) -> dict[str, object]:
-    entry = _SUBSCRIPTION_STATUS_CATALOG.get(code)
-    if entry is not None:
-        return entry
-    fallback = _default_status_entry(code)
-    return fallback
-
-
-def subscription_status_label(code: int) -> str:
-    return subscription_status_entry(code)["label"]
-
-
-def subscription_status_detail(code: int) -> str | None:
-    detail = subscription_status_entry(code)["detail"]
-    return detail if detail else None
+def subscription_status_detail(code: int, receiver_status_code: int | None = None) -> str | None:
+    return subscription_status_entry(code, receiver_status_code)["detail"]
