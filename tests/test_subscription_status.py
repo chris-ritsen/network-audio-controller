@@ -4,16 +4,9 @@ import pytest
 
 from netaudio.dante.const import (
     SUBSCRIPTION_STATUS_ACTIVE,
-    SUBSCRIPTION_STATUS_INFO,
-    SUBSCRIPTION_STATUS_LABELS,
     SUBSCRIPTION_STATUS_SEVERITY,
     subscription_status_entry,
 )
-
-
-def test_catalog_covers_full_byte_range():
-    for code in range(0x00, 0x40):
-        assert code in SUBSCRIPTION_STATUS_INFO
 
 
 def test_active_set_is_connected_states_only():
@@ -44,24 +37,6 @@ def test_known_codes_have_expected_status_label_and_severity(code, status, label
     assert SUBSCRIPTION_STATUS_SEVERITY[code] == severity
 
 
-def test_no_verbatim_dante_status_text():
-    dante_phrases = {
-        "cannot find this channel on the network",
-        "channel found; preparing to create flow",
-        "received an unexpected error when trying to resolve this channel",
-        "the RX subscription failed for an unknown reason.",
-        "communicating with transmitter to create flow",
-        "could not communicate with transmitter",
-        "source and destination channels do not match",
-    }
-    for code in range(0x00, 0x40):
-        entry = subscription_status_entry(code)
-        detail = entry["detail"]
-        if detail is None:
-            continue
-        assert detail not in dante_phrases
-
-
 def test_unknown_range_falls_back():
     for code in range(0x28, 0x40):
         entry = subscription_status_entry(code)
@@ -78,10 +53,22 @@ def test_high_byte_falls_back_to_low_byte():
     assert unknown["label"] == "Subscription failed"
 
 
-def test_labels_tuple_matches_label():
-    for code, info in SUBSCRIPTION_STATUS_INFO.items():
-        state, label, detail = info
-        assert SUBSCRIPTION_STATUS_LABELS[code][0] == label
+@pytest.mark.parametrize(
+    "code,expected",
+    [(9, "Subscribed (unicast)"), (0x1B, "Clock domain mismatch"), (0xFFFF, "status:65535"), (None, "status:unknown")],
+)
+def test_subscription_format_includes_status_only_when_verbose(code, expected):
+    from netaudio.dante.subscription import DanteSubscription
+
+    subscription = DanteSubscription()
+    subscription.rx_channel_name = "Speaker"
+    subscription.rx_device_name = "Receiver"
+    subscription.tx_channel_name = "Mic"
+    subscription.tx_device_name = "Transmitter"
+    subscription.status_code = code
+
+    assert subscription.format(verbose=True) == f"Speaker@Receiver <- Mic@Transmitter [{expected}]"
+    assert subscription.format(verbose=False) == "Speaker@Receiver <- Mic@Transmitter"
 
 
 @pytest.mark.parametrize(

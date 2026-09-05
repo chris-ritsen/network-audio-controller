@@ -19,6 +19,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.http.api import DaemonHTTPServer
+from netaudio.daemon.log_file import daemon_log_path, truncate_when_oversized
 from netaudio.daemon.managed_inventory import ManagedInventoryRegistry
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
@@ -161,6 +162,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self.heartbeat: DanteHeartbeatService | None = None
         self._revalidate_task: asyncio.Task | None = None
         self._pending_offline_tasks: dict[str, asyncio.Task] = {}
+        self._unreachable_devices_reported: set[str] = set()
         self._background_tasks: set[asyncio.Task] = set()
         self._offline_failures: dict[str, int] = {}
         self._offline_candidate_since: dict[str, float] = {}
@@ -657,6 +659,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     def forget_device(self, server_name: str) -> None:
         device = self.devices.get(server_name)
+        self._unreachable_devices_reported.discard(server_name)
         self.clear_offline_candidate(server_name)
         self.application.unregister_device(server_name)
         if (
@@ -833,6 +836,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             if not reachable:
                 raise OSError("No Dante response")
             logger.info(f"Device reachable after mDNS removal, re-registering: {server_name}")
+            self._unreachable_devices_reported.discard(server_name)
             self.clear_offline_candidate(server_name)
             device.online = True
             device.update_last_seen()
@@ -844,7 +848,12 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 name=f"fetch-controls:{server_name}",
             )
         except (asyncio.TimeoutError, OSError) as exception:
-            logger.warning(f"Device not reachable after recheck: {server_name}: {exception}")
+            message = f"Device not reachable after recheck: {server_name}: {exception}"
+            if server_name in self._unreachable_devices_reported:
+                logger.debug(message)
+            else:
+                self._unreachable_devices_reported.add(server_name)
+                logger.warning(message)
 
     async def _recover_known_devices(self, delay: float = 0, offline_only: bool = True) -> None:
         if delay > 0:
@@ -910,6 +919,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self._recover_known_devices(offline_only=True)
                 await self._verify_quiet_online_devices()
                 self._refresh_status_fields()
+                truncate_when_oversized(daemon_log_path())
             except asyncio.CancelledError:
                 break
             except (OSError, RuntimeError, TimeoutError) as exception:

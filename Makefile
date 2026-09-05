@@ -1,4 +1,4 @@
-.PHONY: core header example example-swift test quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
+.PHONY: core header example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -41,8 +41,11 @@ dev:
 	@echo "Watching for changes... (restart daemon on *.py save)"
 	@find packages/netaudio/src -name '*.py' | entr -r make restart
 
-test:
+test: test-webapp
 	uv run pytest -q
+
+test-webapp:
+	node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
 
 quality:
 	uv lock --check

@@ -71,7 +71,7 @@ def _find_or_build_library():
     library_path = CRATE_DIR / "target" / "debug" / _library_name()
     if library_path.exists():
         return library_path
-    pytest.skip("netaudio-core build produced no loadable library")
+    pytest.fail(f"cargo build succeeded but the expected library is missing: {library_path}")
 
 
 @pytest.fixture(scope="module")

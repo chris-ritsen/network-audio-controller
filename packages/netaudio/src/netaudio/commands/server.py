@@ -348,6 +348,7 @@ def install(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
+    service_install.ensure_log_directory()
     typer.echo(f"Wrote {path}")
 
     if platform == "systemd":
@@ -447,3 +448,31 @@ def logs(
                         time.sleep(0.25)
             except KeyboardInterrupt:
                 raise typer.Exit(code=0)
+
+
+@app.command()
+def web(
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
+    ),
+    open_browser: bool = typer.Option(False, "--open", help="Open the web interface in the default browser."),
+):
+    """Show the daemon web interface address."""
+    effective_port = _effective_daemon_port(daemon_port)
+    _pin_client_port(effective_port)
+
+    if not _port_in_use(effective_port):
+        typer.echo(f"{icon('offline')}Daemon is not running. Start it with: netaudio daemon start", err=True)
+        raise typer.Exit(code=1)
+
+    url = f"http://127.0.0.1:{effective_port}/"
+    typer.echo(url)
+    from netaudio.daemon.http.api import advertisement_addresses
+
+    for address in advertisement_addresses():
+        typer.echo(f"http://{address}:{effective_port}/")
+
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)

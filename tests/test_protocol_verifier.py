@@ -1,4 +1,5 @@
 import json
+import hashlib
 import struct
 from types import SimpleNamespace
 from pathlib import Path
@@ -104,9 +105,9 @@ async def test_bundle_export(temp_db, output_dir):
                 verifier.packet_store.store_packet(
                     PacketRecord(
                         payload=fake_response,
-                        source_type="test_request",
+                        source_type="test_response",
                         device_ip="192.168.1.100",
-                        direction="request",
+                        direction="response",
                         session_id=verifier.session_id,
                     )
                 )
@@ -124,11 +125,13 @@ async def test_bundle_export(temp_db, output_dir):
 
     assert manifest["session_name"] == "export_test"
     assert manifest["scope"]["device_ip"] == "192.168.1.100"
-    assert len(manifest["samples"]) >= 1
-    assert len(manifest["markers"]) >= 1
-
-    bin_files = list(output_path.glob("*.bin"))
-    assert len(bin_files) >= 1
+    assert manifest["session_packet_count"] == 1
+    [sample] = manifest["samples"]
+    exported = output_path / sample["file"]
+    assert exported.read_bytes() == fake_response
+    assert sample["sha256"] == hashlib.sha256(fake_response).hexdigest()
+    assert sample["direction"] == "response"
+    assert set(output_path.glob("*.bin")) == {exported}
 
     marker_types = {m["marker_type"] for m in manifest["markers"]}
     assert "system" in marker_types
@@ -256,7 +259,10 @@ async def test_include_evidence_from_ambient(temp_db, output_dir):
     assert evidence_markers[0]["label"] == "evidence_set_latency_observed"
 
     evidence_bins = list(output_path.glob("evidence_*.bin"))
-    assert len(evidence_bins) == 1
+    [evidence_file] = evidence_bins
+    assert evidence_file.read_bytes() == ambient_packet
+    assert output_path / evidence_samples[0]["file"] == evidence_file
+    assert evidence_samples[0]["sha256"] == hashlib.sha256(ambient_packet).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -303,7 +309,7 @@ async def test_include_evidence_by_payload_hex(temp_db, output_dir):
                     label="latency_250us_packets",
                 )
 
-                assert len(found) == 1
+                assert [packet["payload"] for packet in found] == [packet_with_latency]
 
 
 @pytest.mark.asyncio
@@ -313,9 +319,9 @@ async def test_query_packets_filters(tmp_path):
     db_path = str(tmp_path / "query_test.sqlite")
     store = PacketStore(db_path=db_path)
 
-    pkt_a = struct.pack(">HHHH", 0x2729, 20, 0x0001, 0x1101) + struct.pack(">H", 0x0001)
-    pkt_b = struct.pack(">HHHH", 0x2729, 20, 0x0002, 0x1002) + struct.pack(">H", 0x0001)
-    pkt_c = struct.pack(">HHHH", 0x27FF, 20, 0x0003, 0x1101) + struct.pack(">H", 0x0001)
+    pkt_a = struct.pack(">HHHH", 0x2729, 8, 0x0001, 0x1101)
+    pkt_b = struct.pack(">HHHH", 0x2729, 8, 0x0002, 0x1002)
+    pkt_c = struct.pack(">HHHH", 0x27FF, 8, 0x0003, 0x1101)
 
     store.store_packet(
         PacketRecord(payload=pkt_a, source_type="tshark", device_ip="192.168.1.100", direction="request")
@@ -328,21 +334,21 @@ async def test_query_packets_filters(tmp_path):
     )
 
     by_ip = store.query_packets(PacketQuery(device_ip="192.168.1.100"))
-    assert len(by_ip) == 2
+    assert sorted(packet["payload"] for packet in by_ip) == sorted([pkt_a, pkt_c])
 
     by_opcode = store.query_packets(PacketQuery(opcode=0x1101))
-    assert len(by_opcode) == 2
+    assert sorted(packet["payload"] for packet in by_opcode) == sorted([pkt_a, pkt_c])
 
     by_protocol = store.query_packets(PacketQuery(protocol_id=0x2729))
-    assert len(by_protocol) == 2
+    assert sorted(packet["payload"] for packet in by_protocol) == sorted([pkt_a, pkt_b])
 
     by_combo = store.query_packets(PacketQuery(device_ip="192.168.1.100", opcode=0x1101, protocol_id=0x2729))
-    assert len(by_combo) == 1
+    assert [packet["payload"] for packet in by_combo] == [pkt_a]
 
     by_source = store.query_packets(PacketQuery(source_type="tshark"))
-    assert len(by_source) == 2
+    assert sorted(packet["payload"] for packet in by_source) == sorted([pkt_a, pkt_b])
 
     by_hex = store.query_packets(PacketQuery(payload_hex_contains="2729"))
-    assert len(by_hex) == 2
+    assert sorted(packet["payload"] for packet in by_hex) == sorted([pkt_a, pkt_b])
 
     store.close()
