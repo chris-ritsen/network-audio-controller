@@ -16,9 +16,9 @@ fn all_external_observations() {
             let entry = decode(code, Some(257));
             assert_eq!(entry.code, code);
             assert_eq!(entry.status, group["api"]["status"].as_str(), "{code:#06x}");
-            if entry.status.is_some() {
+            if let Some(status) = entry.status {
                 assert_eq!(entry.observed_summary, group["api"]["summary"].as_str());
-                assert_eq!(state_for_identifier(entry.status.unwrap()), entry.state);
+                assert_eq!(state_for_identifier(status), entry.state);
             } else {
                 assert_eq!(entry.state, "unknown");
             }
