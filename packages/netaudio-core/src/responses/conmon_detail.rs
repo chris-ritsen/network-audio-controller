@@ -68,17 +68,37 @@ fn parse_ptp_clock_port_records(data: &[u8]) -> Option<Vec<PtpClockPortRecord>> 
     let descriptor_offset = CONMON_CLOCK_PORT_DESCRIPTOR_BASE_RECORD_OFFSET
         .checked_add(preceding_count.checked_mul(4)?)?;
     let descriptor_target = usize::from(read_u16(record, descriptor_offset)?);
-    let descriptor_size = usize::from(read_u16(record, descriptor_offset.checked_add(2)?)?);
-    if descriptor_size != CONMON_CLOCK_PORT_DESCRIPTOR_SIZE
-        || descriptor_target != descriptor_offset.checked_add(descriptor_size)?
-    {
+    let descriptor_code = read_u16(record, descriptor_offset.checked_add(2)?)?;
+    // Observed AVIO 0x0738 layout: twelve-byte descriptor, stride 0x1000.
+    // Interpreting that stride as one byte plus padding is inferred;
+    // the checks below accept only the captured sixteen-byte record size.
+    // See tests/fixtures/clock_status/README.md for capture provenance.
+    let extended = match (read_u16(record, 0)?, descriptor_code) {
+        (_, 0x0004) => false,
+        (0x0738, 0x0c00) => true,
+        _ => return None,
+    };
+    let descriptor_size = if extended {
+        12
+    } else {
+        CONMON_CLOCK_PORT_DESCRIPTOR_SIZE
+    };
+    if descriptor_target != descriptor_offset.checked_add(descriptor_size)? {
         return None;
     }
 
     let port_count = usize::from(read_u16(record, descriptor_target)?);
     let reserved_header = read_u16(record, descriptor_target.checked_add(2)?)?;
     let records_offset = usize::from(read_u16(record, descriptor_target.checked_add(4)?)?);
-    let record_size = usize::from(read_u16(record, descriptor_target.checked_add(6)?)?);
+    let stride_code = read_u16(record, descriptor_target.checked_add(6)?)?;
+    let record_size = if extended {
+        if stride_code & 0xff != 0 {
+            return None;
+        }
+        usize::from(stride_code >> 8)
+    } else {
+        usize::from(stride_code)
+    };
     if reserved_header != 0
         || records_offset != descriptor_target.checked_add(CONMON_CLOCK_PORT_HEADER_SIZE)?
         || record_size != CONMON_CLOCK_PORT_RECORD_SIZE
@@ -86,7 +106,7 @@ fn parse_ptp_clock_port_records(data: &[u8]) -> Option<Vec<PtpClockPortRecord>> 
         return None;
     }
     let records_end = records_offset.checked_add(port_count.checked_mul(record_size)?)?;
-    if records_end != record.len() {
+    if records_end > record.len() || (!extended && records_end != record.len()) {
         return None;
     }
 

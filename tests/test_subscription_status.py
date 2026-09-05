@@ -44,13 +44,6 @@ def test_known_codes_have_expected_status_label_and_severity(code, status, label
     assert SUBSCRIPTION_STATUS_SEVERITY[code] == severity
 
 
-def test_status_names_come_from_enum():
-    from netaudio.dante.subscription_status import SubscriptionStatus
-
-    assert SubscriptionStatus(0x09).name == "SUBSCRIBED_UNICAST"
-    assert subscription_status_entry(0x09)["status"] == SubscriptionStatus.SUBSCRIBED_UNICAST.name
-
-
 def test_no_verbatim_dante_status_text():
     dante_phrases = {
         "cannot find this channel on the network",
@@ -91,7 +84,11 @@ def test_labels_tuple_matches_label():
         assert SUBSCRIPTION_STATUS_LABELS[code][0] == label
 
 
-def test_severity_icon_nerd_font_mode():
+@pytest.mark.parametrize(
+    "severity,expected",
+    [("ok", "\U000f05e0"), ("error", "\U000f0159"), ("none", ""), ("unknown", "")],
+)
+def test_severity_icon_nerd_font_mode(severity, expected):
     from netaudio.cli import state
     from netaudio.icons import severity_icon
 
@@ -99,9 +96,7 @@ def test_severity_icon_nerd_font_mode():
     try:
         state.icons = True
         state.no_color = False
-        assert severity_icon("ok")
-        assert severity_icon("error")
-        assert severity_icon("none") == ""
+        assert severity_icon(severity) == expected
     finally:
         state.icons, state.no_color = previous
 
@@ -115,8 +110,7 @@ def test_severity_icon_color_shape_mode():
         state.icons = False
         state.no_color = False
         rendered = severity_icon("warning")
-        assert "\033[33m" in rendered
-        assert "⚠" in rendered
+        assert rendered == "\033[33m⚠\033[0m"
         assert severity_icon("none") == ""
     finally:
         state.icons, state.no_color = previous

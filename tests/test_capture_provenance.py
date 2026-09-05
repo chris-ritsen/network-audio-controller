@@ -5,6 +5,8 @@ import struct
 import zlib
 from pathlib import Path
 
+import pytest
+
 from netaudio.capture import provenance
 from netaudio.capture.provenance import (
     _decode_packet_payload,
@@ -13,7 +15,6 @@ from netaudio.capture.provenance import (
     _query_observed_subscription_statuses,
     _write_seed_samples,
 )
-from netaudio.dante.const import ARC_PROTOCOL_IDS, CAPTURE_PROTOCOL_IDS
 
 
 def test_arc_extended_success_is_not_reported_as_failure():
@@ -133,9 +134,14 @@ def test_seed_samples_write_decompressed_packet_bytes(tmp_path):
     assert (tmp_path / samples_by_type["subscription_status"]["file"]).read_bytes() == payload
 
 
-def test_capture_classifies_all_captured_arc_protocol_variants():
-    assert ARC_PROTOCOL_IDS == (0x2729, 0x27FF, 0x2801, 0x2809, 0x280F)
-    assert set(ARC_PROTOCOL_IDS).issubset(CAPTURE_PROTOCOL_IDS)
+@pytest.mark.parametrize("protocol", [0x2729, 0x27FF, 0x2801, 0x2809, 0x280F])
+def test_capture_classifies_all_captured_arc_protocol_variants(tmp_path, protocol):
+    packet = struct.pack(">HHHHH", protocol, 10, 1, 0x2200, 1)
+    (tmp_path / "response.bin").write_bytes(packet)
+    opcodes, messages, statuses = provenance._scan_observed_from_fixtures(tmp_path)
+    assert opcodes == {(protocol, 0x2200)}
+    assert messages == set()
+    assert statuses == set()
 
 
 def test_opcode_label_proof_accepts_evidence_from_every_arc_variant(monkeypatch):
