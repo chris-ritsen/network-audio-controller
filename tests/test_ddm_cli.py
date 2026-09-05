@@ -117,13 +117,13 @@ def test_generated_password_mutation_is_replaced_by_the_dedicated_login_command(
     login_help = _invoke("login", "--help")
 
     assert help_result.exit_code == 0
-    assert "user-login-with-password" not in help_result.output
+    assert "user-login-with-password" not in click.unstyle(help_result.output)
     assert "login" in help_result.output
     assert login_help.exit_code == 0
-    assert "--password" not in login_help.output
-    assert "--api-key-file" not in login_help.output
+    assert "--password" not in click.unstyle(login_help.output)
+    assert "--api-key-file" not in click.unstyle(login_help.output)
     assert "--server-profile" in click.unstyle(login_help.output)
-    assert "--credential-file" in login_help.output
+    assert "--credential-file" in click.unstyle(login_help.output)
 
 
 def test_managed_api_operations_exist_only_under_the_api_group():
@@ -524,7 +524,7 @@ def test_bare_graphql_command_displays_help():
 
     assert result.exit_code == 2
     assert "Usage: netaudio ddm api graphql" in click.unstyle(result.output)
-    assert "--variables-file" in result.output
+    assert "--variables-file" in click.unstyle(result.output)
     assert "pass a GraphQL document" not in result.output
 
 
