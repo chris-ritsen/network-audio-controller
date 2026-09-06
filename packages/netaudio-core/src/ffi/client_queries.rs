@@ -1,8 +1,11 @@
 use super::*;
 
 #[no_mangle]
+/// Create an IPv4 control client. A null local_ip uses the OS-selected source;
+/// a non-null local_ip must identify a specific local unicast IPv4 address.
 pub unsafe extern "C" fn netaudio_client_new(
     device_ip: *const c_char,
+    local_ip: *const c_char,
     arc_port: u16,
     timeout_milliseconds: u32,
     attempts: u32,
@@ -22,8 +25,17 @@ pub unsafe extern "C" fn netaudio_client_new(
                 format!("device address {device_ip:?} is not an IP address"),
             )
         })?;
+        let local_ip = if local_ip.is_null() {
+            None
+        } else {
+            let address = unsafe { c_string(local_ip)? };
+            Some(address.parse::<IpAddr>().map_err(|_| {
+                FfiError::new(NetaudioStatus::InvalidAddress, "invalid local IP address")
+            })?)
+        };
         let client = Client::new(
             device_ip,
+            local_ip,
             arc_port,
             Duration::from_millis(timeout_milliseconds as u64),
             attempts,

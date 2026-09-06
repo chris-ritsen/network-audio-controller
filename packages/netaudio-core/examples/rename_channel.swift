@@ -9,7 +9,7 @@ guard arguments.count == 4 else {
 print("netaudio-core ABI \(netaudio_abi_version())")
 
 var client: OpaquePointer? = nil
-var status = netaudio_client_new(arguments[1], 4440, 1000, 3, &client)
+var status = netaudio_client_new(arguments[1], nil, 4440, 1000, 3, &client)
 guard status == NETAUDIO_STATUS_OK else {
     FileHandle.standardError.write(Data("client_new failed: \(status.rawValue)\n".utf8))
     exit(1)
