@@ -19,34 +19,32 @@ pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
         return None;
     }
 
-    let (tx_count, rx_count, levels_offset) = match data.get(METERING_FAMILY_OFFSET).copied()? {
-        0x02 => {
-            if data.get(METERING_V2_SUFFIX_OFFSET).copied()? != 0xFE {
-                return None;
-            }
-            (
+    let (tx_count, rx_count, levels_offset, trailing_length) =
+        match data.get(METERING_FAMILY_OFFSET).copied()? {
+            0x02 => (
                 u16::from(data.get(METERING_V2_TX_COUNT_OFFSET).copied()?),
                 u16::from(data.get(METERING_V2_RX_COUNT_OFFSET).copied()?),
                 METERING_V2_LEVELS_OFFSET,
-            )
-        }
-        0x03 => {
-            if data.len() < METERING_V3_HEADER_SIZE
-                || data.get(METERING_V3_RESERVED_OFFSET).copied()? != 0
-            {
-                return None;
+                1,
+            ),
+            0x03 => {
+                if data.len() < METERING_V3_HEADER_SIZE
+                    || data.get(METERING_V3_RESERVED_OFFSET).copied()? != 0
+                {
+                    return None;
+                }
+                (
+                    read_u16(data, METERING_V3_TX_COUNT_OFFSET)?,
+                    read_u16(data, METERING_V3_RX_COUNT_OFFSET)?,
+                    METERING_V3_LEVELS_OFFSET,
+                    0,
+                )
             }
-            (
-                read_u16(data, METERING_V3_TX_COUNT_OFFSET)?,
-                read_u16(data, METERING_V3_RX_COUNT_OFFSET)?,
-                METERING_V3_LEVELS_OFFSET,
-            )
-        }
-        _ => return None,
-    };
+            _ => return None,
+        };
     let tx_levels_end = levels_offset.checked_add(usize::from(tx_count))?;
     let rx_levels_end = tx_levels_end.checked_add(usize::from(rx_count))?;
-    if rx_levels_end != data.len() {
+    if rx_levels_end.checked_add(trailing_length)? != data.len() {
         return None;
     }
 
@@ -390,6 +388,7 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
                 | OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
                 | OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809
                 | OPCODE_SET_RECEIVER_CHANNEL_NAME_2809
+                | crate::commands::OPCODE_MODERN_ARC_SUBSCRIPTION
         ),
         _ => false,
     };

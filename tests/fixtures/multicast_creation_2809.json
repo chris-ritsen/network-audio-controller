@@ -1,0 +1,77 @@
+{
+  "evidence_class": "observed",
+  "source": {
+    "kind": "packet_capture.sqlite",
+    "sha256": "84d3140b7a89af9a62d76b9da057ce9f308aefbf217ac48645bff88acbe1a2ad",
+    "size_bytes": 4580208640,
+    "capture_tool": "tshark",
+    "interface": "en0",
+    "originating_tool": "Dante Controller; exact historical version unknown",
+    "run": "identify_flow_types, 2026-03-09; marker 11 identifies AES3 creation pairs",
+    "timestamp_timezone": "not recorded in timestamp_iso; strings preserved verbatim",
+    "allowed_evidence": ["Recorded Controller packet exchanges", "Experiment markers identifying those exchanges"],
+    "excluded_evidence": ["Competing application implementation and packet layouts", "Stored protocol decoder labels", "Proprietary application or firmware static inspection"],
+    "transformations": ["Read exact database packet IDs without modifying database", "zlib-decompress payload column", "Retain UDP application payload only; no addressing or credentials embedded", "Encode payload as lowercase hexadecimal"]
+  },
+  "claims": {
+    "observed": ["ARC 0x2809 opcode 0x2601 succeeds for the three captured requests", "Both request options words 0x0001 and 0x0071 occur in successful exchanges", "Captured channel selections are channel 2 and channels 1 plus 2", "Responses identify global flow 2 and media-local flow 2"],
+    "inferred": ["Segment lengths generalize with the channel count", "The zero global identifier in allocation requests delegates global identification to the device"],
+    "unknown": ["Meaning of the differing request options bits", "Support for empty allocations", "Support for additional media-local identifiers", "Cross-device interchangeability of options words", "Acceptance of channel counts beyond the captured cases"]
+  },
+  "exchanges": [
+    {
+      "device": "AVIO AES3",
+      "channels": [1, 2],
+      "request_options_word": 113,
+      "transaction_id": 5600,
+      "request": {
+        "packet_id": 48825,
+        "timestamp_iso": "2026-03-09T20:34:50.809184",
+        "sha256": "1a2222aca5d04dd0d8c320c3d52c8dc2b381ab8e35e4d5003673919d7c91b9d3",
+        "hexadecimal": "2809006a15e02601000000000071000001010014162b0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a15000000000000000100000000000000000000040b0000000000000507000200010002000002000000"
+      },
+      "response": {
+        "packet_id": 48826,
+        "timestamp_iso": "2026-03-09T20:34:50.813180",
+        "sha256": "38e3cf7122963122a34cce987e162f2d4ef2897997397624a899ec37a762fd21",
+        "hexadecimal": "2809006e15e0260100010000000000000101002032006e040000000000000018142700020000000300020000000000020000000000140018000f424000000000000000000000000008130000000000000001000000000000040b0000000000000507000200010002000002000010"
+      }
+    },
+    {
+      "device": "AVIO AES3",
+      "channels": [2],
+      "request_options_word": 113,
+      "transaction_id": 5632,
+      "request": {
+        "packet_id": 49075,
+        "timestamp_iso": "2026-03-09T20:35:00.201508",
+        "sha256": "9bf564f779977f91c3c903701d8a548fcffd4ebf3ccb45430a333499f761acd7",
+        "hexadecimal": "2809006816002601000000000071000001010014162a0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a14000000000000000100000000000000000000040a000000000000040600010002000002000000"
+      },
+      "response": {
+        "packet_id": 49076,
+        "timestamp_iso": "2026-03-09T20:35:00.206294",
+        "sha256": "4c0faba98cd52e6088b2d69151b219ec4ee31430003341516a483ac1d1e5b531",
+        "hexadecimal": "2809006c16002601000100000000000001010020320000000000000000000018142600020000000300020000000000020000000000140018000f424000000000000000000000000008120000000000000001000000000000040a000000000000040600010002000002000010"
+      }
+    },
+    {
+      "device": "AVIO Bluetooth",
+      "channels": [1, 2],
+      "request_options_word": 1,
+      "transaction_id": 5917,
+      "request": {
+        "packet_id": 52302,
+        "timestamp_iso": "2026-03-09T21:44:09.483187",
+        "sha256": "6a1c8c79a48687cf7c73f11b3e047253bbfaab64b061914f8d62f7c1460aa0b5",
+        "hexadecimal": "2809006a171d2601000000000001000001010014162b0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a15000000000000000100000000000000000000040b0000000000000507000200010002000002000000"
+      },
+      "response": {
+        "packet_id": 52303,
+        "timestamp_iso": "2026-03-09T21:44:09.487997",
+        "sha256": "05a7b63c9f7a328dab3c28847b02c5e9d334c80bbf3227bb32f9351fbf32166c",
+        "hexadecimal": "2809006e171d2601000100000000000001010020320000000000000000000018142700020000000300020000000000020000000000140018000f424000000000000000000000000008130000000000000001000000000000040b0000000000000507000200010002000002000010"
+      }
+    }
+  ]
+}

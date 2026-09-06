@@ -2,6 +2,17 @@ use super::flows::flow_query_response;
 use super::*;
 
 #[test]
+fn metering_v2_does_not_consume_trailer_or_require_a_muted_first_channel() {
+    let mut data = metering_frame(&[0x21, 0x42], &[0x63, 0x84]);
+    *data.last_mut().unwrap() = 0;
+    let parsed = parse_metering_frame(&data).unwrap();
+    assert_eq!(parsed.tx_levels, [0x21, 0x42]);
+    assert_eq!(parsed.rx_levels, [0x63, 0x84]);
+    data[27] = 0;
+    assert_eq!(parse_metering_frame(&data).unwrap().tx_levels[0], 0);
+}
+
+#[test]
 fn metering_frame_parses_embedded_counts_and_level_order() {
     let data = metering_frame(&[0xFE, 0x7D, 0xA0], &[0x88, 0x00]);
     assert_eq!(
@@ -45,7 +56,7 @@ fn metering_v3_frame_parses_sixteen_bit_counts_and_level_order() {
 fn metering_frame_rejects_invalid_envelope_and_count_mismatch() {
     let original = metering_frame(&[0xFE, 0x7D], &[0x88]);
 
-    for (offset, value) in [(0, 0x12), (6, 0x01), (16, b'X'), (24, 0x07), (27, 0xFF)] {
+    for (offset, value) in [(0, 0x12), (6, 0x01), (16, b'X'), (24, 0x07)] {
         let mut data = original.clone();
         data[offset] = value;
         assert_eq!(parse_metering_frame(&data), None);

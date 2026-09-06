@@ -48,8 +48,8 @@ def make_manager():
 
 def test_metering_levels_use_embedded_channel_counts():
     assert parse_metering_levels(METERING_FRAME) == {
-        "tx": {1: 0xFE, 2: 0x7D, 3: 0xA0},
-        "rx": {1: 0x88, 2: 0x00},
+        "tx": {1: 0xFE, 2: 0xFE, 3: 0x7D},
+        "rx": {1: 0xA0, 2: 0x88},
     }
 
 
@@ -82,8 +82,8 @@ def test_metering_manager_uses_frame_counts_without_device_inventory():
 
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.34", 8752))
 
-    assert manager._latest_levels["a32"]["tx"] == {1: 0xFE, 2: 0x7D, 3: 0xA0}
-    assert manager._latest_levels["a32"]["rx"] == {1: 0x88, 2: 0x00}
+    assert manager._latest_levels["a32"]["tx"] == {1: 0xFE, 2: 0xFE, 3: 0x7D}
+    assert manager._latest_levels["a32"]["rx"] == {1: 0xA0, 2: 0x88}
     device.update_last_seen.assert_called_once_with()
 
 
@@ -164,7 +164,7 @@ def test_fresh_detailed_sample_takes_precedence_over_newer_passive_sample():
 
     cached = manager.get_cached_levels("avio-bt-1")
     assert cached["metering_source"] == "detailed"
-    assert cached["tx"] == {1: 0xFE, 2: 0x7D, 3: 0xA0}
+    assert cached["tx"] == {1: 0xFE, 2: 0xFE, 3: 0x7D}
     assert manager._signal_presence_levels["avio-bt-1"]["rx"] == {1: 0x6D}
 
 

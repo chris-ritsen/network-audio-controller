@@ -17,6 +17,8 @@ fn all_external_observations() {
             assert_eq!(entry.code, code);
             assert_eq!(entry.status, group["api"]["status"].as_str(), "{code:#06x}");
             if let Some(status) = entry.status {
+                assert_eq!(entry.label, status);
+                assert_eq!(entry.detail, group["api"]["statusMessage"].as_str());
                 assert_eq!(entry.observed_summary, group["api"]["summary"].as_str());
                 assert_eq!(state_for_identifier(status), entry.state);
             } else {
@@ -31,6 +33,8 @@ fn all_external_observations() {
             Some(record["wire"]["rx_status_code"].as_u64().unwrap() as u16),
         );
         assert_eq!(entry.status, record["api"]["status"].as_str());
+        assert_eq!(Some(entry.label), record["api"]["status"].as_str());
+        assert_eq!(entry.detail, record["api"]["statusMessage"].as_str());
         assert_eq!(entry.observed_summary, record["api"]["summary"].as_str());
     }
 }

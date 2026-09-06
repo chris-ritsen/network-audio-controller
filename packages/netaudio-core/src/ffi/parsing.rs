@@ -121,6 +121,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "transmitter_flow_status_page" => {
             serialize_optional(kind, responses::parse_transmitter_flow_status_page(bytes))
         }
+        "multicast_flow_creation_2809" => {
+            serialize_optional(kind, responses::parse_multicast_flow_creation_2809(bytes))
+        }
         "tx_flow_page" => serialize_optional(kind, responses::parse_tx_flow_page(bytes)),
         "tx_flows" => serialize_optional(kind, responses::parse_tx_flows(bytes)),
         "unmapped_0022_status" => {

@@ -1,0 +1,125 @@
+{
+  "evidence_class": "observed",
+  "source": {
+    "run": "netaudio-aes3-allocation-20260906.G5wpTA",
+    "originating_tool": "Dante Controller 4.16.1.5, operated by the user",
+    "device": "AVIO AES3",
+    "firmware_version": "4.3.0",
+    "software_version": "4.1.0",
+    "product_version": "1.2.0.3",
+    "capture_tool": "dumpcap",
+    "interface": "en0",
+    "scope": "One authorized AES3 target; UDP control ports 4440, 4455, 5353, 8700, 8702; each capture bounded to 90 seconds; no media",
+    "allowed_evidence": [
+      "Controller visible-interface operations",
+      "Captured request/acknowledgment exchanges",
+      "Fresh flow readback and baseline restoration"
+    ],
+    "excluded_evidence": [
+      "Competing application implementation or layouts",
+      "Proprietary executable or firmware static inspection"
+    ],
+    "transformations": [
+      "Verify complete capture SHA-256 against run inventory",
+      "Select opcode 0x2601 request and acknowledgment by exact frame",
+      "Extract UDP payload with tshark",
+      "Omit transport addresses and all unrelated packets",
+      "Encode application payload as hexadecimal and hash decoded bytes"
+    ]
+  },
+  "claims": {
+    "observed": [
+      "Controller successfully created channel 1, channel 2 and both channels",
+      "The same AES3 used options 113 for channel 2 and zero for both channels and repeated channel 1",
+      "Each allocation read back as global flow 2, media-local flow 2 and the selected channels; all were removed afterward"
+    ],
+    "inferred": [
+      "Zero is usable as the ordinary allocation request default within the captured revision; acceptance beyond these cases is not established"
+    ],
+    "unknown": [
+      "Meaning of options bits",
+      "Empty allocation support",
+      "Other media-local identifiers",
+      "Acceptance on other products and firmware revisions",
+      "NetAudio allocation behavior on the live device"
+    ]
+  },
+  "exchanges": [
+    {
+      "device": "AVIO AES3",
+      "capture": {
+        "name": "controller-channel-2.pcapng",
+        "sha256": "f04cdfd12bd598633155f29e1105bb64891c0bd1c54f081030eb668334368340",
+        "size_bytes": 31744
+      },
+      "channels": [
+        2
+      ],
+      "request_options_word": 113,
+      "transaction_id": 15598,
+      "request": {
+        "frame": 19,
+        "timestamp_epoch": "1788695429.874178000",
+        "sha256": "c72d486e7961434c7bc604acd07c48255bf3bf217561e5244e6070427418b60d",
+        "hexadecimal": "280900683cee2601000000000071000001010014162a0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a14000000000000000100000000000000000000040a000000000000040600010002000002000000"
+      },
+      "response": {
+        "frame": 20,
+        "timestamp_epoch": "1788695429.880634000",
+        "sha256": "ee6ca5afb5f717a9c64a4ad4673ed810f8c170d57fe392c25ed13230fffa0227",
+        "hexadecimal": "2809006c3cee2601000100000000000001010020320000000000000000000018142600020000000300020000000000020000000000140018000f424000000000000000000000000008120000000000000001000000000000040a000000000000040600010002000002000010"
+      }
+    },
+    {
+      "device": "AVIO AES3",
+      "capture": {
+        "name": "controller-both-channels.pcapng",
+        "sha256": "5a9b641dfbb7d85622f4b1926fa95447aaa5fadfa3fd78b47255c8e94699d893",
+        "size_bytes": 31732
+      },
+      "channels": [
+        1,
+        2
+      ],
+      "request_options_word": 0,
+      "transaction_id": 15602,
+      "request": {
+        "frame": 35,
+        "timestamp_epoch": "1788695514.992404000",
+        "sha256": "6ce75807cb0f2228501eceeb42aeecfca879bc0ec21489e917af5b9f99d611d9",
+        "hexadecimal": "2809006a3cf22601000000000000000001010014162b0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a15000000000000000100000000000000000000040b0000000000000507000200010002000002000000"
+      },
+      "response": {
+        "frame": 36,
+        "timestamp_epoch": "1788695514.996815000",
+        "sha256": "de9985f0b5a8b21df1c347b029eb878c1a335d3044603e27286d1ce15517af58",
+        "hexadecimal": "2809006e3cf22601000100000000000001010020320000000000000000000018142700020000000300020000000000020000000000140018000f424000000000000000000000000008130000000000000001000000000000040b0000000000000507000200010002000002000010"
+      }
+    },
+    {
+      "device": "AVIO AES3",
+      "capture": {
+        "name": "controller-channel-1-repeat.pcapng",
+        "sha256": "5645773df98dec19f4cd309d1574e2bd1227462e2caf5899b68a878f652773f4",
+        "size_bytes": 28600
+      },
+      "channels": [
+        1
+      ],
+      "request_options_word": 0,
+      "transaction_id": 15632,
+      "request": {
+        "frame": 19,
+        "timestamp_epoch": "1788695696.078117000",
+        "sha256": "8cabb9b05b09cab4f845e450d8a29f0a18c6f9be8198e0970ea0ecb615fb0a30",
+        "hexadecimal": "280900683d102601000000000000000001010014162a0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a14000000000000000100000000000000000000040a000000000000040600010001000002000000"
+      },
+      "response": {
+        "frame": 20,
+        "timestamp_epoch": "1788695696.082138000",
+        "sha256": "dae15c93bc02f4d28817247866faa1506cbb0850fc4eee144e89da6303714345",
+        "hexadecimal": "2809006c3d102601000100000000000001010020320000000000000000000018142600020000000300020000000000020000000000140018000f424000000000000000000000000008120000000000000001000000000000040a000000000000040600010001000002000010"
+      }
+    }
+  ]
+}
