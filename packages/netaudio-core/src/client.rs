@@ -305,6 +305,7 @@ impl Client {
     ) -> Result<crate::lock::LockResult, crate::lock::LockError> {
         crate::lock::lock_operation(
             self.device_address.ip(),
+            self.socket.local_addr()?.ip(),
             pin,
             key,
             crate::lock::LockOperation::Lock,
@@ -318,6 +319,7 @@ impl Client {
     ) -> Result<crate::lock::LockResult, crate::lock::LockError> {
         crate::lock::lock_operation(
             self.device_address.ip(),
+            self.socket.local_addr()?.ip(),
             pin,
             key,
             crate::lock::LockOperation::Unlock,
