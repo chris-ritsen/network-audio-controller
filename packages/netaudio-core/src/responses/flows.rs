@@ -1,5 +1,66 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MulticastFlowCreation2809 {
+    pub global_flow_id: u16,
+    pub media_type_code: u16,
+    pub media_local_flow_id: u16,
+    pub channels: Vec<u16>,
+}
+
+/// Allocation acknowledgments can contain an unspecified sample rate. They are
+/// not inventory pages; callers must obtain fresh inventory before claiming that
+/// an allocated flow is configured and transmitting.
+pub fn parse_multicast_flow_creation_2809(response: &[u8]) -> Option<MulticastFlowCreation2809> {
+    validate_response_envelope(
+        response,
+        &[(PROTOCOL_ARC_2809, OPCODE_CREATE_TX_FLOW_2809)],
+        &[RESULT_CODE_SUCCESS],
+    )?;
+    if read_u16(response, 16)? != 0x0101 || read_u16(response, 18)? != 32 {
+        return None;
+    }
+    let record_offset = 32;
+    let geometry = transmitter_flow_status_record_geometry(response, record_offset)?;
+    // All observed allocations have five segments followed by one terminal word.
+    if geometry.segment_offsets.len() != 5 || geometry.record_end.checked_add(2)? != response.len()
+    {
+        return None;
+    }
+    let first_segment_end = *geometry.segment_offsets.get(1)?;
+    let field = |offset| {
+        transmitter_flow_status_segment_u16(response, record_offset, first_segment_end, offset)
+    };
+    let global_flow_id = field(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_NUMBER)?;
+    let media_type_code = field(TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_TYPE)?;
+    let media_local_flow_id = field(TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID)?;
+    if !(1..=32).contains(&global_flow_id)
+        || media_type_code != MEDIA_TYPE_AUDIO
+        || media_local_flow_id != 2
+        || field(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE)? != FLOW_TYPE_MULTICAST
+    {
+        return None;
+    }
+    let (_, count, channels) =
+        parse_audio_channel_slot_segment(response, &geometry, media_type_code)?;
+    if count? == 0 || channels.contains(&0) {
+        return None;
+    }
+    let mut unique_channels = HashSet::with_capacity(channels.len());
+    if !channels
+        .iter()
+        .all(|channel| unique_channels.insert(*channel))
+    {
+        return None;
+    }
+    Some(MulticastFlowCreation2809 {
+        global_flow_id,
+        media_type_code,
+        media_local_flow_id,
+        channels,
+    })
+}
+
 pub fn parse_tx_flow_page(response: &[u8]) -> Option<TxFlowPage> {
     let envelope = validate_response_envelope(
         response,

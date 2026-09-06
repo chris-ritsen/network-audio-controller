@@ -1,0 +1,54 @@
+{
+  "evidence_class": "observed",
+  "source": {
+    "kind": "packet_capture.sqlite",
+    "sha256": "84d3140b7a89af9a62d76b9da057ce9f308aefbf217ac48645bff88acbe1a2ad",
+    "run": "dc_preset_save_load, 2026-03-30",
+    "originating_tool": "Dante Controller, exact historical version unknown",
+    "capture_tool": "tshark",
+    "interface": "en0",
+    "timestamp_timezone": "not recorded in timestamp_iso; strings preserved verbatim",
+    "allowed_evidence": ["Controller network exchanges", "Preset load action markers"],
+    "excluded_evidence": ["Competing application packet layouts or implementation", "Stored decoder interpretations of operation semantics"],
+    "transformations": ["Select exact packet IDs from immutable database", "zlib-decompress payload", "Retain UDP payload only and encode as lowercase hexadecimal"]
+  },
+  "claims": {
+    "observed": ["Successful ARC 2.8.9 audio subscription pages with one and two records", "Controller repeats strings across records instead of sharing pointers", "Zero name pointers occur during the preset subscription-clear phase"],
+    "inferred": ["The record geometry generalizes to other valid audio channel and name selections"],
+    "unknown": ["Same-device shorthand semantics on ARC 2.8.9", "Video media support on ARC 2.8.9", "Whether this operation alone suffices without accompanying preset reconciliation"]
+  },
+  "exchanges": [
+    {
+      "device": "AVIO AES3",
+      "page_capacity": 2,
+      "transaction_id": 18777,
+      "records": [{"action": "clear", "rx_channel": 1}, {"action": "clear", "rx_channel": 2}],
+      "request": {"packet_id": 4495387, "timestamp_iso": "2026-03-30T14:46:10.017842", "sha256": "735a8216141aeb026ce3df4db5cda833ec86e53bf467801d237d302c5a4169e4", "hexadecimal": "280900244959341000000000000000000800020200010003000000000002000300000000"},
+      "response": {"packet_id": 4495462, "timestamp_iso": "2026-03-30T14:46:10.023906", "sha256": "db11ed179c7bf0152932fa1ea1984f15d9172dd785ed4bcebf432fef6a212b14", "hexadecimal": "28090016495934100001000000000000020000000000"}
+    },
+    {
+      "device": "AVIO Bluetooth",
+      "page_capacity": 1,
+      "transaction_id": 18778,
+      "records": [{"action": "clear", "rx_channel": 1}],
+      "request": {"packet_id": 4495389, "timestamp_iso": "2026-03-30T14:46:10.018194", "sha256": "66436a14e991b407b312cc31ca447962025adff7b1b5d74d5ad536a65a185150", "hexadecimal": "2809001c495a34100000000000000000080001010001000300000000"},
+      "response": {"packet_id": 4495464, "timestamp_iso": "2026-03-30T14:46:10.025794", "sha256": "f47f57dbbbee681714a917a08604a3f0d00d8ee9e054469c6590e1aff3155a19", "hexadecimal": "28090014495a3410000100000000000001000000"}
+    },
+    {
+      "device": "AVIO Bluetooth",
+      "page_capacity": 1,
+      "transaction_id": 18982,
+      "records": [{"action": "set", "rx_channel": 1, "tx_channel": "mic-mix:high", "tx_device": "lx-dante"}],
+      "request": {"packet_id": 4500864, "timestamp_iso": "2026-03-30T14:47:01.488610", "sha256": "7532733726df42225cec51b26b2eff0787c80d7a363bbd643372766d96f4fe8d", "hexadecimal": "280900324a26341000000000000000000800010100010003001c00296d69632d6d69783a68696768006c782d64616e746500"},
+      "response": {"packet_id": 4500877, "timestamp_iso": "2026-03-30T14:47:01.492841", "sha256": "fe4202de214448bcd01740f2c6b37d77067d4db8fda71ec12bb539fab4674029", "hexadecimal": "280900144a263410000100000000000001000000"}
+    },
+    {
+      "device": "AVIO USB",
+      "page_capacity": 2,
+      "transaction_id": 18983,
+      "records": [{"action": "set", "rx_channel": 1, "tx_channel": "mic-mix:high", "tx_device": "lx-dante"}, {"action": "set", "rx_channel": 2, "tx_channel": "mic-mix:high", "tx_device": "lx-dante"}],
+      "request": {"packet_id": 4500867, "timestamp_iso": "2026-03-30T14:47:01.489031", "sha256": "ec80973a6d67fd7426c6c2657ccdf89d1dd70b6c61a1020cd69b56846ad5db41", "hexadecimal": "280900504a273410000000000000000008000202000100030024003100020003003a00476d69632d6d69783a68696768006c782d64616e7465006d69632d6d69783a68696768006c782d64616e746500"},
+      "response": {"packet_id": 4500878, "timestamp_iso": "2026-03-30T14:47:01.492842", "sha256": "b9e17d0cda1ccf3df74bd977fadd12d112824c04ac8437e11ce04857427f8e6d", "hexadecimal": "280900164a2734100001000000000000020000000000"}
+    }
+  ]
+}

@@ -32,10 +32,9 @@ fn metering_frame(tx_levels: &[u8], rx_levels: &[u8]) -> Vec<u8> {
     data[METERING_FAMILY_OFFSET] = 0x02;
     data[METERING_V2_TX_COUNT_OFFSET] = u8::try_from(tx_levels.len()).unwrap();
     data[METERING_V2_RX_COUNT_OFFSET] = u8::try_from(rx_levels.len()).unwrap();
-    data[METERING_V2_SUFFIX_OFFSET] = 0xFE;
     let tx_levels_end = METERING_V2_LEVELS_OFFSET + tx_levels.len();
     data[METERING_V2_LEVELS_OFFSET..tx_levels_end].copy_from_slice(tx_levels);
-    data[tx_levels_end..].copy_from_slice(rx_levels);
+    data[tx_levels_end..tx_levels_end + rx_levels.len()].copy_from_slice(rx_levels);
     data
 }
 
