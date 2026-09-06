@@ -13,7 +13,12 @@ pub fn local_ipv4() -> Option<Ipv4Addr> {
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub fn discover_host_mac() -> Option<[u8; 6]> {
-    let local_octets = local_ipv4()?.octets();
+    host_mac_for_ipv4(local_ipv4()?)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+pub fn host_mac_for_ipv4(address: Ipv4Addr) -> Option<[u8; 6]> {
+    let local_octets = address.octets();
     let interfaces = InterfaceAddresses::collect()?;
     let name = interfaces
         .entries()
@@ -122,5 +127,10 @@ fn link_mac_address(entry: &libc::ifaddrs) -> Option<[u8; 6]> {
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
 pub fn discover_host_mac() -> Option<[u8; 6]> {
+    None
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+pub fn host_mac_for_ipv4(_address: Ipv4Addr) -> Option<[u8; 6]> {
     None
 }

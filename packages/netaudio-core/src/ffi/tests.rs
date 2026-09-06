@@ -29,6 +29,7 @@ fn lock_token_call(nonce: &[u8], key: &[u8]) -> (NetaudioStatus, Vec<u8>) {
 fn client_lock_call(key: &[u8], locking: bool) -> NetaudioStatus {
     let inner = Client::new(
         "127.0.0.1".parse().unwrap(),
+        None,
         4440,
         Duration::from_millis(1),
         1,
@@ -271,8 +272,16 @@ fn failed_client_creation_clears_output_pointer() {
     let invalid_address = CString::new("invalid address").unwrap();
     let mut client_pointer = std::ptr::NonNull::<NetaudioClient>::dangling().as_ptr();
 
-    let status =
-        unsafe { netaudio_client_new(invalid_address.as_ptr(), 4440, 1, 1, &mut client_pointer) };
+    let status = unsafe {
+        netaudio_client_new(
+            invalid_address.as_ptr(),
+            ptr::null(),
+            4440,
+            1,
+            1,
+            &mut client_pointer,
+        )
+    };
 
     assert_eq!(status, NetaudioStatus::InvalidAddress);
     assert!(client_pointer.is_null());
@@ -282,7 +291,8 @@ fn failed_client_creation_clears_output_pointer() {
 fn null_client_address_clears_output_pointer() {
     let mut client_pointer = std::ptr::NonNull::<NetaudioClient>::dangling().as_ptr();
 
-    let status = unsafe { netaudio_client_new(ptr::null(), 4440, 1, 1, &mut client_pointer) };
+    let status =
+        unsafe { netaudio_client_new(ptr::null(), ptr::null(), 4440, 1, 1, &mut client_pointer) };
 
     assert_eq!(status, NetaudioStatus::NullPointer);
     assert!(client_pointer.is_null());
@@ -293,7 +303,16 @@ fn ipv6_client_creation_is_rejected_and_clears_output_pointer() {
     let address = CString::new("::1").unwrap();
     let mut client_pointer = std::ptr::NonNull::<NetaudioClient>::dangling().as_ptr();
 
-    let status = unsafe { netaudio_client_new(address.as_ptr(), 4440, 1, 1, &mut client_pointer) };
+    let status = unsafe {
+        netaudio_client_new(
+            address.as_ptr(),
+            ptr::null(),
+            4440,
+            1,
+            1,
+            &mut client_pointer,
+        )
+    };
 
     assert_eq!(status, NetaudioStatus::InvalidAddress);
     assert!(client_pointer.is_null());
@@ -360,6 +379,7 @@ fn ffi_errors_clear_buffer_and_scalar_outputs() {
 fn same_client_handle_serializes_concurrent_calls() {
     let client = Client::new(
         "127.0.0.1".parse().unwrap(),
+        None,
         4440,
         Duration::from_millis(1),
         1,
@@ -391,6 +411,34 @@ fn same_client_handle_serializes_concurrent_calls() {
     }
     unsafe {
         netaudio_client_free(client_pointer);
+    }
+}
+
+#[test]
+fn client_constructor_validates_the_local_address_and_clears_output_on_error() {
+    let device = CString::new("127.0.0.1").unwrap();
+    for (address, expected) in [
+        ("127.0.0.1", NetaudioStatus::Ok),
+        ("", NetaudioStatus::InvalidAddress),
+        ("not-an-ip", NetaudioStatus::InvalidAddress),
+        ("::1", NetaudioStatus::InvalidAddress),
+        ("0.0.0.0", NetaudioStatus::InvalidAddress),
+        ("224.0.0.251", NetaudioStatus::InvalidAddress),
+        ("255.255.255.255", NetaudioStatus::InvalidAddress),
+        ("192.0.2.254", NetaudioStatus::IoError),
+    ] {
+        let local = CString::new(address).unwrap();
+        let mut client = std::ptr::dangling_mut();
+        let status = unsafe {
+            netaudio_client_new(device.as_ptr(), local.as_ptr(), 4440, 1, 1, &mut client)
+        };
+        assert_eq!(status, expected, "{address}");
+        if expected == NetaudioStatus::Ok {
+            assert!(!client.is_null());
+            unsafe { netaudio_client_free(client) };
+        } else {
+            assert!(client.is_null());
+        }
     }
 }
 

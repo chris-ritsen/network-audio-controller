@@ -86,6 +86,7 @@ def core():
     library.netaudio_build_command.restype = ctypes.c_int
     library.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
+        ctypes.c_char_p,
         ctypes.c_uint16,
         ctypes.c_uint32,
         ctypes.c_uint32,
@@ -234,7 +235,7 @@ def client_factory(core):
 
     def _create(port, timeout_milliseconds=500, attempts=1):
         handle = ctypes.c_void_p()
-        status = core.netaudio_client_new(b"127.0.0.1", port, timeout_milliseconds, attempts, ctypes.byref(handle))
+        status = core.netaudio_client_new(b"127.0.0.1", None, port, timeout_milliseconds, attempts, ctypes.byref(handle))
         assert status == NETAUDIO_OK
         created.append(handle)
         return handle
@@ -357,7 +358,7 @@ class TestClientSetDeviceName:
 
     def test_invalid_address_rejected(self, core):
         handle = ctypes.c_void_p()
-        status = core.netaudio_client_new(b"not-an-ip", 4440, 100, 1, ctypes.byref(handle))
+        status = core.netaudio_client_new(b"not-an-ip", None, 4440, 100, 1, ctypes.byref(handle))
         assert status == NETAUDIO_INVALID_ADDRESS
 
     def test_null_client_rejected(self, core):
