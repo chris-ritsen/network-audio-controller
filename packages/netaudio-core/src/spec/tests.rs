@@ -2,6 +2,33 @@ use super::*;
 
 const TEST_HOST_MAC: [u8; 6] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55];
 
+#[test]
+fn audio_subscription_2809_pages_match_controller_exchanges() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/subscription_2809.json"
+    ))
+    .unwrap();
+    for exchange in fixture["exchanges"].as_array().unwrap() {
+        let specification = serde_json::json!({
+            "command": "modern_arc_subscription_page", "protocol_id": 0x2809,
+            "page_capacity": exchange["page_capacity"], "media_type_code": 3,
+            "records": exchange["records"], "transaction_id": exchange["transaction_id"],
+        });
+        assert_eq!(
+            build_command_from_json(&specification.to_string()).unwrap(),
+            crate::test_support::decode_hexadecimal(
+                exchange["request"]["hexadecimal"].as_str().unwrap()
+            ),
+        );
+        assert_eq!(
+            crate::responses::parse_result_code(&crate::test_support::decode_hexadecimal(
+                exchange["response"]["hexadecimal"].as_str().unwrap(),
+            )),
+            Some(1),
+        );
+    }
+}
+
 fn routed_with_assigned_id(json: &str, host_mac: [u8; 6], assigned_id: u16) -> Routed {
     build_routed_command(json, Some(host_mac), || assigned_id).unwrap()
 }
