@@ -146,6 +146,7 @@ pub fn parse_lock_result(auth_response: &[u8]) -> Option<LockResult> {
 
 pub fn lock_operation(
     device_ip: IpAddr,
+    local_ip: IpAddr,
     pin: &str,
     key: &[u8],
     operation: LockOperation,
@@ -155,8 +156,7 @@ pub fn lock_operation(
         return Err(LockError::InvalidKey);
     }
 
-    let socket = UdpSocket::bind(("0.0.0.0", 0))?;
-    socket.set_read_timeout(Some(Duration::from_secs(LOCK_TIMEOUT_SECONDS)))?;
+    let socket = lock_socket(local_ip)?;
     let address = SocketAddr::new(device_ip, DEVICE_LOCK_PORT);
     let sequence = 1u16;
 
@@ -192,6 +192,12 @@ pub fn lock_operation(
     Err(LockError::Timeout)
 }
 
+fn lock_socket(local_ip: IpAddr) -> Result<UdpSocket, LockError> {
+    let socket = UdpSocket::bind((local_ip, 0))?;
+    socket.set_read_timeout(Some(Duration::from_secs(LOCK_TIMEOUT_SECONDS)))?;
+    Ok(socket)
+}
+
 fn is_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
@@ -202,6 +208,24 @@ fn is_timeout(error: &io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_socket_uses_the_parent_clients_source_address() {
+        for source in ["127.0.0.1", "0.0.0.0"] {
+            let address: IpAddr = source.parse().unwrap();
+            let socket = lock_socket(address).unwrap();
+            assert_eq!(socket.local_addr().unwrap().ip(), address);
+            assert_ne!(socket.local_addr().unwrap().port(), 0);
+        }
+    }
+
+    #[test]
+    fn lock_socket_does_not_fall_back_from_an_unavailable_source() {
+        assert!(matches!(
+            lock_socket("192.0.2.254".parse().unwrap()),
+            Err(LockError::Io(_))
+        ));
+    }
 
     #[test]
     fn challenge_request_layout() {
