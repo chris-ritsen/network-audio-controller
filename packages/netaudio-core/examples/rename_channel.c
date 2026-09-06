@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     printf("netaudio-core ABI %u\n", netaudio_abi_version());
 
     NetaudioClient *client = NULL;
-    NetaudioStatus status = netaudio_client_new(argv[1], 4440, 1000, 3, &client);
+    NetaudioStatus status = netaudio_client_new(argv[1], NULL, 4440, 1000, 3, &client);
     if (status != NETAUDIO_STATUS_OK) {
         fprintf(stderr, "client_new failed: %d\n", status);
         return 1;

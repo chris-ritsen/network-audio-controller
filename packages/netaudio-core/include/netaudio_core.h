@@ -105,7 +105,12 @@ NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
 
 void netaudio_client_free(NetaudioClient *client);
 
+/**
+ * Create an IPv4 control client. A null local_ip uses the OS-selected source;
+ * a non-null local_ip must identify a specific local unicast IPv4 address.
+ */
 NetaudioStatus netaudio_client_new(const char *device_ip,
+                                   const char *local_ip,
                                    uint16_t arc_port,
                                    uint32_t timeout_milliseconds,
                                    uint32_t attempts,

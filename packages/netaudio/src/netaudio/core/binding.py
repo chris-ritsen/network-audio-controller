@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import ipaddress
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 5
+ABI_VERSION = 6
 
 LOCK_NONCE_LENGTH = 24
 LOCK_KEY_LENGTH = 32
@@ -235,6 +236,7 @@ def _configure(lib):
     lib.netaudio_dapi_build_service_acknowledgement.restype = ctypes.c_int
 
     lib.netaudio_client_new.argtypes = [
+        ctypes.c_char_p,
         ctypes.c_char_p,
         ctypes.c_uint16,
         ctypes.c_uint32,
@@ -525,10 +527,22 @@ def _as_buffer(data: bytes):
 
 
 class CoreClient:
-    def __init__(self, device_ip: str, arc_port: int = 4440, timeout_ms: int = 1000, attempts: int = 3):
+    def __init__(
+        self,
+        device_ip: str,
+        arc_port: int = 4440,
+        timeout_ms: int = 1000,
+        attempts: int = 3,
+        *,
+        local_ip: str | None = None,
+    ):
         self._native_lock = threading.RLock()
         self._handle = ctypes.c_void_p()
         self._lib = None
+        if local_ip is not None:
+            if not isinstance(local_ip, str):
+                raise ValueError("local_ip must be an IPv4 address string")
+            local_ip = str(ipaddress.IPv4Address(local_ip))
         library = require()
         self._lib = library
         self._device_ip = device_ip
@@ -536,7 +550,12 @@ class CoreClient:
         self.observer = None
         with self._native_lock:
             status = library.netaudio_client_new(
-                device_ip.encode("ascii"), arc_port, timeout_ms, attempts, ctypes.byref(self._handle)
+                device_ip.encode("ascii"),
+                local_ip.encode("ascii") if local_ip is not None else None,
+                arc_port,
+                timeout_ms,
+                attempts,
+                ctypes.byref(self._handle),
             )
         if status != STATUS_OK:
             raise NetaudioCoreError(status, f"client_new {device_ip}")

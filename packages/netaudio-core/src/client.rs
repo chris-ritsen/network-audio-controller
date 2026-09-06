@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::io;
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -64,7 +64,9 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClientError::InvalidAddress => formatter.write_str("device address must be IPv4"),
+            ClientError::InvalidAddress => {
+                formatter.write_str("invalid device or local IPv4 address")
+            }
             ClientError::InvalidLength => write!(
                 formatter,
                 "packet must be at least {MINIMUM_PACKET_BYTES} bytes so it carries a message id"
@@ -150,6 +152,7 @@ pub struct Client {
 impl Client {
     pub fn new(
         device_ip: IpAddr,
+        local_ip: Option<IpAddr>,
         arc_port: u16,
         timeout: Duration,
         attempts: u32,
@@ -157,14 +160,28 @@ impl Client {
         if !device_ip.is_ipv4() {
             return Err(ClientError::InvalidAddress);
         }
-        let socket = UdpSocket::bind(("0.0.0.0", 0))?;
+        let local_ip = match local_ip {
+            None => None,
+            Some(IpAddr::V4(address))
+                if !address.is_unspecified()
+                    && !address.is_multicast()
+                    && !address.is_broadcast() =>
+            {
+                Some(address)
+            }
+            _ => return Err(ClientError::InvalidAddress),
+        };
+        let socket = UdpSocket::bind((local_ip.unwrap_or(Ipv4Addr::UNSPECIFIED), 0))?;
         Ok(Client {
             socket,
             device_address: SocketAddr::new(device_ip, arc_port),
             message_counter: 0,
             timeout,
             attempts: attempts.max(1),
-            host_mac: crate::netif::discover_host_mac(),
+            host_mac: match local_ip {
+                Some(address) => crate::netif::host_mac_for_ipv4(address),
+                None => crate::netif::discover_host_mac(),
+            },
             wire_captures: WireCaptureBuffer::default(),
         })
     }
@@ -575,6 +592,7 @@ mod tests {
     fn test_client(port: u16) -> Client {
         Client::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
+            None,
             port,
             Duration::from_millis(200),
             1,
@@ -623,8 +641,67 @@ mod tests {
     #[test]
     fn construction_rejects_ipv6_addresses() {
         assert!(matches!(
-            Client::new("::1".parse().unwrap(), 4440, Duration::from_millis(1), 1,),
+            Client::new(
+                "::1".parse().unwrap(),
+                None,
+                4440,
+                Duration::from_millis(1),
+                1,
+            ),
             Err(ClientError::InvalidAddress)
+        ));
+    }
+
+    #[test]
+    fn construction_binds_the_explicit_source_address() {
+        let client = Client::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            4440,
+            Duration::from_millis(1),
+            1,
+        )
+        .unwrap();
+        let bound = client.socket.local_addr().unwrap();
+        assert_eq!(bound.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_ne!(bound.port(), 0);
+        assert_eq!(
+            client.host_mac,
+            crate::netif::host_mac_for_ipv4(Ipv4Addr::LOCALHOST)
+        );
+        assert_eq!(
+            test_client(4440).socket.local_addr().unwrap().ip(),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        );
+    }
+
+    #[test]
+    fn construction_rejects_invalid_explicit_sources() {
+        for source in ["::1", "0.0.0.0", "224.0.0.251", "255.255.255.255"] {
+            assert!(matches!(
+                Client::new(
+                    IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    Some(source.parse().unwrap()),
+                    4440,
+                    Duration::from_millis(1),
+                    1,
+                ),
+                Err(ClientError::InvalidAddress)
+            ));
+        }
+    }
+
+    #[test]
+    fn unavailable_source_does_not_fall_back_to_an_unspecified_socket() {
+        assert!(matches!(
+            Client::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                Some("192.0.2.254".parse().unwrap()),
+                4440,
+                Duration::from_millis(1),
+                1,
+            ),
+            Err(ClientError::Io(_))
         ));
     }
 
@@ -660,6 +737,7 @@ mod tests {
     fn execute_fire_command_does_not_wait_for_response() {
         let mut client = Client::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
+            None,
             9,
             Duration::from_millis(5000),
             1,
@@ -774,6 +852,7 @@ mod tests {
         let device = FakeDevice::new();
         let mut client = Client::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
+            None,
             device.port(),
             Duration::from_millis(100),
             3,

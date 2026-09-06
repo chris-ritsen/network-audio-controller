@@ -13,6 +13,7 @@ def load():
     lib = ctypes.CDLL(str(LIBRARY))
     lib.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
+        ctypes.c_char_p,
         ctypes.c_uint16,
         ctypes.c_uint32,
         ctypes.c_uint32,
@@ -67,7 +68,7 @@ def main():
         print("host_mac: discovery failed")
 
     handle = ctypes.c_void_p()
-    assert lib.netaudio_client_new(device_ip.encode(), 4440, 1000, 3, ctypes.byref(handle)) == NETAUDIO_OK
+    assert lib.netaudio_client_new(device_ip.encode(), None, 4440, 1000, 3, ctypes.byref(handle)) == NETAUDIO_OK
 
     before = rx_channels(lib, handle)
     original = before[0]["rx_channel_name"]

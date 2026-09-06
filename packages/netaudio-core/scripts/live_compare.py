@@ -13,6 +13,7 @@ def load_library():
     library = ctypes.CDLL(str(LIBRARY))
     library.netaudio_client_new.argtypes = [
         ctypes.c_char_p,
+        ctypes.c_char_p,
         ctypes.c_uint16,
         ctypes.c_uint32,
         ctypes.c_uint32,
@@ -55,7 +56,7 @@ def main():
     library = load_library()
 
     handle = ctypes.c_void_p()
-    status = library.netaudio_client_new(device_ip.encode(), arc_port, 1000, 3, ctypes.byref(handle))
+    status = library.netaudio_client_new(device_ip.encode(), None, arc_port, 1000, 3, ctypes.byref(handle))
     if status != NETAUDIO_OK:
         raise SystemExit(f"client_new failed: {status}")
 
