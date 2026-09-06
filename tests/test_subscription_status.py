@@ -34,7 +34,8 @@ def test_every_observed_numeric_mapping(code, api):
     else:
         assert entry["observed_summary"] == api["summary"]
         assert entry["interpretation"] == "observed"
-        assert entry["detail"] != api["statusMessage"]
+        assert entry["label"] == api["status"]
+        assert entry["detail"] == api["statusMessage"]
         if api["summary"] == "CONNECTED":
             assert entry["state"] == "connected"
         if api["summary"] == "WARNING":
@@ -172,7 +173,7 @@ def test_status_to_json_includes_status_severity_and_icon():
         assert rendered["status"] == "DYNAMIC"
         assert rendered["state"] == "connected"
         assert rendered["severity"] == "ok"
-        assert rendered["label"] == "Subscribed (automatic flow)"
+        assert rendered["label"] == "DYNAMIC"
         assert rendered["icon"] == ""
         assert DanteDeviceSerializer._status_to_json(None) is None
     finally:
@@ -220,7 +221,7 @@ async def test_cli_displays_success_label_and_additional_warning(monkeypatch, ca
     monkeypatch.setattr(state, "output_format", OutputFormat.plain)
     await commands.run_subscription_list(None, {device.server_name: device}, False)
     output = capsys.readouterr().out
-    assert "Subscribed (automatic flow)" in output
+    assert "DYNAMIC" in output
     assert "Source name changed" in output
 
 
@@ -236,8 +237,8 @@ def test_managed_success_with_warning_survives_roundtrip_and_text():
 @pytest.mark.parametrize(
     "code,expected",
     [
-        (9, "Subscribed (automatic flow)"),
-        (0x1B, "Clock domain mismatch"),
+        (9, "DYNAMIC"),
+        (0x1B, "CLOCK_DOMAIN"),
         (0xFFFF, "Unknown subscription status"),
         (None, "status:unknown"),
     ],

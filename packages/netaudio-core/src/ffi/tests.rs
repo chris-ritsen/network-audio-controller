@@ -516,8 +516,8 @@ fn metering_response_kind_serializes_expected_schema() {
     assert_eq!(json["source_eui64"], "001dc119245c0000");
     assert_eq!(json["tx_count"], 3);
     assert_eq!(json["rx_count"], 2);
-    assert_eq!(json["tx_levels"], serde_json::json!([0xFE, 0x7D, 0xA0]));
-    assert_eq!(json["rx_levels"], serde_json::json!([0x88, 0x00]));
+    assert_eq!(json["tx_levels"], serde_json::json!([0xFE, 0xFE, 0x7D]));
+    assert_eq!(json["rx_levels"], serde_json::json!([0xA0, 0x88]));
 }
 
 #[test]

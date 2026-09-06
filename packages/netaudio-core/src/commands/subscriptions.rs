@@ -92,7 +92,8 @@ pub fn build_modern_arc_subscription_page(
     records: &[SubscriptionPageRecord],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if protocol_id != PROTOCOL_ARC_280F
+    if ![PROTOCOL_ARC_2809, PROTOCOL_ARC_280F].contains(&protocol_id)
+        || (protocol_id == PROTOCOL_ARC_2809 && media_type_code != MODERN_ARC_AUDIO_MEDIA_TYPE)
         || page_capacity == 0
         || page_capacity > 32
         || records.is_empty()
@@ -125,6 +126,9 @@ pub fn build_modern_arc_subscription_page(
                 tx_device_name,
             } => {
                 validate_dante_channel_reference(tx_channel_name)?;
+                if protocol_id == PROTOCOL_ARC_2809 && tx_device_name == "." {
+                    return Err(NetaudioError::UnsupportedProtocolOperation);
+                }
                 if tx_device_name != "." {
                     validate_dante_name(tx_device_name)?;
                 }
@@ -132,8 +136,10 @@ pub fn build_modern_arc_subscription_page(
                               strings: &mut Vec<u8>,
                               offsets: &mut HashMap<String, u16>|
                  -> Result<u16, NetaudioError> {
-                    if let Some(offset) = offsets.get(value) {
-                        return Ok(*offset);
+                    if protocol_id == PROTOCOL_ARC_280F {
+                        if let Some(offset) = offsets.get(value) {
+                            return Ok(*offset);
+                        }
                     }
                     let pointer = string_table_offset
                         .checked_add(strings.len())

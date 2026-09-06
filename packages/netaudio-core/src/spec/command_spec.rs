@@ -80,6 +80,13 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
+    #[serde(rename = "create_multicast_flow_2809")]
+    CreateMulticastFlow2809 {
+        channels: Vec<u16>,
+        request_options_word: u16,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+    },
     CreateTxFlow {
         channels: Vec<u16>,
         flow_protocol_id: u16,
@@ -486,6 +493,7 @@ impl CommandSpec {
             }
             | CommandSpec::CmcRegister { message_id, .. }
             | CommandSpec::CreateTxFlow { message_id, .. }
+            | CommandSpec::CreateMulticastFlow2809 { message_id, .. }
             | CommandSpec::DeleteTxFlow { message_id, .. }
             | CommandSpec::DeviceInfo { message_id, .. }
             | CommandSpec::DeviceLogExport { message_id, .. }
@@ -561,6 +569,7 @@ impl CommandSpec {
             }
             | CommandSpec::CmcRegister { message_id, .. }
             | CommandSpec::CreateTxFlow { message_id, .. }
+            | CommandSpec::CreateMulticastFlow2809 { message_id, .. }
             | CommandSpec::DeleteTxFlow { message_id, .. }
             | CommandSpec::DeviceInfo { message_id, .. }
             | CommandSpec::DeviceLogExport { message_id, .. }
@@ -631,6 +640,7 @@ impl CommandSpec {
             CommandSpec::AddSubscriptions { .. }
             | CommandSpec::ChannelCount { .. }
             | CommandSpec::CreateTxFlow { .. }
+            | CommandSpec::CreateMulticastFlow2809 { .. }
             | CommandSpec::DeleteTxFlow { .. }
             | CommandSpec::DeviceInfo { .. }
             | CommandSpec::DeviceName { .. }
@@ -777,6 +787,13 @@ pub(super) fn build_command(
             message_id,
             host_mac,
         } => commands::build_cmc_register(message_id, parse_mac_required(&host_mac)?)?,
+        CommandSpec::CreateMulticastFlow2809 {
+            channels,
+            request_options_word,
+            message_id,
+        } => {
+            commands::build_create_multicast_flow_2809(&channels, request_options_word, message_id)?
+        }
         CommandSpec::CreateTxFlow {
             flow_protocol_id,
             flow_slot,
