@@ -109,3 +109,11 @@
     }
   }
 }
+
+@layer utilities {
+  @media (max-width: 900px) {
+    .subscription-transport {
+      display: none;
+    }
+  }
+}

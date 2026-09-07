@@ -2,7 +2,7 @@ import {Fields, Notice, OnlineState, Panel, Pill, Value} from "../components.js"
 import { ConfigurableTable } from "../table.js";
 import * as format from "../format.js";
 import { html } from "../lib/preact.js";
-import { shureDevices, shureMeters } from "../store.js";
+import { visibleShureDevices as shureDevices, shureMeters } from "../store.js";
 
 const CHANNEL_COLUMNS = [
   { align: "right", cell: (row) => row.number, id: "number", label: "#" },
@@ -129,15 +129,9 @@ function ShureView({ location }) {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="content-header">
-        <div>
-          <div class="content-title">Shure</div>
-          <div class="content-subtitle">Wireless receivers discovered on the network.</div>
-        </div>
-      </div>
       <${Panel} title=${`Receivers (${all.length})`}>
         ${all.length === 0
-          ? html`<${Notice}>No Shure devices have been discovered by the daemon.<//>`
+          ? html`<${Notice}>No Shure devices found.<//>`
           : html`<${ConfigurableTable}
               tableId="shure-receivers"
               columns=${RECEIVER_COLUMNS}

@@ -20,7 +20,7 @@ const INFO_COLUMNS = [
   { cell: (device) => format.text(device.product_version), id: "product-version", label: "Product version", defaultHidden: true },
   { cell: (device) => format.text(device.firmware_version), id: "dante-version", label: "Dante firmware" },
   { cell: (device) => format.text(device.software_version), id: "software-version", label: "Dante software", defaultHidden: true },
-  { cell: (device) => (device.is_locked ? "locked" : "unlocked"), id: "lock", label: "Device lock" },
+  { cell: (device) => device.is_locked == null ? "Unknown" : device.is_locked ? "Locked" : "Unlocked", id: "lock", label: "Device lock" },
   { cell: (device) => format.text(device.ipv4), id: "primary-address", label: "Primary address" },
   { cell: (device) => (device.link_speed_mbps ? `${device.link_speed_mbps} Mbps` : format.ABSENT), id: "link-speed", label: "Primary link speed" },
   { cell: (device) => format.sampleRate(device.sample_rate_hz), id: "sample-rate", label: "Sample rate" },
@@ -66,7 +66,22 @@ const INFO_COLUMNS = [
   })),
 ];
 
+const INVENTORY_VIEWS = {
+  devices: {
+    columns: ["state", "name", "model", "primary-address", "sample-rate", "receive", "transmit", "lock", "domain"] },
+  "clock-status": {
+    columns: ["state", "name", "clock-role", "clock-leader", "preferred-leader", "clock-source", "clock-sync", "sample-rate", "domain"] },
+  "network-status": {
+    columns: ["state", "name", "primary-address", "link-speed", "secondary-address", "secondary-link-speed", "tx-bandwidth", "rx-bandwidth", "reboot-required"] },
+};
+
 function DeviceInfo({ location }) {
+  const mode = INVENTORY_VIEWS[location.view] ? location.view : "devices";
+  const view = INVENTORY_VIEWS[mode];
+  const columns = [...INFO_COLUMNS].sort((a, b) => {
+    const rank = (column) => view.columns.includes(column.id) ? view.columns.indexOf(column.id) : view.columns.length;
+    return rank(a) - rank(b);
+  }).map((column) => ({ ...column, defaultHidden: !view.columns.includes(column.id) }));
   const filter = location.query.filter || "";
   const all = format.sortedDevices(devices.value);
   const needle = filter.trim().toLowerCase();
@@ -75,32 +90,27 @@ function DeviceInfo({ location }) {
 
   return html`
     <div class="flex flex-col gap-4 pb-6">
-      <div class="content-header">
-        <div>
-          <div class="content-title">Devices</div>
-          <div class="content-subtitle">${online} of ${all.length} online</div>
-        </div>
-      </div>
       <${Panel}>
         ${all.length === 0
           ? html`<${Notice}>No Dante devices have been discovered yet. The daemon browses mDNS continuously.<//>`
           : html`<${ConfigurableTable}
-              tableId="devices"
+              key=${mode}
+              tableId=${mode}
               mobileSummary=${(device) => ({ title: format.deviceLabel(device), detail: html`<${OnlineState} online=${device.online} />` })}
-              columns=${INFO_COLUMNS}
+              columns=${columns}
               rows=${visible}
               rowKey=${(device) => device.server_name || device.name}
               rowHref=${(device) => devicePath("devices", format.deviceLabel(device), "receive")}
               toolbar=${html`
                 <input
                   type="search"
-                  placeholder="Filter"
+                  placeholder="Find a device…"
                   aria-label="Find device by name, address, model, or domain"
                   size="18"
                   value=${filter}
                   onInput=${(event) => setQueryParameter("filter", event.target.value)}
                 />
-                <span class="nav-count">${visible.length} of ${all.length}</span>
+                <span class="nav-count">${visible.length} devices · ${online} online</span>
               `}
             />`}
       <//>
@@ -152,7 +162,7 @@ function DeviceView({ location }) {
   const device = deviceByName(deviceName);
   if (!device) {
     return html`<${Notice}>
-      No device named ${deviceName} is in the daemon inventory. It may have gone offline or been forgotten.
+      No device named ${deviceName} is visible in this view. It may be offline, filtered out, or forgotten.
     <//>`;
   }
   if (!device.online) {
@@ -169,7 +179,12 @@ function DeviceView({ location }) {
       <div class="device-header">
         <div class="device-heading">
           <h1 class="content-title">${format.deviceLabel(device)}</h1>
-          <${OnlineState} online=${device.online} />
+          <label class="device-switcher">Device
+            <select aria-label="Switch device" value=${deviceRequestIdentifier(device)}
+              onChange=${(event) => navigate(devicePath("devices", event.target.value, tab))}>
+              ${format.sortedDevices(devices.value).map((entry) => html`<option value=${deviceRequestIdentifier(entry)}>${format.deviceLabel(entry)}</option>`)}
+            </select>
+          </label>
         </div>
         ${format.deviceModelName(device) ? html`<div class="device-model">${format.deviceModelName(device)}</div>` : null}
         ${device.ipv4 ? html`<div class="device-address"><span>Address</span> ${device.ipv4}</div>` : null}
@@ -200,6 +215,10 @@ function DeviceView({ location }) {
   `;
 }
 
+function deviceRequestIdentifier(device) {
+  return device.server_name || device.name;
+}
+
 function DevicesView({ location }) {
   if (location.parameters.device) {
     return html`<${DeviceView} location=${location} />`;
@@ -210,5 +229,8 @@ function DevicesView({ location }) {
 export const devicesView = {
   component: DevicesView,
   id: "devices",
-  label: "Devices",
+  label: "Device Info",
 };
+
+export const clockStatusView = { component: DeviceInfo, id: "clock-status", label: "Clock Status" };
+export const networkStatusView = { component: DeviceInfo, id: "network-status", label: "Network Status" };
