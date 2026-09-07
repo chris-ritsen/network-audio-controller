@@ -1,10 +1,10 @@
-import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.network_configuration import (
     NetworkConfigurationError,
@@ -27,7 +27,7 @@ def network_device(protocol=0x0724):
         interface_reboot_required=False,
         link_speed_mbps=1000,
         requires_managed_control=False,
-        topology_mutation_lock=asyncio.Lock(),
+        topology_mutation_lock=DeferredAsyncioLock(),
     )
 
 

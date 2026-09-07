@@ -15,6 +15,7 @@ from zeroconf import Error as ZeroconfError
 from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import DDMConfiguration
@@ -159,8 +160,8 @@ class DaemonHTTPServer(
         self._bonjour_registered_monotonic: float | None = None
         self._last_bonjour_probe_wall_time: float | None = None
         self._device_lock_operation_locks: dict[str, asyncio.Lock] = {}
-        self._connection_lock = asyncio.Lock()
-        self._preset_operation_lock = asyncio.Lock()
+        self._connection_lock = DeferredAsyncioLock()
+        self._preset_operation_lock = DeferredAsyncioLock()
         self.audio_capability_verification_timeout = AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS
         self.post_handlers = {
             "/presets/save": self._handle_save_preset,
