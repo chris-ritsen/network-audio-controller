@@ -52,8 +52,8 @@
     margin: 0;
     padding: 5px 0;
     border-top: 1px solid var(--line);
-    font-family: var(--font-data);
-    font-size: 12.5px;
+    font-family: var(--font-ui);
+    font-size: 13px;
     overflow-wrap: anywhere;
   }
 
@@ -81,7 +81,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--text);
+    color: var(--muted);
   }
 
   select {

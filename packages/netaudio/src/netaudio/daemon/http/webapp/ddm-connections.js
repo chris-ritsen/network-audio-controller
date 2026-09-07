@@ -2,20 +2,39 @@ import { api } from "./api.js";
 import { Panel } from "./components.js";
 import { Icon } from "./icons.js";
 import { NewDomainDialog } from "./new-domain.js";
-import { html, useEffect, useRef, useState } from "./lib/preact.js";
+import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
 import { connectionProfiles, managedDomains, selectContext, selectedContext } from "./store.js";
 
 export function ContextSelector() {
   const contexts = connectionProfiles.value?.contexts || [];
   const servers = connectionProfiles.value?.servers || [];
   const domains = managedDomains.value;
-  return html`<select aria-label="Server and domain" class="context-selector min-[901px]:max-w-52" value=${selectedContext.value}
-    onChange=${(event) => selectContext(event.target.value)}>
-    <option value="all">All devices</option><option value="local">Unmanaged</option>
-    ${servers.map((server) => html`<option value=${`server:${server.name}`}>${server.name} · All domains</option>`)}
-    ${contexts.map((context) => html`<option value=${context.name}>${context.server} · ${context.domain_name || "Domain"}</option>`)}
-    ${domains.filter((domain) => !contexts.some((context) => context.server === domain.ddm_server_profile && context.domain_id === domain.id))
-      .map((domain) => html`<option value=${`domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`}>${domain.ddm_server_profile} · ${domain.name || "Domain"}</option>`)}
+  const options = [
+    { value: "all", label: "All devices" }, { value: "local", label: "Unmanaged" },
+    ...servers.map((server) => ({ value: `server:${server.name}`, label: `${server.name} · All domains` })),
+    ...contexts.map((context) => ({ value: context.name, label: `${context.server} · ${context.domain_name || "Domain"}` })),
+    ...domains.filter((domain) => !contexts.some((context) => context.server === domain.ddm_server_profile && context.domain_id === domain.id))
+      .map((domain) => ({ value: `domain:${JSON.stringify([domain.ddm_server_profile, domain.id])}`, label: `${domain.ddm_server_profile} · ${domain.name || "Domain"}` })),
+  ];
+  const current = selectedContext.value;
+  const selected = options.find((option) => option.value === current);
+  let rememberedLabel = current;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem("netaudio.context-label"));
+    if (saved?.value === current && typeof saved.label === "string") rememberedLabel = saved.label;
+  } catch {}
+  useLayoutEffect(() => {
+    if (!selected) return;
+    try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(selected)); } catch {}
+  }, [current, selected?.label]);
+  if (!selected) options.push({ value: current, label: rememberedLabel });
+  return html`<select aria-label="Server and domain" class="context-selector" value=${current}
+    onChange=${(event) => {
+      const option = options.find((item) => item.value === event.target.value);
+      try { window.localStorage.setItem("netaudio.context-label", JSON.stringify(option)); } catch {}
+      selectContext(event.target.value);
+    }}>
+    ${options.map((option) => html`<option key=${option.value} value=${option.value}>${option.label}</option>`)}
   </select>`;
 }
 
