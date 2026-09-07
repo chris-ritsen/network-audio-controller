@@ -1,5 +1,5 @@
 import { html } from "./lib/preact.js";
-import { DEVICE_FILTERS, deviceFilterOptions, toggleDeviceFilter } from "./device-filters.js";
+import { deviceFilterOptions, toggleDeviceFilter } from "./device-filters.js";
 
 export function DeviceFilterPanel({ all, filters, onChange }) {
   return html`<aside class="routing-filter-panel" aria-label="Device filters">
@@ -11,9 +11,8 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
         onInput=${(event) => onChange({ ...filters, search: event.target.value })} />
     </label>
     <p class="routing-filter-help">Applies to both receivers and transmitters.</p>
-    <${ActiveDeviceFilters} filters=${filters} onChange=${onChange} />
     ${deviceFilterOptions(all, filters).map((group) => html`<details key=${group.id} open>
-      <summary>${group.label}${filters.values?.[group.id]?.length ? html`<span class="badge badge-sm">${filters.values[group.id].length}</span>` : null}</summary>
+      <summary>${group.label}</summary>
       <div class="routing-filter-options">
         ${group.options.map(([value, count]) => html`<label key=${value}>
           <input type="checkbox" checked=${filters.values?.[group.id]?.includes(value) || false}
@@ -23,15 +22,4 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
       </div>
     </details>`)}
   </aside>`;
-}
-
-export function ActiveDeviceFilters({ filters, onChange }) {
-  if (!filters.search && !Object.values(filters.values || {}).some((values) => values.length)) return null;
-  return html`<div class="routing-filter-chips" aria-label="Active device filters">
-    ${filters.search ? html`<button type="button" class="btn btn-xs" aria-label="Remove device search"
-      onClick=${() => onChange({ ...filters, search: "" })}>Search: ${filters.search} ×</button>` : null}
-    ${DEVICE_FILTERS.flatMap((group) => (filters.values?.[group.id] || []).map((value) => html`
-      <button type="button" class="btn btn-xs" aria-label=${`Remove ${group.label}: ${value}`}
-        onClick=${() => onChange(toggleDeviceFilter(filters, group.id, value))}>${group.label}: ${value} ×</button>`))}
-  </div>`;
 }
