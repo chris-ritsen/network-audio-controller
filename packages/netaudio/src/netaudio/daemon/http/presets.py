@@ -143,7 +143,8 @@ class DaemonPresetHandlers:
             await self._send_json(writer, {"error": "Another preset operation is in progress."}, 409)
             return
         try:
-            async with self._preset_operation_lock, asyncio.timeout(PRESET_READ_TIMEOUT):
+
+            async def read_selected():
                 for device in selected.values():
                     await self._preset_identity(device, device.name)
                     if "routing" in sections:
@@ -170,7 +171,11 @@ class DaemonPresetHandlers:
                 content = format_devices_xml(selected, preset_name=name, sections=sections)
                 if len(content.encode("utf-8")) > MAX_PRESET_BYTES:
                     raise ValueError("This preset exceeds 4 MiB. Save fewer devices together.")
-        except (ValueError, OSError, RuntimeError, NetaudioCoreError) as exception:
+                return content
+
+            async with self._preset_operation_lock:
+                content = await asyncio.wait_for(read_selected(), PRESET_READ_TIMEOUT)
+        except (ValueError, OSError, RuntimeError, asyncio.TimeoutError, NetaudioCoreError) as exception:
             await self._send_json(writer, {"error": f"Preset was not saved: {exception}"}, 409)
             return
         filename = re.sub(r"[^\w .-]", "_", name).strip(" .")[:100] or "preset"
@@ -247,7 +252,8 @@ class DaemonPresetHandlers:
             return
         async with self._preset_operation_lock:
             try:
-                async with asyncio.timeout(PRESET_READ_TIMEOUT):
+
+                async def prepare_plan():
                     for entry in matched:
                         await self._preset_identity(entry.device, entry.device_name)
                         if "sample_rate" in entry.config:
@@ -261,21 +267,26 @@ class DaemonPresetHandlers:
                     plan = await build_preset_plan(matched)
                     if not any(entry.actions for entry in plan.device_actions):
                         raise ValueError("This selection contains no supported preset settings.")
-            except (ValueError, OSError, RuntimeError, NetaudioCoreError) as exception:
+                    return plan
+
+                plan = await asyncio.wait_for(prepare_plan(), PRESET_READ_TIMEOUT)
+            except (ValueError, OSError, RuntimeError, asyncio.TimeoutError, NetaudioCoreError) as exception:
                 await self._send_json(writer, {"error": f"No changes were sent: {exception}"}, 409)
                 return
             report = PresetLoadReport()
             interrupted = False
             try:
-                async with asyncio.timeout(PRESET_APPLY_TIMEOUT):
-                    await apply_preset_plan(
+                await asyncio.wait_for(
+                    apply_preset_plan(
                         self.application,
                         plan,
                         confirm_destructive=confirm_destructive,
                         report=report,
                         stop_on_failure=True,
-                    )
-            except (ValueError, OSError, RuntimeError, NetaudioCoreError) as exception:
+                    ),
+                    PRESET_APPLY_TIMEOUT,
+                )
+            except (ValueError, OSError, RuntimeError, asyncio.TimeoutError, NetaudioCoreError) as exception:
                 interrupted = True
                 report.record(
                     "Preset",

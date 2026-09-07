@@ -6667,6 +6667,7 @@
     height: 32px;
     padding: 0 4px;
     font: inherit;
+    font-size: 12px;
     line-height: normal;
   }
   .channel-name-value {
