@@ -9,7 +9,7 @@ for (const width of [1200, 390]) {
     if (width < 900) await page.locator(".mobile-card-toggle").first().click();
     const edit = page.getByRole("button", { name: "Edit receive channel 1 name", exact: true });
     // Neutralize state colors so the pixel comparison isolates text placement.
-    await page.addStyleTag({ content: `.channel-name-value, .channel-name-editor > input {
+    await page.addStyleTag({ content: `.channel-name-value, .channel-name-input {
       color: #fff !important; background: #000 !important;
       border-color: transparent !important; outline: none !important; box-shadow: none !important;
     }` });
@@ -19,15 +19,9 @@ for (const width of [1200, 390]) {
     await edit.click();
     const input = page.getByRole("textbox", { name: "Receive channel 1 name", exact: true });
     await expect(input).toBeFocused();
-    await input.evaluate((node) => { node.setSelectionRange(0, 0); node.blur(); });
+    await input.evaluate((node) => { window.getSelection().removeAllRanges(); node.blur(); });
     const after = await page.screenshot({ clip, caret: "hide", path: test.info().outputPath("during-editing.png") });
     if (!after.equals(before)) {
-      console.log(await page.locator(".channel-name-value, .channel-name-editor > input").evaluateAll((nodes) => nodes.slice(0, 2).map((node) => {
-        const style = getComputedStyle(node);
-        return { tag: node.tagName, box: node.getBoundingClientRect().toJSON(), font: style.font,
-          letterSpacing: style.letterSpacing, fontVariant: style.fontVariant, textIndent: style.textIndent,
-          padding: style.padding, border: style.border, transform: style.transform };
-      })));
       await test.info().attach("before-editing", { body: before, contentType: "image/png" });
       await test.info().attach("during-editing", { body: after, contentType: "image/png" });
     }
@@ -70,7 +64,7 @@ for (const [section, direction, word] of [["receive", "rx", "Receive"], ["transm
     await input.fill("Try again");
     await row.getByRole("button", { name: "Save", exact: true }).click();
     await expect(row.getByRole("alert")).toHaveText("Rename failed");
-    await expect(input).toHaveValue("Try again");
+    await expect(input).toHaveText("Try again");
     await row.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(input).toHaveCount(0);
     fail = false;
@@ -81,6 +75,31 @@ for (const [section, direction, word] of [["receive", "rx", "Receive"], ["transm
     expect(writes.at(-1).name).toBe("");
   });
 }
+
+test("channel editor retains typed characters and normalizes multiline pasted text", async ({ page }) => {
+  await serveWebapp(page);
+  const writes = [];
+  await page.route("**/rename-channel", (route) => {
+    writes.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: "application/json", body: "{}" });
+  });
+  await page.goto("http://netaudio.test/devices/Windows-PC/receive");
+  await page.getByRole("button", { name: "Edit receive channel 1 name", exact: true }).click();
+  const editor = page.getByRole("textbox", { name: "Receive channel 1 name", exact: true });
+  await expect(editor).toBeFocused();
+  await editor.fill("");
+  await editor.pressSequentially("Left output");
+  await expect(editor).toHaveText("Left output");
+  await editor.press("ArrowLeft");
+  await editor.press("Backspace");
+  await expect(editor).toHaveText("Left outpt");
+  await editor.fill("Left\noutput");
+  await expect(editor).toHaveText("Left output");
+  await editor.press("Enter");
+  await expect(editor).toHaveCount(0);
+  expect(writes).toHaveLength(1);
+  expect(writes[0].name).toBe("Left output");
+});
 
 test("column picker escapes short table clipping and stays within the viewport", async ({ page }) => {
   await serveWebapp(page);
