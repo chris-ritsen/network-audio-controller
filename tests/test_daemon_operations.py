@@ -378,4 +378,4 @@ class TestSetInterface:
         http_server = make_http_server({"dev1": device})
         status, body = await post(http_server, "/interface", {"device": "dev1", "mode": "static"})
         assert status == 400
-        assert body == {"error": "static mode requires ip, netmask"}
+        assert body == {"error": "ip_address must be an IPv4 address"}

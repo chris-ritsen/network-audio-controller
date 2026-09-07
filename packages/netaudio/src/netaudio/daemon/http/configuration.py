@@ -3,8 +3,15 @@ from __future__ import annotations
 import ipaddress
 import json
 
-from netaudio.dante import flows
+from netaudio.dante import flows, multicast
 from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.network_configuration import (
+    NetworkConfigurationError,
+    NetworkConfigurationUnverified,
+    interface_configuration,
+    network_snapshot,
+    validate_interface_configuration,
+)
 
 STATUS_TEXT = {
     200: "OK",
@@ -13,6 +20,7 @@ STATUS_TEXT = {
     404: "Not Found",
     409: "Conflict",
     500: "Internal Server Error",
+    502: "Bad Gateway",
     503: "Service Unavailable",
     504: "Gateway Timeout",
 }
@@ -280,64 +288,66 @@ class DaemonConfigurationHandlers:
         if not device:
             return
 
-        mode = params.get("mode", "").lower()
+        mode = params.get("mode")
         if mode not in ("dhcp", "static"):
             await self._send_json(writer, {"error": "mode must be 'dhcp' or 'static'"}, 400)
             return
 
-        target = device
-        ip_address = ""
-        netmask = ""
-        if mode == "dhcp":
-            result = await self.application.set_interface_dhcp(target)
-        else:
-            ip_address = params.get("ip")
-            netmask = params.get("netmask")
-            if not isinstance(ip_address, str) or not ip_address or not isinstance(netmask, str) or not netmask:
-                await self._send_json(writer, {"error": "static mode requires ip, netmask"}, 400)
-                return
-            result = await self.application.set_interface_static(
-                target, ip_address, netmask, params.get("dns") or "", params.get("gateway") or ""
-            )
-        if result is None:
-            await self._send_json(writer, {"error": "interface readback was unavailable"}, 504)
+        interface = params.get("interface", "primary")
+        configuration = {
+            "ip_address": params.get("ip"),
+            "netmask": params.get("netmask"),
+            "dns_server": params.get("dns"),
+            "gateway": params.get("gateway"),
+        }
+        try:
+            expected = validate_interface_configuration(mode, configuration)
+            result = await self.application.set_interface(device, mode, configuration, interface=interface)
+            configured = interface_configuration(result, interface).get("configured") or {}
+            if not all(configured.get(key) == value for key, value in expected.items()):
+                raise NetworkConfigurationUnverified("Interface change could not be verified")
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
             return
-        expected_mode = "dynamic" if mode == "dhcp" else "static"
-        candidates = list(result)
-        pending_config = device.interface_pending_config
-        if isinstance(pending_config, dict):
-            candidates.append(pending_config)
-        expected_fields = {"mode": expected_mode}
-        if mode == "static":
-            expected_fields.update(
-                {
-                    "ip_address": ip_address,
-                    "netmask": netmask,
-                    "dns_server": params.get("dns") or "",
-                    "gateway": params.get("gateway") or "",
-                }
-            )
-        matched = any(
-            all(candidate.get(key) == value for key, value in expected_fields.items()) for candidate in candidates
-        )
-        if not matched:
-            await self._send_json(
-                writer,
-                {"error": "interface change was not applied", "interfaces": result},
-                409,
-            )
+        except NetworkConfigurationUnverified as exception:
+            await self._send_json(writer, {"error": str(exception)}, 502)
             return
-        await self._send_json(
-            writer,
-            {
-                "success": True,
-                "reboot_required": device.interface_reboot_required,
-                "interfaces": result,
-            },
-        )
+        except (NetworkConfigurationError, TimeoutError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+        device.interfaces = result
+        await self._send_json(writer, {"success": True, **network_snapshot(device)})
+
+    async def _handle_get_redundancy(self, writer, device_name):
+        device = await self._require_online_device(writer, device_name)
+        if not device:
+            return
+        try:
+            status = await self.application.probe_dante_redundancy(device)
+        except (NetworkConfigurationError, TimeoutError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+        await self._send_json(writer, {"device": device.server_name, "redundancy": status})
+
+    async def _handle_set_redundancy(self, writer, params):
+        device = await self._require_online_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            status = await self.application.set_dante_redundancy(device, params.get("mode"))
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        except NetworkConfigurationUnverified as exception:
+            await self._send_json(writer, {"error": str(exception)}, 502)
+            return
+        except (NetworkConfigurationError, TimeoutError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+        await self._send_json(writer, {"success": True, "redundancy": status})
 
     async def _handle_get_tx_flows(self, writer, device_name):
-        snapshot = await self._tx_flow_snapshot(writer, device_name)
+        snapshot = await self._tx_flow_snapshot(writer, device_name, prefer_status=True)
         if snapshot is None:
             return
 
@@ -351,6 +361,30 @@ class DaemonConfigurationHandlers:
                 "flows": flow_inventory["flows"],
             },
         )
+
+    async def _handle_allocate_multicast_flow(self, writer, params):
+        if params.get("confirmed") is not True:
+            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
+            return
+        if "flow_slot" in params:
+            await self._send_json(
+                writer, {"error": "allocation assigns the global flow identifier; omit flow_slot"}, 400
+            )
+            return
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        if not device.online:
+            await self._send_json(writer, {"error": "device is offline"}, 503)
+            return
+        try:
+            result = await multicast.create_multicast_flow_2809(
+                device, params.get("channels"), params.get("request_options_word", 0)
+            )
+        except flows.FlowValidationError as exception:
+            await self._send_json(writer, {"error": str(exception)}, exception.status)
+            return
+        await self._send_json(writer, {"success": True, **result})
 
     async def _handle_create_tx_flow(self, writer, params):
         if params.get("confirmed") is not True:
@@ -469,7 +503,7 @@ class DaemonConfigurationHandlers:
             },
         )
 
-    async def _tx_flow_snapshot(self, writer, device_name):
+    async def _tx_flow_snapshot(self, writer, device_name, *, prefer_status=False):
         device = await self._require_device(writer, device_name)
         if not device:
             return None
@@ -494,7 +528,9 @@ class DaemonConfigurationHandlers:
                 return None
             device.flow_protocol_id = flow_protocol_id
 
-        flow_inventory = await flows.query_preferred_tx_flow_inventory(
+        # Mutation preflight must use the same protocol as the subsequent write.
+        query_inventory = flows.query_preferred_tx_flow_inventory if prefer_status else flows.query_tx_flow_inventory
+        flow_inventory = await query_inventory(
             device_address,
             self._flow_arc_port(device),
             flow_protocol_id,
@@ -503,6 +539,8 @@ class DaemonConfigurationHandlers:
         if flow_inventory is None:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
             return None
+        if prefer_status:
+            flow_protocol_id = flow_inventory["flow_protocol_id"]
         return device, flow_protocol_id, flow_inventory
 
     @staticmethod

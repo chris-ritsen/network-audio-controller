@@ -128,6 +128,7 @@ def save_ddm_context(
         {
             "url": url,
             "credential_file": credential_value,
+            "credential": None,
             "enabled": True,
         },
     )
@@ -142,6 +143,41 @@ def save_ddm_context(
     )
     if make_default:
         text = _upsert_table(text, "[ddm]", {"default_context": context_name})
+    _write_atomic(destination, text)
+
+
+def save_ddm_server(path: Path, *, name: str, url: str, credential: str) -> None:
+    name = _validate_name(name, "DDM server profile name")
+    destination = path.expanduser().resolve()
+    credential_path = destination.parent / "credentials" / f"{name}.credential"
+    _write_atomic(credential_path, credential + "\n")
+    text = destination.read_text(encoding="utf-8") if destination.exists() else ""
+    text = _upsert_table(
+        text,
+        _named_table_header(text, "ddm.servers", name),
+        {
+            "url": url,
+            "credential_file": str(credential_path),
+            "credential": None,
+            "enabled": True,
+        },
+    )
+    _write_atomic(destination, text)
+
+
+def logout_ddm_server(path: Path, name: str) -> None:
+    name = _validate_name(name, "DDM server profile name")
+    destination = path.expanduser().resolve()
+    text = destination.read_text(encoding="utf-8")
+    text = _upsert_table(
+        text,
+        _named_table_header(text, "ddm.servers", name),
+        {
+            "credential": None,
+            "credential_file": None,
+            "enabled": False,
+        },
+    )
     _write_atomic(destination, text)
 
 

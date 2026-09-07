@@ -23,6 +23,7 @@ from zeroconf.asyncio import (
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC, SERVICES
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.discovery import request_discovery
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 
 logger = logging.getLogger("netaudio")
@@ -207,17 +208,20 @@ class DanteBrowser:
 
     def get_zeroconf_kwargs(self) -> ZeroconfKwargs:
         kwargs: ZeroconfKwargs = {"ip_version": IPVersion.V4Only}
+        interface_address = app_settings.interface_ip
+        if app_settings.interface and not interface_address:
+            raise RuntimeError("configured discovery interface has no IPv4 address")
 
-        if app_settings.interface_ip:
-            logger.info("Using interface IP %s for Zeroconf", app_settings.interface_ip)
-            kwargs["interfaces"] = [app_settings.interface_ip]
+        if interface_address:
+            logger.info("Using interface IP %s for Zeroconf", interface_address)
+            kwargs["interfaces"] = [interface_address]
 
-            if "127.0.0.1" not in app_settings.interface_ip:
-                logger.info("Configuring Zeroconf with interface %s", app_settings.interface_ip)
+            if "127.0.0.1" not in interface_address:
+                logger.info("Configuring Zeroconf with interface %s", interface_address)
             else:
                 logger.warning(
                     "Using loopback interface %s for Zeroconf may not discover network devices",
-                    app_settings.interface_ip,
+                    interface_address,
                 )
 
         return kwargs
@@ -237,6 +241,9 @@ class DanteBrowser:
             await asyncio.sleep(self.mdns_timeout)
             logger.debug("mDNS discovery: timeout reached, closing browser")
             await self._async_close(cancel_service_tasks=False)
+
+    def refresh_discovery(self, address: str | None = None) -> dict:
+        return request_discovery(self.aio_zc.zeroconf if self.aio_zc is not None else None, address)
 
     async def async_close(self) -> None:
         await self._async_close(cancel_service_tasks=True)

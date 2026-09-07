@@ -1,0 +1,143 @@
+@layer components {
+  .routing-filter-container {
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+
+  .routing-list .routing-filter-container {
+    max-height: 75vh;
+  }
+
+  .routing-filter-panel {
+    padding: 16px;
+    font-family: var(--font-ui);
+    font-size: 14px;
+  }
+
+  .routing-filter-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .routing-filter-heading h2 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .routing-filter-search {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .routing-filter-search input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .routing-filter-help {
+    font-size: 12px;
+    line-height: 1.5;
+    opacity: 0.65;
+    margin: 10px 0;
+  }
+
+  .routing-filter-panel details {
+    border-top: 1px solid var(--line);
+    padding: 12px 0;
+  }
+
+  .routing-filter-panel summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    min-height: 28px;
+    list-style: none;
+  }
+
+  .routing-filter-panel summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .routing-filter-panel summary::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    flex: 0 0 7px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+  }
+
+  .routing-filter-panel details[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  .routing-filter-panel summary .badge {
+    margin-left: 8px;
+  }
+
+  .routing-filter-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+  }
+
+  .routing-filter-options label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 36px;
+    cursor: pointer;
+  }
+
+  .routing-filter-options label > span:not(.routing-filter-count) {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  .routing-filter-options input {
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+
+  .routing-filter-count {
+    margin-left: auto;
+    padding-left: 8px;
+    opacity: 0.65;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .routing-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .routing-filter-chips .btn {
+    height: auto;
+    min-height: 30px;
+    white-space: normal;
+    text-align: left;
+  }
+
+  @media (max-width: 900px) {
+    .routing-filter-container {
+      max-height: 60vh;
+    }
+
+    .routing-filter-options label {
+      min-height: 44px;
+    }
+  }
+}

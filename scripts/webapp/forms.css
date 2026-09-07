@@ -1,0 +1,262 @@
+@layer components {
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .field-row:last-child {
+    border-bottom: none;
+  }
+
+  .field-row-label {
+    min-width: 168px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  label.inline-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .fields {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0;
+    margin: 0;
+  }
+
+  .fields dt {
+    padding: 5px 16px 5px 0;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .fields dd {
+    margin: 0;
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-data);
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+  }
+
+  .fields dt:first-of-type,
+  .fields dd:first-of-type {
+    border-top: none;
+  }
+
+  button {
+    font-family: var(--font-ui);
+  }
+
+  input,
+  select,
+  textarea {
+    background: var(--raised);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    font-family: var(--font-data);
+    font-size: 12.5px;
+    padding: 5px 8px;
+    min-width: 0;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text);
+  }
+
+  select {
+    font-family: var(--font-ui);
+    cursor: pointer;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 150px;
+    resize: vertical;
+    white-space: pre;
+    line-height: 1.5;
+  }
+
+  .input-wide {
+    width: 100%;
+  }
+
+  .control-icon {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    vertical-align: middle;
+  }
+
+  @media (max-width: 900px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+
+    button,
+    .btn,
+    .nav-item,
+    .menu-toggle {
+      min-height: 44px;
+    }
+
+    .field-row {
+      align-items: flex-start;
+    }
+
+    .field-row-label {
+      min-width: 0;
+      flex-basis: 100%;
+    }
+
+    .fields {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fields dt {
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .fields dd {
+      padding-top: 2px;
+      border-top: none;
+    }
+
+    .fields dd + dt {
+      border-top: 1px solid var(--line);
+      margin-top: 4px;
+    }
+  }
+
+  .fields.nested {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    padding: 0 10px;
+    background: var(--black);
+  }
+
+  .fields.nested dt,
+  .fields.nested dd {
+    font-size: 11.5px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .btn {
+    box-shadow: none;
+    background-image: none;
+    white-space: normal;
+    text-overflow: clip;
+    flex-shrink: 0;
+  }
+
+  .btn.pending {
+    border-style: dashed;
+  }
+
+  @media (max-width: 900px) {
+    .content input,
+    .content select,
+    .content textarea {
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    .toolbar,
+    .toolbar > *,
+    label.inline-field {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    label.inline-field {
+      flex-wrap: wrap;
+    }
+  }
+}
+
+@layer base {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@layer utilities {
+  .header-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .header-icon-button:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: 2px;
+  }
+
+  .btn {
+    box-shadow: none;
+    text-shadow: none;
+    background-image: none;
+  }
+
+  button,
+  .btn,
+  button:active,
+  .btn:active {
+    animation: none;
+    transition: none;
+    transform: none;
+    translate: none;
+    scale: none;
+  }
+
+  @media (max-width: 900px) {
+    .btn,
+    .menu-toggle,
+    .search-trigger {
+      height: 32px;
+      min-height: 32px;
+      padding-block: 0;
+    }
+
+    .btn {
+      padding-inline: 9px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+  }
+}

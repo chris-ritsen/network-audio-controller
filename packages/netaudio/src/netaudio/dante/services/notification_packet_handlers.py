@@ -32,6 +32,7 @@ from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
 from netaudio.dante.link_status import LinkStatusObservation
 from netaudio.dante.lock_status import LockStatusObservation
+from netaudio.dante.network_configuration import interface_redundancy_status
 from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
@@ -157,15 +158,17 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
         f"Conmon interface_status from {source_ip} ({len(data)}B): "
         f"interface_count={len(parsed['interfaces'])} link_speed_mbps={parsed['link_speed_mbps']} "
         f"reboot_required={parsed['reboot_required']} "
-        f"pending_config={parsed['pending_config']} interfaces={parsed['interfaces']}"
+        f"interfaces={parsed['interfaces']}"
     )
     status = {
-        "interface_pending_config": parsed["pending_config"],
+        "interface_status_protocol": parsed["record_protocol_identifier"],
         "interface_reboot_required": parsed["reboot_required"],
         "interfaces": parsed["interfaces"],
         "link_speed_mbps": parsed["link_speed_mbps"],
     }
-    return ParsedStatus(STATUS_KIND_INTERFACE, status, parsed["interfaces"])
+    if parsed["record_protocol_identifier"] != 0x072E:
+        status["dante_redundancy"] = interface_redundancy_status(parsed, device)
+    return ParsedStatus(STATUS_KIND_INTERFACE, status, status)
 
 
 def _parse_link_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -296,7 +299,7 @@ def _parse_switch_configuration_status(data: bytes, source_ip: str, device) -> P
     parsed = _core_parse("switch_configuration_status", data, source_ip, "switch configuration status")
     if parsed is None:
         return None
-    return ParsedStatus(STATUS_KIND_SWITCH_CONFIGURATION, parsed, parsed)
+    return ParsedStatus(STATUS_KIND_SWITCH_CONFIGURATION, {"dante_redundancy": parsed["redundancy"]}, parsed)
 
 
 CONMON_STATUS_PARSERS = {

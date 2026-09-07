@@ -235,7 +235,9 @@ def client_factory(core):
 
     def _create(port, timeout_milliseconds=500, attempts=1):
         handle = ctypes.c_void_p()
-        status = core.netaudio_client_new(b"127.0.0.1", None, port, timeout_milliseconds, attempts, ctypes.byref(handle))
+        status = core.netaudio_client_new(
+            b"127.0.0.1", None, port, timeout_milliseconds, attempts, ctypes.byref(handle)
+        )
         assert status == NETAUDIO_OK
         created.append(handle)
         return handle

@@ -1,0 +1,83 @@
+@layer components {
+  .metric-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .metric {
+    flex: 1 1 130px;
+    padding: 11px 13px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .metric-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .metric-value {
+    margin-top: 4px;
+    font-family: var(--font-data);
+    font-size: 21px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .notice {
+    padding: 14px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-small);
+    font-size: 13px;
+  }
+
+  details > summary {
+    cursor: pointer;
+    padding: 4px 0;
+    font-size: 12.5px;
+  }
+
+  @media (max-width: 900px) {
+    .panel-body {
+      padding: 12px 10px;
+    }
+
+    .metric {
+      flex-basis: calc(50% - 5px);
+    }
+
+    .metric-value {
+      font-size: 18px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .metric {
+      flex-basis: 100%;
+    }
+
+    .panel-header {
+      padding: 10px;
+    }
+  }
+
+  .section-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+
+  .panel.wide {
+    grid-column: 1 / -1;
+  }
+
+  @media (max-width: 900px) {
+    .card-body {
+      overflow-x: visible;
+    }
+  }
+}
