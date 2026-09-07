@@ -1,0 +1,81 @@
+@layer components {
+  :root {
+    --color-base-100: #0a0a0a;
+    --color-base-200: #1c1c1c;
+    --color-base-300: #3d3d3d;
+    --color-base-content: #ffffff;
+    --accent: #ff2323;
+    --bad: #ff4d4d;
+    --black: #000000;
+    --good: #2fe36a;
+    --hover: #151515;
+    --line: #242424;
+    --line-strong: #3d3d3d;
+    --panel: #0a0a0a;
+    --raised: #141414;
+    --text: #ffffff;
+    --warn: #ffc400;
+    --font-data:
+      "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    --font-ui:
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui,
+      sans-serif;
+    --radius: 10px;
+    --radius-small: 6px;
+    --topbar-height: 52px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+
+  body {
+    background: var(--black);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  pre {
+    font-family: var(--font-data);
+    font-size: 12px;
+    margin: 0;
+    padding: 12px;
+    background: var(--black);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-small);
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  @media (max-width: 900px) {
+    :root {
+      --topbar-height: 50px;
+    }
+
+    :root {
+      --topbar-height: 104px;
+    }
+  }
+}

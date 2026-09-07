@@ -15,7 +15,7 @@ from netaudio.commands.device.display import (
     format_sample_rate_hertz,
 )
 from netaudio.core.binding import NetaudioCoreError
-from netaudio.dante import flows
+from netaudio.dante import flows, multicast
 from netaudio.dante.const import RESULT_CODE_SUCCESS
 
 app = typer.Typer(
@@ -81,7 +81,7 @@ async def run_flow_list(application, devices) -> None:
         typer.echo("Error: failed to query flows.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
     device_flows = flow_inventory["flows"]
-    uses_modern_status = "reported_flow_count" in flow_inventory
+    uses_legacy_inventory = "reported_flow_count" not in flow_inventory
     include_status_endpoint = any(
         flow.get("destination_internet_protocol_version_four_address") or flow.get("subscriber_device_name")
         for flow in device_flows
@@ -92,14 +92,16 @@ async def run_flow_list(application, devices) -> None:
     else:
         headers.append("FPP")
 
-    if uses_modern_status:
+    if not uses_legacy_inventory:
         empty_message = f"No transmitter flow records reported (capacity {flow_inventory['max_flow_slots']})."
     else:
         empty_message = f"No TX flows configured (0/{flow_inventory['max_flow_slots']} slots used)."
 
     rows = []
     for flow in device_flows:
-        channel_numbers = flow.get("populated_transmitter_channel_ids") if uses_modern_status else flow.get("channels")
+        channel_numbers = (
+            flow.get("channels") if uses_legacy_inventory else flow.get("populated_transmitter_channel_ids")
+        )
         channel_list = (
             ", ".join(str(channel_number) for channel_number in channel_numbers)
             if isinstance(channel_numbers, list)
@@ -110,10 +112,10 @@ async def run_flow_list(application, devices) -> None:
             flow_type_code = flow.get("flow_type_code")
             flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else "unknown"
         row = [
-            str(flow["global_flow_id"] if uses_modern_status else flow["flow_number"]),
+            str(flow["flow_number"] if uses_legacy_inventory else flow["global_flow_id"]),
             flow_type,
             channel_list
-            or str(flow.get("populated_slot_count") if uses_modern_status else flow.get("channel_count") or ""),
+            or str(flow.get("channel_count") or "" if uses_legacy_inventory else flow.get("populated_slot_count")),
             format_sample_rate_hertz(flow["sample_rate"]),
             format_encoding(flow["encoding"]),
         ]
@@ -376,7 +378,7 @@ def flow_create(
     slot: int = typer.Option(..., "--slot", help="Flow slot number, limited by the device-reported capacity."),
     channels: str = typer.Option(..., "--channels", help="Comma-separated TX channel numbers."),
 ):
-    """Create a TX multicast flow."""
+    """Create a legacy TX multicast flow in an explicit slot."""
 
     try:
         flow_slot = flows.validate_flow_slot(slot)
@@ -384,6 +386,35 @@ def flow_create(
         _fail_validation(exception)
     channel_numbers = _parse_channel_numbers(channels)
     run_command(run_flow_create, flow_slot, channel_numbers)
+
+
+async def run_flow_allocate(application, devices, channel_numbers: list[int], request_options_word: int) -> None:
+    device, _ = _selected_device(devices)
+    try:
+        result = await multicast.create_multicast_flow_2809(device, channel_numbers, request_options_word)
+    except flows.FlowValidationError as exception:
+        _fail_validation(exception)
+    output_table(
+        ["Allocated Flow", "Channels", "Verified"],
+        [[str(result["flow"]["global_flow_id"]), ", ".join(map(str, channel_numbers)), "yes"]],
+        json_data=result,
+    )
+
+
+@app.command("allocate")
+def flow_allocate(
+    channels: str = typer.Option(..., "--channels", help="Comma-separated TX channel numbers."),
+    request_options_word: int = typer.Option(
+        0,
+        "--request-options-word",
+        help="Captured request option: 0, 1 or 113. Defaults to zero; bit meanings are unknown.",
+    ),
+    confirmed: bool = typer.Option(False, "--confirmed", help="Confirm creation of a transmitting multicast flow."),
+):
+    """Allocate an ARC 2.8.9 multicast flow and verify its assigned identifier."""
+    if not confirmed:
+        _fail_validation(flows.FlowValidationError("--confirmed is required"))
+    run_command(run_flow_allocate, _parse_channel_numbers(channels), request_options_word)
 
 
 async def run_flow_delete(application, devices, flow_slot: int) -> None:

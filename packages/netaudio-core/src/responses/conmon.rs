@@ -37,6 +37,7 @@ pub struct SwitchConfigurationChoice {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SwitchConfigurationStatus {
+    pub redundancy: crate::network::DanteRedundancyStatus,
     pub record_protocol_identifier: u16,
     pub unmapped_prefix_word: u32,
     pub choice_count: u16,
@@ -213,7 +214,34 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
         });
     }
 
+    let mode_for = |code| match code {
+        1 => Some(crate::network::DanteRedundancyMode::Switched),
+        2 => Some(crate::network::DanteRedundancyMode::SplitRedundant),
+        _ => None,
+    };
+    let current = mode_for(read_u16(record, 20)?);
+    let configured = mode_for(read_u16(record, 22)?);
+    let supported: Vec<crate::network::DanteRedundancyMode> = if read_u16(record, 0)? == 0x072e {
+        choices
+            .iter()
+            .filter_map(|choice| match (choice.code, choice.label.as_str()) {
+                (1, "Switched") => mode_for(1),
+                (2, "Split/Redundant") => mode_for(2),
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let current = current.filter(|mode| supported.contains(mode));
+    let configured = configured.filter(|mode| supported.contains(mode));
     Some(SwitchConfigurationStatus {
+        redundancy: crate::network::DanteRedundancyStatus {
+            current,
+            configured,
+            reboot_required: current.is_some() && configured.is_some() && current != configured,
+            supported,
+        },
         record_protocol_identifier: read_u16(record, 0)?,
         unmapped_prefix_word: read_u32(record, 4)?,
         choice_count,

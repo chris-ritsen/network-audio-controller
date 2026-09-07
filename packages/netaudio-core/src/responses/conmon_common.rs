@@ -92,12 +92,5 @@ pub(super) const CONMON_INTERFACE_LINK_SPEED_OFFSET: usize = 0x24;
 pub(super) const CONMON_INTERFACE_RECORDS_OFFSET: usize = 0x28;
 pub(super) const CONMON_INTERFACE_RECORD_SIZE: usize = 20;
 pub(super) const CONMON_INTERFACE_CONFIGURED_RECORD_SIZE: usize = 24;
-pub(super) const CONMON_INTERFACE_CONFIGURED_RECORD_STRIDE: usize = 28;
-pub(super) const CONMON_INTERFACE_REBOOT_FLAG_OFFSET: usize = 0x48;
-pub(super) const CONMON_INTERFACE_PENDING_STATIC_OFFSET: usize = 0x4C;
-pub(super) const CONMON_INTERFACE_MINIMUM_SIZE: usize = 0x40;
-
-pub(super) const INTERFACE_MODE_DYNAMIC: u16 = 0x0001;
-pub(super) const INTERFACE_MODE_STATIC: u16 = 0x0003;
 pub(super) const INTERFACE_REBOOT_PENDING_DYNAMIC: u16 = 0x0004;
 pub(super) const INTERFACE_REBOOT_PENDING_STATIC: u16 = 0x0006;

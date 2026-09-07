@@ -46,6 +46,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: npm ci
       - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
 
   build-wheel:

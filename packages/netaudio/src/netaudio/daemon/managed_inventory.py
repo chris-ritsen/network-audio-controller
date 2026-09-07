@@ -620,6 +620,7 @@ class ManagedInventoryRegistry:
         services: dict[str, ManagedInventoryService] | None = None,
     ):
         self.configuration = configuration
+        self._callback: InventoryCallback | None = None
         contexts_by_server: dict[str, list[DDMContextConfiguration]] = {}
         for context in configuration.contexts.values():
             contexts_by_server.setdefault(context.server, []).append(context)
@@ -640,8 +641,29 @@ class ManagedInventoryRegistry:
         return any(service.enabled for service in self.services.values())
 
     def set_callback(self, callback: InventoryCallback | None) -> None:
+        self._callback = callback
         for service in self.services.values():
             service.set_callback(callback)
+
+    async def reconfigure(self, configuration: DDMConfiguration, changed_server: str | None = None) -> None:
+        replacement = ManagedInventoryRegistry(configuration)
+        replacement.set_callback(self._callback)
+        for name, existing in self.services.items():
+            candidate = replacement.services.get(name)
+            if (
+                name != changed_server
+                and candidate is not None
+                and existing.configuration == candidate.configuration
+                and existing.contexts == candidate.contexts
+            ):
+                replacement.services[name] = existing
+            else:
+                await existing.stop()
+        self.configuration = configuration
+        self.services = replacement.services
+        await self.start()
+        if self._callback is not None:
+            await self._callback()
 
     async def start(self) -> None:
         await asyncio.gather(*(service.start() for service in self.services.values()))

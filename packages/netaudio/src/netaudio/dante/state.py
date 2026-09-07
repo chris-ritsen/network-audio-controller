@@ -40,6 +40,7 @@ from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_ROUTING_CAPACITY,
     STATUS_KIND_SAMPLE_RATE,
     STATUS_KIND_SAMPLE_RATE_PULLUP,
+    STATUS_KIND_SWITCH_CONFIGURATION,
 )
 
 logger = logging.getLogger("netaudio")
@@ -61,6 +62,7 @@ FIELD_STATUS_KINDS = frozenset(
         STATUS_KIND_LOCK,
         STATUS_KIND_SAMPLE_RATE,
         STATUS_KIND_SAMPLE_RATE_PULLUP,
+        STATUS_KIND_SWITCH_CONFIGURATION,
     }
 )
 

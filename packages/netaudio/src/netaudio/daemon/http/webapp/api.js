@@ -1,3 +1,5 @@
+import { inventoryReady, removeForgottenDevices } from "./store.js";
+
 export class ApiError extends Error {
   constructor(message, status, payload) {
     super(message);
@@ -8,6 +10,9 @@ export class ApiError extends Error {
 }
 
 async function request(method, path, body) {
+  if (method !== "GET" && !["/presets/preview", "/metering/stop", "/ddm/login", "/ddm/logout", "/ddm/context", "/ddm/domains", "/settings/monitoring"].includes(path) && !inventoryReady.value) {
+    throw new ApiError("Waiting for live device inventory. Try again when connected.", 409, null);
+  }
   const options = { method, headers: { Accept: "application/json" } };
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
@@ -38,28 +43,40 @@ function post(path, body = {}) {
   return request("POST", path, body);
 }
 
-function remove(path) {
-  return request("DELETE", path);
+async function remove(path) {
+  const result = await request("DELETE", path);
+  removeForgottenDevices(result.forgotten || []);
+  return result;
 }
 
 export const api = {
+  savePreset: (body) => post("/presets/save", body),
+  previewPreset: (body) => post("/presets/preview", body),
+  loadPreset: (body) => post("/presets/load", body),
   getDevices: (context) => get(`/devices${context ? `?context=${encodeURIComponent(context)}` : ""}`),
   getDevice: (name, context) =>
     get(`/devices/${encodeURIComponent(name)}${context ? `?context=${encodeURIComponent(context)}` : ""}`),
   getInterfaces: (name) => get(`/interfaces/${encodeURIComponent(name)}`),
+  getRedundancy: (name) => get(`/redundancy/${encodeURIComponent(name)}`),
+  setRedundancy: (body) => post("/redundancy", body),
   getLockStatus: (name) => get(`/lock-status/${encodeURIComponent(name)}`),
-  getTransmitFlows: (name) => get(`/flows/${encodeURIComponent(name)}`),
   getShureDevices: () => get("/shure/devices"),
   getShureDevice: (identifier) => get(`/shure/devices/${encodeURIComponent(identifier)}`),
   getManagedDevices: (context) => get(`/ddm/devices${context ? `?context=${encodeURIComponent(context)}` : ""}`),
   getManagedDomains: (context) => get(`/ddm/domains${context ? `?context=${encodeURIComponent(context)}` : ""}`),
   getManagedStatus: () => get("/ddm/status"),
-  getMeteringStatus: () => get("/metering/status"),
+  getConnections: () => get("/ddm/connections"),
+  getSettings: () => get("/settings"),
+  setMonitoringPort: (port) => post("/settings/monitoring", { port }),
+  loginDdm: (body) => post("/ddm/login", body),
+  logoutDdm: (server) => post("/ddm/logout", { server }),
+  setDdmEnrollment: (body) => post("/ddm/enrollment", body),
+  createDdmDomain: (server, name) => post("/ddm/domains", { server, name }),
+  selectDdmContext: (body) => post("/ddm/context", body),
   getMeteringCache: () => get("/metering/cache"),
   getMeteringSnapshot: (name) => get(`/metering/snapshot/${encodeURIComponent(name)}`),
 
   forgetDevice: (name) => remove(`/devices/${encodeURIComponent(name)}`),
-  forgetDevices: (selection) => remove(`/devices?selection=${encodeURIComponent(selection)}`),
 
   subscribe: (body) => post("/subscribe", body),
   unsubscribe: (body) => post("/unsubscribe", body),
@@ -88,9 +105,6 @@ export const api = {
   startMetering: (device, clientId) => post("/metering/start", { device, client_id: clientId }),
   stopMetering: (device, clientId) => post("/metering/stop", { device, client_id: clientId }),
   reportUnresponsive: (device) => post("/report-unresponsive", { device }),
-  createTransmitFlow: (device, flowSlot, channels) =>
-    post("/flows/create", { device, flow_slot: flowSlot, channels, confirmed: true }),
-  deleteTransmitFlow: (device, flowSlot) => post("/flows/delete", { device, flow_slot: flowSlot, confirmed: true }),
   managedGraphql: (query, variables, operationName, context) =>
     post("/ddm/graphql", { query, variables, operation_name: operationName, context }),
   managedRefresh: (context) => post("/ddm/refresh", context ? { context } : {}),

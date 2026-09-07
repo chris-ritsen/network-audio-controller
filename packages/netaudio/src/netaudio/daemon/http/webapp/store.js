@@ -1,4 +1,5 @@
-import { batch, signal } from "./lib/preact.js";
+import { batch, computed, signal } from "./lib/preact.js";
+import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
 
 const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
@@ -7,7 +8,27 @@ const RECONNECT_DELAY_MILLISECONDS = 2000;
 const PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS = 8000;
 
 export const connectionState = signal("connecting");
-export const devices = signal({});
+export const devices = signal(readInventoryCache());
+export const managedState = signal(null);
+export const managedDomains = signal([]);
+export const connectionProfiles = signal(null);
+export const backendSettings = signal(null);
+function readContext() {
+  try { return window.localStorage.getItem("netaudio.context") || "all"; } catch { return "all"; }
+}
+export const selectedContext = signal(readContext());
+export const scopedDevices = computed(() => selectedContext.value === "all" ? devices.value :
+  Object.fromEntries(Object.entries(devices.value).filter(([, device]) => selectedContext.value === "local"
+    ? device.management_state !== "managed" : selectedContext.value.startsWith("server:")
+      ? device.ddm_server_profile === selectedContext.value.slice(7)
+      : selectedContext.value.startsWith("domain:")
+        ? JSON.stringify([device.ddm_server_profile, device.ddm_domain_id]) === selectedContext.value.slice(7)
+        : device.ddm_context === selectedContext.value)));
+export function selectContext(context) {
+  selectedContext.value = context;
+  try { window.localStorage.setItem("netaudio.context", context); } catch {}
+}
+export const inventoryReady = signal(false);
 export const events = signal([]);
 export const meterRevision = signal(0);
 export const pendingSubscriptions = signal({});
@@ -18,6 +39,15 @@ export const meterCache = new Map();
 
 const meterHandlers = new Set();
 let meterTableTimer = null;
+let inventorySaveTimer = null;
+
+function saveInventorySoon() {
+  if (inventorySaveTimer !== null) return;
+  inventorySaveTimer = setTimeout(() => {
+    inventorySaveTimer = null;
+    writeInventoryCache(devices.value);
+  }, 250);
+}
 
 export function onMeterValues(handler) {
   meterHandlers.add(handler);
@@ -26,6 +56,16 @@ export function onMeterValues(handler) {
 
 export function meterValuesFor(serverName) {
   return meterCache.get(serverName) || null;
+}
+
+export function removeForgottenDevices(forgotten) {
+  const next = { ...devices.value };
+  for (const device of forgotten) {
+    delete next[device.server_name];
+    meterCache.delete(device.server_name);
+  }
+  devices.value = next;
+  writeInventoryCache(next);
 }
 
 function scheduleMeterTableUpdate() {
@@ -50,9 +90,18 @@ function recordEvent(payload) {
 function applyMeterValues(payload) {
   const previous = meterCache.get(payload.server_name);
   const continues = previous && previous.metering_source === payload.metering_source;
+  const channelTimes = (direction) => {
+    const numbers = (sample) => [...new Set([...Object.keys(sample[direction] || {}), ...Object.keys(sample[`${direction}_signal_presence`] || {})])];
+    return {
+      ...(continues ? Object.fromEntries(numbers(previous).map((number) => [number, previous[`${direction}_updated_at`]?.[number] ?? previous.wall_time])) : {}),
+      ...Object.fromEntries(numbers(payload).map((number) => [number, payload.wall_time])),
+    };
+  };
   const values = {
     metering_source: payload.metering_source,
     rx: { ...(continues ? previous.rx : {}), ...(payload.rx || {}) },
+    rx_updated_at: channelTimes("rx"),
+    tx_updated_at: channelTimes("tx"),
     rx_signal_presence: {
       ...(continues ? previous.rx_signal_presence : {}),
       ...(payload.rx_signal_presence || {}),
@@ -116,15 +165,28 @@ function clearPendingForDevice(device) {
 
 function applyEvent(payload) {
   const kind = payload.event;
+  if (kind === "settings_updated") {
+    backendSettings.value = payload.settings;
+    return;
+  }
   if (kind === "subscription_pending") {
     markPending(payload);
     return;
   }
   if (kind === "snapshot") {
     batch(() => {
-      devices.value = payload.devices || {};
+      if (payload.managed) {
+        managedState.value = payload.managed.status;
+        managedDomains.value = payload.managed.domains || [];
+        connectionProfiles.value = payload.managed.connections;
+      }
+      if (Object.keys(payload.devices || {}).length || !Object.keys(devices.value).length) {
+        devices.value = payload.devices || {};
+      }
       shureDevices.value = payload.shure_devices || {};
+      inventoryReady.value = Object.keys(payload.devices || {}).length > 0 || Object.keys(devices.value).length === 0;
     });
+    writeInventoryCache(devices.value);
     for (const [serverName, values] of Object.entries(payload.metering || {})) {
       meterCache.set(serverName, values);
     }
@@ -133,6 +195,7 @@ function applyEvent(payload) {
   }
   if (kind === "device_discovered" || kind === "device_updated") {
     devices.value = { ...devices.value, [payload.server_name]: payload.device };
+    saveInventorySoon();
     if (payload.device) {
       clearPendingForDevice(payload.device);
     }
@@ -142,6 +205,7 @@ function applyEvent(payload) {
     const next = { ...devices.value };
     delete next[payload.server_name];
     devices.value = next;
+    writeInventoryCache(next);
     meterCache.delete(payload.server_name);
     return;
   }
@@ -202,12 +266,8 @@ export function deviceByName(deviceName) {
   if (!deviceName) {
     return null;
   }
-  for (const device of Object.values(devices.value)) {
-    if (device.name === deviceName || device.server_name === deviceName) {
-      return device;
-    }
-  }
-  return null;
+  const matches = Object.values(scopedDevices.value).filter((device) => device.name === deviceName || device.server_name === deviceName);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function deviceKey(device) {

@@ -62,6 +62,35 @@ async def delete(http_server, path):
 
 class TestForget:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("bulk", [False, True])
+    async def test_dismiss_ddm_only_offline_device_until_it_returns_online(self, bulk):
+        server = make_http_server()
+        key = "ddm:site:domain:receiver"
+        records = {
+            key: {
+                "server_name": key,
+                "inventory_id": key,
+                "name": "Receiver",
+                "online": False,
+                "ddm_device_id": "receiver",
+            }
+        }
+        server.managed_inventory = SimpleNamespace(enabled=True, serialize_devices=lambda _: records.copy())
+        server.publish_inventory_snapshot = AsyncMock()
+        path = "/devices?selection=offline" if bulk else f"/devices/{key}"
+        status, body = await delete(server, path)
+        assert status == 200
+        assert [item["server_name"] for item in body["forgotten"]] == [key]
+        assert server._snapshot_payload()["devices"] == {}
+        assert server._serialized_devices() == {}
+        server.application.unregister_device.assert_not_called()
+        server.publish_inventory_snapshot.assert_awaited_once()
+        records[key]["online"] = True
+        assert key in server._serialized_devices()
+        records[key]["online"] = False
+        assert key in server._serialized_devices()
+
+    @pytest.mark.asyncio
     async def test_forget_by_server_name_removes_device_and_reports_it(self):
         device = make_device(server_name="ghost.local.", name="ghost", ipv4="192.0.2.99", online=False)
         http_server = make_http_server({"ghost.local.": device, "dev1": make_device()})
@@ -745,12 +774,14 @@ class TestMutationVerification:
     async def test_interface_mismatch_is_conflict(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_interface_dhcp.return_value = [{"mode": "static"}]
+        http_server.application.set_interface.return_value = [
+            {"interface": "primary", "mode": "static", "configured": {"mode": "static"}}
+        ]
 
         status, response = await post(http_server, "/interface", {"device": "dev1", "mode": "dhcp"})
 
-        assert status == 409
-        assert response["interfaces"] == [{"mode": "static"}]
+        assert status == 502
+        assert response["error"] == "Interface change could not be verified"
 
     @pytest.mark.asyncio
     async def test_applied_interface_reports_no_reboot(self):
@@ -763,16 +794,19 @@ class TestMutationVerification:
         assert response == {
             "success": True,
             "reboot_required": False,
-            "interfaces": [{"mode": "dynamic"}],
+            "interfaces": [{"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}}],
+            "redundancy": None,
+            "link_speed_mbps": None,
         }
 
     @pytest.mark.asyncio
     async def test_pending_interface_reports_reboot(self):
         device = make_device()
         device.interface_reboot_required = True
-        device.interface_pending_config = {"mode": "dynamic"}
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_interface_dhcp.return_value = [{"mode": "static"}]
+        http_server.application.set_interface.return_value = [
+            {"interface": "primary", "mode": "static", "configured": {"mode": "dynamic"}}
+        ]
 
         status, response = await post(http_server, "/interface", {"device": "dev1", "mode": "dhcp"})
 
@@ -780,7 +814,9 @@ class TestMutationVerification:
         assert response == {
             "success": True,
             "reboot_required": True,
-            "interfaces": [{"mode": "static"}],
+            "interfaces": [{"interface": "primary", "mode": "static", "configured": {"mode": "dynamic"}}],
+            "redundancy": None,
+            "link_speed_mbps": None,
         }
 
 
@@ -837,7 +873,7 @@ class TestDeviceLookup:
             "interfaces": [{"mode": "dynamic", "ip_address": "192.168.1.50"}],
             "link_speed_mbps": 100,
             "reboot_required": False,
-            "pending_config": None,
+            "redundancy": None,
         }
         http_server.application.probe_interface_status.assert_awaited_once_with(device)
         assert device.interfaces == body["interfaces"]
