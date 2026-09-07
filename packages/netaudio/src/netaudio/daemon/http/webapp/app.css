@@ -5562,6 +5562,9 @@
   .break-words {
     overflow-wrap: break-word;
   }
+  .whitespace-nowrap {
+    white-space: nowrap;
+  }
   @layer daisyui.l1.l2 {
     .alert-error {
       color: var(--color-error-content);
@@ -7627,7 +7630,7 @@
   }
   .routing-options-panel {
     position: absolute;
-    right: 0;
+    left: 0;
     top: calc(100% + 6px);
     z-index: 8;
     display: flex;
@@ -7635,7 +7638,7 @@
     align-items: stretch;
     gap: 14px;
     padding: 16px;
-    min-width: 220px;
+    min-width: 260px;
     background: var(--panel);
     border: 1px solid var(--line-strong);
     border-radius: 6px;
