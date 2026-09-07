@@ -1,4 +1,7 @@
 *.pyc
+node_modules/
+test-results/
+playwright-report/
 .eggs
 .sw*
 dist/

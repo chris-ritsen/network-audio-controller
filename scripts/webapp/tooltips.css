@@ -1,0 +1,27 @@
+@layer components {
+  .matrix-tooltip {
+    position: absolute;
+    z-index: 10;
+    pointer-events: none;
+    max-width: min(480px, calc(100% - 24px));
+    padding: 12px 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--raised);
+    color: var(--text);
+    box-shadow: 0 8px 24px #0008;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .matrix-tooltip-route {
+    font-weight: 600;
+  }
+
+  .matrix-tooltip-status {
+    margin-top: 6px;
+    white-space: pre-line;
+  }
+}

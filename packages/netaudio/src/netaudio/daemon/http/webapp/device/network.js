@@ -1,120 +1,142 @@
 import { api } from "../api.js";
-import { AsyncButton, DataTable, Fields, FieldRow, Panel, Value } from "../components.js";
-import * as format from "../format.js";
-import { html, useCallback, useRef, useState } from "../lib/preact.js";
+import { AsyncButton, Fields, FieldRow, Panel } from "../components.js";
+import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
-import { runAction } from "../toast.js";
 
-const INTERFACE_HEADERS = ["Index", "Mode", "Address", "Netmask", "Gateway", "DNS", "MAC address", "Link speed"];
+const modeLabel = (value) => ({
+  switched: "Switched", redundant: "Redundant", split_redundant: "Split/Redundant",
+  dynamic: "DHCP", static: "Static",
+}[value] || "Unavailable");
 
-function interfaceRows(interfaces) {
-  return (interfaces || []).map(
-    (entry, index) => html`
-      <tr key=${index}>
-        <td class="numeric">${index}</td>
-        <td>${html`<${Value} value=${entry.mode} />`}</td>
-        <td>${html`<${Value} value=${entry.ip_address} />`}</td>
-        <td>${html`<${Value} value=${entry.netmask} />`}</td>
-        <td>${html`<${Value} value=${entry.gateway} />`}</td>
-        <td>${html`<${Value} value=${entry.dns_server} />`}</td>
-        <td>${html`<${Value} value=${entry.mac_address} />`}</td>
-        <td>${html`<${Value} value=${entry.link_speed_mbps ?? entry.speed} />`}</td>
-      </tr>
-    `,
-  );
+function InterfaceCard({ entry, requestName, onReadback }) {
+  const configured = entry.configured;
+  const role = entry.interface;
+  const title = role === "primary" ? "Primary" : role === "secondary" ? "Secondary" : "Network interface";
+  const [mode, setMode] = useState(configured?.mode === "static" ? "static" : "dhcp");
+  const ip = useRef(null), mask = useRef(null), gateway = useRef(null), dns = useRef(null);
+  const editable = role === "primary" && configured != null;
+  return html`
+    <section class="network-section">
+      <h3 class="section-label">${title}</h3>
+      <${Fields} entries=${[
+        ["Active mode", modeLabel(entry.mode)],
+        ["Active address", entry.ip_address],
+        ["Subnet mask", entry.netmask],
+        ...(entry.gateway && entry.gateway !== "0.0.0.0" ? [["Gateway", entry.gateway]] : []),
+        ...(entry.dns_server && entry.dns_server !== "0.0.0.0" ? [["DNS server", entry.dns_server]] : []),
+        ["MAC address", entry.mac_address],
+        ...(configured ? [
+          ["Configured mode", modeLabel(configured.mode)],
+          ...(configured.mode === "static" ? [
+            ["Configured address", configured.ip_address],
+            ["Configured subnet mask", configured.netmask],
+            ["Configured gateway", configured.gateway],
+            ["Configured DNS server", configured.dns_server],
+          ] : []),
+        ] : []),
+      ]} />
+      ${entry.reboot_required ? html`<p role="status">Pending network change — reboot required.</p>` : null}
+      ${editable ? html`
+        <${FieldRow} label="Address mode">
+          <select aria-label=${title + " address mode"} value=${mode} onChange=${(event) => setMode(event.currentTarget.value)}>
+            <option value="dhcp">DHCP</option><option value="static">Static</option>
+          </select>
+        <//>
+        ${mode === "static" ? html`
+          <${FieldRow} label="IP address"><input ref=${ip} aria-label=${title + " IP address"} defaultValue=${configured.ip_address || entry.ip_address || ""} /><//>
+          <${FieldRow} label="Subnet mask"><input ref=${mask} aria-label=${title + " subnet mask"} defaultValue=${configured.netmask || entry.netmask || ""} /><//>
+          <${FieldRow} label="Gateway"><input ref=${gateway} aria-label=${title + " gateway"} defaultValue=${configured.gateway || ""} /><//>
+          <${FieldRow} label="DNS server"><input ref=${dns} aria-label=${title + " DNS server"} defaultValue=${configured.dns_server || ""} /><//>
+        ` : null}
+        <${AsyncButton} description=${"save " + title.toLowerCase() + " network settings"}
+          onRun=${async () => {
+            const result = await api.setInterface({
+              device: requestName, interface: role, mode,
+              ip: ip.current?.value, netmask: mask.current?.value,
+              gateway: gateway.current?.value, dns: dns.current?.value,
+            });
+            onReadback(result);
+            return result;
+          }}>Save ${title.toLowerCase()} settings<//>
+      ` : role === "secondary" ? html`<p>Secondary network settings are read-only; changing them is not yet supported.</p>` : null}
+    </section>
+  `;
+}
+
+function Redundancy({ status, requestName, onReadback }) {
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [selection, setSelection] = useState(status?.configured);
+  const changeMode = async (event) => {
+    const mode = event.currentTarget.value;
+    if (pending.current || mode === status.configured) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    setSelection(mode);
+    try {
+      const result = await api.setRedundancy({ device: requestName, mode });
+      setSelection(result.redundancy?.configured ?? status.configured);
+      onReadback(result);
+    } catch (error) {
+      setSelection(status.configured);
+      setError(error.message);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  if (!status) return html`<p>Dante Redundancy status is unavailable.</p>`;
+  return html`
+    <section class="network-section">
+      <h3 class="section-label">Dante Redundancy</h3>
+      <${Fields} entries=${[["Active", modeLabel(status.current)], ["Configured", modeLabel(status.configured)]]} />
+      ${status.reboot_required ? html`<p role="status">Pending redundancy change — reboot required.</p>` : null}
+      ${status.supported?.length ? html`
+        <${FieldRow} label="Dante Redundancy">
+          <select aria-label="Dante Redundancy" value=${selection} disabled=${busy} onChange=${changeMode}>
+            ${status.supported.map((mode) => html`<option value=${mode}>${modeLabel(mode)}</option>`)}
+          </select>
+        <//>
+        ${busy ? html`<p role="status">Applying redundancy mode…</p>` : null}
+        ${error ? html`<p role="alert">Could not change redundancy mode: ${error}</p>` : null}
+      ` : null}
+    </section>
+  `;
 }
 
 export function NetworkSection({ device }) {
   const requestName = deviceRequestName(device);
   const [probe, setProbe] = useState(null);
-  const address = useRef(null);
-  const netmask = useRef(null);
-  const gateway = useRef(null);
-  const dns = useRef(null);
-
-  const probeInterfaces = useCallback(async () => {
-    const outcome = await runAction(`probe interfaces on ${requestName}`, () => api.getInterfaces(requestName));
-    if (outcome.ok) {
-      setProbe(outcome.result);
-    }
-    return outcome.result;
+  const [loadError, setLoadError] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setProbe(null);
+    setLoadError(false);
+    if (device.online !== false) api.getInterfaces(requestName).then(
+      (result) => { if (active) setProbe(result); },
+      () => { if (active) setLoadError(true); },
+    );
+    return () => { active = false; };
   }, [requestName]);
-
+  const onReadback = (result) => {
+    setProbe((previous) => ({ ...previous, ...result }));
+    setLoadError(false);
+  };
+  const interfaces = probe?.interfaces ?? device.interfaces ?? [];
+  const status = probe?.redundancy ?? device.dante_redundancy;
+  const speed = probe?.link_speed_mbps ?? device.link_speed_mbps;
   return html`
-    <${Panel}
-      title="Network config"
-      actions=${html`
-        <${AsyncButton} small description=${`probe interfaces on ${requestName}`} onRun=${() => api.getInterfaces(requestName).then((result) => {
-          setProbe(result);
-          return result;
-        })}>
-          Probe interface status
-        <//>
-        <${AsyncButton}
-          small
-          description=${`set ${requestName} to DHCP`}
-          onRun=${async () => {
-            const result = await api.setInterface({ device: requestName, mode: "dhcp" });
-            await probeInterfaces();
-            return result;
-          }}
-        >
-          Set DHCP
-        <//>
-      `}
-    >
-      <${FieldRow} label="Static address">
-        <input key=${`interface-ip-${requestName}`} ref=${address} type="text" size="16" placeholder="address" />
-        <input key=${`interface-netmask-${requestName}`} ref=${netmask} type="text" size="16" placeholder="netmask" />
-        <input key=${`interface-gateway-${requestName}`} ref=${gateway} type="text" size="16" placeholder="gateway" />
-        <input key=${`interface-dns-${requestName}`} ref=${dns} type="text" size="16" placeholder="dns" />
-        <${AsyncButton}
-          variant="primary"
-          small
-          description=${`set static address on ${requestName}`}
-          onRun=${async () => {
-            const result = await api.setInterface({
-              device: requestName,
-              dns: dns.current.value,
-              gateway: gateway.current.value,
-              ip: address.current.value,
-              mode: "static",
-              netmask: netmask.current.value,
-            });
-            await probeInterfaces();
-            return result;
-          }}
-        >
-          Apply
-        <//>
-      <//>
-      <div class="section-label">Cached interfaces</div>
-      <${DataTable} headers=${INTERFACE_HEADERS} rows=${interfaceRows(device.interfaces)} short />
-      ${probe
-        ? html`
-            <div class="section-label">Last probe</div>
-            <${Fields}
-              entries=${[
-                ["Reboot required", html`<${Value} value=${probe.reboot_required} />`],
-                ["Pending configuration", html`<${Value} value=${probe.pending_config} />`],
-                ["Link speed", probe.link_speed_mbps ? `${probe.link_speed_mbps} Mbps` : format.ABSENT],
-              ]}
-            />
-            <${DataTable} headers=${INTERFACE_HEADERS} rows=${interfaceRows(probe.interfaces)} short />
-          `
-        : null}
-      <${Fields}
-        entries=${[
-          ["Reboot required", html`<${Value} value=${device.interface_reboot_required} />`],
-          ["Pending configuration", html`<${Value} value=${device.interface_pending_config} />`],
-          ["Network interface traffic", html`<${Value} value=${device.network_interface_traffic} />`],
-          ["Receiver flow connection health", html`<${Value} value=${device.receiver_flow_connection_health} />`],
-          [
-            "Receiver flow latency",
-            device.receiver_flow_latency_ns ? `${device.receiver_flow_latency_ns} ns` : format.ABSENT,
-          ],
-        ]}
-      />
+    <div class="network-config">
+    <${Panel} title="Network config">
+      ${loadError ? html`<p role="status">The device did not respond. Showing last-known network settings.</p>` : null}
+      ${speed ? html`<p>Link speed: ${speed} Mbps</p>` : null}
+      ${interfaces.length ? interfaces.map((entry) => html`
+        <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} entry=${entry} requestName=${requestName} onReadback=${onReadback} />
+      `) : html`<p>Network settings are unavailable.</p>`}
+      <${Redundancy} key=${requestName + status?.configured} status=${status} requestName=${requestName} onReadback=${onReadback} />
     <//>
+    </div>
   `;
 }

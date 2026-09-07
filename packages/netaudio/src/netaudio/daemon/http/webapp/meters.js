@@ -1,5 +1,5 @@
 import * as format from "./format.js";
-import { html, useEffect, useLayoutEffect, useRef, useState } from "./lib/preact.js";
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { meterValuesFor, onMeterValues } from "./store.js";
 
 const COLUMN_GAP = 14;
@@ -7,6 +7,20 @@ const LABEL_FONT = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
 const MINIMUM_BAR_WIDTH = 120;
 const PEAK_DECAY_PER_SECOND = 0.55;
 const ROW_HEIGHT = 20;
+const PRESENCE_LABELS = {
+  below_threshold: "Quiet",
+  signal_present: "Signal",
+  clipping: "Clipping",
+  muted: "Muted",
+  unknown: "Unknown",
+};
+
+function meterReadout(value, presence) {
+  const level = format.meteringLabel(value);
+  const label = presence ? PRESENCE_LABELS[presence] || "Unknown" : "";
+  if (label.toLowerCase() === level.toLowerCase()) return label;
+  return label ? `${level}  ${label}` : level;
+}
 
 const COLORS = {
   background: "#000000",
@@ -50,7 +64,8 @@ export function MeterBank({ device, direction, serverName }) {
   const lastDrawn = useRef(0);
   const [width, setWidth] = useState(0);
 
-  const names = channelNames(device, direction);
+  const names = useMemo(() => channelNames(device, direction), [device, direction]);
+  const declaredNumbers = useMemo(() => channelNumbers(device, direction, {}), [device, direction]);
   const initialValues = latest.current ? latest.current[direction] || {} : {};
   const [channelCount, setChannelCount] = useState(channelNumbers(device, direction, initialValues).length);
 
@@ -87,7 +102,7 @@ export function MeterBank({ device, direction, serverName }) {
       }
       const values = latest.current ? latest.current[direction] || {} : {};
       const presence = latest.current ? latest.current[`${direction}_signal_presence`] || {} : {};
-      const numbers = channelNumbers(device, direction, values);
+      const numbers = declaredNumbers.length ? declaredNumbers : channelNumbers(device, direction, values);
       if (numbers.length !== channelCount) {
         setChannelCount(numbers.length);
       }
@@ -100,7 +115,7 @@ export function MeterBank({ device, direction, serverName }) {
       running = false;
       window.cancelAnimationFrame(frame.current);
     };
-  }, [channelCount, device, direction, names, width]);
+  }, [channelCount, declaredNumbers, direction, names, width]);
 
   const height = Math.max(ROW_HEIGHT, channelCount * ROW_HEIGHT);
 
@@ -113,43 +128,69 @@ export function MeterBank({ device, direction, serverName }) {
   `;
 }
 
-export function measureColumns(context, numbers, values, presence, names) {
+export function measureColumns(context, numbers, names) {
   context.font = LABEL_FONT;
   let labelWidth = 0;
-  let valueWidth = 0;
+  const valueWidth = context.measureText("-126.0 dBFS  Clipping").width;
   for (const number of numbers) {
     const name = names[number] ? `${number}  ${names[number]}` : String(number);
     labelWidth = Math.max(labelWidth, context.measureText(name).width);
-    const indication = presence[number];
-    const label = indication
-      ? `${format.meteringLabel(values[number])}  ${indication}`
-      : format.meteringLabel(values[number]);
-    valueWidth = Math.max(valueWidth, context.measureText(label).width);
   }
   return { labelWidth: Math.ceil(labelWidth), valueWidth: Math.ceil(valueWidth) };
 }
 
+const layouts = new WeakMap();
+
+function meterLayout(context, width, numbers, names) {
+  const columns = measureColumns(context, numbers, names);
+  const compact = width < columns.labelWidth + columns.valueWidth + MINIMUM_BAR_WIDTH + COLUMN_GAP * 4;
+  const canvasWidth = width;
+  const barLeft = compact ? COLUMN_GAP : COLUMN_GAP * 2 + columns.labelWidth;
+  const barWidth = Math.max(1, compact ? width - COLUMN_GAP * 2 : width - barLeft - columns.valueWidth - COLUMN_GAP * 2);
+  let height = 0;
+  const rows = numbers.map((number) => {
+    const name = names[number] ? `${number}  ${names[number]}` : String(number);
+    const lines = [];
+    let line = "";
+    for (const character of name) {
+      if (compact && line && context.measureText(line + character).width > width - COLUMN_GAP * 2) {
+        lines.push(line);
+        line = "";
+      }
+      line += character;
+    }
+    lines.push(line);
+    const y = height;
+    height += ROW_HEIGHT * (compact ? lines.length + 2 : 1);
+    return { y, lines };
+  });
+  height = Math.max(ROW_HEIGHT, height);
+  return { columns, compact, canvasWidth, barLeft, barWidth, rows, height };
+}
+
 export function drawMeters(node, width, numbers, values, presence, names, peaks, elapsed) {
   const ratio = window.devicePixelRatio || 1;
-  const height = Math.max(ROW_HEIGHT, numbers.length * ROW_HEIGHT);
   const context = node.getContext("2d");
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  const columns = measureColumns(context, numbers, values, presence, names);
-  const barLeft = COLUMN_GAP + columns.labelWidth + COLUMN_GAP;
-  const canvasWidth = Math.max(width, barLeft + MINIMUM_BAR_WIDTH + COLUMN_GAP + columns.valueWidth + COLUMN_GAP);
-  const barWidth = canvasWidth - barLeft - COLUMN_GAP - columns.valueWidth - COLUMN_GAP;
+  let cached = layouts.get(node);
+  if (!cached || cached.width !== width || cached.names !== names || cached.numbers.length !== numbers.length || cached.numbers.some((number, index) => number !== numbers[index])) {
+    cached = { width, names, numbers: [...numbers], layout: meterLayout(context, width, numbers, names) };
+    layouts.set(node, cached);
+  }
+  const { columns, compact, canvasWidth, barLeft, barWidth, rows, height } = cached.layout;
 
   if (node.width !== Math.floor(canvasWidth * ratio) || node.height !== Math.floor(height * ratio)) {
     node.width = Math.floor(canvasWidth * ratio);
     node.height = Math.floor(height * ratio);
   }
-  node.style.width = `${canvasWidth}px`;
+  if (node.style.width !== `${canvasWidth}px`) node.style.width = `${canvasWidth}px`;
+  if (node.style.height !== `${height}px`) node.style.height = `${height}px`;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, canvasWidth, height);
 
   context.textBaseline = "middle";
   numbers.forEach((number, index) => {
-    const y = index * ROW_HEIGHT;
+    const row = rows[index];
+    const y = row.y + (compact ? row.lines.length * ROW_HEIGHT : 0);
     const centre = y + ROW_HEIGHT / 2;
     const raw = values[number];
     const fraction = format.meterFraction(raw);
@@ -158,15 +199,15 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     context.font = LABEL_FONT;
     context.fillStyle = COLORS.text;
     context.textAlign = "left";
-    const name = names[number] ? `${number}  ${names[number]}` : String(number);
-    context.fillText(name, COLUMN_GAP, centre);
+    row.lines.forEach((line, lineIndex) => context.fillText(line, COLUMN_GAP, compact ? row.y + (lineIndex + 0.5) * ROW_HEIGHT : centre));
 
     context.fillStyle = COLORS.track;
     context.fillRect(barLeft, y + 5, barWidth, ROW_HEIGHT - 10);
 
     const filled = Math.round(barWidth * fraction);
     if (filled > 0) {
-      context.fillStyle = raw === 0 ? COLORS.clip : decibels !== null && decibels > -6 ? COLORS.hot : COLORS.nominal;
+      context.fillStyle = raw === 0 || (decibels !== null && decibels >= -3) ? COLORS.clip
+        : decibels !== null && decibels >= -12 ? COLORS.hot : COLORS.nominal;
       context.fillRect(barLeft, y + 5, filled, ROW_HEIGHT - 10);
     }
 
@@ -182,14 +223,14 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
     context.fillStyle = COLORS.text;
     context.textAlign = "right";
     const indication = presence[number];
-    const label = indication ? `${format.meteringLabel(raw)}  ${indication}` : format.meteringLabel(raw);
-    context.fillText(label, canvasWidth - COLUMN_GAP, centre);
+    const label = meterReadout(raw, indication);
+    context.fillText(label, canvasWidth - COLUMN_GAP, compact ? centre + ROW_HEIGHT : centre, Math.min(columns.valueWidth, canvasWidth - COLUMN_GAP * 2));
   });
 
   context.strokeStyle = COLORS.grid;
   context.beginPath();
   for (let index = 1; index < numbers.length; index += 1) {
-    const y = Math.floor(index * ROW_HEIGHT) + 0.5;
+    const y = Math.floor(rows[index].y) + 0.5;
     context.moveTo(0, y);
     context.lineTo(canvasWidth, y);
   }

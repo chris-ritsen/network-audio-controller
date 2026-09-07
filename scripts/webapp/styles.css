@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "./base.css";
+@import "./layout.css";
+@import "./navigation.css";
+@import "./forms.css";
+@import "./panels.css";
+@import "./status.css";
+@import "./menus.css";
+@import "./tables.css";
+@import "./channels.css";
+@import "./metering.css";
+@import "./events.css";
+@import "./dialogs.css";
+@import "./devices.css";
+@import "./routing.css";
+@import "./filters.css";
+@import "./tooltips.css";
+
+@source "../../packages/netaudio/src/netaudio/daemon/http/webapp/**/*.js";
+@source "../../packages/netaudio/src/netaudio/daemon/http/webapp/index.html";
+
+@plugin "daisyui" {
+  themes: dark --default;
+  logs: false;
+}

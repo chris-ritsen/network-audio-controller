@@ -9,6 +9,7 @@ import struct
 import time
 
 from netaudio.common.app_config import settings as app_settings
+from netaudio.common.preferences import read_preferences, save_monitoring_port
 from netaudio.dante.const import (
     MULTICAST_GROUP_CONTROL_MONITORING,
 )
@@ -39,6 +40,7 @@ class MeteringManager:
         self._keepalive_task = None
         self._broadcast_task = None
         self._active_port: int | None = None
+        self._port_lock = asyncio.Lock()
         self._dirty_devices: set[str] = set()
 
     @staticmethod
@@ -155,15 +157,22 @@ class MeteringManager:
         self._host_ip = _get_local_ip()
         self._host_mac = self._application.cmc.host_media_access_control_address
 
-        preferred_port = app_settings.metering_port
+        configured = read_preferences().get("monitoring_port")
+        preferred_port = (
+            configured
+            if isinstance(configured, int) and not isinstance(configured, bool) and 1024 <= configured <= 65535
+            else app_settings.metering_port
+        )
         if self._probe_port(preferred_port):
             self._active_port = preferred_port
-        else:
+        elif configured is None:
             fallback_port = preferred_port + 1
             logger.warning(
                 f"Metering port {preferred_port} is in use (Dante Controller?), falling back to {fallback_port}"
             )
             self._active_port = fallback_port
+        else:
+            raise OSError(f"Configured monitoring port {preferred_port} is already in use")
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.bind(("", self._active_port))
@@ -270,6 +279,53 @@ class MeteringManager:
                 "metering_source": cached.get("metering_source") if cached else None,
             }
         return result
+
+    def port_settings(self):
+        return {
+            "monitoring_port": read_preferences().get("monitoring_port", app_settings.metering_port),
+            "active_monitoring_port": self._active_port,
+        }
+
+    async def configure_port(self, port):
+        if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+            raise ValueError("Monitoring port must be an integer between 1024 and 65535")
+        async with self._port_lock:
+            if port == self._active_port:
+                await asyncio.to_thread(save_monitoring_port, port)
+                return self.port_settings()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            replacement = None
+            try:
+                sock.bind(("", port))
+                sock.setsockopt(
+                    socket.IPPROTO_IP,
+                    socket.IP_ADD_MEMBERSHIP,
+                    struct.pack(
+                        "4s4s", socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING), socket.inet_aton("0.0.0.0")
+                    ),
+                )
+                replacement, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                    lambda: _MeteringProtocol(self._on_metering_packet), sock=sock
+                )
+                await asyncio.to_thread(save_monitoring_port, port)
+            except BaseException:
+                if replacement is not None:
+                    replacement.close()
+                else:
+                    sock.close()
+                raise
+            old = self._transport
+            active = set(self._persistent_refs) | {name for name, count in self._snapshot_count.items() if count}
+            stopped = await asyncio.gather(*(self._send_stop(name) for name in active), return_exceptions=True)
+            if any(isinstance(result, Exception) for result in stopped):
+                logger.warning("Some devices did not acknowledge the old monitoring destination")
+            self._transport = replacement
+            self._active_port = port
+            if old is not None:
+                old.close()
+            for name in active:
+                self._schedule(self._send_start(name))
+            return self.port_settings()
 
     def get_cached_levels(self, server_name: str) -> dict | None:
         cached = self._selected_sample(server_name)

@@ -1,4 +1,8 @@
-import { html, useCallback, useEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import { html, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
+import { PanelHeaderControls } from "./components.js";
+import { Icon } from "./icons.js";
+import { sortRows } from "./table-sort.js";
+import { navigate } from "./router.js";
 
 const STORAGE_PREFIX = "netaudio.columns.";
 
@@ -89,44 +93,65 @@ export function useColumnLayout(tableId, columns) {
 
   const visible = useMemo(() => {
     const byId = new Map(columns.map((column) => [column.id, column]));
-    return order.map((id) => byId.get(id)).filter((column) => column && !hidden.has(column.id));
+    return order.map((id) => byId.get(id)).filter((column) => column && (column.configurable === false || !hidden.has(column.id)));
   }, [columns, hidden, order]);
 
   return { hidden, move, order, reset, toggle, visible };
 }
 
 function ColumnMenu({ columns, layout }) {
+  const menuId = useId();
+  const selectable = columns
+    .filter((column) => column.configurable !== false && column.label)
+    .sort((first, second) => first.label.localeCompare(second.label, undefined, { sensitivity: "base", numeric: true }));
   const [open, setOpen] = useState(false);
-  const container = useRef(null);
+  const trigger = useRef(null);
+  const panel = useRef(null);
+  const position = useCallback(() => {
+    if (!trigger.current || !panel.current) return;
+    const anchor = trigger.current.getBoundingClientRect();
+    const margin = 8;
+    const gap = 6;
+    const width = Math.min(280, window.innerWidth - margin * 2);
+    const below = window.innerHeight - anchor.bottom - margin - gap;
+    const above = anchor.top - margin - gap;
+    const upwards = below < 200 && above > below;
+    const menu = panel.current;
+    menu.style.width = `${width}px`;
+    menu.style.maxHeight = `${Math.max(40, Math.min(480, upwards ? above : below))}px`;
+    menu.style.left = `${Math.max(margin, Math.min(anchor.right - width, window.innerWidth - width - margin))}px`;
+    const height = menu.getBoundingClientRect().height;
+    const desiredTop = upwards ? anchor.top - gap - height : anchor.bottom + gap;
+    menu.style.top = `${Math.max(margin, Math.min(desiredTop, window.innerHeight - height - margin))}px`;
+  }, []);
 
   useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const dismiss = (event) => {
-      if (container.current && !container.current.contains(event.target)) {
-        setOpen(false);
-      }
+    if (!open) return;
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
     };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
+  }, [open, position]);
 
-  const byId = new Map(columns.map((column) => [column.id, column]));
+  const byId = new Map(selectable.map((column) => [column.id, column]));
 
   return html`
-    <div class="menu" ref=${container}>
-      <button type="button" class="btn btn-small" onClick=${() => setOpen(!open)}>
-        Columns ${layout.visible.length}/${columns.length}
+    <div class="menu">
+      <button ref=${trigger} type="button" class="btn btn-sm" aria-expanded=${open}
+        popovertarget=${menuId} popovertargetaction="toggle" onClick=${(event) => {
+          event.preventDefault();
+          panel.current?.togglePopover();
+          position();
+        }}>
+        <span class="column-menu-desktop-label">Columns ${layout.visible.filter((column) => byId.has(column.id)).length}/${selectable.length}</span>
+        <span class="column-menu-mobile-label">Fields</span>
       </button>
-      ${open
-        ? html`
-            <div class="menu-panel column-menu">
-              ${layout.order.map((id) => {
-                const column = byId.get(id);
-                if (!column) {
-                  return null;
-                }
+            <div id=${menuId} ref=${panel} popover="auto" class="menu-panel column-menu" onToggle=${(event) => setOpen(event.newState === "open")}>
+              ${selectable.map((column) => {
+                const id = column.id;
                 return html`
                   <label key=${id} class="column-option">
                     <input
@@ -140,25 +165,44 @@ function ColumnMenu({ columns, layout }) {
               })}
               <button type="button" class="menu-item" onClick=${layout.reset}>Reset to defaults</button>
             </div>
-          `
-        : null}
     </div>
   `;
 }
 
-export function ConfigurableTable({ columns, height, onRowClick, rowKey, rows, short, tableId, toolbar }) {
+export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, rows, tableId, toolbar, toolbarActions }) {
   const layout = useColumnLayout(tableId, columns);
+  const headerControls = useContext(PanelHeaderControls);
+  useLayoutEffect(() => {
+    if (!headerControls) return;
+    headerControls.value = html`<${ColumnMenu} columns=${columns} layout=${layout} />`;
+    return () => { headerControls.value = null; };
+  }, [headerControls, columns, layout]);
   const dragged = useRef(null);
   const [dragTarget, setDragTarget] = useState(null);
+  const [sort, setSort] = useState(null);
+  const [expanded, setExpanded] = useState(() => new Set());
+  const sortedRows = sortRows(rows, columns.find((column) => column.id === sort?.id), sort?.direction);
 
   return html`
-    <div class="stack">
-      <div class="table-toolbar">
-        ${toolbar}
-        <div class="table-toolbar-spacer"></div>
-        <${ColumnMenu} columns=${columns} layout=${layout} />
+    <div class="flex flex-col gap-4">
+      <div class=${`table-toolbar${!toolbar && !toolbarActions && headerControls ? " table-toolbar-mobile-only" : ""}`}>
+        ${toolbar ? html`<div class="table-filter-controls">${toolbar}</div>` : null}
+        <div class="table-display-controls">
+        <label class="mobile-table-sort"><span class="sr-only">Sort by</span>
+          <select aria-label="Sort by" value=${sort?.id || ""} onChange=${(event) => setSort(event.target.value ? { id: event.target.value, direction: sort?.direction || "ascending" } : null)}>
+            <option value="">Sort: default</option>
+            ${layout.visible.filter((column) => column.label && column.sortable !== false)
+              .sort((first, second) => first.label.localeCompare(second.label, undefined, { numeric: true, sensitivity: "base" }))
+              .map((column) => html`<option value=${column.id}>${column.label}</option>`)}
+          </select>
+        </label>
+        ${sort ? html`<button type="button" class="btn btn-sm mobile-table-order" aria-label=${sort.direction === "ascending" ? "Sort descending" : "Sort ascending"}
+          onClick=${() => setSort({ ...sort, direction: sort.direction === "ascending" ? "descending" : "ascending" })}><${Icon} name=${sort.direction === "ascending" ? "sort-up" : "sort-down"} /></button>` : null}
+        ${toolbarActions}
+        ${headerControls ? null : html`<${ColumnMenu} columns=${columns} layout=${layout} />`}
+        </div>
       </div>
-      <div class="table-wrapper${short ? " short" : ""}" style=${height ? `max-height:${height}` : null}>
+      <div class="table-wrapper">
         <table class="data">
           <thead>
             <tr>
@@ -166,8 +210,10 @@ export function ConfigurableTable({ columns, height, onRowClick, rowKey, rows, s
                 (column) => html`
                   <th
                     key=${column.id}
+                    scope="col"
+                    aria-sort=${sort?.id === column.id ? sort.direction : null}
                     draggable=${true}
-                    class=${`draggable${dragTarget === column.id ? " drop-target" : ""}`}
+                    class=${`draggable${column.align === "right" ? " numeric" : ""}${column.id === "number" ? " channel-number" : ""}${dragTarget === column.id ? " drop-target" : ""}`}
                     title="Drag to reorder"
                     onDragStart=${() => {
                       dragged.current = column.id;
@@ -192,24 +238,52 @@ export function ConfigurableTable({ columns, height, onRowClick, rowKey, rows, s
                       setDragTarget(null);
                     }}
                   >
-                    ${column.label}
+                    ${column.label && column.sortable !== false ? html`
+                      <button type="button" class="inline-flex items-center gap-2 bg-transparent border-0 p-0 text-inherit font-inherit cursor-pointer"
+                        onClick=${() => setSort({ id: column.id, direction: sort?.id === column.id && sort.direction === "ascending" ? "descending" : "ascending" })}>
+                        ${column.label}<${Icon} name=${sort?.id === column.id ? (sort.direction === "ascending" ? "sort-up" : "sort-down") : "sort"} />
+                      </button>` : column.label}
                   </th>
                 `,
               )}
             </tr>
           </thead>
           <tbody>
-            ${rows.map((row) => {
+            ${sortedRows.map((row) => {
               const key = rowKey(row);
+              const summary = mobileSummary?.(row);
+              const isExpanded = expanded.has(key);
               return html`
                 <tr
                   key=${key}
-                  class=${onRowClick ? "selectable" : null}
-                  onClick=${onRowClick ? () => onRowClick(row) : null}
+                  class=${`${rowHref ? "cursor-pointer" : ""}${summary ? " expandable-row" : ""}${isExpanded ? " expanded" : ""}`}
+                  onClick=${rowHref ? (event) => {
+                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    if (event.target.closest("a, button, input, select, textarea, summary, [role=button]")) return;
+                    if (window.getSelection()?.toString()) return;
+                    navigate(rowHref(row));
+                  } : undefined}
                 >
+                  ${summary ? html`<td class="mobile-card-heading" data-label="" colspan=${layout.visible.length || 1}>
+                    <button type="button" class="mobile-card-toggle" aria-expanded=${isExpanded}
+                      onClick=${() => setExpanded((current) => {
+                        const next = new Set(current);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      })}>
+                      <span class="mobile-card-summary">
+                        <span class="mobile-card-title">${summary.title}</span>
+                        ${summary.detail ? html`<span class="mobile-card-detail">${summary.detail}</span>` : null}
+                      </span>
+                      <span class="mobile-card-chevron" aria-hidden="true">${isExpanded ? "−" : "+"}</span>
+                    </button>
+                  </td>` : null}
                   ${layout.visible.map(
-                    (column) => html`<td key=${column.id} class=${column.align === "right" ? "numeric" : null}>
-                      ${column.cell(row)}
+                    (column) => html`<td key=${column.id} data-label=${column.label || ""} class=${`${column.align === "right" ? "numeric" : ""}${column.id === "number" ? " channel-number" : ""}${column.id === "status" || column.id.endsWith("-status") ? " status-cell" : ""}`}>
+                      ${rowHref && column.id === (layout.visible.find((entry) => entry.id === "name" || entry.id === "device") || layout.visible[0]).id
+                        ? html`<a class="link link-hover inline-flex items-center gap-2 min-h-11" href=${rowHref(row)}><${Icon} name="devices" />${column.cell(row)}</a>`
+                        : column.cell(row)}
                     </td>`,
                   )}
                 </tr>

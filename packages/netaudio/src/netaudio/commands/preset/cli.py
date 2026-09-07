@@ -14,7 +14,7 @@ from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_command
 from netaudio.commands.preset.display import show_preset_dry_run
 from netaudio.commands.preset.loading import run_preset_load
-from netaudio.commands.preset.parsing import parse_preset
+from netaudio.presets.parsing import parse_preset
 
 app = typer.Typer(
     help="Save and load device presets (DC-compatible XML).",

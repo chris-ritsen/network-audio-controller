@@ -617,14 +617,15 @@ def test_single_device_preferred_leader_read_is_labeled():
     assert result.output == "Preferred leader: off\n"
 
 
-def test_interface_write_is_requested_but_not_verified():
+def test_interface_write_without_readback_is_an_error():
     device = FakeDevice("AVIO")
     application = FakeApplication({"avio.local.": device})
 
     result = invoke(config_network_commands.run_interface, application, application.devices, "dhcp", None, False)
 
-    assert result.exit_code == 0
-    assert "Interface change requested for AVIO: dhcp; not verified" in result.output
+    assert result.exit_code == 1
+    assert "Primary interface is unavailable" in result.output
+    assert "(verified)" not in result.output
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_interface", ("dhcp", None))]
 
 
@@ -632,7 +633,7 @@ def test_interface_write_is_requested_but_not_verified():
     ("locking", "action"),
     [(True, "lock"), (False, "unlock")],
 )
-def test_daemon_lock_failure_reports_protocol_status(monkeypatch, reset_cli_state, locking, action):
+def test_daemon_lock_failure_reports_unknown_state_without_raw_status(monkeypatch, reset_cli_state, locking, action):
     async def failed_daemon_request(device_name, pin, requested_action):
         assert device_name == "AVIO"
         assert pin == "1234"
@@ -647,7 +648,8 @@ def test_daemon_lock_failure_reports_protocol_status(monkeypatch, reset_cli_stat
     )
 
     assert result.exit_code == 1
-    assert f"Error: {action} failed (status 0x1101)" in result.output
+    assert f"Error: {action} failed: the device returned an unrecognized status." in result.output
+    assert "0x1101" not in result.output
     assert "unknown" not in result.output
 
 

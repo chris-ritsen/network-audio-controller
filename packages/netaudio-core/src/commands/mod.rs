@@ -150,6 +150,7 @@ mod device;
 mod flows;
 mod metering;
 mod multicast;
+mod network;
 mod settings;
 mod subscriptions;
 
@@ -157,6 +158,7 @@ pub use device::*;
 pub use flows::*;
 pub use metering::*;
 pub use multicast::*;
+pub use network::*;
 pub use settings::*;
 pub use subscriptions::*;
 

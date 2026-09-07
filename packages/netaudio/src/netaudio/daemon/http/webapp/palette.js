@@ -7,11 +7,8 @@ const paletteOpen = signal(false);
 
 const VIEW_ENTRIES = [
   { kind: "view", label: "Routing", path: "/routing" },
-  { kind: "view", label: "Device info", path: "/devices" },
-  { kind: "view", label: "Clock status", path: "/clock-status" },
-  { kind: "view", label: "Network status", path: "/network-status" },
-  { kind: "view", label: "Metering", path: "/metering" },
-  { kind: "view", label: "Flows", path: "/flows" },
+  { kind: "view", label: "Subscriptions", path: "/subscriptions" },
+  { kind: "view", label: "Devices", path: "/devices" },
   { kind: "view", label: "Domains", path: "/ddm" },
   { kind: "view", label: "Shure", path: "/shure" },
   { kind: "view", label: "Events", path: "/events" },
@@ -44,7 +41,7 @@ function buildEntries() {
   for (const device of format.sortedShureDevices(shureDevices.value)) {
     const name = device.name || device.mac;
     entries.push({
-      detail: format.text(device.model),
+      detail: format.text(format.deviceModelName(device)),
       kind: "shure",
       label: name,
       online: device.online,
@@ -122,7 +119,12 @@ export function CommandPalette() {
   };
 
   return html`
-    <dialog class="palette" ref=${dialog} onClose=${closePalette} onCancel=${closePalette}>
+    <dialog class="palette" ref=${dialog} aria-label="Search" onClose=${closePalette} onCancel=${closePalette}
+      onClick=${(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closePalette();
+      }}>
       <input
         ref=${input}
         type="text"

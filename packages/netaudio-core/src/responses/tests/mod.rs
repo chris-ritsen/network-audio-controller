@@ -3,6 +3,7 @@ use crate::protocol::PROTOCOL_ID;
 use crate::test_support::decode_hexadecimal;
 
 mod ancillary_media;
+mod network_configuration;
 
 fn stamp_arc_response(response: &mut [u8], protocol: u16, opcode: u16, result: u16) {
     let length = response.len() as u16;

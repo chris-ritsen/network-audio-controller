@@ -11,7 +11,7 @@ from netaudio.dante.lock import (
 class _FakeCoreClient:
     instances = []
 
-    def __init__(self, device_ip):
+    def __init__(self, device_ip, *, local_ip=None):
         self.device_ip = device_ip
         self.calls = []
         self.closed = False

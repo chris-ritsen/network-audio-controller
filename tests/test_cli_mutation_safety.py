@@ -337,7 +337,7 @@ def test_empty_flow_list_preserves_structured_output(monkeypatch):
     result = invoke(flow_commands.run_flow_list, application, devices)
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == flow_inventory
+    assert json.loads(result.output) == {**flow_inventory, "flow_protocol_id": 0x2809}
 
 
 RECEIVER_FLOW_INVENTORY = {

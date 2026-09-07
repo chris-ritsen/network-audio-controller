@@ -8,7 +8,7 @@ import logging
 import socket
 import time
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import ifaddr
 from zeroconf import Error as ZeroconfError
@@ -17,9 +17,13 @@ from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
+from netaudio.common.managed_api import DDMConfiguration
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
+from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
+from netaudio.daemon.http.presets import DaemonPresetHandlers
+from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
@@ -80,9 +84,18 @@ def _daemon_service_instance_label(hostname: str) -> str:
 
 
 @dataclass(eq=False)
+class _MeterUpdate:
+    key: str
+    payload: bytes
+
+
+@dataclass(eq=False)
 class _SseClient:
     writer: asyncio.StreamWriter
-    queue: asyncio.Queue[bytes] = field(default_factory=lambda: asyncio.Queue(maxsize=SSE_CLIENT_QUEUE_SIZE))
+    queue: asyncio.Queue[bytes | _MeterUpdate] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=SSE_CLIENT_QUEUE_SIZE)
+    )
+    pending_meters: dict[str, _MeterUpdate] = field(default_factory=dict)
     closed: asyncio.Event = field(default_factory=asyncio.Event)
     sender_task: asyncio.Task | None = None
 
@@ -103,6 +116,9 @@ async def _bounded(awaitable, timeout: float):
 
 
 class DaemonHTTPServer(
+    DaemonPresetHandlers,
+    DaemonSettingsHandlers,
+    DaemonConnectionHandlers,
     DaemonConfigurationHandlers,
     DaemonDeviceHandlers,
     DaemonManagedHandlers,
@@ -119,9 +135,12 @@ class DaemonHTTPServer(
         mark_offline=None,
         forget_device=None,
         managed_inventory=None,
+        refresh_discovery=None,
     ):
         self.application = application
         self.managed_inventory = managed_inventory
+        self.refresh_discovery = refresh_discovery
+        self._dismissed_offline_inventory: set[str] = set()
         self.state = state
         self.metering = metering
         self.shure = shure
@@ -140,8 +159,13 @@ class DaemonHTTPServer(
         self._bonjour_registered_monotonic: float | None = None
         self._last_bonjour_probe_wall_time: float | None = None
         self._device_lock_operation_locks: dict[str, asyncio.Lock] = {}
+        self._connection_lock = asyncio.Lock()
+        self._preset_operation_lock = asyncio.Lock()
         self.audio_capability_verification_timeout = AUDIO_CAPABILITY_VERIFICATION_TIMEOUT_SECONDS
         self.post_handlers = {
+            "/presets/save": self._handle_save_preset,
+            "/presets/preview": self._handle_preview_preset,
+            "/presets/load": self._handle_load_preset,
             "/subscribe": self._handle_subscribe,
             "/unsubscribe": self._handle_unsubscribe,
             "/identify": self._handle_identify,
@@ -151,6 +175,7 @@ class DaemonHTTPServer(
             "/lock": self._handle_lock,
             "/unlock": self._handle_unlock,
             "/refresh": self._handle_refresh,
+            "/discovery/refresh": self._handle_discovery_refresh,
             "/set-sample-rate": self._handle_set_sample_rate,
             "/set-encoding": self._handle_set_encoding,
             "/set-gain": self._handle_set_gain,
@@ -163,13 +188,21 @@ class DaemonHTTPServer(
             "/refresh-clock": self._handle_refresh_clock,
             "/reboot": self._handle_reboot,
             "/interface": self._handle_set_interface,
+            "/redundancy": self._handle_set_redundancy,
             "/metering/start": self._handle_metering_start,
             "/metering/stop": self._handle_metering_stop,
             "/report-unresponsive": self._handle_report_unresponsive,
             "/flows/create": self._handle_create_tx_flow,
+            "/flows/allocate": self._handle_allocate_multicast_flow,
             "/flows/delete": self._handle_delete_tx_flow,
             "/ddm/graphql": self._handle_ddm_graphql,
             "/ddm/refresh": self._handle_ddm_refresh,
+            "/ddm/login": self._handle_ddm_login,
+            "/ddm/logout": self._handle_ddm_logout,
+            "/ddm/enrollment": self._handle_ddm_enrollment,
+            "/ddm/domains": self._handle_ddm_create_domain,
+            "/ddm/context": self._handle_ddm_context,
+            "/settings/monitoring": self._handle_monitoring_settings,
             "/shutdown": self._handle_shutdown,
         }
         self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
@@ -333,6 +366,10 @@ class DaemonHTTPServer(
                 server_name: DanteDeviceSerializer.to_json(device)
                 for server_name, device in self.application.devices.items()
             }
+        for key, record in records.items():
+            if record.get("online"):
+                self._dismissed_offline_inventory.discard(key)
+        records = {key: record for key, record in records.items() if key not in self._dismissed_offline_inventory}
         if context_name is not None:
             records = {
                 server_name: record
@@ -351,6 +388,14 @@ class DaemonHTTPServer(
             "devices": self._serialized_devices(),
             "shure_devices": shure_state,
             "metering": metering_state,
+            "managed": {
+                "status": self.managed_inventory.status(),
+                "domains": self.managed_inventory.domains(),
+                "connections": self._connection_state(self.managed_inventory.configuration),
+            }
+            if self.managed_inventory is not None
+            and isinstance(getattr(self.managed_inventory, "configuration", None), DDMConfiguration)
+            else None,
         }
 
     async def publish_inventory_snapshot(self) -> None:
@@ -360,9 +405,24 @@ class DaemonHTTPServer(
 
     async def _broadcast_sse(self, data):
         payload = f"data: {json.dumps(data, default=str)}\n\n".encode()
+        # Detailed samples contain complete vectors. Partial signal-presence
+        # updates and control events must retain their original ordering.
+        key = (
+            data["server_name"]
+            if data.get("event") == "meter_values" and data.get("metering_source") == "detailed"
+            else None
+        )
         for client in tuple(self.sse_clients.values()):
             try:
-                client.queue.put_nowait(payload)
+                if key is None:
+                    client.queue.put_nowait(payload)
+                    client.pending_meters.clear()
+                elif key in client.pending_meters:
+                    client.pending_meters[key].payload = payload
+                else:
+                    update = _MeterUpdate(key, payload)
+                    client.queue.put_nowait(update)
+                    client.pending_meters[key] = update
             except asyncio.QueueFull:
                 self._drop_sse_client(client, "outbound event queue full")
 
@@ -370,6 +430,10 @@ class DaemonHTTPServer(
         try:
             while True:
                 payload = await client.queue.get()
+                if isinstance(payload, _MeterUpdate):
+                    if client.pending_meters.get(payload.key) is payload:
+                        del client.pending_meters[payload.key]
+                    payload = payload.payload
                 client.writer.write(payload)
                 await _bounded(
                     client.writer.drain(),
@@ -611,6 +675,15 @@ class DaemonHTTPServer(
             logger.warning(f"Daemon HTTP API writer close ended with {exception}")
 
     async def _dispatch(self, method, path, body, writer, headers=None):
+        if (
+            path.startswith("/presets/")
+            or path
+            in {"/ddm/login", "/ddm/logout", "/ddm/context", "/ddm/enrollment", "/ddm/domains", "/settings/monitoring"}
+        ) and headers:
+            origin = headers.get("origin")
+            if origin and urlsplit(origin).netloc != headers.get("host"):
+                await self._send_json(writer, {"error": "Settings must be changed from this app's origin"}, 403)
+                return
         if method == "GET":
             route, _, query_string = path.partition("?")
             if prefers_web_page(headers) and is_application_route(route):
@@ -618,7 +691,11 @@ class DaemonHTTPServer(
                 return
             query = parse_qs(query_string)
             context_name = next(iter(query.get("context", ())), None)
-            if route == "/shure/devices":
+            if route == "/settings":
+                await self._handle_get_settings(writer)
+            elif route == "/ddm/connections":
+                await self._handle_get_connections(writer)
+            elif route == "/shure/devices":
                 await self._handle_get_shure_devices(writer)
             elif route.startswith("/shure/devices/"):
                 await self._handle_get_shure_device(writer, route[len("/shure/devices/") :])
@@ -634,6 +711,8 @@ class DaemonHTTPServer(
                 await self._handle_get_device(writer, unquote(route[len("/devices/") :]), context_name)
             elif route.startswith("/interfaces/"):
                 await self._handle_get_interfaces(writer, unquote(route[len("/interfaces/") :]))
+            elif route.startswith("/redundancy/"):
+                await self._handle_get_redundancy(writer, unquote(route[len("/redundancy/") :]))
             elif route.startswith("/lock-status/"):
                 await self._handle_get_lock_status(writer, unquote(route[len("/lock-status/") :]))
             elif route.startswith("/flows/"):

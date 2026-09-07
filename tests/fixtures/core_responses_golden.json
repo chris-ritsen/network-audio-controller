@@ -384,11 +384,17 @@
           "ip_address": "192.168.1.139",
           "netmask": "255.255.255.0",
           "gateway": "192.168.1.1",
-          "dns_server": "192.168.1.1"
+          "dns_server": "192.168.1.1",
+          "interface": "primary",
+          "configured": {
+            "mode": "dynamic"
+          },
+          "reboot_required": false
         }
       ],
       "reboot_required": false,
-      "pending_config": null
+      "record_protocol_identifier": 1831,
+      "redundancy": null
     }
   },
   "interface_status_avio_input_packet_12362180": {
@@ -403,11 +409,21 @@
           "ip_address": "192.168.1.42",
           "netmask": "255.255.255.0",
           "gateway": "8.8.4.4",
-          "dns_server": "8.8.8.8"
+          "dns_server": "8.8.8.8",
+          "interface": "primary",
+          "configured": {
+            "mode": "static",
+            "ip_address": "192.168.1.42",
+            "netmask": "255.255.255.0",
+            "gateway": "8.8.4.4",
+            "dns_server": "8.8.8.8"
+          },
+          "reboot_required": false
         }
       ],
       "reboot_required": false,
-      "pending_config": null
+      "record_protocol_identifier": 1831,
+      "redundancy": null
     }
   },
   "interface_status_lx_dante_packet_12362179": {
@@ -422,17 +438,36 @@
           "ip_address": "192.168.1.108",
           "netmask": "255.255.255.0",
           "gateway": "192.168.1.1",
-          "dns_server": "192.168.1.1"
+          "dns_server": "192.168.1.1",
+          "interface": "primary",
+          "configured": {
+            "mode": "dynamic"
+          },
+          "reboot_required": false
         },
         {
-          "mode": "unknown(0x0000)",
+          "mode": "dynamic",
           "mac_address": "00:1D:C1:08:12:59",
           "ip_address": "172.31.185.58",
-          "netmask": "255.255.0.0"
+          "netmask": "255.255.0.0",
+          "interface": "secondary",
+          "configured": {
+            "mode": "dynamic"
+          },
+          "reboot_required": false
         }
       ],
       "reboot_required": false,
-      "pending_config": null
+      "record_protocol_identifier": 1828,
+      "redundancy": {
+        "current": "switched",
+        "configured": "switched",
+        "supported": [
+          "switched",
+          "redundant"
+        ],
+        "reboot_required": false
+      }
     }
   },
   "metering_frame_a32_packet_7298422": {

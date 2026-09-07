@@ -17,6 +17,18 @@ STATIC_INTERFACE_FIELDS = (
 
 def parse_preset(preset_path: Path) -> tuple[str, dict[str, dict[str, Any]]]:
     root = ET.parse(preset_path).getroot()
+    return _parse_root(root)
+
+
+def parse_preset_xml(content: str) -> tuple[str, dict[str, dict[str, Any]]]:
+    if "<!DOCTYPE" in content.upper() or "<!ENTITY" in content.upper():
+        raise ValueError("preset XML must not contain document type or entity declarations")
+    return _parse_root(ET.fromstring(content))
+
+
+def _parse_root(root: ET.Element) -> tuple[str, dict[str, dict[str, Any]]]:
+    if root.tag != "preset":
+        raise ValueError("expected a Dante preset XML document")
     preset_name = root.findtext("name", "unknown")
     preset_devices: dict[str, dict[str, Any]] = {}
     for device_element in root.findall("device"):
@@ -92,7 +104,10 @@ def _parse_transmitter_channel_names(device_element: ET.Element) -> dict[int, st
         dante_identifier = transmitter_element.get("danteId")
         label = transmitter_element.findtext("label", "")
         if dante_identifier and label:
-            transmitter_channel_names[int(dante_identifier)] = label
+            identifier = int(dante_identifier)
+            if not 1 <= identifier <= 65535 or identifier in transmitter_channel_names:
+                raise ValueError("transmitter channel danteId must be unique and from 1 through 65535")
+            transmitter_channel_names[identifier] = label
     return transmitter_channel_names
 
 

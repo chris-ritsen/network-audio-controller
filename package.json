@@ -1,0 +1,17 @@
+{
+  "name": "netaudio-webapp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:webapp": "node scripts/webapp/icons.mjs && tailwindcss -i ./scripts/webapp/styles.css -o ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css && prettier --write ./packages/netaudio/src/netaudio/daemon/http/webapp/app.css",
+    "test:webapp": "node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test tests/webapp/*.test.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/cli": "4.3.3",
+    "daisyui": "5.7.28",
+    "lucide-static": "1.41.0",
+    "prettier": "3.9.6",
+    "tailwindcss": "4.3.3"
+  }
+}

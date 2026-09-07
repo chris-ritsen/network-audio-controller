@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.channel_status_paging import modern_arc_protocol_identifier_for_device
 from netaudio.dante.const import (
     FLOW_CREATE_PROTOCOL_IDS,
@@ -47,8 +48,13 @@ def require_available_tx_channels(channel_numbers, available_channels) -> None:
 
 
 def require_available_flow_slot(device_flows, flow_slot: int) -> None:
-    if any(flow.get("flow_number") == flow_slot for flow in device_flows):
+    if any(_flow_slot(flow) == flow_slot for flow in device_flows):
         raise FlowValidationError(f"flow slot {flow_slot} is already in use", status=409)
+
+
+def _flow_slot(flow: dict) -> int | None:
+    # Legacy inventory and modern status pages use different field names.
+    return flow.get("global_flow_id") if "global_flow_id" in flow else flow.get("flow_number")
 
 
 def require_supported_flow_slot(flow_slot: int, max_flow_slots: int) -> None:
@@ -61,7 +67,7 @@ def require_supported_flow_slot(flow_slot: int, max_flow_slots: int) -> None:
 
 def require_multicast_flow(device_flows, flow_slot: int) -> dict:
     flow = next(
-        (entry for entry in device_flows if entry.get("flow_number") == flow_slot),
+        (entry for entry in device_flows if _flow_slot(entry) == flow_slot),
         None,
     )
     if flow is None:
@@ -115,7 +121,9 @@ async def _request(
     from netaudio import core
 
     def _send():
-        client = core.CoreClient(device_ip, arc_port=arc_port, timeout_ms=timeout_ms, attempts=attempts)
+        client = core.CoreClient(
+            device_ip, arc_port=arc_port, timeout_ms=timeout_ms, attempts=attempts, local_ip=app_settings.interface_ip
+        )
         try:
             packet = core.build_command(command_specification)
             return client.request(packet, arc_port)
@@ -334,10 +342,13 @@ async def query_preferred_tx_flow_inventory(
         device=device,
     )
     if status_inventory is not None:
-        return status_inventory
+        return {**status_inventory, "flow_protocol_id": status_protocol_id}
     if mutation_protocol_id in MODERN_ARC_PROTOCOL_IDS:
         return None
-    return await _query_tx_inventory_with_optional_device(device_ip, arc_port, mutation_protocol_id, device)
+    inventory = await _query_tx_inventory_with_optional_device(device_ip, arc_port, mutation_protocol_id, device)
+    if inventory is None:
+        return None
+    return {**inventory, "flow_protocol_id": mutation_protocol_id}
 
 
 def inventory_from_receiver_flow_status_page(page: dict) -> dict:

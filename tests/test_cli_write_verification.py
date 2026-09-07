@@ -105,7 +105,7 @@ async def test_transport_executes_specifications_through_one_cached_client(monke
     created = []
 
     class FakeClient:
-        def __init__(self, device_ip, arc_port=4440, timeout_ms=1000, attempts=3):
+        def __init__(self, device_ip, arc_port=4440, timeout_ms=1000, attempts=3, *, local_ip=None):
             self.device_ip = device_ip
             self.arc_port = arc_port
             self.executed = []

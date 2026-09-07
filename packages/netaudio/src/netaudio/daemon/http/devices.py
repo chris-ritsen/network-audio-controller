@@ -6,7 +6,10 @@ import logging
 from netaudio.common.app_config import settings as app_settings
 from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
 from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.discovery import discovery_destination
 from netaudio.dante.lock import validate_pin
+from netaudio.dante.application import CapabilityProbeTimeout
+from netaudio.dante.network_configuration import network_snapshot
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
@@ -86,9 +89,37 @@ class DaemonDeviceHandlers:
     async def _handle_forget_device(self, writer, device_name):
         device = self._find_device(device_name)
         if not device:
+            records = (
+                self._serialized_devices()
+                if self.managed_inventory is not None and self.managed_inventory.enabled
+                else {}
+            )
+            matches = [
+                (key, record)
+                for key, record in records.items()
+                if device_name.lower()
+                in {str(record.get(field, "")).lower() for field in ("server_name", "inventory_id", "name")}
+                or key == device_name
+            ]
+            if len(matches) > 1:
+                await self._send_json(writer, {"error": "multiple devices matched; use the inventory ID"}, 409)
+                return
+            if matches and matches[0][1].get("online") is False:
+                forgotten = self._dismiss_inventory_records(matches)
+                await self.publish_inventory_snapshot()
+                await self._send_json(writer, {"forgotten": forgotten})
+                return
             await self._send_json(writer, {"error": "device not found"}, 404)
             return
-        await self._send_json(writer, {"forgotten": self._forget_devices([device])})
+        records = (
+            self._serialized_devices() if self.managed_inventory is not None and self.managed_inventory.enabled else {}
+        )
+        forgotten = self._forget_devices([device])
+        record = records.get(device.server_name)
+        if record and record.get("online") is False and record.get("ddm_device_id"):
+            self._dismiss_inventory_records([(device.server_name, record)])
+            await self.publish_inventory_snapshot()
+        await self._send_json(writer, {"forgotten": forgotten})
 
     async def _handle_forget_devices(self, writer, query):
         selections = {
@@ -111,7 +142,28 @@ class DaemonDeviceHandlers:
             if ("offline" in selections and not device.online)
             or ("emulated" in selections and device.kind == "emulated")
         ]
-        await self._send_json(writer, {"forgotten": self._forget_devices(matched)})
+        records = (
+            self._serialized_devices() if self.managed_inventory is not None and self.managed_inventory.enabled else {}
+        )
+        forgotten = self._forget_devices(matched)
+        if "offline" in selections:
+            extra = [
+                (key, record)
+                for key, record in records.items()
+                if record.get("online") is False and record.get("ddm_device_id")
+            ]
+            existing = {entry["server_name"] for entry in forgotten}
+            dismissed = self._dismiss_inventory_records(extra)
+            forgotten.extend(entry for entry in dismissed if entry["server_name"] not in existing)
+        await self.publish_inventory_snapshot()
+        await self._send_json(writer, {"forgotten": forgotten})
+
+    def _dismiss_inventory_records(self, records):
+        forgotten = []
+        for key, record in records:
+            self._dismissed_offline_inventory.add(key)
+            forgotten.append({field: record.get(field) for field in ("ipv4", "kind", "name", "online", "server_name")})
+        return forgotten
 
     def _forget_devices(self, devices):
         forgotten = []
@@ -140,7 +192,13 @@ class DaemonDeviceHandlers:
             await self._send_json(writer, {"error": "device has no IP address"}, 409)
             return
 
-        interfaces = await self.application.probe_interface_status(device)
+        try:
+            interfaces = await self.application.probe_interface_status(device)
+            if device.interface_status_protocol == 0x072E:
+                await self.application.probe_switch_configuration(device)
+        except (CapabilityProbeTimeout, TimeoutError):
+            await self._send_json(writer, {"error": "The device did not respond to the network settings query"}, 504)
+            return
         if interfaces is None:
             await self._send_json(writer, {"error": "interface status was not reported"}, 504)
             return
@@ -150,10 +208,7 @@ class DaemonDeviceHandlers:
             writer,
             {
                 "device": device.server_name,
-                "interfaces": interfaces,
-                "link_speed_mbps": device.link_speed_mbps,
-                "reboot_required": device.interface_reboot_required,
-                "pending_config": device.interface_pending_config,
+                **network_snapshot(device),
             },
         )
 
@@ -528,6 +583,22 @@ class DaemonDeviceHandlers:
             await self.state.refresh_all_devices()
         await self._send_json(writer, {"success": True})
 
+    async def _handle_discovery_refresh(self, writer, params):
+        try:
+            address = discovery_destination(params.get("address"))
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        if self.refresh_discovery is None:
+            await self._send_json(writer, {"error": "mDNS discovery is not running"}, 503)
+            return
+        try:
+            result = await self.refresh_discovery(address)
+        except (RuntimeError, OSError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 503)
+            return
+        await self._send_json(writer, {"success": True, **result})
+
     @staticmethod
     def _peer_is_loopback(writer):
         peername = writer.get_extra_info("peername")
@@ -614,6 +685,15 @@ class DaemonDeviceHandlers:
     async def _handle_metering_start(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
+            return
+        if getattr(device, "requires_managed_control", False):
+            await self._send_json(
+                writer,
+                {
+                    "error": "Detailed metering through DDM is not implemented yet. DDM login enables inventory and supported device controls, not this meter stream."
+                },
+                409,
+            )
             return
         client_id = params.get("client_id", "daemon_http")
         if not self.metering:

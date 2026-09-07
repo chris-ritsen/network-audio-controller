@@ -11,7 +11,7 @@ async def test_core_lock_device_rejects_missing_key_before_client(monkeypatch):
     called = False
 
     class Client:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             nonlocal called
             called = True
 
@@ -36,7 +36,7 @@ async def test_core_lock_device_rejects_bad_key_length_before_client(monkeypatch
     called = False
 
     class Client:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             nonlocal called
             called = True
 
@@ -101,7 +101,7 @@ async def test_core_lock_device_returns_core_error(monkeypatch):
     from netaudio.core import NetaudioCoreError
 
     class Client:
-        def __init__(self, device_ip):
+        def __init__(self, device_ip, *, local_ip=None):
             assert device_ip == "192.0.2.10"
 
         def __enter__(self):
@@ -129,7 +129,7 @@ async def test_core_lock_device_uses_rust_client(monkeypatch):
     called = False
 
     class Client:
-        def __init__(self, device_ip):
+        def __init__(self, device_ip, *, local_ip=None):
             assert device_ip == "192.0.2.10"
 
         def __enter__(self):

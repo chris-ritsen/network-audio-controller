@@ -190,12 +190,11 @@ def _fetch_instrumented(client, arc_port, include_channels=True):
 
 
 async def populate_instrumented(device, observer):
+    from netaudio.common.app_config import settings as app_settings
+
     arc_port = device._arc_port()
-    client = core.CoreClient(str(device.ipv4), arc_port=arc_port)
+    client = core.CoreClient(str(device.ipv4), arc_port=arc_port, local_ip=app_settings.interface_ip)
     client.observer = observer
-    mac = core.host_mac()
-    if mac:
-        client.set_host_mac(mac)
     try:
         data = await asyncio.to_thread(_fetch_instrumented, client, arc_port)
         device.apply_controls(device.controls_data_from_core(data))

@@ -97,7 +97,8 @@ class FakeDevice:
         self.clock_source_code = None
         self.preferred_leader = None
         self.interfaces = None
-        self.interface_pending_config = None
+        self.dante_redundancy = None
+        self.interface_status_protocol = None
         self.tx_channels = {}
         self.rx_channels = {}
         self.subscriptions = []
@@ -250,7 +251,7 @@ class FakeApplication:
         device.clock_source_code = source
         return source
 
-    async def set_interface(self, device, mode, static_configuration=None):
+    async def set_interface(self, device, mode, static_configuration=None, *, interface="primary"):
         return self._record("set_interface", device, mode, static_configuration)
 
     async def add_subscriptions(self, device, records):

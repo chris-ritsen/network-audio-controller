@@ -476,6 +476,7 @@ mod conmon_detail;
 mod device;
 mod flow_setup;
 mod flows;
+mod network;
 mod pointer_table;
 
 pub use channel_status::*;
@@ -485,6 +486,7 @@ pub use conmon_detail::*;
 pub use device::*;
 pub use flow_setup::*;
 pub use flows::*;
+pub use network::*;
 use pointer_table::parse_pointer_table_page;
 
 #[cfg(test)]

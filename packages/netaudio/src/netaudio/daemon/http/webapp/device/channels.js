@@ -1,10 +1,11 @@
 import { api } from "../api.js";
 import {AsyncButton, Button, Notice, Panel, Value} from "../components.js";
 import * as format from "../format.js";
-import { html, useRef, useState } from "../lib/preact.js";
+import { html, useEffect, useRef, useState } from "../lib/preact.js";
 import { RoutePicker } from "../route-picker.js";
 import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
+import { SubscriptionStatus } from "./receiver-status.js";
 
 function gainChannelType(device) {
   if (device.gain_device_type === "input") {
@@ -18,29 +19,81 @@ function gainChannelType(device) {
 
 function NameCell({ channel, channelNumber, channelType, requestName }) {
   const input = useRef(null);
+  const editButton = useRef(null);
+  const editor = useRef(null);
+  const [editing, setEditing] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [name, setName] = useState(channel.name || "");
+  const [draft, setDraft] = useState("");
+  const label = `${channelType === "rx" ? "Receive" : "Transmit"} channel ${channelNumber} name`;
+  useEffect(() => setName(channel.name || ""), [channel.name]);
+  useEffect(() => {
+    if (editing) {
+      input.current?.focus();
+      input.current?.select();
+      const reposition = () => {
+        const box = editButton.current.getBoundingClientRect();
+        editor.current.style.left = `${box.left}px`;
+        editor.current.style.top = `${box.top}px`;
+        editor.current.style.width = `${box.width}px`;
+        editor.current.classList.toggle("actions-above", window.innerHeight - box.bottom < 80);
+        editor.current.classList.toggle("actions-right", window.innerWidth - box.left < 248);
+      };
+      reposition();
+      window.addEventListener("resize", reposition);
+      window.addEventListener("scroll", reposition, true);
+      return () => {
+        window.removeEventListener("resize", reposition);
+        window.removeEventListener("scroll", reposition, true);
+      };
+    }
+  }, [editing]);
+  const close = () => {
+    editor.current.hidePopover();
+    setError("");
+    requestAnimationFrame(() => editButton.current?.focus());
+  };
+  const save = async (value) => {
+    if (pending) return;
+    setPending(true);
+    setError("");
+    try {
+      await api.renameChannel(requestName, channelType, channelNumber, value);
+      if (value) setName(value);
+      close();
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setPending(false);
+    }
+  };
   return html`
-    <span class="cell-actions">
+    <span class="channel-name-display">
+      <button ref=${editButton} type="button" class="channel-name-value" aria-label=${`Edit ${label.toLowerCase()}`} title="Click to edit" onClick=${() => {
+        setDraft(name);
+        setError("");
+        const box = editButton.current.getBoundingClientRect();
+        Object.assign(editor.current.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px` });
+        editor.current.showPopover();
+      }}>${name || "Unnamed channel"}</button>
+    <form ref=${editor} popover="auto" class="channel-name-editor" onToggle=${(event) => setEditing(event.newState === "open")}
+      onSubmit=${(event) => { event.preventDefault(); void save(draft); }} onKeyDown=${(event) => { if (event.key === "Escape" && !pending) { event.preventDefault(); close(); } }}>
       <input
-        key=${`channel-name-${requestName}-${channelType}-${channelNumber}`}
         ref=${input}
         type="text"
-        size="16"
-        defaultValue=${channel.name || ""}
+        aria-label=${label}
+        placeholder="Default channel name"
+        value=${draft}
+        disabled=${pending}
+        onInput=${(event) => setDraft(event.target.value)}
       />
-      <${AsyncButton}
-        small
-        description=${`rename ${channelType} channel ${channelNumber} on ${requestName}`}
-        onRun=${() => api.renameChannel(requestName, channelType, channelNumber, input.current.value)}
-      >
-        Set
-      <//>
-      <${AsyncButton}
-        small
-        description=${`reset ${channelType} channel ${channelNumber} name on ${requestName}`}
-        onRun=${() => api.renameChannel(requestName, channelType, channelNumber, "")}
-      >
-        Reset
-      <//>
+      <div class="channel-name-actions">
+      <button type="submit" class="btn btn-xs" disabled=${pending} aria-busy=${pending}>Save</button>
+      <${Button} small disabled=${pending} onClick=${close}>Cancel<//>
+      ${error ? html`<span role="alert" class="text-error text-sm">${error}</span>` : null}
+      </div>
+    </form>
     </span>
   `;
 }
@@ -82,25 +135,20 @@ function receiveColumns(device, requestName, onRoute) {
     { align: "right", cell: (row) => row.number, id: "number", label: "#" },
     {
       cell: (row) =>
-        html`<${NameCell} channel=${row.channel} channelNumber=${row.number} channelType="rx" requestName=${requestName} />`,
+        html`<${NameCell} key=${`${requestName}:rx:${row.number}`} channel=${row.channel} channelNumber=${row.number} channelType="rx" requestName=${requestName} />`,
       id: "name",
       label: "Name",
     },
     { cell: (row) => format.subscriptionSource(row.subscription), id: "subscription", label: "Subscription" },
     {
-      cell: (row) => {
-        const status = row.subscription && row.subscription.status ? row.subscription.status : null;
-        return html`<span class=${status ? `state-${format.statusTone(status.severity)}` : ""}>
-          ${status ? format.subscriptionStatusText(row.subscription) : format.ABSENT}
-        </span>`;
-      },
+      cell: (row) => html`<${SubscriptionStatus} subscription=${row.subscription} />`,
       id: "status",
       label: "Status",
     },
     {
       cell: (row) => html`
         <span class="cell-actions">
-          <${Button} small onClick=${() => onRoute(row)}>Subscribe…<//>
+          <${Button} small onClick=${() => onRoute(row)}>Subscribe<//>
           ${row.subscription && row.subscription.tx_device
             ? html`<${AsyncButton}
                 small
@@ -140,7 +188,7 @@ function transmitColumns(device, requestName) {
     { align: "right", cell: (row) => row.number, id: "number", label: "#" },
     {
       cell: (row) =>
-        html`<${NameCell} channel=${row.channel} channelNumber=${row.number} channelType="tx" requestName=${requestName} />`,
+        html`<${NameCell} key=${`${requestName}:tx:${row.number}`} channel=${row.channel} channelNumber=${row.number} channelType="tx" requestName=${requestName} />`,
       id: "name",
       label: "Name",
     },
@@ -186,7 +234,7 @@ export function ReceiveSection({ device }) {
   const [routing, setRouting] = useState(null);
   const rows = receiveRows(device);
   return html`
-    <div class="stack">
+    <div class="flex flex-col gap-4">
       ${routing
         ? html`<${RoutePicker}
             receiver=${device}
@@ -198,7 +246,7 @@ export function ReceiveSection({ device }) {
         : null}
       <${Panel}
         title=${`Receivers (${rows.length})`}
-        actions=${rows.length
+        headerActions=${rows.length
           ? html`<${AsyncButton}
               small
               variant="danger"
@@ -213,7 +261,14 @@ export function ReceiveSection({ device }) {
           ? html`<${Notice}>This device reports no Dante receivers.<//>`
           : html`<${ConfigurableTable}
               tableId="device-receive-channels"
-              columns=${receiveColumns(device, requestName, setRouting)}
+              mobileSummary=${(row) => ({
+                title: html`<span class="receiver-summary-line">
+                  <${SubscriptionStatus} subscription=${row.subscription} />
+                  <span>${row.number}. ${row.channel.name || "Unnamed channel"}</span>
+                </span>`,
+                detail: row.subscription?.tx_device ? format.subscriptionSource(row.subscription) : "Not subscribed",
+              })}
+              columns=${receiveColumns(device, requestName, setRouting).filter((column) => column.id !== "gain" || (gainChannelType(device) === "rx" && device.gain_level_choices?.length))}
               rows=${rows}
               rowKey=${(row) => row.number}
             />`}
@@ -226,15 +281,18 @@ export function TransmitSection({ device }) {
   const requestName = deviceRequestName(device);
   const rows = transmitRows(device);
   return html`
+    <div class="flex flex-col gap-4">
     <${Panel} title=${`Transmitters (${rows.length})`}>
       ${rows.length === 0
         ? html`<${Notice}>This device reports no Dante transmitters.<//>`
         : html`<${ConfigurableTable}
             tableId="device-transmit-channels"
-            columns=${transmitColumns(device, requestName)}
+            mobileSummary=${(row) => ({ title: html`<span class="receiver-summary-line"><span>${row.number}. ${row.channel.name || "Unnamed channel"}</span></span>` })}
+            columns=${transmitColumns(device, requestName).filter((column) => column.id !== "gain" || (gainChannelType(device) === "tx" && device.gain_level_choices?.length))}
             rows=${rows}
             rowKey=${(row) => row.number}
           />`}
     <//>
+    </div>
   `;
 }

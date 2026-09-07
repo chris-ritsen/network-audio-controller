@@ -451,14 +451,34 @@ fn interface_status_response_kind_serializes_expected_schema() {
     data[24] = 0x07;
     data[26..28].copy_from_slice(&crate::responses::CONMON_OPCODE_INTERFACE_STATUS.to_be_bytes());
     data[36..40].copy_from_slice(&1_000u32.to_be_bytes());
+    let (status, _) = parse_response_call("interface_status", &data);
+    assert_ne!(
+        status,
+        NetaudioStatus::Ok,
+        "zero-interface records are not a valid network observation"
+    );
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/network_configuration.json"
+    ))
+    .unwrap();
+    let hex = fixture["cases"]["a32_static_active_both"]["hexadecimal"]
+        .as_str()
+        .unwrap();
+    let data: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|offset| u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap())
+        .collect();
     let (status, output) = parse_response_call("interface_status", &data);
-
     assert_eq!(status, NetaudioStatus::Ok);
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["link_speed_mbps"], 1_000);
-    assert_eq!(json["interfaces"], serde_json::json!([]));
+    assert_eq!(json["interfaces"][1]["interface"], "secondary");
+    assert_eq!(
+        json["interfaces"][1]["configured"]["ip_address"],
+        "192.0.2.244"
+    );
     assert_eq!(json["reboot_required"], false);
-    assert_eq!(json["pending_config"], serde_json::Value::Null);
+    assert!(json.get("pending_config").is_none());
 }
 
 #[test]

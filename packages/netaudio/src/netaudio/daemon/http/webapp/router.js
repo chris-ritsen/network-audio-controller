@@ -3,20 +3,17 @@ import { effect, signal } from "./lib/preact.js";
 export const DEFAULT_PATH = "/routing";
 
 const ROUTES = [
-  { pattern: "/clock-status", view: "clock-status" },
   { pattern: "/devices", view: "devices" },
   { pattern: "/devices/:device", view: "devices" },
   { pattern: "/devices/:device/:section", view: "devices" },
-  { pattern: "/network-status", view: "network-status" },
   { pattern: "/routing", view: "routing" },
-  { pattern: "/metering", view: "metering" },
-  { pattern: "/metering/:device", view: "metering" },
-  { pattern: "/flows", view: "flows" },
-  { pattern: "/flows/:device", view: "flows" },
+  { pattern: "/subscriptions", view: "subscriptions" },
   { pattern: "/ddm", view: "ddm" },
   { pattern: "/shure", view: "shure" },
   { pattern: "/shure/:device", view: "shure" },
   { pattern: "/events", view: "events" },
+  { pattern: "/settings", view: "settings" },
+  { pattern: "/presets", view: "presets" },
 ];
 
 function matchPattern(pattern, segments) {

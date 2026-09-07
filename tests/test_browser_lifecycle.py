@@ -150,6 +150,31 @@ async def test_timed_async_run_closes_zeroconf_without_cancelling_service_result
 
 
 @pytest.mark.asyncio
+async def test_continuous_discovery_keeps_the_browser_until_explicit_close(monkeypatch):
+    zeroconf = SimpleNamespace(zeroconf=object(), async_close=AsyncMock())
+    active_browser = SimpleNamespace(async_cancel=AsyncMock())
+    constructor = MagicMock(return_value=active_browser)
+    monkeypatch.setattr(browser_module, "AsyncZeroconf", MagicMock(return_value=zeroconf))
+    monkeypatch.setattr(browser_module, "AsyncServiceBrowser", constructor)
+    browser = DanteBrowser(mdns_timeout=0)
+
+    await browser.async_run()
+
+    assert browser.aio_zc is zeroconf
+    assert browser.aio_browser is active_browser
+    constructor.assert_called_once_with(
+        zeroconf.zeroconf, browser_module.SERVICES, handlers=[browser.async_on_service_state_change]
+    )
+    active_browser.async_cancel.assert_not_awaited()
+    zeroconf.async_close.assert_not_awaited()
+
+    await browser.async_close()
+
+    active_browser.async_cancel.assert_awaited_once_with()
+    zeroconf.async_close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_assembling_services_logs_malformed_device_and_continues(caplog):
     event_loop = asyncio.get_running_loop()
     malformed_service = event_loop.create_future()

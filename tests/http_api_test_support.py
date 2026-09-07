@@ -62,7 +62,8 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50", kind="h
         flow_protocol_id=None,
         is_locked=False,
         interface_reboot_required=False,
-        interface_pending_config=None,
+        dante_redundancy=None,
+        interface_status_protocol=None,
         sample_rate=None,
         supported_sample_rates=None,
         aes67_supported=None,
@@ -147,6 +148,9 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
             }
         ),
         set_interface_dhcp=AsyncMock(return_value=[{"mode": "dynamic"}]),
+        set_interface=AsyncMock(
+            return_value=[{"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}}]
+        ),
         set_interface_static=AsyncMock(
             side_effect=lambda _address, ip_address, netmask, dns_server, gateway: [
                 {

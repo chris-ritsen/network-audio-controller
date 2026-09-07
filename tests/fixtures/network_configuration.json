@@ -1,0 +1,378 @@
+{
+  "evidence_class": "observed",
+  "allowed_evidence": [
+    "Endpoint-bounded Controller requests and device notifications",
+    "User-reported current and configured values and user-performed reboots"
+  ],
+  "excluded_evidence": [
+    "Competing-application encodings",
+    "Proprietary executable or firmware static inspection"
+  ],
+  "claims": {
+    "causal": [
+      "A32 configured-mode changes and reboot alter network-status flags and active interface count",
+      "A32 reboot changes active interface addresses to the previously pending primary and secondary addresses"
+    ],
+    "inferred": [
+      "A32 flags use separate current and configured redundancy bits",
+      "Secondary static status uses a per-interface pending record even when the running secondary omits gateway and DNS"
+    ],
+    "unknown": [
+      "Other record revisions and device families",
+      "Other bits in network mode fields",
+      "Secondary-interface write encoding is not supplied by these status captures"
+    ]
+  },
+  "captures": [
+    {
+      "id": "a32-switch-20260906/control-continuation.pcapng",
+      "sha256": "556cee21d3e8879818cc7845114c8edc90a0507f391a6b191341f8ab6c019459",
+      "interface": "en0",
+      "scope": "Explicit target addresses/MACs and UDP control/notification/discovery ports; no media",
+      "source_tool": "Dante Controller 4.16.1.5 and user-operated A32 or AD4D",
+      "device_dante_version": "4.0.8.2"
+    },
+    {
+      "id": "a32-network-config-20260906.CqocJj/control.pcapng",
+      "sha256": "a5ae08dbd2de425bedff62c065f742b439c5a8ee38b0042110d159203441fbdb",
+      "interface": "en0",
+      "scope": "Explicit target addresses/MACs and UDP control/notification/discovery ports; no media",
+      "source_tool": "Dante Controller 4.16.1.5 and user-operated A32 or AD4D",
+      "device_dante_version": "4.0.8.2"
+    },
+    {
+      "id": "ad4d-switch-20260906/control.pcapng",
+      "sha256": "d39f4e9f29e57f298d13c5f05bd9b9bc84289596e3a8acc653b84298afed3849",
+      "interface": "en0",
+      "scope": "Explicit target addresses/MACs and UDP control/notification/discovery ports; no media",
+      "source_tool": "Dante Controller 4.16.1.5 and user-operated A32 or AD4D",
+      "device_dante_version": "4.2.0.28"
+    },
+    {
+      "id": "ad4d-switch-20260906/control-with-notifications.pcapng",
+      "sha256": "dfc65e75e8dbb63be59f86f6b93b99bb8bb2d01af2fc8dfce0a0f5b500556c1c",
+      "interface": "en0",
+      "scope": "Explicit target addresses/MACs and UDP control/notification/discovery ports; no media",
+      "source_tool": "Dante Controller 4.16.1.5 and user-operated A32 or AD4D",
+      "device_dante_version": "4.2.0.28"
+    },
+    {
+      "id": "ad4d-switch-20260906/post-reboot.pcapng",
+      "sha256": "743ce8d285e0d636c0e0da72e8cf5bc9f7a7157a2c7999f9683cd0531a40e5f9",
+      "interface": "en0",
+      "scope": "Explicit target addresses/MACs and UDP control/notification/discovery ports; no media",
+      "source_tool": "Dante Controller 4.16.1.5 and user-operated A32 or AD4D",
+      "device_dante_version": "4.2.0.28"
+    }
+  ],
+  "cases": {
+    "a32_switched_redundant": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 267,
+      "timestamp_epoch": "1788729202.368952000",
+      "source_payload_sha256": "aca6cf8b2641bac572af1d0af7f497c70ae5e2b2eb59b36cbc462088ef720869",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        }
+      ],
+      "hexadecimal": "ffff006009a700000200000000010000417564696e617465072400110000000000010001000003e80001020000000001c0000222ffffff00c0000201c00002010018003000020000000000000000000000000000000000000000000000000000",
+      "sha256": "c61f84986f3fe17ec2efd2d894d0438cc9422cbd29b0ead6efa4a18986d64666"
+    },
+    "a32_set_switched": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 284,
+      "timestamp_epoch": "1788729206.471646000",
+      "source_payload_sha256": "2c9558c03f65a755095b3c31197a6c6b314548de397f0fe5114369afc8cda897",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000010"
+        }
+      ],
+      "hexadecimal": "ffff00280cb548770200000000100000417564696e617465073a0013000000640000000000010000",
+      "sha256": "c9cf0a0d920f22793f304474823098a24dfe72f482c9dbfc97f2469c31a12096"
+    },
+    "a32_switched_switched": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 289,
+      "timestamp_epoch": "1788729206.566636000",
+      "source_payload_sha256": "bf1211f50416e250248eee2e9ef0311daeb6762648fcf483753c77ae42cb416e",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        }
+      ],
+      "hexadecimal": "ffff006009ac00000200000000010000417564696e617465072400110000000000010001000003e80001020000000001c0000222ffffff00c0000201c00002010018003000000000000000000000000000000000000000000000000000000000",
+      "sha256": "03ffd28181bb0d41a2d95f51b891444b09d7eba678dff100fed6cee14375e30c"
+    },
+    "a32_set_redundant": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 1535,
+      "timestamp_epoch": "1788729588.131798000",
+      "source_payload_sha256": "8b98d21808228a7fef3df34d4e660dd8fd0df910c588733df2a970bb68e1b2e6",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000010"
+        }
+      ],
+      "hexadecimal": "ffff00280cc148770200000000100000417564696e617465073a0013000000640000000000010001",
+      "sha256": "95de265da0189ed577172e27a8795c62013a81dd88aa86b323e3410942de4fee"
+    },
+    "a32_redundant_pending": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 1540,
+      "timestamp_epoch": "1788729588.218127000",
+      "source_payload_sha256": "ae81aa1786c95f3ef719e4f0d05a317fe499383ae5ea7e5bf115772df862223d",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        }
+      ],
+      "hexadecimal": "ffff00600b3f00000200000000010000417564696e617465072400110000000000010001000003e80001020000000001c0000222ffffff00c0000201c00002010018003000020000000000000000000000000000000000000000000000000000",
+      "sha256": "f3cfe003999a3faa5af8627fe39a3bb6989435c076e4ae3cf4c0ac0b01eca191"
+    },
+    "a32_redundant_redundant": {
+      "capture": "a32-switch-20260906/control-continuation.pcapng",
+      "frame": 2043,
+      "timestamp_epoch": "1788729638.597313000",
+      "source_payload_sha256": "5bfe0b93e23d4e07bbcd40d7e3b49040764967b2f902ba326cead7235ef956bc",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 70,
+          "replacement_hexadecimal": "020000000002"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 76,
+          "replacement_hexadecimal": "c633643e"
+        }
+      ],
+      "hexadecimal": "ffff0094002900000200000000010000417564696e617465072400110000000000020001000003e80001020000000001c0000222ffffff00c0000201c0000201000000000000020000000002c633643effff000000000000000000000018004c00030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "e03eadbfebefe7412a933b945e742da6fa34cd8f2da0197c66cd06815eb6622e"
+    },
+    "a32_static_pending_both": {
+      "capture": "a32-network-config-20260906.CqocJj/control.pcapng",
+      "frame": 12,
+      "timestamp_epoch": "1788729842.067835000",
+      "source_payload_sha256": "dbbf306a1f02f699bef3d44c955fa6ebca1541f9448cba2e8e222b20b14789cc",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 70,
+          "replacement_hexadecimal": "020000000002"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 104,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 128,
+          "replacement_hexadecimal": "c00002f4"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 116,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 140,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 76,
+          "replacement_hexadecimal": "c633643e"
+        }
+      ],
+      "hexadecimal": "ffff0096010800000200000000010000417564696e617465072400110000000000020001000003e80001020000000001c0000222ffffff00c0000201c0000201000000000000020000000002c633643effff000000000000000000000018004c0003000000060000c0000222ffffff0008080808c00002010000007d00060000c00002f4ffffff0008080808c0000201000000000000",
+      "sha256": "035dabf0db8dbcec306e13a425cacb10cd13ddf77a3774ba645951b98f6dd8e5"
+    },
+    "a32_static_active_both": {
+      "capture": "a32-network-config-20260906.CqocJj/control.pcapng",
+      "frame": 501,
+      "timestamp_epoch": "1788729949.081582000",
+      "source_payload_sha256": "a3985ed1dfed6c9006dd0ef8a507291d0a9adad3720b4ffdc9697422abcda0ad",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000001"
+        },
+        {
+          "offset": 70,
+          "replacement_hexadecimal": "020000000002"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c0000222"
+        },
+        {
+          "offset": 76,
+          "replacement_hexadecimal": "c00002f4"
+        },
+        {
+          "offset": 128,
+          "replacement_hexadecimal": "c00002f4"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 140,
+          "replacement_hexadecimal": "c0000201"
+        }
+      ],
+      "hexadecimal": "ffff0097001800000200000000010000417564696e617465072400110000000000020001000003e80003020000000001c0000222ffffff0008080808c0000201000000000002020000000002c00002f4ffffff0000000000000000000018004c000300000000000000000000000000000000000000000000007c007e00060000c00002f4ffffff0008080808c0000201007d0000000000",
+      "sha256": "96682388e7eeefe707f7bda2a9c189342aa2c3df244d0d7fb9db8d4a13fd99ee"
+    },
+    "ad4d_query_switch_configuration": {
+      "capture": "ad4d-switch-20260906/control.pcapng",
+      "frame": 45,
+      "timestamp_epoch": "1788728180.908112000",
+      "source_payload_sha256": "32853b04ae82d9fd4ebd7156461958ff4ec5343fb0e38dac1a3d51b7e5ae7cb9",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000010"
+        }
+      ],
+      "hexadecimal": "ffff00240c5148770200000000100000417564696e617465073a00150000006400000000",
+      "sha256": "ee10d1c1697a80f9ae84e076f4843acd8be71e73a8b06e44bebf210d8b9fa683"
+    },
+    "ad4d_set_split_redundant": {
+      "capture": "ad4d-switch-20260906/control.pcapng",
+      "frame": 83,
+      "timestamp_epoch": "1788728196.106725000",
+      "source_payload_sha256": "6384a719efb558f186da9f86cde03c257dd142d30fb77e4733d4476dd37b33d9",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000010"
+        }
+      ],
+      "hexadecimal": "ffff00240c5548770200000000100000417564696e617465073a00150000006400010002",
+      "sha256": "72c5628caa29d3ff5be3df53cf016d651ad3f2cd601cab58781794b043ed07f3"
+    },
+    "ad4d_switched_split_redundant": {
+      "capture": "ad4d-switch-20260906/control-with-notifications.pcapng",
+      "frame": 355,
+      "timestamp_epoch": "1788728461.087192000",
+      "source_payload_sha256": "f2641435ac70ffe382e48160b623546f3e920c262ceb654f20e69a087a76418d",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000003"
+        }
+      ],
+      "hexadecimal": "ffff0158005900000200000000030000417564696e617465072e00140000000000020018001000040000007f000100020001000053776974636865640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0000000000000000000000000002000053706c69742f526564756e64616e74000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000240000005300000000",
+      "sha256": "adf4a033f964fac0ab5c8f42efaee1528f7508496c815d841b7f534992b760fb"
+    },
+    "ad4d_switched_switched": {
+      "capture": "ad4d-switch-20260906/post-reboot.pcapng",
+      "frame": 169,
+      "timestamp_epoch": "1788728844.067228000",
+      "source_payload_sha256": "715a27331d35358a0477a31c80c5170a8fa33535b2433e1a79dae8f43a465c24",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000003"
+        }
+      ],
+      "hexadecimal": "ffff0158002000000200000000030000417564696e617465072e00140000000000020018001000040000007f000100010001000053776974636865640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007f0000000000000000000000000002000053706c69742f526564756e64616e74000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000240000005300000000",
+      "sha256": "e0d88932e816e0ca210114a93a3bede9d1209787ae2a83878a401054f6e3d857"
+    }
+  }
+}

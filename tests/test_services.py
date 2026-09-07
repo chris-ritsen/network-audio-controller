@@ -449,6 +449,9 @@ class TestDanteNotificationService:
             {
                 "mode": "dynamic",
                 "mac_address": "00:1D:C1:00:00:01",
+                "interface": "primary",
+                "configured": {"mode": "dynamic"},
+                "reboot_required": False,
                 "ip_address": "192.168.1.10",
                 "netmask": "255.255.255.0",
                 "gateway": "192.168.1.1",
@@ -457,6 +460,15 @@ class TestDanteNotificationService:
             {
                 "mode": "static",
                 "mac_address": "00:1D:C1:AA:BB:CC",
+                "interface": "secondary",
+                "configured": {
+                    "mode": "static",
+                    "ip_address": "192.168.2.20",
+                    "netmask": "255.255.0.0",
+                    "dns_server": "8.8.8.8",
+                    "gateway": "192.168.2.1",
+                },
+                "reboot_required": False,
                 "ip_address": "192.168.2.20",
                 "netmask": "255.255.0.0",
                 "dns_server": "8.8.8.8",
@@ -464,7 +476,7 @@ class TestDanteNotificationService:
             },
         ]
         assert device.interface_reboot_required is False
-        assert device.interface_pending_config is None
+        assert not any(entry["reboot_required"] for entry in device.interfaces)
         assert device.link_speed_mbps == 1000
 
     def test_dual_interface_mac_cannot_create_pending_dhcp_state(self):
@@ -473,7 +485,7 @@ class TestDanteNotificationService:
         assert device.interfaces[1]["mac_address"] == "02:00:00:04:BB:CC"
         assert device.interfaces[1]["ip_address"] == "192.168.2.20"
         assert device.interface_reboot_required is False
-        assert device.interface_pending_config is None
+        assert not any(entry["reboot_required"] for entry in device.interfaces)
 
     def test_applied_dhcp_target_clears_stale_avio_flag(self):
         device_ip = "192.168.1.139"
@@ -484,7 +496,7 @@ class TestDanteNotificationService:
         assert device.interfaces[0]["mode"] == "dynamic"
         assert device.interfaces[0]["ip_address"] == device_ip
         assert device.interface_reboot_required is False
-        assert device.interface_pending_config is None
+        assert device.interfaces[0]["configured"] == {"mode": "dynamic"}
 
     def test_sample_rate_status_updates_device_and_emits_once(self):
         application, device = application_with_device("lx-dante.local.", "192.168.1.108")

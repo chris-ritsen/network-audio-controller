@@ -801,5 +801,7 @@ def clock_subdomain(
 
 
 from netaudio.commands.config.interface import interface
+from netaudio.commands.config.redundancy import redundancy
 
 app.command("interface")(interface)
+app.command("redundancy")(redundancy)

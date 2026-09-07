@@ -1,17 +1,29 @@
-import { Fragment, html, useCallback, useRef, useState } from "./lib/preact.js";
-import { runAction } from "./toast.js";
+import { Fragment, cloneElement, createContext, html, toChildArray, useCallback, useRef, useSignal, useState } from "./lib/preact.js";
+import { runAction } from "./actions.js";
 
-export function Panel({ actions, children, title, wide }) {
+export const PanelHeaderControls = createContext(null);
+
+function HeaderActions({ actions, controls }) {
+  return html`<div class="ml-auto flex flex-wrap items-center gap-2">${actions}${controls.value}</div>`;
+}
+
+export function Panel({ actions, children, headerActions, title, wide }) {
+  const controls = useSignal(null);
   return html`
-    <section class="panel${wide ? " wide" : ""}">
+    <${PanelHeaderControls.Provider} value=${title == null ? null : controls}>
+    <section class="card bg-base-100 border border-base-300 min-w-0${wide ? " wide" : ""}">
       ${title === undefined || title === null
         ? null
-        : html`<header class="panel-header">
-            <h2 class="panel-title">${title}</h2>
-            ${actions ? html`<div class="panel-header-actions">${actions}</div>` : null}
+        : html`<header class="flex flex-wrap items-center gap-3 border-b border-base-300 px-4 py-3">
+            <h2 class="card-title text-base">${title}</h2>
+            <${HeaderActions} actions=${headerActions} controls=${controls} />
           </header>`}
-      <div class="panel-body">${children}</div>
+      <div class="card-body block min-[901px]:overflow-x-auto p-4 space-y-3">
+        ${actions ? html`<div class="flex flex-wrap gap-2 mb-4">${actions}</div>` : null}
+        ${children}
+      </div>
     </section>
+    <//>
   `;
 }
 
@@ -73,17 +85,19 @@ export function Metric({ label, value }) {
   `;
 }
 
-export function DataTable({ headers, rows, height, short }) {
+export function DataTable({ headers, rows, numericColumns = [] }) {
   return html`
-    <div class="table-wrapper${short ? " short" : ""}" style=${height ? `max-height:${height}` : null}>
+    <div class="table-wrapper">
       <table class="data">
         <thead>
           <tr>
-            ${headers.map((header, index) => html`<th key=${index}>${header}</th>`)}
+            ${headers.map((header, index) => html`<th key=${index} class=${numericColumns.includes(index) ? "numeric" : ""}>${header}</th>`)}
           </tr>
         </thead>
         <tbody>
-          ${rows}
+          ${toChildArray(rows).map((row) => row?.type === "tr" ? cloneElement(row, {},
+            toChildArray(row.props.children).map((cell, index) => cell?.type === "td" ? cloneElement(cell, { "data-label": headers[index] || "" }) : cell)
+          ) : row)}
         </tbody>
       </table>
     </div>
@@ -92,13 +106,13 @@ export function DataTable({ headers, rows, height, short }) {
 
 export function Tabs({ active, items, onSelect }) {
   return html`
-    <nav class="tabs">
+    <nav class="tabs tabs-border mb-4">
       ${items.map(
         (item) => html`
           <button
             key=${item.id}
             type="button"
-            class="tab${item.id === active ? " active" : ""}"
+            class="tab min-h-11${item.id === active ? " tab-active" : ""}"
             aria-current=${item.id === active ? "page" : null}
             onClick=${() => onSelect(item.id)}
           >
@@ -112,38 +126,36 @@ export function Tabs({ active, items, onSelect }) {
 
 export function AsyncButton({ children, description, disabled, onRun, small, title, variant }) {
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
   const run = useCallback(async () => {
+    setError("");
     setPending(true);
     try {
-      await runAction(description, onRun);
+      const outcome = await runAction(description, onRun);
+      if (!outcome.ok) setError(outcome.error.message);
     } finally {
       setPending(false);
     }
   }, [description, onRun]);
-  const classes = ["btn"];
+  const classes = ["btn", small ? "btn-xs" : "btn-sm"];
   if (variant) {
-    classes.push(`btn-${variant}`);
-  }
-  if (small) {
-    classes.push("btn-small");
+    classes.push(variant === "danger" ? "btn-error" : "btn-primary");
   }
   if (pending) {
     classes.push("pending");
   }
   return html`
-    <button type="button" class=${classes.join(" ")} disabled=${pending || disabled} title=${title} onClick=${run}>
+    <button type="button" class=${classes.join(" ")} disabled=${pending || disabled} aria-busy=${pending ? "true" : null} title=${title} onClick=${run}>
       ${children}
     </button>
+    ${error ? html`<span class="text-error text-sm" role="alert">${error}</span>` : null}
   `;
 }
 
 export function Button({ children, onClick, small, title, variant, disabled }) {
-  const classes = ["btn"];
+  const classes = ["btn", small ? "btn-xs" : "btn-sm"];
   if (variant) {
-    classes.push(`btn-${variant}`);
-  }
-  if (small) {
-    classes.push("btn-small");
+    classes.push(variant === "danger" ? "btn-error" : "btn-primary");
   }
   return html`
     <button type="button" class=${classes.join(" ")} disabled=${disabled} title=${title} onClick=${onClick}>
@@ -165,15 +177,6 @@ export function Disclosure({ children, summary }) {
   </details>`;
 }
 
-export function humanizeKey(key) {
-  const spaced = String(key).replace(/[_-]+/g, " ").trim();
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-function isPlainValue(value) {
-  return value === null || value === undefined || typeof value !== "object";
-}
-
 export function Value({ value }) {
   if (value === null || value === undefined || value === "") {
     return html`<span>—</span>`;
@@ -185,50 +188,8 @@ export function Value({ value }) {
     return html`<span>${String(value)}</span>`;
   }
   if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return html`<span>—</span>`;
-    }
-    if (value.every(isPlainValue)) {
-      return html`<span>${value.map((entry) => (entry === null ? "—" : String(entry))).join(", ")}</span>`;
-    }
-    const columns = [...new Set(value.flatMap((entry) => (entry && typeof entry === "object" ? Object.keys(entry) : [])))];
-    return html`
-      <div class="table-wrapper short">
-        <table class="data">
-          <thead>
-            <tr>
-              ${columns.map((column) => html`<th key=${column}>${humanizeKey(column)}</th>`)}
-            </tr>
-          </thead>
-          <tbody>
-            ${value.map(
-              (entry, index) => html`
-                <tr key=${index}>
-                  ${columns.map(
-                    (column) => html`<td key=${column}><${Value} value=${entry ? entry[column] : null} /></td>`,
-                  )}
-                </tr>
-              `,
-            )}
-          </tbody>
-        </table>
-      </div>
-    `;
+    return html`<span>${value.length ? value.map((entry, index) => html`<${Fragment} key=${index}>${index ? ", " : ""}<${Value} value=${entry} /><//>`) : "—"}</span>`;
   }
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return html`<span>—</span>`;
-  }
-  return html`
-    <dl class="fields nested">
-      ${entries.map(
-        ([key, nested]) => html`
-          <${Fragment} key=${key}>
-            <dt>${humanizeKey(key)}</dt>
-            <dd><${Value} value=${nested} /></dd>
-          <//>
-        `,
-      )}
-    </dl>
-  `;
+  const summary = [value.label, value.summary, value.name].find((entry) => typeof entry === "string" && entry.length);
+  return html`<span>${summary || "—"}</span>`;
 }

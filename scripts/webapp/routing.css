@@ -1,0 +1,129 @@
+@layer components {
+  .content:has(> .routing-grid) {
+    padding-bottom: 18px;
+  }
+
+  .routing-grid {
+    height: 100%;
+  }
+
+  .routing-grid > :not(.matrix-shell) {
+    flex-shrink: 0;
+  }
+
+  .routing-grid > .routing-workspace {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .routing-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .routing-workspace.with-filters {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .routing-results {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  @media (max-width: 900px) {
+    .routing-workspace.with-filters {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .matrix-shell {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 240px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .matrix-stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .matrix-axis-controls {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .matrix-viewport {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: auto;
+  }
+
+  .matrix-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    display: block;
+  }
+
+  .matrix-spacer {
+    pointer-events: none;
+  }
+
+  .matrix-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-data);
+    font-size: 12px;
+  }
+
+  .matrix-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .legend-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 10px;
+    border-radius: 2px;
+  }
+
+  .legend-swatch.ok {
+    background: var(--good);
+  }
+
+  .legend-swatch.warning {
+    background: var(--warn);
+  }
+
+  .legend-swatch.error {
+    background: var(--bad);
+  }
+
+  .legend-swatch.pending {
+    border: 2px solid var(--text);
+    box-sizing: border-box;
+  }
+}

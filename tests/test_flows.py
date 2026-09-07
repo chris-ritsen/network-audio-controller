@@ -126,6 +126,7 @@ async def test_preferred_inventory_uses_2809_status_page_when_present(monkeypatc
 
     inventory = await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729)
     assert queried == [0x2809]
+    assert inventory["flow_protocol_id"] == 0x2809
     assert inventory["flows"][0]["subscriber_device_name"] == "lx-dante"
 
 
@@ -143,7 +144,20 @@ async def test_preferred_inventory_falls_back_to_mutation_protocol(monkeypatch):
 
     inventory = await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729)
     assert queried == [0x2809, 0x2729]
+    assert inventory["flow_protocol_id"] == 0x2729
     assert inventory["flows"][0]["flow_number"] == 32
+
+
+@pytest.mark.parametrize("identifier", ["flow_number", "global_flow_id"])
+def test_flow_guards_recognize_both_inventory_formats(identifier):
+    inventory = [{identifier: 2, "flow_type": "multicast"}]
+    with pytest.raises(flows.FlowValidationError, match="already in use"):
+        flows.require_available_flow_slot(inventory, 2)
+    flows.require_available_flow_slot(inventory, 1)
+    assert flows.require_multicast_flow(inventory, 2) == inventory[0]
+    inventory[0]["flow_type"] = "unicast"
+    with pytest.raises(flows.FlowValidationError, match="not multicast"):
+        flows.require_multicast_flow(inventory, 2)
 
 
 def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():

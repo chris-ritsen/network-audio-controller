@@ -18,7 +18,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: npm ci
+      - run: npm run build:webapp
+      - run: git diff --exit-code -- packages/netaudio/src/netaudio/daemon/http/webapp/app.css packages/netaudio/src/netaudio/daemon/http/webapp/icon-paths.js
       - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npx playwright test
 
   python-tests:
     strategy:

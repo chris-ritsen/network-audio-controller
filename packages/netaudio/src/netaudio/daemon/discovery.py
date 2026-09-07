@@ -4,11 +4,13 @@ import logging
 from dataclasses import dataclass
 
 from zeroconf import ServiceStateChange
-from zeroconf.asyncio import AsyncServiceInfo
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 from netaudio.daemon.systemd import notify_systemd
-from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC
+from netaudio.common.app_config import settings as app_settings
+from netaudio.dante.const import MEDIA_SERVICE_TYPES, SERVICE_ARC, SERVICE_CMC, SERVICES
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.discovery import request_discovery
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 
@@ -47,6 +49,20 @@ class _DiscoveredService:
 
 
 class DanteDiscoveryMixin:
+    def _start_discovery(self) -> None:
+        interface_address = app_settings.interface_ip
+        if app_settings.interface and not interface_address:
+            raise RuntimeError("configured discovery interface has no IPv4 address")
+        self.zeroconf = AsyncZeroconf(interfaces=[interface_address]) if interface_address else AsyncZeroconf()
+        self.browser = AsyncServiceBrowser(
+            self.zeroconf.zeroconf,
+            SERVICES,
+            handlers=[self.on_service_state_change],
+        )
+
+    async def refresh_discovery(self, address: str | None = None) -> dict:
+        return request_discovery(self.zeroconf.zeroconf if self.zeroconf is not None else None, address)
+
     def on_service_state_change(self, zeroconf, service_type, name, state_change):
         logger.debug(f"mDNS event: {state_change.name} - {service_type} - {name}")
 
@@ -229,7 +245,8 @@ class DanteDiscoveryMixin:
         if not self.application.get_arc_port(device):
             return False
 
-        device_changed = False
+        network_cache = getattr(self, "network_status_cache", None)
+        device_changed = network_cache.restore(device) if network_cache is not None else False
         if not is_new:
             new_name = await device.fetch_device_name()
             if new_name and new_name != device.name:
