@@ -35,6 +35,9 @@ export function readRoutingFilters() {
       search: typeof saved?.search === "string" ? saved.search : "",
       receiverSearch: typeof saved?.receiverSearch === "string" ? saved.receiverSearch : "",
       transmitterSearch: typeof saved?.transmitterSearch === "string" ? saved.transmitterSearch : "",
+      expandedGroups: DEVICE_FILTERS.filter(({ id }) => Array.isArray(saved?.expandedGroups) && saved.expandedGroups.includes(id)).map(({ id }) => id),
+      listMode: saved?.listMode === true,
+      panelOpen: typeof saved?.panelOpen === "boolean" ? saved.panelOpen : null,
       values: Object.fromEntries(DEVICE_FILTERS.flatMap(({ id }) => {
         const selected = saved?.values?.[id];
         if (!Array.isArray(selected)) return [];
@@ -43,7 +46,7 @@ export function readRoutingFilters() {
       })),
     };
   } catch {
-    return { search: "", receiverSearch: "", transmitterSearch: "", values: {} };
+    return { search: "", receiverSearch: "", transmitterSearch: "", expandedGroups: [], listMode: false, panelOpen: null, values: {} };
   }
 }
 
