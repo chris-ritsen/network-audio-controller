@@ -20,7 +20,12 @@ for (const width of [1200, 390]) {
     const input = page.getByRole("textbox", { name: "Receive channel 1 name", exact: true });
     await expect(input).toBeFocused();
     await input.evaluate((node) => { node.setSelectionRange(0, 0); node.blur(); });
-    expect(await page.screenshot({ clip, caret: "hide" })).toEqual(before);
+    const after = await page.screenshot({ clip, caret: "hide" });
+    if (!after.equals(before)) {
+      await test.info().attach("before-editing", { body: before, contentType: "image/png" });
+      await test.info().attach("during-editing", { body: after, contentType: "image/png" });
+    }
+    expect(after).toEqual(before);
   });
 }
 

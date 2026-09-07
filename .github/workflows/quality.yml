@@ -24,6 +24,11 @@ jobs:
       - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
       - run: npx playwright install --with-deps chromium webkit
       - run: npx playwright test
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: browser-failures-${{ matrix.runner }}
+          path: test-results/
 
   python-tests:
     strategy:
