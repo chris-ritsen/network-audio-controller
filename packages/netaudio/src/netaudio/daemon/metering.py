@@ -8,6 +8,7 @@ import socket
 import struct
 import time
 
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.preferences import read_preferences, save_monitoring_port
 from netaudio.dante.const import (
@@ -40,7 +41,7 @@ class MeteringManager:
         self._keepalive_task = None
         self._broadcast_task = None
         self._active_port: int | None = None
-        self._port_lock = asyncio.Lock()
+        self._port_lock = DeferredAsyncioLock()
         self._dirty_devices: set[str] = set()
 
     @staticmethod

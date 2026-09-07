@@ -1,3 +1,4 @@
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -47,7 +48,8 @@ async def test_login_validates_credentials_then_persists_without_exposing_them(c
     assert body["servers"] == [{"name": "studio", "url": "https://ddm.example/graphql", "configured": True}]
     assert token not in str(body) and token not in path.read_text()
     assert (path.parent / "credentials/studio.credential").read_text().strip() == token
-    assert not ((path.parent / "credentials/studio.credential").stat().st_mode & 0o077)
+    if os.name == "posix":
+        assert not ((path.parent / "credentials/studio.credential").stat().st_mode & 0o077)
     inventory.assert_awaited_once()
     assert login.call_count == (1 if method == "password" else 0)
     server.managed_inventory.reconfigure.assert_awaited_once()
