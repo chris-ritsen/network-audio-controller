@@ -1,0 +1,42 @@
+@layer components {
+  .event-row {
+    display: grid;
+    grid-template-columns: 152px 190px minmax(0, 1fr);
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--font-data);
+    font-size: 12px;
+    cursor: pointer;
+    align-items: baseline;
+  }
+
+  .event-row:hover {
+    background: var(--hover);
+  }
+
+  .event-kind {
+    font-weight: 600;
+  }
+
+  .event-summary {
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 900px) {
+    .event-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  .event-log {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .event-detail {
+    padding: 8px 0 12px;
+  }
+}

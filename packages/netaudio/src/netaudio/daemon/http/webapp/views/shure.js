@@ -2,7 +2,6 @@ import {Fields, Notice, OnlineState, Panel, Pill, Value} from "../components.js"
 import { ConfigurableTable } from "../table.js";
 import * as format from "../format.js";
 import { html } from "../lib/preact.js";
-import { navigate } from "../router.js";
 import { shureDevices, shureMeters } from "../store.js";
 
 const CHANNEL_COLUMNS = [
@@ -95,7 +94,7 @@ function ShureView({ location }) {
       return html`<${Notice}>No Shure device named ${identifier} has been discovered.<//>`;
     }
     return html`
-      <div class="stack">
+      <div class="flex flex-col gap-4">
         <div class="content-header">
           <div>
             <div class="content-title">${device.name || device.mac}</div>
@@ -129,7 +128,7 @@ function ShureView({ location }) {
   }
 
   return html`
-    <div class="stack">
+    <div class="flex flex-col gap-4">
       <div class="content-header">
         <div>
           <div class="content-title">Shure</div>
@@ -144,7 +143,7 @@ function ShureView({ location }) {
               columns=${RECEIVER_COLUMNS}
               rows=${all}
               rowKey=${(device) => device.mac}
-              onRowClick=${(device) => navigate(`/shure/${encodeURIComponent(device.name || device.mac)}`)}
+              rowHref=${(device) => `/shure/${encodeURIComponent(device.name || device.mac)}`}
             />`}
       <//>
     </div>

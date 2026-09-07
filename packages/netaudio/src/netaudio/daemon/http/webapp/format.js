@@ -73,15 +73,32 @@ export function severityClass(severity) {
 }
 
 export function subscriptionStatusText(subscription) {
-  const status = subscription.status;
+  const status = subscription?.status;
   if (!status) {
     return ABSENT;
   }
-  const parts = [status.label || `0x${Number(status.code).toString(16)}`];
-  if (status.detail) {
-    parts.push(status.detail);
+  const identifier = status.status || status.label;
+  const connected = {
+    DYNAMIC: "Connected — unicast",
+    STATIC: "Connected — multicast",
+    SUBSCRIBE_SELF: "Connected — local loopback",
+    MANUAL: "Connected — manually configured",
+    CONNECTED: "Connected",
+  };
+  if (status.state === "connected" && statusTone(status.severity) === "good") {
+    return connected[identifier] || "Connected";
   }
-  return parts.join(" - ");
+  if (identifier === "NONE" || status.state === "none") return "Not subscribed";
+  const detail = typeof status.detail === "string" ? status.detail.trim() : "";
+  if (detail && !/\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(detail)) {
+    return detail.replace(/^(Error|Warning):\s*/i, "");
+  }
+  return {
+    pending: "Subscription pending",
+    resolving: "Finding source channel",
+    unresolved: "Source channel not found",
+    error: "Subscription failed",
+  }[status.state] || "Subscription status unavailable";
 }
 
 export function subscriptionSource(subscription) {
@@ -127,6 +144,35 @@ export function meteringLabel(value) {
   return `${meteringDecibelsFullScale(raw).toFixed(1)} dBFS`;
 }
 
+export function macAddress(device) {
+  const reported = (device.interfaces || []).map((entry) => entry.mac_address).find(Boolean) || device.mac_address;
+  let mac = typeof reported === "string" ? reported.replace(/[:-]/g, "").toLowerCase() : "";
+  if (/^[0-9a-f]{16}$/.test(mac)) {
+    if (mac.slice(6, 10) === "fffe") mac = mac.slice(0, 6) + mac.slice(10);
+    else if (mac.endsWith("0000")) mac = mac.slice(0, 12);
+  }
+  return /^[0-9a-f]{12}$/.test(mac) ? mac.match(/../g).join(":").toUpperCase() : ABSENT;
+}
+
+export function stateLabel(value) {
+  if (value === null || value === undefined || value === "") return ABSENT;
+  if (value === "OK") return "OK";
+  const words = String(value).replaceAll("_", " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export function clockLeaderName(device, inventory) {
+  const normalize = (value) => typeof value === "string" ? value.replace(/[:-]/g, "").toLowerCase() : "";
+  const identity = normalize(device.leader_clock_identity);
+  if (!identity) return ABSENT;
+  const matches = Object.values(inventory).filter((candidate) => {
+    if ((candidate.ddm_server_profile || "") !== (device.ddm_server_profile || "")) return false;
+    if ((candidate.ddm_domain_id || "") !== (device.ddm_domain_id || "")) return false;
+    return normalize(candidate.clock_identity) === identity || normalize(macAddress(candidate)) === identity;
+  });
+  return matches.length === 1 ? deviceLabel(matches[0]) : text(device.leader_clock_identity);
+}
+
 export function meterFraction(value) {
   const raw = Number(value);
   if (raw === 0x00) {
@@ -151,6 +197,10 @@ export function sortedChannelNumbers(channels) {
     .sort((first, second) => first - second);
 }
 
+export function deviceModelName(device) {
+  return device.model || device.dante_model || "";
+}
+
 export function deviceHaystack(device) {
   return [
     device.name,
@@ -158,6 +208,8 @@ export function deviceHaystack(device) {
     device.ipv4,
     device.mac_address,
     device.model,
+    device.dante_model,
+    device.board_name,
     device.manufacturer,
     device.ddm_domain_name,
   ]
@@ -168,8 +220,8 @@ export function deviceHaystack(device) {
 
 export function deviceSummaryLine(device) {
   const parts = [];
-  if (device.model) {
-    parts.push(device.model);
+  if (deviceModelName(device)) {
+    parts.push(deviceModelName(device));
   }
   if (device.ipv4) {
     parts.push(device.ipv4);
@@ -206,6 +258,12 @@ export function statusTone(severity) {
   return "";
 }
 
+export function subscriptionTone(subscription) {
+  const status = subscription?.status;
+  if ((status?.status || status?.label) === "UNRESOLVED") return "warn";
+  return statusTone(status?.severity);
+}
+
 const CLOCK_SUBDOMAIN_SIZE = 16;
 
 function clockSubdomainBytes(value) {
@@ -238,12 +296,12 @@ export function clockSubdomain(value) {
   if (printable) {
     return content.map((entry) => String.fromCharCode(entry)).join("");
   }
-  return `hex:${content.map((entry) => entry.toString(16).padStart(2, "0")).join("")}`;
+  return "Custom subdomain";
 }
 
 export function clockSubdomainInputValue(value) {
   const formatted = clockSubdomain(value);
-  if (formatted === ABSENT || formatted === "unset (default subdomain)") {
+  if (formatted === ABSENT || formatted === "unset (default subdomain)" || formatted === "Custom subdomain") {
     return "";
   }
   return formatted;
@@ -253,7 +311,7 @@ export function clockSourceCode(value) {
   if (value === null || value === undefined || typeof value !== "number" || !Number.isInteger(value)) {
     return ABSENT;
   }
-  return `${value} (0x${value.toString(16).toUpperCase().padStart(4, "0")})`;
+  return "Device-defined";
 }
 
 export function preferredLeader(value) {

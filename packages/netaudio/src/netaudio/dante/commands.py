@@ -158,6 +158,16 @@ class DanteCommands:
     def probe_switch_configuration(self, host_mac=None) -> dict:
         return self._sequenced({"command": "probe_switch_configuration"}, host_mac)
 
+    def set_dante_redundancy(self, record_protocol_identifier: int, mode: str, host_mac=None) -> dict:
+        return self._sequenced(
+            {
+                "command": "set_dante_redundancy",
+                "record_protocol_identifier": record_protocol_identifier,
+                "mode": mode,
+            },
+            host_mac,
+        )
+
     def query_latency_config(self) -> dict:
         return {"command": "query_latency_config"}
 

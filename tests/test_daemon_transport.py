@@ -306,7 +306,6 @@ def bonjour_http_server(monkeypatch):
     monkeypatch.setattr(http_api_module, "AsyncZeroconf", FakeAsyncZeroconf)
     monkeypatch.setattr(http_api_module.socket, "gethostname", lambda: "netaudio-test-host")
     monkeypatch.setattr(http_api_module.app_settings, "_interface", None, raising=False)
-    monkeypatch.setattr(http_api_module.app_settings, "_interface_ip", None, raising=False)
 
     return make_http_server()
 
@@ -467,6 +466,38 @@ class TestBonjourReconcile:
 
 
 class TestTxFlows:
+    @pytest.mark.asyncio
+    async def test_creation_preflight_queries_the_mutation_protocol(self, monkeypatch):
+        device = make_device()
+        device.tx_channels = {1: SimpleNamespace(number=1)}
+        _, query, create, _ = self._mock_api(monkeypatch, [self._flow(slot=2)])
+        preferred = AsyncMock(return_value={"max_flow_slots": 2, "flows": []})
+        monkeypatch.setattr(flows, "query_preferred_tx_flow_inventory", preferred)
+        http_server = make_http_server({"dev1": device})
+
+        status, _ = await post(
+            http_server, "/flows/create", {"device": "dev1", "flow_slot": 2, "channels": [1], "confirmed": True}
+        )
+
+        assert status == 409
+        query.assert_awaited_once_with("192.168.1.50", 4440, 0x2729)
+        preferred.assert_not_awaited()
+        create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_modern_delete_preflight_recognizes_global_flow_identifier(self, monkeypatch):
+        device = make_device()
+        device.flow_protocol_id = 0x2809
+        _, query, _, delete = self._mock_api(monkeypatch, [{"global_flow_id": 2, "flow_type": "multicast"}])
+        http_server = make_http_server({"dev1": device})
+
+        status, body = await post(http_server, "/flows/delete", {"device": "dev1", "flow_slot": 2, "confirmed": True})
+
+        assert status == 200
+        assert body["flow_protocol_id"] == 0x2809
+        query.assert_awaited_once_with("192.168.1.50", 4440, 0x2809)
+        delete.assert_awaited_once_with("192.168.1.50", 4440, 0x2809, 2)
+
     @pytest.mark.parametrize(
         ("protocol", "slot", "create_allowed", "delete_allowed"),
         [
@@ -526,7 +557,7 @@ class TestTxFlows:
         assert status == 200
         assert body == {
             "device": "dev1",
-            "flow_protocol_id": 0x2729,
+            "flow_protocol_id": 0x2809,
             "max_flow_slots": 32,
             "flows": [flow],
         }

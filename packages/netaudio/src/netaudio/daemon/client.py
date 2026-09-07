@@ -177,6 +177,11 @@ async def refresh_clock_on_daemon(device_name: str) -> dict | None:
     return data
 
 
+async def refresh_discovery_on_daemon(address: str | None = None) -> tuple[int | None, dict | None]:
+    body = {"address": address} if address is not None else {}
+    return await _daemon_request("POST", "/discovery/refresh", body)
+
+
 async def refresh_ddm_inventory_on_daemon(context: str | None = None) -> tuple[int | None, dict | None]:
     body = {"context": context} if context is not None else {}
     status, data = await _daemon_request("POST", "/ddm/refresh", body, timeout=30.0)

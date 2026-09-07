@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable
 
 from netaudio import core
+from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import DEVICE_ARC_PORT
 
 logger = logging.getLogger("netaudio")
@@ -16,6 +17,7 @@ DEFAULT_REQUEST_ATTEMPTS = 3
 DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 1000
 
 WireObserver = Callable[[bytes, str, int, str], None]
+ClientKey = tuple[str, int, int, int, str | None]
 
 
 def _wire_capture_functions(library):
@@ -58,14 +60,9 @@ def take_wire_captures(client) -> list[dict]:
 
 class CoreTransport:
     def __init__(self, observer: WireObserver | None = None):
-        self._clients: dict[tuple[str, int, int, int], core.CoreClient] = {}
-        self._client_locks: dict[tuple[str, int, int, int], threading.Lock] = {}
-        self._host_mac = core.host_mac()
+        self._clients: dict[ClientKey, core.CoreClient] = {}
+        self._client_locks: dict[ClientKey, threading.Lock] = {}
         self._observer = observer
-
-    @property
-    def host_mac(self) -> bytes | None:
-        return self._host_mac
 
     @property
     def observer(self) -> WireObserver | None:
@@ -82,17 +79,19 @@ class CoreTransport:
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
     ) -> core.CoreClient:
-        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts)
+        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts, app_settings.interface_ip)
+        return self._client_for_key(key)
+
+    def _client_for_key(self, key: ClientKey) -> core.CoreClient:
         client = self._clients.get(key)
         if client is None:
             client = core.CoreClient(
                 key[0],
-                arc_port=arc_port,
-                timeout_ms=timeout_milliseconds,
-                attempts=attempts,
+                arc_port=key[1],
+                timeout_ms=key[2],
+                attempts=key[3],
+                local_ip=key[4],
             )
-            if self._host_mac:
-                client.set_host_mac(self._host_mac)
             self._clients[key] = client
             self._client_locks[key] = threading.Lock()
         return client
@@ -106,8 +105,8 @@ class CoreTransport:
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
     ):
-        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts)
-        client = self.client(device_ip_address, arc_port, timeout_milliseconds, attempts)
+        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts, app_settings.interface_ip)
+        client = self._client_for_key(key)
         return await asyncio.to_thread(self._call_and_observe, client, self._client_locks[key], operation)
 
     async def execute(

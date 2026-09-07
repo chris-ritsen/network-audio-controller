@@ -11,6 +11,7 @@ pub mod heartbeat_connection_health;
 pub mod heartbeat_interface_traffic;
 pub mod lock;
 pub mod netif;
+pub mod network;
 pub mod parser;
 pub mod protocol;
 pub mod responses;

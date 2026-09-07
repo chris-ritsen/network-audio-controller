@@ -1,13 +1,14 @@
 import { api } from "./api.js";
 import { Button } from "./components.js";
+import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, devices } from "./store.js";
-import { runAction } from "./toast.js";
+import { deviceRequestName, scopedDevices as devices } from "./store.js";
+import { runAction } from "./actions.js";
 
-function transmitterEntries() {
+function transmitterEntries(sourceDevices) {
   const entries = [];
-  for (const device of format.sortedDevices(devices.value)) {
+  for (const device of sourceDevices) {
     const channels = device.channels ? device.channels.transmitters || {} : {};
     for (const number of format.sortedChannelNumbers(channels)) {
       const channel = channels[number];
@@ -25,14 +26,15 @@ function transmitterEntries() {
   return entries;
 }
 
-export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveChannelName, subscription }) {
+export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveChannelName, subscription, sourceDevices }) {
   const dialog = useRef(null);
   const input = useRef(null);
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  const entries = useMemo(() => transmitterEntries(), [devices.value]);
+  const entries = useMemo(() => transmitterEntries(sourceDevices || format.sortedDevices(devices.value)), [sourceDevices, devices.value]);
   const needle = query.trim().toLowerCase();
   const results = entries.filter(
     (entry) => !needle || `${entry.channelName} ${entry.deviceLabel}`.toLowerCase().includes(needle),
@@ -42,7 +44,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   useLayoutEffect(() => {
     if (dialog.current && !dialog.current.open) {
       dialog.current.showModal();
-      if (input.current) {
+      if (input.current && window.innerWidth > 900) {
         input.current.focus();
       }
     }
@@ -51,8 +53,10 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   const requestName = deviceRequestName(receiver);
 
   const apply = async (entry) => {
+    if (busy || !entry.online || !receiver.online) return;
+    setError("");
     setBusy(true);
-    await runAction(
+    const result = await runAction(
       `route ${entry.channelName}@${entry.deviceLabel} to ${format.deviceLabel(receiver)} channel ${receiveChannelNumber}`,
       () =>
         api.subscribe({
@@ -63,23 +67,27 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         }),
     );
     setBusy(false);
-    onClose();
+    if (result.ok) onClose();
+    else setError(result.error.message);
   };
 
   const clear = async () => {
+    if (busy || !receiver.online) return;
+    setError("");
     setBusy(true);
-    await runAction(`unsubscribe ${format.deviceLabel(receiver)} channel ${receiveChannelNumber}`, () =>
+    const result = await runAction(`unsubscribe ${format.deviceLabel(receiver)} channel ${receiveChannelNumber}`, () =>
       api.unsubscribe({ rx_channel: receiveChannelNumber, rx_device: requestName }),
     );
     setBusy(false);
-    onClose();
+    if (result.ok) onClose();
+    else setError(result.error.message);
   };
 
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      if (!busy) onClose();
       return;
     }
     if (event.key === "ArrowDown") {
@@ -99,24 +107,30 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   };
 
   return html`
-    <dialog class="palette route-picker" ref=${dialog} onClose=${onClose} onCancel=${onClose}>
-      <header class="route-picker-header">
+    <dialog class="modal modal-bottom sm:modal-middle" aria-labelledby="source-picker-title" ref=${dialog} onClose=${onClose}
+      onClick=${(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}
+      onCancel=${(event) => { if (busy) event.preventDefault(); else onClose(); }}>
+      <div class="modal-box max-h-[85dvh] space-y-4 p-4 sm:p-6">
+      <header class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div class="route-picker-title">Route to ${format.deviceLabel(receiver)}</div>
+          <h2 id="source-picker-title" class="text-lg font-semibold">Choose source</h2>
           <div class="route-picker-subtitle">
-            receive channel ${receiveChannelNumber}${receiveChannelName ? ` · ${receiveChannelName}` : ""}
+            ${format.deviceLabel(receiver)} · ${receiveChannelName || `Channel ${receiveChannelNumber}`}
           </div>
         </div>
         <div class="toolbar">
-          ${subscription
-            ? html`<${Button} small variant="danger" disabled=${busy} onClick=${clear}>Clear route<//>`
+          ${subscription?.tx_device && subscription?.tx_channel
+            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}><${Icon} name="unplug" /> Disconnect<//>`
             : null}
-          <${Button} small disabled=${busy} onClick=${onClose}>Cancel<//>
+          <${Button} disabled=${busy} onClick=${onClose}>Done<//>
         </div>
       </header>
+      ${error ? html`<div role="alert" class="alert alert-error"><${Icon} name="warning" /><span>${error}</span></div>` : null}
       <input
         ref=${input}
         type="text"
+        class="input input-bordered w-full min-h-11"
+        aria-label="Find a source device or channel"
         placeholder="Filter transmit channels"
         value=${query}
         onInput=${(event) => {
@@ -125,7 +139,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         }}
         onKeyDown=${onKeyDown}
       />
-      <div class="palette-results">
+      <div class="flex flex-col gap-2 max-h-[50dvh] overflow-y-auto">
         ${results.length === 0
           ? html`<div class="palette-empty">No transmit channel matches this filter.</div>`
           : results.map((entry, index) => {
@@ -134,19 +148,19 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
                 subscription.tx_channel === entry.channelName &&
                 subscription.tx_device === entry.deviceLabel;
               return html`
-                <div
+                <button type="button" disabled=${busy || !entry.online || !receiver.online}
                   key=${`${entry.deviceLabel}/${entry.channelName}`}
-                  class="palette-item${index === activeIndex ? " active" : ""}"
+                  class=${`btn btn-ghost justify-start h-auto min-h-16 p-3 text-left whitespace-normal${active ? " bg-base-300" : ""}`}
                   onPointerEnter=${() => setHighlighted(index)}
                   onClick=${() => apply(entry)}
                 >
-                  <span class="status-dot${entry.online ? " online" : ""}"></span>
-                  <span class="palette-item-name">${entry.channelName}</span>
-                  <span class="palette-item-detail">${entry.deviceLabel}</span>
-                  ${active ? html`<span class="palette-item-kind">current</span>` : null}
-                </div>
+                  <${Icon} name=${active ? "check" : "routing"} />
+                  <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
+                  ${active ? html`<span class="badge badge-success badge-outline">Current</span>` : !entry.online ? html`<span class="badge">Offline</span>` : null}
+                </button>
               `;
             })}
+      </div>
       </div>
     </dialog>
   `;

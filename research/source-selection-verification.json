@@ -1,0 +1,46 @@
+{
+  "evidence_class": "observed",
+  "timestamp": "2026-09-06T13:18:12.736643+00:00",
+  "scope": "Nine existing physical devices; one device-name query per device through an explicitly bound local IPv4 source",
+  "platform": "macOS 26.5.1",
+  "source_commit": "a63ca7d45384f61ed3417f0a1ba794ddcdd41394",
+  "native_abi": 6,
+  "installed_native_sha256": "9974afcc3d0d115d0f562aec4001f8450c75e365ef410b5022bd52a95dfa1ad0",
+  "source_run": "netaudio-source-binding-readback.bpsFXY",
+  "source_artifacts": {
+    "RESULTS.json": "d356e7e75fc1be67d4ce496be87a690da38f73efc872baf7e57268cce70e7129",
+    "verify.py": "58eb8a082cba043deec2aa1253a3520b750fc050bf5b36fe16e724e2e61ea221"
+  },
+  "method": [
+    "Resolve the explicitly selected interface through AppSettings",
+    "Resolve each endpoint and ARC port from fresh local-daemon inventory and require baseline MAC identity agreement",
+    "Create an installed CoreClient with that source address, one attempt, and a 750 ms timeout",
+    "Inspect only the verification process's UDP sockets with lsof and require the selected source address",
+    "Query the device name once, require agreement with inventory, and close the client"
+  ],
+  "results": {
+    "device_count": 9,
+    "matching_bound_socket_count": 9,
+    "matching_name_readback_count": 9,
+    "advertised_arc_revisions": {"2.7.41": 2, "2.8.1": 1, "2.8.9": 6},
+    "elapsed_seconds": 0.6008645000401884,
+    "device_writes": 0,
+    "packet_capture_performed": false
+  },
+  "allowed_evidence": [
+    "NetAudio source and installed artifact",
+    "Own-process socket-address observation",
+    "Ordinary read-only device-name replies"
+  ],
+  "excluded_evidence": [
+    "Proprietary firmware or application executable inspection",
+    "Competing implementation encoding or parsing",
+    "Runtime memory inspection"
+  ],
+  "transformation": "Aggregate the digest-bound local results by advertised ARC revision; omit endpoint addresses, MAC identities, returned device names, and ephemeral source ports",
+  "limitations": [
+    "One selected interface on one Mac; no alternate-interface or other-OS experiment",
+    "No physical lock/unlock verification; the separate lock socket's source inheritance is covered by offline native tests",
+    "No claim about audio routing, media delivery, or unsupported wire revisions"
+  ]
+}

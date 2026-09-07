@@ -253,7 +253,7 @@ def _global_options(
         status_command()
 
 
-from netaudio.commands import channel, flow, key, report, server, shure, status, subscription, virtual
+from netaudio.commands import channel, discovery, flow, key, report, server, shure, status, subscription, virtual
 from netaudio.commands.capture.cli import app as capture_app
 from netaudio.commands.config.cli import top_app as config_app
 from netaudio.commands.ddm import app as ddm_app
@@ -283,6 +283,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(server.app, name="daemon")
 app.add_typer(ddm_app, name="ddm")
 app.add_typer(device_app, name="device")
+app.add_typer(discovery.app, name="discovery")
 app.add_typer(flow.app, name="flow")
 app.add_typer(lab_app, name="lab")
 app.add_typer(lock_app, name="lock")

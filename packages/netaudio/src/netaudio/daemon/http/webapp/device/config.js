@@ -1,17 +1,9 @@
 import { api } from "../api.js";
-import { AsyncButton, Disclosure, Fields, FieldRow, Panel, Value } from "../components.js";
+import { AsyncButton, Fields, FieldRow, Panel, Value } from "../components.js";
 import * as format from "../format.js";
 import { html, useRef } from "../lib/preact.js";
-import { deviceRequestName } from "../store.js";
+import { deviceRequestName, inventoryReady } from "../store.js";
 
-function parseClockSource(rawValue) {
-  const trimmed = String(rawValue).trim();
-  const parsed = trimmed.toLowerCase().startsWith("0x") ? Number.parseInt(trimmed.slice(2), 16) : Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffff) {
-    throw new Error("clock source must be an integer from 0 through 65535 (decimal or 0x hex)");
-  }
-  return parsed;
-}
 
 function RenameControl({ device, requestName }) {
   const input = useRef(null);
@@ -32,11 +24,10 @@ function RenameControl({ device, requestName }) {
 
 function SampleRateControl({ device, requestName }) {
   const select = useRef(null);
-  const confirm = useRef(null);
   const supported = device.supported_sample_rates_hz || [];
   if (!supported.length) {
     return html`<${FieldRow} label="Sample rate">
-      <span>${format.sampleRate(device.sample_rate_hz)} — not configurable on this device</span>
+      <span>${format.sampleRate(device.sample_rate_hz)}${inventoryReady.value ? " — not configurable on this device" : ""}</span>
     <//>`;
   }
   return html`
@@ -48,15 +39,11 @@ function SampleRateControl({ device, requestName }) {
           </option>`,
         )}
       </select>
-      <label class="inline">
-        <input type="checkbox" ref=${confirm} key=${`sample-rate-confirm-${requestName}`} />
-        I understand this interrupts audio and may drop subscriptions
-      </label>
       <${AsyncButton}
         variant="primary"
         small
         description=${`set sample rate on ${requestName}`}
-        onRun=${() => api.setSampleRate(requestName, Number(select.current.value), confirm.current.checked)}
+        onRun=${() => api.setSampleRate(requestName, Number(select.current.value), true)}
       >
         Apply
       <//>
@@ -69,7 +56,7 @@ function EncodingControl({ device, requestName }) {
   const supported = device.supported_encodings || [];
   if (!supported.length) {
     return html`<${FieldRow} label="Encoding">
-      <span>${format.text(device.encoding)} — not configurable on this device</span>
+      <span>${format.text(device.encoding)}${inventoryReady.value ? " — not configurable on this device" : ""}</span>
     <//>`;
   }
   return html`
@@ -121,7 +108,6 @@ function PullupControl({ device, requestName }) {
 }
 
 function ClockingControls({ device, requestName }) {
-  const source = useRef(null);
   const subdomain = useRef(null);
   return html`
     <${Panel}
@@ -151,18 +137,6 @@ function ClockingControls({ device, requestName }) {
           Disable
         <//>
       <//>
-      <${FieldRow} label="Clock source">
-        <span>${format.clockSourceCode(device.clock_source_code)}</span>
-        <input key=${`clock-source-${requestName}`} ref=${source} type="text" size="8" defaultValue=${device.clock_source_code} />
-        <${AsyncButton}
-          variant="primary"
-          small
-          description=${`set clock source on ${requestName}`}
-          onRun=${() => api.setClockSource(requestName, parseClockSource(source.current.value))}
-        >
-          Apply
-        <//>
-      <//>
       <${FieldRow} label="Clock subdomain">
         <span>${format.clockSubdomain(device.clock_subdomain)}</span>
         <input
@@ -170,7 +144,7 @@ function ClockingControls({ device, requestName }) {
           ref=${subdomain}
           type="text"
           size="18"
-          placeholder="name, hex:00ff, or unset"
+          placeholder="Subdomain name"
           defaultValue=${format.clockSubdomainInputValue(device.clock_subdomain)}
         />
         <${AsyncButton}
@@ -189,44 +163,26 @@ function ClockingControls({ device, requestName }) {
 export function DeviceConfigSection({ device }) {
   const requestName = deviceRequestName(device);
   return html`
-    <div class="stack">
+    <div class="flex flex-col gap-4">
       <${Panel}
         title="Device config"
         actions=${html`
           <${AsyncButton} small description=${`identify ${requestName}`} onRun=${() => api.identify(requestName)}>Identify<//>
-          <${AsyncButton} small description=${`refresh ${requestName}`} onRun=${() => api.refresh(requestName)}>Re-read device<//>
           <${AsyncButton} small variant="danger" description=${`reboot ${requestName}`} onRun=${() => api.reboot(requestName)}>Reboot<//>
         `}
       >
         <${RenameControl} device=${device} requestName=${requestName} />
         <${SampleRateControl} device=${device} requestName=${requestName} />
         <${EncodingControl} device=${device} requestName=${requestName} />
+        <${LatencyControl} device=${device} />
         <${PullupControl} device=${device} requestName=${requestName} />
       <//>
       <${ClockingControls} device=${device} requestName=${requestName} />
-      <${Disclosure} summary="Advanced audio and clock fields">
-        <${Fields}
-          entries=${[
-            ["Supported sample rates", (device.supported_sample_rates_hz || []).map(format.sampleRate).join(", ") || format.ABSENT],
-            ["Sample rate channel capacities", html`<${Value} value=${device.sample_rate_channel_capacities} />`],
-            ["Supported encodings", html`<${Value} value=${device.supported_encodings} />`],
-            ["Encoding configurable", html`<${Value} value=${device.encoding_configurable} />`],
-            ["Bit depth", html`<${Value} value=${device.bit_depth} />`],
-            ["Requested sample rate pull-up", html`<${Value} value=${device.requested_sample_rate_pullup_raw_value} />`],
-            ["Clock identity", html`<${Value} value=${device.clock_identity} />`],
-            ["Leader clock identity", html`<${Value} value=${device.leader_clock_identity} />`],
-            ["Clock port state code", html`<${Value} value=${device.clock_port_state_code} />`],
-            ["Clock port records", html`<${Value} value=${device.clock_port_records} />`],
-            ["Domain clocking state", html`<${Value} value=${device.ddm_clocking_state} />`],
-            ["Domain clock preferences", html`<${Value} value=${device.ddm_clock_preferences} />`],
-          ]}
-        />
-      <//>
     </div>
   `;
 }
 
-export function LatencySection({ device }) {
+function LatencyControl({ device }) {
   const requestName = deviceRequestName(device);
   const control = useRef(null);
   const values = new Set((device.standard_latency_choices_ms || []).map(Number));
@@ -237,10 +193,7 @@ export function LatencySection({ device }) {
   }
   const choices = [...values].sort((first, second) => first - second);
   const current = device.configured_latency_ms ?? device.latency_ms;
-  const health = device.receiver_flow_connection_health;
   return html`
-    <div class="stack">
-      <${Panel} title="Device latency">
         <${FieldRow} label="Latency">
           ${choices.length
             ? html`<select key=${`latency-${requestName}`} ref=${control}>
@@ -258,23 +211,6 @@ export function LatencySection({ device }) {
             Apply
           <//>
         <//>
-        <${Fields}
-          entries=${[
-            ["Current latency", format.latency(device.latency_ms)],
-            ["Configured latency", format.latency(device.configured_latency_ms)],
-            ["Active latency", format.latency(device.active_latency_ms)],
-            ["Default latency", format.latency(device.default_latency_ms)],
-            ["Minimum latency", format.latency(device.min_latency_ms)],
-            ["Maximum latency", format.latency(device.max_latency_ms)],
-          ]}
-        />
-      <//>
-      ${health
-        ? html`<${Panel} title="Receive flow latency">
-            <${Value} value=${health} />
-          <//>`
-        : null}
-    </div>
   `;
 }
 

@@ -1,0 +1,103 @@
+@layer components {
+  .receiver-subscription,
+  .receiver-summary-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .receiver-summary-line > span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .receiver-subscription.state-muted {
+    color: #999;
+  }
+
+  .channel-name-display {
+    display: inline-block;
+  }
+
+  .channel-name-value,
+  .channel-name-editor > input {
+    appearance: none;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 0 4px;
+    font: inherit;
+    line-height: normal;
+  }
+
+  .channel-name-value {
+    display: inline-flex;
+    align-items: center;
+    min-width: 12ch;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: text;
+  }
+
+  .channel-name-value:hover,
+  .channel-name-value:focus-visible {
+    color: var(--text);
+    background: var(--hover);
+  }
+
+  .channel-name-value:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+
+  .channel-name-editor {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  .channel-name-editor > input {
+    display: block;
+    width: 100%;
+    margin: 0;
+  }
+
+  .channel-name-actions {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: max-content;
+    max-width: 240px;
+    padding: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--text);
+    white-space: normal;
+  }
+
+  .channel-name-editor.actions-above .channel-name-actions {
+    top: auto;
+    bottom: calc(100% + 4px);
+  }
+
+  .channel-name-editor.actions-right .channel-name-actions {
+    right: 0;
+    left: auto;
+  }
+
+  @media (max-width: 900px) {
+    .channel-name-editor > input {
+      height: 44px;
+    }
+  }
+}

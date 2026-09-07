@@ -35,7 +35,6 @@ class AppSettings:
         self.debug: bool = False
         self.no_color: bool = False
         self._interface: str = DEFAULT_INTERFACE
-        self._interface_ip: str = None
         self.refresh: bool = False
         self.metering_port: int = int(os.environ.get("NETAUDIO_METERING_PORT", DEFAULT_MULTICAST_METERING_PORT))
         self.daemon_port: int = int(os.environ.get("NETAUDIO_DAEMON_PORT", DEFAULT_DAEMON_PORT))
@@ -78,15 +77,11 @@ class AppSettings:
     @interface.setter
     def interface(self, value: str) -> None:
         self._interface = value
-        self._interface_ip = None
 
     @property
-    def interface_ip(self) -> str:
+    def interface_ip(self) -> str | None:
         if not self._interface:
             return None
-
-        if self._interface_ip:
-            return self._interface_ip
 
         adapters = ifaddr.get_adapters()
 
@@ -95,29 +90,17 @@ class AppSettings:
                 ipv4_addresses = [ip.ip for ip in adapter.ips if isinstance(ip.ip, str)]
 
                 if ipv4_addresses:
-                    self._interface_ip = ipv4_addresses[0]
-
                     logger.debug(
                         "Using IPv4 address %s for interface %s",
-                        self._interface_ip,
+                        ipv4_addresses[0],
                         self._interface,
                     )
 
-                    return self._interface_ip
+                    return ipv4_addresses[0]
 
-                print(
-                    f"No IPv4 address found for interface {self._interface}",
-                    file=sys.stderr,
-                )
+                raise RuntimeError(f"Configured interface {self._interface!r} has no IPv4 address")
 
-                return None
-
-        print(
-            f"Warning: Could not find interface '{self._interface}'. Using default interface.",
-            file=sys.stderr,
-        )
-
-        return None
+        raise RuntimeError(f"Configured interface {self._interface!r} was not found")
 
 
 settings = AppSettings()

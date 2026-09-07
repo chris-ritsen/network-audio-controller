@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.common.app_config import settings as app_settings
-from netaudio.daemon.server import NetaudioDaemon, _stale_device_minutes_from_config
+from netaudio.daemon.server import NetaudioDaemon, _probe_device, _stale_device_minutes_from_config
 from netaudio.dante.device import DanteDevice
 
 
@@ -32,6 +32,54 @@ def _device(server_name, *, age_seconds, online=False):
     device.online = online
     device.last_seen = time.time() - age_seconds
     return device
+
+
+def test_reachability_uses_advertised_port_and_only_requires_device_name(monkeypatch):
+    from netaudio import core
+
+    names = {4440: "Windows-PC", 4540: "studio-media-b", 4640: "studio-media-c"}
+    requests = []
+
+    class Client:
+        def __init__(self, ip, *, arc_port, timeout_ms, attempts, local_ip=None):
+            self.port = arc_port
+            requests.append((ip, arc_port))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def get_device_name(self):
+            return names[self.port]
+
+        def get_device_info(self):
+            raise AssertionError("An unsupported full-info query must not mark a responsive device offline")
+
+    monkeypatch.setattr(core, "CoreClient", Client)
+    for port in names:
+        assert _probe_device("192.0.2.10", port)
+    assert requests == [("192.0.2.10", port) for port in names]
+
+
+@pytest.mark.asyncio
+async def test_online_checks_do_not_confuse_devices_sharing_an_ip(monkeypatch):
+    from netaudio.dante.const import SERVICE_ARC
+
+    devices = {}
+    for port in (4440, 4540, 4640):
+        device = _device(f"device-{port}.local.", age_seconds=600, online=True)
+        device.services = {f"arc-{port}": {"type": SERVICE_ARC, "port": port}}
+        devices[device.server_name] = device
+    daemon = _daemon(devices)
+    daemon.mark_device_offline_verified = MagicMock()
+    probe = MagicMock(side_effect=lambda _ip, port: port != 4640)
+    monkeypatch.setattr("netaudio.daemon.server._probe_device", probe)
+    for name in devices:
+        await daemon._verify_quiet_online_device(name)
+    assert [call.args for call in probe.call_args_list] == [("192.0.2.10", port) for port in (4440, 4540, 4640)]
+    daemon.mark_device_offline_verified.assert_called_once_with("device-4640.local.", reason="active_revalidation")
 
 
 def test_expire_stale_devices_forgets_devices_unseen_for_the_configured_window(monkeypatch):

@@ -1,0 +1,54 @@
+@layer components {
+  .signal-presence {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: 64px;
+    height: 20px;
+    flex: 0 0 64px;
+    color: #999;
+  }
+
+  .signal-presence svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+  }
+
+  .signal-track {
+    width: 42px;
+    height: 6px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .signal-level {
+    display: block;
+    height: 100%;
+    background: currentColor;
+  }
+
+  .signal-present {
+    color: var(--good);
+  }
+
+  .signal-clipping {
+    color: var(--bad);
+  }
+
+  .signal-muted,
+  .signal-quiet,
+  .signal-unknown {
+    color: #999;
+  }
+
+  .meter-bank {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .meter-bank canvas {
+    display: block;
+  }
+}

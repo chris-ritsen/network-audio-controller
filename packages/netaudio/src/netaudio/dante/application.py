@@ -69,8 +69,10 @@ from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_CLOCK,
     STATUS_KIND_ENCODING,
     STATUS_KIND_GAIN,
+    STATUS_KIND_INTERFACE,
     STATUS_KIND_SAMPLE_RATE,
     STATUS_KIND_SAMPLE_RATE_PULLUP,
+    STATUS_KIND_SWITCH_CONFIGURATION,
 )
 from netaudio.dante.state import STATUS_KIND_DIAGNOSTIC_LOG_EXPORT, DanteStateService, apply_device_status
 
@@ -1470,13 +1472,17 @@ class DanteApplication:
         return result
 
     async def probe_interface_status(self, target, timeout: float = 2.0) -> list[dict]:
-        return await self._probe_once(
+        status = await self._probe_once(
             "interface",
             target,
             self.send_probe_interface_status,
             timeout,
             "interface status",
         )
+        device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
+        if device is not None:
+            apply_device_status(device, STATUS_KIND_INTERFACE, status)
+        return status["interfaces"]
 
     async def probe_link_status(
         self,
@@ -1547,13 +1553,27 @@ class DanteApplication:
         target,
         timeout: float = 2.0,
     ) -> dict:
-        return await self._probe_once(
+        status = await self._probe_once(
             "switch_configuration",
             target,
             self.send_probe_switch_configuration,
             timeout,
             "switch configuration",
         )
+        device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
+        if device is not None:
+            apply_device_status(device, STATUS_KIND_SWITCH_CONFIGURATION, {"dante_redundancy": status["redundancy"]})
+        return status
+
+    async def probe_dante_redundancy(self, device, timeout: float = 2.0) -> dict:
+        from netaudio.dante.network_configuration import probe_redundancy
+
+        return await probe_redundancy(self, device, timeout)
+
+    async def set_dante_redundancy(self, device, mode: str, timeout: float = 2.0) -> dict:
+        from netaudio.dante.network_configuration import set_redundancy
+
+        return await set_redundancy(self, device, mode, timeout)
 
     async def query_modern_arc_receiver_channel_status(self, device):
         return await self._query_channel_status_pages(device, "rx")
@@ -1978,24 +1998,15 @@ class DanteApplication:
                 self._apply_gain_capability(device, observed_device_type, channel_levels)
             return result
 
-    async def set_interface(self, device, mode: str, static_configuration: dict | None = None) -> list[dict] | None:
-        if mode == "dhcp":
-            return await self.set_interface_dhcp(device)
-        return await self.set_interface_static(
-            device,
-            static_configuration["ip_address"],
-            static_configuration["netmask"],
-            static_configuration["dns_server"],
-            static_configuration["gateway"],
-        )
+    async def set_interface(
+        self, device, mode: str, static_configuration: dict | None = None, *, interface="primary", timeout=2.0
+    ) -> list[dict]:
+        from netaudio.dante.network_configuration import set_interface
 
-    async def set_interface_dhcp(self, target, timeout: float = 2.0) -> list[dict] | None:
-        return await self._mutate_and_take_result(
-            "interface",
-            target,
-            lambda: self.send_set_interface_dhcp(target),
-            timeout,
-        )
+        return await set_interface(self, device, mode, static_configuration, interface=interface, timeout=timeout)
+
+    async def set_interface_dhcp(self, target, timeout: float = 2.0, *, interface="primary") -> list[dict]:
+        return await self.set_interface(target, "dhcp", interface=interface, timeout=timeout)
 
     async def set_interface_static(
         self,
@@ -2005,12 +2016,15 @@ class DanteApplication:
         dns_server: str,
         gateway: str,
         timeout: float = 2.0,
+        *,
+        interface="primary",
     ) -> list[dict] | None:
-        return await self._mutate_and_take_result(
-            "interface",
+        return await self.set_interface(
             target,
-            lambda: self.send_set_interface_static(target, ip_address, netmask, dns_server, gateway),
-            timeout,
+            "static",
+            {"ip_address": ip_address, "netmask": netmask, "dns_server": dns_server, "gateway": gateway},
+            interface=interface,
+            timeout=timeout,
         )
 
     async def set_latency(self, device, milliseconds: float):

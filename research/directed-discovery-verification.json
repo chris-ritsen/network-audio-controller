@@ -1,0 +1,102 @@
+{
+  "evidence_class": "observed",
+  "source": {
+    "run": "netaudio-directed-discovery-20260906.wUrOWs",
+    "originating_tool": "Installed NetAudio discovery refresh HTTP endpoint",
+    "capture": {
+      "name": "directed.pcapng",
+      "sha256": "dae17dc6e9eb1e345e0210f04b2f2548b87f4d230137fafd12398b6a3bff274f",
+      "size_bytes": 24644,
+      "packet_count": 22,
+      "dropped_packets": 0
+    },
+    "interface": "en0",
+    "scope": "Two authorized targets, UDP port 5353, 20 seconds, no media",
+    "allowed_evidence": [
+      "RFC 6762",
+      "Public python-zeroconf APIs",
+      "Directed requests and subsequent matching service responses"
+    ],
+    "excluded_evidence": [
+      "Competing implementation encodings",
+      "Proprietary firmware/application static inspection"
+    ],
+    "transformations": [
+      "Select exact request and following target-response frames",
+      "Hash original UDP payloads",
+      "Retain queried service types and only matching response service types",
+      "Replace transport endpoints with requester, target and multicast roles",
+      "Omit unrelated channel advertisements and queries"
+    ]
+  },
+  "observations": [
+    {
+      "device": "AVIO AES3",
+      "firmware_version": "4.3.0",
+      "software_version": "4.1.0",
+      "product_version": "1.2.0.3",
+      "request": {
+        "frame": 1,
+        "timestamp_epoch": "1788698076.128446000",
+        "payload_sha256": "af71ceae59b4437e9e73d43598f659f1996ad68f99c72d18956f630239e187fd",
+        "destination": "target",
+        "service_types": [
+          "_netaudio-arc._udp.local",
+          "_netaudio-chan._udp.local",
+          "_netaudio-cmc._udp.local",
+          "_netaudio-dbc._udp.local",
+          "_dantevideo._udp.local"
+        ]
+      },
+      "response": {
+        "frame": 2,
+        "timestamp_epoch": "1788698076.141951000",
+        "payload_sha256": "81e1f6d7535542ce68361ffd4ea676db57337b726c7fb50d3ea5eecafcd7a9ea",
+        "destination": "multicast",
+        "matching_service_types": [
+          "_netaudio-dbc._udp.local",
+          "_netaudio-cmc._udp.local",
+          "_netaudio-arc._udp.local"
+        ]
+      },
+      "baseline_identity_and_configuration_equal": true
+    },
+    {
+      "device": "Ferrofish A32",
+      "firmware_version": "4.0.1",
+      "software_version": "4.0.0",
+      "product_version": "1.0.0.0",
+      "request": {
+        "frame": 3,
+        "timestamp_epoch": "1788698076.168751000",
+        "payload_sha256": "af71ceae59b4437e9e73d43598f659f1996ad68f99c72d18956f630239e187fd",
+        "destination": "target",
+        "service_types": [
+          "_netaudio-arc._udp.local",
+          "_netaudio-chan._udp.local",
+          "_netaudio-cmc._udp.local",
+          "_netaudio-dbc._udp.local",
+          "_dantevideo._udp.local"
+        ]
+      },
+      "response": {
+        "frame": 4,
+        "timestamp_epoch": "1788698076.296405000",
+        "payload_sha256": "86099a71a04ac75918b1579d007d7d42664880c60517c8a37d91aea0f4bcf9fc",
+        "destination": "requester",
+        "matching_service_types": [
+          "_netaudio-arc._udp.local",
+          "_netaudio-dbc._udp.local",
+          "_netaudio-chan._udp.local",
+          "_netaudio-cmc._udp.local"
+        ]
+      },
+      "baseline_identity_and_configuration_equal": true
+    }
+  ],
+  "limitations": [
+    "Both devices were already known; no claim of discovering a previously unknown device",
+    "A query request does not prove an inventory state transition",
+    "Other devices, off-link sources and multicast-only networks remain unverified"
+  ]
+}
