@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import {AsyncButton, Button, Notice, Panel, Value} from "../components.js";
 import * as format from "../format.js";
-import { html, useEffect, useRef, useState } from "../lib/preact.js";
+import { html, useEffect, useLayoutEffect, useRef, useState } from "../lib/preact.js";
 import { RoutePicker } from "../route-picker.js";
 import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
@@ -19,7 +19,6 @@ function gainChannelType(device) {
 
 function NameCell({ channel, channelNumber, channelType, requestName }) {
   const input = useRef(null);
-  const editButton = useRef(null);
   const editor = useRef(null);
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(false);
@@ -29,7 +28,7 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
   const draft = useRef("");
   const label = `${channelType === "rx" ? "Receive" : "Transmit"} channel ${channelNumber} name`;
   useEffect(() => setName(channel.name || ""), [channel.name]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (editing) {
       input.current?.focus();
       const selection = window.getSelection();
@@ -38,26 +37,35 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
       selection.removeAllRanges();
       selection.addRange(range);
       const reposition = () => {
-        const box = editButton.current.getBoundingClientRect();
+        const box = input.current.getBoundingClientRect();
+        const above = window.innerHeight - box.bottom < 80;
         editor.current.style.left = `${box.left}px`;
-        editor.current.style.top = `${box.top}px`;
+        editor.current.style.top = `${above ? box.top : box.bottom}px`;
         editor.current.style.width = `${box.width}px`;
-        editor.current.classList.toggle("actions-above", window.innerHeight - box.bottom < 80);
+        editor.current.classList.toggle("actions-above", above);
         editor.current.classList.toggle("actions-right", window.innerWidth - box.left < 248);
       };
       reposition();
       window.addEventListener("resize", reposition);
       window.addEventListener("scroll", reposition, true);
+      const outside = (event) => {
+        if (!input.current.contains(event.target) && !editor.current.contains(event.target)) close();
+      };
+      document.addEventListener("pointerdown", outside);
       return () => {
         window.removeEventListener("resize", reposition);
         window.removeEventListener("scroll", reposition, true);
+        document.removeEventListener("pointerdown", outside);
       };
     }
   }, [editing]);
-  const close = () => {
+  const close = (value = name) => {
     editor.current.hidePopover();
+    input.current.textContent = value || "Unnamed channel";
+    input.current.style.width = "";
+    setEditing(false);
     setError("");
-    requestAnimationFrame(() => editButton.current?.focus());
+    requestAnimationFrame(() => input.current?.focus());
   };
   const save = async (value) => {
     if (pending) return;
@@ -66,47 +74,57 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
     try {
       await api.renameChannel(requestName, channelType, channelNumber, value);
       if (value) setName(value);
-      close();
+      close(value || name);
     } catch (failure) {
       setError(failure.message);
     } finally {
       setPending(false);
     }
   };
+  const open = () => {
+    if (editing) return;
+    const box = input.current.getBoundingClientRect();
+    input.current.style.width = `${box.width}px`;
+    input.current.textContent = name;
+    draft.current = name;
+    setError("");
+    setEditing(true);
+    editor.current.showPopover();
+  };
   return html`
     <span class="channel-name-display">
-      <button ref=${editButton} type="button" class="channel-name-value" aria-label=${`Edit ${label.toLowerCase()}`} title="Click to edit" onClick=${() => {
-        draft.current = name;
-        input.current.textContent = name;
-        setError("");
-        const box = editButton.current.getBoundingClientRect();
-        Object.assign(editor.current.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px` });
-        editor.current.showPopover();
-      }}>${name || "Unnamed channel"}</button>
-    <form ref=${editor} popover="auto" class="channel-name-editor" onToggle=${(event) => setEditing(event.newState === "open")}
-      onSubmit=${(event) => { event.preventDefault(); void save(draft.current); }} onKeyDown=${(event) => {
-        if (event.isComposing || pending) return;
-        if (event.key === "Escape") { event.preventDefault(); close(); }
-        if (event.key === "Enter") { event.preventDefault(); void save(draft.current); }
-      }}>
       <span
         ref=${input}
-        class="channel-name-input"
-        role="textbox"
-        contentEditable=${pending ? "false" : "plaintext-only"}
-        aria-multiline="false"
-        aria-label=${label}
+        class=${`channel-name-value${editing ? " channel-name-input" : ""}`}
+        role=${editing ? "textbox" : "button"}
+        tabIndex="0"
+        contentEditable=${editing && !pending ? "plaintext-only" : "false"}
+        spellCheck="false"
+        aria-multiline=${editing ? "false" : null}
+        aria-label=${editing ? label : `Edit ${label.toLowerCase()}`}
         aria-placeholder="Default channel name"
         aria-disabled=${pending}
+        title=${editing ? null : "Click to edit"}
+        onClick=${open}
+        onKeyDown=${(event) => {
+          if (event.isComposing || pending) return;
+          if (!editing && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); }
+          else if (editing && event.key === "Enter") { event.preventDefault(); void save(draft.current); }
+          else if (editing && event.key === "Escape") { event.preventDefault(); close(); }
+        }}
         onInput=${(event) => {
           const value = event.currentTarget.innerText.replace(/[\r\n]+$/g, "").replace(/[\r\n]+/g, " ");
           if (event.currentTarget.textContent !== value) event.currentTarget.textContent = value;
           draft.current = value;
         }}
-      ></span>
+      >${name || "Unnamed channel"}</span>
+    <form ref=${editor} popover="manual" class="channel-name-editor"
+      onSubmit=${(event) => { event.preventDefault(); void save(draft.current); }} onKeyDown=${(event) => {
+        if (event.key === "Escape" && !pending) { event.preventDefault(); close(); }
+      }}>
       <div class="channel-name-actions">
       <button type="submit" class="btn btn-xs" disabled=${pending} aria-busy=${pending}>Save</button>
-      <${Button} small disabled=${pending} onClick=${close}>Cancel<//>
+      <${Button} small disabled=${pending} onClick=${() => close()}>Cancel<//>
       ${error ? html`<span role="alert" class="text-error text-sm">${error}</span>` : null}
       </div>
     </form>
