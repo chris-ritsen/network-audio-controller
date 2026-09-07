@@ -289,7 +289,7 @@ function readTheme() {
 }
 
 function rowLabelText(row) {
-  if (row.kind === "group") return `${row.expanded ? "⊟" : "⊞"} ${row.name}`;
+  if (row.kind === "group") return row.name;
   if (row.kind === "device") {
     return `${row.label}  (${row.channelCount})`;
   }
@@ -297,7 +297,7 @@ function rowLabelText(row) {
 }
 
 function columnLabelText(column) {
-  if (column.kind === "group") return `${column.name} ${column.expanded ? "⊟" : "⊞"}`;
+  if (column.kind === "group") return column.name;
   if (column.kind === "device") {
     return `${column.label}  (${column.channelCount})`;
   }
@@ -492,7 +492,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   };
 
   const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL && columns[hover.columnIndex]?.activity?.count)
-    || (hover.inGutter && !hover.inHeader && hover.x < CELL && rows[hover.rowIndex]?.kind !== "device" && rows[hover.rowIndex]?.activity?.count));
+    || (hover.inGutter && !hover.inHeader && hover.x >= layout.gutter - CELL && rows[hover.rowIndex]?.kind !== "device" && rows[hover.rowIndex]?.activity?.count));
   const cellHover = hover && !hover.inHeader && !hover.inGutter
     && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
   const hoverText = hover && (cellHover || statusHover)
@@ -783,7 +783,7 @@ function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, si
     context.fillStyle = theme.text;
     context.textAlign = "left";
     if (row.kind !== "device" && row.activity?.count) {
-      drawStatusIcon(context, CELL / 2, y + CELL / 2, row.activity.severity, theme, 18);
+      drawStatusIcon(context, gutter - CELL / 2, y + CELL / 2, row.activity.severity, theme, 18);
       context.fillStyle = theme.text;
     }
     if (row.kind === "device") {
@@ -797,7 +797,9 @@ function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, si
       context.beginPath();
       context.moveTo(x - 16, y); context.lineTo(x - 16, y + CELL / 2); context.lineTo(x - 6, y + CELL / 2);
       context.stroke();
-      context.fillText(fitLabel(context, rowLabelText(row), gutter - x - GUTTER_PADDING), x, y + CELL / 2);
+      if (row.kind === "group") drawExpansionMark(context, x + 6, y + CELL / 2, row.expanded, theme);
+      const textX = x + (row.kind === "group" ? 18 : 0);
+      context.fillText(fitLabel(context, rowLabelText(row), gutter - textX - GUTTER_PADDING - (row.activity ? CELL : 0)), textX, y + CELL / 2);
     }
   }
   context.restore();
@@ -829,6 +831,9 @@ function drawHeader(context, { columns, firstColumn, gutter, header, hover, last
     context.fillRect(Math.floor(x) + CELL - 2, 0, 2, header);
     if (column.kind === "device") {
       drawExpansionMark(context, x + CELL / 2, 14, column.expanded, theme);
+    } else if (column.kind === "group") {
+      context.font = `13px ${theme.uiFont}`;
+      drawExpansionMark(context, x + CELL / 2, header - HEADER_PADDING - CELL - context.measureText(columnLabelText(column)).width - 12, column.expanded, theme);
     }
     context.save();
     if (column.activity?.count) {

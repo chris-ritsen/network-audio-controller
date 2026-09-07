@@ -50,12 +50,15 @@ function RoutingView() {
   });
   const receiverLabels = model.rows.filter((row) => row.kind === "device").map((row) => row.label);
   const transmitterLabels = model.columns.filter((column) => column.kind === "device").map((column) => column.label);
-  const expandDevices = (side, value) => {
-    setAllExpanded(side, side === "receivers" ? receiverLabels : transmitterLabels, value);
+  const expandGroups = (side, value) => {
     const axis = side === "receivers" ? model.rows : model.columns;
     const keys = axis.filter((entry) => entry.kind === "device").flatMap((entry) =>
       groupChannels(deviceRequestName(entry.device), entry.channels).map((group) => group.key));
     setGroupsExpanded(side, keys, value);
+  };
+  const expandDevices = (side, value) => {
+    setAllExpanded(side, side === "receivers" ? receiverLabels : transmitterLabels, value);
+    expandGroups(side, value);
   };
 
   return html`
@@ -67,19 +70,23 @@ function RoutingView() {
           <details class="routing-options" ref=${optionsMenu}><summary class="btn btn-sm">View options</summary><div class="routing-options-panel">
           <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
             setFlipped(!flipped);
-            optionsMenu.current.open = false;
             try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}
           }}><${Icon} name="flip" /> Flip axes</button>
           <span class="inline-flex items-center gap-2">Devices
             <${ExpansionButtons} label="devices and groups" onExpand=${() => {
               expandDevices("receivers", true); expandDevices("transmitters", true);
-              optionsMenu.current.open = false;
             }} onCollapse=${() => {
               expandDevices("receivers", false); expandDevices("transmitters", false);
-              optionsMenu.current.open = false;
             }} />
           </span>
-          <label class="inline-field"><input type="checkbox" checked=${groups.enabled} onChange=${(event) => enableChannelGroups(event.target.checked)} />Channel groups</label>
+          <span class="inline-flex items-center gap-2">
+            <label class="inline-field whitespace-nowrap"><input type="checkbox" checked=${groups.enabled} onChange=${(event) => enableChannelGroups(event.target.checked)} />Channel groups</label>
+            ${groups.enabled ? html`<${ExpansionButtons} label="channel groups" onExpand=${() => {
+              expandGroups("receivers", true); expandGroups("transmitters", true);
+            }} onCollapse=${() => {
+              expandGroups("receivers", false); expandGroups("transmitters", false);
+            }} />` : null}
+          </span>
           </div></details>
           ` : null}
         </div>
