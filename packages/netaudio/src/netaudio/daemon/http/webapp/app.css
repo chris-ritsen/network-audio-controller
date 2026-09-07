@@ -5243,11 +5243,6 @@
       --modal-bl: var(--radius-box);
       --modal-br: var(--radius-box);
     }
-    .btn-square {
-      padding-inline: 0px;
-      width: var(--size);
-      height: var(--size);
-    }
   }
   .size-5 {
     width: calc(var(--spacing) * 5);
@@ -5892,8 +5887,8 @@
     grid-area: topbar;
     display: flex;
     align-items: center;
-    gap: 20px;
-    padding: 0 16px;
+    gap: 13px;
+    padding: 0 12px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
@@ -5940,10 +5935,13 @@
   .app-menu-trigger {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     flex-shrink: 0;
-    min-height: 34px;
-    padding: 5px 8px;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
     border: 1px solid transparent;
     border-radius: 4px;
     background: transparent;
@@ -5961,7 +5959,7 @@
     overflow-x: auto;
     background: var(--panel);
     border-bottom: 1px solid var(--line-strong);
-    padding: 0 16px;
+    padding: 0 12px;
     gap: 1px;
   }
   .network-navigation .mobile-view-selector {
@@ -5972,7 +5970,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    padding: 0 24px;
+    padding: 0 12px;
     border-bottom: 3px solid transparent;
     font-size: 14px;
     color: var(--muted);
@@ -7509,7 +7507,7 @@
   .routing-grid > .content-header {
     align-items: center;
     margin: 0;
-    padding: 4px 10px;
+    padding: 4px 12px;
     min-height: 38px;
     gap: 8px;
   }
@@ -7576,15 +7574,39 @@
     position: absolute;
     z-index: 2;
     display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .matrix-axis-controls.column-axis {
     flex-direction: column;
+  }
+  .column-axis .matrix-axis-title {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+  .matrix-expansion-stack {
+    display: flex;
+    flex-direction: column-reverse;
     gap: 2px;
+  }
+  .row-axis .matrix-expansion-controls {
+    order: -1;
+  }
+  .matrix-filters {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
   .matrix-filter-label {
     display: flex;
     flex-direction: column;
     gap: 2px;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 400;
   }
   .matrix-filter-label input {
     width: 100%;
