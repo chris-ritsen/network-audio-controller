@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WEBAPP, fixture, setLocation } from "./setup.mjs";
 
-const { DEVICE_FILTERS, matchesDeviceFilters, deviceFilterOptions, toggleDeviceFilter } = await import(`${WEBAPP}device-filters.js`);
-const { DeviceFilterPanel, ActiveDeviceFilters } = await import(`${WEBAPP}filter-panel.js`);
+const { DEVICE_FILTERS, matchesDeviceFilters, deviceFilterOptions, toggleDeviceFilter, readRoutingFilters, saveRoutingFilters } = await import(`${WEBAPP}device-filters.js`);
+const { DeviceFilterPanel } = await import(`${WEBAPP}filter-panel.js`);
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
 const inventory = [
@@ -37,20 +37,43 @@ test("facet counts respect other groups and retain selected values after invento
   assert.deepEqual(filters.values.manufacturer, ["Maker A"]);
 });
 
-test("filter panel has labeled checkboxes, search, clear all and removable chips", () => {
+test("filter panel uses checkboxes without added dismiss buttons or selection badges", () => {
   const filters = { search: "Alpha", values: { lock: ["Unlocked"] } };
   const markup = render(h(DeviceFilterPanel, { all: inventory, filters, onChange() {} }));
   assert.match(markup, /aria-label="Device filters"/);
   assert.match(markup, /Clear all/);
   assert.match(markup, /type="checkbox"/);
-  const sidebar = markup.match(/<aside[^>]*>([\s\S]*)<\/aside>/)[1];
-  assert.match(sidebar, /aria-label="Active device filters"/);
-  assert.match(sidebar, /Remove Device lock: Unlocked/);
+  assert.doesNotMatch(markup, /Active device filters|Remove Device lock|routing-filter-chips|badge/);
+  assert.equal((markup.match(/<button/g) || []).length, 1);
   for (const group of DEVICE_FILTERS) assert.ok(markup.includes(group.label));
-  const chips = render(h(ActiveDeviceFilters, { filters, onChange() {} }));
-  assert.match(chips, /Remove device search/);
-  assert.match(chips, /Remove Device lock: Unlocked/);
-  assert.equal(render(h(ActiveDeviceFilters, { filters: { search: "", values: {} }, onChange() {} })), "");
+});
+
+test("routing filters persist searches and selections, including absent devices", () => {
+  const filters = { search: "Desk", receiverSearch: "left", transmitterSearch: "right", values: { manufacturer: ["Absent maker"], availability: ["Online"] } };
+  try {
+    saveRoutingFilters(filters);
+    assert.deepEqual(readRoutingFilters(), filters);
+    saveRoutingFilters({ search: "", values: {} });
+    assert.deepEqual(readRoutingFilters().values, {});
+  } finally { window.localStorage.removeItem("netaudio.routing.filters"); }
+});
+
+test("invalid stored filters are ignored and unavailable storage is harmless", () => {
+  const original = window.localStorage;
+  try {
+    for (const saved of ["{", "null", JSON.stringify({ search: [], values: { model: [3, "A", "A"], unknown: ["B"] } })]) {
+      original.setItem("netaudio.routing.filters", saved);
+      const filters = readRoutingFilters();
+      assert.equal(filters.search, "");
+      assert.deepEqual(filters.values, saved.startsWith('{"') ? { model: ["A"] } : {});
+    }
+    window.localStorage = { getItem() { throw Error("denied"); }, setItem() { throw Error("denied"); } };
+    assert.deepEqual(readRoutingFilters().values, {});
+    assert.doesNotThrow(() => saveRoutingFilters({ values: {} }));
+  } finally {
+    window.localStorage = original;
+    original.removeItem("netaudio.routing.filters");
+  }
 });
 
 test("routing keeps labeled navigation and axis searches alongside the filter panel", async () => {

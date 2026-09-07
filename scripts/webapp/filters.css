@@ -117,20 +117,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .routing-filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-
-  .routing-filter-chips .btn {
-    height: auto;
-    min-height: 30px;
-    white-space: normal;
-    text-align: left;
-  }
-
   @media (max-width: 900px) {
     .routing-filter-container {
       max-height: 60vh;

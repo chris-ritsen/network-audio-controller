@@ -7,16 +7,20 @@ import { buildMatrixModel, expanded, ExpansionButtons, RoutingMatrix, setAllExpa
 import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
 import { deviceRequestName, scopedDevices as devices } from "../store.js";
-import { matchesDeviceFilters } from "../device-filters.js";
+import { matchesDeviceFilters, readRoutingFilters, saveRoutingFilters } from "../device-filters.js";
 import { DeviceFilterPanel } from "../filter-panel.js";
 
 function RoutingView() {
   const all = format.sortedDevices(devices.value);
-  const [receiverFilter, setReceiverFilter] = useState("");
-  const [transmitterFilter, setTransmitterFilter] = useState("");
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
   const [listMode, setListMode] = useState(false);
-  const [filters, setFilters] = useState({ search: "", values: {} });
+  const [filters, setFilters] = useState(readRoutingFilters);
+  const receiverFilter = filters.receiverSearch || "";
+  const transmitterFilter = filters.transmitterSearch || "";
+  const updateFilters = (next) => {
+    setFilters(next);
+    saveRoutingFilters(next);
+  };
   const [filtersOpen, setFiltersOpen] = useState(() => !window.matchMedia("(max-width: 900px)").matches);
   const [flipped, setFlipped] = useState(() => {
     try { return window.localStorage.getItem("netaudio.matrix.flipped") === "true"; }
@@ -79,11 +83,11 @@ function RoutingView() {
           }}><${Icon} name="flip" /> Flip axes</button>
           <label class="inline-field">
             Receivers
-            <input type="search" size="16" value=${receiverFilter} onInput=${(event) => setReceiverFilter(event.target.value)} />
+            <input type="search" size="16" value=${receiverFilter} onInput=${(event) => updateFilters({ ...filters, receiverSearch: event.target.value })} />
           </label>
           <label class="inline-field">
             Transmitters
-            <input type="search" size="16" value=${transmitterFilter} onInput=${(event) => setTransmitterFilter(event.target.value)} />
+            <input type="search" size="16" value=${transmitterFilter} onInput=${(event) => updateFilters({ ...filters, transmitterSearch: event.target.value })} />
           </label>
           <span class="inline-flex items-center gap-2">Devices
             <${ExpansionButtons} label="devices" onExpand=${() => {
@@ -102,7 +106,7 @@ function RoutingView() {
         </div>
       </div>
       <div class=${`routing-workspace${filtersOpen ? " with-filters" : ""}`}>
-        ${filtersOpen ? html`<div id="routing-device-filters" class="routing-filter-container"><${DeviceFilterPanel} all=${all} filters=${filters} onChange=${setFilters} /></div>` : null}
+        ${filtersOpen ? html`<div id="routing-device-filters" class="routing-filter-container"><${DeviceFilterPanel} all=${all} filters=${filters} onChange=${updateFilters} /></div>` : null}
         <div class="routing-results">
       ${showList ? html`<${RoutingControls} all=${visible.filter((device) => device.online)} />`
         : model.rows.length === 0 || model.columns.length === 0
