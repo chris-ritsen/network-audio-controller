@@ -20,7 +20,7 @@ export function StatusSection({ device }) {
               ["Dante software", html`<${Value} value=${device.software_version} />`],
               ["Primary address", html`<${Value} value=${device.ipv4} />`],
               ["MAC address", format.macAddress(device)],
-              ["Device lock", device.is_locked ? "locked" : "unlocked"],
+              ["Device lock", device.is_locked == null ? "Unknown" : device.is_locked ? "Locked" : "Unlocked"],
               ["Last seen", format.timestamp(device.last_seen)],
             ]}
           />

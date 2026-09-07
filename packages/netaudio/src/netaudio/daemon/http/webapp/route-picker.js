@@ -107,10 +107,10 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   };
 
   return html`
-    <dialog class="modal modal-bottom sm:modal-middle" aria-labelledby="source-picker-title" ref=${dialog} onClose=${onClose}
+    <dialog class="modal modal-middle source-picker" aria-labelledby="source-picker-title" ref=${dialog} onClose=${onClose}
       onClick=${(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}
       onCancel=${(event) => { if (busy) event.preventDefault(); else onClose(); }}>
-      <div class="modal-box max-h-[85dvh] space-y-4 p-4 sm:p-6">
+      <div class="modal-box source-picker-box">
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="source-picker-title" class="text-lg font-semibold">Choose source</h2>
@@ -120,7 +120,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         </div>
         <div class="toolbar">
           ${subscription?.tx_device && subscription?.tx_channel
-            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}><${Icon} name="unplug" /> Disconnect<//>`
+            ? html`<${Button} variant="danger" disabled=${busy || !receiver.online} onClick=${clear}>Disconnect<//>`
             : null}
           <${Button} disabled=${busy} onClick=${onClose}>Done<//>
         </div>
@@ -139,7 +139,7 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         }}
         onKeyDown=${onKeyDown}
       />
-      <div class="flex flex-col gap-2 max-h-[50dvh] overflow-y-auto">
+      <div class="source-picker-results">
         ${results.length === 0
           ? html`<div class="palette-empty">No transmit channel matches this filter.</div>`
           : results.map((entry, index) => {
@@ -150,11 +150,10 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
               return html`
                 <button type="button" disabled=${busy || !entry.online || !receiver.online}
                   key=${`${entry.deviceLabel}/${entry.channelName}`}
-                  class=${`btn btn-ghost justify-start h-auto min-h-16 p-3 text-left whitespace-normal${active ? " bg-base-300" : ""}`}
+                  class=${`source-picker-entry${active ? " current" : ""}`}
                   onPointerEnter=${() => setHighlighted(index)}
                   onClick=${() => apply(entry)}
                 >
-                  <${Icon} name=${active ? "check" : "routing"} />
                   <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
                   ${active ? html`<span class="badge badge-success badge-outline">Current</span>` : !entry.online ? html`<span class="badge">Offline</span>` : null}
                 </button>

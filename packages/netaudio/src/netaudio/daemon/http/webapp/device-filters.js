@@ -1,23 +1,44 @@
 import * as format from "./format.js";
+import { signal } from "./lib/preact.js";
 
 const UNKNOWN = "Not reported";
 const text = (value) => typeof value === "string" && value.trim() ? value.trim() : UNKNOWN;
 const boolean = (value, yes, no) => value === true ? yes : value === false ? no : UNKNOWN;
 const number = (value, label) => typeof value === "number" && Number.isFinite(value) ? label(value) : UNKNOWN;
 
+function subscriptionStates(device) {
+  if (!Array.isArray(device.subscriptions)) return [UNKNOWN];
+  const routed = device.subscriptions.filter((entry) => entry.tx_device && entry.tx_channel);
+  if (!routed.length) return ["None"];
+  return [...new Set(routed.map((entry) => ({ good: "Has successes", warn: "Has warnings", bad: "Has errors" })[format.subscriptionTone(entry)] || UNKNOWN))];
+}
+
+function multicastState(device) {
+  if (!Array.isArray(device.transmitter_flows)) return UNKNOWN;
+  if (device.transmitter_flows.some((flow) => flow.flow_type?.toLowerCase() === "multicast")) return "Active";
+  if (device.transmitter_flows.some((flow) => !["unicast", "multicast"].includes(flow.flow_type?.toLowerCase()))) return UNKNOWN;
+  return "None";
+}
+
 export const DEVICE_FILTERS = [
-  { id: "availability", label: "Availability", values: (device) => [boolean(device.online, "Online", "Offline")] },
   { id: "manufacturer", label: "Manufacturer", values: (device) => [text(device.manufacturer)] },
   { id: "model", label: "Model", values: (device) => [text(format.deviceModelName(device))] },
   { id: "domain", label: "Domain", values: (device) => [text(device.ddm_domain_name)] },
   { id: "lock", label: "Device lock", values: (device) => [boolean(device.is_locked, "Locked", "Unlocked")] },
   { id: "sample-rate", label: "Sample rate", values: (device) => [number(device.sample_rate_hz, format.sampleRate)] },
   { id: "latency", label: "Latency", values: (device) => [number(device.latency_ms, format.latency)] },
+  { id: "subscription", label: "Subscription", values: subscriptionStates },
+  { id: "tx-multicast", label: "Tx multicast flows", values: (device) => [multicastState(device)] },
+  { id: "aes67", label: "AES67", values: (device) => [device.aes67_supported === false ? "Unsupported" : boolean(device.aes67_current, "Enabled", "Disabled")] },
+  { id: "sample-rate-pullup", label: "Sample rate pull-up", values: (device) => {
+    const raw = device.sample_rate_pullup_raw_value;
+    return [Number.isInteger(raw) ? ["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"][raw] || UNKNOWN : UNKNOWN];
+  } },
   { id: "media", label: "Media type", values: (device) => {
     const types = new Set();
     for (const channels of Object.values(device.channels || {})) {
       for (const channel of Object.values(channels || {})) {
-        const type = channel.ddm_media_type;
+        const type = (channel.ddm_media_type || channel.media_type || "").toUpperCase();
         if (["AUDIO", "VIDEO", "ANCILLARY"].includes(type)) types.add({ AUDIO: "Audio", VIDEO: "Video", ANCILLARY: "Ancillary" }[type]);
       }
     }
@@ -51,8 +72,11 @@ export function readRoutingFilters() {
 }
 
 export function saveRoutingFilters(filters) {
+  inventoryFilters.value = filters;
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filters)); } catch {}
 }
+
+export const inventoryFilters = signal(readRoutingFilters());
 
 export function matchesDeviceFilters(device, filters, except) {
   const query = (filters.search || "").trim().toLowerCase();

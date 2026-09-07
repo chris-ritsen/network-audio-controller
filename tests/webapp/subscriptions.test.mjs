@@ -17,7 +17,7 @@ test("subscriptions show severity icons and expand without a table height limit"
       })),
     } };
     const markup = render(h(subscriptionsView.component));
-    assert.match(markup, /^<div class="flex flex-col gap-4 pb-6">/);
+    assert.match(markup, /^<div class="flex flex-col gap-4">/);
     for (const name of ["subscription-ok", "warning", "subscription-blocked"]) {
       assert.ok(iconPaths[name]);
       assert.ok(markup.includes(iconPaths[name]), name);
