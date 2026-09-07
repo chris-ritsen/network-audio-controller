@@ -7,7 +7,8 @@ import { allowTextSelection, setAllowTextSelection } from "../ui-preferences.js"
 
 function SettingsView() {
   const settings = backendSettings.value;
-  const [port, setPort] = useState("");
+  const [editedPort, setPort] = useState(null);
+  const port = editedPort ?? (settings ? String(settings.monitoring_port) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -16,7 +17,6 @@ function SettingsView() {
       .catch((failure) => { if (active) setError(failure.message); });
     return () => { active = false; };
   }, []);
-  useEffect(() => { if (settings) setPort(String(settings.monitoring_port)); }, [settings]);
   const changed = settings && Number(port) !== settings.monitoring_port;
   return html`<div class="flex flex-col gap-6 w-full max-w-lg">
     <${Panel} title="Interface">
@@ -29,7 +29,10 @@ function SettingsView() {
         event.preventDefault();
         if (busy || !changed) return;
         setBusy(true); setError("");
-        try { backendSettings.value = await api.setMonitoringPort(Number(port)); }
+        try {
+          backendSettings.value = await api.setMonitoringPort(Number(port));
+          setPort(null);
+        }
         catch (failure) { setError(failure.message); }
         finally { setBusy(false); }
       }}>

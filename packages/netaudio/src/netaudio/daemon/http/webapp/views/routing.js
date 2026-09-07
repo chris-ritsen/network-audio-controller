@@ -67,13 +67,16 @@ function RoutingView() {
           <details class="routing-options" ref=${optionsMenu}><summary class="btn btn-sm">View options</summary><div class="routing-options-panel">
           <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
             setFlipped(!flipped);
+            optionsMenu.current.open = false;
             try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}
           }}><${Icon} name="flip" /> Flip axes</button>
           <span class="inline-flex items-center gap-2">Devices
             <${ExpansionButtons} label="devices and groups" onExpand=${() => {
               expandDevices("receivers", true); expandDevices("transmitters", true);
+              optionsMenu.current.open = false;
             }} onCollapse=${() => {
               expandDevices("receivers", false); expandDevices("transmitters", false);
+              optionsMenu.current.open = false;
             }} />
           </span>
           <label class="inline-field"><input type="checkbox" checked=${groups.enabled} onChange=${(event) => enableChannelGroups(event.target.checked)} />Channel groups</label>

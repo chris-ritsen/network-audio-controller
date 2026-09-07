@@ -59,15 +59,15 @@ function model(options = {}) {
   });
 }
 
-test("axis indicators include subscriptions hidden by the opposite filter", () => {
+test("receiver indicators include hidden sources and transmitters have no subscription indicators", () => {
   const receivers = model({ transmitterFilter: "Windows-PC", expandedReceivers: new Set(["avio-usb-1"]) });
   assert.equal(receivers.rows.find((row) => row.label === "avio-usb-1" && row.kind === "device").activity.count, 2);
   assert.equal(receivers.rows.find((row) => row.label === "avio-usb-1" && row.kind === "channel").activity.count, 1);
   const transmitters = model({ receiverFilter: "avio-bt-1" });
   const source = transmitters.columns.find((column) => column.label === "lx-dante");
   const baseline = model().columns.find((column) => column.label === "lx-dante");
-  assert.deepEqual(source.activity, baseline.activity);
-  assert.ok(source.activity.count >= 3);
+  assert.equal(source.activity, undefined);
+  assert.equal(baseline.activity, undefined);
 });
 
 test("collapsed model has one row and one column per device with channels", () => {

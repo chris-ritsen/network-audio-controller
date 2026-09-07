@@ -1,6 +1,29 @@
 import { test, expect } from "@playwright/test";
 import { serveWebapp, deviceFixture } from "./fixture.mjs";
 
+test("desktop navigation rails and routing controls share aligned edges", async ({ page }) => {
+  await serveWebapp(page);
+  await page.addInitScript(() => localStorage.setItem("netaudio.routing.filters", JSON.stringify({ panelOpen: false })));
+  await page.goto("http://netaudio.test/routing");
+  const menu = await page.locator(".app-menu-trigger").boundingBox();
+  const filter = await page.locator(".filter-panel-toggle").boundingBox();
+  expect(menu.x).toBe(filter.x);
+  expect(menu.width).toBe(filter.width);
+  const brand = await page.locator(".brand-mark").boundingBox();
+  const tabText = await page.locator(".network-navigation a").first().evaluate((node) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return range.getBoundingClientRect().x;
+  });
+  expect(brand.x).toBe(tabText);
+  const control = await page.getByRole("button", { name: "Channel list", exact: true }).boundingBox();
+  const label = await page.locator(".matrix-filter-label").first().boundingBox();
+  expect(control.x).toBe(label.x);
+  await page.locator(".routing-options summary").click();
+  await page.getByRole("button", { name: "Flip axes", exact: true }).click();
+  await expect(page.locator(".routing-options")).not.toHaveAttribute("open", "");
+});
+
 test("details, tables, notices and errors remain selectable with UI selection disabled", async ({ page }) => {
   await serveWebapp(page);
   await page.route("**/settings", (route) => route.request().headers().accept === "application/json"
@@ -146,7 +169,7 @@ test("matrix separators match the background and end at the occupied grid", asyn
   await page.getByRole("button", { name: "Collapse all receiver devices and groups", exact: true }).click();
   await page.getByRole("button", { name: "Collapse all transmitter devices and groups", exact: true }).click();
   await expect(page.locator(".matrix-status")).toHaveCount(0);
-  await expect(page.locator(".matrix-axis-controls input[placeholder]")).toHaveCount(0);
+  await expect(page.locator(".matrix-filters input[placeholder]")).toHaveCount(0);
   await expect(page.getByText("Expand / collapse all", { exact: true })).toHaveCount(0);
   const pixels = await page.locator(".matrix-canvas").evaluate((canvas) => {
     const viewport = document.querySelector(".matrix-viewport");
@@ -191,12 +214,17 @@ test("navigation row has the sidebar control and one-pixel tab gaps", async ({ p
 test("receivers start across the top and a saved alternate orientation is respected", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
-  await expect(page.locator(".column-axis").getByRole("searchbox", { name: "Receivers", exact: true })).toBeVisible();
-  await expect(page.locator(".row-axis").getByRole("searchbox", { name: "Transmitters", exact: true })).toBeVisible();
+  await expect(page.locator(".column-axis .matrix-axis-title")).toContainText("Receivers");
+  await expect(page.locator(".row-axis .matrix-axis-title")).toContainText("Transmitters");
+  expect(await page.locator(".column-axis .matrix-axis-title").evaluate((node) => getComputedStyle(node).writingMode)).toBe("vertical-rl");
+  const buttons = await page.locator(".column-axis button").all();
+  const first = await buttons[0].boundingBox(), second = await buttons[1].boundingBox();
+  expect(first.x).toBe(second.x);
+  expect(first.y).toBeGreaterThanOrEqual(second.y + second.height);
   await page.locator(".routing-options summary").click();
   await page.getByRole("button", { name: "Flip axes", exact: true }).click();
   await page.reload();
-  await expect(page.locator(".column-axis").getByRole("searchbox", { name: "Transmitters", exact: true })).toBeVisible();
+  await expect(page.locator(".column-axis .matrix-axis-title")).toContainText("Transmitters");
 });
 
 test("desktop channel list has compact aligned rows and selectable search text", async ({ page }) => {

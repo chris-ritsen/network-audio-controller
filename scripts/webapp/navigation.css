@@ -3,8 +3,8 @@
     grid-area: topbar;
     display: flex;
     align-items: center;
-    gap: 20px;
-    padding: 0 16px;
+    gap: 13px;
+    padding: 0 12px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
@@ -51,10 +51,13 @@
   .app-menu-trigger {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
     flex-shrink: 0;
-    min-height: 34px;
-    padding: 5px 8px;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
     border: 1px solid transparent;
     border-radius: 4px;
     background: transparent;
@@ -72,7 +75,7 @@
     overflow-x: auto;
     background: var(--panel);
     border-bottom: 1px solid var(--line-strong);
-    padding: 0 16px;
+    padding: 0 12px;
     gap: 1px;
   }
   .network-navigation .mobile-view-selector {
@@ -83,7 +86,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    padding: 0 24px;
+    padding: 0 12px;
     border-bottom: 3px solid transparent;
     font-size: 14px;
     color: var(--muted);
