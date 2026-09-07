@@ -18,7 +18,7 @@ async function setup(page, { data = preview, result } = {}) {
         : result || { complete: true, report: { results: [[device.name, "preferred leader on (verified)"]], needs_reboot: [] } }) });
   });
   await page.goto("http://netaudio.test/presets");
-  await expect(page.getByRole("heading", { name: "Presets", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Save preset", exact: true })).toBeVisible();
   return writes;
 }
 

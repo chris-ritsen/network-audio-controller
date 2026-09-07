@@ -1,10 +1,222 @@
 @layer components {
+  .routing-channel-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    padding: 12px;
+  }
+  .routing-channel-toolbar {
+    display: grid;
+    grid-template-columns: minmax(160px, 320px) minmax(160px, 320px);
+    align-items: end;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .routing-channel-toolbar label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .routing-channel-toolbar input,
+  .routing-channel-toolbar select {
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+  }
+  .routing-channel-head,
+  .routing-channel-row {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr) minmax(
+        0,
+        1fr
+      ) 24px 20px;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+  }
+  .routing-channel-head {
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .routing-channel-rows {
+    min-height: 0;
+    overflow: auto;
+    border-inline: 1px solid var(--line-strong);
+  }
+  .routing-channel-row {
+    width: 100%;
+    min-height: 40px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--black);
+    text-align: left;
+    font-size: 13px;
+    font-weight: 400;
+    cursor: pointer;
+  }
+  .routing-channel-row:hover {
+    background: var(--raised);
+  }
+  .routing-channel-row:focus-visible {
+    outline: 2px solid var(--text);
+    outline-offset: -2px;
+  }
+  .routing-channel-row:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .routing-channel-row > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .routing-channel-name {
+    font-weight: 400;
+  }
+  .routing-channel-number,
+  .routing-channel-device {
+    color: var(--muted);
+  }
+  .routing-channel-row svg {
+    width: 16px;
+    height: 16px;
+  }
+  @media (min-width: 901px) {
+    .content:has(> .routing-list) {
+      padding: 0;
+      overflow: hidden;
+    }
+    .routing-list {
+      height: 100%;
+      gap: 0;
+    }
+    .routing-list > .routing-workspace {
+      flex: 1;
+      min-height: 0;
+    }
+    .routing-list .routing-filter-container {
+      max-height: none;
+      border-radius: 0;
+      border-inline: 0;
+      border-bottom: 0;
+    }
+    .routing-list > .content-header {
+      align-items: center;
+      margin: 0;
+      padding: 4px 10px;
+      min-height: 38px;
+      gap: 8px;
+    }
+    .routing-list > .content-header .content-title {
+      display: none;
+    }
+    .routing-list > .content-header .content-subtitle {
+      margin: 0;
+      font-size: 12px;
+    }
+    .routing-list > .content-header .btn {
+      min-height: 26px;
+      height: 26px;
+      font-size: 12px;
+      padding: 0 9px;
+    }
+  }
+  @media (max-width: 900px) {
+    .routing-channel-list {
+      padding: 0;
+    }
+    .routing-channel-toolbar {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .routing-channel-toolbar input,
+    .routing-channel-toolbar select {
+      height: 40px;
+      font-size: 16px;
+    }
+    .routing-channel-head {
+      display: none;
+    }
+    .routing-channel-rows {
+      border-top: 1px solid var(--line-strong);
+    }
+    .routing-channel-row {
+      grid-template-columns: 24px minmax(0, 1fr) 20px 16px;
+      gap: 2px 8px;
+      min-height: 64px;
+    }
+    .routing-channel-number {
+      grid-column: 1;
+      grid-row: 1 / 4;
+    }
+    .routing-channel-name {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .routing-channel-source {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .routing-channel-device {
+      grid-column: 2;
+      grid-row: 3;
+      font-size: 12px;
+    }
+    .routing-channel-status {
+      grid-column: 3;
+      grid-row: 1 / 4;
+    }
+    .routing-channel-action {
+      grid-column: 4;
+      grid-row: 1 / 4;
+    }
+  }
   .content:has(> .routing-grid) {
-    padding-bottom: 18px;
+    padding: 0;
+    overflow: hidden;
   }
 
   .routing-grid {
     height: 100%;
+    gap: 0;
+  }
+
+  .routing-grid .routing-filter-container {
+    border-radius: 0;
+    border-inline: 0;
+    border-bottom: 0;
+  }
+
+  .routing-grid > .content-header {
+    align-items: center;
+    margin: 0;
+    padding: 4px 10px;
+    min-height: 38px;
+    gap: 8px;
+  }
+  .routing-grid > .content-header .content-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .routing-grid > .content-header .content-subtitle {
+    margin: 0;
+    font-size: 12px;
+  }
+  .routing-grid > .content-header .btn {
+    min-height: 26px;
+    height: 26px;
+    font-size: 12px;
+    padding: 0 9px;
   }
 
   .routing-grid > :not(.matrix-shell) {
@@ -19,12 +231,12 @@
   .routing-workspace {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    gap: 0;
     min-width: 0;
   }
 
   .routing-workspace.with-filters {
-    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-columns: 230px minmax(0, 1fr);
   }
 
   .routing-results {
@@ -46,8 +258,8 @@
     flex: 1;
     min-height: 240px;
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
   }
 
@@ -62,7 +274,48 @@
     z-index: 2;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
+  }
+
+  .matrix-filter-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .matrix-filter-label input {
+    width: 100%;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    font-weight: 400;
+    height: 26px;
+  }
+  .matrix-expansion-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .routing-options {
+    position: relative;
+  }
+  .routing-options-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 16px;
+    min-width: 220px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    box-shadow: 0 10px 30px #0006;
   }
 
   .matrix-viewport {
@@ -84,46 +337,4 @@
     pointer-events: none;
   }
 
-  .matrix-status {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
-    border-top: 1px solid var(--line);
-    font-family: var(--font-data);
-    font-size: 12px;
-  }
-
-  .matrix-legend {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-  }
-
-  .legend-swatch {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-left: 10px;
-    border-radius: 2px;
-  }
-
-  .legend-swatch.ok {
-    background: var(--good);
-  }
-
-  .legend-swatch.warning {
-    background: var(--warn);
-  }
-
-  .legend-swatch.error {
-    background: var(--bad);
-  }
-
-  .legend-swatch.pending {
-    border: 2px solid var(--text);
-    box-sizing: border-box;
-  }
 }

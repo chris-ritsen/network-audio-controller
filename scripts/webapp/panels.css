@@ -76,8 +76,18 @@
   }
 
   @media (max-width: 900px) {
-    .card-body {
+    .card > .card-body {
       overflow-x: visible;
+      padding: 10px;
+      gap: 10px;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 900px) {
+    .card > .card-body {
+      padding: 10px;
     }
   }
 }

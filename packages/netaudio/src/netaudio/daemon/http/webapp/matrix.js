@@ -7,14 +7,13 @@ import { deviceRequestName, pendingKey, pendingSubscriptions } from "./store.js"
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 
-const CELL = 24;
+const CELL = 30;
 const GUTTER_PADDING = 12;
 const HEADER_PADDING = 18;
 const INDENT = 22;
-const MINIMUM_GUTTER = 240;
-const MINIMUM_HEADER = 120;
-const MAXIMUM_GUTTER = 280;
-const MAXIMUM_HEADER = 180;
+const MINIMUM_GUTTER = 280;
+const MINIMUM_HEADER = 160;
+const MAXIMUM_GUTTER = 340;
 const STORAGE_KEY = "netaudio.matrix.expanded";
 
 function readExpanded() {
@@ -22,7 +21,7 @@ function readExpanded() {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     if (parsed && Array.isArray(parsed.receivers) && Array.isArray(parsed.transmitters)) {
-      return { receivers: new Set(parsed.receivers), transmitters: new Set(parsed.transmitters) };
+      return { receivers: new Set(parsed.receivers), transmitters: new Set(parsed.transmitters), initialized: true };
     }
   } catch (error) {
     return { receivers: new Set(), transmitters: new Set() };
@@ -32,9 +31,18 @@ function readExpanded() {
 
 export const expanded = signal(readExpanded());
 
+export function initializeExpansion(devices) {
+  if (expanded.value.initialized || !devices.length) return;
+  const forSide = (side) => new Set(devices.filter((device) => {
+    const count = Object.keys(device.channels?.[side] || {}).length;
+    return count > 0 && count <= 16;
+  }).map(format.deviceLabel));
+  expanded.value = { receivers: forSide("receivers"), transmitters: forSide("transmitters"), initialized: true };
+}
+
 export function toggleExpanded(side, deviceLabel) {
   const current = expanded.value;
-  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters) };
+  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters), initialized: true };
   if (next[side].has(deviceLabel)) {
     next[side].delete(deviceLabel);
   } else {
@@ -53,7 +61,7 @@ export function toggleExpanded(side, deviceLabel) {
 
 export function setAllExpanded(side, deviceLabels, value) {
   const current = expanded.value;
-  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters) };
+  const next = { receivers: new Set(current.receivers), transmitters: new Set(current.transmitters), initialized: true };
   for (const label of deviceLabels) {
     if (value) {
       next[side].add(label);
@@ -169,7 +177,7 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
         ? entry.channels.some((channel) => channel.name === item.subscription.rx_channel) : item.subscription.rx_channel === entry.name))
       : item.subscription.tx_device === entry.label && (entry.kind === "device" || (entry.kind === "group"
         ? entry.channels.some((channel) => channel.name === item.subscription.tx_channel) : item.subscription.tx_channel === entry.name)));
-    return { count: subscriptions.length, severity: severityName(Math.max(0, ...subscriptions.map((item) => severityRank(item.subscription.status?.severity)))) };
+    return { count: subscriptions.length, severity: severityName(Math.max(0, ...subscriptions.map((item) => severityRank(format.subscriptionTone(item.subscription))))) };
   };
   const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
   const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
@@ -227,8 +235,7 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
     if (!subscription || subscription.tx_device !== column.label || subscription.tx_channel !== column.name) {
       return { kind: "empty" };
     }
-    const status = subscription.status;
-    return { kind: severityName(severityRank(status ? status.severity : "ok")), subscription };
+    return { kind: severityName(severityRank(format.subscriptionTone(subscription))), subscription };
   }
   if (row.kind === "channel") {
     const subscription = row.subscription;
@@ -252,7 +259,7 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
       continue;
     }
     count += 1;
-    worst = Math.max(worst, severityRank(subscription.status ? subscription.status.severity : "ok"));
+    worst = Math.max(worst, severityRank(format.subscriptionTone(subscription)));
   }
   if (count === 0) {
     return { kind: "empty" };
@@ -272,10 +279,12 @@ function readTheme() {
     background: read("--black", "#000000"),
     dataFont: read("--font-data", "ui-monospace, Menlo, monospace"),
     good: read("--good", "#2fe36a"),
-    hover: "rgba(255, 255, 255, 0.08)",
+    hover: "#245663",
     line: read("--line", "#242424"),
     lineStrong: read("--line-strong", "#3d3d3d"),
+    muted: read("--muted", "#b3bcc4"),
     panel: read("--panel", "#0a0a0a"),
+    cell: read("--raised", "#2b2f32"),
     text: read("--text", "#ffffff"),
     uiFont: read("--font-ui", "system-ui, sans-serif"),
     warn: read("--warn", "#ffc400"),
@@ -285,7 +294,7 @@ function readTheme() {
 function rowLabelText(row) {
   if (row.kind === "group") return `${row.expanded ? "⊟" : "⊞"} ${row.name}`;
   if (row.kind === "device") {
-    return `${row.expanded ? "▾" : "▸"} ${row.label}  (${row.channelCount})`;
+    return `${row.label}  (${row.channelCount})`;
   }
   return `${row.number}  ${row.name}`;
 }
@@ -293,25 +302,26 @@ function rowLabelText(row) {
 function columnLabelText(column) {
   if (column.kind === "group") return `${column.name} ${column.expanded ? "⊟" : "⊞"}`;
   if (column.kind === "device") {
-    return `${column.label}  (${column.channelCount}) ${column.expanded ? "▾" : "▸"}`;
+    return `${column.label}  (${column.channelCount})`;
   }
   return `${column.number}  ${column.name}`;
 }
 
 export function measureMatrixLayout(context, rows, columns, theme) {
-  context.font = `12px ${theme.dataFont}`;
+  context.font = `13px ${theme.uiFont}`;
   let gutter = MINIMUM_GUTTER;
   for (const row of rows) {
     const indent = row.kind === "device" ? 0 : row.grouped ? INDENT * 2 : INDENT;
     const label = context.measureText(rowLabelText(row)).width;
     gutter = Math.max(gutter, CELL + GUTTER_PADDING + indent + label + GUTTER_PADDING);
   }
-  context.font = `11px ${theme.dataFont}`;
-  let header = Math.max(MINIMUM_HEADER, 160);
+  context.font = `13px ${theme.uiFont}`;
+  let header = rows.some((entry) => entry.kind === "group") || columns.some((entry) => entry.kind === "group") ? 192 : MINIMUM_HEADER;
   for (const column of columns) {
-    header = Math.max(header, CELL + HEADER_PADDING + context.measureText(columnLabelText(column)).width + HEADER_PADDING);
+    context.font = `${column.kind === "device" ? "600 " : ""}13px ${theme.uiFont}`;
+    header = Math.max(header, CELL * 2 + HEADER_PADDING + context.measureText(columnLabelText(column)).width);
   }
-  return { gutter: Math.min(MAXIMUM_GUTTER, Math.ceil(gutter)), header: Math.min(MAXIMUM_HEADER, Math.ceil(header)) };
+  return { gutter: Math.min(MAXIMUM_GUTTER, Math.ceil(gutter)), header: Math.ceil(header) };
 }
 
 function fitLabel(context, text, width) {
@@ -329,7 +339,7 @@ export function ExpansionButtons({ label, onExpand, onCollapse }) {
 }
 
 export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: receivers, subscriptionIndex, flipped = false,
-  onExpandDevices, onExpandGroups, grouped = false }) {
+  onExpandDevices, receiverFilter = "", transmitterFilter = "", onReceiverFilter, onTransmitterFilter }) {
   const rows = flipped ? transmitters : receivers;
   const columns = flipped ? receivers : transmitters;
   const stage = useRef(null);
@@ -438,11 +448,25 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
     const row = flipped ? columns[position.columnIndex] : rows[position.rowIndex];
     const column = flipped ? rows[position.rowIndex] : columns[position.columnIndex];
+    if (row.kind !== "channel" || column.kind !== "channel") {
+      const entries = [[row, "receivers"], [column, "transmitters"]].filter(([entry]) => entry.kind !== "channel");
+      const expand = entries.some(([entry]) => !entry.expanded);
+      for (const [entry, side] of entries) {
+        if (entry.kind === "device") setAllExpanded(side, [entry.label], expand);
+        else setGroupsExpanded(side, [entry.key], expand);
+      }
+      return;
+    }
+    if (!row.device.online || !column.device.online) {
+      setError("Both devices must be online to change this connection.");
+      return;
+    }
     const key = `${position.rowIndex}:${position.columnIndex}`;
     if (busy.current.has(key)) {
       return;
     }
     const state = cellState(row, column, subscriptionIndex, pending);
+    if (state.kind === "pending") return;
     const requestName = deviceRequestName(row.device);
     busy.current.add(key);
     try {
@@ -464,37 +488,20 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
         );
         return;
       }
-      if (row.kind === "device" && column.kind === "device") {
-        const receiverSubscriptions = subscriptionIndex.get(row.label) || new Map();
-        const existing = row.channels.filter((channel) => {
-          const subscription = receiverSubscriptions.get(channel.name);
-          return subscription && subscription.tx_device === column.label;
-        });
-        if (existing.length) {
-          await runAction(`unsubscribe ${row.label} from ${column.label} (${existing.length} channels)`, () =>
-            api.unsubscribe({ rx_channels: existing.map((channel) => channel.number), rx_device: requestName }),
-          );
-          return;
-        }
-        const pairs = row.channels.slice(0, Math.min(row.channels.length, column.channels.length)).map((channel, index) => ({
-          rx_channel: channel.number,
-          tx_channel: column.channels[index].name,
-          tx_device: column.label,
-        }));
-        await runAction(`subscribe ${row.label} to ${column.label} one-to-one (${pairs.length} channels)`, () =>
-          api.subscribe({ rx_device: requestName, subscriptions: pairs }),
-        );
-      }
     } finally {
       busy.current.delete(key);
     }
   };
 
-  const hoverText = describeHover(hover, rows, columns, subscriptionIndex, pending, flipped);
+  const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL)
+    || (hover.inGutter && !hover.inHeader && hover.x < CELL && rows[hover.rowIndex]?.kind !== "device"));
+  const cellHover = hover && !hover.inHeader && !hover.inGutter
+    && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
+  const hoverText = hover && (cellHover || statusHover)
+    ? describeHover(hover, rows, columns, subscriptionIndex, pending, flipped) : "";
   const cursor = !hover || (hover.inGutter && hover.inHeader) ? "default"
     : hover.inGutter || hover.inHeader ? "pointer"
-    : rows[hover.rowIndex]?.kind === columns[hover.columnIndex]?.kind
-      && ["device", "channel"].includes(rows[hover.rowIndex]?.kind) ? "crosshair" : "default";
+    : rows[hover.rowIndex]?.kind !== "channel" || columns[hover.columnIndex]?.kind !== "channel" ? "pointer" : "crosshair";
 
   return html`
     <div class="matrix-shell">
@@ -503,6 +510,9 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
         <canvas class="matrix-canvas" ref=${canvas}></canvas>
         <div
           class="matrix-viewport"
+          data-cell-size=${CELL}
+          data-header-height=${layout.header}
+          data-gutter-width=${layout.gutter}
           aria-describedby=${hoverText ? "routing-matrix-tooltip" : undefined}
           style=${`cursor:${cursor}`}
           ref=${viewport}
@@ -518,20 +528,15 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
           const side = columnAxis !== flipped ? "transmitters" : "receivers";
           const label = side === "receivers" ? "receiver" : "transmitter";
           return html`<div class=${`matrix-axis-controls ${columnAxis ? "column-axis" : "row-axis"}`}
-            style=${columnAxis ? `left:${layout.gutter - 152}px;top:8px` : `left:12px;top:${layout.header - (grouped ? 76 : 44)}px`}>
-            <div class="flex items-center gap-2"><span>Devices</span><${ExpansionButtons} label=${`${label} devices`} onExpand=${() => onExpandDevices(side, true)} onCollapse=${() => onExpandDevices(side, false)} /></div>
-            ${grouped ? html`<div class="flex items-center gap-2"><span>Groups</span><${ExpansionButtons} label=${`${label} groups`} onExpand=${() => onExpandGroups(side, true)} onCollapse=${() => onExpandGroups(side, false)} /></div>` : null}
+            style=${`left:12px;width:${layout.gutter - 24}px;top:${columnAxis ? 6 : layout.header / 2 + 2}px`}>
+            <label class="matrix-filter-label">${side === "receivers" ? "Receivers" : "Transmitters"}
+              <input type="search" aria-label=${side === "receivers" ? "Receivers" : "Transmitters"}
+                value=${side === "receivers" ? receiverFilter : transmitterFilter}
+                onInput=${(event) => (side === "receivers" ? onReceiverFilter : onTransmitterFilter)?.(event.target.value)} />
+            </label>
+            <div class="matrix-expansion-controls"><${ExpansionButtons} label=${`${label} devices and groups`} onExpand=${() => onExpandDevices(side, true)} onCollapse=${() => onExpandDevices(side, false)} /></div>
           </div>`;
         })}
-      </div>
-      <div class="matrix-status">
-        <span>${hoverText}</span>
-        <span class="matrix-legend">
-          <span class="legend-swatch ok"></span>subscribed
-          <span class="legend-swatch warning"></span>warning
-          <span class="legend-swatch error"></span>error
-          <span class="legend-swatch pending"></span>pending
-        </span>
       </div>
     </div>
   `;
@@ -548,12 +553,14 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
     const row = rows[hover.rowIndex];
     return row.kind === "device"
       ? `${row.label} — ${row.channelCount} ${flipped ? "transmit" : "receive"} channels`
+      : row.kind === "group" ? `${row.label} — ${row.name} (${row.channelCount} channels)`
       : `${row.label} ${row.number} ${row.name}`;
   }
   if (hover.inHeader) {
     const column = columns[hover.columnIndex];
     return column.kind === "device"
       ? `${column.label} — ${column.channelCount} ${flipped ? "receive" : "transmit"} channels`
+      : column.kind === "group" ? `${column.label} — ${column.name} (${column.channelCount} channels)`
       : `${column.label} ${column.number} ${column.name}`;
   }
   const row = flipped ? columns[hover.columnIndex] : rows[hover.rowIndex];
@@ -591,60 +598,52 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
 
   context.save();
   context.beginPath();
-  context.rect(gutter, header, size.width - gutter, size.height - header);
+  context.rect(gutter, header,
+    Math.max(0, Math.min(size.width - gutter, columns.length * CELL - scroll.left)),
+    Math.max(0, Math.min(size.height - header, rows.length * CELL - scroll.top)));
   context.clip();
 
+  context.fillStyle = theme.cell;
+  context.fillRect(gutter, header, size.width - gutter, size.height - header);
   for (let index = firstRow; index < lastRow; index += 1) {
     if (rows[index].kind === "device") {
-      context.fillStyle = theme.panel;
+      context.fillStyle = theme.line;
       context.fillRect(gutter, rowY(index), size.width - gutter, CELL);
     }
   }
   for (let index = firstColumn; index < lastColumn; index += 1) {
     if (columns[index] && columns[index].kind === "device") {
-      context.fillStyle = theme.panel;
+      context.fillStyle = theme.line;
       context.fillRect(columnX(index), header, CELL, size.height - header);
     }
   }
 
-  if (hover && !hover.inGutter && !hover.inHeader) {
+  if (hover) {
     context.fillStyle = theme.hover;
-    context.fillRect(gutter, rowY(hover.rowIndex), size.width - gutter, CELL);
-    context.fillRect(columnX(hover.columnIndex), header, CELL, size.height - header);
+    if (!hover.inHeader && rows[hover.rowIndex]) {
+      context.fillRect(gutter, rowY(hover.rowIndex), size.width - gutter, CELL);
+    }
+    if (!hover.inGutter && columns[hover.columnIndex]) {
+      context.fillRect(columnX(hover.columnIndex), header, CELL, size.height - header);
+    }
   }
 
-  context.lineWidth = 1;
+  context.lineWidth = 4;
   context.beginPath();
-  context.strokeStyle = theme.line;
+  context.strokeStyle = theme.background;
   for (let index = firstColumn; index <= lastColumn; index += 1) {
-    const x = Math.floor(columnX(index)) + 0.5;
+    const x = Math.floor(columnX(index));
     context.moveTo(x, header);
     context.lineTo(x, size.height);
   }
   for (let index = firstRow; index <= lastRow; index += 1) {
-    const y = Math.floor(rowY(index)) + 0.5;
+    const y = Math.floor(rowY(index));
     context.moveTo(gutter, y);
     context.lineTo(size.width, y);
   }
   context.stroke();
 
-  context.beginPath();
-  context.strokeStyle = theme.lineStrong;
-  for (let index = firstColumn; index <= lastColumn; index += 1) {
-    if (columns[index] && columns[index].kind === "device") {
-      const x = Math.floor(columnX(index)) + 0.5;
-      context.moveTo(x, header);
-      context.lineTo(x, size.height);
-    }
-  }
-  for (let index = firstRow; index <= lastRow; index += 1) {
-    if (rows[index] && rows[index].kind === "device") {
-      const y = Math.floor(rowY(index)) + 0.5;
-      context.moveTo(gutter, y);
-      context.lineTo(size.width, y);
-    }
-  }
-  context.stroke();
+  context.lineWidth = 1;
 
   context.textAlign = "center";
   context.textBaseline = "middle";
@@ -654,6 +653,20 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
     for (let columnIndex = firstColumn; columnIndex < lastColumn; columnIndex += 1) {
       const column = columns[columnIndex];
       if (!column) {
+        continue;
+      }
+      if (row.kind !== "channel" || column.kind !== "channel") {
+        if (row.kind !== "device" || column.kind !== "device") continue;
+        const entries = [row, column].filter((entry) => entry.kind !== "channel");
+        const expand = entries.some((entry) => !entry.expanded);
+        const x = columnX(columnIndex) + CELL / 2, y = rowY(rowIndex) + CELL / 2;
+        context.strokeStyle = theme.muted;
+        context.lineWidth = 1.5;
+        context.beginPath();
+        context.moveTo(x - 5, y); context.lineTo(x + 5, y);
+        if (expand) { context.moveTo(x, y - 5); context.lineTo(x, y + 5); }
+        context.stroke();
+        context.lineWidth = 1;
         continue;
       }
       const state = cellState(row, column, subscriptionIndex, pending, flipped);
@@ -669,22 +682,9 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
         context.lineWidth = 1;
         continue;
       }
-      if (state.kind === "partial") {
-        context.fillStyle = severityColor(theme, state.subscription.status ? state.subscription.status.severity : "ok");
-        context.beginPath();
-        context.arc(x + CELL / 2, y + CELL / 2, 3.5, 0, Math.PI * 2);
-        context.fill();
-        continue;
-      }
-      if (state.kind === "aggregate") {
-        context.fillStyle = severityColor(theme, state.severity);
-        context.fillRect(x + 4, y + 4, CELL - 8, CELL - 8);
-        context.fillStyle = theme.background;
-        context.fillText(String(state.count), x + CELL / 2, y + CELL / 2 + 0.5);
-        continue;
-      }
-      context.fillStyle = severityColor(theme, state.kind);
-      context.fillRect(x + 4, y + 4, CELL - 8, CELL - 8);
+      const severity = state.kind === "aggregate" ? state.severity
+        : state.kind === "partial" ? severityName(severityRank(format.subscriptionTone(state.subscription))) : state.kind;
+      drawStatusIcon(context, x + CELL / 2, y + CELL / 2, severity, theme);
     }
   }
   context.restore();
@@ -694,23 +694,25 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
 
   context.fillStyle = theme.panel;
   context.fillRect(0, 0, gutter, header);
-  context.strokeStyle = theme.lineStrong;
+  context.strokeStyle = theme.background;
+  context.lineWidth = 4;
   context.beginPath();
-  context.moveTo(0, header + 0.5);
-  context.lineTo(size.width, header + 0.5);
-  context.moveTo(gutter + 0.5, 0);
-  context.lineTo(gutter + 0.5, size.height);
+  context.moveTo(0, header);
+  context.lineTo(Math.min(size.width, gutter + columns.length * CELL - scroll.left), header);
+  context.moveTo(gutter, 0);
+  context.lineTo(gutter, Math.min(size.height, header + rows.length * CELL - scroll.top));
   context.stroke();
-  context.fillStyle = theme.text;
-  context.font = `600 10.5px ${theme.uiFont}`;
-  context.textAlign = "left";
-  context.textBaseline = "alphabetic";
-  context.fillText(flipped ? "DANTE TRANSMITTERS" : "DANTE RECEIVERS", GUTTER_PADDING, header - 10);
-  context.save();
-  context.translate(gutter - 12, header - CELL);
-  context.rotate(-Math.PI / 2);
-  context.fillText(flipped ? "DANTE RECEIVERS" : "DANTE TRANSMITTERS", 0, 0);
-  context.restore();
+  context.lineWidth = 1;
+}
+
+function drawExpansionMark(context, x, y, expanded, theme) {
+  context.strokeStyle = theme.text;
+  context.lineWidth = 1;
+  context.strokeRect(x - 6, y - 6, 12, 12);
+  context.beginPath();
+  context.moveTo(x - 3, y); context.lineTo(x + 3, y);
+  if (!expanded) { context.moveTo(x, y - 3); context.lineTo(x, y + 3); }
+  context.stroke();
 }
 
 function severityColor(theme, severity) {
@@ -723,10 +725,39 @@ function severityColor(theme, severity) {
   return theme.good;
 }
 
+function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
+  context.save();
+  context.translate(x - size / 2, y - size / 2);
+  context.scale(size / 26, size / 26);
+  context.fillStyle = severityColor(theme, severity);
+  context.strokeStyle = "#000000";
+  context.lineWidth = 1.25;
+  if (severity === "warning") {
+    context.fillRect(0, 0, 26, 26);
+    context.beginPath();
+    context.moveTo(13, 4); context.lineTo(22, 21); context.lineTo(4, 21); context.closePath();
+    context.stroke();
+    context.beginPath();
+    context.moveTo(13, 9); context.lineTo(13, 15);
+    context.moveTo(13, 17); context.lineTo(13, 19);
+  } else if (severity === "error") {
+    context.beginPath(); context.arc(13, 13, 12, 0, Math.PI * 2); context.fill();
+    context.beginPath();
+    context.moveTo(8, 8); context.lineTo(18, 18);
+    context.moveTo(18, 8); context.lineTo(8, 18);
+  } else {
+    context.fillRect(0, 0, 26, 26);
+    context.beginPath();
+    context.moveTo(6, 13); context.lineTo(11, 18); context.lineTo(21, 7);
+  }
+  context.stroke();
+  context.restore();
+}
+
 function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, size, theme }) {
   context.save();
   context.beginPath();
-  context.rect(0, header, gutter, size.height - header);
+  context.rect(0, header, gutter, Math.max(0, Math.min(size.height - header, rows.length * CELL - scroll.top)));
   context.clip();
   context.fillStyle = theme.panel;
   context.fillRect(0, header, gutter, size.height - header);
@@ -735,29 +766,34 @@ function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, si
   for (let index = firstRow; index < lastRow; index += 1) {
     const row = rows[index];
     const y = header + index * CELL - scroll.top;
+    if (row.kind === "device") {
+      context.fillStyle = theme.line;
+      context.fillRect(0, y, gutter, CELL);
+    }
     if (hover && hover.rowIndex === index && !hover.inHeader) {
       context.fillStyle = theme.hover;
       context.fillRect(0, y, gutter, CELL);
     }
-    if (row.kind === "device") {
-      context.fillStyle = theme.lineStrong;
-      context.fillRect(0, Math.floor(y) + 0.5, gutter, 1);
-    }
+    context.fillStyle = theme.background;
+    context.fillRect(0, Math.floor(y), gutter, 2);
+    context.fillRect(0, Math.floor(y) + CELL - 2, gutter, 2);
     context.fillStyle = theme.text;
     context.textAlign = "left";
-    if (row.activity?.count) {
-      context.fillStyle = severityColor(theme, row.activity.severity);
-      context.beginPath();
-      context.arc(CELL / 2, y + CELL / 2, 4, 0, Math.PI * 2);
-      context.fill();
+    if (row.kind !== "device" && row.activity?.count) {
+      drawStatusIcon(context, CELL / 2, y + CELL / 2, row.activity.severity, theme, 18);
       context.fillStyle = theme.text;
     }
     if (row.kind === "device") {
-      context.font = `600 12px ${theme.uiFont}`;
+      drawExpansionMark(context, CELL / 2, y + CELL / 2, row.expanded, theme);
+      context.font = `600 13px ${theme.uiFont}`;
       context.fillText(fitLabel(context, rowLabelText(row), gutter - CELL - GUTTER_PADDING * 2), CELL + GUTTER_PADDING, y + CELL / 2);
     } else {
-      context.font = `12px ${theme.dataFont}`;
+      context.font = `13px ${theme.uiFont}`;
       const x = CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT);
+      context.strokeStyle = theme.lineStrong;
+      context.beginPath();
+      context.moveTo(x - 16, y); context.lineTo(x - 16, y + CELL / 2); context.lineTo(x - 6, y + CELL / 2);
+      context.stroke();
       context.fillText(fitLabel(context, rowLabelText(row), gutter - x - GUTTER_PADDING), x, y + CELL / 2);
     }
   }
@@ -767,7 +803,7 @@ function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, si
 function drawHeader(context, { columns, firstColumn, gutter, header, hover, lastColumn, scroll, size, theme }) {
   context.save();
   context.beginPath();
-  context.rect(gutter, 0, size.width - gutter, header);
+  context.rect(gutter, 0, Math.max(0, Math.min(size.width - gutter, columns.length * CELL - scroll.left)), header);
   context.clip();
   context.fillStyle = theme.panel;
   context.fillRect(gutter, 0, size.width - gutter, header);
@@ -777,28 +813,31 @@ function drawHeader(context, { columns, firstColumn, gutter, header, hover, last
       continue;
     }
     const x = gutter + index * CELL - scroll.left;
+    if (column.kind === "device") {
+      context.fillStyle = theme.line;
+      context.fillRect(x, 0, CELL, header);
+    }
     if (hover && hover.columnIndex === index && !hover.inGutter) {
       context.fillStyle = theme.hover;
       context.fillRect(x, 0, CELL, header);
     }
+    context.fillStyle = theme.background;
+    context.fillRect(Math.floor(x), 0, 2, header);
+    context.fillRect(Math.floor(x) + CELL - 2, 0, 2, header);
     if (column.kind === "device") {
-      context.fillStyle = theme.lineStrong;
-      context.fillRect(Math.floor(x) + 0.5, 0, 1, header);
+      drawExpansionMark(context, x + CELL / 2, 14, column.expanded, theme);
     }
     context.save();
     if (column.activity?.count) {
-      context.fillStyle = severityColor(theme, column.activity.severity);
-      context.beginPath();
-      context.arc(x + CELL / 2, header - CELL / 2, 4, 0, Math.PI * 2);
-      context.fill();
+      drawStatusIcon(context, x + CELL / 2, header - CELL / 2, column.activity.severity, theme);
     }
     context.translate(x + CELL / 2, header - HEADER_PADDING - CELL);
     context.rotate(-Math.PI / 2);
     context.textAlign = "left";
     context.textBaseline = "middle";
     context.fillStyle = theme.text;
-    context.font = column.kind === "device" ? `600 11px ${theme.uiFont}` : `11px ${theme.dataFont}`;
-    context.fillText(fitLabel(context, columnLabelText(column), header - CELL - HEADER_PADDING * 2), 0, 0);
+    context.font = column.kind === "device" ? `600 13px ${theme.uiFont}` : `13px ${theme.uiFont}`;
+    context.fillText(columnLabelText(column), 0, 0);
     context.restore();
   }
   context.restore();

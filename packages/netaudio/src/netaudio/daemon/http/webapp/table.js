@@ -282,7 +282,7 @@ export function ConfigurableTable({ columns, mobileSummary, rowHref, rowKey, row
                   ${layout.visible.map(
                     (column) => html`<td key=${column.id} data-label=${column.label || ""} class=${`${column.align === "right" ? "numeric" : ""}${column.id === "number" ? " channel-number" : ""}${column.id === "status" || column.id.endsWith("-status") ? " status-cell" : ""}`}>
                       ${rowHref && column.id === (layout.visible.find((entry) => entry.id === "name" || entry.id === "device") || layout.visible[0]).id
-                        ? html`<a class="link link-hover inline-flex items-center gap-2 min-h-11" href=${rowHref(row)}><${Icon} name="devices" />${column.cell(row)}</a>`
+                        ? html`<a class="device-table-link" href=${rowHref(row)}><${Icon} name="devices" />${column.cell(row)}</a>`
                         : column.cell(row)}
                     </td>`,
                   )}

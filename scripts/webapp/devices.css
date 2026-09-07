@@ -27,6 +27,30 @@
     margin: 0;
   }
 
+  .device-switcher {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .device-switcher select {
+    max-width: 240px;
+  }
+  @media (max-width: 600px) {
+    .device-heading {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .device-switcher {
+      width: 100%;
+    }
+    .device-switcher select {
+      flex: 1;
+      max-width: 100%;
+    }
+  }
+
   .device-model {
     font-family: var(--font-ui);
     overflow-wrap: anywhere;
