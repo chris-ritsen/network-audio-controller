@@ -5349,10 +5349,6 @@
       --size: calc(var(--size-selector, 0.25rem) * 7);
       font-size: 1rem;
     }
-    .badge-sm {
-      --size: calc(var(--size-selector, 0.25rem) * 5);
-      font-size: 0.75rem;
-    }
   }
   .font-normal {
     --tw-font-weight: var(--font-weight-normal);
@@ -7213,18 +7209,6 @@
     padding-left: 8px;
     opacity: 0.65;
     font-variant-numeric: tabular-nums;
-  }
-  .routing-filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-  .routing-filter-chips .btn {
-    height: auto;
-    min-height: 30px;
-    white-space: normal;
-    text-align: left;
   }
   @media (max-width: 900px) {
     .routing-filter-container {

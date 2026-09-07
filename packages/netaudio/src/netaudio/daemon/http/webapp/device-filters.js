@@ -26,6 +26,31 @@ export const DEVICE_FILTERS = [
   { id: "external-clock", label: "External clock", values: (device) => [boolean(device.ddm_clock_preferences?.external_word_clock, "Enabled", "Disabled")] },
 ];
 
+const STORAGE_KEY = "netaudio.routing.filters";
+
+export function readRoutingFilters() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+    return {
+      search: typeof saved?.search === "string" ? saved.search : "",
+      receiverSearch: typeof saved?.receiverSearch === "string" ? saved.receiverSearch : "",
+      transmitterSearch: typeof saved?.transmitterSearch === "string" ? saved.transmitterSearch : "",
+      values: Object.fromEntries(DEVICE_FILTERS.flatMap(({ id }) => {
+        const selected = saved?.values?.[id];
+        if (!Array.isArray(selected)) return [];
+        const values = [...new Set(selected.filter((value) => typeof value === "string" && value.length))];
+        return values.length ? [[id, values]] : [];
+      })),
+    };
+  } catch {
+    return { search: "", receiverSearch: "", transmitterSearch: "", values: {} };
+  }
+}
+
+export function saveRoutingFilters(filters) {
+  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filters)); } catch {}
+}
+
 export function matchesDeviceFilters(device, filters, except) {
   const query = (filters.search || "").trim().toLowerCase();
   if (query && !format.deviceHaystack(device).includes(query)) return false;

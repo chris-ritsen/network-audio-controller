@@ -1,0 +1,33 @@
+import { test, expect } from "@playwright/test";
+import { serveWebapp } from "./fixture.mjs";
+
+test("filter checkboxes do not move controls and survive refresh with search values", async ({ page }) => {
+  await serveWebapp(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("http://netaudio.test/routing");
+  const panel = page.getByRole("complementary", { name: "Device filters" });
+  const online = panel.getByRole("checkbox", { name: /^Online\b/ });
+  const positions = () => panel.locator("summary").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().y));
+  const before = await positions();
+  await online.check();
+  expect(await positions()).toEqual(before);
+  await expect(panel.getByRole("button")).toHaveCount(1);
+  await expect(panel.getByRole("button", { name: "Clear all", exact: true })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search devices", exact: true }).fill("Windows");
+  await page.getByRole("searchbox", { name: "Receivers", exact: true }).fill("01");
+  await page.getByRole("searchbox", { name: "Transmitters", exact: true }).fill("02");
+  await page.reload();
+  await expect(online).toBeChecked();
+  await expect(page.getByRole("searchbox", { name: "Search devices", exact: true })).toHaveValue("Windows");
+  await expect(page.getByRole("searchbox", { name: "Receivers", exact: true })).toHaveValue("01");
+  await expect(page.getByRole("searchbox", { name: "Transmitters", exact: true })).toHaveValue("02");
+  await online.uncheck();
+  await page.reload();
+  await expect(online).not.toBeChecked();
+  await panel.getByRole("button", { name: "Clear all", exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole("searchbox", { name: "Search devices", exact: true })).toHaveValue("");
+  await expect(page.getByRole("searchbox", { name: "Receivers", exact: true })).toHaveValue("");
+  await expect(page.getByRole("searchbox", { name: "Transmitters", exact: true })).toHaveValue("");
+  await expect(panel.getByRole("checkbox", { checked: true })).toHaveCount(0);
+});
