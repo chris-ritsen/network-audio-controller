@@ -45,11 +45,12 @@ test("filter panel uses checkboxes without added dismiss buttons or selection ba
   assert.match(markup, /type="checkbox"/);
   assert.doesNotMatch(markup, /Active device filters|Remove Device lock|routing-filter-chips|badge/);
   assert.equal((markup.match(/<button/g) || []).length, 1);
+  assert.doesNotMatch(markup, /<details[^>]*\bopen\b/);
   for (const group of DEVICE_FILTERS) assert.ok(markup.includes(group.label));
 });
 
 test("routing filters persist searches and selections, including absent devices", () => {
-  const filters = { search: "Desk", receiverSearch: "left", transmitterSearch: "right", values: { manufacturer: ["Absent maker"], availability: ["Online"] } };
+  const filters = { search: "Desk", receiverSearch: "left", transmitterSearch: "right", expandedGroups: ["manufacturer"], listMode: true, panelOpen: false, values: { manufacturer: ["Absent maker"], availability: ["Online"] } };
   try {
     saveRoutingFilters(filters);
     assert.deepEqual(readRoutingFilters(), filters);
