@@ -6697,7 +6697,6 @@
     overflow: visible;
   }
   .channel-name-input {
-    width: 100%;
     margin: 0;
     border: 1px solid var(--line);
     border-radius: 4px;
@@ -6732,6 +6731,7 @@
     left: auto;
   }
   @media (max-width: 900px) {
+    .channel-name-value,
     .channel-name-input {
       height: 44px;
     }

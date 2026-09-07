@@ -99,6 +99,15 @@ test("channel editor retains typed characters and normalizes multiline pasted te
   await expect(editor).toHaveCount(0);
   expect(writes).toHaveLength(1);
   expect(writes[0].name).toBe("Left output");
+  const edit = page.getByRole("button", { name: "Edit receive channel 1 name", exact: true });
+  await edit.focus();
+  await edit.press("Enter");
+  await expect(editor).toBeFocused();
+  await editor.fill("Discarded draft");
+  await page.getByRole("heading", { name: "Receivers", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(edit).toHaveText("Left output");
+  expect(writes).toHaveLength(1);
 });
 
 test("column picker escapes short table clipping and stays within the viewport", async ({ page }) => {
