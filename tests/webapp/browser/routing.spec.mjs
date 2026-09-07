@@ -512,7 +512,7 @@ test("tools menu leaves routing intact and axis preferences survive reload", asy
   expect(Math.abs(content.y + content.height - grid.y - grid.height)).toBeLessThan(2);
   await expect(page.locator(".matrix-status")).toHaveCount(0);
   await page.locator(".routing-options summary").click();
-  const flip = page.getByRole("button", { name: "Flip axes", exact: true });
+  const flip = page.locator(".routing-options button[aria-pressed]");
   await flip.click();
   await expect(flip).toHaveAttribute("aria-pressed", "false");
   await page.reload();
@@ -520,7 +520,7 @@ test("tools menu leaves routing intact and axis preferences survive reload", asy
   await expect(flip).toHaveAttribute("aria-pressed", "false");
   await flip.click();
   await expect(flip).toHaveAttribute("aria-pressed", "true");
-  await page.locator(".routing-options summary").click();
+  await expect(page.locator(".routing-options-panel")).toBeHidden();
   const before = await page.locator("#content").boundingBox();
   await page.getByRole("button", { name: "Show navigation" }).click();
   const sidebar = page.getByRole("dialog", { name: "Application navigation" });
