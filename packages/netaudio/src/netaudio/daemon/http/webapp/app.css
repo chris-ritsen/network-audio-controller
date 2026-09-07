@@ -5037,10 +5037,6 @@
   .flex-grow {
     flex-grow: 1;
   }
-  .transform {
-    transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,)
-      var(--tw-skew-x,) var(--tw-skew-y,);
-  }
   @layer daisyui.l1.l2.l3 {
     .link {
       cursor: pointer;
@@ -6661,13 +6657,15 @@
     display: inline-block;
   }
   .channel-name-value,
-  .channel-name-editor > input {
+  .channel-name-input {
     appearance: none;
     box-sizing: border-box;
     height: 32px;
     padding: 0 4px;
     font: inherit;
     line-height: normal;
+    display: inline-flex;
+    align-items: center;
   }
   .channel-name-value {
     display: inline-flex;
@@ -6698,10 +6696,16 @@
     background: transparent;
     overflow: visible;
   }
-  .channel-name-editor > input {
-    display: block;
+  .channel-name-input {
     width: 100%;
     margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--raised);
+    color: inherit;
+    white-space: pre;
+    overflow: hidden;
+    cursor: text;
   }
   .channel-name-actions {
     position: absolute;
@@ -6728,7 +6732,7 @@
     left: auto;
   }
   @media (max-width: 900px) {
-    .channel-name-editor > input {
+    .channel-name-input {
       height: 44px;
     }
   }
@@ -7426,26 +7430,6 @@
     opacity: 0;
   }
 }
-@property --tw-rotate-x {
-  syntax: "*";
-  inherits: false;
-}
-@property --tw-rotate-y {
-  syntax: "*";
-  inherits: false;
-}
-@property --tw-rotate-z {
-  syntax: "*";
-  inherits: false;
-}
-@property --tw-skew-x {
-  syntax: "*";
-  inherits: false;
-}
-@property --tw-skew-y {
-  syntax: "*";
-  inherits: false;
-}
 @property --tw-space-y-reverse {
   syntax: "*";
   inherits: false;
@@ -7525,11 +7509,6 @@
     ::before,
     ::after,
     ::backdrop {
-      --tw-rotate-x: initial;
-      --tw-rotate-y: initial;
-      --tw-rotate-z: initial;
-      --tw-skew-x: initial;
-      --tw-skew-y: initial;
       --tw-space-y-reverse: 0;
       --tw-border-style: solid;
       --tw-font-weight: initial;

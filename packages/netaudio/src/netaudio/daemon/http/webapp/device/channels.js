@@ -25,13 +25,18 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [name, setName] = useState(channel.name || "");
-  const [draft, setDraft] = useState("");
+  // Leave the editable text node under browser control so rerenders do not move the caret.
+  const draft = useRef("");
   const label = `${channelType === "rx" ? "Receive" : "Transmit"} channel ${channelNumber} name`;
   useEffect(() => setName(channel.name || ""), [channel.name]);
   useEffect(() => {
     if (editing) {
       input.current?.focus();
-      input.current?.select();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input.current);
+      selection.removeAllRanges();
+      selection.addRange(range);
       const reposition = () => {
         const box = editButton.current.getBoundingClientRect();
         editor.current.style.left = `${box.left}px`;
@@ -71,23 +76,34 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
   return html`
     <span class="channel-name-display">
       <button ref=${editButton} type="button" class="channel-name-value" aria-label=${`Edit ${label.toLowerCase()}`} title="Click to edit" onClick=${() => {
-        setDraft(name);
+        draft.current = name;
+        input.current.textContent = name;
         setError("");
         const box = editButton.current.getBoundingClientRect();
         Object.assign(editor.current.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px` });
         editor.current.showPopover();
       }}>${name || "Unnamed channel"}</button>
     <form ref=${editor} popover="auto" class="channel-name-editor" onToggle=${(event) => setEditing(event.newState === "open")}
-      onSubmit=${(event) => { event.preventDefault(); void save(draft); }} onKeyDown=${(event) => { if (event.key === "Escape" && !pending) { event.preventDefault(); close(); } }}>
-      <input
+      onSubmit=${(event) => { event.preventDefault(); void save(draft.current); }} onKeyDown=${(event) => {
+        if (event.isComposing || pending) return;
+        if (event.key === "Escape") { event.preventDefault(); close(); }
+        if (event.key === "Enter") { event.preventDefault(); void save(draft.current); }
+      }}>
+      <span
         ref=${input}
-        type="text"
+        class="channel-name-input"
+        role="textbox"
+        contentEditable=${pending ? "false" : "plaintext-only"}
+        aria-multiline="false"
         aria-label=${label}
-        placeholder="Default channel name"
-        value=${draft}
-        disabled=${pending}
-        onInput=${(event) => setDraft(event.target.value)}
-      />
+        aria-placeholder="Default channel name"
+        aria-disabled=${pending}
+        onInput=${(event) => {
+          const value = event.currentTarget.innerText.replace(/[\r\n]+$/g, "").replace(/[\r\n]+/g, " ");
+          if (event.currentTarget.textContent !== value) event.currentTarget.textContent = value;
+          draft.current = value;
+        }}
+      ></span>
       <div class="channel-name-actions">
       <button type="submit" class="btn btn-xs" disabled=${pending} aria-busy=${pending}>Save</button>
       <${Button} small disabled=${pending} onClick=${close}>Cancel<//>
