@@ -67,6 +67,16 @@ async def test_preview_is_offline_and_matches_only_exact_scope(server):
         xml('<txchannel danteId="1"><label>A</label></txchannel><txchannel danteId="1"><label>B</label></txchannel>'),
         " " * (presets.MAX_PRESET_BYTES + 1),
     ],
+    ids=[
+        "empty",
+        "malformed",
+        "wrong-root",
+        "doctype",
+        "no-devices",
+        "duplicate-device",
+        "duplicate-channel",
+        "oversized",
+    ],
 )
 async def test_invalid_xml_refused(server, content):
     status, _ = await post(server, "/presets/preview", {"xml": content, "devices": []})

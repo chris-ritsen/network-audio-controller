@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable
+from typing import Optional
 
 from netaudio import core
 from netaudio.common.app_config import settings as app_settings
@@ -17,7 +18,7 @@ DEFAULT_REQUEST_ATTEMPTS = 3
 DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 1000
 
 WireObserver = Callable[[bytes, str, int, str], None]
-ClientKey = tuple[str, int, int, int, str | None]
+ClientKey = tuple[str, int, int, int, Optional[str]]
 
 
 def _wire_capture_functions(library):
