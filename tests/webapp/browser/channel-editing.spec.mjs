@@ -104,7 +104,7 @@ test("channel editor retains typed characters and normalizes multiline pasted te
   await edit.press("Enter");
   await expect(editor).toBeFocused();
   await editor.fill("Discarded draft");
-  await page.getByRole("heading", { name: "Receivers", exact: true }).click();
+  await page.locator("#content").click({ position: { x: 1, y: 1 } });
   await expect(editor).toHaveCount(0);
   await expect(edit).toHaveText("Left output");
   expect(writes).toHaveLength(1);
