@@ -1,85 +1,55 @@
 import { api } from "../api.js";
-import {AsyncButton, FieldRow, Fields, Panel, Value} from "../components.js";
+import { AsyncButton, Panel } from "../components.js";
 import * as format from "../format.js";
-import { html, useCallback, useRef, useState } from "../lib/preact.js";
+import { html, useLayoutEffect, useState } from "../lib/preact.js";
 import { deviceRequestName } from "../store.js";
-import { runAction } from "../toast.js";
 
 export function LockSection({ device }) {
   const requestName = deviceRequestName(device);
   const [observation, setObservation] = useState(null);
-  const pin = useRef(null);
-
-  const probeLockStatus = useCallback(async () => {
-    const outcome = await runAction(`probe lock status on ${requestName}`, () => api.getLockStatus(requestName));
-    if (outcome.ok) {
-      setObservation(outcome.result);
-    }
-    return outcome.result;
-  }, [requestName]);
+  const [pin, setPin] = useState("");
+  useLayoutEffect(() => { setObservation(null); setPin(""); }, [requestName]);
+  const locked = observation ? observation.is_locked : device.is_locked;
+  const known = locked === true || locked === false;
+  const refresh = async () => {
+    const result = await api.getLockStatus(requestName);
+    setObservation(result);
+    return result;
+  };
 
   return html`
-    <${Panel}
+    <div class="w-full max-w-lg"><${Panel}
       title="Device lock"
-      actions=${html`<${AsyncButton}
+      headerActions=${html`<${AsyncButton}
         small
-        description=${`probe lock status on ${requestName}`}
-        onRun=${() => api.getLockStatus(requestName).then((result) => {
-          setObservation(result);
-          return result;
-        })}
+        description=${`refresh lock status on ${requestName}`}
+        onRun=${refresh}
       >
-        Probe lock status
+        Refresh
       <//>`}
     >
-      <${FieldRow} label="Device PIN">
-        <input key=${`lock-pin-${requestName}`} ref=${pin} type="password" size="10" autocomplete="off" />
+      <div class="flex flex-col items-start gap-4">
+        <div class="text-sm" role="status">${locked === true ? "Locked" : locked === false ? "Unlocked" : "Lock state unavailable"}</div>
+        ${!known ? html`<p class="text-sm">Refresh to check the device before changing its lock.</p>` : null}
+        <label class="flex flex-col gap-2">Device PIN
+          <input class="w-32" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off"
+            value=${pin} onInput=${(event) => setPin(event.target.value)} placeholder="4 digits" />
+        </label>
         <${AsyncButton}
           small
-          description=${`lock ${requestName}`}
+          disabled=${!known || !/^\d{4}$/.test(pin)}
+          description=${`${locked ? "unlock" : "lock"} ${requestName}`}
           onRun=${async () => {
-            const result = await api.lock(requestName, pin.current.value);
-            await probeLockStatus();
+            const result = locked ? await api.unlock(requestName, pin) : await api.lock(requestName, pin);
+            setPin("");
+            await refresh();
             return result;
           }}
         >
-          Lock
+          ${locked ? "Unlock" : "Lock"}
         <//>
-        <${AsyncButton}
-          small
-          description=${`unlock ${requestName}`}
-          onRun=${async () => {
-            const result = await api.unlock(requestName, pin.current.value);
-            await probeLockStatus();
-            return result;
-          }}
-        >
-          Unlock
-        <//>
-      <//>
-      <${Fields}
-        entries=${[
-          ["Locked", device.is_locked ? "locked" : "unlocked"],
-          ["Lock reset status", html`<${Value} value=${device.lock_reset_status} />`],
-          ["License signature length", html`<${Value} value=${device.license_signature_length_bytes} />`],
-          ["Clear configuration status", html`<${Value} value=${device.clear_configuration_status} />`],
-          ["Diagnostic log export supported", html`<${Value} value=${device.diagnostic_log_export_supported} />`],
-        ]}
-      />
-      ${observation
-        ? html`
-            <div class="section-label">Last probe</div>
-            <${Fields}
-              entries=${[
-                ["Probed lock state", html`<${Value} value=${observation.is_locked} />`],
-                ["Lock state code", html`<${Value} value=${observation.lock_state_code} />`],
-                ["Status code", html`<${Value} value=${observation.status_code} />`],
-                ["Observed at", format.timestamp(observation.observed_at)],
-                ["Observation source", html`<${Value} value=${observation.observation_source} />`],
-              ]}
-            />
-          `
-        : null}
-    <//>
+        ${observation?.observed_at ? html`<div class="text-xs opacity-70">Last checked ${format.timestamp(observation.observed_at)}</div>` : null}
+      </div>
+    <//></div>
   `;
 }

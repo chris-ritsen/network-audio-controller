@@ -1,0 +1,170 @@
+{
+  "evidence_class": "causal",
+  "source": {
+    "run": "netaudio-aes3-native-allocation-20260906.agpk5c",
+    "originating_tool": "NetAudio 0.3.0, installed HTTP allocator with omitted options word",
+    "core_source_commit": "4b6ea591c1eec92942f425304ee261b0c4eef306",
+    "installed_core_sha256": "03cfe62fd0d45c2656c938c31fa72c6c108f060f09663372bbb35dfec1f792ff",
+    "installed_wheel_sha256": "472ea6a98c90210a6b29ad727b3fd09f0e94a0a75be780c964ff507d5a746361",
+    "device": "AVIO AES3",
+    "firmware_version": "4.3.0",
+    "software_version": "4.1.0",
+    "product_version": "1.2.0.3",
+    "capture": {
+      "name": "allocation.pcapng",
+      "sha256": "f950be557224fb1375a341225037c46cc69b6b67669d50243cec101050edebd2",
+      "size_bytes": 8220,
+      "packet_count": 64,
+      "dropped_packets": 0
+    },
+    "interface": "en0",
+    "scope": "One authorized AES3 target, UDP port 4440, maximum 90 seconds, no media",
+    "allowed_evidence": [
+      "NetAudio requests and device acknowledgments",
+      "Fresh device and flow readbacks",
+      "Exact baseline and restoration comparisons"
+    ],
+    "excluded_evidence": [
+      "Competing implementation encodings",
+      "Proprietary firmware/application static inspection"
+    ],
+    "transformations": [
+      "Select the six opcode 0x2601 frames from the bounded capture",
+      "Retain application payloads only as lowercase hexadecimal",
+      "Hash decoded payload bytes",
+      "Retain only flow identity and requested channel selection from readback",
+      "Bind full local HTTP records and baseline/restoration records by SHA-256"
+    ]
+  },
+  "claims": {
+    "causal": [
+      "NetAudio default-zero requests individually allocate channel 1, channel 2 and both channels on this target",
+      "Each acknowledged allocation matches fresh inventory and is subsequently removed with empty readback",
+      "Stable device configuration and interface configuration match baseline after all cases"
+    ],
+    "unknown": [
+      "Options bit meanings",
+      "Empty allocation support",
+      "Additional media-local identifiers",
+      "Acceptance on other products and firmware versions",
+      "Actual multicast media content"
+    ]
+  },
+  "exchanges": [
+    {
+      "channels": [
+        1
+      ],
+      "request_options_word": 0,
+      "transaction_id": 1,
+      "request": {
+        "frame": 5,
+        "timestamp_epoch": "1788697590.615538000",
+        "hexadecimal": "2809006800012601000000000000000001010014162a0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a14000000000000000100000000000000000000040a000000000000040600010001000002000000",
+        "sha256": "9140ce4becc22a81c8730432893522795dccd649c60454674cba127a7da817f6"
+      },
+      "response": {
+        "frame": 6,
+        "timestamp_epoch": "1788697590.618967000",
+        "hexadecimal": "2809006c00012601000100000000000001010020320000000000000000000018142600020000000300020000000000020000000000140018000f424000000000000000000000000008120000000000000001000000000000040a000000000000040600010001000002000010",
+        "sha256": "7511f8188adfcb70fd7f502b7130f797f27161f1c1b5b2996645f5431d2b6914"
+      },
+      "readback": {
+        "global_flow_id": 2,
+        "media_type_code": 3,
+        "media_local_flow_id": 2,
+        "flow_type": "multicast",
+        "channels": [
+          1
+        ]
+      },
+      "artifact_sha256": {
+        "channel-1-before.json": "d2d7df68f48e5d2b4c1dbced93470b16411a3b3217d374a66cb63363e59b3353",
+        "channel-1-allocation.json": "68717a485497171b9ee653b8b78a15ff6885a6add3632d856977f9e18fd27d2c",
+        "channel-1-readback.json": "5559529c6fc50838b963de27a912bc729f24669787599813a27e9599d8927248",
+        "channel-1-removal.json": "45b7ddea77c85c937d44e018d38ce067eda9a18a58bb5e8de9cbced29e349c17",
+        "channel-1-restored.json": "925ad81e270b1ef257f5c2e66666159cc5d24da3cea74f1ba3a8f8c40cc8e63c"
+      }
+    },
+    {
+      "channels": [
+        2
+      ],
+      "request_options_word": 0,
+      "transaction_id": 2,
+      "request": {
+        "frame": 23,
+        "timestamp_epoch": "1788697590.724872000",
+        "hexadecimal": "2809006800022601000000000000000001010014162a0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a14000000000000000100000000000000000000040a000000000000040600010002000002000000",
+        "sha256": "7ac4d845196259b5eac2267884d980f7e42241d344ab90b4f2d5eb8fa0555777"
+      },
+      "response": {
+        "frame": 26,
+        "timestamp_epoch": "1788697590.728877000",
+        "hexadecimal": "2809006c00022601000100000000000001010020320000500000000000000018142600020000000300020000000000020000000000140018000f424000000000000000000000000008120000000000000001000000000000040a000000000000040600010002000002000010",
+        "sha256": "d6fe9530f3af636c9c9e09dbd9699016ccdb1574706390c84326b04dd6cff17c"
+      },
+      "readback": {
+        "global_flow_id": 2,
+        "media_type_code": 3,
+        "media_local_flow_id": 2,
+        "flow_type": "multicast",
+        "channels": [
+          2
+        ]
+      },
+      "artifact_sha256": {
+        "channel-2-before.json": "a57859448b522a3f740b6092ba508fa59256880901f861f00f3465836cfea0dd",
+        "channel-2-allocation.json": "1d654c10d19d59d418f8cf1f99daa46f0fbc544cd4f8a4161a10c2991c98a1fa",
+        "channel-2-readback.json": "f4a42332be70ffb2f8e951eaf0b2fb2e633ed48da7c571618cea22caa723a718",
+        "channel-2-removal.json": "a41ab2259e04fe7e04f0ee67a948f6fe7eb6d7ca60d6c2b322682ee312ae6770",
+        "channel-2-restored.json": "36e486229fd93ed2ce5d555688d2bbd7643f0692896e927aff16e7dd8482677f"
+      }
+    },
+    {
+      "channels": [
+        1,
+        2
+      ],
+      "request_options_word": 0,
+      "transaction_id": 3,
+      "request": {
+        "frame": 49,
+        "timestamp_epoch": "1788697590.841711000",
+        "hexadecimal": "2809006a00032601000000000000000001010014162b0000000000030002000000000002000000000000000000000000000000000000000000000000000000000a15000000000000000100000000000000000000040b0000000000000507000200010002000002000000",
+        "sha256": "f1e148ce876d720acfd5dc8bcddecc64fb63a6ecc53dfedbc447563186ecb79a"
+      },
+      "response": {
+        "frame": 50,
+        "timestamp_epoch": "1788697590.845248000",
+        "hexadecimal": "2809006e00032601000100000000000001010020320000500000000000000018142700020000000300020000000000020000000000140018000f424000000000000000000000000008130000000000000001000000000000040b0000000000000507000200010002000002000010",
+        "sha256": "6d1bae2c64cc3225d1d2bd0c3f53363a25ae5245edc80d98cecf28323e3d81ae"
+      },
+      "readback": {
+        "global_flow_id": 2,
+        "media_type_code": 3,
+        "media_local_flow_id": 2,
+        "flow_type": "multicast",
+        "channels": [
+          1,
+          2
+        ]
+      },
+      "artifact_sha256": {
+        "both-channels-before.json": "5ebe3a39ba4417d496eac22e1e18348a266774cd21251b1c1ce1c3c19154d21e",
+        "both-channels-allocation.json": "f83d33e37217303d20f9a02b09593fc9ea684666e85915c34305f45ebb36ebb9",
+        "both-channels-readback.json": "12090f56b95d38b67a6459105bcdee79946377c14ff83585ffe2bcab2290c4d3",
+        "both-channels-removal.json": "d3b7c85d02ce8455f53daad92c5b09f8d3311078b7456ad368c72ec78592ddba",
+        "both-channels-restored.json": "b39edd7191ba4fff351bcf6404a07f39b1aec126bc527136ede29ab2b811d4c3"
+      }
+    }
+  ],
+  "restoration": {
+    "baseline-device.json": "f049c810f62d9db74e5ff7c768bbaa4bafbc3c1363b82f209291e6d6dbde90e5",
+    "baseline-interfaces.json": "df593b92afd39bdd23576e5c087bb19bdc3179df6cc4a22830c94ddb9fb54b44",
+    "baseline-flows.json": "a4f256223b038f5a24fbde94d562b1a7770698579d8b2f441a81e44214e4b051",
+    "final-device.json": "5ba523d634924c495d77058c9ac781ea4d954c0ff6191f20c18158238bdca8a1",
+    "final-interfaces.json": "fd5a64eb5e70ac956c5f52aa473fd92921d35fee81abf1ee10d542a3b64df95b",
+    "restoration.json": "4cbcb8b7ddbaa7ddf166464f0b42e3e8b2f9345cd70f200e1c4cd950fccb4234"
+  }
+}

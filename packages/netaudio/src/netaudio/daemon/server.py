@@ -22,9 +22,9 @@ from netaudio.daemon.http.api import DaemonHTTPServer
 from netaudio.daemon.log_file import daemon_log_path, truncate_when_oversized
 from netaudio.daemon.managed_inventory import ManagedInventoryRegistry
 from netaudio.daemon.metering import MeteringManager
+from netaudio.daemon.network_cache import NetworkStatusCache
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.const import SERVICES
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.services.heartbeat import DanteHeartbeatService
 from netaudio.shure.manager import ShureManager
@@ -66,12 +66,14 @@ def _stale_device_minutes_from_config(daemon_config: dict) -> float:
     return float(raw_value)
 
 
-def _probe_device(device_ip: str) -> bool:
+def _probe_device(device_ip: str, arc_port: int) -> bool:
     from netaudio import core
 
     try:
-        with core.CoreClient(device_ip, timeout_ms=1000, attempts=2) as client:
-            client.get_device_info()
+        with core.CoreClient(
+            device_ip, arc_port=arc_port, timeout_ms=1000, attempts=2, local_ip=app_settings.interface_ip
+        ) as client:
+            client.get_device_name()
         return True
     except core.NetaudioCoreError:
         return False
@@ -134,8 +136,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             session_id=self._session_id,
         )
         self.state = self.application.state
-        self.zeroconf = None
-        self.browser = None
+        self.network_status_cache = NetworkStatusCache(default_config_path().parent / "network-status.json")
+        self.zeroconf: AsyncZeroconf | None = None
+        self.browser: AsyncServiceBrowser | None = None
         self.running = False
         self._redis = None
         self._stop_event = DeferredAsyncioEvent()
@@ -157,6 +160,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             mark_offline=self.mark_device_offline,
             forget_device=self.forget_device,
             managed_inventory=self.managed_inventory,
+            refresh_discovery=self.refresh_discovery,
         )
         self.managed_inventory.set_callback(self._on_managed_inventory_changed)
         self.heartbeat: DanteHeartbeatService | None = None
@@ -234,6 +238,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             self._redis = None
 
     async def _publish_device_to_redis(self, device):
+        network_cache = getattr(self, "network_status_cache", None)
+        if network_cache is not None:
+            network_cache.remember(device)
         if not self._redis:
             return
 
@@ -534,12 +541,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
                 await self._publish_shure_to_redis(mac)
 
         _sd_notify("STATUS=Starting mDNS browser...")
-        self.zeroconf = AsyncZeroconf()
-        self.browser = AsyncServiceBrowser(
-            self.zeroconf.zeroconf,
-            SERVICES,
-            handlers=[self.on_service_state_change],
-        )
+        self._start_discovery()
 
         logger.info("mDNS browser started, watching for devices...")
 
@@ -681,7 +683,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             return
         device_ip = str(device.ipv4)
         try:
-            reachable = await asyncio.wait_for(asyncio.to_thread(_probe_device, device_ip), timeout=5.0)
+            reachable = await asyncio.wait_for(
+                asyncio.to_thread(_probe_device, device_ip, device._arc_port()), timeout=5.0
+            )
         except (asyncio.TimeoutError, OSError) as exception:
             logger.warning(f"Dante probe failed for forgotten device {device.server_name}: {exception}")
             return
@@ -794,7 +798,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             if device_ip:
                 try:
                     reachable = await asyncio.wait_for(
-                        asyncio.to_thread(_probe_device, device_ip),
+                        asyncio.to_thread(_probe_device, device_ip, device._arc_port()),
                         timeout=5.0,
                     )
                     if reachable:
@@ -830,7 +834,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         try:
             reachable = await asyncio.wait_for(
-                asyncio.to_thread(_probe_device, device_ip),
+                asyncio.to_thread(_probe_device, device_ip, device._arc_port()),
                 timeout=5.0,
             )
             if not reachable:
@@ -884,7 +888,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         device_ip = str(device.ipv4)
         try:
             reachable = await asyncio.wait_for(
-                asyncio.to_thread(_probe_device, device_ip),
+                asyncio.to_thread(_probe_device, device_ip, device._arc_port()),
                 timeout=5.0,
             )
             if reachable:

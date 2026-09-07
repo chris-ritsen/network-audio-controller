@@ -107,7 +107,7 @@ def _preset_device(
         supported_sample_rates=supported_sample_rates,
         encoding=encoding,
         supported_encodings=supported_encodings if supported_encodings is not None else [16, 24, 32],
-        interface_pending_config=None,
+        interface_reboot_required=False,
         settings={"sample_rate": sample_rate, "active_latency_ns": active_latency_ns},
         settings_calls=0,
         topology_mutation_lock=DeferredAsyncioLock(),
@@ -709,7 +709,7 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
         [{"name": "Device", "preferred": True, "interface": interface}],
     )
     device = _preset_device("Device")
-    device.interface_pending_config = pending_interface_config
+    device.interface_reboot_required = expects_reboot
     devices = {"device.local.": device}
 
     class ReadbackApplication(PresetApplication):

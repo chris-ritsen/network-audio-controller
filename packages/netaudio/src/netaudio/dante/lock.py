@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from netaudio.common.app_config import settings as app_settings
+
 LOCK_OPERATION_LOCK = 1
 LOCK_OPERATION_UNLOCK = 2
 
@@ -70,7 +72,7 @@ async def _device_lock_operation(device_ip: str, pin: str, key: bytes, operation
         raise ValueError(f"unknown lock operation: {operation}")
 
     def _run():
-        with core.CoreClient(device_ip) as client:
+        with core.CoreClient(device_ip, local_ip=app_settings.interface_ip) as client:
             if operation == LOCK_OPERATION_LOCK:
                 return client.lock(pin, key)
             return client.unlock(pin, key)

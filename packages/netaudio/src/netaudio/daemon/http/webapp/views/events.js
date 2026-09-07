@@ -1,7 +1,7 @@
-import { Notice, Panel, Value } from "../components.js";
+import { Notice, Panel } from "../components.js";
 import * as format from "../format.js";
-import { html, useState } from "../lib/preact.js";
-import { connectionState, events } from "../store.js";
+import { html, useEffect, useRef, useState } from "../lib/preact.js";
+import { events } from "../store.js";
 
 const EVENT_LABELS = {
   device_discovered: "device discovered",
@@ -25,34 +25,45 @@ function summaryOf(payload) {
   }
   if (payload.device) {
     const device = payload.device;
-    return [device.model, device.ipv4, device.online === false ? "offline" : "online"].filter(Boolean).join(" · ");
+    return [format.deviceModelName(device), device.ipv4, device.online === false ? "offline" : "online"].filter(Boolean).join(" · ");
   }
   if (payload.event === "parse_error") {
-    return html`<${Value} value=${payload.message} />`;
+    return "Could not read a server update";
   }
   return "";
 }
 
-function EventRow({ entry, expanded, onToggle }) {
+function EventRow({ entry }) {
   const payload = entry.payload || {};
   const kind = payload.event || "unknown";
   return html`
     <div>
-      <div class="event-row" onClick=${onToggle}>
+      <div class="event-row">
         <span>${format.timestamp(entry.received)}</span>
         <span class="event-kind">${EVENT_LABELS[kind] || kind}</span>
         <span class="event-summary">${[subjectOf(payload), summaryOf(payload)].filter(Boolean).join("  ·  ")}</span>
       </div>
-      ${expanded ? html`<div class="event-detail"><${Value} value=${payload} /></div>` : null}
     </div>
   `;
 }
 
 function EventsView() {
   const [filter, setFilter] = useState("");
-  const [expanded, setExpanded] = useState(null);
+  const [paused, setPaused] = useState(true);
+  const [snapshot, setSnapshot] = useState(() => events.value);
+  const root = useRef(null);
+  const current = paused ? snapshot : events.value;
+  const hasNew = events.value[0] !== current[0];
+  const pause = () => { setSnapshot(events.value); setPaused(true); };
+  useEffect(() => {
+    if (paused) return;
+    const content = root.current?.closest("main");
+    const onScroll = () => { if (content.scrollTop > 0) pause(); };
+    content?.addEventListener("scroll", onScroll, { passive: true });
+    return () => content?.removeEventListener("scroll", onScroll);
+  }, [paused]);
   const needle = filter.trim().toLowerCase();
-  const entries = events.value.filter((entry) => {
+  const entries = current.filter((entry) => {
     if (!needle) {
       return true;
     }
@@ -61,42 +72,38 @@ function EventsView() {
   });
 
   return html`
-    <div class="stack">
+    <div ref=${root} class="flex flex-col gap-4">
       <div class="content-header">
         <div>
           <div class="content-title">Events</div>
           <div class="content-subtitle">
-            Live daemon events held in memory only. Meter samples are excluded so the log stays readable.
+            Recent device events. The list stays still until you update it.
           </div>
         </div>
       </div>
       <${Panel}
-        title="Daemon event stream"
+        title="Recent events"
         actions=${html`
           <input
             type="search"
-            size="30"
-            placeholder="Filter by event, device, or detail"
+            class="w-full sm:w-64"
+            aria-label="Filter events"
+            placeholder="Filter events"
             value=${filter}
+            onFocus=${() => { if (!paused) pause(); }}
             onInput=${(event) => setFilter(event.target.value)}
           />
-          <span class="nav-count">${entries.length} of ${events.value.length}</span>
-          <span class="connection-pill ${connectionState.value}">
-            <span class="status-dot${connectionState.value === "open" ? " online" : ""}"></span>
-            ${connectionState.value === "open" ? "live" : connectionState.value}
-          </span>
+          ${paused && hasNew ? html`<button type="button" class="btn btn-sm" onClick=${() => setSnapshot(events.value)}>Show new events</button>` : null}
+          <button type="button" class="btn btn-sm" onClick=${() => paused ? setPaused(false) : pause()}>${paused ? "Resume live" : "Pause"}</button>
         `}
       >
         ${entries.length === 0
-          ? html`<${Notice}>No events buffered yet.<//>`
+          ? html`<${Notice}>${needle ? "No matching events." : "No recent events."}<//>`
           : html`<div class="event-log">
               ${entries.map(
                 (entry, index) => html`<${EventRow}
                   key=${`${entry.received}-${index}`}
                   entry=${entry}
-                  expanded=${expanded === `${entry.received}-${index}`}
-                  onToggle=${() =>
-                    setExpanded(expanded === `${entry.received}-${index}` ? null : `${entry.received}-${index}`)}
                 />`,
               )}
             </div>`}

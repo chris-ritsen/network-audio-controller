@@ -1,117 +1,63 @@
-import { api } from "./api.js";
+import { Icon } from "./icons.js";
+import { ContextSelector } from "./ddm-connections.js";
 import { Button } from "./components.js";
-import * as format from "./format.js";
-import { html, render, signal, useEffect, useRef, useState } from "./lib/preact.js";
+import { html, render, signal, useLayoutEffect } from "./lib/preact.js";
 import { CommandPalette, openPalette } from "./palette.js";
 import { devicePath, location, navigate, onNavigate, startRouter } from "./router.js";
-import { matchesCommandKey, shortcutLabel } from "./shortcuts.js";
-import { connect, connectionState, devices, shureDevices } from "./store.js";
-import { clockStatusView } from "./views/clock-status.js";
+import { matchesCommandKey } from "./shortcuts.js";
+import { connect } from "./store.js";
 import { ddmView } from "./views/ddm.js";
-import { devicesView } from "./views/devices.js";
+import { DEVICE_TABS, devicesView } from "./views/devices.js";
 import { eventsView } from "./views/events.js";
-import { flowsView } from "./views/flows.js";
-import { meteringView } from "./views/metering.js";
-import { networkStatusView } from "./views/network-status.js";
 import { routingView } from "./views/routing.js";
+import { subscriptionsView } from "./views/subscriptions.js";
 import { shureView } from "./views/shure.js";
+import { settingsView } from "./views/settings.js";
+import { presetsView } from "./views/presets.js";
 
 const VIEWS = [
-  routingView,
   devicesView,
-  clockStatusView,
-  networkStatusView,
-  meteringView,
-  flowsView,
+  routingView,
+  subscriptionsView,
+  presetsView,
   ddmView,
   shureView,
   eventsView,
+  settingsView,
 ];
-const DEVICE_AWARE_VIEWS = new Set(["devices", "flows", "metering"]);
 
-const sidebarOpen = signal(false);
+function readSidebarOpen() {
+  try {
+    const saved = window.localStorage.getItem("netaudio.sidebar.open");
+    if (saved === "true" || saved === "false") return saved === "true";
+  } catch {}
+  return window.innerWidth > 900;
+}
+
+const sidebarOpen = signal(readSidebarOpen());
 
 function viewById(identifier) {
-  return VIEWS.find((view) => view.id === identifier) || VIEWS[0];
+  return VIEWS.find((view) => view.id === identifier) || routingView;
 }
 
 function Breadcrumb() {
   const current = location.value;
   const view = viewById(current.view);
   const deviceName = current.parameters.device;
+  const section = current.parameters.section;
+  const sectionLabel = section === "domain" ? "Domain" : DEVICE_TABS.find((tab) => tab.id === section)?.label || "Unknown section";
   return html`
-    <div class="breadcrumb">
-      <span>${view.label}</span>
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <a class="link link-hover" href=${`/${view.id}`}>${view.label}</a>
       ${deviceName
         ? html`<span class="breadcrumb-separator">/</span>
-            <span>${deviceName}</span>`
+            <a class="link link-hover" href=${devicePath(view.id, deviceName)}>${deviceName}</a>`
         : null}
       ${current.parameters.section
         ? html`<span class="breadcrumb-separator">/</span>
-            <span>${current.parameters.section}</span>`
+            <span aria-current="page">${sectionLabel}</span>`
         : null}
-    </div>
-  `;
-}
-
-function ConnectionPill() {
-  const state = connectionState.value;
-  return html`
-    <span class="connection-pill ${state}" title="Daemon event stream">
-      <span class="status-dot${state === "open" ? " online" : ""}"></span>
-      ${state === "open" ? "live" : state}
-    </span>
-  `;
-}
-
-function GlobalMenu() {
-  const [open, setOpen] = useState(false);
-  const container = useRef(null);
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const dismiss = (event) => {
-      if (container.current && !container.current.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [open]);
-
-  return html`
-    <div class="menu" ref=${container}>
-      <${Button} onClick=${() => setOpen(!open)} title="Daemon actions">Actions<//>
-      ${open
-        ? html`
-            <div class="menu-panel" role="menu">
-              <${MenuAction} label="Refresh all devices" description="refresh all devices" onRun=${() => api.refresh(null)} onDone=${() => setOpen(false)} />
-              <${MenuAction} label="Forget offline devices" description="forget offline devices" onRun=${() => api.forgetDevices("offline")} onDone=${() => setOpen(false)} />
-              <${MenuAction} label="Forget emulated devices" description="forget emulated devices" onRun=${() => api.forgetDevices("emulated")} onDone=${() => setOpen(false)} />
-              <${MenuAction} label="Refresh managed inventory" description="refresh managed inventory" onRun=${() => api.managedRefresh(null)} onDone=${() => setOpen(false)} />
-              <${MenuAction} label="Shut down daemon" description="shut down daemon" danger onRun=${() => api.shutdown()} onDone=${() => setOpen(false)} />
-            </div>
-          `
-        : null}
-    </div>
-  `;
-}
-
-function MenuAction({ danger, description, label, onDone, onRun }) {
-  return html`
-    <button
-      type="button"
-      role="menuitem"
-      class="menu-item${danger ? " danger" : ""}"
-      onClick=${async () => {
-        onDone();
-        const { runAction } = await import("./toast.js");
-        await runAction(description, onRun);
-      }}
-    >
-      ${label}
-    </button>
+    </nav>
   `;
 }
 
@@ -120,17 +66,17 @@ function TopBar() {
     <header class="topbar">
       <button
         type="button"
-        class="menu-toggle"
-        aria-label="Toggle navigation"
+        class="header-icon-button"
+        aria-label=${sidebarOpen.value ? "Hide navigation" : "Show navigation"}
+        aria-controls="navigation-sidebar"
         aria-expanded=${sidebarOpen.value}
         onClick=${() => {
           sidebarOpen.value = !sidebarOpen.value;
         }}
       >
-        <span class="menu-toggle-bar"></span>
-        <span class="menu-toggle-bar"></span>
-        <span class="menu-toggle-bar"></span>
+        <${Icon} name="menu" />
       </button>
+      <div class="topbar-heading">
       <a class="brand" href="/routing">
         <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
           <rect width="64" height="64" rx="13" fill="#ff2323" />
@@ -141,17 +87,16 @@ function TopBar() {
             <rect x="46" y="16" width="8" height="36" rx="3" />
           </g>
         </svg>
-        netaudio
+        <span class="brand-name">netaudio</span>
       </a>
       <${Breadcrumb} />
+      </div>
       <div class="topbar-spacer"></div>
+      <${ContextSelector} />
       <div class="topbar-controls">
-        <button type="button" class="search-trigger" onClick=${openPalette}>
-          <span>Jump to device or view</span>
-          <kbd>${shortcutLabel("K")}</kbd>
+        <button type="button" class="header-icon-button" aria-label="Search" title="Search" onClick=${openPalette}>
+          <${Icon} name="search" />
         </button>
-        <${ConnectionPill} />
-        <${GlobalMenu} />
       </div>
     </header>
   `;
@@ -159,84 +104,24 @@ function TopBar() {
 
 function NavigationItems() {
   const current = location.value;
-  const deviceCount = Object.keys(devices.value).length;
-  const shureCount = Object.keys(shureDevices.value).length;
-  const counts = { devices: deviceCount, shure: shureCount };
-  return html`
-    <nav class="nav-list">
-      ${VIEWS.map(
-        (view) => html`
-          <a
-            key=${view.id}
-            class="nav-item${current.view === view.id ? " active" : ""}"
-            aria-current=${current.view === view.id ? "page" : null}
-            href=${`/${view.id}`}
-          >
-            <span>${view.label}</span>
-            ${counts[view.id] === undefined ? null : html`<span class="nav-count">${counts[view.id]}</span>`}
-          </a>
-        `,
-      )}
-    </nav>
-  `;
-}
-
-function DeviceList({ filter }) {
-  const current = location.value;
-  const view = DEVICE_AWARE_VIEWS.has(current.view) ? current.view : "devices";
-  const section = current.parameters.section;
-  const needle = filter.trim().toLowerCase();
-  const visible = format
-    .sortedDevices(devices.value)
-    .filter((device) => !needle || format.deviceHaystack(device).includes(needle));
-
-  if (!visible.length) {
-    return html`<div class="sidebar-empty">${needle ? "No device matches this filter." : "No devices discovered."}</div>`;
-  }
-
-  return html`
-    <div class="device-list">
-      ${visible.map((device) => {
-        const name = format.deviceLabel(device);
-        const active = current.parameters.device === name;
-        return html`
-          <a
-            key=${device.server_name || name}
-            class="device-item${active ? " active" : ""}"
-            href=${devicePath(view, name, view === "devices" ? section || "receive" : undefined)}
-          >
-            <span class="status-dot${device.online ? " online" : ""}"></span>
-            <span>
-              <span class="device-item-name">${name}</span>
-              <span class="device-item-detail">${format.deviceSummaryLine(device)}</span>
-            </span>
-          </a>
-        `;
-      })}
-    </div>
-  `;
+  const entry = (view) => html`<a
+    key=${view.id}
+    class=${`btn btn-sm justify-start${current.view === view.id ? " btn-active" : ""}`}
+    aria-current=${current.view === view.id ? "page" : null}
+    aria-label=${view.label}
+    href=${`/${view.id}`}>
+    <${Icon} name=${view.id} /><span>${view.label}</span>
+  </a>`;
+  return html`<nav aria-label="Main navigation" class="flex flex-col gap-1 p-2">
+    ${VIEWS.map(entry)}
+  </nav>`;
 }
 
 function Sidebar() {
-  const [filter, setFilter] = useState("");
   return html`
-    <aside class="sidebar${sidebarOpen.value ? " open" : ""}">
+    <aside id="navigation-sidebar" class=${`sidebar${sidebarOpen.value ? " open" : ""}`} inert=${!sidebarOpen.value}>
       <div class="sidebar-scroll">
         <${NavigationItems} />
-        <div class="sidebar-heading">
-          <span>Devices</span>
-          <span class="nav-count">${Object.keys(devices.value).length}</span>
-        </div>
-        <div class="sidebar-search">
-          <input
-            type="search"
-            class="input-wide"
-            placeholder="Filter devices"
-            value=${filter}
-            onInput=${(event) => setFilter(event.target.value)}
-          />
-        </div>
-        <${DeviceList} filter=${filter} />
       </div>
     </aside>
   `;
@@ -263,6 +148,10 @@ function Content() {
 }
 
 function App() {
+  useLayoutEffect(() => {
+    document.getElementById("root").classList.toggle("navigation-collapsed", !sidebarOpen.value);
+    try { window.localStorage.setItem("netaudio.sidebar.open", String(sidebarOpen.value)); } catch {}
+  }, [sidebarOpen.value]);
   return html`
     <${TopBar} />
     <${Sidebar} />
@@ -284,7 +173,7 @@ function bindShortcuts() {
 startRouter();
 bindShortcuts();
 onNavigate(() => {
-  sidebarOpen.value = false;
+  if (window.innerWidth <= 900) sidebarOpen.value = false;
 });
 render(html`<${App} />`, document.getElementById("root"));
 connect();

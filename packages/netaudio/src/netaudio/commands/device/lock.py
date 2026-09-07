@@ -72,7 +72,7 @@ def _report_lock_failure(action: str, result: dict) -> None:
     if error:
         typer.echo(f"Error: {action} failed: {error}", err=True)
     elif result.get("status") is not None:
-        typer.echo(f"Error: {action} failed (status 0x{result['status']:04x})", err=True)
+        typer.echo(f"Error: {action} failed: the device returned an unrecognized status.", err=True)
     else:
         typer.echo(f"Error: {action} failed: unknown", err=True)
     raise typer.Exit(code=1)

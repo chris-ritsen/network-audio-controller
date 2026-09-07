@@ -158,9 +158,8 @@ def _filter_device(device: dict, level: str) -> dict:
         interfaces = device.get("interfaces")
         if interfaces:
             filtered["interfaces"] = interfaces
-        pending = device.get("interface_pending_config")
-        if pending:
-            filtered["interface_pending_config"] = pending
+        if device.get("dante_redundancy"):
+            filtered["dante_redundancy"] = device["dante_redundancy"]
         return filtered
 
     return dict(device)

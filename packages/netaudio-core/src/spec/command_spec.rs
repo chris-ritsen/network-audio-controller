@@ -388,6 +388,14 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
+    SetDanteRedundancy {
+        record_protocol_identifier: u16,
+        mode: crate::network::DanteRedundancyMode,
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+    },
     SetInterfaceStatic {
         #[serde(default)]
         dns: String,
@@ -537,6 +545,7 @@ impl CommandSpec {
             | CommandSpec::SetEncoding { message_id, .. }
             | CommandSpec::SetGainLevel { message_id, .. }
             | CommandSpec::SetInterfaceDhcp { message_id, .. }
+            | CommandSpec::SetDanteRedundancy { message_id, .. }
             | CommandSpec::SetInterfaceStatic { message_id, .. }
             | CommandSpec::SetLatency { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
@@ -613,6 +622,7 @@ impl CommandSpec {
             | CommandSpec::SetEncoding { message_id, .. }
             | CommandSpec::SetGainLevel { message_id, .. }
             | CommandSpec::SetInterfaceDhcp { message_id, .. }
+            | CommandSpec::SetDanteRedundancy { message_id, .. }
             | CommandSpec::SetInterfaceStatic { message_id, .. }
             | CommandSpec::SetLatency { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
@@ -691,6 +701,7 @@ impl CommandSpec {
             | CommandSpec::SetEncoding { .. }
             | CommandSpec::SetGainLevel { .. }
             | CommandSpec::SetInterfaceDhcp { .. }
+            | CommandSpec::SetDanteRedundancy { .. }
             | CommandSpec::SetInterfaceStatic { .. }
             | CommandSpec::SetSampleRate { .. }
             | CommandSpec::SetSampleRatePullup { .. } => (
@@ -1065,6 +1076,17 @@ pub(super) fn build_command(
             channel_number,
             gain_level,
             parse_gain_device_type(&device_type)?,
+        )?,
+        CommandSpec::SetDanteRedundancy {
+            record_protocol_identifier,
+            mode,
+            host_mac,
+            message_id,
+        } => commands::build_set_dante_redundancy(
+            record_protocol_identifier,
+            mode,
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
         )?,
         CommandSpec::SetInterfaceDhcp {
             host_mac,

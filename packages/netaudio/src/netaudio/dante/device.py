@@ -114,7 +114,8 @@ class DanteDevice:
         self.receiver_flow_connection_health: dict | None = None
         self.link_speed_mbps: int | None = None
         self.interface_reboot_required: bool = False
-        self.interface_pending_config: dict | None = None
+        self.interface_status_protocol: int | None = None
+        self.dante_redundancy: dict | None = None
         self.lock_reset_status: dict | None = None
         self.clear_configuration_status: dict | None = None
         self.diagnostic_log_export_supported: bool | None = None

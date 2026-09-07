@@ -8,79 +8,60 @@ from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.execution import run_command
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, select_device, sort_devices
-from netaudio.commands.config.readback import _send_requested_change
+from netaudio.dante.network_configuration import (
+    interface_configuration,
+    network_snapshot,
+    validate_interface_configuration,
+)
 
-INTERFACE_HEADERS = ["Name", "Interface", "Mode", "IP Address", "Netmask", "Gateway", "DNS", "Pending"]
-
-
-def _pending_label(pending_config) -> str:
-    if not pending_config:
-        return ""
-    pending_mode = pending_config.get("mode", "")
-    if pending_mode == "static":
-        return f"static {pending_config.get('ip_address', '')}"
-    return pending_mode
+INTERFACE_HEADERS = ["Name", "Interface", "State", "Mode", "IP Address", "Netmask", "Gateway", "DNS", "Reboot Required"]
 
 
 def _interface_rows(server_name, device) -> list[list[str]]:
-    pending_label = _pending_label(device.interface_pending_config)
-    if not device.interfaces:
-        return [
-            [
-                device.name or server_name,
-                "0",
-                "",
-                str(device.ipv4) if device.ipv4 else "",
-                "",
-                "",
-                "",
-                pending_label,
-            ]
-        ]
-    return [
-        [
-            device.name or server_name,
-            str(index),
-            interface_state.get("mode", ""),
-            interface_state.get("ip_address", ""),
-            interface_state.get("netmask", ""),
-            interface_state.get("gateway", ""),
-            interface_state.get("dns_server", ""),
-            pending_label if index == 0 else "",
-        ]
-        for index, interface_state in enumerate(device.interfaces)
-    ]
+    rows = []
+    for entry in device.interfaces or []:
+        for state, configuration in (("Active", entry), ("Configured", entry.get("configured"))):
+            if configuration is None:
+                continue
+            rows.append(
+                [
+                    device.name or server_name,
+                    (entry.get("interface") or "unknown").capitalize(),
+                    state,
+                    {"dynamic": "DHCP", "static": "Static"}.get(configuration.get("mode"), "Unknown"),
+                    *[configuration.get(key) or "" for key in ("ip_address", "netmask", "gateway", "dns_server")],
+                    "yes" if entry.get("reboot_required") else "no",
+                ]
+            )
+    return rows
 
 
-async def run_interface(
-    application,
-    devices,
-    mode: str | None,
-    static_configuration: dict | None,
-    all_devices: bool,
-) -> None:
+async def run_interface(application, devices, mode, static_configuration, all_devices, interface="primary") -> None:
     filtered = filter_devices(devices)
-    if mode is None:
-        rows = []
-        json_data = {}
-        for server_name, device in sort_devices(filtered):
+    targets = sort_devices(filtered) if mode is None else select_device(filtered, allow_many=all_devices)
+    rows, json_data, failures = [], {}, 0
+    for server_name, device in targets:
+        try:
+            if mode is None:
+                device.interfaces = await application.probe_interface_status(device)
+            else:
+                device.interfaces = await application.set_interface(
+                    device, mode, static_configuration, interface=interface
+                )
+                expected = validate_interface_configuration(mode, static_configuration)
+                configured = interface_configuration(device.interfaces, interface).get("configured") or {}
+                if not all(configured.get(key) == value for key, value in expected.items()):
+                    raise RuntimeError("Interface change could not be verified; no reboot sent")
+                typer.echo(
+                    f"Configured {interface} interface on {device.name or server_name} (verified). No reboot sent.",
+                    err=True,
+                )
             rows.extend(_interface_rows(server_name, device))
-            device_json = {"name": device.name, "interfaces": device.interfaces}
-            if device.interface_pending_config:
-                device_json["pending_config"] = device.interface_pending_config
-            json_data[server_name] = device_json
-        output_table(INTERFACE_HEADERS, rows, json_data=json_data)
-        return
-
-    targets = select_device(filtered, allow_many=all_devices)
-    failures = await _send_requested_change(
-        targets,
-        lambda device: application.set_interface(device, mode, static_configuration),
-        "interface change",
-        lambda label: f"Interface change requested for {label}: {mode}; not verified.",
-    )
-
-    typer.echo("Reboot required for changes to take effect.", err=True)
+            json_data[server_name] = {"name": device.name, **network_snapshot(device)}
+        except (ValueError, RuntimeError, OSError, TimeoutError) as exception:
+            failures += 1
+            typer.echo(f"Error: {device.name or server_name}: {exception}", err=True)
+    output_table(INTERFACE_HEADERS, rows, json_data=json_data)
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)
 
@@ -92,22 +73,16 @@ def interface(
     dns_server: Optional[str] = typer.Option(None, "--dns", help="DNS server (static only)."),
     gateway: Optional[str] = typer.Option(None, "--gateway", help="Gateway (static only)."),
     all_devices: bool = typer.Option(False, "--all", help="Apply to all devices."),
+    interface: str = typer.Option("primary", "--interface", help="Target primary or secondary interface."),
 ):
-    """Get or set interface configuration."""
-    if mode is not None and mode not in ("dhcp", "static"):
-        typer.echo("Error: mode must be 'dhcp' or 'static'.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    static_configuration = None
-    if mode == "static":
-        if not all([ip_address, netmask, dns_server, gateway]):
-            typer.echo("Error: --ip, --netmask, --dns, and --gateway are required for static mode.", err=True)
-            raise typer.Exit(code=ExitCode.ERROR)
-        static_configuration = {
-            "dns_server": dns_server,
-            "gateway": gateway,
-            "ip_address": ip_address,
-            "netmask": netmask,
-        }
-
-    run_command(run_interface, mode, static_configuration, all_devices)
+    """Read active/configured network settings or set and verify an interface."""
+    configuration = {"ip_address": ip_address, "netmask": netmask, "dns_server": dns_server, "gateway": gateway}
+    try:
+        if interface not in {"primary", "secondary"}:
+            raise ValueError("interface must be primary or secondary")
+        if mode is not None:
+            validate_interface_configuration(mode, configuration)
+    except ValueError as exception:
+        typer.echo(f"Error: {exception}", err=True)
+        raise typer.Exit(code=ExitCode.ERROR) from None
+    run_command(run_interface, mode, configuration if mode == "static" else None, all_devices, interface)

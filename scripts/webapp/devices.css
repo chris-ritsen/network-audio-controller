@@ -1,0 +1,100 @@
+@layer components {
+  @media (max-width: 900px) {
+    .tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+    .tab {
+      white-space: nowrap;
+    }
+  }
+
+  .device-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .device-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .device-heading h1 {
+    margin: 0;
+  }
+
+  .device-model {
+    font-family: var(--font-ui);
+    overflow-wrap: anywhere;
+  }
+
+  .device-address {
+    font-family: var(--font-data);
+    font-size: 12px;
+  }
+
+  .device-address > span {
+    font-family: var(--font-ui);
+    opacity: 0.65;
+    margin-right: 6px;
+  }
+
+  .device-section-menu {
+    display: none;
+  }
+
+  .network-config {
+    width: 100%;
+    max-width: 44rem;
+  }
+
+  .network-section {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .network-section + .network-section {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .network-section > .btn {
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+
+  .network-section .field-row {
+    border-bottom: none;
+  }
+
+  @media (max-width: 900px) {
+    .tabs {
+      flex-wrap: wrap;
+      overflow: visible;
+      height: auto;
+    }
+
+    .device-section-menu {
+      display: block;
+    }
+
+    .device-section-menu select {
+      width: 100%;
+    }
+  }
+}
+
+@layer utilities {
+  @media (max-width: 900px) {
+    .tabs.device-tabs {
+      display: none;
+    }
+  }
+}
