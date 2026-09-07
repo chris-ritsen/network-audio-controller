@@ -77,8 +77,7 @@ function SubscriptionTable({ all }) {
 }
 
 function SubscriptionsView() {
-  return html`<div class="flex flex-col gap-4 pb-6">
-    <div class="content-header"><h1 class="content-title">Subscriptions</h1></div>
+  return html`<div class="flex flex-col gap-4">
     <${SubscriptionTable} all=${format.sortedDevices(devices.value)} />
   </div>`;
 }

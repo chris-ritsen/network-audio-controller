@@ -1,13 +1,20 @@
 @layer components {
+  .event-live-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    -webkit-user-select: none;
+    user-select: none;
+  }
   .event-row {
     display: grid;
     grid-template-columns: 152px 190px minmax(0, 1fr);
     gap: 12px;
     padding: 5px 0;
     border-bottom: 1px solid var(--line);
-    font-family: var(--font-data);
-    font-size: 12px;
-    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 13px;
     align-items: baseline;
   }
 
@@ -16,7 +23,7 @@
   }
 
   .event-kind {
-    font-weight: 600;
+    font-weight: 400;
   }
 
   .event-summary {

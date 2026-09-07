@@ -35,9 +35,9 @@ test("reported Bluetooth product name appears in device list, header and search"
     if (path === "/devices") {
       assert.match(markup, /^<div class="flex flex-col gap-4 pb-6">/);
       assert.match(markup, /class="table-wrapper">/);
-      assert.equal(markup.match(/>Devices</g).length, 1);
+      assert.doesNotMatch(markup, />Device Info</);
       assert.doesNotMatch(markup, /devices online|>Device name</);
-      assert.match(markup, /placeholder="Filter"/);
+      assert.match(markup, /placeholder="Find a device…"/);
     }
   }
   assert.equal(format.deviceModelName({ model: "AD4D", dante_model: "other" }), "AD4D");

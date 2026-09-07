@@ -1,4 +1,67 @@
 @layer components {
+  .source-picker .source-picker-box {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: min(560px, calc(100vw - 24px));
+    max-height: calc(100dvh - 32px);
+    padding: 16px;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+  .source-picker-box > header,
+  .source-picker-box > input,
+  .source-picker-box > .alert {
+    flex-shrink: 0;
+  }
+  .source-picker-box > input {
+    font-family: var(--font-ui);
+    font-size: 16px;
+  }
+  .source-picker-results {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .source-picker-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 52px;
+    padding: 8px;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    text-align: left;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .source-picker-entry.current,
+  .source-picker-entry:hover {
+    background: var(--raised);
+  }
+  .source-picker-entry:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  @media (max-width: 900px) {
+    .source-picker .source-picker-box {
+      width: calc(100vw - 16px);
+      max-height: calc(100dvh - 16px);
+      padding: 12px;
+      gap: 10px;
+    }
+    .source-picker-box > header {
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .source-picker-box .toolbar {
+      margin-left: auto;
+    }
+    .source-picker-box h2 {
+      font-size: 16px;
+    }
+  }
   dialog.palette {
     width: min(620px, 92vw);
     max-width: min(620px, 92vw);

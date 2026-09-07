@@ -7,6 +7,8 @@ const ROUTES = [
   { pattern: "/devices/:device", view: "devices" },
   { pattern: "/devices/:device/:section", view: "devices" },
   { pattern: "/routing", view: "routing" },
+  { pattern: "/clock-status", view: "clock-status" },
+  { pattern: "/network-status", view: "network-status" },
   { pattern: "/subscriptions", view: "subscriptions" },
   { pattern: "/ddm", view: "ddm" },
   { pattern: "/shure", view: "shure" },

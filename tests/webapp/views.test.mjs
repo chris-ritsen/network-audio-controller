@@ -16,9 +16,9 @@ test("source picker offers disconnect only for a configured source", async () =>
   const { RoutePicker } = await import(`${WEBAPP}route-picker.js`);
   const receiver = Object.values(devices)[0];
   for (const subscription of [null, {}, { tx_device: "", tx_channel: "" }, { tx_device: "source", tx_channel: "" }]) {
-    assert.doesNotMatch(render(h(RoutePicker, { receiver, receiveChannelNumber: 1, subscription })), /> Disconnect</);
+    assert.doesNotMatch(render(h(RoutePicker, { receiver, receiveChannelNumber: 1, subscription })), />Disconnect</);
   }
-  assert.match(render(h(RoutePicker, { receiver, receiveChannelNumber: 1, subscription: { tx_device: "source", tx_channel: "left" } })), /> Disconnect</);
+  assert.match(render(h(RoutePicker, { receiver, receiveChannelNumber: 1, subscription: { tx_device: "source", tx_channel: "left" } })), />Disconnect</);
 });
 
 function renderView(view, path) {
@@ -60,12 +60,12 @@ test("subscription table has its own route and is absent from the routing matrix
   assert.equal(router.resolve("/subscriptions", "").view, "subscriptions");
 });
 
-test("offline device sections show offline state without dismissal controls", async () => {
+test("offline unmanaged device sections are excluded from the displayed inventory", async () => {
   const { devicesView } = await import(`${WEBAPP}views/devices.js`);
   const device = Object.values(devices).find((entry) => entry.online === false);
   for (const section of DEVICE_SECTIONS) {
     const markup = renderView(devicesView, `/devices/${encodeURIComponent(device.name)}/${section}`);
-    assert.match(markup, /This device is offline/);
+    assert.match(markup, /No device/);
     assert.doesNotMatch(markup, /Dismiss offline/);
     assert.doesNotMatch(markup, /Reboot|Apply|Identify|Start detailed|type="password"/);
   }

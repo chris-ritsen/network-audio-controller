@@ -26,6 +26,29 @@ test("missing state is not invented from absent fields or raw identifiers", () =
   assert.deepEqual(DEVICE_FILTERS.find((g) => g.id === "external-clock").values({ clock_source_code: 0 }), ["Not reported"]);
 });
 
+test("Controller-style facets use known statuses and do not equate unknown with disabled", () => {
+  const values = (id, device) => DEVICE_FILTERS.find((group) => group.id === id).values(device);
+  assert.deepEqual(values("subscription", { subscriptions: [] }), ["None"]);
+  assert.deepEqual(values("subscription", { subscriptions: [
+    { tx_device: "Source", tx_channel: "One", status: { severity: "ok" } },
+    { tx_device: "Source", tx_channel: "Two", status: { severity: "warning" } },
+    { tx_device: "Source", tx_channel: "Three", status: { severity: "error" } },
+  ] }), ["Has successes", "Has warnings", "Has errors"]);
+  assert.deepEqual(values("tx-multicast", { transmitter_flows: [{ flow_type: "multicast" }] }), ["Active"]);
+  assert.deepEqual(values("tx-multicast", { transmitter_flows: [] }), ["None"]);
+  assert.deepEqual(values("tx-multicast", { transmitter_flows: [{}] }), ["Not reported"]);
+  assert.deepEqual(values("aes67", { aes67_supported: false }), ["Unsupported"]);
+  assert.deepEqual(values("aes67", { aes67_current: false }), ["Disabled"]);
+  assert.deepEqual(values("aes67", { aes67_current: true }), ["Enabled"]);
+  assert.deepEqual(values("aes67", { aes67_supported: true }), ["Not reported"]);
+  for (const [raw, label] of ["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"].entries()) {
+    assert.deepEqual(values("sample-rate-pullup", { sample_rate_pullup_raw_value: raw }), [label]);
+  }
+  assert.deepEqual(values("sample-rate-pullup", { sample_rate_pullup_raw_value: 99 }), ["Not reported"]);
+  assert.deepEqual(values("media", { channels: { receivers: { 1: { media_type: "audio" }, 2: { ddm_media_type: "VIDEO" } } } }), ["Audio", "Video"]);
+  assert.equal(DEVICE_FILTERS.some((group) => group.id === "video-format"), false);
+});
+
 test("facet counts respect other groups and retain selected values after inventory changes", () => {
   const filters = { values: { manufacturer: ["Maker A"], "sample-rate": ["96 kHz"] } };
   const options = deviceFilterOptions(inventory, filters);
@@ -50,7 +73,7 @@ test("filter panel uses checkboxes without added dismiss buttons or selection ba
 });
 
 test("routing filters persist searches and selections, including absent devices", () => {
-  const filters = { search: "Desk", receiverSearch: "left", transmitterSearch: "right", expandedGroups: ["manufacturer"], listMode: true, panelOpen: false, values: { manufacturer: ["Absent maker"], availability: ["Online"] } };
+  const filters = { search: "Desk", receiverSearch: "left", transmitterSearch: "right", expandedGroups: ["manufacturer"], listMode: true, panelOpen: false, values: { manufacturer: ["Absent maker"], "sample-rate": ["48 kHz"] } };
   try {
     saveRoutingFilters(filters);
     assert.deepEqual(readRoutingFilters(), filters);
@@ -85,8 +108,7 @@ test("routing keeps labeled navigation and axis searches alongside the filter pa
     store.devices.value = fixture("devices");
     setLocation("/routing");
     const markup = render(h(routingView.component));
-    assert.match(markup, /Device filters/);
-    assert.match(markup, /aria-controls="routing-device-filters"/);
+    assert.doesNotMatch(markup, /Device filters|routing-device-filters/);
     assert.match(markup, /Receivers/);
     assert.match(markup, /Transmitters/);
     assert.match(markup, /matrix-viewport/);

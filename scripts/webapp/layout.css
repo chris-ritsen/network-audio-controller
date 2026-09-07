@@ -1,17 +1,26 @@
 @layer components {
   #root {
     display: grid;
-    grid-template-areas: "topbar topbar" "sidebar content";
-    grid-template-columns: max-content minmax(0, 1fr);
-    grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+    grid-template-areas: "topbar" "workspace" "content";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--topbar-height) 34px minmax(0, 1fr);
     height: 100%;
   }
 
-  .content {
+  .app-workspace {
     grid-area: content;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+  }
+  .app-workspace.with-filters {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+  .content {
     min-width: 0;
     overflow: auto;
-    padding: 18px 20px 48px;
+    padding: 20px 24px 32px;
   }
 
   .content-header {
@@ -31,8 +40,9 @@
 
   .content-subtitle {
     margin-top: 3px;
-    font-family: var(--font-data);
-    font-size: 12.5px;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--muted);
   }
 
   .stack {
@@ -48,25 +58,23 @@
     align-items: start;
   }
 
-  @media (min-width: 901px) {
-    #root.navigation-collapsed {
-      grid-template-columns: 0 minmax(0, 1fr);
-    }
-  }
-
   @media (max-width: 900px) {
+    .app-workspace.with-filters {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 45%) minmax(0, 1fr);
+    }
     .content {
       padding-bottom: max(24px, env(safe-area-inset-bottom));
     }
 
     #root {
-      grid-template-areas: "topbar" "content";
+      grid-template-areas: "topbar" "workspace" "content";
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+      grid-template-rows: var(--topbar-height) auto minmax(0, 1fr);
     }
 
     .content {
-      padding: 14px 12px 40px;
+      padding: 8px 8px max(8px, env(safe-area-inset-bottom));
     }
 
     .content-title {
@@ -76,7 +84,7 @@
 
   @media (max-width: 480px) {
     .content {
-      padding: 12px 8px 36px;
+      padding: 8px 8px max(8px, env(safe-area-inset-bottom));
     }
 
     .content-header {

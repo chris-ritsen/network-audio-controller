@@ -7,7 +7,7 @@ const matrix = await import(`${WEBAPP}matrix.js`);
 const store = await import(`${WEBAPP}store.js`);
 const devices = fixture("devices");
 
-test("matrix labels stay bounded and subscription source text never affects layout", () => {
+test("matrix column headers grow to fit labels and subscription text never affects layout", () => {
   const context = { measureText: (text) => ({ width: text.length * 8 }) };
   const theme = { dataFont: "monospace" };
   const channel = { kind: "channel", number: 1, name: "Main" };
@@ -15,7 +15,7 @@ test("matrix labels stay bounded and subscription source text never affects layo
   const subscribed = { ...channel, subscription: { tx_device: "source".repeat(100), tx_channel: "channel".repeat(100) } };
   assert.deepEqual(matrix.measureMatrixLayout(context, [subscribed], [channel], theme), baseline);
   const long = { ...channel, name: "long-name".repeat(100) };
-  assert.deepEqual(matrix.measureMatrixLayout(context, [long], [long], theme), { gutter: 280, header: 180 });
+  assert.deepEqual(matrix.measureMatrixLayout(context, [long], [long], theme), { gutter: 340, header: 78 + `1  ${long.name}`.length * 8 });
 });
 const { groupChannels } = await import(`${WEBAPP}channel-groups.js`);
 

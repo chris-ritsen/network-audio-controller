@@ -19,12 +19,13 @@ test("flow pages, device controls and diagnostic fields are absent", async ({ pa
   })).toEqual([false, false]);
 });
 
-test("one Devices table contains clock and network columns without duplicate navigation", async ({ page }) => {
+test("network views have focused defaults while every inventory column remains available", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/devices");
-  const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(navigation.getByRole("link", { name: "Devices", exact: true })).toBeVisible();
-  await expect(navigation.getByRole("link", { name: /Clock status|Network status|Device info/ })).toHaveCount(0);
+  const navigation = page.getByRole("navigation", { name: "Network views" });
+  for (const name of ["Routing", "Device Info", "Clock Status", "Network Status"]) {
+    await expect(navigation.getByRole("link", { name, exact: true })).toBeVisible();
+  }
   await page.getByRole("button", { name: /^Columns/ }).click();
   const menu = page.locator(".column-menu");
   const labels = await menu.locator(".column-option span").allTextContents();
@@ -35,6 +36,13 @@ test("one Devices table contains clock and network columns without duplicate nav
     await menu.getByRole("checkbox", { name: label, exact: true }).check();
     await expect(page.getByRole("columnheader", { name: label, exact: true })).toBeVisible();
   }
+  await page.keyboard.press("Escape");
+  await navigation.getByRole("link", { name: "Clock Status", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "Clock role", exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Primary address", exact: true })).toHaveCount(0);
+  await navigation.getByRole("link", { name: "Network Status", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "Primary address", exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Clock role", exact: true })).toHaveCount(0);
 });
 
 test("latency is in device config and status contains no inventory actions", async ({ page }) => {
@@ -118,11 +126,7 @@ test("receivers show subscription icons on desktop and collapsed mobile cards", 
   await expect(rows.nth(0).locator(".receiver-subscription:visible")).toHaveText("");
   await expect(rows.nth(0).locator(".receiver-subscription:visible")).toHaveAttribute("title", /Subscription successful$/);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Hide navigation", exact: true }).click();
-  await expect.poll(async () => {
-    const sidebar = await page.locator("#navigation-sidebar").boundingBox();
-    return sidebar.x + sidebar.width;
-  }).toBeLessThanOrEqual(1);
+  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
   await expect(rows.nth(0).getByRole("button")).toHaveAttribute("aria-expanded", "false");
   await expect(rows.nth(0).getByRole("img", { name: "Subscribed", exact: true })).toBeVisible();
   await expect(rows.nth(3).getByRole("img", { name: "Subscribed", exact: true })).toBeVisible();
@@ -131,10 +135,10 @@ test("receivers show subscription icons on desktop and collapsed mobile cards", 
   expect(writes).toEqual([]);
 });
 
-test("header icons are bare and desktop sorting never shows the mobile direction control", async ({ page }) => {
+test("header controls are labeled and desktop sorting never shows the mobile direction control", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/devices");
-  for (const label of ["Hide navigation", "Search"]) {
+  for (const label of ["Show navigation", "Search"]) {
     const control = page.getByRole("button", { name: label, exact: true });
     expect(await control.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     expect(await control.innerText()).toBe("");
@@ -147,5 +151,5 @@ test("header icons are bare and desktop sorting never shows the mobile direction
   expect(labels).toEqual([...labels].sort((first, second) => first.localeCompare(second, undefined, { numeric: true, sensitivity: "base" })));
   const card = page.locator(".expandable-row").first();
   expect(await card.evaluate((node) => getComputedStyle(node).overflow)).toBe("hidden");
-  expect(await card.evaluate((node) => getComputedStyle(node).borderRadius)).toBe("10px");
+  expect(await card.evaluate((node) => getComputedStyle(node).borderRadius)).toBe("6px");
 });

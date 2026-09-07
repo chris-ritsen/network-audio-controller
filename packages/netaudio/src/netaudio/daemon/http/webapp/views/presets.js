@@ -141,7 +141,7 @@ function LoadPreset() {
 }
 
 function PresetsView() {
-  return html`<div class="flex flex-col gap-6 w-full max-w-3xl"><h1 class="content-title">Presets</h1>
+  return html`<div class="flex flex-col gap-6 w-full max-w-3xl">
     <p class="text-sm">Save and load Dante preset XML files. Supported settings are receiver subscriptions, transmitter names, sample rate, encoding, latency, preferred leader and single-interface network configuration. This is not a full device backup: receiver names, AES67 and other settings are not restored.</p>
     ${!inventoryReady.value ? html`<p class="text-sm" role="status">Waiting for live inventory. You can still preview a file.</p>` : null}
     <${SavePreset} key=${`save:${selectedContext.value}`} />

@@ -125,11 +125,6 @@ function DdmView() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="content-header">
-        <div>
-          <div class="content-title">Dante Domain Manager</div>
-        </div>
-      </div>
       <${DdmConnections} />
       <${DomainsPanel} domains=${domains} />
       <${ManagedDevicesPanel} />

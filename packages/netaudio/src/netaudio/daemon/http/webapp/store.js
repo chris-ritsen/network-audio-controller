@@ -1,5 +1,7 @@
 import { batch, computed, signal } from "./lib/preact.js";
 import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
+import { visibleInventory } from "./inventory-visibility.js";
+import { inventoryFilters, matchesDeviceFilters } from "./device-filters.js";
 
 const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
@@ -17,13 +19,16 @@ function readContext() {
   try { return window.localStorage.getItem("netaudio.context") || "all"; } catch { return "all"; }
 }
 export const selectedContext = signal(readContext());
-export const scopedDevices = computed(() => selectedContext.value === "all" ? devices.value :
-  Object.fromEntries(Object.entries(devices.value).filter(([, device]) => selectedContext.value === "local"
+export const visibleDevices = computed(() => visibleInventory(devices.value));
+export const contextDevices = computed(() => selectedContext.value === "all" ? visibleDevices.value :
+  Object.fromEntries(Object.entries(visibleDevices.value).filter(([, device]) => selectedContext.value === "local"
     ? device.management_state !== "managed" : selectedContext.value.startsWith("server:")
       ? device.ddm_server_profile === selectedContext.value.slice(7)
       : selectedContext.value.startsWith("domain:")
         ? JSON.stringify([device.ddm_server_profile, device.ddm_domain_id]) === selectedContext.value.slice(7)
         : device.ddm_context === selectedContext.value)));
+export const scopedDevices = computed(() => Object.fromEntries(Object.entries(contextDevices.value)
+  .filter(([, device]) => matchesDeviceFilters(device, inventoryFilters.value))));
 export function selectContext(context) {
   selectedContext.value = context;
   try { window.localStorage.setItem("netaudio.context", context); } catch {}
@@ -33,6 +38,8 @@ export const events = signal([]);
 export const meterRevision = signal(0);
 export const pendingSubscriptions = signal({});
 export const shureDevices = signal({});
+export const visibleShureDevices = computed(() => Object.fromEntries(Object.entries(visibleInventory(shureDevices.value))
+  .filter(([, device]) => matchesDeviceFilters(device, inventoryFilters.value))));
 export const shureMeters = signal({});
 
 export const meterCache = new Map();
@@ -180,11 +187,9 @@ function applyEvent(payload) {
         managedDomains.value = payload.managed.domains || [];
         connectionProfiles.value = payload.managed.connections;
       }
-      if (Object.keys(payload.devices || {}).length || !Object.keys(devices.value).length) {
-        devices.value = payload.devices || {};
-      }
+      devices.value = payload.devices || {};
       shureDevices.value = payload.shure_devices || {};
-      inventoryReady.value = Object.keys(payload.devices || {}).length > 0 || Object.keys(devices.value).length === 0;
+      inventoryReady.value = true;
     });
     writeInventoryCache(devices.value);
     for (const [serverName, values] of Object.entries(payload.metering || {})) {

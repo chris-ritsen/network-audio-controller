@@ -35,15 +35,14 @@ export function RoutingControls({ all }) {
       .includes(filter.toLowerCase()),
   );
   return html`<section
-    class="max-w-2xl flex flex-col gap-4"
+    class="routing-channel-list"
     aria-label="Route receiver channels"
   >
-    <label class="fieldset"
-      ><span class="fieldset-legend text-base"
-        ><${Icon} name="devices" />Receiving device</span
+    <div class="routing-channel-toolbar">
+    <label
+      ><span>Receiving device</span
       >
       <select
-        class="select select-bordered w-full min-h-12 text-base"
         value=${deviceRequestName(receiver)}
         onChange=${(event) => {
         setSelected(event.target.value);
@@ -59,8 +58,7 @@ export function RoutingControls({ all }) {
         )}
       </select>
     </label>
-    <label class="input input-bordered w-full min-h-12"
-      ><${Icon} name="search" />
+    <label><span>Find a channel</span>
       <input
         type="search"
         aria-label="Find a receiving channel"
@@ -69,8 +67,10 @@ export function RoutingControls({ all }) {
         onInput=${(event) => setFilter(event.target.value)}
       />
     </label>
+    </div>
     ${!receiver.online ? html`<p role="status">Receiver offline. Routing is unavailable.</p>` : null}
-    <div class="flex flex-col gap-2">
+    <div class="routing-channel-head" aria-hidden="true"><span>#</span><span>Receiving channel</span><span>Source channel</span><span>Transmitting device</span><span></span><span></span></div>
+    <div class="routing-channel-rows">
       ${visible.map((channel) => {
         const subscription = channel.subscription;
         const routed = Boolean(
@@ -86,29 +86,27 @@ export function RoutingControls({ all }) {
         const good = subscription?.status?.state === "connected";
         return html`<button
           type="button"
-          class="btn bg-base-200 border-base-300 justify-start h-auto min-h-20 p-4 gap-3 text-left whitespace-normal"
+          class="routing-channel-row"
           key=${channel.number}
           disabled=${!receiver.online || Boolean(pending)}
           onClick=${() => setEditing(channel.number)}
           aria-label=${`${channel.name}: ${routed ? `${subscription.tx_channel} from ${subscription.tx_device}` : "Choose source"}`}
         >
-          <span class="badge badge-lg badge-neutral shrink-0"
+          <span class="routing-channel-number"
             >${channel.number}</span
           >
-          <span class="flex-1 min-w-0 break-words"
-            ><strong class="block">${channel.name}</strong>
-            <span class="block font-normal"
+          <strong class="routing-channel-name">${channel.name}</strong>
+            <span class="routing-channel-source"
               >${pending ? "Applying…" : routed ? subscription.tx_channel : "Choose source"}</span
             >
-            ${routed ? html`<small class="block font-normal">${subscription.tx_device}</small>` : null}
-          </span>
+            <span class="routing-channel-device">${routed ? subscription.tx_device : "—"}</span>
           <span
-            class=${`flex state-${tone}`}
+            class=${`routing-channel-status state-${tone}`}
             title=${routed ? format.subscriptionStatusText(subscription) : "Not routed"}
           >
             <${Icon} name=${routed ? (good ? "check" : "warning") : "plus"} />
           </span>
-          <${Icon} name="chevron" />
+          <span class="routing-channel-action"><${Icon} name="chevron" /></span>
         </button>`;
       })}
       ${!visible.length ? html`<p>No channels match this search.</p>` : null}

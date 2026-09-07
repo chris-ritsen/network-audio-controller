@@ -21,9 +21,9 @@ export function SubscriptionTransport({ subscription }) {
   const status = subscription?.status;
   const transport = status?.state === "connected" && format.statusTone(status.severity) === "good"
     ? { DYNAMIC: "unicast", STATIC: "multicast" }[status.status] : null;
-  if (!transport) return html`<span class="inline-flex size-5 shrink-0" aria-hidden="true"></span>`;
+  if (!transport) return html`<span class="subscription-transport inline-flex size-5 shrink-0" aria-hidden="true"></span>`;
   const label = transport === "unicast" ? "Unicast" : "Multicast";
-  return html`<span class="inline-flex items-center size-5 shrink-0" style="color:#999" role="img" aria-label=${label} title=${label}>
+  return html`<span class="subscription-transport inline-flex items-center size-5 shrink-0" style="color:#999" role="img" aria-label=${label} title=${label}>
     <${Icon} name=${`subscription-${transport}`} />
   </span>`;
 }

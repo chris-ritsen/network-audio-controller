@@ -21,11 +21,12 @@ function subjectOf(payload) {
 
 function summaryOf(payload) {
   if (payload.event === "snapshot") {
-    return `${Object.keys(payload.devices || {}).length} devices, ${Object.keys(payload.shure_devices || {}).length} Shure devices`;
+    const onlineCount = (records) => Object.values(records || {}).filter((device) => device.online === true && device.availability_state !== "offline").length;
+    return `${onlineCount(payload.devices)} Dante devices online · ${onlineCount(payload.shure_devices)} Shure devices online`;
   }
   if (payload.device) {
     const device = payload.device;
-    return [format.deviceModelName(device), device.ipv4, device.online === false ? "offline" : "online"].filter(Boolean).join(" · ");
+    return [format.deviceModelName(device), device.ipv4, device.online === true ? "online" : device.online === false ? "offline" : "availability not reported"].filter(Boolean).join(" · ");
   }
   if (payload.event === "parse_error") {
     return "Could not read a server update";
@@ -73,14 +74,6 @@ function EventsView() {
 
   return html`
     <div ref=${root} class="flex flex-col gap-4">
-      <div class="content-header">
-        <div>
-          <div class="content-title">Events</div>
-          <div class="content-subtitle">
-            Recent device events. The list stays still until you update it.
-          </div>
-        </div>
-      </div>
       <${Panel}
         title="Recent events"
         actions=${html`
@@ -93,8 +86,10 @@ function EventsView() {
             onFocus=${() => { if (!paused) pause(); }}
             onInput=${(event) => setFilter(event.target.value)}
           />
-          ${paused && hasNew ? html`<button type="button" class="btn btn-sm" onClick=${() => setSnapshot(events.value)}>Show new events</button>` : null}
-          <button type="button" class="btn btn-sm" onClick=${() => paused ? setPaused(false) : pause()}>${paused ? "Resume live" : "Pause"}</button>
+          <button type="button" class="btn btn-sm" disabled=${!paused || !hasNew}
+            onClick=${() => setSnapshot(events.value)}>Show new events</button>
+          <label class="event-live-control"><input type="checkbox" checked=${!paused}
+            onChange=${(event) => event.target.checked ? setPaused(false) : pause()} />Live updates</label>
         `}
       >
         ${entries.length === 0

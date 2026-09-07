@@ -10,7 +10,7 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
       <input type="search" placeholder="Name, address, model…" value=${filters.search || ""}
         onInput=${(event) => onChange({ ...filters, search: event.target.value })} />
     </label>
-    <p class="routing-filter-help">Applies to both receivers and transmitters.</p>
+    <p class="routing-filter-help">Filters device lists across views.</p>
     ${deviceFilterOptions(all, filters).map((group) => html`<details key=${group.id}
       open=${filters.expandedGroups?.includes(group.id) || false}
       onToggle=${(event) => {
@@ -19,8 +19,9 @@ export function DeviceFilterPanel({ all, filters, onChange }) {
         if (open === expanded.includes(group.id)) return;
         onChange({ ...filters, expandedGroups: open ? [...expanded, group.id] : expanded.filter((id) => id !== group.id) });
       }}>
-      <summary>${group.label}</summary>
+      <summary title=${group.description}>${group.label}</summary>
       <div class="routing-filter-options">
+        ${group.description ? html`<p class="text-xs text-muted">${group.description}</p>` : null}
         ${group.options.map(([value, count]) => html`<label key=${value}>
           <input type="checkbox" checked=${filters.values?.[group.id]?.includes(value) || false}
             onChange=${() => onChange(toggleDeviceFilter(filters, group.id, value))} />

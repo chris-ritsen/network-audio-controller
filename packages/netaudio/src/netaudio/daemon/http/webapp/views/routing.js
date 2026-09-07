@@ -1,30 +1,28 @@
 import { Button, Notice } from "../components.js";
 import * as format from "../format.js";
-import { html, useEffect, useState } from "../lib/preact.js";
+import { html, useEffect, useLayoutEffect, useState } from "../lib/preact.js";
 import { RoutingControls } from "../routing-controls.js";
 import { Icon } from "../icons.js";
-import { buildMatrixModel, expanded, ExpansionButtons, RoutingMatrix, setAllExpanded } from "../matrix.js";
+import { buildMatrixModel, expanded, ExpansionButtons, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
 import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
-import { deviceRequestName, scopedDevices as devices } from "../store.js";
-import { matchesDeviceFilters, readRoutingFilters, saveRoutingFilters } from "../device-filters.js";
-import { DeviceFilterPanel } from "../filter-panel.js";
+import { contextDevices, deviceRequestName, scopedDevices as devices } from "../store.js";
+import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
+import { useDropdownDismissal } from "../dropdown.js";
 
 function RoutingView() {
-  const all = format.sortedDevices(devices.value);
+  const all = format.sortedDevices(contextDevices.value);
+  useLayoutEffect(() => initializeExpansion(all), [devices.value]);
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
-  const [filters, setFilters] = useState(readRoutingFilters);
+  const filters = inventoryFilters.value;
   const listMode = filters.listMode === true;
   const receiverFilter = filters.receiverSearch || "";
   const transmitterFilter = filters.transmitterSearch || "";
-  const updateFilters = (next) => {
-    setFilters(next);
-    saveRoutingFilters(next);
-  };
-  const filtersOpen = filters.panelOpen ?? !compact;
+  const updateFilters = saveRoutingFilters;
+  const optionsMenu = useDropdownDismissal();
   const [flipped, setFlipped] = useState(() => {
-    try { return window.localStorage.getItem("netaudio.matrix.flipped") === "true"; }
-    catch { return false; }
+    try { return window.localStorage.getItem("netaudio.matrix.flipped") !== "false"; }
+    catch { return true; }
   });
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
@@ -39,8 +37,8 @@ function RoutingView() {
     return html`<${Notice}>No Dante devices have been discovered yet.<//>`;
   }
 
-  const visible = all.filter((device) => matchesDeviceFilters(device, filters));
-  const filteredDevices = Object.fromEntries(Object.entries(devices.value).filter(([, device]) => matchesDeviceFilters(device, filters)));
+  const visible = format.sortedDevices(devices.value);
+  const filteredDevices = devices.value;
   const showList = compact || listMode;
   const model = buildMatrixModel({
     devices: filteredDevices,
@@ -54,9 +52,6 @@ function RoutingView() {
   const transmitterLabels = model.columns.filter((column) => column.kind === "device").map((column) => column.label);
   const expandDevices = (side, value) => {
     setAllExpanded(side, side === "receivers" ? receiverLabels : transmitterLabels, value);
-  };
-  const expandGroups = (side, value) => {
-    if (value) expandDevices(side, true);
     const axis = side === "receivers" ? model.rows : model.columns;
     const keys = axis.filter((entry) => entry.kind === "device").flatMap((entry) =>
       groupChannels(deviceRequestName(entry.device), entry.channels).map((group) => group.key));
@@ -64,49 +59,29 @@ function RoutingView() {
   };
 
   return html`
-    <div class=${`${showList ? "routing-list" : "routing-grid"} flex flex-col gap-4`}>
+    <div class=${showList ? "routing-list flex flex-col gap-4" : "routing-grid flex flex-col"}>
       <div class="content-header">
-        <div>
-          <h1 class="content-title">Routing</h1>
-          <div class="content-subtitle">
-            ${visible.length} of ${all.length} devices · ${receiverLabels.length} receivers · ${transmitterLabels.length} transmitters
-          </div>
-        </div>
         <div class="toolbar">
-          <button type="button" class="btn btn-sm" aria-expanded=${filtersOpen} aria-controls="routing-device-filters"
-            onClick=${() => updateFilters({ ...filters, panelOpen: !filtersOpen })}>Filters</button>
           ${!compact ? html`<${Button} onClick=${() => updateFilters({ ...filters, listMode: !listMode })}>${listMode ? "Show grid" : "Channel list"}<//>` : null}
           ${!showList ? html`
+          <details class="routing-options" ref=${optionsMenu}><summary class="btn btn-sm">View options</summary><div class="routing-options-panel">
           <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
             setFlipped(!flipped);
             try { window.localStorage.setItem("netaudio.matrix.flipped", String(!flipped)); } catch {}
           }}><${Icon} name="flip" /> Flip axes</button>
-          <label class="inline-field">
-            Receivers
-            <input type="search" size="16" value=${receiverFilter} onInput=${(event) => updateFilters({ ...filters, receiverSearch: event.target.value })} />
-          </label>
-          <label class="inline-field">
-            Transmitters
-            <input type="search" size="16" value=${transmitterFilter} onInput=${(event) => updateFilters({ ...filters, transmitterSearch: event.target.value })} />
-          </label>
           <span class="inline-flex items-center gap-2">Devices
-            <${ExpansionButtons} label="devices" onExpand=${() => {
+            <${ExpansionButtons} label="devices and groups" onExpand=${() => {
               expandDevices("receivers", true); expandDevices("transmitters", true);
             }} onCollapse=${() => {
               expandDevices("receivers", false); expandDevices("transmitters", false);
             }} />
           </span>
           <label class="inline-field"><input type="checkbox" checked=${groups.enabled} onChange=${(event) => enableChannelGroups(event.target.checked)} />Channel groups</label>
-          ${groups.enabled ? html`<${ExpansionButtons} label="channel groups" onExpand=${() => {
-            expandGroups("receivers", true); expandGroups("transmitters", true);
-          }} onCollapse=${() => {
-            expandGroups("receivers", false); expandGroups("transmitters", false);
-          }} />` : null}
+          </div></details>
           ` : null}
         </div>
       </div>
-      <div class=${`routing-workspace${filtersOpen ? " with-filters" : ""}`}>
-        ${filtersOpen ? html`<div id="routing-device-filters" class="routing-filter-container"><${DeviceFilterPanel} all=${all} filters=${filters} onChange=${updateFilters} /></div>` : null}
+      <div class="routing-workspace">
         <div class="routing-results">
       ${showList ? html`<${RoutingControls} all=${visible.filter((device) => device.online)} />`
         : model.rows.length === 0 || model.columns.length === 0
@@ -114,9 +89,11 @@ function RoutingView() {
         : html`<${RoutingMatrix}
             key=${flipped ? "transposed" : "normal"}
             flipped=${flipped}
-            grouped=${groups.enabled}
+            receiverFilter=${receiverFilter}
+            transmitterFilter=${transmitterFilter}
+            onReceiverFilter=${(value) => updateFilters({ ...filters, receiverSearch: value })}
+            onTransmitterFilter=${(value) => updateFilters({ ...filters, transmitterSearch: value })}
             onExpandDevices=${expandDevices}
-            onExpandGroups=${expandGroups}
             rows=${model.rows}
             columns=${model.columns}
             subscriptionIndex=${model.subscriptionIndex}

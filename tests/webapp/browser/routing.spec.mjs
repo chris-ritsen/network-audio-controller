@@ -72,19 +72,20 @@ test("phone views use the available width without horizontal scrolling", async (
 test("routing reserves space for cells and moves subscription details to a separate page", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/routing");
-  await page.getByRole("button", { name: "Expand all devices", exact: true }).click();
-  await expect(page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").first()).toHaveText("Devices");
+  await page.locator(".routing-options summary").click();
+  await page.getByRole("button", { name: "Expand all devices and groups", exact: true }).click();
+  await page.locator(".routing-options summary").click();
+  await expect(page.getByRole("navigation", { name: "Network views" }).getByRole("link").first()).toHaveText("Routing");
   await expect(page.locator(".matrix-canvas")).toBeVisible();
   await expect(page.getByRole("heading", { name: /^Subscriptions \(/ })).toHaveCount(0);
   const geometry = await page.locator(".matrix-stage").evaluate((node) => {
-    const columnControls = node.querySelector(".column-axis");
-    const rowControls = node.querySelector(".row-axis");
-    return { height: node.clientHeight, gutter: parseFloat(columnControls.style.left) + 152,
-      header: parseFloat(rowControls.style.top) + 44 };
+    const viewport = node.querySelector(".matrix-viewport");
+    return { height: node.clientHeight, gutter: Number(viewport.dataset.gutterWidth), header: Number(viewport.dataset.headerHeight) };
   });
-  expect(geometry.gutter).toBeLessThanOrEqual(280);
-  expect(geometry.header).toBeLessThanOrEqual(180);
+  expect(geometry.gutter).toBeLessThanOrEqual(340);
+  expect(geometry.header).toBeLessThanOrEqual(280);
   expect(geometry.height - geometry.header).toBeGreaterThan(350);
+  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Subscriptions", exact: true }).click();
   await expect(page).toHaveURL("http://netaudio.test/subscriptions");
   await expect(page.getByRole("heading", { name: /^Subscriptions \(/ })).toBeVisible();
@@ -97,7 +98,7 @@ test("mobile device and channel cards expand independently and the section menu 
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices");
   const cards = page.locator(".mobile-card-toggle");
-  await expect(cards).toHaveCount(Object.keys(devices).length);
+  await expect(cards).toHaveCount(Object.values(devices).filter((device) => device.online !== false).length);
   await expect(page.locator('.expandable-row > td:not(.mobile-card-heading):visible')).toHaveCount(0);
   expect((await cards.first().boundingBox()).height).toBeLessThanOrEqual(80);
   await page.screenshot({ path: "test-results/mobile-device-list.png" });
@@ -146,7 +147,7 @@ for (const width of [1200, 390]) {
 
 test("breadcrumbs share the wordmark text baseline", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("http://netaudio.test/routing");
+  await page.goto("http://netaudio.test/devices/avio-bt-1/receive");
   const baselines = await page.locator(".brand-name, .breadcrumb a").evaluateAll((nodes) => nodes.map((node) => {
     const marker = document.createElement("span");
     marker.style.display = "inline-block";
@@ -200,17 +201,18 @@ test("routing filter search has a visible gap below its label", async ({ page })
   }
 });
 
-test("sidebar scrolls only when navigation exceeds the available height", async ({ page }) => {
+test("tools menu scrolls when its navigation exceeds the available height", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/routing");
-  const sidebar = page.locator(".sidebar-scroll");
+  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
+  const sidebar = page.getByRole("dialog", { name: "Application navigation" });
   await expect(sidebar).toBeVisible();
   const navigation = page.getByRole("navigation", { name: "Main navigation" });
-  await expect(navigation.getByRole("link", { name: "Devices", exact: true })).toHaveText("Devices");
+  await expect(navigation.getByRole("link", { name: "Device Info", exact: true })).toHaveCount(0);
   await expect(navigation.getByRole("link", { name: "Shure", exact: true })).toHaveText("Shure");
   expect(await sidebar.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
   expect(await sidebar.locator("nav").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
-  await page.setViewportSize({ width: 1440, height: 300 });
+  await page.setViewportSize({ width: 1440, height: 200 });
   expect(await sidebar.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
   await sidebar.evaluate((node) => { node.scrollTop = node.scrollHeight; });
   expect(await sidebar.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
@@ -220,9 +222,10 @@ test("sidebar scrolls only when navigation exceeds the available height", async 
   expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(panelBox.y + panelBox.height);
 });
 
-test("desktop navigation sizes every button to the widest label", async ({ page }) => {
+test("tools menu labels fit without truncation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/routing");
+  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
   const nav = page.getByRole("navigation", { name: "Main navigation" });
   const measure = () => nav.locator("a").evaluateAll((links) => links.map((link) => {
     const style = getComputedStyle(link);
@@ -234,71 +237,88 @@ test("desktop navigation sizes every button to the widest label", async ({ page 
     };
   }));
   const before = await measure();
-  const widest = Math.max(...before.map((link) => link.needed));
-  for (const link of before) expect(Math.abs(link.width - widest)).toBeLessThan(1);
-  await nav.getByRole("link", { name: "Settings", exact: true }).locator("span").evaluate((node) => { node.textContent = "A much longer navigation label"; });
-  const after = await measure();
-  expect(after[0].width).toBeGreaterThan(before[0].width);
-  for (const link of after) expect(link.width).toBe(after[0].width);
+  for (const link of before) expect(link.width).toBeGreaterThanOrEqual(link.needed);
 });
 
-test("sidebar restores both collapsed and expanded states on reload", async ({ page }) => {
+test("tools menu closes on Escape and reload without moving the workspace", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://netaudio.test/routing");
-  await page.getByRole("button", { name: "Hide navigation", exact: true }).click();
   const collapsed = await page.locator("#content").boundingBox();
-  await page.reload();
-  await expect(page.locator("#navigation-sidebar")).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
   await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toHaveAttribute("aria-expanded", "false");
   expect((await page.locator("#content").boundingBox()).x).toBe(collapsed.x);
   expect((await page.locator("#content").boundingBox()).width).toBe(collapsed.width);
   await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-  const expanded = await page.locator("#content").boundingBox();
+  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeVisible();
+  expect(await page.locator("#content").boundingBox()).toEqual(collapsed);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Show navigation", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
   await page.reload();
-  await expect(page.locator("#navigation-sidebar")).toBeVisible();
-  expect((await page.locator("#content").boundingBox()).width).toBe(expanded.width);
+  await expect(page.getByRole("dialog", { name: "Application navigation" })).toBeHidden();
+  expect(await page.locator("#content").boundingBox()).toEqual(collapsed);
 });
 
-test("device and group expansion controls work independently on both axes and persist", async ({ page }) => {
+test("each axis expands and collapses all devices and their groups together and persists", async ({ page }) => {
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.setViewportSize({ width: 1600, height: 1100 });
+  await page.addInitScript(() => localStorage.setItem("netaudio.matrix.flipped", "false"));
   await page.goto("http://netaudio.test/routing");
-  const spacer = page.locator(".matrix-spacer");
-  const initial = await spacer.boundingBox();
-  await page.getByRole("button", { name: "Expand all receiver devices", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBeGreaterThan(initial.height);
+  const dimensions = () => page.locator(".matrix-spacer").evaluate((node) => {
+    const viewport = node.closest(".matrix-viewport");
+    return {
+      width: parseFloat(node.style.width) - Number(viewport.dataset.gutterWidth),
+      height: parseFloat(node.style.height) - Number(viewport.dataset.headerHeight),
+    };
+  });
+  await page.getByRole("button", { name: "Collapse all receiver devices and groups", exact: true }).click();
+  await page.getByRole("button", { name: "Collapse all transmitter devices and groups", exact: true }).click();
+  const initial = await dimensions();
+  await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).height).toBeGreaterThan(initial.height);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("netaudio.matrix.expanded")).transmitters)).toEqual([]);
-  await page.getByRole("button", { name: "Collapse all receiver devices", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBe(initial.height);
+  await page.getByRole("button", { name: "Collapse all receiver devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).height).toBe(initial.height);
+  await page.locator(".routing-options summary").click();
   await page.getByRole("checkbox", { name: "Channel groups", exact: true }).check();
-  await page.getByRole("button", { name: "Expand all devices", exact: true }).click();
-  const grouped = await spacer.boundingBox();
-  await page.getByRole("button", { name: "Expand all channel groups", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBeGreaterThan(grouped.height);
-  await expect.poll(async () => (await spacer.boundingBox()).width).toBeGreaterThan(grouped.width);
-  const expanded = await spacer.boundingBox();
-  await page.getByRole("button", { name: "Collapse all receiver groups", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBeLessThan(expanded.height);
-  expect((await spacer.boundingBox()).width).toBeGreaterThan(grouped.width);
-  await page.getByRole("button", { name: "Collapse all transmitter groups", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).width).toBe(grouped.width);
+  await expect(page.getByRole("button", { name: "Expand all channel groups", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand all devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).height).toBeGreaterThan(initial.height);
+  await expect.poll(async () => (await dimensions()).width).toBeGreaterThan(initial.width);
+  const expanded = await dimensions();
+  const savedGroups = await page.evaluate(() => JSON.parse(localStorage.getItem("netaudio.matrix.groups")));
+  expect(savedGroups.receivers.length).toBeGreaterThan(0);
+  expect(savedGroups.transmitters.length).toBeGreaterThan(0);
+  await expect(page.locator(".matrix-axis-controls button")).toHaveCount(4);
+  await page.getByRole("button", { name: "Collapse all receiver devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).height).toBe(initial.height);
+  expect((await dimensions()).width).toBe(expanded.width);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("netaudio.matrix.groups")).receivers)).toEqual([]);
+  await page.getByRole("button", { name: "Collapse all transmitter devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).width).toBe(initial.width);
   await page.reload();
+  await page.locator(".routing-options summary").click();
   await expect(page.getByRole("checkbox", { name: "Channel groups", exact: true })).toBeChecked();
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBe(grouped.height);
-  await page.screenshot({ path: "test-results/grouped-routing.png" });
-  const header = await page.locator(".matrix-axis-controls.row-axis").evaluate((node) => parseFloat(node.style.top) + 76);
-  await page.locator(".matrix-viewport").click({ position: { x: 65, y: header + 36 } });
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBe(grouped.height + 24);
-  await page.locator(".matrix-viewport").click({ position: { x: 65, y: header + 36 } });
-  await expect.poll(async () => (await spacer.boundingBox()).height).toBe(grouped.height);
+  await expect.poll(async () => (await dimensions()).height).toBe(initial.height);
+  await page.locator(".routing-options summary").click();
+  const header = Number(await page.locator(".matrix-viewport").getAttribute("data-header-height"));
+  await page.locator(".matrix-viewport").click({ position: { x: 15, y: header + 15 } });
+  await expect.poll(async () => (await dimensions()).height).toBeGreaterThan(initial.height);
+  const grouped = await dimensions();
+  await page.locator(".matrix-viewport").click({ position: { x: 65, y: header + 45 } });
+  await expect.poll(async () => (await dimensions()).height).toBeGreaterThan(grouped.height);
+  await page.locator(".matrix-viewport").click({ position: { x: 65, y: header + 45 } });
+  await expect.poll(async () => (await dimensions()).height).toBe(grouped.height);
+  await page.locator(".routing-options summary").click();
   await page.getByRole("button", { name: "Flip axes", exact: true }).click();
-  const flipped = await spacer.boundingBox();
-  await page.getByRole("button", { name: "Expand all receiver groups", exact: true }).click();
-  await expect.poll(async () => (await spacer.boundingBox()).width).toBeGreaterThan(flipped.width);
+  const flipped = await dimensions();
+  await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
+  await expect.poll(async () => (await dimensions()).width).toBeGreaterThan(flipped.width);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("netaudio.matrix.groups")).transmitters)).toEqual([]);
-  await page.getByRole("button", { name: "Collapse all devices", exact: true }).click();
-  expect((await spacer.boundingBox()).height).toBeLessThan(flipped.height);
+  await page.locator(".routing-options summary").click();
+  await page.getByRole("button", { name: "Collapse all devices and groups", exact: true }).click();
+  expect((await dimensions()).width).toBeLessThan(flipped.width);
   expect(writes).toEqual([]);
 });
 
@@ -328,7 +348,7 @@ test("table headers sort by click and keyboard; device names are real navigable 
   expect((await status.boundingBox()).width).toBeLessThanOrEqual(280);
   expect(await status.evaluate((node) => getComputedStyle(node).whiteSpace)).toBe("normal");
   await expect(page.getByRole("button", { name: "Subscribe…", exact: true })).toHaveCount(0);
-  await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Devices" }).click();
+  await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Device Info" }).click();
   await expect(page).toHaveURL(/\/devices$/);
 });
 
@@ -338,12 +358,13 @@ test("routing has no offline dismissal or floating notifications", async ({ page
   await expect(page.getByText("Review offline devices", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Dismiss offline", exact: true })).toHaveCount(0);
   await expect(page.locator(".topbar .connection-pill")).toHaveCount(0);
+  await page.getByRole("button", { name: "Show navigation", exact: true }).click();
   const shureLink = page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Shure", exact: true });
   await expect(shureLink.getByText("Shure", { exact: true })).toBeVisible();
   await expect(shureLink.locator("svg")).toHaveAttribute("width", "20");
 });
 
-test("refresh keeps saved devices visible even while the daemon inventory is empty", async ({ page }) => {
+test("saved devices survive connection loss but an empty snapshot replaces them", async ({ page }) => {
   await page.goto("http://netaudio.test/devices");
   await expect.poll(() => page.evaluate(() => localStorage.getItem("netaudio.inventory.v1"))).not.toBeNull();
   const before = await page.locator("#content table").boundingBox();
@@ -356,10 +377,9 @@ test("refresh keeps saved devices visible even while the daemon inventory is emp
   expect(after.height).toBe(before.height);
   await page.route("**/events", (route) => route.fulfill({ contentType: "text/event-stream", body: 'data: {"event":"snapshot","devices":{}}\n\n' }));
   await page.reload();
-  await expect(page.getByText("No Dante devices have been discovered yet.", { exact: false })).toHaveCount(0);
-  await expect(page.locator("#content table").getByRole("link", { name: "Windows-PC", exact: true })).toBeVisible();
+  await expect(page.locator("#content").getByRole("link", { name: "Windows-PC", exact: true })).toHaveCount(0);
   await expect(page.getByText("Showing saved devices.", { exact: false })).toHaveCount(0);
-  expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("netaudio.inventory.v1")).devices).length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem("netaudio.inventory.v1")).devices).length)).toBe(0);
 });
 
 test("device Metering tab starts and releases its own session", async ({ page }) => {
@@ -385,7 +405,7 @@ test("device Metering tab starts and releases its own session", async ({ page })
   expect(writes[1]).toEqual({ path: "/metering/stop", body: writes[0].body });
 });
 
-test("offline monitoring does not request a detailed session", async ({ page }) => {
+test("hidden offline devices do not request a detailed session through a direct URL", async ({ page }) => {
   const writes = [];
   await page.route("**/metering/*", (route) => {
     if (route.request().method() !== "POST") return route.fallback();
@@ -394,7 +414,7 @@ test("offline monitoring does not request a detailed session", async ({ page }) 
   });
   const device = Object.values(devices).find((entry) => entry.online === false);
   await page.goto(`http://netaudio.test/devices/${encodeURIComponent(device.name)}/metering`);
-  await expect(page.getByText("This device is offline.", { exact: false })).toBeVisible();
+  await expect(page.getByText(`No device named ${device.name}`, { exact: false })).toBeVisible();
   await page.getByRole("link", { name: "Routing", exact: true }).click();
   expect(writes).toEqual([]);
 });
@@ -479,7 +499,7 @@ test("phone routing fits and a failed write keeps the source sheet open", async 
   await page.screenshot({ path: "test-results/phone-routing.png" });
 });
 
-test("desktop navigation collapses and restores without losing routing", async ({
+test("tools menu leaves routing intact and axis preferences survive reload", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -489,28 +509,30 @@ test("desktop navigation collapses and restores without losing routing", async (
   await expect.poll(async () => (await page.locator(".matrix-viewport").boundingBox()).height).toBeGreaterThan(720);
   const content = await page.locator("#content").boundingBox();
   const grid = await page.locator(".routing-grid").boundingBox();
-  expect(Math.abs(content.y + content.height - grid.y - grid.height - 18)).toBeLessThan(2);
-  await expect(page.locator(".matrix-status")).not.toContainText(/click/i);
+  expect(Math.abs(content.y + content.height - grid.y - grid.height)).toBeLessThan(2);
+  await expect(page.locator(".matrix-status")).toHaveCount(0);
+  await page.locator(".routing-options summary").click();
   const flip = page.getByRole("button", { name: "Flip axes", exact: true });
   await flip.click();
-  await expect(flip).toHaveAttribute("aria-pressed", "true");
-  await page.reload();
-  await expect(flip).toHaveAttribute("aria-pressed", "true");
-  await flip.click();
   await expect(flip).toHaveAttribute("aria-pressed", "false");
-  const sidebar = page.locator("#navigation-sidebar");
+  await page.reload();
+  await page.locator(".routing-options summary").click();
+  await expect(flip).toHaveAttribute("aria-pressed", "false");
+  await flip.click();
+  await expect(flip).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".routing-options summary").click();
+  const before = await page.locator("#content").boundingBox();
+  await page.getByRole("button", { name: "Show navigation" }).click();
+  const sidebar = page.getByRole("dialog", { name: "Application navigation" });
   await expect(sidebar.locator(".device-list, details")).toHaveCount(0);
   for (const link of await sidebar.getByRole("link").all()) {
     await expect(link).toBeVisible();
     await expect(link.locator("svg")).toBeVisible();
   }
-  const before = await page.locator("#content").boundingBox();
-  await page.getByRole("button", { name: "Hide navigation" }).click();
-  await expect(page.locator("#navigation-sidebar")).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(sidebar).toBeHidden();
   const after = await page.locator("#content").boundingBox();
-  expect(after.width).toBeGreaterThan(before.width);
-  await page.getByRole("button", { name: "Show navigation" }).click();
-  await expect(page.locator("#navigation-sidebar")).toBeVisible();
+  expect(after).toEqual(before);
   await page.screenshot({ path: "test-results/desktop-routing.png" });
 });
 

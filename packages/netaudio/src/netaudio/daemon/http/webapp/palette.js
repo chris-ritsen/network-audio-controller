@@ -1,18 +1,12 @@
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { navigate } from "./router.js";
-import { devices, shureDevices } from "./store.js";
+import { NAVIGATION } from "./navigation.js";
+import { scopedDevices as devices, visibleShureDevices as shureDevices } from "./store.js";
 
 const paletteOpen = signal(false);
 
-const VIEW_ENTRIES = [
-  { kind: "view", label: "Routing", path: "/routing" },
-  { kind: "view", label: "Subscriptions", path: "/subscriptions" },
-  { kind: "view", label: "Devices", path: "/devices" },
-  { kind: "view", label: "Domains", path: "/ddm" },
-  { kind: "view", label: "Shure", path: "/shure" },
-  { kind: "view", label: "Events", path: "/events" },
-];
+const VIEW_ENTRIES = NAVIGATION.map(({ label, path }) => ({ kind: "view", label, path }));
 
 export function openPalette() {
   paletteOpen.value = true;
