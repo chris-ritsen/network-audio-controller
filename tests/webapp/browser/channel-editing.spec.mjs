@@ -15,13 +15,19 @@ for (const width of [1200, 390]) {
     }` });
     const box = await edit.boundingBox();
     const clip = { x: box.x + 6, y: box.y + 4, width: 60, height: 24 };
-    const before = await page.screenshot({ clip });
+    const before = await page.screenshot({ clip, path: test.info().outputPath("before-editing.png") });
     await edit.click();
     const input = page.getByRole("textbox", { name: "Receive channel 1 name", exact: true });
     await expect(input).toBeFocused();
     await input.evaluate((node) => { node.setSelectionRange(0, 0); node.blur(); });
-    const after = await page.screenshot({ clip, caret: "hide" });
+    const after = await page.screenshot({ clip, caret: "hide", path: test.info().outputPath("during-editing.png") });
     if (!after.equals(before)) {
+      console.log(await page.locator(".channel-name-value, .channel-name-editor > input").evaluateAll((nodes) => nodes.slice(0, 2).map((node) => {
+        const style = getComputedStyle(node);
+        return { tag: node.tagName, box: node.getBoundingClientRect().toJSON(), font: style.font,
+          letterSpacing: style.letterSpacing, fontVariant: style.fontVariant, textIndent: style.textIndent,
+          padding: style.padding, border: style.border, transform: style.transform };
+      })));
       await test.info().attach("before-editing", { body: before, contentType: "image/png" });
       await test.info().attach("during-editing", { body: after, contentType: "image/png" });
     }
