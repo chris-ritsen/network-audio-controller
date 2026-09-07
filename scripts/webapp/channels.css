@@ -20,13 +20,15 @@
   }
 
   .channel-name-value,
-  .channel-name-editor > input {
+  .channel-name-input {
     appearance: none;
     box-sizing: border-box;
     height: 32px;
     padding: 0 4px;
     font: inherit;
     line-height: normal;
+    display: inline-flex;
+    align-items: center;
   }
 
   .channel-name-value {
@@ -62,10 +64,16 @@
     overflow: visible;
   }
 
-  .channel-name-editor > input {
-    display: block;
+  .channel-name-input {
     width: 100%;
     margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--raised);
+    color: inherit;
+    white-space: pre;
+    overflow: hidden;
+    cursor: text;
   }
 
   .channel-name-actions {
@@ -96,7 +104,7 @@
   }
 
   @media (max-width: 900px) {
-    .channel-name-editor > input {
+    .channel-name-input {
       height: 44px;
     }
   }
