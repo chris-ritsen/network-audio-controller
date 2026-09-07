@@ -21,7 +21,7 @@ test("desktop navigation rails and routing controls share aligned edges", async 
   expect(control.x).toBe(label.x);
   await page.locator(".routing-options summary").click();
   await page.getByRole("button", { name: "Flip axes", exact: true }).click();
-  await expect(page.locator(".routing-options")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".routing-options")).toHaveAttribute("open", "");
 });
 
 test("details, tables, notices and errors remain selectable with UI selection disabled", async ({ page }) => {
@@ -185,6 +185,26 @@ test("matrix separators match the background and end at the occupied grid", asyn
   expect(pixels.separator).toEqual(pixels.background);
 });
 
+test("receiver row status sits next to the matrix and its tooltip follows the icon", async ({ page }) => {
+  await serveWebapp(page);
+  await page.addInitScript(() => localStorage.setItem("netaudio.matrix.flipped", "false"));
+  await page.goto("http://netaudio.test/routing");
+  const canvas = page.locator(".matrix-canvas");
+  const geometry = await canvas.evaluate((node) => {
+    const viewport = document.querySelector(".matrix-viewport");
+    const gutter = Number(viewport.dataset.gutterWidth), header = Number(viewport.dataset.headerHeight);
+    const scale = node.width / node.getBoundingClientRect().width;
+    const pixel = (x, y) => [...node.getContext("2d").getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data];
+    return { gutter, header, left: pixel(8, header + 38), right: pixel(gutter - 22, header + 38) };
+  });
+  expect(geometry.right[1]).toBeGreaterThan(geometry.right[0] * 2);
+  expect(geometry.left).not.toEqual(geometry.right);
+  await page.locator(".matrix-viewport").hover({ position: { x: geometry.gutter - 15, y: geometry.header + 45 } });
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  await page.locator(".matrix-viewport").hover({ position: { x: 15, y: geometry.header + 45 } });
+  await expect(page.getByRole("tooltip")).toBeHidden();
+});
+
 test("navigation row has the sidebar control and one-pixel tab gaps", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
@@ -254,6 +274,10 @@ test("view options dismiss outside and on Escape without closing on internal con
   await trigger.click();
   await page.getByRole("checkbox", { name: "Channel groups", exact: true }).check();
   await expect(panel).toBeVisible();
+  for (const name of ["Flip axes", "Expand all devices and groups", "Collapse all devices and groups"]) {
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(panel).toBeVisible();
+  }
   await page.getByRole("searchbox", { name: "Search devices", exact: true }).click();
   await expect(panel).toBeHidden();
   await trigger.click();
@@ -269,7 +293,7 @@ test("view options dismiss outside and on Escape without closing on internal con
 test("matrix device bands retain visible borders between individual cells", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
-  const pixels = await page.locator(".matrix-canvas").evaluate((canvas) => {
+  const readPixels = () => page.locator(".matrix-canvas").evaluate((canvas) => {
     const viewport = document.querySelector(".matrix-viewport");
     const gutter = Number(viewport.dataset.gutterWidth);
     const header = Number(viewport.dataset.headerHeight);
@@ -283,8 +307,12 @@ test("matrix device bands retain visible borders between individual cells", asyn
       interior: pixel(gutter + 8, header + 8),
     };
   });
-  expect(pixels.horizontal).not.toEqual(pixels.interior);
-  expect(pixels.vertical).not.toEqual(pixels.interior);
+  await expect(async () => {
+    const pixels = await readPixels();
+    expect(pixels.interior[3]).toBe(255);
+    expect(pixels.horizontal).not.toEqual(pixels.interior);
+    expect(pixels.vertical).not.toEqual(pixels.interior);
+  }).toPass({ timeout: 5000 });
 });
 
 test("desktop matrix uses the viewport and Tools is a compact nonmodal menu", async ({ page }) => {
