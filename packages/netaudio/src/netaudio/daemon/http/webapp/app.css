@@ -7180,20 +7180,18 @@
   .routing-filter-panel details[open] > summary::before {
     transform: rotate(45deg);
   }
-  .routing-filter-panel summary .badge {
-    margin-left: 8px;
-  }
   .routing-filter-options {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0;
     margin-top: 8px;
   }
   .routing-filter-options label {
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    min-height: 36px;
+    padding: 6px 0;
+    line-height: 1.5;
     cursor: pointer;
   }
   .routing-filter-options label > span:not(.routing-filter-count) {
@@ -7215,7 +7213,7 @@
       max-height: 60vh;
     }
     .routing-filter-options label {
-      min-height: 44px;
+      padding: 12px 0;
     }
   }
   .matrix-tooltip {

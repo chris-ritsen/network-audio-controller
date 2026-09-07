@@ -4,14 +4,21 @@ import { deviceFilterOptions, toggleDeviceFilter } from "./device-filters.js";
 export function DeviceFilterPanel({ all, filters, onChange }) {
   return html`<aside class="routing-filter-panel" aria-label="Device filters">
     <div class="routing-filter-heading"><h2>Device filters</h2>
-      <button type="button" class="btn btn-xs" onClick=${() => onChange({ search: "", values: {} })}>Clear all</button>
+      <button type="button" class="btn btn-xs" onClick=${() => onChange({ ...filters, search: "", receiverSearch: "", transmitterSearch: "", values: {} })}>Clear all</button>
     </div>
     <label class="routing-filter-search">Search devices
       <input type="search" placeholder="Name, address, model…" value=${filters.search || ""}
         onInput=${(event) => onChange({ ...filters, search: event.target.value })} />
     </label>
     <p class="routing-filter-help">Applies to both receivers and transmitters.</p>
-    ${deviceFilterOptions(all, filters).map((group) => html`<details key=${group.id} open>
+    ${deviceFilterOptions(all, filters).map((group) => html`<details key=${group.id}
+      open=${filters.expandedGroups?.includes(group.id) || false}
+      onToggle=${(event) => {
+        const expanded = filters.expandedGroups || [];
+        const open = event.currentTarget.open;
+        if (open === expanded.includes(group.id)) return;
+        onChange({ ...filters, expandedGroups: open ? [...expanded, group.id] : expanded.filter((id) => id !== group.id) });
+      }}>
       <summary>${group.label}</summary>
       <div class="routing-filter-options">
         ${group.options.map(([value, count]) => html`<label key=${value}>
