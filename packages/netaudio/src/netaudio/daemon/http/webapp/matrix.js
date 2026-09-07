@@ -171,18 +171,15 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
     subscriptionIndex.get(format.deviceLabel(device)).get(channelName) || null;
   const allSubscriptions = [...subscriptionIndex.entries()].flatMap(([receiver, channels]) =>
     [...channels.values()].map((subscription) => ({ receiver, subscription })));
-  const summarize = (entry, receiver) => {
-    const subscriptions = allSubscriptions.filter((item) => receiver
-      ? item.receiver === entry.label && (entry.kind === "device" || (entry.kind === "group"
-        ? entry.channels.some((channel) => channel.name === item.subscription.rx_channel) : item.subscription.rx_channel === entry.name))
-      : item.subscription.tx_device === entry.label && (entry.kind === "device" || (entry.kind === "group"
-        ? entry.channels.some((channel) => channel.name === item.subscription.tx_channel) : item.subscription.tx_channel === entry.name)));
+  const summarize = (entry) => {
+    const subscriptions = allSubscriptions.filter((item) =>
+      item.receiver === entry.label && (entry.kind === "device" || (entry.kind === "group"
+        ? entry.channels.some((channel) => channel.name === item.subscription.rx_channel) : item.subscription.rx_channel === entry.name)));
     return { count: subscriptions.length, severity: severityName(Math.max(0, ...subscriptions.map((item) => severityRank(format.subscriptionTone(item.subscription))))) };
   };
   const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
   const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
-  for (const entry of rows) entry.activity = summarize(entry, true);
-  for (const entry of columns) entry.activity = summarize(entry, false);
+  for (const entry of rows) entry.activity = summarize(entry);
   return {
     columns,
     rows,
@@ -331,10 +328,11 @@ function fitLabel(context, text, width) {
   return text.slice(0, end) + "…";
 }
 
-export function ExpansionButtons({ label, onExpand, onCollapse }) {
-  return html`<div class="join" role="group" aria-label=${label}>
-    <button type="button" class="btn btn-xs btn-square join-item" title=${`Expand all ${label}`} aria-label=${`Expand all ${label}`} onClick=${onExpand}><${Icon} name="plus" /></button>
-    <button type="button" class="btn btn-xs btn-square join-item" title=${`Collapse all ${label}`} aria-label=${`Collapse all ${label}`} onClick=${onCollapse}><${Icon} name="minus" /></button>
+export function ExpansionButtons({ label, onExpand, onCollapse, vertical = false }) {
+  const buttonClass = `btn btn-xs btn-square${vertical ? "" : " join-item"}`;
+  return html`<div class=${vertical ? "matrix-expansion-stack" : "join"} role="group" aria-label=${label}>
+    <button type="button" class=${buttonClass} title=${`Expand all ${label}`} aria-label=${`Expand all ${label}`} onClick=${onExpand}><${Icon} name="plus" /></button>
+    <button type="button" class=${buttonClass} title=${`Collapse all ${label}`} aria-label=${`Collapse all ${label}`} onClick=${onCollapse}><${Icon} name="minus" /></button>
   </div>`;
 }
 
@@ -493,8 +491,8 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
   };
 
-  const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL)
-    || (hover.inGutter && !hover.inHeader && hover.x < CELL && rows[hover.rowIndex]?.kind !== "device"));
+  const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL && columns[hover.columnIndex]?.activity?.count)
+    || (hover.inGutter && !hover.inHeader && hover.x < CELL && rows[hover.rowIndex]?.kind !== "device" && rows[hover.rowIndex]?.activity?.count));
   const cellHover = hover && !hover.inHeader && !hover.inGutter
     && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
   const hoverText = hover && (cellHover || statusHover)
@@ -524,17 +522,22 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
           <div class="matrix-spacer" style=${`width:${contentWidth}px;height:${contentHeight}px`}></div>
         </div>
         ${hoverText && hover ? html`<${MatrixTooltip} id="routing-matrix-tooltip" text=${hoverText} point=${hover} bounds=${size} onDismiss=${() => setHover(null)} />` : null}
+        <div class="matrix-filters" style=${`left:12px;width:${layout.gutter - CELL - 36}px;top:${Math.max(12, layout.header / 2 - 60)}px`}>
+          ${["transmitters", "receivers"].map((side) => html`<label class="matrix-filter-label">Filter ${side}
+            <input type="search" aria-label=${side === "receivers" ? "Receivers" : "Transmitters"}
+              value=${side === "receivers" ? receiverFilter : transmitterFilter}
+              onInput=${(event) => (side === "receivers" ? onReceiverFilter : onTransmitterFilter)?.(event.target.value)} />
+          </label>`)}
+        </div>
         ${[false, true].map((columnAxis) => {
           const side = columnAxis !== flipped ? "transmitters" : "receivers";
           const label = side === "receivers" ? "receiver" : "transmitter";
+          const count = (columnAxis ? columns : rows).filter((entry) => entry.kind === "device").length;
           return html`<div class=${`matrix-axis-controls ${columnAxis ? "column-axis" : "row-axis"}`}
-            style=${`left:12px;width:${layout.gutter - 24}px;top:${columnAxis ? 6 : layout.header / 2 + 2}px`}>
-            <label class="matrix-filter-label">${side === "receivers" ? "Receivers" : "Transmitters"}
-              <input type="search" aria-label=${side === "receivers" ? "Receivers" : "Transmitters"}
-                value=${side === "receivers" ? receiverFilter : transmitterFilter}
-                onInput=${(event) => (side === "receivers" ? onReceiverFilter : onTransmitterFilter)?.(event.target.value)} />
-            </label>
-            <div class="matrix-expansion-controls"><${ExpansionButtons} label=${`${label} devices and groups`} onExpand=${() => onExpandDevices(side, true)} onCollapse=${() => onExpandDevices(side, false)} /></div>
+            style=${columnAxis ? `left:${layout.gutter - CELL - 6}px;top:8px;width:${CELL}px`
+              : `left:12px;top:${layout.header - CELL}px;width:${layout.gutter - 24}px;height:${CELL}px`}>
+            <span class="matrix-axis-title">${side === "receivers" ? "Receivers" : "Transmitters"} (${count})</span>
+            <div class="matrix-expansion-controls"><${ExpansionButtons} vertical=${columnAxis} label=${`${label} devices and groups`} onExpand=${() => onExpandDevices(side, true)} onCollapse=${() => onExpandDevices(side, false)} /></div>
           </div>`;
         })}
       </div>

@@ -197,7 +197,7 @@
   .routing-grid > .content-header {
     align-items: center;
     margin: 0;
-    padding: 4px 10px;
+    padding: 4px 12px;
     min-height: 38px;
     gap: 8px;
   }
@@ -273,8 +273,32 @@
     position: absolute;
     z-index: 2;
     display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .matrix-axis-controls.column-axis {
     flex-direction: column;
+  }
+  .column-axis .matrix-axis-title {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+  .matrix-expansion-stack {
+    display: flex;
+    flex-direction: column-reverse;
     gap: 2px;
+  }
+  .row-axis .matrix-expansion-controls {
+    order: -1;
+  }
+  .matrix-filters {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .matrix-filter-label {
@@ -282,7 +306,7 @@
     flex-direction: column;
     gap: 2px;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 400;
   }
   .matrix-filter-label input {
     width: 100%;
