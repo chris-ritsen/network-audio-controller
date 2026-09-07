@@ -13,15 +13,15 @@ import { DeviceFilterPanel } from "../filter-panel.js";
 function RoutingView() {
   const all = format.sortedDevices(devices.value);
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
-  const [listMode, setListMode] = useState(false);
   const [filters, setFilters] = useState(readRoutingFilters);
+  const listMode = filters.listMode === true;
   const receiverFilter = filters.receiverSearch || "";
   const transmitterFilter = filters.transmitterSearch || "";
   const updateFilters = (next) => {
     setFilters(next);
     saveRoutingFilters(next);
   };
-  const [filtersOpen, setFiltersOpen] = useState(() => !window.matchMedia("(max-width: 900px)").matches);
+  const filtersOpen = filters.panelOpen ?? !compact;
   const [flipped, setFlipped] = useState(() => {
     try { return window.localStorage.getItem("netaudio.matrix.flipped") === "true"; }
     catch { return false; }
@@ -74,8 +74,8 @@ function RoutingView() {
         </div>
         <div class="toolbar">
           <button type="button" class="btn btn-sm" aria-expanded=${filtersOpen} aria-controls="routing-device-filters"
-            onClick=${() => setFiltersOpen(!filtersOpen)}>Filters</button>
-          ${!compact ? html`<${Button} onClick=${() => setListMode(!listMode)}>${listMode ? "Show grid" : "Channel list"}<//>` : null}
+            onClick=${() => updateFilters({ ...filters, panelOpen: !filtersOpen })}>Filters</button>
+          ${!compact ? html`<${Button} onClick=${() => updateFilters({ ...filters, listMode: !listMode })}>${listMode ? "Show grid" : "Channel list"}<//>` : null}
           ${!showList ? html`
           <button class="btn btn-sm" type="button" aria-pressed=${flipped} onClick=${() => {
             setFlipped(!flipped);
