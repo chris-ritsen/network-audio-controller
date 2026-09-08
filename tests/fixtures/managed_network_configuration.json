@@ -1,0 +1,48 @@
+{
+  "evidence_class": "causal",
+  "source_device": {
+    "name": "avio-output-3",
+    "model": "AVIO-DAO2",
+    "dante_firmware": "4.2.4.1"
+  },
+  "source_tool": "NetAudio existing managed status transport and Rust command encoder",
+  "source_run": "managed-controls-20260908.3cfd91xc",
+  "allowed_evidence": [
+    "authenticated managed status replies",
+    "bounded DNS treatment on user-authorized enrolled adapter"
+  ],
+  "excluded_evidence": [
+    "proprietary static inspection",
+    "runtime memory",
+    "unrelated device traffic",
+    "credentials"
+  ],
+  "transformations": [
+    "Outer message ID replaced with 1; sender identity and interface MAC replaced with synthetic locally administered identities.",
+    "Active and pending device address replaced with 192.0.2.34; gateway and treated DNS address replaced with 192.0.2.1; original public DNS preserved.",
+    "Framing, status fields, lengths, descriptors and offsets retained."
+  ],
+  "cases": {
+    "before": {
+      "source_artifact": "network-status-before.bin",
+      "source_sha256": "541af0f25b75b19bcfe6ed40242967edea2f9d86c948d82161e0869c8ba71dcb",
+      "observed_at": "2026-09-08T00:52:46.776443+00:00",
+      "sha256": "ade0326cc4debbd86b4d2268db10bcfa3469e8e327874856e8570bd9645dac3e",
+      "hexadecimal": "ffff006000010000020000fffe000022417564696e617465073800110000000000010000000000640003020000000022c0000222ffffff0008080808c00002010018003000000000000000000000000000000000000000000000000000000000"
+    },
+    "pending": {
+      "source_artifact": "network-status-pending.bin",
+      "source_sha256": "a14016ee2626fb53523ba30f71b37c51f50b70b1b9cf0b4a1b903ab3cdb86a24",
+      "observed_at": "2026-09-08T00:52:48.394467+00:00",
+      "sha256": "6fb6d6db9ea609c915dd603897b2af08a6e567a46b027dff02891277e4af89a0",
+      "hexadecimal": "ffff006000010000020000fffe000022417564696e617465073800110000000000010000000000640003020000000022c0000222ffffff0008080808c0000201001800300000000000060000c0000222ffffff00c0000201c000020100000000"
+    },
+    "restored": {
+      "source_artifact": "network-status-restored.bin",
+      "source_sha256": "29a9aea4fd772eb82ffe3a0c8835d4c61faccff36545c4a98363fbf9c6a4cdd5",
+      "observed_at": "2026-09-08T00:52:49.986098+00:00",
+      "sha256": "ade0326cc4debbd86b4d2268db10bcfa3469e8e327874856e8570bd9645dac3e",
+      "hexadecimal": "ffff006000010000020000fffe000022417564696e617465073800110000000000010000000000640003020000000022c0000222ffffff0008080808c00002010018003000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

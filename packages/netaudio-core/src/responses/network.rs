@@ -157,7 +157,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             ),
             _ => (None, None),
         };
-        let mut entry = InterfaceStatusEntry {
+        let entry = InterfaceStatusEntry {
             interface: match index {
                 0 => Some(NetworkInterface::Primary),
                 1 => Some(NetworkInterface::Secondary),
@@ -172,7 +172,6 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             configured: None,
             reboot_required: false,
         };
-        entry.configured = current_configuration(&entry);
         interfaces.push(entry);
         offset = offset.checked_add(stride)?;
         fixed_records &= known;
@@ -181,7 +180,12 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     let mut redundancy = None;
     // These revisions carry a configuration descriptor after the last active
     // interface. Its pointer is relative to the notification record, not UDP.
-    if fixed_records && matches!(record_protocol_identifier, 0x0724 | 0x0727 | 0x072e) {
+    if fixed_records
+        && matches!(
+            record_protocol_identifier,
+            0x0724 | 0x0727 | 0x072e | 0x0738
+        )
+    {
         let descriptor = offset.checked_sub(4)?;
         let size = usize::from(read_u16(data, descriptor)?);
         let pointer = usize::from(read_u16(data, descriptor + 2)?);
@@ -209,6 +213,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
         }
         let start = CONMON_RECORD_BASE.checked_add(pointer)?;
         for (index, entry) in interfaces.iter_mut().enumerate() {
+            entry.configured = current_configuration(entry);
             let position = start.checked_add(index.checked_mul(size)?)?;
             if let Some(configured) = configured_interface(data, position)? {
                 entry.reboot_required =
