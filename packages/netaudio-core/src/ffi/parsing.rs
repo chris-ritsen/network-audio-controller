@@ -29,6 +29,7 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             responses::parse_dante_brooklyn_control_protocol_flow_setup_response(bytes),
         ),
         "dante_model" => serialize_optional(kind, responses::parse_dante_model(bytes)),
+        "dapi_frame_header" => serialize_optional(kind, crate::dapi::parse_frame_header(bytes)),
         "dapi_device_announcement" => {
             serialize_optional(kind, crate::dapi::parse_device_announcement(bytes))
         }

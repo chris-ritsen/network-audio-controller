@@ -13,6 +13,58 @@ fn set_word(data: &mut [u8], offset: usize, value: u16) {
     data[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
 }
 
+fn managed_capture(name: &str) -> Vec<u8> {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/managed_network_configuration.json"
+    ))
+    .unwrap();
+    decode_hexadecimal(fixtures["cases"][name]["hexadecimal"].as_str().unwrap())
+}
+
+#[test]
+fn managed_network_status_preserves_active_and_pending_dns() {
+    for (name, dns, pending) in [
+        ("before", "8.8.8.8", false),
+        ("pending", "192.0.2.1", true),
+        ("restored", "8.8.8.8", false),
+    ] {
+        let status = parse_interface_status(&managed_capture(name)).unwrap();
+        assert_eq!(status.record_protocol_identifier, 0x0738);
+        assert_eq!(status.interfaces.len(), 1);
+        let primary = &status.interfaces[0];
+        assert_eq!(primary.dns_server.as_deref(), Some("8.8.8.8"));
+        assert_eq!(
+            primary.configured.as_ref().unwrap().dns_server.as_deref(),
+            Some(dns)
+        );
+        assert_eq!(primary.reboot_required, pending);
+        assert_eq!(status.reboot_required, pending);
+        assert!(status.redundancy.is_none());
+    }
+}
+
+#[test]
+fn managed_network_status_rejects_bad_pending_descriptors() {
+    let data = managed_capture("pending");
+    for length in 72..92 {
+        let mut short = data[..length].to_vec();
+        set_word(&mut short, 2, length as u16);
+        assert!(parse_interface_status(&short).is_none(), "length {length}");
+    }
+    for (offset, value) in [(64, 23), (66, 0), (66, u16::MAX), (72, 7)] {
+        let mut invalid = data.clone();
+        set_word(&mut invalid, offset, value);
+        assert!(
+            parse_interface_status(&invalid).is_none(),
+            "offset {offset}"
+        );
+    }
+    let mut unknown = data;
+    set_word(&mut unknown, 24, 0x07fe);
+    let status = parse_interface_status(&unknown).unwrap();
+    assert!(status.interfaces[0].configured.is_none());
+}
+
 #[test]
 fn captured_redundancy_treatment_distinguishes_current_from_configured() {
     for (name, current, configured, reboot) in [
