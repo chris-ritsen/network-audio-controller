@@ -157,8 +157,15 @@ fn append_frame(message_type: u32, payload: &[u8]) -> Option<Vec<u8>> {
     Some(frame)
 }
 
-pub fn parse_frame(bytes: &[u8]) -> Option<Frame<'_>> {
-    if bytes.len() < 12 {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FrameHeader {
+    pub message_type: u32,
+    pub payload_length: usize,
+    pub server_to_client: bool,
+}
+
+pub fn parse_frame_header(bytes: &[u8]) -> Option<FrameHeader> {
+    if bytes.len() != 12 {
         return None;
     }
     let server_to_client = match bytes.get(..4)? {
@@ -167,13 +174,25 @@ pub fn parse_frame(bytes: &[u8]) -> Option<Frame<'_>> {
         _ => return None,
     };
     let payload_length = usize::try_from(read_u32(bytes, 8)?).ok()?;
-    if payload_length > MAX_FRAME_PAYLOAD_BYTES || bytes.len() != 12 + payload_length {
+    if payload_length > MAX_FRAME_PAYLOAD_BYTES {
+        return None;
+    }
+    Some(FrameHeader {
+        message_type: read_u32(bytes, 4)?,
+        payload_length,
+        server_to_client,
+    })
+}
+
+pub fn parse_frame(bytes: &[u8]) -> Option<Frame<'_>> {
+    let header = parse_frame_header(bytes.get(..12)?)?;
+    if bytes.len() != 12 + header.payload_length {
         return None;
     }
     Some(Frame {
-        message_type: read_u32(bytes, 4)?,
+        message_type: header.message_type,
         payload: &bytes[12..],
-        server_to_client,
+        server_to_client: header.server_to_client,
     })
 }
 
@@ -574,6 +593,24 @@ mod tests {
                 u8::from_str_radix(text, 16).unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn stream_header_enforces_marker_length_and_payload_bound() {
+        let header = decode("b91a37250000000200000010");
+        let parsed = parse_frame_header(&header).unwrap();
+        assert_eq!(parsed.payload_length, 16);
+        assert!(parsed.server_to_client);
+        assert!(parse_frame_header(&header[..11]).is_none());
+        let mut extra = header.clone();
+        extra.push(0);
+        assert!(parse_frame_header(&extra).is_none());
+        let mut invalid = header.clone();
+        invalid[0] = 0;
+        assert!(parse_frame_header(&invalid).is_none());
+        invalid = header;
+        invalid[8..12].copy_from_slice(&1_048_577u32.to_be_bytes());
+        assert!(parse_frame_header(&invalid).is_none());
     }
 
     #[test]
