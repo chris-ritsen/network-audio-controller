@@ -47,6 +47,8 @@ test("details, tables, notices and errors remain selectable with UI selection di
 });
 
 test("matrix collapse marks are limited to device intersections and hover colors both axes", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
   await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
@@ -58,12 +60,13 @@ test("matrix collapse marks are limited to device intersections and hover colors
     const scale = node.width / node.getBoundingClientRect().width;
     const ctx = node.getContext("2d");
     const pixel = (x, y) => [...ctx.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data];
-    return { g, h, c, mark: pixel(g + c / 2, h + c / 2), blank: pixel(g + c / 2, h + c / 2 - 5),
+    return { g, h, c, canvasSize: [node.width, node.height], viewportSize: [viewport.clientWidth, viewport.clientHeight],
+      scale, mark: pixel(g + c / 2, h + c / 2), blank: pixel(g + c / 2, h + c / 2 - 5),
       group: pixel(g + c * 1.5, h + c / 2), groupBlank: pixel(g + c * 1.5, h + c / 2 - 5),
       row: pixel(g + c + 6, h + 6), column: pixel(g + 6, h + c + 6),
       header: pixel(g + 6, h - 40), gutter: pixel(5, h + 6) };
   });
-  await expect.poll(async () => (await sample()).mark[3]).toBe(255);
+  await expect.poll(async () => ({ ...await sample(), errors })).toMatchObject({ mark: [expect.any(Number), expect.any(Number), expect.any(Number), 255], errors: [] });
   const before = await sample();
   expect(before.mark).not.toEqual(before.blank);
   expect(before.group).toEqual(before.groupBlank);
