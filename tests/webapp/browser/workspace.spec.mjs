@@ -1,5 +1,22 @@
 import { test, expect } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 import { serveWebapp, deviceFixture } from "./fixture.mjs";
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || !await page.locator(".matrix-canvas").count()) return;
+  const state = await page.locator(".matrix-canvas").evaluate((canvas) => {
+    const viewport = document.querySelector(".matrix-viewport");
+    const context = canvas.getContext("2d");
+    return {
+      width: canvas.width, height: canvas.height, bounds: canvas.getBoundingClientRect().toJSON(),
+      viewport: viewport.getBoundingClientRect().toJSON(), layout: { ...viewport.dataset },
+      scale: devicePixelRatio, contextLost: context.isContextLost?.(),
+      origin: [...context.getImageData(0, 0, 1, 1).data],
+    };
+  });
+  await writeFile(testInfo.outputPath("matrix-state.json"), JSON.stringify(state, null, 2));
+  await page.screenshot({ path: testInfo.outputPath("matrix-failure.png") });
+});
 
 test("desktop navigation rails and routing controls share aligned edges", async ({ page }) => {
   await serveWebapp(page);
