@@ -46,7 +46,7 @@ test("details, tables, notices and errors remain selectable with UI selection di
   await expect(page.getByText("Video format", { exact: true })).toHaveCount(0);
 });
 
-test("matrix collapse marks are limited to device intersections and hover colors both axes", async ({ page }) => {
+test("matrix collapse marks are limited to device intersections and hover colors both axes", async ({ page }, testInfo) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await serveWebapp(page);
@@ -66,7 +66,13 @@ test("matrix collapse marks are limited to device intersections and hover colors
       row: pixel(g + c + 6, h + 6), column: pixel(g + 6, h + c + 6),
       header: pixel(g + 6, h - 40), gutter: pixel(5, h + 6) };
   });
-  await expect.poll(async () => ({ ...await sample(), errors })).toMatchObject({ mark: [expect.any(Number), expect.any(Number), expect.any(Number), 255], errors: [] });
+  try {
+    await expect.poll(async () => ({ ...await sample(), errors })).toMatchObject({ mark: [expect.any(Number), expect.any(Number), expect.any(Number), 255], errors: [] });
+  } catch (error) {
+    await testInfo.attach("matrix-rendering", { body: JSON.stringify({ ...await sample(), errors }), contentType: "application/json" });
+    await testInfo.attach("matrix-screenshot", { body: await page.screenshot(), contentType: "image/png" });
+    throw error;
+  }
   const before = await sample();
   expect(before.mark).not.toEqual(before.blank);
   expect(before.group).toEqual(before.groupBlank);
