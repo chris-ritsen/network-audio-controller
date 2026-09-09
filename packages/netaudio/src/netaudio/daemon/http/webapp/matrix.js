@@ -360,9 +360,14 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       return undefined;
     }
     const observer = new ResizeObserver(() => setSize({ height: node.clientHeight, width: node.clientWidth }));
+    const drawing = canvas.current;
     observer.observe(node);
     setSize({ height: node.clientHeight, width: node.clientWidth });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      drawing.width = 0;
+      drawing.height = 0;
+    };
   }, []);
 
   useLayoutEffect(() => {
@@ -382,8 +387,9 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
       return;
     }
     const ratio = window.devicePixelRatio || 1;
-    node.width = Math.floor(size.width * ratio);
-    node.height = Math.floor(size.height * ratio);
+    const width = Math.floor(size.width * ratio), height = Math.floor(size.height * ratio);
+    if (node.width !== width) node.width = width;
+    if (node.height !== height) node.height = height;
     node.style.width = `${size.width}px`;
     node.style.height = `${size.height}px`;
     const context = node.getContext("2d");
