@@ -240,6 +240,87 @@ def test_mac_correlation_accepts_dante_eui64_with_inserted_fffe():
     assert merged["direct.local."]["inventory_sources"] == ["direct", "ddm"]
 
 
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_shared_host_interface_does_not_duplicate_unenrolled_device(reverse_order):
+    direct = _direct_device("soundcard.local.", mac="001122fffe334455")
+    other = _direct_device("video.local.", mac="0011223344560000")
+    for device in (direct, other):
+        device.interfaces = [{"mac_address": "00:11:22:33:44:55"}]
+    devices = [direct, other]
+    if reverse_order:
+        devices.reverse()
+    managed = _managed_device(mac="00:11:22:33:44:55", domain_id=None)
+    before = {device.server_name: DanteDeviceSerializer.to_json(device) for device in devices}
+
+    merged = merge_device_inventory(
+        {device.server_name: device for device in devices},
+        (_observation(managed, domain_id=None, domain_name=None),),
+        synced_at=1234.0,
+        fresh=True,
+    )
+
+    assert list(merged) == ["soundcard.local.", "video.local."]
+    record = merged["soundcard.local."]
+    assert record["inventory_sources"] == ["direct", "ddm"]
+    assert record["management_state"] == "unenrolled"
+    assert record["direct_control_available"] is True
+    assert record["channels"]["transmitters"][1]["name"] == "direct-tx"
+    assert record["sample_rate_hz"] == 48000
+    assert merged["video.local."]["inventory_sources"] == ["direct"]
+    assert merged["video.local."]["inventory_id"] == "001122334456"
+    assert {device.server_name: DanteDeviceSerializer.to_json(device) for device in devices} == before
+
+
+def test_interface_match_does_not_override_conflicting_device_identity():
+    direct = _direct_device("video.local.", mac="0011223344560000")
+    direct.interfaces = [{"mac_address": "00:11:22:33:44:55"}]
+    managed = _managed_device(mac="00:11:22:33:44:55")
+
+    merged = merge_device_inventory(
+        {direct.server_name: direct},
+        (_observation(managed),),
+        synced_at=1234.0,
+        fresh=True,
+    )
+
+    assert set(merged) == {"video.local.", "ddm:default:domain-1:managed-1"}
+    assert merged["video.local."]["inventory_sources"] == ["direct"]
+
+
+@pytest.mark.parametrize("mac", [None, "", "000000000000"])
+@pytest.mark.parametrize("interface_field", ["mac_address", "macAddress"])
+def test_interface_identity_is_used_when_device_identity_is_unavailable(mac, interface_field):
+    direct = _direct_device("direct.local.", mac=mac)
+    direct.interfaces = [{interface_field: "00:11:22:33:44:55"}]
+
+    merged = merge_device_inventory(
+        {direct.server_name: direct},
+        (_observation(_managed_device()),),
+        synced_at=1234.0,
+        fresh=True,
+    )
+
+    assert list(merged) == ["direct.local."]
+    assert merged["direct.local."]["inventory_sources"] == ["direct", "ddm"]
+
+
+@pytest.mark.parametrize("duplicate_source", ["direct", "ddm"])
+def test_duplicate_device_identities_remain_ambiguous(duplicate_source):
+    first = _direct_device("first.local.")
+    direct = {first.server_name: first}
+    observations = [_observation(_managed_device())]
+    if duplicate_source == "direct":
+        second = _direct_device("second.local.")
+        direct[second.server_name] = second
+    else:
+        observations.append(_observation(_managed_device("managed-2")))
+
+    merged = merge_device_inventory(direct, tuple(observations), synced_at=1234.0, fresh=True)
+
+    assert len(merged) == 3
+    assert all(len(record["inventory_sources"]) == 1 for record in merged.values())
+
+
 def test_matching_name_and_ip_do_not_override_conflicting_macs():
     direct = _direct_device(
         "same.local.",
@@ -672,3 +753,83 @@ def test_managed_null_status_without_source_retains_error_information():
     assert subscription["status"]["status"] is None
     assert subscription["ddm_status_message"] == "Unknown status"
     assert subscription["ddm_summary"] == "ERROR"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("old_state,expected_count", [("DISCONNECTED", 1), ("READY", 2), (None, 2)])
+async def test_unenrollment_reconciles_changed_inventory_id_by_primary_identity(old_state, expected_count):
+    old = _managed_device("old-enrollment", connection_state=old_state)
+    current = _managed_device("new-unenrolled", domain_id=None)
+    service = _service(FakeClient(_result(domains=(_domain("domain-1", old),), unenrolled=(current,))), FakeClock())
+    await service.refresh()
+    observations = service.observations()
+    assert len(observations) == expected_count
+    direct = _direct_device("device.local.")
+    direct.management_state = "managed"
+    direct.ddm_enrolment_state = "ENROLLED"
+    direct.ddm_domain_id = "domain-1"
+    records = service.serialize_devices({direct.server_name: direct})
+    if expected_count == 1:
+        assert list(records) == [direct.server_name]
+        assert records[direct.server_name]["management_state"] == "unenrolled"
+        assert records[direct.server_name].get("ddm_domain_id") is None
+    else:
+        assert records[direct.server_name]["management_state"] == "managed"
+
+
+@pytest.mark.asyncio
+async def test_stale_unenrolled_identity_does_not_supersede_disconnected_enrollment():
+    old = _managed_device("old-enrollment", connection_state="DISCONNECTED")
+    current = _managed_device("new-unenrolled", domain_id=None)
+    clock = FakeClock()
+    service = _service(FakeClient(_result(domains=(_domain("domain-1", old),), unenrolled=(current,))), clock)
+    await service.refresh()
+    clock.value += 1000
+    assert len(service.observations()) == 2
+
+
+@pytest.mark.asyncio
+async def test_unenrollment_does_not_choose_between_multiple_previous_identities():
+    old = _managed_device("old-enrollment", connection_state="DISCONNECTED")
+    other = _managed_device("other-enrollment", connection_state="DISCONNECTED")
+    current = _managed_device("new-unenrolled", domain_id=None)
+    service = _service(
+        FakeClient(_result(domains=(_domain("domain-1", old, other),), unenrolled=(current,))), FakeClock()
+    )
+    await service.refresh()
+    assert len(service.observations()) == 3
+
+
+@pytest.mark.asyncio
+async def test_rename_does_not_reactivate_superseded_enrollment():
+    old = _managed_device("old-enrollment", connection_state="DISCONNECTED")
+    current = _managed_device("new-unenrolled", domain_id=None)
+    reconnected = _managed_device("old-enrollment", connection_state="READY")
+    service = _service(
+        FakeClient(
+            _result(domains=(_domain("domain-1", old),), unenrolled=(current,)),
+            _result(domains=(_domain("domain-1", old),), unenrolled=()),
+            _result(domains=(_domain("domain-1", reconnected),), unenrolled=()),
+        ),
+        FakeClock(),
+    )
+    await service.refresh()
+    assert [item.device.id for item in service.observations()] == [current.id]
+    await service.refresh()
+    assert service.observations() == ()
+    await service.refresh()
+    assert [item.device.id for item in service.observations()] == [reconnected.id]
+
+
+def test_stable_ddm_identity_correlates_when_enrollment_omits_interface_mac():
+    direct = _direct_device("device.local.")
+    direct.ddm_device_id = "managed-1"
+    direct.ddm_server_profile = "default"
+    managed = _managed_device("managed-1")
+    managed = replace(managed, interfaces=tuple(replace(interface, mac_address="") for interface in managed.interfaces))
+    result = merge_device_inventory(
+        {direct.server_name: direct}, (_observation(managed),), synced_at=1234.0, fresh=True
+    )
+    assert list(result) == [direct.server_name]
+    assert result[direct.server_name]["mac_address"] == direct.mac_address
+    assert result[direct.server_name]["management_state"] == "managed"

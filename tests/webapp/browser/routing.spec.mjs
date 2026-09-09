@@ -455,6 +455,7 @@ test("network settings load once without a refresh button and stay a compact for
   let reads = 0;
   const snapshot = { interfaces: [{ interface: "primary", mode: "dynamic", ip_address: "192.0.2.34",
     netmask: "255.255.255.0", configured: { mode: "dynamic" } }],
+    interface_configuration_modes: { primary: ["dhcp", "static"] },
     redundancy: { current: "switched", configured: "switched", supported: ["switched", "redundant"] } };
   await page.route("**/interfaces/*", (route) => {
     reads += 1;

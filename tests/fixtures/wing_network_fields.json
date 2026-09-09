@@ -1,0 +1,102 @@
+{
+  "evidence_class": "observed",
+  "source": {
+    "run": "wing-network-20260908.f6b9lno4/controller-relay",
+    "artifact": "preflight-reply.bin",
+    "sha256": "d08b94a8ca707824efdaed008e0552221551e7e1eefae693302d260aac3e8669",
+    "timestamp": "2026-09-09T01:48:03.557604+00:00",
+    "source_tool": "NetAudio read-only query through TLS relay to DDM; field labels reconciled with Dante Controller Wing Network Config at 2026-09-09 01:44 UTC",
+    "scope": "Disposable Wing, both interface configurations and pending redundancy; no reboot",
+    "allowed_evidence": [
+      "Ordinary Controller interface observation",
+      "Device settings response through DDM"
+    ],
+    "excluded_evidence": [
+      "Experimental secondary request candidates",
+      "Authentication frames",
+      "Vendor process memory",
+      "Proprietary static contents"
+    ],
+    "transformations": [
+      {
+        "offset": 8,
+        "replacement_hexadecimal": "020000fffe000010"
+      },
+      {
+        "offset": 42,
+        "replacement_hexadecimal": "020000000010"
+      },
+      {
+        "offset": 70,
+        "replacement_hexadecimal": "020000000011"
+      },
+      {
+        "offset": 48,
+        "replacement_hexadecimal": "c000022f"
+      },
+      {
+        "offset": 76,
+        "replacement_hexadecimal": "c63364e3"
+      },
+      {
+        "offset": 104,
+        "replacement_hexadecimal": "c0000265"
+      },
+      {
+        "offset": 128,
+        "replacement_hexadecimal": "c6336466"
+      },
+      {
+        "offset": 56,
+        "replacement_hexadecimal": "c0000201"
+      },
+      {
+        "offset": 60,
+        "replacement_hexadecimal": "c0000201"
+      },
+      {
+        "offset": 112,
+        "replacement_hexadecimal": "cb007135"
+      },
+      {
+        "offset": 136,
+        "replacement_hexadecimal": "cb007135"
+      },
+      {
+        "offset": 116,
+        "replacement_hexadecimal": "cb007101"
+      },
+      {
+        "offset": 140,
+        "replacement_hexadecimal": "cb007102"
+      }
+    ]
+  },
+  "hexadecimal": "ffff009402e70000020000fffe000010417564696e617465073d00110000000000020001000003e80001020000000010c000022fffffff00c0000201c0000201000000000000020000000011c63364e3ffff000000000000000000000018004c0001000000060000c0000265ffffff00cb007135cb0071010000000000060000c6336466ffffff00cb007135cb00710200000000",
+  "sha256": "d208bcbf3edcfd6fdddd3ad9dbabcf3c1760d3b42147c9f93048d9a1e8280976",
+  "configured_fields": {
+    "primary": {
+      "mode": "static",
+      "ip_address": "192.0.2.101",
+      "netmask": "255.255.255.0",
+      "dns_server": "203.0.113.53",
+      "gateway": "203.0.113.1"
+    },
+    "secondary": {
+      "mode": "static",
+      "ip_address": "198.51.100.102",
+      "netmask": "255.255.255.0",
+      "dns_server": "203.0.113.53",
+      "gateway": "203.0.113.2"
+    }
+  },
+  "redundancy": {
+    "current": "redundant",
+    "configured": "switched",
+    "supported": [
+      "switched",
+      "redundant"
+    ],
+    "reboot_required": true
+  }
+}

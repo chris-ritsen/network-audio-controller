@@ -204,7 +204,7 @@ class DanteStateService:
         kind = event.data["kind"]
         status = event.data["status"]
         source_ip = event.data["source_ip"]
-        device = self.application._device_by_ip(source_ip)
+        device = self.application._device_by_control_key(source_ip)
         if device is None:
             self._pending_status.setdefault(source_ip, []).append((kind, status))
             return
@@ -397,7 +397,7 @@ class DanteStateService:
                             f"Device controls unavailable for {device.server_name} after sample rate changed"
                         )
                     else:
-                        device.apply_controls(controls)
+                        await self._apply_direct_controls(device, controls)
             except (RuntimeError, OSError) as exception:
                 logger.warning(f"Error re-fetching device controls for {device.server_name}: {exception}")
         self._emit_device_updated(device)
@@ -470,6 +470,12 @@ class DanteStateService:
         )
         self._emit_device_updated(device)
 
+    async def _apply_direct_controls(self, device, controls) -> None:
+        device.apply_controls(controls)
+        # Basic channel inventory does not carry the media identities needed
+        # for modern ARC routing. Refresh them after replacing those channels.
+        await self.application.apply_modern_arc_status_pages(device)
+
     async def refetch_device_controls(self, server_name: str) -> None:
         device = self._online_device(server_name)
         if not device:
@@ -486,7 +492,7 @@ class DanteStateService:
                 else:
                     controls = await device.fetch_controls_data()
                     if controls:
-                        device.apply_controls(controls)
+                        await self._apply_direct_controls(device, controls)
             except (RuntimeError, OSError) as exception:
                 logger.warning(f"Error re-fetching controls for {server_name}: {exception}")
                 return
@@ -561,7 +567,7 @@ class DanteStateService:
                     for attempt in range(retries):
                         controls = await device.fetch_controls_data()
                         if controls:
-                            device.apply_controls(controls)
+                            await self._apply_direct_controls(device, controls)
 
                         if device.name and device.tx_count is not None:
                             break
@@ -579,11 +585,11 @@ class DanteStateService:
                 )
 
                 capability_tasks = []
-                if device.supported_sample_rates is None:
+                if device.requires_managed_control or device.supported_sample_rates is None:
                     capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
-                if device.supported_encodings is None:
+                if device.requires_managed_control or device.supported_encodings is None:
                     capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
-                if device.supported_gain_levels is None:
+                if device.requires_managed_control or device.supported_gain_levels is None:
                     capability_tasks.append(self._refresh_gain_status(device, "device discovered"))
                 if capability_tasks:
                     await asyncio.gather(*capability_tasks)

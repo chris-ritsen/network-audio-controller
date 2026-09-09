@@ -214,25 +214,25 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
         });
     }
 
-    let mode_for = |code| match code {
-        1 => Some(crate::network::DanteRedundancyMode::Switched),
-        2 => Some(crate::network::DanteRedundancyMode::SplitRedundant),
+    let protocol_id = read_u16(record, 0)?;
+    let mode_for = |code| match (protocol_id, code) {
+        (0x072e | 0x073d, 1) => Some(crate::network::DanteRedundancyMode::Switched),
+        (0x072e, 2) => Some(crate::network::DanteRedundancyMode::SplitRedundant),
+        (0x073d, 2) => Some(crate::network::DanteRedundancyMode::Redundant),
         _ => None,
     };
     let current = mode_for(read_u16(record, 20)?);
     let configured = mode_for(read_u16(record, 22)?);
-    let supported: Vec<crate::network::DanteRedundancyMode> = if read_u16(record, 0)? == 0x072e {
-        choices
-            .iter()
-            .filter_map(|choice| match (choice.code, choice.label.as_str()) {
-                (1, "Switched") => mode_for(1),
-                (2, "Split/Redundant") => mode_for(2),
+    let supported: Vec<crate::network::DanteRedundancyMode> = choices
+        .iter()
+        .filter_map(
+            |choice| match (protocol_id, choice.code, choice.label.as_str()) {
+                (0x072e | 0x073d, 1, "Switched") => mode_for(1),
+                (0x072e, 2, "Split/Redundant") | (0x073d, 2, "Redundant") => mode_for(2),
                 _ => None,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+            },
+        )
+        .collect();
     let current = current.filter(|mode| supported.contains(mode));
     let configured = configured.filter(|mode| supported.contains(mode));
     Some(SwitchConfigurationStatus {
