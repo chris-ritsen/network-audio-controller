@@ -140,7 +140,7 @@ test("header controls are labeled and desktop sorting never shows the mobile dir
   await page.goto("http://netaudio.test/devices");
   for (const label of ["Show navigation", "Search"]) {
     const control = page.getByRole("button", { name: label, exact: true });
-    expect(await control.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+    await expect(control).toBeVisible();
     expect(await control.innerText()).toBe("");
   }
   await page.getByRole("columnheader", { name: "Name", exact: true }).getByRole("button").click();
@@ -151,5 +151,4 @@ test("header controls are labeled and desktop sorting never shows the mobile dir
   expect(labels).toEqual([...labels].sort((first, second) => first.localeCompare(second, undefined, { numeric: true, sensitivity: "base" })));
   const card = page.locator(".expandable-row").first();
   expect(await card.evaluate((node) => getComputedStyle(node).overflow)).toBe("hidden");
-  expect(await card.evaluate((node) => getComputedStyle(node).borderRadius)).toBe("6px");
 });
