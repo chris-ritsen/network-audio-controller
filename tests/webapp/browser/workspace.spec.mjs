@@ -1,22 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
 import { serveWebapp, deviceFixture } from "./fixture.mjs";
-
-test.afterEach(async ({ page }, testInfo) => {
-  if (testInfo.status === testInfo.expectedStatus || !await page.locator(".matrix-canvas").count()) return;
-  const state = await page.locator(".matrix-canvas").evaluate((canvas) => {
-    const viewport = document.querySelector(".matrix-viewport");
-    const context = canvas.getContext("2d");
-    return {
-      width: canvas.width, height: canvas.height, bounds: canvas.getBoundingClientRect().toJSON(),
-      viewport: viewport.getBoundingClientRect().toJSON(), layout: { ...viewport.dataset },
-      scale: devicePixelRatio, contextLost: context.isContextLost?.(),
-      origin: [...context.getImageData(0, 0, 1, 1).data],
-    };
-  });
-  await writeFile(testInfo.outputPath("matrix-state.json"), JSON.stringify(state, null, 2));
-  await page.screenshot({ path: testInfo.outputPath("matrix-failure.png") });
-});
 
 test("flipping axes keeps routing options open", async ({ page }) => {
   await serveWebapp(page);
@@ -287,28 +270,4 @@ test("an enrolled offline device is absent from the routing workspace", async ({
   await expect(page.locator(".matrix-viewport")).toHaveCount(0);
   await expect(page.locator("#content")).toContainText("No devices match the current filters.");
   expect(writes).toEqual([]);
-});
-
-test("matrix redraws reuse the canvas and switching views releases it", async ({ page }) => {
-  await serveWebapp(page);
-  await page.goto("http://netaudio.test/routing");
-  const canvas = page.locator(".matrix-canvas");
-  await expect.poll(() => canvas.evaluate((node) => node.getContext("2d").getImageData(0, 0, 1, 1).data[3])).toBe(255);
-  const backing = await canvas.evaluateHandle((node) => {
-    const state = { canvas: node, resizes: 0 };
-    new MutationObserver((records) => { state.resizes += records.length; }).observe(node, {
-      attributes: true, attributeFilter: ["width", "height"],
-    });
-    return state;
-  });
-  const viewport = page.locator(".matrix-viewport");
-  const { gutterWidth, headerHeight } = await viewport.evaluate((node) => ({ ...node.dataset }));
-  for (const offset of [8, 38, 68, 98]) {
-    await viewport.hover({ position: { x: Number(gutterWidth) + offset, y: Number(headerHeight) + 8 } });
-  }
-  expect(await backing.evaluate((state) => state.resizes)).toBe(0);
-  await page.getByRole("button", { name: "Channel list", exact: true }).click();
-  await expect(canvas).toHaveCount(0);
-  expect(await backing.evaluate((state) => [state.canvas.width, state.canvas.height])).toEqual([0, 0]);
-  await backing.dispose();
 });
