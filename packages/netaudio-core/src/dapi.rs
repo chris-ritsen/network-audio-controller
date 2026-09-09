@@ -86,6 +86,12 @@ pub struct SettingsPublication {
     pub packet_hex: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SignalPresencePublication {
+    pub device_id: String,
+    pub records: Vec<crate::signal_presence::SignalPresenceRecord>,
+}
+
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     Some(u16::from_be_bytes(
         bytes.get(offset..offset + 2)?.try_into().ok()?,
@@ -548,13 +554,14 @@ pub fn parse_settings_request(bytes: &[u8]) -> Option<SettingsRequest> {
     })
 }
 
-pub fn parse_settings_publication(bytes: &[u8]) -> Option<SettingsPublication> {
+fn publication_payload(bytes: &[u8], service: u16) -> Option<(&str, &[u8])> {
     let frame = normal_record(bytes, SETTINGS_PUBLICATION, [0x00, 0x04, 0x00, 0x0C])?;
     if !frame.server_to_client
         || read_u16(bytes, WRAPPER_ID_OFFSET)? != 0
         || read_u16(bytes, WRAPPER_ID_OFFSET + 2)? != 0
-        || bytes.get(INNER_LENGTH_OFFSET + 4..SETTINGS_PACKET_OFFSET)?
-            != [0x00, 0x02, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00]
+        || read_u16(bytes, INNER_LENGTH_OFFSET + 4)? != service
+        || bytes.get(INNER_LENGTH_OFFSET + 6..SETTINGS_PACKET_OFFSET)?
+            != [0x00, 0x18, 0x00, 0x00, 0x00, 0x00]
     {
         return None;
     }
@@ -568,18 +575,33 @@ pub fn parse_settings_publication(bytes: &[u8]) -> Option<SettingsPublication> {
     }
     let target_name_field = bytes.get(SETTINGS_PACKET_OFFSET..packet_offset)?;
     let target_name_length = target_name_field.iter().position(|byte| *byte == 0)?;
-    let target_name = std::str::from_utf8(&target_name_field[..target_name_length])
-        .ok()?
-        .to_owned();
-    let packet = bytes.get(packet_offset..)?;
+    let target_name = std::str::from_utf8(&target_name_field[..target_name_length]).ok()?;
+    Some((target_name, bytes.get(packet_offset..)?))
+}
+
+pub fn parse_settings_publication(bytes: &[u8]) -> Option<SettingsPublication> {
+    let (target_name, packet) = publication_payload(bytes, 2)?;
     let opcode = settings_opcode(packet)?;
     Some(SettingsPublication {
         wrapper_id: 0,
-        target_name,
+        target_name: target_name.to_owned(),
         device_id: hexadecimal(packet.get(8..16)?),
         message_id: read_u16(packet, 4)?,
         opcode,
         packet_hex: hexadecimal(packet),
+    })
+}
+
+pub fn parse_signal_presence_publication(bytes: &[u8]) -> Option<SignalPresencePublication> {
+    let (_, packet) = publication_payload(bytes, 8)?;
+    let identity = crate::heartbeat::parse_heartbeat_device_extended_unique_identifier(packet)?;
+    let records = crate::signal_presence::parse_signal_presence_packet(packet)?;
+    if records.is_empty() {
+        return None;
+    }
+    Some(SignalPresencePublication {
+        device_id: identity,
+        records,
     })
 }
 
@@ -612,6 +634,45 @@ pub fn parse_identify_confirmation(bytes: &[u8]) -> Option<IdentifyConfirmation>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn observed_avio_signal_publications_validate_envelope_and_channel_ranges() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/managed_signal_presence.json"
+        ))
+        .unwrap();
+        for (index, frame) in fixture["frames"].as_array().unwrap().iter().enumerate() {
+            let text = frame["frame_hex"].as_str().unwrap();
+            let bytes: Vec<u8> = (0..text.len())
+                .step_by(2)
+                .map(|offset| u8::from_str_radix(&text[offset..offset + 2], 16).unwrap())
+                .collect();
+            let parsed = super::parse_signal_presence_publication(&bytes).unwrap();
+            assert_eq!(parsed.records.len(), 1);
+            let record = &parsed.records[0];
+            if index == 0 {
+                assert_eq!(parsed.device_id, "001dc1fffe50692e");
+                assert_eq!(record.tx_levels, [164, 163]);
+                assert!(record.rx_levels.is_empty());
+            } else {
+                assert_eq!(parsed.device_id, "001dc1fffe507b8d");
+                assert_eq!(record.rx_levels, [171, 170]);
+                assert!(record.tx_levels.is_empty());
+            }
+            assert!(super::parse_settings_publication(&bytes).is_none());
+            for offset in [0, 8, 36, 38, 40, 44, 48, 50, 52, 54, 56, 76, 78] {
+                let mut invalid = bytes.clone();
+                invalid[offset] ^= 1;
+                assert!(
+                    super::parse_signal_presence_publication(&invalid).is_none(),
+                    "offset {offset}"
+                );
+            }
+            for end in 0..bytes.len() {
+                assert!(super::parse_signal_presence_publication(&bytes[..end]).is_none());
+            }
+        }
+    }
+
     use super::*;
 
     // Minimal packet fixtures derived from protocol-research run
