@@ -386,15 +386,18 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     if (!node || size.width === 0 || size.height === 0) {
       return;
     }
-    const ratio = window.devicePixelRatio || 1;
-    const width = Math.floor(size.width * ratio), height = Math.floor(size.height * ratio);
-    if (node.width !== width) node.width = width;
-    if (node.height !== height) node.height = height;
-    node.style.width = `${size.width}px`;
-    node.style.height = `${size.height}px`;
-    const context = node.getContext("2d");
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    draw(context, { columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme });
+    const frame = requestAnimationFrame(() => {
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.floor(size.width * ratio), height = Math.floor(size.height * ratio);
+      if (node.width !== width) node.width = width;
+      if (node.height !== height) node.height = height;
+      node.style.width = `${size.width}px`;
+      node.style.height = `${size.height}px`;
+      const context = node.getContext("2d");
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      draw(context, { columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [columns, flipped, hover, layout, pending, rows, scroll, size, subscriptionIndex, theme]);
 
   const locate = (event) => {
