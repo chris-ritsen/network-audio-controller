@@ -1,0 +1,32 @@
+{
+  "evidence_class": "observed",
+  "source": "Configured DDM managed-control notification session, 2026-09-09",
+  "scope": "Physical AVIO input and output signal-presence publications only",
+  "allowed_evidence": [
+    "Ordinary read-only session subscription and received network messages"
+  ],
+  "excluded_evidence": [
+    "WING audio or metering behavior",
+    "Proprietary executable or firmware inspection",
+    "Device settings and audio mutations"
+  ],
+  "transformation": "Two complete received frames selected verbatim; no payload edits",
+  "frames": [
+    {
+      "name": "avio_input",
+      "run": "/Users/chris/projects/netaudio/ios-signal-presence-8mt_tzl6/continuous-frames",
+      "timestamp": "2026-09-09T17:17:26.180624+00:00",
+      "source_artifact": "session-38.bin",
+      "sha256": "9fc87cbcd5fad8eeff0ca64456d996fd813dd2863f6ce83705b26408d1d6f2eb",
+      "frame_hex": "b91a372500000002000000bc00180001100003080841ffffffff0000084001060fa8000a00a420030004000c00000000007c002800080018000000006176696f2d696e7075742d3200000000fffe007c3e180000001dc1fffe50692e417564696e6174650008000110000000001c800100040010eb55000000000d480000000000000000000000000024800000040004eb55000000100000000100100006ee6c0007fa670000000000000000001c800200040010eb550000000200000000000000180000a4a30000"
+    },
+    {
+      "name": "avio_output",
+      "run": "/Users/chris/projects/netaudio/ios-signal-presence-8mt_tzl6/continuous-frames",
+      "timestamp": "2026-09-09T17:17:25.837734+00:00",
+      "source_artifact": "session-37.bin",
+      "sha256": "a8d4cad3a17582b3fe112b41107521976f0c832d027c4052ecd66fe1256a54ec",
+      "frame_hex": "b91a372500000002000000f800180001100003080841ffffffff0000084001060fa8000a00e020030004000c0000000000b8002800080018000000006176696f2d6f75747075742d33000003fffe00b857730000001dc1fffe507b8d417564696e6174650008000110000000001c80010004001037340000000025c0000000000000000000000000002480000004000437340000001000000001001000000300000fe0f50000000000000000001c80020004001037340000000000000002000000180000abaa000000208003000400143734000000020000001800000000bb800000001200000000001c8004000400103734000000020000001400000000000000000000"
+    }
+  ]
+}
