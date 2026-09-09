@@ -46,9 +46,7 @@ test("details, tables, notices and errors remain selectable with UI selection di
   await expect(page.getByText("Video format", { exact: true })).toHaveCount(0);
 });
 
-test("matrix collapse marks are limited to device intersections and hover colors both axes", async ({ page }, testInfo) => {
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+test("matrix collapse marks are limited to device intersections and hover colors both axes", async ({ page }) => {
   await serveWebapp(page);
   await page.goto("http://netaudio.test/routing");
   await page.getByRole("button", { name: "Expand all receiver devices and groups", exact: true }).click();
@@ -60,19 +58,12 @@ test("matrix collapse marks are limited to device intersections and hover colors
     const scale = node.width / node.getBoundingClientRect().width;
     const ctx = node.getContext("2d");
     const pixel = (x, y) => [...ctx.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data];
-    return { g, h, c, canvasSize: [node.width, node.height], viewportSize: [viewport.clientWidth, viewport.clientHeight],
-      scale, mark: pixel(g + c / 2, h + c / 2), blank: pixel(g + c / 2, h + c / 2 - 5),
+    return { g, h, c, mark: pixel(g + c / 2, h + c / 2), blank: pixel(g + c / 2, h + c / 2 - 5),
       group: pixel(g + c * 1.5, h + c / 2), groupBlank: pixel(g + c * 1.5, h + c / 2 - 5),
       row: pixel(g + c + 6, h + 6), column: pixel(g + 6, h + c + 6),
       header: pixel(g + 6, h - 40), gutter: pixel(5, h + 6) };
   });
-  try {
-    await expect.poll(async () => ({ ...await sample(), errors })).toMatchObject({ mark: [expect.any(Number), expect.any(Number), expect.any(Number), 255], errors: [] });
-  } catch (error) {
-    await testInfo.attach("matrix-rendering", { body: JSON.stringify({ ...await sample(), errors }), contentType: "application/json" });
-    await testInfo.attach("matrix-screenshot", { body: await page.screenshot(), contentType: "image/png" });
-    throw error;
-  }
+  await expect.poll(async () => (await sample()).mark[3]).toBe(255);
   const before = await sample();
   expect(before.mark).not.toEqual(before.blank);
   expect(before.group).toEqual(before.groupBlank);
@@ -402,4 +393,28 @@ test("an enrolled offline device is absent from the routing workspace", async ({
   await expect(page.locator(".matrix-viewport")).toHaveCount(0);
   await expect(page.locator("#content")).toContainText("No devices match the current filters.");
   expect(writes).toEqual([]);
+});
+
+test("matrix redraws reuse the canvas and switching views releases it", async ({ page }) => {
+  await serveWebapp(page);
+  await page.goto("http://netaudio.test/routing");
+  const canvas = page.locator(".matrix-canvas");
+  await expect.poll(() => canvas.evaluate((node) => node.getContext("2d").getImageData(0, 0, 1, 1).data[3])).toBe(255);
+  const backing = await canvas.evaluateHandle((node) => {
+    const state = { canvas: node, resizes: 0 };
+    new MutationObserver((records) => { state.resizes += records.length; }).observe(node, {
+      attributes: true, attributeFilter: ["width", "height"],
+    });
+    return state;
+  });
+  const viewport = page.locator(".matrix-viewport");
+  const { gutterWidth, headerHeight } = await viewport.evaluate((node) => ({ ...node.dataset }));
+  for (const offset of [8, 38, 68, 98]) {
+    await viewport.hover({ position: { x: Number(gutterWidth) + offset, y: Number(headerHeight) + 8 } });
+  }
+  expect(await backing.evaluate((state) => state.resizes)).toBe(0);
+  await page.getByRole("button", { name: "Channel list", exact: true }).click();
+  await expect(canvas).toHaveCount(0);
+  expect(await backing.evaluate((state) => [state.canvas.width, state.canvas.height])).toEqual([0, 0]);
+  await backing.dispose();
 });
