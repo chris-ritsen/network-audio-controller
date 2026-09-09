@@ -433,6 +433,29 @@ class DAPISession:
             except ValueError as exception:
                 raise DAPISessionError("DDM returned an invalid managed ARC response") from exception
 
+    def reboot(
+        self,
+        credential: str,
+        device_id: str,
+        host_mac: bytes,
+        expected_domain_id: str | None = None,
+    ) -> None:
+        target_id = normalize_device_id(device_id)
+        packet = core.build_command(
+            {"command": "reboot", "host_mac": host_mac.hex(), "message_id": core.next_message_id()}
+        )
+        deadline = time.monotonic() + self.timeout
+        self._initialize(credential, deadline, expected_domain_id)
+        target_selector = self._target_selector(target_id, deadline)
+        wrapper_id = self._next_wrapper_id()
+        self._send(core.build_dapi_settings_request(target_selector, wrapper_id, packet))
+        # Reboot has a transport acknowledgement, but no settings publication.
+        # Acceptance does not establish that the device has finished restarting.
+        while True:
+            acknowledgement = self._parse("dapi_settings_acknowledgement", self._read_frame(deadline))
+            if acknowledgement is not None and acknowledgement.get("wrapper_id") == wrapper_id:
+                return
+
     def query_settings(
         self,
         credential: str,
@@ -529,6 +552,25 @@ def identify_managed_device_with_api_key(
         timeout=timeout,
     ) as session:
         session.identify(api_key, device_id, host_mac, expected_domain_id)
+
+
+def reboot_managed_device_with_api_key(
+    server: str,
+    api_key: str,
+    device_id: str,
+    host_mac: bytes,
+    *,
+    auth_port: int = DEFAULT_AUTH_PORT,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    expected_domain_id: str | None = None,
+) -> None:
+    api_key = _validate_api_key(api_key)
+    api = ControllerAPIClient(server, port=auth_port, timeout=timeout)
+    if "v2" not in api.versions():
+        raise ControllerServiceError("DDM does not advertise the observed v2 Controller API")
+    endpoints = api.endpoints()
+    with DAPISession(api.server, endpoints.service_port, api.ssl_context, timeout=timeout) as session:
+        session.reboot(api_key, device_id, host_mac, expected_domain_id)
 
 
 def query_managed_arc(

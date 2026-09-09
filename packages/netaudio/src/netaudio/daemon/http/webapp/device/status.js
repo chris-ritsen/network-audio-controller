@@ -1,4 +1,5 @@
 import { Fields, OnlineState, Panel, Value } from "../components.js";
+import { aes67Status } from "../aes67.js";
 import * as format from "../format.js";
 import { html } from "../lib/preact.js";
 
@@ -35,7 +36,7 @@ export function StatusSection({ device }) {
               ["Preferred leader", format.preferredLeader(device.preferred_leader)],
               ["Clock source", format.clockSourceCode(device.clock_source_code)],
               ["Clock subdomain", format.clockSubdomain(device.clock_subdomain)],
-              ["AES67", device.aes67_supported === false ? "not supported" : html`<${Value} value=${device.aes67_current} />`],
+              ["AES67", aes67Status(device).label],
             ]}
           />
         <//>

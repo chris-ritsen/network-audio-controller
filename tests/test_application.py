@@ -24,6 +24,31 @@ def make_arc_device(server_name: str, ip_address: str) -> DanteDevice:
 
 
 class TestDanteApplication:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mutation", [False, True])
+    @pytest.mark.parametrize("status", [(False, False), (False, True), (None, False)])
+    async def test_aes67_readback_updates_device_before_status_events_dispatch(self, mutation, status):
+        application = DanteApplication()
+        device = make_arc_device("device.local.", "192.0.2.10")
+        device.aes67_current = True
+        device.aes67_configured = True
+        application.devices[device.server_name] = device
+
+        async def reply(target):
+            application.notifications.notify_waiters("aes67", application._control_key(target), status)
+
+        application.send_probe_aes67 = AsyncMock(side_effect=reply)
+        application.send_enable_aes67 = AsyncMock()
+        if mutation:
+            result = await application.set_aes67_enabled(device, status[1])
+        else:
+            result = await application.probe_aes67_state(device)
+
+        assert result == status
+        assert device.aes67_current is (True if status[0] is None else status[0])
+        assert device.aes67_configured is status[1]
+        assert not application.notifications.is_waiting("aes67", application._control_key(device))
+
     def test_instantiation(self):
         application = DanteApplication()
         assert application.devices == {}

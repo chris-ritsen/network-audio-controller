@@ -1,0 +1,309 @@
+{
+  "evidence_class": "causal",
+  "source_tool": "NetAudio bounded Wing experiment through DDM; no Controller request was captured",
+  "source_run": "wing-network-20260908.f6b9lno4/secondary-mode-prefix-trial",
+  "device": "wing-dante64, Dante 4.3.1.8",
+  "scope": "Secondary configured DNS change without reboot; primary and reported network state compared",
+  "allowed_evidence": [
+    "Authorized disposable-device treatments",
+    "Native settings requests and fresh device responses",
+    "Controller field-label observation"
+  ],
+  "excluded_evidence": [
+    "Proprietary static contents",
+    "Vendor process memory",
+    "Authentication data"
+  ],
+  "claims": {
+    "causal": [
+      "The static request changes the secondary configured DNS while the primary configuration and reported network mode remain unchanged",
+      "The installed normal configuration API sets secondary DHCP while primary DHCP, active interface records and reported redundancy remain unchanged"
+    ],
+    "inferred": [],
+    "unknown": [
+      "Other secondary network-status revisions"
+    ]
+  },
+  "cases": {
+    "before": {
+      "source_artifact": "baseline-reply.bin",
+      "timestamp": "2026-09-09T01:43:17.927768+00:00",
+      "source_sha256": "49bcf4e7eb7a2c4dad24bf142f37aa6699fa7bfbef4fdb7c58538a972e474113",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000fffe000010"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000010"
+        },
+        {
+          "offset": 70,
+          "replacement_hexadecimal": "020000000011"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c000022f"
+        },
+        {
+          "offset": 76,
+          "replacement_hexadecimal": "c63364e3"
+        },
+        {
+          "offset": 104,
+          "replacement_hexadecimal": "c0000265"
+        },
+        {
+          "offset": 128,
+          "replacement_hexadecimal": "c6336466"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 136,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 112,
+          "replacement_hexadecimal": "cb007135"
+        },
+        {
+          "offset": 116,
+          "replacement_hexadecimal": "cb007101"
+        },
+        {
+          "offset": 138,
+          "replacement_hexadecimal": "cb007101"
+        },
+        {
+          "offset": 140,
+          "replacement_hexadecimal": "cb007102"
+        }
+      ],
+      "hexadecimal": "ffff009402c80000020000fffe000010417564696e617465073d00110000000000020001000003e80001020000000010c000022fffffff00c0000201c0000201000000000000020000000011c63364e3ffff000000000000000000000018004c0001000000060000c0000265ffffff00cb007135cb0071010000000000060000c6336466ffffff00c000cb00cb00710200000000",
+      "sha256": "ff4be5f8149329c6548667dd97f3d60c54af333ff4bf932c81bf9a4a8c75c630"
+    },
+    "static_request": {
+      "source_artifact": "candidate-request.bin",
+      "timestamp": "2026-09-09T01:43:18.791104+00:00",
+      "source_sha256": "18a62e0e036fd30e357103f4cc83fd65b85fe2a6588f51579a00804861cb0eba",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000000062"
+        },
+        {
+          "offset": 44,
+          "replacement_hexadecimal": "c6336466"
+        },
+        {
+          "offset": 52,
+          "replacement_hexadecimal": "cb007135"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "cb007102"
+        }
+      ],
+      "hexadecimal": "ffff0044000200000200000000620000417564696e617465073a001300000064011c0f100000000000010002c6336466ffffff00cb007135cb0071020002000000000000",
+      "sha256": "fcfc12b6daa89694e3b28aba537196a53c414253928d7bbf223898f06c6697df"
+    },
+    "after": {
+      "source_artifact": "after-candidate-reply.bin",
+      "timestamp": "2026-09-09T01:43:19.022926+00:00",
+      "source_sha256": "e1965179dc54d98795c214bba4d360fc75cc8c316f5931864e7a7cf2b548bb3a",
+      "transformations": [
+        {
+          "offset": 8,
+          "replacement_hexadecimal": "020000fffe000010"
+        },
+        {
+          "offset": 42,
+          "replacement_hexadecimal": "020000000010"
+        },
+        {
+          "offset": 70,
+          "replacement_hexadecimal": "020000000011"
+        },
+        {
+          "offset": 48,
+          "replacement_hexadecimal": "c000022f"
+        },
+        {
+          "offset": 76,
+          "replacement_hexadecimal": "c63364e3"
+        },
+        {
+          "offset": 104,
+          "replacement_hexadecimal": "c0000265"
+        },
+        {
+          "offset": 128,
+          "replacement_hexadecimal": "c6336466"
+        },
+        {
+          "offset": 56,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 60,
+          "replacement_hexadecimal": "c0000201"
+        },
+        {
+          "offset": 112,
+          "replacement_hexadecimal": "cb007135"
+        },
+        {
+          "offset": 136,
+          "replacement_hexadecimal": "cb007135"
+        },
+        {
+          "offset": 116,
+          "replacement_hexadecimal": "cb007101"
+        },
+        {
+          "offset": 140,
+          "replacement_hexadecimal": "cb007102"
+        }
+      ],
+      "hexadecimal": "ffff009402ca0000020000fffe000010417564696e617465073d00110000000000020001000003e80001020000000010c000022fffffff00c0000201c0000201000000000000020000000011c63364e3ffff000000000000000000000018004c0001000000060000c0000265ffffff00cb007135cb0071010000000000060000c6336466ffffff00cb007135cb00710200000000",
+      "sha256": "c7e338ad02ebf92fee9e54b21393d7e805dd0020900ece0f2fca98b619b6c007"
+    }
+  },
+  "dhcp_verification": {
+    "evidence_class": "causal",
+    "source_run": "secondary-network-app-20260909.pc25gkhz",
+    "source_tool": "Installed NetAudio normal HTTP configuration API and fresh managed interface readback",
+    "start": "2026-09-09T13:29:19.807054+00:00",
+    "end": "2026-09-09T13:29:23.068278+00:00",
+    "treatment": {
+      "interface": "secondary",
+      "mode": "dhcp"
+    },
+    "records": {
+      "before": {
+        "source_artifact": "wing-before.json",
+        "source_sha256": "d46bf5ff2fd640960fc0d8265d299abdfaa8523a9f3c32ba9fdb44e68c6e78af",
+        "transformation": "Device key, MAC and IPv4 addresses replaced with synthetic values; other fields preserved; digest uses sorted compact JSON",
+        "json": {
+          "device": "test-wing",
+          "interfaces": [
+            {
+              "interface": "primary",
+              "mode": "dynamic",
+              "mac_address": "02:00:00:00:00:10",
+              "ip_address": "192.0.2.47",
+              "netmask": "255.255.255.0",
+              "gateway": "192.0.2.1",
+              "dns_server": "192.0.2.1",
+              "configured": {
+                "mode": "dynamic"
+              },
+              "reboot_required": false
+            },
+            {
+              "interface": "secondary",
+              "mode": "dynamic",
+              "mac_address": "02:00:00:00:00:11",
+              "ip_address": "198.51.100.227",
+              "netmask": "255.255.0.0",
+              "configured": {
+                "mode": "static",
+                "ip_address": "198.51.100.102",
+                "netmask": "255.255.255.0",
+                "gateway": "203.0.113.2",
+                "dns_server": "203.0.113.55"
+              },
+              "reboot_required": true
+            }
+          ],
+          "interface_configuration_modes": {
+            "primary": [
+              "dhcp",
+              "static"
+            ],
+            "secondary": [
+              "dhcp",
+              "static"
+            ]
+          },
+          "redundancy": {
+            "current": "redundant",
+            "configured": "switched",
+            "supported": [
+              "switched",
+              "redundant"
+            ],
+            "reboot_required": true
+          },
+          "link_speed_mbps": 1000,
+          "reboot_required": true
+        },
+        "sha256": "bbcba51c33bdd046f490b59d0a4659c2d00fb2a215f7c5ef4aca42d103ed8db8"
+      },
+      "after": {
+        "source_artifact": "secondary-fresh-readback.json",
+        "source_sha256": "11a8651c94d492484e64acbcaabca9675e9110158ed722877fe678542cc44c8c",
+        "transformation": "Device key, MAC and IPv4 addresses replaced with synthetic values; other fields preserved; digest uses sorted compact JSON",
+        "json": {
+          "device": "test-wing",
+          "interfaces": [
+            {
+              "interface": "primary",
+              "mode": "dynamic",
+              "mac_address": "02:00:00:00:00:10",
+              "ip_address": "192.0.2.47",
+              "netmask": "255.255.255.0",
+              "gateway": "192.0.2.1",
+              "dns_server": "192.0.2.1",
+              "configured": {
+                "mode": "dynamic"
+              },
+              "reboot_required": false
+            },
+            {
+              "interface": "secondary",
+              "mode": "dynamic",
+              "mac_address": "02:00:00:00:00:11",
+              "ip_address": "198.51.100.227",
+              "netmask": "255.255.0.0",
+              "configured": {
+                "mode": "dynamic"
+              },
+              "reboot_required": false
+            }
+          ],
+          "interface_configuration_modes": {
+            "primary": [
+              "dhcp",
+              "static"
+            ],
+            "secondary": [
+              "dhcp",
+              "static"
+            ]
+          },
+          "redundancy": {
+            "current": "redundant",
+            "configured": "switched",
+            "supported": [
+              "switched",
+              "redundant"
+            ],
+            "reboot_required": true
+          },
+          "link_speed_mbps": 1000,
+          "reboot_required": true
+        },
+        "sha256": "fe175a63b0de4759b7c99c3c86a6544abb3af4c93a0aa48f67a2d32c6141d151"
+      }
+    }
+  }
+}

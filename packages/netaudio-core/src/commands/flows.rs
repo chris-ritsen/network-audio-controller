@@ -201,11 +201,18 @@ pub fn build_query_receiver_flow_status(
     )
 }
 
-pub fn build_set_receiver_channel_name_2809(
+pub fn build_set_receiver_channel_name_for_protocol(
+    protocol_id: u16,
     channel_number: u16,
     name: &str,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    if !matches!(
+        protocol_id,
+        PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F
+    ) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
     if channel_number == 0 {
         return Err(NetaudioError::InvalidChannel);
     }
@@ -222,7 +229,7 @@ pub fn build_set_receiver_channel_name_2809(
     body.push(0);
 
     arc_packet_with_reserved_word(
-        PROTOCOL_ARC_2809,
+        protocol_id,
         OPCODE_SET_RECEIVER_CHANNEL_NAME_2809,
         &body,
         transaction_id,

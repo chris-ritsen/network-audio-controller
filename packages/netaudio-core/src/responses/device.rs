@@ -388,6 +388,7 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
                 | OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
                 | OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809
                 | OPCODE_SET_RECEIVER_CHANNEL_NAME_2809
+                | OPCODE_TX_CHANNEL_NAME_SET
                 | crate::commands::OPCODE_MODERN_ARC_SUBSCRIPTION
         ),
         _ => false,

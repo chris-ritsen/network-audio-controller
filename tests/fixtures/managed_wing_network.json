@@ -1,0 +1,21 @@
+{
+  "source": {
+    "run": "wing-network-20260908.f6b9lno4",
+    "artifact": "interface-frame-4.bin",
+    "scope": "Disposable Wing VM; DDM Controller service response to one interface query",
+    "start": "2026-09-09T00:37:19.248425+00:00",
+    "end": "2026-09-09T00:37:31.792694+00:00",
+    "sha256": "f240a6e4bc7664cfb6eda6223f80f6f090aa6d9158659fb2c082f5b9c7beb94b",
+    "allowed_evidence": [
+      "ordinary network requests and responses"
+    ],
+    "excluded_evidence": [
+      "authentication frames",
+      "proprietary static contents",
+      "runtime memory"
+    ],
+    "transformation": "Same-length replacement of device name, primary and secondary interface identities, IP addresses and gateway/DNS addresses with synthetic test values; other bytes preserved"
+  },
+  "packet_hex": "b91a372500000002000000d000180001100003080841ffffffff0000084001061834000a00b820030004000c00000000009400240002001800000000746573742d756e6974303100ffff009401a10000020000fffe000010417564696e617465073d00110000000000020001000003e80001020000000010c000020affffff00c0000201c0000201000000000000020000000011c633640affff000000000000000000000018004c00030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "sha256": "c5100dee1a1982d2628f6680e92fa8c450b2cb47617b9f8c11400843e1c46e98"
+}

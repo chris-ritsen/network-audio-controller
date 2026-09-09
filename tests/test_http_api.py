@@ -795,6 +795,7 @@ class TestMutationVerification:
             "success": True,
             "reboot_required": False,
             "interfaces": [{"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}}],
+            "interface_configuration_modes": {"primary": []},
             "redundancy": None,
             "link_speed_mbps": None,
         }
@@ -815,6 +816,7 @@ class TestMutationVerification:
             "success": True,
             "reboot_required": True,
             "interfaces": [{"interface": "primary", "mode": "static", "configured": {"mode": "dynamic"}}],
+            "interface_configuration_modes": {"primary": []},
             "redundancy": None,
             "link_speed_mbps": None,
         }
@@ -823,23 +825,25 @@ class TestMutationVerification:
 class TestDeviceLookup:
     def test_managed_inventory_record_is_rehydrated_with_exact_ddm_context(self):
         http_server = make_http_server()
-        http_server.managed_inventory = SimpleNamespace(enabled=True)
-        http_server._serialized_devices = MagicMock(
-            return_value={
-                "ddm:manager:domain-id:device-id": {
-                    "server_name": "ddm:manager:domain-id:device-id",
-                    "name": "Managed Device",
-                    "online": True,
-                    "ipv4": "None",
-                    "management_state": "managed",
-                    "ddm_enrolment_state": "ENROLLED",
-                    "ddm_device_id": "device-id",
-                    "ddm_server_profile": "manager",
-                    "ddm_context": "main",
-                    "ddm_domain_id": "domain-id",
-                    "direct_control_available": False,
+        http_server.managed_inventory = SimpleNamespace(
+            enabled=True,
+            serialize_devices=MagicMock(
+                return_value={
+                    "ddm:manager:domain-id:device-id": {
+                        "server_name": "ddm:manager:domain-id:device-id",
+                        "name": "Managed Device",
+                        "online": True,
+                        "ipv4": "None",
+                        "management_state": "managed",
+                        "ddm_enrolment_state": "ENROLLED",
+                        "ddm_device_id": "device-id",
+                        "ddm_server_profile": "manager",
+                        "ddm_context": "main",
+                        "ddm_domain_id": "domain-id",
+                        "direct_control_available": False,
+                    }
                 }
-            }
+            ),
         )
 
         device = http_server._find_device("device-id")
@@ -851,6 +855,9 @@ class TestDeviceLookup:
         assert device.ddm_server_profile == "manager"
         assert device.ddm_context == "main"
         assert device.ddm_domain_id == "domain-id"
+        device.configured_latency = 2.0
+        assert http_server._find_device("device-id") is device
+        assert http_server._serialized_devices()[device.server_name]["configured_latency_ms"] == 2.0
 
     def test_duplicate_direct_ip_address_is_not_an_implicit_device_selection(self):
         first = make_device(server_name="first", name="First")
@@ -871,6 +878,7 @@ class TestDeviceLookup:
         assert body == {
             "device": "dev1",
             "interfaces": [{"mode": "dynamic", "ip_address": "192.168.1.50"}],
+            "interface_configuration_modes": {},
             "link_speed_mbps": 100,
             "reboot_required": False,
             "redundancy": None,
@@ -974,7 +982,7 @@ class TestRenameReset:
 
         assert status == 409
         assert body["result_code"] == 0x0600
-        assert "0x0600" in body["error"]
+        assert body["error"] == "device rejected device name change"
 
     @pytest.mark.asyncio
     async def test_name_reset_timeout_is_not_reported_as_success(self):
@@ -997,3 +1005,26 @@ class TestRenameReset:
 
         assert status == 500
         assert "invalid device response" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_latency_write_verifies_configured_value_when_active_latency_differs():
+    server = make_http_server({"dev1": make_device()})
+    server.application.set_latency.return_value = bytes.fromhex("27ff000a000011010001")
+    server.application.get_latency_settings.return_value = {
+        "configured_latency_ns": 1000000,
+        "active_latency_ns": 250000,
+    }
+    status, response = await post(server, "/set-latency", {"device": "dev1", "latency": 1.0})
+    assert status == 200
+    assert response == {"success": True}
+
+
+@pytest.mark.asyncio
+async def test_latency_write_requires_configured_readback():
+    server = make_http_server({"dev1": make_device()})
+    server.application.set_latency.return_value = bytes.fromhex("27ff000a000011010001")
+    server.application.get_latency_settings.return_value = {"active_latency_ns": 1000000}
+    status, response = await post(server, "/set-latency", {"device": "dev1", "latency": 1.0})
+    assert status == 504
+    assert "readback" in response["error"]

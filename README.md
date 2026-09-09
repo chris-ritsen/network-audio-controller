@@ -16,9 +16,16 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 #### Current
 
 - AVIO input/output gain control
+- AES67 readiness in the browser: supported and active modes, pending changes,
+  and DDM-reported RTP flow availability
 - Add/remove subscriptions
 - CLI and browser interface
 - Cross-platform daemon
+- DDM-enrolled device settings in the browser, including latency, encoding,
+  analog gain, preferred leader, network configuration, reboot, and sample-rate
+  controls for supported models
+- Primary and secondary DHCP/static network configuration on supported Wing
+  devices, through the browser, CLI and API, including DDM-managed control
 - Device lock/unlock
 - Display active subscriptions, Rx and Tx channels, devices names and
   addresses, subscription status
@@ -64,6 +71,10 @@ To open the browser interface:
 netaudio daemon start
 netaudio daemon web --open
 ```
+
+The server reports its installed version at `GET /server-info` and during
+local-network discovery. A Git revision is included when the installation
+metadata identifies a Git commit.
 
 Run tests:
 

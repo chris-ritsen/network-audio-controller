@@ -31,7 +31,9 @@ def make_application(devices):
         return None
 
     return SimpleNamespace(
+        apply_modern_arc_status_pages=AsyncMock(),
         _device_by_ip=device_by_ip,
+        _device_by_control_key=device_by_ip,
         _send_conmon_query_for_device=AsyncMock(),
         cmc=SimpleNamespace(register_device=AsyncMock()),
         devices=devices,
@@ -906,3 +908,25 @@ class TestRefreshAffectedSubscriptions:
 
         subscriber.get_rx_channels.assert_awaited_once()
         bystander.get_rx_channels.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_refresh_repopulates_media_identity_after_basic_channels():
+    from netaudio.dante.channel import DanteChannel
+
+    device = make_device()
+    channel = DanteChannel()
+    channel.number = 1
+    channel.name = "Input"
+    channel.device = device
+    channel.channel_type = "rx"
+    device.fetch_controls_data = AsyncMock(return_value={"rx_channels": {1: channel}, "tx_count": 0})
+    application = make_application({device.server_name: device})
+
+    async def enrich(target):
+        assert target.rx_channels[1] is channel
+        target.rx_channels[1].media_type_code = 3
+
+    application.apply_modern_arc_status_pages.side_effect = enrich
+    await DanteStateService(application).refetch_device_controls(device.server_name)
+    assert device.rx_channels[1].media_type_code == 3

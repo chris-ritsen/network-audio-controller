@@ -69,6 +69,14 @@ pub struct SettingsAcknowledgement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SettingsRequest {
+    pub target_selector: u16,
+    pub wrapper_id: u16,
+    pub opcode: u16,
+    pub packet_hex: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SettingsPublication {
     pub wrapper_id: u16,
     pub target_name: String,
@@ -515,19 +523,47 @@ pub fn parse_settings_acknowledgement(bytes: &[u8]) -> Option<SettingsAcknowledg
     })
 }
 
+pub fn parse_settings_request(bytes: &[u8]) -> Option<SettingsRequest> {
+    let frame = normal_record(bytes, SETTINGS_REQUEST, [0x00, 0x04, 0x00, 0x0C])?;
+    if frame.server_to_client {
+        return None;
+    }
+    let target_selector = read_u16(bytes, 24)?;
+    let wrapper_id = read_u16(bytes, WRAPPER_ID_OFFSET)?;
+    let packet_length = usize::from(read_u16(bytes, INNER_LENGTH_OFFSET)?);
+    let packet =
+        bytes.get(SETTINGS_PACKET_OFFSET..SETTINGS_PACKET_OFFSET.checked_add(packet_length)?)?;
+    let opcode = settings_opcode(packet)?;
+    // Restrict observation to the established envelope, including alignment.
+    // Authentication and unsupported record variants must never be classified
+    // as device settings requests.
+    if build_settings_request(target_selector, wrapper_id, packet)?.as_slice() != bytes {
+        return None;
+    }
+    Some(SettingsRequest {
+        target_selector,
+        wrapper_id,
+        opcode,
+        packet_hex: hexadecimal(packet),
+    })
+}
+
 pub fn parse_settings_publication(bytes: &[u8]) -> Option<SettingsPublication> {
     let frame = normal_record(bytes, SETTINGS_PUBLICATION, [0x00, 0x04, 0x00, 0x0C])?;
     if !frame.server_to_client
         || read_u16(bytes, WRAPPER_ID_OFFSET)? != 0
         || read_u16(bytes, WRAPPER_ID_OFFSET + 2)? != 0
-        || bytes.get(INNER_LENGTH_OFFSET + 2..SETTINGS_PACKET_OFFSET)?
-            != [0x00, 0x28, 0x00, 0x02, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00]
+        || bytes.get(INNER_LENGTH_OFFSET + 4..SETTINGS_PACKET_OFFSET)?
+            != [0x00, 0x02, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00]
     {
         return None;
     }
     let packet_length = usize::from(read_u16(bytes, INNER_LENGTH_OFFSET)?);
     let packet_offset = bytes.len().checked_sub(packet_length)?;
-    if packet_offset < SETTINGS_PACKET_OFFSET {
+    if packet_offset < SETTINGS_PACKET_OFFSET
+        || usize::from(read_u16(bytes, INNER_LENGTH_OFFSET + 2)?)
+            != packet_offset.checked_sub(RECORD_OFFSET)?
+    {
         return None;
     }
     let target_name_field = bytes.get(SETTINGS_PACKET_OFFSET..packet_offset)?;
@@ -838,7 +874,23 @@ mod tests {
         ));
         assert_eq!(
             build_settings_request(0, 52, &settings_packet),
-            Some(expected)
+            Some(expected.clone())
+        );
+        let parsed = parse_settings_request(&expected).unwrap();
+        assert_eq!(parsed.target_selector, 0);
+        assert_eq!(parsed.wrapper_id, 52);
+        assert_eq!(parsed.opcode, 0x1006);
+        assert_eq!(parsed.packet_hex, hexadecimal(&settings_packet));
+        let mut invalid = expected.clone();
+        invalid[50..52].copy_from_slice(&28u16.to_be_bytes());
+        assert_eq!(parse_settings_request(&invalid), None);
+        assert_eq!(
+            parse_settings_request(&expected[..expected.len() - 1]),
+            None
+        );
+        assert_eq!(
+            parse_settings_request(&build_authentication(&[b'a'; 43]).unwrap()),
+            None
         );
 
         let acknowledgement = decode(
@@ -850,6 +902,7 @@ mod tests {
             Some(SettingsAcknowledgement { wrapper_id: 45 })
         );
         assert_eq!(parse_settings_publication(&acknowledgement), None);
+        assert_eq!(parse_settings_request(&acknowledgement), None);
     }
 
     #[test]
@@ -873,6 +926,28 @@ mod tests {
         let mut wrong_native_length = observed;
         wrong_native_length[48..50].copy_from_slice(&0x0020u16.to_be_bytes());
         assert_eq!(parse_settings_publication(&wrong_native_length), None);
+    }
+
+    #[test]
+    fn managed_network_publication_uses_its_declared_packet_offset() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/managed_wing_network.json"
+        ))
+        .unwrap();
+        let observed = decode(fixture["packet_hex"].as_str().unwrap());
+        let publication = parse_settings_publication(&observed).unwrap();
+        assert_eq!(publication.target_name, "test-unit01");
+        assert_eq!(publication.device_id, "020000fffe000010");
+        assert_eq!(publication.opcode, 0x0011);
+        assert_eq!(publication.packet_hex, hexadecimal(&observed[72..]));
+
+        let mut wrong_offset = observed.clone();
+        wrong_offset[50..52].copy_from_slice(&40u16.to_be_bytes());
+        assert_eq!(parse_settings_publication(&wrong_offset), None);
+        assert_eq!(
+            parse_settings_publication(&observed[..observed.len() - 1]),
+            None
+        );
     }
 
     #[test]

@@ -46,6 +46,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "dapi_settings_acknowledgement" => {
             serialize_optional(kind, crate::dapi::parse_settings_acknowledgement(bytes))
         }
+        "dapi_settings_request" => {
+            serialize_optional(kind, crate::dapi::parse_settings_request(bytes))
+        }
         "dapi_settings_publication" => {
             serialize_optional(kind, crate::dapi::parse_settings_publication(bytes))
         }

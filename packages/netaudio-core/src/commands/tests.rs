@@ -614,7 +614,7 @@ fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
 #[test]
 fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
     assert_eq!(
-        build_set_receiver_channel_name_2809(1, "01", 0x2849).unwrap(),
+        build_set_receiver_channel_name_for_protocol(PROTOCOL_ARC_2809, 1, "01", 0x2849).unwrap(),
         decode_hexadecimal("2809001d2849340100000000000000000600010100010003001a303100")
     );
     assert_eq!(
@@ -640,7 +640,7 @@ fn receiver_channel_name_2809_builder_matches_shipping_controller_requests() {
         decode_hexadecimal("28090022041120130000020100000002001800000000000074762d70726f62653200")
     );
     assert_eq!(
-        build_set_receiver_channel_name_2809(0, "rx-a", 0),
+        build_set_receiver_channel_name_for_protocol(PROTOCOL_ARC_2809, 0, "rx-a", 0),
         Err(NetaudioError::InvalidChannel)
     );
 }

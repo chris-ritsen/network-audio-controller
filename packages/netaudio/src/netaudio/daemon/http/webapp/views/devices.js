@@ -1,6 +1,8 @@
 import { Notice, OnlineState, Panel } from "../components.js";
 import { ReceiveSection, TransmitSection } from "../device/channels.js";
-import { Aes67Section, DeviceConfigSection } from "../device/config.js";
+import { Aes67Section } from "../device/aes67.js";
+import { DeviceConfigSection } from "../device/config.js";
+import { aes67Status } from "../aes67.js";
 import { isEnrolled, ManagedSection } from "../device/managed.js";
 import { NetworkSection } from "../device/network.js";
 import { LockSection } from "../device/security.js";
@@ -47,7 +49,7 @@ const INFO_COLUMNS = [
   { cell: (device) => format.clockSubdomain(device.clock_subdomain), id: "clock-subdomain", label: "Clock subdomain", defaultHidden: true },
   { cell: (device) => format.text(device.ddm_clocking_state?.locked), id: "clock-sync", label: "Clock sync", defaultHidden: true },
   { cell: (device) => device.clock_frequency_offset_parts_per_billion == null ? format.ABSENT : `${device.clock_frequency_offset_parts_per_billion} ppb`, id: "frequency-offset", label: "Frequency offset", defaultHidden: true },
-  { cell: (device) => device.aes67_current == null ? format.ABSENT : device.aes67_current ? "Enabled" : "Disabled", id: "aes67", label: "AES67", defaultHidden: true },
+  { cell: (device) => aes67Status(device).label, id: "aes67", label: "AES67", defaultHidden: true },
   { cell: (device) => format.text(device.interfaces?.[0]?.mode), id: "primary-mode", label: "Primary mode", defaultHidden: true },
   { cell: (device) => format.text(device.interfaces?.[1]?.ip_address), id: "secondary-address", label: "Secondary address", defaultHidden: true },
   { cell: (device) => {

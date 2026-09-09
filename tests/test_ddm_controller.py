@@ -300,7 +300,8 @@ def test_dapi_settings_query_requires_both_publication_and_transport_ack(monkeyp
     assert fake_socket.sent == [b"settings:0:6:settings-request"]
 
 
-def test_api_key_identify_skips_password_login(monkeypatch):
+@pytest.mark.parametrize("operation", ["identify", "reboot"])
+def test_api_key_device_operation_skips_password_login(monkeypatch, operation):
     captured = {}
 
     class API:
@@ -337,11 +338,13 @@ def test_api_key_identify_skips_password_login(monkeypatch):
                 expected_domain_id=expected_domain_id,
             )
 
+        reboot = identify
+
     monkeypatch.setattr(controller, "ControllerAPIClient", API)
     monkeypatch.setattr(controller, "DAPISession", Session)
     api_key = "00000000-0000-4000-8000-000000000000"
 
-    controller.identify_managed_device_with_api_key(
+    getattr(controller, f"{operation}_managed_device_with_api_key")(
         "ddm.example",
         api_key,
         "001dc1fffe507b8d:0",
@@ -352,6 +355,52 @@ def test_api_key_identify_skips_password_login(monkeypatch):
     assert captured["device_id"] == "001dc1fffe507b8d:0"
     assert captured["session_port"] == 8001
     assert captured["expected_domain_id"] is None
+
+
+@pytest.mark.parametrize("matching_ack", [True, False])
+def test_managed_reboot_requires_correlated_ack_without_retry(monkeypatch, matching_ack):
+    incoming = _response(b"wrong") + (_response(b"matching") if matching_ack else b"")
+    fake_socket = FakeSocket(incoming)
+    session = controller.DAPISession(
+        "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
+    )
+    session.initialized = True
+    session.domain_id = "11" * 16
+    session.target_selectors["001dc1fffe50692e"] = 2
+    monkeypatch.setattr(controller.core, "next_message_id", lambda: 71)
+
+    def parse(kind, frame):
+        if kind == "dapi_settings_acknowledgement":
+            return {"wrapper_id": 6 if frame.endswith(b"matching") else 5}
+        return None
+
+    monkeypatch.setattr(controller.core, "parse_response", parse)
+    with session:
+        if matching_ack:
+            session.reboot("credential", "001dc1fffe50692e:0", b"\x01\x02\x03\x04\x05\x06", "11" * 16)
+        else:
+            with pytest.raises(controller.DAPISessionError, match="closed"):
+                session.reboot("credential", "001dc1fffe50692e:0", b"\x01\x02\x03\x04\x05\x06", "11" * 16)
+    expected = controller.core.build_command({"command": "reboot", "host_mac": "010203040506", "message_id": 71})
+    assert fake_socket.sent == [controller.core.build_dapi_settings_request(2, 6, expected)]
+
+
+def test_managed_reboot_rejects_an_unobserved_controller_version(monkeypatch):
+    class API:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def versions(self):
+            return ("v3",)
+
+        def endpoints(self):
+            raise AssertionError("Must stop before opening a control session")
+
+    monkeypatch.setattr(controller, "ControllerAPIClient", API)
+    with pytest.raises(controller.ControllerServiceError, match="observed v2"):
+        controller.reboot_managed_device_with_api_key(
+            "ddm.example", "00000000-0000-4000-8000-000000000000", "001dc1fffe50692e", bytes(6)
+        )
 
 
 def test_dapi_session_rejects_an_authenticated_domain_other_than_the_selected_context(monkeypatch):

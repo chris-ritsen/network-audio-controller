@@ -442,7 +442,7 @@ class TestDanteNotificationService:
         assert device.tx_count_raw == 64
         assert device.rx_count == device.rx_count_raw == 1
 
-    def test_dual_interface_status_uses_28_byte_stride(self):
+    def test_dual_active_interface_status_does_not_invent_unknown_configuration(self):
         device = self._parse_dual_interface_packet(bytes.fromhex("001DC1AABBCC"))
 
         assert device.interfaces == [
@@ -450,7 +450,7 @@ class TestDanteNotificationService:
                 "mode": "dynamic",
                 "mac_address": "00:1D:C1:00:00:01",
                 "interface": "primary",
-                "configured": {"mode": "dynamic"},
+                "configured": None,
                 "reboot_required": False,
                 "ip_address": "192.168.1.10",
                 "netmask": "255.255.255.0",
@@ -461,13 +461,7 @@ class TestDanteNotificationService:
                 "mode": "static",
                 "mac_address": "00:1D:C1:AA:BB:CC",
                 "interface": "secondary",
-                "configured": {
-                    "mode": "static",
-                    "ip_address": "192.168.2.20",
-                    "netmask": "255.255.0.0",
-                    "dns_server": "8.8.8.8",
-                    "gateway": "192.168.2.1",
-                },
+                "configured": None,
                 "reboot_required": False,
                 "ip_address": "192.168.2.20",
                 "netmask": "255.255.0.0",

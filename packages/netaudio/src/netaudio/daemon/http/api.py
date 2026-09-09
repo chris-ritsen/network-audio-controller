@@ -26,6 +26,7 @@ from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
+from netaudio.daemon.server_info import server_info
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
@@ -139,6 +140,10 @@ class DaemonHTTPServer(
         refresh_discovery=None,
     ):
         self.application = application
+        self.server_info = server_info()
+        from netaudio.daemon.managed_controls import ManagedDeviceControls
+
+        self.managed_controls = ManagedDeviceControls(application)
         self.managed_inventory = managed_inventory
         self.refresh_discovery = refresh_discovery
         self._dismissed_offline_inventory: set[str] = set()
@@ -361,8 +366,10 @@ class DaemonHTTPServer(
 
     def _serialized_devices(self, context_name: str | None = None) -> dict[str, dict]:
         if self.managed_inventory is not None and self.managed_inventory.enabled:
-            records = self.managed_inventory.serialize_devices(self.application.devices)
+            records = self.managed_inventory.serialize_devices(self.managed_controls.direct_devices())
+            records = self.managed_controls.reconcile(records)
         else:
+            self.managed_controls.clear()
             records = {
                 server_name: DanteDeviceSerializer.to_json(device)
                 for server_name, device in self.application.devices.items()
@@ -606,12 +613,17 @@ class DaemonHTTPServer(
     def _build_service_info(self, addresses, name=None):
         hostname = socket.gethostname().removesuffix(".local")
         server_hostname = _bounded_service_label(hostname, SERVICE_LABEL_MAXIMUM_BYTES)
+        properties = {"version": "1"}
+        if version := self.server_info.get("version"):
+            properties["server_version"] = version
+        if revision := self.server_info.get("git_revision"):
+            properties["git_revision"] = revision
         return ServiceInfo(
             DAEMON_SERVICE_TYPE,
             name or f"{_daemon_service_instance_label(hostname)}.{DAEMON_SERVICE_TYPE}",
             addresses=[socket.inet_aton(address) for address in addresses],
             port=self.port,
-            properties={"version": "1"},
+            properties=properties,
             server=f"{server_hostname}.local.",
         )
 
@@ -692,7 +704,9 @@ class DaemonHTTPServer(
                 return
             query = parse_qs(query_string)
             context_name = next(iter(query.get("context", ())), None)
-            if route == "/settings":
+            if route == "/server-info":
+                await self._send_json(writer, self.server_info)
+            elif route == "/settings":
                 await self._handle_get_settings(writer)
             elif route == "/ddm/connections":
                 await self._handle_get_connections(writer)

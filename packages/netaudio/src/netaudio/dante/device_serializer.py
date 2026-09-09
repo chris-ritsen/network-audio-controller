@@ -227,6 +227,13 @@ class DanteDeviceSerializer:
         device.subscriptions = [
             DanteDeviceSerializer._subscription_from_json(entry) for entry in data.get("subscriptions") or []
         ]
+        for subscription in device.subscriptions:
+            channels = [
+                channel for channel in device.rx_channels.values() if channel.name == subscription.rx_channel_name
+            ]
+            if len(channels) == 1:
+                subscription.rx_channel = channels[0]
+                subscription._netaudio_rx_channel_number = channels[0].number
 
         return device
 
@@ -313,12 +320,17 @@ class DanteDeviceSerializer:
 
     @staticmethod
     def subscription_to_json(subscription):
+        from netaudio.dante.subscription import managed_subscription_status
+
+        status = DanteDeviceSerializer._status_to_json(subscription.status_code, subscription.rx_channel_status_code)
+        if status is None and subscription.ddm_status is not None:
+            status = managed_subscription_status(
+                subscription.ddm_status, subscription.ddm_status_message, subscription.ddm_summary
+            )
         as_json = {
             "rx_channel": subscription.rx_channel_name,
             "rx_device": subscription.rx_device_name,
-            "status": DanteDeviceSerializer._status_to_json(
-                subscription.status_code, subscription.rx_channel_status_code
-            ),
+            "status": status,
             "tx_channel": subscription.tx_channel_name,
             "tx_device": subscription.tx_device_name,
         }

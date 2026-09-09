@@ -115,6 +115,7 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
         set_device_name=AsyncMock(return_value=arc_success),
         set_gain_level=AsyncMock(return_value=("input", [3])),
         set_latency=AsyncMock(return_value=arc_success),
+        get_latency_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}),
         unlock_device=AsyncMock(return_value={"success": True, "lock_state": 0}),
         probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
         set_sample_rate=AsyncMock(side_effect=sample_rate_change_result),

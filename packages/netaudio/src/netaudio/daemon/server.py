@@ -171,6 +171,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._offline_failures: dict[str, int] = {}
         self._offline_candidate_since: dict[str, float] = {}
         self._last_status_field_refresh_monotonic = time.monotonic()
+        self._managed_control_refreshes: dict[str, tuple[object, float]] = {}
+        self._managed_control_tasks: dict[str, asyncio.Task] = {}
         self._dbus = None
         self._event_listeners_registered = False
 
@@ -268,6 +270,32 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             logger.warning(f"Redis publish error for {device.server_name}: {exception}")
 
     async def _on_managed_inventory_changed(self) -> None:
+        self.http_api._serialized_devices()
+        now = time.monotonic()
+        for device in list(self.devices.values()):
+            if not device.requires_managed_control or not device.online:
+                continue
+            try:
+                key = self.application._managed_control_key(device)
+            except RuntimeError:
+                continue
+            pending = self._managed_control_tasks.get(key)
+            if pending is not None and not pending.done():
+                continue
+            previous = self._managed_control_refreshes.get(key)
+            if (
+                previous is not None
+                and previous[0] is device
+                and now - previous[1] < STATUS_FIELD_REFRESH_INTERVAL_SECONDS
+            ):
+                continue
+            task = self._spawn_background(
+                self.state.refresh_device(device.server_name),
+                name=f"managed-controls:{device.server_name}",
+            )
+            if task is not None:
+                self._managed_control_tasks[key] = task
+                self._managed_control_refreshes[key] = (device, now)
         await self.http_api.publish_inventory_snapshot()
         await self._publish_managed_inventory_to_redis()
 

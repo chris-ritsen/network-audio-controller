@@ -272,12 +272,15 @@ pub fn build_enable_aes67(
     settings_packet(message_id, mac, SETTINGS_SUFFIX_AES67_WRITE, &tail)
 }
 
-pub fn build_probe_interface_status(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
+pub fn build_probe_interface_status(
+    mac: [u8; 6],
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
     let mut tail = Vec::new();
     tail.extend_from_slice(&0x0013u16.to_be_bytes());
     tail.extend_from_slice(&0x64u32.to_be_bytes());
     tail.extend(std::iter::repeat_n(0, 8));
-    settings_packet(0x0000, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
+    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
 }
 
 pub fn build_probe_link_status(mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
@@ -301,46 +304,6 @@ pub fn build_probe_switch_configuration(
     tail.extend_from_slice(&0x0015u16.to_be_bytes());
     tail.extend_from_slice(&100u32.to_be_bytes());
     tail.extend_from_slice(&0u32.to_be_bytes());
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_set_interface_dhcp(mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    if message_id == 0 {
-        return Err(NetaudioError::InvalidSequence);
-    }
-    let mut tail = Vec::new();
-    tail.extend_from_slice(&0x0013u16.to_be_bytes());
-    tail.extend_from_slice(&0x64u32.to_be_bytes());
-    tail.extend_from_slice(&[0x01, 0x1c, 0x00, 0x10]);
-    tail.extend(std::iter::repeat_n(0, 24));
-    tail.extend_from_slice(&[0x00, 0x02, 0x00, 0x00]);
-    tail.extend(std::iter::repeat_n(0, 4));
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_set_interface_static(
-    ip_address: [u8; 4],
-    netmask: [u8; 4],
-    dns_server: [u8; 4],
-    gateway: [u8; 4],
-    mac: [u8; 6],
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    if message_id == 0 {
-        return Err(NetaudioError::InvalidSequence);
-    }
-    let mut tail = Vec::new();
-    tail.extend_from_slice(&0x0013u16.to_be_bytes());
-    tail.extend_from_slice(&0x64u32.to_be_bytes());
-    tail.extend_from_slice(&[0x01, 0x1c, 0x0f, 0x10]);
-    tail.extend(std::iter::repeat_n(0, 4));
-    tail.extend_from_slice(&0x02u32.to_be_bytes());
-    tail.extend_from_slice(&ip_address);
-    tail.extend_from_slice(&netmask);
-    tail.extend_from_slice(&dns_server);
-    tail.extend_from_slice(&gateway);
-    tail.extend_from_slice(&[0x00, 0x02, 0x00, 0x00]);
-    tail.extend(std::iter::repeat_n(0, 4));
     settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
 }
 

@@ -183,7 +183,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     if fixed_records
         && matches!(
             record_protocol_identifier,
-            0x0724 | 0x0727 | 0x072e | 0x0738
+            0x0724 | 0x0727 | 0x072e | 0x0738 | 0x073d
         )
     {
         let descriptor = offset.checked_sub(4)?;
@@ -193,7 +193,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             return None;
         }
         let flags = read_u16(data, offset)?;
-        if record_protocol_identifier == 0x0724 && flags & !3 == 0 {
+        if matches!(record_protocol_identifier, 0x0724 | 0x073d) && flags & !3 == 0 {
             let mode = |mask| {
                 if flags & mask == 0 {
                     DanteRedundancyMode::Switched

@@ -138,7 +138,7 @@ class DanteCommands:
         return self._sequenced({"command": "probe_gain_level"}, host_mac)
 
     def probe_interface_status(self, host_mac=None) -> dict:
-        return self._with_host_mac({"command": "probe_interface_status"}, host_mac)
+        return self._sequenced({"command": "probe_interface_status"}, host_mac)
 
     def probe_link_status(self, host_mac=None) -> dict:
         return self._sequenced({"command": "probe_link_status"}, host_mac)
@@ -232,8 +232,15 @@ class DanteCommands:
             host_mac,
         )
 
-    def set_interface_dhcp(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "set_interface_dhcp"}, host_mac)
+    def set_interface_dhcp(self, host_mac=None, *, interface="primary", record_protocol_identifier=None) -> dict:
+        return self._sequenced(
+            {
+                "command": "set_interface_dhcp",
+                "interface": interface,
+                "record_protocol_identifier": record_protocol_identifier,
+            },
+            host_mac,
+        )
 
     def set_interface_static(
         self,
@@ -242,10 +249,15 @@ class DanteCommands:
         dns_server: str,
         gateway: str,
         host_mac=None,
+        *,
+        interface="primary",
+        record_protocol_identifier=None,
     ) -> dict:
         return self._sequenced(
             {
                 "command": "set_interface_static",
+                "interface": interface,
+                "record_protocol_identifier": record_protocol_identifier,
                 "dns": dns_server,
                 "gateway": gateway,
                 "ip": ip_address,

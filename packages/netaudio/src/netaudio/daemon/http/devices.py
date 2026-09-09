@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 
 from netaudio.common.app_config import settings as app_settings
 from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
@@ -194,7 +195,7 @@ class DaemonDeviceHandlers:
 
         try:
             interfaces = await self.application.probe_interface_status(device)
-            if device.interface_status_protocol == 0x072E:
+            if device.interface_status_protocol in {0x072E, 0x073D}:
                 await self.application.probe_switch_configuration(device)
         except (CapabilityProbeTimeout, TimeoutError):
             await self._send_json(writer, {"error": "The device did not respond to the network settings query"}, 504)
@@ -213,7 +214,7 @@ class DaemonDeviceHandlers:
         )
 
     async def _handle_get_lock_status(self, writer, device_name):
-        device = await self._require_online_device(writer, device_name)
+        device = await self._require_lock_device(writer, device_name)
         if not device:
             return
 
@@ -405,7 +406,7 @@ class DaemonDeviceHandlers:
             await self._send_json(
                 writer,
                 {
-                    "error": f"device rejected {operation} with result 0x{result_code:04X}",
+                    "error": f"device rejected {operation}",
                     "result_code": result_code,
                 },
                 409,
@@ -418,8 +419,32 @@ class DaemonDeviceHandlers:
         if not device:
             return
 
-        response = await self.application.set_latency(device, params.get("latency"))
+        latency = params.get("latency")
+        if (
+            isinstance(latency, bool)
+            or not isinstance(latency, (int, float))
+            or not math.isfinite(latency)
+            or latency < 0
+        ):
+            await self._send_json(
+                writer, {"error": "latency must be a finite, nonnegative number of milliseconds"}, 400
+            )
+            return
+        response = await self.application.set_latency(device, latency)
         if not await self._require_arc_write_success(writer, response, "latency change"):
+            return
+        settings = await self.application.get_latency_settings(device)
+        configured = settings.get("configured_latency_ns") if isinstance(settings, dict) else None
+        if configured is None:
+            await self._send_json(writer, {"error": "latency readback was unavailable; refresh before retrying"}, 504)
+            return
+        self._emit_device_updated(device)
+        if configured != round(latency * 1_000_000):
+            await self._send_json(
+                writer,
+                {"error": "latency change was not applied", "configured_latency_ms": configured / 1_000_000},
+                409,
+            )
             return
         await self._send_json(writer, {"success": True})
 
@@ -430,7 +455,7 @@ class DaemonDeviceHandlers:
         await self._handle_lock_operation(writer, params, locking=False)
 
     async def _handle_lock_operation(self, writer, params, locking):
-        device = await self._require_online_device(writer, params.get("device"))
+        device = await self._require_lock_device(writer, params.get("device"))
         if not device:
             return
 
@@ -542,11 +567,15 @@ class DaemonDeviceHandlers:
         if not device.online:
             await self._send_json(writer, {"error": "device is offline"}, 409)
             return None
-        if getattr(device, "requires_managed_control", False):
-            await self._send_json(writer, {"error": "device lock is not available through DDM"}, 409)
-            return None
-        if device.ipv4 is None:
+        if device.ipv4 is None and not getattr(device, "requires_managed_control", False):
             await self._send_json(writer, {"error": "device has no IP address"}, 409)
+            return None
+        return device
+
+    async def _require_lock_device(self, writer, device_name):
+        device = await self._require_online_device(writer, device_name)
+        if device is not None and getattr(device, "requires_managed_control", False):
+            await self._send_json(writer, {"error": "device lock is not available through DDM"}, 409)
             return None
         return device
 
