@@ -361,10 +361,14 @@ class DanteDeviceCommands:
         )
         return self._settings(spec)
 
-    def command_set_interface_dhcp(self, host_mac=None, sequence=None):
+    def command_set_interface_dhcp(
+        self, host_mac=None, sequence=None, *, interface="primary", record_protocol_identifier=None
+    ):
         spec = self._with_host_mac(
             {
                 "command": "set_interface_dhcp",
+                "interface": interface,
+                "record_protocol_identifier": record_protocol_identifier,
                 "sequence": self._next_settings_sequence() if sequence is None else sequence,
             },
             host_mac,
@@ -379,9 +383,14 @@ class DanteDeviceCommands:
         gateway,
         host_mac=None,
         sequence=None,
+        *,
+        interface="primary",
+        record_protocol_identifier=None,
     ):
         spec = {
             "command": "set_interface_static",
+            "interface": interface,
+            "record_protocol_identifier": record_protocol_identifier,
             "ip": ip_address,
             "netmask": netmask,
             "dns": dns_server,

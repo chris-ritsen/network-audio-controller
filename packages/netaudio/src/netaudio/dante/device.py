@@ -492,6 +492,8 @@ class DanteDevice:
                 self.subscriptions.remove(subscription)
                 continue
             subscription._netaudio_rx_channel_number = channel_number
+            subscription.rx_channel = channel
+            subscription.rx_device_name = self.name
             subscription.rx_channel_name = channel.name
             subscription.tx_device_name = source_device_name
             subscription.tx_channel_name = source_channel_name

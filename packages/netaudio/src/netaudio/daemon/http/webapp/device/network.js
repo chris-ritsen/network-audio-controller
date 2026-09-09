@@ -8,13 +8,14 @@ const modeLabel = (value) => ({
   dynamic: "DHCP", static: "Static",
 }[value] || "Unavailable");
 
-function InterfaceCard({ entry, requestName, onReadback }) {
+function InterfaceCard({ entry, modes, requestName, onReadback }) {
   const configured = entry.configured;
   const role = entry.interface;
   const title = role === "primary" ? "Primary" : role === "secondary" ? "Secondary" : "Network interface";
   const [mode, setMode] = useState(configured?.mode === "static" ? "static" : "dhcp");
+  const [saving, setSaving] = useState(false);
   const ip = useRef(null), mask = useRef(null), gateway = useRef(null), dns = useRef(null);
-  const editable = role === "primary" && configured != null;
+  const editable = modes.length > 0 && configured != null;
   return html`
     <section class="network-section">
       <h3 class="section-label">${title}</h3>
@@ -38,27 +39,32 @@ function InterfaceCard({ entry, requestName, onReadback }) {
       ${entry.reboot_required ? html`<p role="status">Pending network change — reboot required.</p>` : null}
       ${editable ? html`
         <${FieldRow} label="Address mode">
-          <select aria-label=${title + " address mode"} value=${mode} onChange=${(event) => setMode(event.currentTarget.value)}>
-            <option value="dhcp">DHCP</option><option value="static">Static</option>
+          <select disabled=${saving} aria-label=${title + " address mode"} value=${mode} onChange=${(event) => setMode(event.currentTarget.value)}>
+            ${modes.map((value) => html`<option value=${value}>${value === "dhcp" ? "DHCP" : "Static"}</option>`)}
           </select>
         <//>
         ${mode === "static" ? html`
-          <${FieldRow} label="IP address"><input ref=${ip} aria-label=${title + " IP address"} defaultValue=${configured.ip_address || entry.ip_address || ""} /><//>
-          <${FieldRow} label="Subnet mask"><input ref=${mask} aria-label=${title + " subnet mask"} defaultValue=${configured.netmask || entry.netmask || ""} /><//>
-          <${FieldRow} label="Gateway"><input ref=${gateway} aria-label=${title + " gateway"} defaultValue=${configured.gateway || ""} /><//>
-          <${FieldRow} label="DNS server"><input ref=${dns} aria-label=${title + " DNS server"} defaultValue=${configured.dns_server || ""} /><//>
+          <${FieldRow} label="IP address"><input disabled=${saving} ref=${ip} aria-label=${title + " IP address"} defaultValue=${configured.ip_address || entry.ip_address || ""} /><//>
+          <${FieldRow} label="Subnet mask"><input disabled=${saving} ref=${mask} aria-label=${title + " subnet mask"} defaultValue=${configured.netmask || entry.netmask || ""} /><//>
+          <${FieldRow} label="Gateway"><input disabled=${saving} ref=${gateway} aria-label=${title + " gateway"} defaultValue=${configured.gateway || ""} /><//>
+          <${FieldRow} label="DNS server"><input disabled=${saving} ref=${dns} aria-label=${title + " DNS server"} defaultValue=${configured.dns_server || ""} /><//>
         ` : null}
         <${AsyncButton} description=${"save " + title.toLowerCase() + " network settings"}
           onRun=${async () => {
-            const result = await api.setInterface({
-              device: requestName, interface: role, mode,
-              ip: ip.current?.value, netmask: mask.current?.value,
-              gateway: gateway.current?.value, dns: dns.current?.value,
-            });
-            onReadback(result);
-            return result;
+            setSaving(true);
+            try {
+              const result = await api.setInterface({
+                device: requestName, interface: role, mode,
+                ip: ip.current?.value, netmask: mask.current?.value,
+                gateway: gateway.current?.value, dns: dns.current?.value,
+              });
+              onReadback(result);
+              return result;
+            } finally {
+              setSaving(false);
+            }
           }}>Save ${title.toLowerCase()} settings<//>
-      ` : role === "secondary" ? html`<p>Secondary network settings are read-only; changing them is not yet supported.</p>` : null}
+      ` : configured ? html`<p>Network changes are unavailable for this interface.</p>` : null}
     </section>
   `;
 }
@@ -127,13 +133,14 @@ export function NetworkSection({ device }) {
   const interfaces = probe?.interfaces ?? device.interfaces ?? [];
   const status = probe?.redundancy ?? device.dante_redundancy;
   const speed = probe?.link_speed_mbps ?? device.link_speed_mbps;
+  const interfaceModes = probe?.interface_configuration_modes ?? device.interface_configuration_modes ?? {};
   return html`
     <div class="network-config">
     <${Panel} title="Network config">
       ${loadError ? html`<p role="status">The device did not respond. Showing last-known network settings.</p>` : null}
       ${speed ? html`<p>Link speed: ${speed} Mbps</p>` : null}
       ${interfaces.length ? interfaces.map((entry) => html`
-        <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} entry=${entry} requestName=${requestName} onReadback=${onReadback} />
+        <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} entry=${entry} modes=${interfaceModes[entry.interface] || []} requestName=${requestName} onReadback=${onReadback} />
       `) : html`<p>Network settings are unavailable.</p>`}
       <${Redundancy} key=${requestName + status?.configured} status=${status} requestName=${requestName} onReadback=${onReadback} />
     <//>

@@ -11,8 +11,8 @@ from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
 
 from netaudio.common.managed_api import DDMConfiguration, DDMContextConfiguration, ManagedAPIConfiguration
-from netaudio.core import subscription_state_for_identifier
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.subscription import managed_subscription_status
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
 
@@ -47,7 +47,12 @@ def _normalized_mac(value: object) -> str | None:
 
 
 def _direct_macs(record: dict) -> set[str]:
-    values: list[object] = [record.get("mac_address")]
+    identity = _normalized_mac(record.get("mac_address"))
+    if identity is not None:
+        # Distinct logical devices can report the same host network interface.
+        # Interface addresses must not override a known device identity.
+        return {identity}
+    values: list[object] = []
     for interface in record.get("interfaces") or []:
         if isinstance(interface, dict):
             values.extend((interface.get("mac_address"), interface.get("macAddress")))
@@ -69,7 +74,9 @@ def _managed_ips(device: Device) -> set[str]:
         if interface is None or not interface.address:
             continue
         try:
-            addresses.add(str(ipaddress.ip_address(interface.address)))
+            address = ipaddress.ip_address(interface.address)
+            if not address.is_unspecified:
+                addresses.add(str(address))
         except ValueError:
             continue
     return addresses
@@ -81,7 +88,15 @@ def _unique_cross_source_matches(
     candidate_sets: dict[int, set[str]] = {}
     for index, observation in enumerate(observations):
         managed_macs = _managed_macs(observation.device)
-        candidates = {key for key, record in direct.items() if managed_macs & _direct_macs(record)}
+        candidates = {
+            key
+            for key, record in direct.items()
+            if record.get("ddm_device_id") == observation.device.id
+            and record.get("ddm_server_profile") == observation.server_profile
+            and (not managed_macs or not _direct_macs(record) or managed_macs & _direct_macs(record))
+        }
+        if not candidates:
+            candidates = {key for key, record in direct.items() if managed_macs & _direct_macs(record)}
         candidate_sets[index] = candidates
 
     matches: dict[int, str] = {}
@@ -152,23 +167,6 @@ def _managed_channels(device: Device) -> dict:
     return {"receivers": receivers, "transmitters": transmitters}
 
 
-MANAGED_SUBSCRIPTION_SEVERITIES = {"connected": "ok", "error": "error", "warning": "warning"}
-
-
-def _managed_subscription_status(channel) -> dict:
-    summary = channel.summary.casefold() if isinstance(channel.summary, str) and channel.summary else None
-    state = subscription_state_for_identifier(channel.status)
-    return {
-        "code": None,
-        "detail": channel.status_message,
-        "icon": "",
-        "label": channel.summary or channel.status or "unknown",
-        "severity": MANAGED_SUBSCRIPTION_SEVERITIES.get(summary, "info"),
-        "state": state,
-        "status": channel.status,
-    }
-
-
 def _managed_subscriptions(device: Device) -> list[dict]:
     subscriptions = []
     for channel in device.rx_channels or ():
@@ -186,7 +184,7 @@ def _managed_subscriptions(device: Device) -> list[dict]:
                 "rx_device": _managed_name(device),
                 "tx_channel": channel.subscribed_channel,
                 "tx_device": channel.subscribed_device,
-                "status": _managed_subscription_status(channel),
+                "status": managed_subscription_status(channel.status, channel.status_message, channel.summary),
                 "ddm_status": channel.status,
                 "ddm_status_message": channel.status_message,
                 "ddm_summary": channel.summary,
@@ -293,6 +291,9 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
     merged = copy.deepcopy(direct_record)
+    for field in list(merged):
+        if field.startswith("ddm_"):
+            merged.pop(field)
     for key, value in managed_record.items():
         if key.startswith("ddm_") or key in {"inventory_id", "management_state", "availability_state"}:
             merged[key] = copy.deepcopy(value)
@@ -337,6 +338,10 @@ def merge_device_inventory(
         if key in matched_direct:
             continue
         annotated = copy.deepcopy(record)
+        if record.get("management_state") == "managed":
+            annotated.update(online=False, availability_state="unknown", control_transports=["ddm"])
+            merged[key] = annotated
+            continue
         annotated.update(
             {
                 "inventory_id": _first_value(sorted(_direct_macs(record))) or f"direct:{key}",
@@ -388,6 +393,7 @@ class ManagedInventoryService:
         self._contexts_by_domain = {context.domain_id: context.name for context in contexts}
         self._domains: dict[str, Domain] = {}
         self._unenrolled: dict[str, Device] = {}
+        self._superseded_enrollments: set[str] = set()
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._callback: InventoryCallback | None = None
@@ -562,7 +568,45 @@ class ManagedInventoryService:
                 self.configuration.name,
                 None,
             )
-        return tuple(observations.values())
+        # DDM can retain a disconnected enrollment under its old inventory ID
+        # after reporting the same device as unenrolled under a new ID.
+        by_primary: dict[str, list[ManagedDeviceObservation]] = {}
+        for observation in observations.values():
+            interfaces = observation.device.interfaces or ()
+            primary = _normalized_mac(interfaces[0].mac_address) if interfaces and interfaces[0] else None
+            if primary is not None:
+                by_primary.setdefault(primary, []).append(observation)
+        self._superseded_enrollments.intersection_update(
+            key
+            for key, item in observations.items()
+            if item.domain_id is not None
+            and item.device.connection is not None
+            and item.device.connection.state == "DISCONNECTED"
+        )
+        for group in by_primary.values():
+            if len(group) != 2:
+                continue
+            current = [
+                item
+                for item in group
+                if item.fresh
+                and item.domain_id is None
+                and item.device.enrolment_state == "UNENROLLED"
+                and item.device.connection is not None
+                and item.device.connection.state == "READY"
+            ]
+            if len(current) != 1:
+                continue
+            previous = next(item for item in group if item is not current[0])
+            if (
+                previous.domain_id is not None
+                and previous.device.connection is not None
+                and previous.device.connection.state == "DISCONNECTED"
+            ):
+                self._superseded_enrollments.add(previous.device.id)
+        # A rename can temporarily remove the new unenrolled record. Its absence
+        # does not make the already superseded, disconnected enrollment current.
+        return tuple(item for key, item in observations.items() if key not in self._superseded_enrollments)
 
     def serialize_devices(self, direct_devices: dict[str, object]) -> dict[str, dict]:
         return merge_device_inventory(

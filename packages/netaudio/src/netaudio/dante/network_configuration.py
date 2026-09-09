@@ -40,8 +40,6 @@ def validate_interface_configuration(mode, configuration=None):
         network.broadcast_address,
     ):
         raise ValueError("ip_address must be a host address")
-    if result["gateway"] != "0.0.0.0" and IPv4Address(result["gateway"]) not in network:
-        raise ValueError("gateway must be in the configured subnet")
     return result
 
 
@@ -49,31 +47,53 @@ async def set_interface(application, device, mode, configuration=None, *, interf
     expected = validate_interface_configuration(mode, configuration)
     if not isinstance(interface, str) or interface not in {"primary", "secondary"}:
         raise ValueError("interface must be 'primary' or 'secondary'")
-    if interface == "secondary":
-        raise NetworkConfigurationError("Secondary interface writes are not yet supported")
     async with device.topology_mutation_lock:
-        before = await application.probe_interface_status(device, timeout=timeout)
+        before = deepcopy(await application.probe_interface_status(device, timeout=timeout))
+        before_redundancy = deepcopy(device.dante_redundancy)
         selected = interface_configuration(before, interface)
-        if device.interface_status_protocol not in {0x0724, 0x0727, 0x072E} or selected.get("configured") is None:
-            raise NetworkConfigurationError("Network configuration is unavailable for this protocol")
+        if (
+            mode not in interface_configuration_modes(device.interface_status_protocol, interface)
+            or selected.get("configured") is None
+        ):
+            raise NetworkConfigurationError("Network configuration is unavailable for this interface")
         if all(selected["configured"].get(key) == value for key, value in expected.items()):
             return before
         try:
             if mode == "dhcp":
-                await application.send_set_interface_dhcp(device)
+                await application.send_set_interface_dhcp(
+                    device, interface=interface, record_protocol_identifier=device.interface_status_protocol
+                )
             else:
                 await application.send_set_interface_static(
-                    device, expected["ip_address"], expected["netmask"], expected["dns_server"], expected["gateway"]
+                    device,
+                    expected["ip_address"],
+                    expected["netmask"],
+                    expected["dns_server"],
+                    expected["gateway"],
+                    interface=interface,
+                    record_protocol_identifier=device.interface_status_protocol,
                 )
             after = await application.probe_interface_status(device, timeout=timeout)
             configured = interface_configuration(after, interface).get("configured") or {}
             if not all(configured.get(key) == value for key, value in expected.items()):
                 raise NetworkConfigurationError("configured value did not match")
+            if interface_configuration_context(before, interface) != interface_configuration_context(after, interface):
+                raise NetworkConfigurationError("Other interface settings changed during verification")
+            if device.dante_redundancy != before_redundancy:
+                raise NetworkConfigurationError("Dante redundancy changed during verification")
         except (OSError, RuntimeError, TimeoutError) as exception:
             raise NetworkConfigurationUnverified(
                 "Network change was requested, but could not be verified; no retry or reboot was sent"
             ) from exception
         return after
+
+
+def interface_configuration_context(interfaces, interface):
+    context = deepcopy(interfaces)
+    selected = interface_configuration(context, interface)
+    selected.pop("configured", None)
+    selected.pop("reboot_required", None)
+    return context
 
 
 def interface_configuration(interfaces, interface: str) -> dict:
@@ -90,11 +110,24 @@ def interface_configuration(interfaces, interface: str) -> dict:
 def network_snapshot(device) -> dict:
     return {
         "interfaces": deepcopy(device.interfaces or []),
+        "interface_configuration_modes": {
+            entry["interface"]: interface_configuration_modes(device.interface_status_protocol, entry["interface"])
+            for entry in device.interfaces or []
+            if entry.get("interface") in {"primary", "secondary"} and entry.get("configured") is not None
+        },
         "redundancy": deepcopy(device.dante_redundancy),
         "link_speed_mbps": device.link_speed_mbps,
         "reboot_required": device.interface_reboot_required
         or bool((device.dante_redundancy or {}).get("reboot_required")),
     }
+
+
+def interface_configuration_modes(record_protocol_identifier, interface):
+    if interface == "primary" and record_protocol_identifier in {0x0724, 0x0727, 0x072E, 0x0738, 0x073D}:
+        return ["dhcp", "static"]
+    if interface == "secondary" and record_protocol_identifier == 0x073D:
+        return ["dhcp", "static"]
+    return []
 
 
 def interface_redundancy_status(parsed: dict, device) -> dict | None:
@@ -117,7 +150,7 @@ def interface_redundancy_status(parsed: dict, device) -> dict | None:
 async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
     await application.probe_interface_status(device, timeout=timeout)
     protocol = device.interface_status_protocol
-    if protocol == 0x072E:
+    if protocol in {0x072E, 0x073D}:
         await application.probe_switch_configuration(device, timeout=timeout)
     elif protocol != 0x0724:
         raise NetworkConfigurationError("Dante redundancy is unavailable for this network protocol")
@@ -130,10 +163,11 @@ async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
 async def set_redundancy(application, device, mode: str, timeout: float = 2.0) -> dict:
     if not isinstance(mode, str) or mode not in {"switched", "redundant", "split_redundant"}:
         raise ValueError("mode must be switched, redundant, or split_redundant")
-    if getattr(device, "requires_managed_control", False):
-        raise NetworkConfigurationError("Dante redundancy changes through managed control are not supported")
     async with device.topology_mutation_lock:
         before = await probe_redundancy(application, device, timeout)
+        before_interfaces = deepcopy(device.interfaces)
+        if getattr(device, "requires_managed_control", False) and device.interface_status_protocol != 0x073D:
+            raise NetworkConfigurationError("Managed redundancy changes are unavailable for this network protocol")
         if mode not in before.get("supported", []):
             raise NetworkConfigurationError("The device does not support the selected Dante redundancy mode")
         if before["configured"] == mode:
@@ -149,5 +183,9 @@ async def set_redundancy(application, device, mode: str, timeout: float = 2.0) -
         if after.get("configured") != mode:
             raise NetworkConfigurationUnverified(
                 "Dante redundancy was requested, but the configured value did not match"
+            )
+        if device.interfaces != before_interfaces or after.get("current") != before.get("current"):
+            raise NetworkConfigurationUnverified(
+                "Dante redundancy was requested, but other network state changed; no retry or reboot was sent"
             )
         return after

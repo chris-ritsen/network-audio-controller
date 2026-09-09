@@ -1,0 +1,36 @@
+{
+  "evidence_class": "observed",
+  "source_run": "wing-redundancy-read-20260908.f497jlb1",
+  "source_device": {
+    "name": "wing-4e4701",
+    "product_model_name": "wing-dante64"
+  },
+  "source_artifacts": [
+    {
+      "name": "inventory-identity.json",
+      "sha256": "b42eccd5cc0d034cdbf4c65ee8c3195d8d230c45266ee1fac41cee98bb3f3dfe",
+      "observed_at": "2026-09-08T19:13:47.574351+00:00"
+    },
+    {
+      "name": "wing-service-32.bin",
+      "sha256": "ca70588c30947a3ee58e591790bfc7b0c3787560d6ce1e99320b5bacf711e099",
+      "observed_at": "2026-09-08T19:09:57.975753+00:00"
+    }
+  ],
+  "allowed_evidence": [
+    "documented Managed API inventory",
+    "authenticated Controller service announcement"
+  ],
+  "excluded_evidence": [
+    "device mutations",
+    "proprietary static inspection",
+    "runtime memory",
+    "credentials"
+  ],
+  "transformation": "Retain only the identity relationship; replace inventory ID and primary MAC with synthetic values, and apply the same MAC substitution to the announced Controller identity.",
+  "case": {
+    "inventory_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "primary_mac": "02:00:00:00:00:22",
+    "controller_id": "020000fffe000022"
+  }
+}

@@ -166,7 +166,7 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
         "interfaces": parsed["interfaces"],
         "link_speed_mbps": parsed["link_speed_mbps"],
     }
-    if parsed["record_protocol_identifier"] != 0x072E:
+    if parsed["record_protocol_identifier"] not in {0x072E, 0x073D}:
         status["dante_redundancy"] = interface_redundancy_status(parsed, device)
     return ParsedStatus(STATUS_KIND_INTERFACE, status, status)
 
