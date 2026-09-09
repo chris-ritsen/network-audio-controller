@@ -1,9 +1,13 @@
 from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.network_configuration import (
@@ -17,6 +21,19 @@ from netaudio.dante.network_configuration import (
     validate_interface_configuration,
 )
 from tests.http_api_test_support import get, make_device, make_http_server, post
+
+
+@pytest.mark.parametrize("case,pending", [("before", False), ("pending", True), ("restored", False)])
+def test_managed_network_fixture_digest_and_pending_readback(case, pending):
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "managed_network_configuration.json").read_text())
+    record = fixture["cases"][case]
+    packet = bytes.fromhex(record["hexadecimal"])
+    assert hashlib.sha256(packet).hexdigest() == record["sha256"]
+    parsed = core.parse_response("interface_status", packet)
+    primary = parsed["interfaces"][0]
+    assert primary["dns_server"] == "8.8.8.8"
+    assert primary["configured"]["dns_server"] == ("192.0.2.1" if pending else "8.8.8.8")
+    assert parsed["reboot_required"] is pending
 
 
 def network_device(protocol=0x0724):
@@ -157,13 +174,17 @@ async def test_matching_secondary_does_not_verify_primary_change():
     )
     with pytest.raises(NetworkConfigurationUnverified):
         await set_interface(application, device, "dhcp")
-    application.send_set_interface_dhcp.assert_awaited_once_with(device)
+    application.send_set_interface_dhcp.assert_awaited_once_with(
+        device, interface="primary", record_protocol_identifier=0x0724
+    )
     application.reboot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_matching_primary_pending_change_is_verified():
-    device = network_device()
+@pytest.mark.parametrize("protocol,managed", [(0x0724, False), (0x0738, True)])
+async def test_matching_primary_pending_change_is_verified(protocol, managed):
+    device = network_device(protocol)
+    device.requires_managed_control = managed
     primary = interface_state("primary", {"mode": "static"})
     pending = interface_state("primary", {"mode": "dynamic"})
     application = SimpleNamespace(
@@ -171,16 +192,77 @@ async def test_matching_primary_pending_change_is_verified():
         send_set_interface_dhcp=AsyncMock(),
     )
     assert await set_interface(application, device, "dhcp") == [pending]
-    application.send_set_interface_dhcp.assert_awaited_once_with(device)
+    application.send_set_interface_dhcp.assert_awaited_once_with(
+        device, interface="primary", record_protocol_identifier=protocol
+    )
 
 
 @pytest.mark.asyncio
-async def test_secondary_write_unavailable_without_sending_primary_command():
-    application = SimpleNamespace(probe_interface_status=AsyncMock(), send_set_interface_dhcp=AsyncMock())
-    with pytest.raises(NetworkConfigurationError, match="Secondary interface writes"):
+async def test_secondary_write_unavailable_for_an_unobserved_revision():
+    secondary = interface_state("secondary", {"mode": "static"})
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(return_value=[secondary]), send_set_interface_dhcp=AsyncMock()
+    )
+    with pytest.raises(NetworkConfigurationError, match="unavailable for this interface"):
         await set_interface(application, network_device(), "dhcp", interface="secondary")
-    application.probe_interface_status.assert_not_awaited()
+    application.probe_interface_status.assert_awaited_once()
     application.send_set_interface_dhcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["dhcp", "static"])
+async def test_secondary_configuration_reaches_the_selected_interface(mode):
+    device = network_device(0x073D)
+    fields = {
+        "mode": "static",
+        "ip_address": "198.51.100.102",
+        "netmask": "255.255.255.0",
+        "dns_server": "203.0.113.53",
+        "gateway": "203.0.113.2",
+    }
+    before = [
+        interface_state("primary", {"mode": "dynamic"}),
+        interface_state("secondary", {"mode": "static", "ip_address": "198.51.100.99"}),
+    ]
+    after = deepcopy(before)
+    after[1]["configured"] = {"mode": "dynamic"} if mode == "dhcp" else fields
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(side_effect=[before, after]),
+        send_set_interface_dhcp=AsyncMock(),
+        send_set_interface_static=AsyncMock(),
+    )
+    assert await set_interface(application, device, mode, fields, interface="secondary") == after
+    if mode == "dhcp":
+        application.send_set_interface_dhcp.assert_awaited_once_with(
+            device, interface="secondary", record_protocol_identifier=0x073D
+        )
+        application.send_set_interface_static.assert_not_awaited()
+    else:
+        application.send_set_interface_static.assert_awaited_once_with(
+            device,
+            fields["ip_address"],
+            fields["netmask"],
+            fields["dns_server"],
+            fields["gateway"],
+            interface="secondary",
+            record_protocol_identifier=0x073D,
+        )
+        application.send_set_interface_dhcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_http_secondary_configuration_preserves_target_and_reports_supported_modes():
+    device = make_device()
+    device.interface_status_protocol = 0x073D
+    server = make_http_server({"dev1": device})
+    server.application.set_interface.return_value = [
+        interface_state("primary", {"mode": "dynamic"}),
+        interface_state("secondary", {"mode": "dynamic"}),
+    ]
+    status, result = await post(server, "/interface", {"device": "dev1", "interface": "secondary", "mode": "dhcp"})
+    assert status == 200
+    assert server.application.set_interface.await_args.kwargs == {"interface": "secondary"}
+    assert result["interface_configuration_modes"] == {"primary": ["dhcp", "static"], "secondary": ["dhcp", "static"]}
 
 
 @pytest.mark.parametrize("entries", [None, b"reply", [{}], [{"interface": "primary"}] * 2])
@@ -200,13 +282,47 @@ def test_interface_selection_requires_one_identified_target(entries):
         {"netmask": "255.0.255.0"},
         {"netmask": "0.0.0.0"},
         {"netmask": "0.0.0.255"},
-        {"gateway": "198.51.100.1"},
+        {"gateway": "224.0.0.1"},
         {"dns_server": []},
     ],
 )
 def test_invalid_static_configuration_is_rejected(override):
     with pytest.raises(ValueError):
         validate_interface_configuration("static", {"ip_address": "192.0.2.34", "netmask": "255.255.255.0", **override})
+
+
+def test_controller_configured_gateway_and_dns_are_preserved_as_distinct_fields():
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "wing_network_fields.json").read_text())
+    for fields in fixture["configured_fields"].values():
+        assert validate_interface_configuration("static", fields) == fields
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["secondary", "active_address", "redundancy"])
+async def test_matching_target_does_not_hide_changes_to_other_network_state(changed):
+    device = network_device(0x073D)
+    device.dante_redundancy = redundancy_status(current="redundant", configured="redundant")
+    before = [interface_state("primary", {"mode": "static"}), interface_state("secondary", {"mode": "static"})]
+    after = deepcopy(before)
+    after[0]["configured"] = {"mode": "dynamic"}
+    if changed == "secondary":
+        after[1]["configured"] = {"mode": "dynamic"}
+    elif changed == "active_address":
+        after[0]["ip_address"] = "192.0.2.99"
+    observations = iter([before, after])
+
+    async def probe(_device, timeout):
+        result = next(observations)
+        if result is after and changed == "redundancy":
+            device.dante_redundancy["configured"] = "switched"
+        return result
+
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(side_effect=probe), send_set_interface_dhcp=AsyncMock()
+    )
+    with pytest.raises(NetworkConfigurationUnverified):
+        await set_interface(application, device, "dhcp")
+    application.send_set_interface_dhcp.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -254,3 +370,54 @@ async def test_redundancy_http_reports_failure(error, status):
     server.application.set_dante_redundancy = AsyncMock(side_effect=error)
     actual, result = await post(server, "/redundancy", {"device": "dev1", "mode": "redundant"})
     assert actual == status and result == {"error": str(error)}
+
+
+@pytest.mark.asyncio
+async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
+    device = network_device(0x073D)
+    device.requires_managed_control = True
+    application = redundancy_application(
+        device,
+        iter(
+            [
+                redundancy_status(current="redundant"),
+                redundancy_status(current="redundant", configured="redundant"),
+            ]
+        ),
+    )
+    result = await set_redundancy(application, device, "redundant")
+    assert result["configured"] == result["current"] == "redundant"
+    assert result["reboot_required"] is False
+    application._send_settings.assert_awaited_once()
+    assert application.probe_switch_configuration.await_count == 2
+    application.reboot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_other_managed_redundancy_revisions_send_nothing():
+    device = network_device(0x0724)
+    device.requires_managed_control = True
+    application = redundancy_application(device, iter([redundancy_status()]))
+    with pytest.raises(NetworkConfigurationError, match="unavailable"):
+        await set_redundancy(application, device, "redundant")
+    application._send_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["interfaces", "current"])
+async def test_redundancy_detects_unrelated_network_changes(change):
+    device = network_device(0x073D)
+    after = redundancy_status(configured="redundant")
+    if change == "current":
+        after["current"] = "redundant"
+    application = redundancy_application(device, iter([redundancy_status(), after]))
+
+    async def send(*_args):
+        if change == "interfaces":
+            device.interfaces = [{"interface": "primary", "configured": {"mode": "static"}}]
+
+    application._send_settings.side_effect = send
+    with pytest.raises(NetworkConfigurationUnverified, match="other network state changed"):
+        await set_redundancy(application, device, "redundant")
+    application._send_settings.assert_awaited_once()
+    application.reboot.assert_not_awaited()

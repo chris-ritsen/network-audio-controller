@@ -1,4 +1,5 @@
 import * as format from "./format.js";
+import { aes67Status } from "./aes67.js";
 import { signal } from "./lib/preact.js";
 
 const UNKNOWN = "Not reported";
@@ -29,7 +30,7 @@ export const DEVICE_FILTERS = [
   { id: "latency", label: "Latency", values: (device) => [number(device.latency_ms, format.latency)] },
   { id: "subscription", label: "Subscription", values: subscriptionStates },
   { id: "tx-multicast", label: "Tx multicast flows", values: (device) => [multicastState(device)] },
-  { id: "aes67", label: "AES67", values: (device) => [device.aes67_supported === false ? "Unsupported" : boolean(device.aes67_current, "Enabled", "Disabled")] },
+  { id: "aes67", label: "AES67", values: (device) => [aes67Status(device).label] },
   { id: "sample-rate-pullup", label: "Sample rate pull-up", values: (device) => {
     const raw = device.sample_rate_pullup_raw_value;
     return [Number.isInteger(raw) ? ["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"][raw] || UNKNOWN : UNKNOWN];

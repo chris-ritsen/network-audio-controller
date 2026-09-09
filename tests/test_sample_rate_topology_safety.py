@@ -418,7 +418,7 @@ async def test_preflight_accepts_proven_zero_directional_capacities(
 
 
 @pytest.mark.asyncio
-async def test_non_a32_device_is_refused_without_querying_topology(install_flow_inventory):
+async def test_unknown_device_is_refused_without_querying_topology(install_flow_inventory):
     device = FakeA32([_phase(64, [])])
     device.dante_model = "Different Device"
     install_flow_inventory(device)
@@ -426,7 +426,7 @@ async def test_non_a32_device_is_refused_without_querying_topology(install_flow_
     async def probe():
         return 48_000, [48_000, 96_000]
 
-    with pytest.raises(SampleRateTopologyUnsupportedError, match="currently proven only"):
+    with pytest.raises(SampleRateTopologyUnsupportedError, match="capacity across sample rates is unavailable"):
         await preflight_sample_rate_change(device, 96_000, probe)
 
 
@@ -493,3 +493,20 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
         ("mutate", device, 96_000),
         ("probe", device, 4.0),
     ]
+
+
+@pytest.mark.parametrize("rate", [44100, 48000])
+def test_wing_capacity_is_limited_to_observed_rates(rate):
+    from netaudio.dante.sample_rate_topology import _capacity_for_rate
+
+    device = SimpleNamespace(model="wing-dante64", dante_model="Brooklyn-3")
+    capacity = _capacity_for_rate(device, rate)
+    assert (capacity.receive_channel_count, capacity.transmit_channel_count) == (64, 64)
+
+
+@pytest.mark.parametrize("model,rate", [("wing-dante64", 96000), ("unknown", 48000)])
+def test_wing_capacity_does_not_generalize_to_unknown_variants(model, rate):
+    from netaudio.dante.sample_rate_topology import _capacity_for_rate
+
+    with pytest.raises(SampleRateTopologyUnsupportedError):
+        _capacity_for_rate(SimpleNamespace(model=model, dante_model="Brooklyn-3"), rate)

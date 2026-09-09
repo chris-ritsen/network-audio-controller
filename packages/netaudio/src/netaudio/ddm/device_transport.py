@@ -11,8 +11,10 @@ from netaudio.dante.const import PROTOCOL_ARC_2809, PROTOCOL_SETTINGS
 from netaudio.ddm.client import ManagedAPIClient
 from netaudio.ddm.controller import (
     identify_managed_device_with_api_key,
+    normalize_device_id,
     query_managed_arc_with_api_key,
     query_managed_settings_with_api_key,
+    reboot_managed_device_with_api_key,
 )
 
 
@@ -59,6 +61,7 @@ SETTINGS_RESPONSE_OPCODES = {
     "refresh_clock_status": 0x0020,
     "set_clock_source": 0x0020,
     "set_clock_subdomain": 0x0020,
+    "set_dante_redundancy": 0x0011,
     "set_encoding": 0x0082,
     "set_gain_level": 0x100B,
     "set_interface_dhcp": 0x0011,
@@ -88,6 +91,7 @@ SETTINGS_COMMANDS_REQUIRING_HOST_MAC = frozenset(
         "refresh_clock_status",
         "set_clock_source",
         "set_clock_subdomain",
+        "set_dante_redundancy",
         "set_gain_level",
         "set_interface_dhcp",
         "set_interface_static",
@@ -163,6 +167,45 @@ class ManagedDeviceTransport:
         domain_id = getattr(device, "ddm_domain_id", None)
         return {"expected_domain_id": domain_id} if isinstance(domain_id, str) and domain_id else {}
 
+    async def _control_device_id(self, device) -> str:
+        device_id = self._device_id(device)
+        try:
+            normalize_device_id(device_id)
+            return device_id
+        except ValueError:
+            if len(device_id) != 32 or any(character not in "0123456789abcdef" for character in device_id.lower()):
+                raise ManagedDeviceControlError("The device's managed Controller identity is unsupported") from None
+
+        fresh = await self.fetch_device(device, require_unique_primary=True)
+        return self._primary_control_id(fresh, device)
+
+    @staticmethod
+    def _primary_control_id(fresh, observed_device=None) -> str:
+        primary = fresh.interfaces[0] if fresh.interfaces else None
+        mac_address = getattr(primary, "mac_address", None)
+        if mac_address in (None, "") and observed_device is not None:
+            # Enrollment can omit the primary MAC while retaining the same DDM
+            # inventory ID and address. Keep the independently read interface
+            # identity only across that explicitly correlated transition.
+            observed = [
+                interface
+                for interface in getattr(observed_device, "interfaces", None) or ()
+                if isinstance(interface, dict)
+                and interface.get("interface") == "primary"
+                and interface.get("ip_address") == getattr(primary, "address", None)
+            ]
+            if len(observed) == 1 and fresh.id == getattr(observed_device, "ddm_device_id", None):
+                mac_address = observed[0].get("mac_address")
+        try:
+            mac = bytes.fromhex(mac_address.replace(":", "").replace("-", ""))
+        except (AttributeError, TypeError, ValueError):
+            mac = b""
+        if len(mac) != 6 or not any(mac) or mac[0] & 1:
+            raise ManagedDeviceControlError("The device's primary interface identity is unavailable")
+        # DDM's inventory identifier can differ from the Controller service's
+        # EUI-64 identity. Service discovery still has to announce this target.
+        return (mac[:3] + b"\xff\xfe" + mac[3:]).hex()
+
     @staticmethod
     def _host_mac() -> bytes:
         host_mac = core.host_mac()
@@ -191,8 +234,28 @@ class ManagedDeviceTransport:
         return prepared
 
     async def execute(self, device, specification: Mapping[str, Any]) -> bytes | None:
-        device_id = self._device_id(device)
+        if (
+            specification.get("command") == "set_dante_redundancy"
+            and specification.get("record_protocol_identifier") != 0x073D
+        ):
+            raise ManagedDeviceControlError("Managed redundancy changes are unavailable for this network protocol")
+        device_id = await self._control_device_id(device)
         command = specification.get("command")
+        if command == "reboot":
+            fresh = await self.fetch_device(device)
+            if fresh.capabilities is None or fresh.capabilities.can_reset is not True:
+                raise ManagedDeviceControlError("The device does not report managed reboot support")
+            if fresh.connection is None or fresh.connection.state != "READY":
+                raise ManagedDeviceControlError("The device is not ready for a managed reboot")
+            await asyncio.to_thread(
+                reboot_managed_device_with_api_key,
+                self.server,
+                self._credential(),
+                device_id,
+                self._host_mac(),
+                **self._domain_options(device),
+            )
+            return None
         if command == "identify":
             await asyncio.to_thread(
                 identify_managed_device_with_api_key,
@@ -273,7 +336,7 @@ class ManagedDeviceTransport:
             {"deviceId": self._device_id(device), "enabled": enabled},
         )
 
-    async def fetch_device(self, device):
+    async def fetch_device(self, device, *, require_unique_primary=False):
         device_id = self._device_id(device)
         result = await self.client.inventory_async()
         if result.data is None:
@@ -287,6 +350,19 @@ class ManagedDeviceTransport:
                 continue
             for candidate in domain.devices or ():
                 if candidate is not None and candidate.id == device_id:
+                    if require_unique_primary:
+                        control_id = self._primary_control_id(candidate, device)
+                        for other in domain.devices or ():
+                            if other is None or other.id == candidate.id:
+                                continue
+                            if getattr(getattr(other, "connection", None), "state", None) == "DISCONNECTED":
+                                continue
+                            try:
+                                other_control_id = self._primary_control_id(other)
+                            except ManagedDeviceControlError:
+                                continue
+                            if other_control_id == control_id:
+                                raise ManagedDeviceControlError("The device's primary interface identity is not unique")
                     return candidate
         raise ManagedDeviceControlError(f"managed device {device_id} was absent from fresh DDM inventory")
 

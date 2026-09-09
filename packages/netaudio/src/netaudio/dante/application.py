@@ -1394,13 +1394,24 @@ class DanteApplication:
                 logger.warning(f"Failed to populate {phase_tasks[task]}: {exception}")
 
     async def probe_aes67_state(self, target, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
-        return await self._probe_once(
+        status = await self._probe_once(
             "aes67",
             target,
             self.send_probe_aes67,
             timeout,
             "AES67 status",
         )
+        self._apply_aes67_readback(target, status)
+        return status
+
+    def _apply_aes67_readback(self, target, status) -> None:
+        device = target if hasattr(target, "aes67_current") else self._device_by_control_key(self._control_key(target))
+        if device is not None and status is not None:
+            apply_device_status(
+                device,
+                STATUS_KIND_AES67,
+                {"aes67_current": status[0], "aes67_configured": status[1]},
+            )
 
     async def probe_bluetooth_status(self, device, timeout: float = 2.0) -> dict:
         status = await self._probe_once(
@@ -1600,6 +1611,9 @@ class DanteApplication:
         )
 
     async def reboot(self, device, host_mac=None) -> None:
+        if getattr(device, "requires_managed_control", False):
+            await device.execute({"command": "reboot"})
+            return
         await self._send_registered_system_reset(device, self.commands.reboot, host_mac)
 
     def register_device(self, server_name: str, device) -> None:
@@ -1838,8 +1852,15 @@ class DanteApplication:
             self.commands.set_gain_level(channel_number, gain_level, device_type, host_mac),
         )
 
-    async def send_set_interface_dhcp(self, device_ip_address, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.set_interface_dhcp(host_mac))
+    async def send_set_interface_dhcp(
+        self, device_ip_address, host_mac=None, *, interface="primary", record_protocol_identifier=None
+    ) -> None:
+        await self._send_settings(
+            device_ip_address,
+            self.commands.set_interface_dhcp(
+                host_mac, interface=interface, record_protocol_identifier=record_protocol_identifier
+            ),
+        )
 
     async def send_set_interface_static(
         self,
@@ -1849,10 +1870,21 @@ class DanteApplication:
         dns_server: str,
         gateway: str,
         host_mac=None,
+        *,
+        interface="primary",
+        record_protocol_identifier=None,
     ) -> None:
         await self._send_settings(
             device_ip_address,
-            self.commands.set_interface_static(ip_address, netmask, dns_server, gateway, host_mac),
+            self.commands.set_interface_static(
+                ip_address,
+                netmask,
+                dns_server,
+                gateway,
+                host_mac,
+                interface=interface,
+                record_protocol_identifier=record_protocol_identifier,
+            ),
         )
 
     async def send_set_preferred_leader(
@@ -1878,7 +1910,9 @@ class DanteApplication:
             await self.send_enable_aes67(device, is_enabled)
             await self.send_probe_aes67(device)
 
-        return await self._mutate_and_take_result("aes67", device, mutate, timeout)
+        status = await self._mutate_and_take_result("aes67", device, mutate, timeout)
+        self._apply_aes67_readback(device, status)
+        return status
 
     async def set_aes67_multicast_prefix(self, device, prefix: str) -> str | None:
         from netaudio.dante.device import device_advertises_aes67_multicast_prefix

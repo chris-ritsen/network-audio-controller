@@ -323,3 +323,29 @@ async def test_video_source_service_attaches_without_creating_a_device(monkeypat
     assert daemon.application.media_services[service_name]["port"] == 4555
     daemon.application._attach_media_services.assert_called_once_with(device)
     daemon.application.register_device.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observed_name", ["new", "old", None, "unrelated"])
+async def test_rename_reconciliation_requires_fresh_name_and_matching_identity(observed_name):
+    devices = {}
+    for name, identity, port in [
+        ("old", "001122334455", 4440),
+        ("new", "00:11:22:33:44:55", 4440),
+        ("other", "001122334466", 4440),
+        ("logical", "001122334455", 4540),
+    ]:
+        device = DanteDevice(server_name=f"{name}.local.")
+        device.mac_address = identity
+        device.ipv4 = "192.0.2.10"
+        device.services = {f"{name}.{SERVICE_ARC}": {"type": SERVICE_ARC, "port": port}}
+        device.fetch_device_name = AsyncMock(return_value=observed_name)
+        device.update_last_seen()
+        devices[device.server_name] = device
+    daemon = _DiscoveryHarness(devices)
+    await daemon._reconcile_renamed_device(devices["new.local."])
+    expected = {"old.local.", "new.local.", "other.local.", "logical.local."}
+    if observed_name in ("old", "new"):
+        expected.remove("old.local." if observed_name == "new" else "new.local.")
+    assert set(daemon.devices) == expected
+    assert all(device.online for device in daemon.devices.values())

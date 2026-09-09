@@ -2,8 +2,8 @@
 
 ## Scope and evidence
 
-This change retains managed status in the daemon, enables the existing settings
-controls, and adds an acknowledged managed reboot request. Network configuration
+Managed status persists in the daemon across inventory polls. Device settings
+use the managed transport, including acknowledged reboot requests. Network configuration
 parsing remains in the Rust core. Allowed evidence consists of public product
 documentation, the documented Managed API, existing independent NetAudio protocol
 implementations, authenticated status replies, and bounded causal treatments on
@@ -96,12 +96,12 @@ managed-only objects; losing a manager never permits direct-control fallback.
 Discovery and periodic refresh populate settings without an open browser or a
 direct device address.
 
-Latency writes require a matching active-latency readback. Custom entry is bounded
+Latency writes require a matching configured-latency readback. Custom entry is bounded
 by the reported range, which does not guarantee every intermediate value is
 accepted. Pull-up choices use tuning labels and omit unknown values.
 
-Sample-rate preflight supports the identified analog AVIO models and the existing
-A32 profile. Managed snapshots validate fresh channel counts and typed modern
+Sample-rate preflight supports the identified analog AVIO models, the A32
+profile, and Wing at its observed 44.1 and 48 kHz rates. Managed snapshots validate fresh channel counts and typed modern
 flow records. Zero channel counts avoid querying nonexistent directions. Modern
 records do not report frames per packet, so it remains unknown. Changes verify
 rate, capacity, configured subscriptions and retained flow membership. Automatic
@@ -120,7 +120,7 @@ require matching configured readback without automatically rebooting. Unknown
 revisions do not invent configured values. Active and pending settings are shown
 separately, including whether the observed change requires reboot.
 
-Managed device lock, multicast allocation, detailed metering and redundancy
-changes retain their unsupported paths. AES67 and clock-domain configuration
-follow DDM's domain-level rules. This is not a claim that every managed operation
-or every Dante device model has complete parity.
+Managed device lock, multicast allocation and detailed metering remain
+unavailable. Managed redundancy writes support the observed Wing revision; see
+[network configuration](network-configuration.md). AES67 and clock-domain
+configuration follow DDM's domain-level rules.

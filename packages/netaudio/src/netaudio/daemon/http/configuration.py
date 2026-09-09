@@ -578,11 +578,7 @@ class DaemonConfigurationHandlers:
                 ]
                 record = matches[0] if len(matches) == 1 else None
             if record is not None and record.get("management_state") == "managed":
-                from netaudio.dante.device_serializer import DanteDeviceSerializer
-
-                device = DanteDeviceSerializer.device_from_json(record)
-                device._app = self.application
-                return device
+                return self.application.devices.get(record["server_name"])
 
         device = self.application.devices.get(name)
         if device:
