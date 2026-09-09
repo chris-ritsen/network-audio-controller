@@ -230,10 +230,15 @@ pub fn build_set_channel_name_for_protocol(
                 transaction_id,
             )
         }
-        (PROTOCOL_ARC_2809, ChannelType::Rx) => {
-            build_set_receiver_channel_name_2809(channel_number, name, transaction_id)
+        (PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F, ChannelType::Rx) => {
+            build_set_receiver_channel_name_for_protocol(
+                protocol_id,
+                channel_number,
+                name,
+                transaction_id,
+            )
         }
-        (PROTOCOL_ARC_2809, ChannelType::Tx) => {
+        (PROTOCOL_ARC_2809 | crate::protocol::PROTOCOL_ARC_280F, ChannelType::Tx) => {
             let channel_number =
                 u8::try_from(channel_number).map_err(|_| NetaudioError::InvalidChannel)?;
             build_control_packet_for_protocol(

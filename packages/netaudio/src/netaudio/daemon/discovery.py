@@ -95,6 +95,10 @@ class DanteDiscoveryMixin:
             if await self._refresh_arc_device(device, service.device_key, is_new):
                 device_changed = True
 
+            await self._reconcile_renamed_device(device)
+            if self.devices.get(service.device_key) is not device:
+                return
+
             if device_changed:
                 self._emit_device_updated(device, service.device_key)
 
@@ -260,6 +264,42 @@ class DanteDiscoveryMixin:
                 name=f"delayed-controls:{server_name}",
             )
         return device_changed
+
+    async def _reconcile_renamed_device(self, device):
+        if device.requires_managed_control or not device.mac_address or not self.application.get_arc_port(device):
+            return
+        identity = device.mac_address.replace(":", "").lower()
+        matches = [
+            candidate
+            for candidate in self.devices.values()
+            if not candidate.requires_managed_control
+            and candidate.mac_address
+            and candidate.mac_address.replace(":", "").lower() == identity
+            and candidate.ipv4 == device.ipv4
+            and self.application.get_arc_port(candidate) == self.application.get_arc_port(device)
+        ]
+        if len(matches) < 2:
+            return
+        # An address answering probes cannot establish that an old mDNS name
+        # still exists. Confirm the current name before retiring its old entry.
+        name = await device.fetch_device_name()
+        if not name:
+            return
+        canonical = [
+            candidate for candidate in matches if candidate.server_name.casefold() == f"{name}.local.".casefold()
+        ]
+        if len(canonical) != 1:
+            return
+        canonical[0].name = name
+        for candidate in matches:
+            if candidate is canonical[0]:
+                continue
+            key = candidate.server_name
+            if self.devices.get(key) is not candidate:
+                continue
+            self.clear_offline_candidate(key)
+            self.application.mark_device_offline(key)
+            self.devices.pop(key, None)
 
     def _emit_device_updated(self, device, server_name):
         self.application.dispatcher.emit_nowait(

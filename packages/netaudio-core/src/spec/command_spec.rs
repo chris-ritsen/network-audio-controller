@@ -185,6 +185,8 @@ pub(super) enum CommandSpec {
     ProbeInterfaceStatus {
         #[serde(default)]
         host_mac: Option<String>,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
     },
     ProbeLinkStatus {
         #[serde(default)]
@@ -384,6 +386,10 @@ pub(super) enum CommandSpec {
     },
     SetInterfaceDhcp {
         #[serde(default)]
+        interface: crate::network::NetworkInterface,
+        #[serde(default)]
+        record_protocol_identifier: Option<u16>,
+        #[serde(default)]
         host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
@@ -397,6 +403,10 @@ pub(super) enum CommandSpec {
         message_id: u16,
     },
     SetInterfaceStatic {
+        #[serde(default)]
+        interface: crate::network::NetworkInterface,
+        #[serde(default)]
+        record_protocol_identifier: Option<u16>,
         #[serde(default)]
         dns: String,
         #[serde(default)]
@@ -515,6 +525,7 @@ impl CommandSpec {
             | CommandSpec::ProbeClearConfigurationStatus { message_id, .. }
             | CommandSpec::ProbeEncoding { message_id, .. }
             | CommandSpec::ProbeGainLevel { message_id, .. }
+            | CommandSpec::ProbeInterfaceStatus { message_id, .. }
             | CommandSpec::ProbeLinkStatus { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
             | CommandSpec::ProbePreferredLeader { message_id, .. }
@@ -561,7 +572,6 @@ impl CommandSpec {
             | CommandSpec::DanteModel { .. }
             | CommandSpec::MakeModel { .. }
             | CommandSpec::MeteringStop { .. }
-            | CommandSpec::ProbeInterfaceStatus { .. }
             | CommandSpec::VolumeStop { .. } => 0,
         }
     }
@@ -592,6 +602,7 @@ impl CommandSpec {
             | CommandSpec::ProbeClearConfigurationStatus { message_id, .. }
             | CommandSpec::ProbeEncoding { message_id, .. }
             | CommandSpec::ProbeGainLevel { message_id, .. }
+            | CommandSpec::ProbeInterfaceStatus { message_id, .. }
             | CommandSpec::ProbeLinkStatus { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
             | CommandSpec::ProbePreferredLeader { message_id, .. }
@@ -638,7 +649,6 @@ impl CommandSpec {
             | CommandSpec::DanteModel { .. }
             | CommandSpec::MakeModel { .. }
             | CommandSpec::MeteringStop { .. }
-            | CommandSpec::ProbeInterfaceStatus { .. }
             | CommandSpec::VolumeStop { .. } => None,
         }
     }
@@ -863,9 +873,13 @@ pub(super) fn build_command(
             host_mac,
             message_id,
         } => commands::build_probe_gain_level(parse_mac(&host_mac, default_host_mac)?, message_id)?,
-        CommandSpec::ProbeInterfaceStatus { host_mac } => {
-            commands::build_probe_interface_status(parse_mac(&host_mac, default_host_mac)?)?
-        }
+        CommandSpec::ProbeInterfaceStatus {
+            host_mac,
+            message_id,
+        } => commands::build_probe_interface_status(
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
+        )?,
         CommandSpec::ProbeLinkStatus {
             host_mac,
             message_id,
@@ -1089,12 +1103,19 @@ pub(super) fn build_command(
             message_id,
         )?,
         CommandSpec::SetInterfaceDhcp {
+            interface,
+            record_protocol_identifier,
             host_mac,
             message_id,
-        } => {
-            commands::build_set_interface_dhcp(parse_mac(&host_mac, default_host_mac)?, message_id)?
-        }
+        } => commands::build_set_interface_dhcp(
+            interface,
+            record_protocol_identifier,
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
+        )?,
         CommandSpec::SetInterfaceStatic {
+            interface,
+            record_protocol_identifier,
             ip,
             netmask,
             dns,
@@ -1102,10 +1123,14 @@ pub(super) fn build_command(
             host_mac,
             message_id,
         } => commands::build_set_interface_static(
-            parse_required_ipv4_address(&ip)?,
-            parse_required_ipv4_address(&netmask)?,
-            parse_optional_ipv4_address(&dns)?,
-            parse_optional_ipv4_address(&gateway)?,
+            crate::network::StaticInterfaceConfiguration {
+                ip_address: parse_required_ipv4_address(&ip)?,
+                netmask: parse_required_ipv4_address(&netmask)?,
+                dns_server: parse_optional_ipv4_address(&dns)?,
+                gateway: parse_optional_ipv4_address(&gateway)?,
+            },
+            interface,
+            record_protocol_identifier,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,

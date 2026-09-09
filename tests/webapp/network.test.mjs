@@ -46,7 +46,7 @@ test("redundancy selection submits immediately and blocks overlapping writes", a
 
 test("network panel separates primary and secondary active/configured values", () => {
   const device = {
-    server_name: "device.local.", interfaces: [
+    server_name: "device.local.", interface_configuration_modes: { primary: ["dhcp", "static"] }, interfaces: [
       { interface: "primary", mode: "static", ip_address: "192.0.2.34", netmask: "255.255.255.0",
         configured: { mode: "static", ip_address: "192.0.2.34", netmask: "255.255.255.0" } },
       { interface: "secondary", mode: "dynamic", ip_address: "198.51.100.62", netmask: "255.255.0.0",
@@ -59,7 +59,7 @@ test("network panel separates primary and secondary active/configured values", (
   for (const value of ["Primary", "Secondary", "192.0.2.34", "192.0.2.244", "198.51.100.62", "Switched", "Redundant", "Configured address"]) {
     assert.ok(markup.includes(value), value);
   }
-  assert.match(markup, /Secondary network settings are read-only/);
+  assert.match(markup, /Network changes are unavailable for this interface/);
   assert.match(markup, /Pending network change — reboot required/);
   assert.match(markup, /Pending redundancy change — reboot required/);
   assert.match(markup, />Save primary settings/);
@@ -67,6 +67,43 @@ test("network panel separates primary and secondary active/configured values", (
   assert.match(markup, /<select aria-label="Dante Redundancy"/);
   assert.doesNotMatch(markup, /type="checkbox"|disabled[^>]*>Save|<button[^>]*>[^<]*[Rr]eboot/);
   assert.doesNotMatch(markup, /0x|pending_config|protocol|unknown\(/);
+});
+
+test("supported secondary configuration submits distinct DNS and gateway fields", async () => {
+  const previousVNode = options.vnode;
+  const previousSet = api.setInterface;
+  let save;
+  let request;
+  options.vnode = (vnode) => {
+    previousVNode?.(vnode);
+    if (vnode.props?.description === "save secondary network settings") save = vnode.props.onRun;
+    if (vnode.type === "input" && vnode.props["aria-label"]?.startsWith("Secondary ")) {
+      vnode.ref.current = { value: vnode.props.defaultValue };
+    }
+  };
+  api.setInterface = async (value) => { request = value; return { interfaces: [] }; };
+  try {
+    const markup = render(h(NetworkSection, { device: {
+      server_name: "wing.local.",
+      interface_configuration_modes: { secondary: ["dhcp", "static"] },
+      interfaces: [{ interface: "secondary", mode: "dynamic", configured: {
+        mode: "static", ip_address: "198.51.100.102", netmask: "255.255.255.0",
+        gateway: "203.0.113.2", dns_server: "203.0.113.53",
+      } }],
+    } }));
+    assert.match(markup, /Save secondary settings/);
+    assert.match(markup, /Secondary address mode/);
+    assert.equal(typeof save, "function");
+    await save();
+    assert.equal(request.interface, "secondary");
+    assert.equal(request.gateway, "203.0.113.2");
+    assert.equal(request.dns, "203.0.113.53");
+    assert.equal(request.ip, "198.51.100.102");
+    assert.equal(request.mode, "static");
+  } finally {
+    options.vnode = previousVNode;
+    api.setInterface = previousSet;
+  }
 });
 
 test("unknown network state has no refresh or guessed write controls", () => {

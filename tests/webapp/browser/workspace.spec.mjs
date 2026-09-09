@@ -63,6 +63,7 @@ test("matrix collapse marks are limited to device intersections and hover colors
       row: pixel(g + c + 6, h + 6), column: pixel(g + 6, h + c + 6),
       header: pixel(g + 6, h - 40), gutter: pixel(5, h + 6) };
   });
+  await expect.poll(async () => (await sample()).mark[3]).toBe(255);
   const before = await sample();
   expect(before.mark).not.toEqual(before.blank);
   expect(before.group).toEqual(before.groupBlank);

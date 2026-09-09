@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -57,6 +59,102 @@ def test_enrolment_metadata_selects_managed_control_even_when_direct_ip_exists()
     enrolled_without_id = _device(enrolled=True, direct=True)
     enrolled_without_id.ddm_device_id = None
     assert device_transport.device_requires_managed_control(enrolled_without_id) is True
+
+
+def _inventory_client(device, interfaces, *, other_devices=()):
+    candidate = SimpleNamespace(id=device.ddm_device_id, interfaces=interfaces)
+    domain = SimpleNamespace(id=device.ddm_domain_id, devices=(candidate, *other_devices))
+    client = FakeClient()
+    client.inventory_async = AsyncMock(return_value=SimpleNamespace(data=SimpleNamespace(domains=(domain,)), errors=()))
+    return client
+
+
+@pytest.mark.asyncio
+async def test_inventory_identifier_uses_fresh_primary_controller_identity_only_for_native_commands(monkeypatch):
+    observed = json.loads((Path(__file__).parent / "fixtures" / "managed_control_identity.json").read_text())["case"]
+    device = _device()
+    device.ddm_device_id = observed["inventory_id"]
+    device.mac_address = "02:00:00:00:00:99"
+    client = _inventory_client(device, (SimpleNamespace(mac_address=observed["primary_mac"]),))
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=client)
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+    monkeypatch.setattr(transport, "_host_mac", lambda: bytes(6))
+    await transport.execute(device, {"command": "identify"})
+    identify.assert_called_once_with(
+        "ddm.example", API_KEY, observed["controller_id"], bytes(6), expected_domain_id=device.ddm_domain_id
+    )
+    client.inventory_async.assert_awaited_once()
+
+    client.result = SimpleNamespace(data={"DeviceNameSet": {"ok": True}}, errors=())
+    await transport.set_device_name(device, "Studio adapter")
+    assert client.calls[0][1]["input"]["deviceId"] == observed["inventory_id"]
+    assert device.ddm_device_id == observed["inventory_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("primary", [None, "", "00:00:00:00:00:00", "01:00:00:00:00:22", "invalid"])
+async def test_inventory_identifier_rejects_missing_or_invalid_primary_without_using_secondary(monkeypatch, primary):
+    device = _device()
+    device.ddm_device_id = "a" * 32
+    client = _inventory_client(
+        device, (SimpleNamespace(mac_address=primary), SimpleNamespace(mac_address="02:00:00:00:00:22"))
+    )
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=client)
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="primary interface identity is unavailable"):
+        await transport.execute(device, {"command": "identify"})
+    identify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inventory_identifier_rejects_ambiguous_primary_interfaces():
+    device = _device()
+    device.ddm_device_id = "a" * 32
+    interfaces = (SimpleNamespace(mac_address="02:00:00:00:00:22"),)
+    other = SimpleNamespace(id="b" * 32, interfaces=interfaces)
+    client = _inventory_client(device, interfaces, other_devices=(other,))
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=client)
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="identity is not unique"):
+        await transport.execute(device, {"command": "identify"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("can_reset,state", [(True, "READY"), (False, "READY"), (None, "READY"), (True, "NOT_READY")])
+async def test_managed_reboot_requires_fresh_capability_and_ready_state(monkeypatch, can_reset, state):
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
+    device = _device()
+    transport.fetch_device = AsyncMock(
+        return_value=SimpleNamespace(
+            capabilities=SimpleNamespace(can_reset=can_reset), connection=SimpleNamespace(state=state)
+        )
+    )
+    reboot = MagicMock()
+    monkeypatch.setattr(device_transport, "reboot_managed_device_with_api_key", reboot)
+    monkeypatch.setattr(transport, "_host_mac", lambda: bytes(6))
+    if can_reset is True and state == "READY":
+        await transport.execute(device, {"command": "reboot"})
+        reboot.assert_called_once_with(
+            "ddm.example", API_KEY, device.ddm_device_id, bytes(6), expected_domain_id=device.ddm_domain_id
+        )
+    else:
+        with pytest.raises(device_transport.ManagedDeviceControlError):
+            await transport.execute(device, {"command": "reboot"})
+        reboot.assert_not_called()
+    transport.fetch_device.assert_awaited_once_with(device)
+
+
+@pytest.mark.asyncio
+async def test_application_reboots_enrolled_device_without_direct_registration():
+    transport = SimpleNamespace(execute=AsyncMock())
+    application = DanteApplication(managed_transport=transport)
+    device = _device()
+    device._app = application
+    application.cmc.require_registration = AsyncMock()
+    await application.reboot(device)
+    transport.execute.assert_awaited_once_with(device, {"command": "reboot"})
+    application.cmc.require_registration.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -531,3 +629,64 @@ async def test_managed_subscription_application_path_skips_direct_arc_and_multic
 
     assert result == accepted
     managed.set_subscriptions.assert_awaited_once_with(device, [(1, "Left", "stagebox")])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_address", [True, False])
+async def test_enrollment_retains_correlated_primary_interface_when_ddm_omits_mac(monkeypatch, same_address):
+    device = _device()
+    device.ddm_device_id = "a" * 32
+    device.interfaces = [{"interface": "primary", "ip_address": "192.0.2.10", "mac_address": "02:00:00:00:00:22"}]
+    client = _inventory_client(
+        device, (SimpleNamespace(mac_address="", address="192.0.2.10" if same_address else "192.0.2.11"),)
+    )
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=client)
+    identify = MagicMock()
+    monkeypatch.setattr(device_transport, "identify_managed_device_with_api_key", identify)
+    monkeypatch.setattr(device_transport.ManagedDeviceTransport, "_host_mac", lambda self: bytes(6))
+    if same_address:
+        await transport.execute(device, {"command": "identify"})
+        assert identify.call_args.args[2] == "020000fffe000022"
+    else:
+        with pytest.raises(device_transport.ManagedDeviceControlError, match="identity is unavailable"):
+            await transport.execute(device, {"command": "identify"})
+        identify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_managed_wing_redundancy_uses_core_packet_and_interface_completion(monkeypatch):
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
+    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("020000000062"))
+    monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x426C)
+    query = MagicMock(return_value=b"verified publication")
+    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
+    result = await transport.execute(
+        _device(),
+        {
+            "command": "set_dante_redundancy",
+            "record_protocol_identifier": 0x073D,
+            "mode": "redundant",
+        },
+    )
+    assert result == b"verified publication"
+    packet, completion = query.call_args.args[3:5]
+    assert packet == bytes.fromhex("ffff0028426c00000200000000620000417564696e617465073a0013000000640000000000010001")
+    assert completion == 0x0011
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("protocol", [None, 0x0724, 0x072E, 0x0777])
+async def test_managed_redundancy_unknown_transport_variants_fail_before_io(monkeypatch, protocol):
+    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
+    identity = AsyncMock()
+    monkeypatch.setattr(transport, "_control_device_id", identity)
+    with pytest.raises(device_transport.ManagedDeviceControlError, match="unavailable"):
+        await transport.execute(
+            _device(),
+            {
+                "command": "set_dante_redundancy",
+                "record_protocol_identifier": protocol,
+                "mode": "redundant",
+            },
+        )
+    identity.assert_not_awaited()
