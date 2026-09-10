@@ -5,31 +5,18 @@ from binascii import unhexlify
 from dataclasses import dataclass
 
 
-A32_LINK_STATUS_LABELS = {
+THREE_RECORD_LINK_STATUS_LABELS = {
     0: "selected_link",
     1: "switch_port_0",
     2: "switch_port_3",
 }
-A32_LINK_STATUS_POINTERS = (0x002C, 0x0044, 0x005C)
-A32_LINK_STATUS_RECORD_SIZE_BYTES = 24
+THREE_RECORD_LINK_STATUS_POINTERS = (0x002C, 0x0044, 0x005C)
+THREE_RECORD_LINK_STATUS_RECORD_SIZE_BYTES = 24
 
 
-def _is_ferrofish_a32(device) -> bool:
-    if device is None:
-        return False
-    model_values = (
-        getattr(device, "dante_model", None),
-        getattr(device, "model", None),
-        getattr(device, "board_name", None),
-    )
-    return any(
-        isinstance(value, str) and value.casefold().startswith("a32 dante ad/da converter") for value in model_values
-    )
-
-
-def _has_exact_a32_link_status_layout(record_pointers: tuple[int, ...], parsed_records: list[dict]) -> bool:
-    return record_pointers == A32_LINK_STATUS_POINTERS and all(
-        isinstance(record, dict) and record.get("record_size_bytes") == A32_LINK_STATUS_RECORD_SIZE_BYTES
+def _has_three_record_link_status_layout(record_pointers: tuple[int, ...], parsed_records: list[dict]) -> bool:
+    return record_pointers == THREE_RECORD_LINK_STATUS_POINTERS and all(
+        isinstance(record, dict) and record.get("record_size_bytes") == THREE_RECORD_LINK_STATUS_RECORD_SIZE_BYTES
         for record in parsed_records
     )
 
@@ -77,8 +64,8 @@ class LinkStatusObservation:
             raise ValueError("link-status record count does not match the pointer table")
 
         labels = (
-            A32_LINK_STATUS_LABELS
-            if _is_ferrofish_a32(device) and _has_exact_a32_link_status_layout(record_pointers, parsed_records)
+            THREE_RECORD_LINK_STATUS_LABELS
+            if _has_three_record_link_status_layout(record_pointers, parsed_records)
             else {}
         )
         records = []
