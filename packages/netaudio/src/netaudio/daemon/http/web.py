@@ -63,6 +63,8 @@ class DaemonWebHandlers:
             f"Content-Type: {WEB_CONTENT_TYPES[asset_path.suffix]}\r\n"
             f"Content-Length: {len(body)}\r\n"
             "Cache-Control: no-store\r\n"
+            "X-Frame-Options: DENY\r\n"
+            "Content-Security-Policy: frame-ancestors 'none'\r\n"
             "\r\n"
         ).encode()
         writer.write(header + body)

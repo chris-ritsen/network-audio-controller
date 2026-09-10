@@ -270,6 +270,7 @@ class DaemonDeviceHandlers:
             response = await self.application.add_subscriptions(device, records)
             if not await self._require_arc_write_success(writer, response, "subscription change"):
                 return
+            self.subscription_readback.request(device, records)
             await self._send_json(writer, {"success": True, "count": len(records)})
             return
 
@@ -297,6 +298,7 @@ class DaemonDeviceHandlers:
         )
         if not await self._require_arc_write_success(writer, response, "subscription change"):
             return
+        self.subscription_readback.request(device, [(rx_channel_number, tx_channel_name, tx_device_name)])
         await self._send_json(writer, {"success": True})
 
     async def _handle_unsubscribe(self, writer, params):
@@ -320,6 +322,7 @@ class DaemonDeviceHandlers:
             )
             if not await self._require_arc_write_success(writer, response, "subscription removal"):
                 return
+            self.subscription_readback.request(device, [(channel.number, "", "") for channel in rx_channels])
             await self._send_json(writer, {"success": True, "count": len(rx_channels)})
             return
 
@@ -331,6 +334,7 @@ class DaemonDeviceHandlers:
         response = await self.application.remove_subscriptions(device, [rx_channel.number])
         if not await self._require_arc_write_success(writer, response, "subscription removal"):
             return
+        self.subscription_readback.request(device, [(rx_channel.number, "", "")])
         await self._send_json(writer, {"success": True})
 
     async def _handle_identify(self, writer, params):

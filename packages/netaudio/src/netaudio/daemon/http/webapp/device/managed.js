@@ -13,7 +13,7 @@ export function ManagedSection({ device }) {
         entries=${[
           ["Managed context", html`<${Value} value=${device.ddm_context} />`],
           ["Domain name", html`<${Value} value=${device.ddm_domain_name} />`],
-          ["Enrolment state", html`<${Value} value=${device.ddm_enrolment_state} />`],
+          ["Enrollment state", html`<${Value} value=${device.ddm_enrolment_state} />`],
           ["Connection state", html`<${Value} value=${device.ddm_connection_state} />`],
           ["Connection last changed", format.timestamp(device.ddm_connection_last_changed)],
           ["Last sync", format.timestamp(device.ddm_last_sync)],
