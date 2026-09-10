@@ -7,13 +7,18 @@ from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
 
 
-A32_CHANNEL_CAPACITIES = {
-    44_100: (64, 64),
-    48_000: (64, 64),
-    88_200: (32, 32),
-    96_000: (32, 32),
-    176_400: (16, 16),
-    192_000: (16, 16),
+FALLBACK_CHANNEL_CAPACITIES = {
+    "a32 dante ad/da converter": {
+        44_100: (64, 64),
+        48_000: (64, 64),
+        88_200: (32, 32),
+        96_000: (32, 32),
+        176_400: (16, 16),
+        192_000: (16, 16),
+    },
+    "avio-dai2": {44_100: (0, 2), 48_000: (0, 2), 88_200: (0, 2), 96_000: (0, 2)},
+    "avio-dao2": {44_100: (2, 0), 48_000: (2, 0), 88_200: (2, 0), 96_000: (2, 0)},
+    "wing-dante64": {44_100: (64, 64), 48_000: (64, 64)},
 }
 
 
@@ -168,8 +173,18 @@ class SampleRateTopologyPreflight:
     uncharacterized_transmitter_flows: tuple[UncharacterizedTransmitterFlow, ...]
 
     @property
+    def capacity_known(self) -> bool:
+        return self.target_capacity is not None
+
+    @property
     def requires_destructive_confirmation(self) -> bool:
-        return bool(self.destructive_transmitter_membership_loss)
+        if self.destructive_transmitter_membership_loss:
+            return True
+        return (
+            self.current_snapshot is not None
+            and self.target_capacity is None
+            and bool(self.current_snapshot.transmitter_flows)
+        )
 
     @property
     def is_classified(self) -> bool:
@@ -194,6 +209,7 @@ class SampleRateTopologyPreflight:
             "requires_destructive_confirmation": self.requires_destructive_confirmation,
             "is_classified": self.is_classified,
             "topology_characterized": self.topology_characterized,
+            "capacity_known": self.capacity_known,
         }
 
 
@@ -234,17 +250,6 @@ def _device_label(device) -> str:
     return device.name or device.server_name or str(device.ipv4)
 
 
-def _is_ferrofish_a32(device) -> bool:
-    model_values = (
-        getattr(device, "dante_model", None),
-        getattr(device, "model", None),
-        getattr(device, "board_name", None),
-    )
-    return any(
-        isinstance(value, str) and value.casefold().startswith("a32 dante ad/da converter") for value in model_values
-    )
-
-
 def _reported_capacity_table(device) -> dict[int, SampleRateChannelCapacity]:
     capacities = getattr(device, "sample_rate_channel_capacities", None)
     if capacities is None:
@@ -267,26 +272,28 @@ def _reported_capacity_table(device) -> dict[int, SampleRateChannelCapacity]:
     return table
 
 
-def _capacity_for_rate(device, sample_rate_hertz: int) -> SampleRateChannelCapacity:
-    # These analog AVIO models retain their two channels at every documented
-    # sample rate. Enrollment can change model IDs, so use the product name.
-    analog_avio_counts = {"AVIO-DAI2": (0, 2), "AVIO-DAO2": (2, 0)}
-    product_name = getattr(device, "model", None) or getattr(device, "dante_model", None)
-    if product_name in analog_avio_counts and sample_rate_hertz in {44100, 48000, 88200, 96000}:
-        receive_count, transmit_count = analog_avio_counts[product_name]
-        return SampleRateChannelCapacity(sample_rate_hertz, receive_count, transmit_count)
-    if product_name == "wing-dante64" and sample_rate_hertz in {44100, 48000}:
-        return SampleRateChannelCapacity(sample_rate_hertz, 64, 64)
-    if not _is_ferrofish_a32(device):
-        raise SampleRateTopologyUnsupportedError("channel capacity across sample rates is unavailable for this device")
+def _fallback_capacity_table(device) -> dict[int, tuple[int, int]]:
+    for value in (
+        getattr(device, "model", None),
+        getattr(device, "dante_model", None),
+        getattr(device, "board_name", None),
+    ):
+        if not isinstance(value, str):
+            continue
+        name = value.casefold()
+        for product, table in FALLBACK_CHANNEL_CAPACITIES.items():
+            if name.startswith(product):
+                return table
+    return {}
+
+
+def _capacity_for_rate(device, sample_rate_hertz: int) -> SampleRateChannelCapacity | None:
     reported = _reported_capacity_table(device).get(sample_rate_hertz)
     if reported is not None:
         return reported
-    counts = A32_CHANNEL_CAPACITIES.get(sample_rate_hertz)
+    counts = _fallback_capacity_table(device).get(sample_rate_hertz)
     if counts is None:
-        raise SampleRateTopologyUnsupportedError(
-            f"no proven Ferrofish A32 channel capacity is available for {sample_rate_hertz} Hz"
-        )
+        return None
     receive_count, transmit_count = counts
     return SampleRateChannelCapacity(sample_rate_hertz, receive_count, transmit_count)
 
@@ -387,25 +394,49 @@ def _transmitter_flow_states(inventory: dict, *, modern: bool = False) -> tuple[
     return tuple(sorted(states, key=lambda state: state.flow_number))
 
 
+async def _fresh_channel_counts(device) -> tuple[int, int] | None:
+    from netaudio import core
+
+    response = await device.execute({"command": "channel_count"})
+    counts = core.parse_response("channel_count", response) if response else None
+    if not isinstance(counts, dict):
+        return None
+    receive_count = counts.get("rx_count")
+    transmit_count = counts.get("tx_count")
+    if isinstance(receive_count, bool) or isinstance(transmit_count, bool):
+        return None
+    if not isinstance(receive_count, int) or not isinstance(transmit_count, int):
+        return None
+    return receive_count, transmit_count
+
+
+async def _observed_capacity(device, sample_rate_hertz: int, managed: bool) -> SampleRateChannelCapacity:
+    if managed:
+        counts = await _fresh_channel_counts(device)
+        if counts is None:
+            raise SampleRateTopologyReadbackError("fresh channel counts were not reported")
+        return SampleRateChannelCapacity(sample_rate_hertz, *counts)
+    try:
+        await device.get_rx_channels()
+        await device.get_tx_channels()
+    except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
+        raise SampleRateTopologyReadbackError(f"fresh channel inventory failed: {exception}") from exception
+    return SampleRateChannelCapacity(sample_rate_hertz, len(device.rx_channels), len(device.tx_channels))
+
+
 async def capture_sample_rate_topology(
     device,
-    capacity: SampleRateChannelCapacity,
+    capacity: SampleRateChannelCapacity | None,
+    sample_rate_hertz: int | None = None,
 ) -> SampleRateTopologySnapshot:
     managed = getattr(device, "requires_managed_control", False)
-    if managed:
-        from netaudio import core
-
-        response = await device.execute({"command": "channel_count"})
-        counts = core.parse_response("channel_count", response) if response else None
-        if not isinstance(counts, dict) or any(
-            isinstance(counts.get(field), bool)
-            or not isinstance(counts.get(field), int)
-            or counts.get(field) != expected
-            for field, expected in (
-                ("rx_count", capacity.receive_channel_count),
-                ("tx_count", capacity.transmit_channel_count),
-            )
-        ):
+    if capacity is None:
+        if sample_rate_hertz is None:
+            raise ValueError("sample_rate_hertz is required when the channel capacity is unknown")
+        capacity = await _observed_capacity(device, sample_rate_hertz, managed)
+    elif managed:
+        counts = await _fresh_channel_counts(device)
+        if counts != (capacity.receive_channel_count, capacity.transmit_channel_count):
             raise SampleRateTopologyVerificationError(
                 "fresh channel counts do not match the expected sample-rate capacity"
             )
@@ -421,7 +452,7 @@ async def capture_sample_rate_topology(
     expected_receiver_channel_numbers = set(range(1, capacity.receive_channel_count + 1))
     if receiver_channel_numbers != expected_receiver_channel_numbers:
         raise SampleRateTopologyVerificationError(
-            "fresh receiver inventory does not match the proven active channel capacity"
+            "fresh receiver inventory does not match the reported active channel capacity"
         )
     if managed and capacity.transmit_channel_count == 0:
         from netaudio.dante.channel_status_paging import modern_arc_protocol_identifier_for_device
@@ -517,6 +548,7 @@ async def preflight_sample_rate_change(
     device,
     target_sample_rate_hertz: int,
     probe_sample_rate_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
+    load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyPreflight:
     target_sample_rate_hertz = _positive_integer(target_sample_rate_hertz, "target sample rate")
     status = _validated_sample_rate_status(await probe_sample_rate_status())
@@ -539,15 +571,25 @@ async def preflight_sample_rate_change(
             destructive_transmitter_membership_loss=(),
             uncharacterized_transmitter_flows=(),
         )
+    if (
+        load_channel_capacities is not None
+        and getattr(device, "sample_rate_channel_capacities", None) is None
+        and _capacity_for_rate(device, target_sample_rate_hertz) is None
+    ):
+        await load_channel_capacities()
     current_capacity = _capacity_for_rate(device, current_sample_rate_hertz)
     target_capacity = _capacity_for_rate(device, target_sample_rate_hertz)
-    current_snapshot = await capture_sample_rate_topology(device, current_capacity)
-    reversible_receiver_clipping = tuple(
-        state
-        for state in current_snapshot.receiver_subscriptions
-        if state.receiver_channel_number > target_capacity.receive_channel_count
-    )
-    destructive, uncharacterized = _classify_transmitter_flows(current_snapshot, target_capacity)
+    current_snapshot = await capture_sample_rate_topology(device, current_capacity, current_sample_rate_hertz)
+    if target_capacity is None:
+        reversible_receiver_clipping = ()
+        destructive, uncharacterized = (), ()
+    else:
+        reversible_receiver_clipping = tuple(
+            state
+            for state in current_snapshot.receiver_subscriptions
+            if state.receiver_channel_number > target_capacity.receive_channel_count
+        )
+        destructive, uncharacterized = _classify_transmitter_flows(current_snapshot, target_capacity)
     return SampleRateTopologyPreflight(
         device_name=_device_label(device),
         current_sample_rate_hertz=current_sample_rate_hertz,
@@ -564,13 +606,26 @@ def _verify_resulting_topology(
     preflight: SampleRateTopologyPreflight,
     resulting_snapshot: SampleRateTopologySnapshot,
 ) -> None:
-    if preflight.current_snapshot is None or preflight.target_capacity is None:
+    if preflight.current_snapshot is None:
         raise SampleRateTopologyVerificationError("sample-rate topology verification lacks a characterized preflight")
     if resulting_snapshot.flow_protocol_identifier != preflight.current_snapshot.flow_protocol_identifier:
         raise SampleRateTopologyVerificationError(
             "transmitter-flow protocol changed during the sample-rate operation",
             preflight,
         )
+    if preflight.target_capacity is None:
+        mismatched = [
+            flow.flow_number
+            for flow in resulting_snapshot.transmitter_flows
+            if flow.sample_rate_hertz != preflight.target_sample_rate_hertz
+        ]
+        if mismatched:
+            raise SampleRateTopologyVerificationError(
+                "transmitter flows did not adopt the target sample rate: "
+                + ", ".join(str(number) for number in mismatched),
+                preflight,
+            )
+        return
     expected_subscriptions = {
         state.receiver_channel_number: state
         for state in preflight.current_snapshot.receiver_subscriptions
@@ -623,6 +678,7 @@ async def change_sample_rate_topology_safe(
     probe_sample_rate_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
     mutate: Callable[[], Awaitable[None]],
     confirm_destructive: bool = False,
+    load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyChangeResult:
     if not isinstance(confirm_destructive, bool):
         raise ValueError("confirm_destructive must be a boolean")
@@ -630,6 +686,7 @@ async def change_sample_rate_topology_safe(
         device,
         target_sample_rate_hertz,
         probe_sample_rate_status,
+        load_channel_capacities,
     )
     if preflight.current_sample_rate_hertz == preflight.target_sample_rate_hertz:
         return SampleRateTopologyChangeResult(
@@ -645,10 +702,14 @@ async def change_sample_rate_topology_safe(
             preflight,
         )
     if preflight.requires_destructive_confirmation and not confirm_destructive:
-        raise SampleRateTopologyConfirmationRequired(
-            "sample-rate change would permanently remove transmitter flow members; explicit confirmation is required",
-            preflight,
-        )
+        if preflight.capacity_known:
+            message = "sample-rate change would permanently remove transmitter flow members; explicit confirmation is required"
+        else:
+            message = (
+                "the device did not report its channel capacity at the target sample rate, so the effect on its "
+                "transmitter flows cannot be predicted; explicit confirmation is required"
+            )
+        raise SampleRateTopologyConfirmationRequired(message, preflight)
     try:
         await mutate()
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
@@ -669,7 +730,7 @@ async def change_sample_rate_topology_safe(
                 preflight,
             )
         resulting_capacity = _capacity_for_rate(device, observed_sample_rate_hertz)
-        resulting_snapshot = await capture_sample_rate_topology(device, resulting_capacity)
+        resulting_snapshot = await capture_sample_rate_topology(device, resulting_capacity, observed_sample_rate_hertz)
         _verify_resulting_topology(preflight, resulting_snapshot)
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyChangedButUnverifiedError(

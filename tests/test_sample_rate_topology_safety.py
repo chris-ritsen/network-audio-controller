@@ -26,6 +26,7 @@ class FakeA32:
         self.supported_sample_rates = None
         self.sample_rate_channel_capacities = None
         self.rx_channels = {}
+        self.tx_channels = {}
         self.subscriptions = []
         self.phases = phases
         self.phase_index = 0
@@ -33,6 +34,14 @@ class FakeA32:
 
     def _arc_port(self):
         return 4440
+
+    async def get_tx_channels(self):
+        phase = self.phases[self.phase_index]
+        transmit_channel_count = phase.get("transmit_channel_count", phase["receive_channel_count"])
+        self.tx_channels = {
+            number: SimpleNamespace(number=number, name=f"Output {number}")
+            for number in range(1, transmit_channel_count + 1)
+        }
 
     async def get_rx_channels(self):
         phase = self.phases[self.phase_index]
@@ -57,12 +66,15 @@ class FakeA32:
             )
 
 
-def _phase(receive_channel_count, flows_state, subscriptions=()):
-    return {
+def _phase(receive_channel_count, flows_state, subscriptions=(), transmit_channel_count=None):
+    phase = {
         "receive_channel_count": receive_channel_count,
         "flows": flows_state,
         "subscriptions": subscriptions,
     }
+    if transmit_channel_count is not None:
+        phase["transmit_channel_count"] = transmit_channel_count
+    return phase
 
 
 def _multicast_flow(flow_number, members, sample_rate=48_000):
@@ -418,16 +430,70 @@ async def test_preflight_accepts_proven_zero_directional_capacities(
 
 
 @pytest.mark.asyncio
-async def test_unknown_device_is_refused_without_querying_topology(install_flow_inventory):
-    device = FakeA32([_phase(64, [])])
+async def test_unknown_model_with_reported_rates_proceeds_and_verifies_by_readback(install_flow_inventory):
+    device = FakeA32([_phase(8, [], transmit_channel_count=8), _phase(4, [], transmit_channel_count=4)])
+    device.dante_model = "Different Device"
+    install_flow_inventory(device)
+    loads = []
+
+    async def load_channel_capacities():
+        loads.append(True)
+
+    async def probe():
+        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+
+    async def mutate():
+        device.phase_index = 1
+
+    result = await change_sample_rate_topology_safe(
+        device, 96_000, probe, mutate, load_channel_capacities=load_channel_capacities
+    )
+
+    assert loads == [True]
+    assert result.changed is True
+    assert result.preflight.capacity_known is False
+    assert result.preflight.current_snapshot.capacity.receive_channel_count == 8
+    assert result.preflight.current_snapshot.capacity.transmit_channel_count == 8
+    assert result.preflight.target_capacity is None
+    assert result.observed_sample_rate_hertz == 96_000
+    assert result.resulting_snapshot.capacity.receive_channel_count == 4
+    assert result.resulting_snapshot.capacity.transmit_channel_count == 4
+
+
+@pytest.mark.asyncio
+async def test_unknown_capacity_with_transmitter_flows_requires_confirmation(install_flow_inventory):
+    device = FakeA32([_phase(8, [_multicast_flow(1, [1, 2])], transmit_channel_count=8)])
     device.dante_model = "Different Device"
     install_flow_inventory(device)
 
     async def probe():
         return 48_000, [48_000, 96_000]
 
-    with pytest.raises(SampleRateTopologyUnsupportedError, match="capacity across sample rates is unavailable"):
-        await preflight_sample_rate_change(device, 96_000, probe)
+    async def refuse_write():
+        raise AssertionError("an unconfirmed change must not send a write")
+
+    with pytest.raises(SampleRateTopologyConfirmationRequired, match="did not report its channel capacity"):
+        await change_sample_rate_topology_safe(device, 96_000, probe, refuse_write)
+
+
+@pytest.mark.asyncio
+async def test_reported_capacity_table_is_used_for_any_model(install_flow_inventory):
+    device = FakeA32([_phase(8, [_multicast_flow(1, [1, 2, 7])], transmit_channel_count=8)])
+    device.dante_model = "Different Device"
+    device.sample_rate_channel_capacities = [
+        {"sample_rate_hertz": 48_000, "receive_channel_count": 8, "transmit_channel_count": 8},
+        {"sample_rate_hertz": 96_000, "receive_channel_count": 4, "transmit_channel_count": 4},
+    ]
+    install_flow_inventory(device)
+
+    async def probe():
+        return 48_000, [48_000, 96_000]
+
+    preflight = await preflight_sample_rate_change(device, 96_000, probe)
+
+    assert preflight.capacity_known is True
+    assert preflight.target_capacity.transmit_channel_count == 4
+    assert [loss.removed_channel_members for loss in preflight.destructive_transmitter_membership_loss] == [(7,)]
 
 
 @pytest.mark.asyncio
@@ -495,18 +561,25 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
     ]
 
 
-@pytest.mark.parametrize("rate", [44100, 48000])
-def test_wing_capacity_is_limited_to_observed_rates(rate):
+@pytest.mark.parametrize(
+    "model,rate,counts",
+    [
+        ("wing-dante64", 44100, (64, 64)),
+        ("wing-dante64", 48000, (64, 64)),
+        ("AVIO-DAI2", 96000, (0, 2)),
+        ("A32 Dante AD/DA Converter", 192000, (16, 16)),
+    ],
+)
+def test_fallback_capacity_table_covers_observed_models_and_rates(model, rate, counts):
     from netaudio.dante.sample_rate_topology import _capacity_for_rate
 
-    device = SimpleNamespace(model="wing-dante64", dante_model="Brooklyn-3")
+    device = SimpleNamespace(model=model, dante_model="Brooklyn-3", board_name=None)
     capacity = _capacity_for_rate(device, rate)
-    assert (capacity.receive_channel_count, capacity.transmit_channel_count) == (64, 64)
+    assert (capacity.receive_channel_count, capacity.transmit_channel_count) == counts
 
 
 @pytest.mark.parametrize("model,rate", [("wing-dante64", 96000), ("unknown", 48000)])
-def test_wing_capacity_does_not_generalize_to_unknown_variants(model, rate):
+def test_capacity_is_unknown_rather_than_refused_outside_the_fallback_table(model, rate):
     from netaudio.dante.sample_rate_topology import _capacity_for_rate
 
-    with pytest.raises(SampleRateTopologyUnsupportedError):
-        _capacity_for_rate(SimpleNamespace(model=model, dante_model="Brooklyn-3"), rate)
+    assert _capacity_for_rate(SimpleNamespace(model=model, dante_model="Brooklyn-3", board_name=None), rate) is None
