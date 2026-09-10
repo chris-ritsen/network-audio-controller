@@ -435,7 +435,7 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
                 "code": None,
                 "detail": "Subscription active",
                 "icon": "",
-                "label": "CONNECTED",
+                "label": "Subscribed (unicast)",
                 "severity": "ok",
                 "state": "connected",
                 "status": "DYNAMIC",
