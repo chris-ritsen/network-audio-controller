@@ -397,13 +397,13 @@ fn ptp_clock_status_parses_fresh_avio_aes3_capture() {
         vec![(1, 1, 1, 9), (2, 2, 2, 3), (3, 2, 1, 3)]
     );
 
-    let mut unknown_variant = data;
-    unknown_variant[24..26].copy_from_slice(&0x0739u16.to_be_bytes());
+    let mut other_revision = data.clone();
+    other_revision[24..26].copy_from_slice(&0x0739u16.to_be_bytes());
     assert_eq!(
-        parse_ptp_clock_status(&unknown_variant)
+        parse_ptp_clock_status(&other_revision)
             .unwrap()
             .clock_port_records,
-        None
+        parse_ptp_clock_status(&data).unwrap().clock_port_records
     );
 }
 

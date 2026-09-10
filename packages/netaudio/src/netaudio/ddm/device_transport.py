@@ -234,11 +234,6 @@ class ManagedDeviceTransport:
         return prepared
 
     async def execute(self, device, specification: Mapping[str, Any]) -> bytes | None:
-        if (
-            specification.get("command") == "set_dante_redundancy"
-            and specification.get("record_protocol_identifier") != 0x073D
-        ):
-            raise ManagedDeviceControlError("Managed redundancy changes are unavailable for this network protocol")
         device_id = await self._control_device_id(device)
         command = specification.get("command")
         if command == "reboot":

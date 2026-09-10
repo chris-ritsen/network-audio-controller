@@ -1,22 +1,16 @@
 use super::*;
 use crate::network::{DanteRedundancyMode, NetworkInterface, StaticInterfaceConfiguration};
 
-fn interface_selector(
-    interface: NetworkInterface,
-    record_protocol_identifier: Option<u16>,
-) -> Result<u16, NetaudioError> {
-    match (interface, record_protocol_identifier) {
-        (NetworkInterface::Primary, None | Some(0x0724 | 0x0727 | 0x072e | 0x0738 | 0x073d)) => {
-            Ok(0)
-        }
-        (NetworkInterface::Secondary, Some(0x073d)) => Ok(1),
-        _ => Err(NetaudioError::UnsupportedProtocolOperation),
+fn interface_selector(interface: NetworkInterface) -> u16 {
+    match interface {
+        NetworkInterface::Primary => 0,
+        NetworkInterface::Secondary => 1,
     }
 }
 
 fn build_interface_configuration(
     interface: NetworkInterface,
-    record_protocol_identifier: Option<u16>,
+    _record_protocol_identifier: Option<u16>,
     configuration: Option<StaticInterfaceConfiguration>,
     mac: [u8; 6],
     message_id: u16,
@@ -24,7 +18,7 @@ fn build_interface_configuration(
     if message_id == 0 {
         return Err(NetaudioError::InvalidSequence);
     }
-    let selector = interface_selector(interface, record_protocol_identifier)?;
+    let selector = interface_selector(interface);
     let mut body = Vec::new();
     body.extend_from_slice(&0x0013u16.to_be_bytes());
     body.extend_from_slice(&100u32.to_be_bytes());
@@ -80,20 +74,22 @@ pub fn build_set_interface_static(
 }
 
 pub fn build_set_dante_redundancy(
-    record_protocol_identifier: u16,
+    _record_protocol_identifier: Option<u16>,
     mode: DanteRedundancyMode,
+    switch_configuration_choice: Option<u16>,
     mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     if message_id == 0 {
         return Err(NetaudioError::InvalidSequence);
     }
-    let (operation, value, interface_word) = match (record_protocol_identifier, mode) {
-        (0x0724 | 0x073d, DanteRedundancyMode::Switched) => (0x0013u16, 0u16, true),
-        (0x0724 | 0x073d, DanteRedundancyMode::Redundant) => (0x0013, 1, true),
-        (0x072e, DanteRedundancyMode::Switched) => (0x0015, 1, false),
-        (0x072e, DanteRedundancyMode::SplitRedundant) => (0x0015, 2, false),
-        _ => return Err(NetaudioError::UnsupportedProtocolOperation),
+    let (operation, value, interface_word) = match (switch_configuration_choice, mode) {
+        (Some(choice), _) => (0x0015u16, choice, false),
+        (None, DanteRedundancyMode::Switched) => (0x0013, 0, true),
+        (None, DanteRedundancyMode::Redundant) => (0x0013, 1, true),
+        (None, DanteRedundancyMode::SplitRedundant) => {
+            return Err(NetaudioError::UnsupportedProtocolOperation)
+        }
     };
     let mut body = Vec::new();
     body.extend_from_slice(&operation.to_be_bytes());

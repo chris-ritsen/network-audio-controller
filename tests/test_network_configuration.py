@@ -37,11 +37,18 @@ def test_managed_network_fixture_digest_and_pending_readback(case, pending):
     assert parsed["reboot_required"] is pending
 
 
+def switch_choices(*entries):
+    entries = entries or (("Switched", 1), ("Split/Redundant", 2))
+    modes = {"Switched": "switched", "Redundant": "redundant", "Split/Redundant": "split_redundant"}
+    return [{"code": code, "label": label, "mode": modes[label]} for label, code in entries]
+
+
 def network_device(protocol=0x0724):
     return SimpleNamespace(
         interface_status_protocol=protocol,
         dante_redundancy=None,
         interfaces=[],
+        switch_configuration_choices=None,
         interface_reboot_required=False,
         link_speed_mbps=1000,
         requires_managed_control=False,
@@ -81,7 +88,7 @@ async def test_redundancy_verifies_configured_not_active_without_reboot():
     application = redundancy_application(device, iter([redundancy_status(), redundancy_status(configured="redundant")]))
     result = await set_redundancy(application, device, "redundant")
     assert result == redundancy_status(configured="redundant")
-    application.commands.set_dante_redundancy.assert_called_once_with(0x0724, "redundant")
+    application.commands.set_dante_redundancy.assert_called_once_with(0x0724, "redundant", None)
     application._send_settings.assert_awaited_once()
     assert application.probe_interface_status.await_count == 2
     application.reboot.assert_not_awaited()
@@ -129,18 +136,45 @@ async def test_invalid_redundancy_never_queries_or_writes(mode):
 
 
 @pytest.mark.asyncio
-async def test_unknown_revision_and_unsupported_choice_fail_closed():
-    for protocol, supported in [(0x0777, ["switched", "redundant"]), (0x0724, [])]:
-        device = network_device(protocol)
-        application = redundancy_application(device, iter([redundancy_status(supported=supported)]))
-        with pytest.raises(NetworkConfigurationError):
-            await set_redundancy(application, device, "redundant")
-        application._send_settings.assert_not_awaited()
+async def test_unsupported_choice_fails_closed():
+    device = network_device()
+    application = redundancy_application(device, iter([redundancy_status(supported=[])]))
+    with pytest.raises(NetworkConfigurationError):
+        await set_redundancy(application, device, "redundant")
+    application._send_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unobserved_revision_with_reported_support_is_written_and_verified():
+    device = network_device(0x0777)
+    application = redundancy_application(device, iter([redundancy_status(), redundancy_status(configured="redundant")]))
+    assert await set_redundancy(application, device, "redundant") == redundancy_status(configured="redundant")
+    application.commands.set_dante_redundancy.assert_called_once_with(0x0777, "redundant", None)
+    application._send_settings.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reported_choice_table_selects_the_choice_code_for_the_mode():
+    device = network_device(0x0777)
+    device.switch_configuration_choices = switch_choices()
+    application = redundancy_application(
+        device,
+        iter(
+            [
+                redundancy_status(supported=["switched", "split_redundant"]),
+                redundancy_status(configured="split_redundant", supported=["switched", "split_redundant"]),
+            ]
+        ),
+    )
+    await set_redundancy(application, device, "split_redundant")
+    application.commands.set_dante_redundancy.assert_called_once_with(0x0777, "split_redundant", 2)
+    assert application.probe_switch_configuration.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_ad4d_uses_fresh_choice_status():
     device = network_device(0x072E)
+    device.switch_configuration_choices = switch_choices()
     application = redundancy_application(device, iter([None]))
     expected = redundancy_status(configured="split_redundant", supported=["switched", "split_redundant"])
 
@@ -199,8 +233,8 @@ async def test_matching_primary_pending_change_is_verified(protocol, managed):
 
 
 @pytest.mark.asyncio
-async def test_secondary_write_unavailable_for_an_unobserved_revision():
-    secondary = interface_state("secondary", {"mode": "static"})
+async def test_secondary_write_unavailable_without_a_configured_record():
+    secondary = interface_state("secondary", None)
     application = SimpleNamespace(
         probe_interface_status=AsyncMock(return_value=[secondary]), send_set_interface_dhcp=AsyncMock()
     )
@@ -208,6 +242,20 @@ async def test_secondary_write_unavailable_for_an_unobserved_revision():
         await set_interface(application, network_device(), "dhcp", interface="secondary")
     application.probe_interface_status.assert_awaited_once()
     application.send_set_interface_dhcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_secondary_write_proceeds_for_an_unobserved_revision_with_a_configured_record():
+    device = network_device(0x07FE)
+    before = interface_state("secondary", {"mode": "static"})
+    after = interface_state("secondary", {"mode": "dynamic"})
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(side_effect=[[before], [after]]), send_set_interface_dhcp=AsyncMock()
+    )
+    assert await set_interface(application, device, "dhcp", interface="secondary") == [after]
+    application.send_set_interface_dhcp.assert_awaited_once_with(
+        device, interface="secondary", record_protocol_identifier=0x07FE
+    )
 
 
 @pytest.mark.asyncio
@@ -377,6 +425,7 @@ async def test_redundancy_http_reports_failure(error, status):
 async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
     device = network_device(0x073D)
     device.requires_managed_control = True
+    device.switch_configuration_choices = switch_choices(("Switched", 1), ("Redundant", 2))
     application = redundancy_application(
         device,
         iter(
@@ -392,16 +441,6 @@ async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
     application._send_settings.assert_awaited_once()
     assert application.probe_switch_configuration.await_count == 2
     application.reboot.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_other_managed_redundancy_revisions_send_nothing():
-    device = network_device(0x0724)
-    device.requires_managed_control = True
-    application = redundancy_application(device, iter([redundancy_status()]))
-    with pytest.raises(NetworkConfigurationError, match="unavailable"):
-        await set_redundancy(application, device, "redundant")
-    application._send_settings.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -424,16 +463,23 @@ async def test_redundancy_detects_unrelated_network_changes(change):
     application.reboot.assert_not_awaited()
 
 
-@pytest.mark.parametrize("protocol,secondary_modes", [(0x073D, ["dhcp", "static"]), (0x0727, [])])
-def test_inventory_includes_network_controls_before_a_page_query(protocol, secondary_modes):
+@pytest.mark.parametrize(
+    "protocol,secondary_configured,secondary_modes",
+    [
+        (0x073D, {"mode": "dynamic"}, ["dhcp", "static"]),
+        (0x0727, {"mode": "dynamic"}, ["dhcp", "static"]),
+        (0x07FE, None, []),
+    ],
+)
+def test_inventory_includes_network_controls_before_a_page_query(protocol, secondary_configured, secondary_modes):
     device = DanteDevice(server_name="network.local.")
     device.interface_status_protocol = protocol
     device.interfaces = [
         {"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}},
-        {"interface": "secondary", "mode": "dynamic", "configured": {"mode": "dynamic"}},
+        {"interface": "secondary", "mode": "dynamic", "configured": secondary_configured},
     ]
 
-    assert device.to_json()["interface_configuration_modes"] == {
-        "primary": ["dhcp", "static"],
-        "secondary": secondary_modes,
-    }
+    expected = {"primary": ["dhcp", "static"]}
+    if secondary_configured is not None:
+        expected["secondary"] = secondary_modes
+    assert device.to_json()["interface_configuration_modes"] == expected
