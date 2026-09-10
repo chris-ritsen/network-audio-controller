@@ -173,7 +173,7 @@ def test_status_to_json_includes_status_severity_and_icon():
         assert rendered["status"] == "DYNAMIC"
         assert rendered["state"] == "connected"
         assert rendered["severity"] == "ok"
-        assert rendered["label"] == "DYNAMIC"
+        assert rendered["label"] == "Subscribed (unicast)"
         assert rendered["icon"] == ""
         assert DanteDeviceSerializer._status_to_json(None) is None
     finally:
