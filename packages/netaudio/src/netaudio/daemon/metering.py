@@ -114,10 +114,17 @@ class MeteringManager:
         self._history[server_name].append(sample)
 
     def _server_name_for_ip(self, ip: str) -> str | None:
-        for device in self._application.devices.values():
-            if device.ipv4 and str(device.ipv4) == ip:
-                return device.server_name
-        return None
+        fallback = None
+        for server_name, device in self._application.devices.items():
+            if not device.ipv4 or str(device.ipv4) != ip:
+                continue
+            published = getattr(device, "server_name", None) or server_name
+            name = getattr(device, "name", None)
+            if name and published.casefold() == f"{name}.local.".casefold():
+                return published
+            if fallback is None:
+                fallback = published
+        return fallback
 
     def _schedule(self, coroutine) -> None:
         task = asyncio.get_running_loop().create_task(coroutine)

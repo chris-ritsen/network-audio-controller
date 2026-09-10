@@ -295,3 +295,75 @@ def test_unenrollment_clears_restored_direct_metadata_before_first_managed_poll(
     assert direct.requires_managed_control is False
     assert direct.ddm_domain_id is None
     assert direct.configured_latency == 2.0
+
+
+def test_managed_subscription_status_presents_catalog_labels_not_raw_identifiers():
+    from netaudio.dante.subscription import managed_subscription_status
+
+    status = managed_subscription_status("UNRESOLVED", "Error: Channel Name not yet found on network", "ERROR")
+    assert status["label"] == "Unresolved"
+    assert status["detail"] == "The transmitting device isn't currently on the network."
+    assert status["status"] == "UNRESOLVED"
+    assert status["severity"] == "error"
+
+
+def test_managed_subscription_status_keeps_cleaned_message_for_unknown_identifiers():
+    from netaudio.dante.subscription import managed_subscription_status
+
+    status = managed_subscription_status("SOMETHING_NEW", "Error: Vendor specific condition", "WARNING")
+    assert status["label"] == "Something new"
+    assert status["detail"] == "Vendor specific condition"
+    assert status["severity"] == "warning"
+
+
+def test_managed_subscription_status_static_reads_multicast():
+    from netaudio.dante.subscription import managed_subscription_status
+
+    status = managed_subscription_status("STATIC", None, "CONNECTED")
+    assert status["label"] == "Subscribed (multicast)"
+    assert status["detail"] is None
+    assert status["severity"] == "ok"
+
+
+def test_stale_unenrolled_reference_resolves_to_the_direct_device_by_mac():
+    record = managed_record(server="lab", domain="unenrolled", device_id="001dc10812580000")
+    record.update(
+        {
+            "server_name": "ddm:lab:unenrolled:001dc10812580000:0",
+            "name": "lx-dante",
+            "mac_address": "00:1D:C1:08:12:58",
+            "management_state": "unenrolled",
+            "ddm_enrolment_state": "UNENROLLED",
+            "direct_control_available": True,
+        }
+    )
+    server, _ = server_with_inventory(record)
+    direct = DanteDevice()
+    direct.server_name = "LX-DANTE-081258.local."
+    direct.name = "lx-dante"
+    direct.mac_address = "001dc1081258"
+    direct.ipv4 = "192.168.1.108"
+    server.application.devices[direct.server_name] = direct
+
+    assert server._find_device("ddm:lab:unenrolled:001dc10812580000:0") is direct
+    assert server._find_device("lx-dante") is direct
+
+
+def test_unresolvable_unenrolled_reference_is_not_matched_to_an_unrelated_device():
+    record = managed_record(server="lab", domain="unenrolled", device_id="001dc1aaaaaaaaaa")
+    record.update(
+        {
+            "server_name": "ddm:lab:unenrolled:001dc1aaaaaaaaaa:0",
+            "name": "ghost",
+            "mac_address": "00:1D:C1:AA:AA:AA",
+            "management_state": "unenrolled",
+        }
+    )
+    server, _ = server_with_inventory(record)
+    other = DanteDevice()
+    other.server_name = "OTHER.local."
+    other.name = "other"
+    other.mac_address = "001dc1bbbbbb"
+    server.application.devices[other.server_name] = other
+
+    assert server._find_device("ddm:lab:unenrolled:001dc1aaaaaaaaaa:0") is None

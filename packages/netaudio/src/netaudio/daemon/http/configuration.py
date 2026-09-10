@@ -553,6 +553,22 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": error}, 404)
         return device
 
+    def _direct_device_for_record(self, record):
+        mac_address = str(record.get("mac_address") or "").replace(":", "").replace("-", "").lower()
+        name = str(record.get("name") or "").lower()
+        ipv4 = str(record.get("ipv4") or "")
+        matches = [
+            candidate
+            for candidate in self.application.devices.values()
+            if (
+                mac_address
+                and str(candidate.mac_address or "").replace(":", "").replace("-", "").lower() == mac_address
+            )
+            or (name and candidate.name and candidate.name.lower() == name)
+            or (ipv4 and candidate.ipv4 and str(candidate.ipv4) == ipv4)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
     def _find_device(self, name):
         if not name:
             return None
@@ -577,8 +593,10 @@ class DaemonConfigurationHandlers:
                     )
                 ]
                 record = matches[0] if len(matches) == 1 else None
-            if record is not None and record.get("management_state") == "managed":
-                return self.application.devices.get(record["server_name"])
+            if record is not None:
+                device = self.application.devices.get(record["server_name"]) or self._direct_device_for_record(record)
+                if device is not None or record.get("management_state") == "managed":
+                    return device
 
         device = self.application.devices.get(name)
         if device:

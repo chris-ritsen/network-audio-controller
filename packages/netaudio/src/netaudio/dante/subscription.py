@@ -5,13 +5,15 @@ from netaudio.dante.const import (
 
 def managed_subscription_status(status, status_message, summary) -> dict:
     from netaudio.core import subscription_state_for_identifier
+    from netaudio.dante.subscription_status import managed_status_presentation
 
     normalized_summary = summary.casefold() if isinstance(summary, str) and summary else None
+    label, detail = managed_status_presentation(status, status_message, summary)
     return {
         "code": None,
-        "detail": status_message,
+        "detail": detail,
         "icon": "",
-        "label": summary or status or "unknown",
+        "label": label,
         "severity": {"connected": "ok", "error": "error", "warning": "warning"}.get(normalized_summary, "info"),
         "state": subscription_state_for_identifier(status),
         "status": status,

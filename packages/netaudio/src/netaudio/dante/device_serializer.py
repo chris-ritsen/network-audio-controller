@@ -308,9 +308,16 @@ class DanteDeviceSerializer:
 
         if code is None:
             return None
+        from netaudio.dante.subscription_status import MANAGED_STATUS_PRESENTATION
+
         entry = subscription_status_entry(code, receiver_status_code)
         entry.pop("labels")
         entry["icon"] = severity_icon(entry["severity"])
+        presentation = MANAGED_STATUS_PRESENTATION.get(entry.get("status") or "")
+        if presentation is not None:
+            label, detail = presentation
+            entry["label"] = label
+            entry["detail"] = detail or entry.get("detail")
         return entry
 
     @staticmethod
