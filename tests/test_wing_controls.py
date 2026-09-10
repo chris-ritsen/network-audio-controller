@@ -106,11 +106,13 @@ def test_wing_network_status_retains_pending_primary_configuration(case, mode, p
     assert status["reboot_required"] is pending
 
 
-def test_wing_network_status_fails_closed_on_unknown_revision_or_descriptor():
+def test_wing_network_status_decodes_by_structure_and_fails_closed_on_bad_descriptors():
     original = packet("interface_pending")
-    unknown = bytearray(original)
-    unknown[24:26] = b"\x07\xfe"
-    assert core.parse_response("interface_status", bytes(unknown))["interfaces"][0]["configured"] is None
+    other_revision = bytearray(original)
+    other_revision[24:26] = b"\x07\xfe"
+    expected = core.parse_response("interface_status", original)
+    expected["record_protocol_identifier"] = 0x07FE
+    assert core.parse_response("interface_status", bytes(other_revision)) == expected
     invalid = bytearray(original)
     invalid[94:96] = b"\x00\x00"
     with pytest.raises(core.NetaudioCoreError):

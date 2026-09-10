@@ -395,8 +395,11 @@ pub(super) enum CommandSpec {
         message_id: u16,
     },
     SetDanteRedundancy {
-        record_protocol_identifier: u16,
+        #[serde(default)]
+        record_protocol_identifier: Option<u16>,
         mode: crate::network::DanteRedundancyMode,
+        #[serde(default)]
+        switch_configuration_choice: Option<u16>,
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -1094,11 +1097,13 @@ pub(super) fn build_command(
         CommandSpec::SetDanteRedundancy {
             record_protocol_identifier,
             mode,
+            switch_configuration_choice,
             host_mac,
             message_id,
         } => commands::build_set_dante_redundancy(
             record_protocol_identifier,
             mode,
+            switch_configuration_choice,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,

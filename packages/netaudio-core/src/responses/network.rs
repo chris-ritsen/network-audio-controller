@@ -178,14 +178,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     }
 
     let mut redundancy = None;
-    // These revisions carry a configuration descriptor after the last active
-    // interface. Its pointer is relative to the notification record, not UDP.
-    if fixed_records
-        && matches!(
-            record_protocol_identifier,
-            0x0724 | 0x0727 | 0x072e | 0x0738 | 0x073d
-        )
-    {
+    if fixed_records && data.len() > offset {
         let descriptor = offset.checked_sub(4)?;
         let size = usize::from(read_u16(data, descriptor)?);
         let pointer = usize::from(read_u16(data, descriptor + 2)?);
@@ -193,7 +186,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             return None;
         }
         let flags = read_u16(data, offset)?;
-        if matches!(record_protocol_identifier, 0x0724 | 0x073d) && flags & !3 == 0 {
+        if flags & !3 == 0 {
             let mode = |mask| {
                 if flags & mask == 0 {
                     DanteRedundancyMode::Switched

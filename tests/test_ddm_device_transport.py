@@ -676,17 +676,19 @@ async def test_managed_wing_redundancy_uses_core_packet_and_interface_completion
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("protocol", [None, 0x0724, 0x072E, 0x0777])
-async def test_managed_redundancy_unknown_transport_variants_fail_before_io(monkeypatch, protocol):
+async def test_managed_redundancy_packet_does_not_depend_on_the_reported_revision(monkeypatch, protocol):
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
-    identity = AsyncMock()
-    monkeypatch.setattr(transport, "_control_device_id", identity)
-    with pytest.raises(device_transport.ManagedDeviceControlError, match="unavailable"):
-        await transport.execute(
-            _device(),
-            {
-                "command": "set_dante_redundancy",
-                "record_protocol_identifier": protocol,
-                "mode": "redundant",
-            },
-        )
-    identity.assert_not_awaited()
+    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("020000000062"))
+    monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x426C)
+    query = MagicMock(return_value=b"verified publication")
+    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
+    await transport.execute(
+        _device(),
+        {
+            "command": "set_dante_redundancy",
+            "record_protocol_identifier": protocol,
+            "mode": "redundant",
+        },
+    )
+    packet = query.call_args.args[3]
+    assert packet == bytes.fromhex("ffff0028426c00000200000000620000417564696e617465073a0013000000640000000000010001")

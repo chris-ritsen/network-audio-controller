@@ -39,7 +39,9 @@ fn managed_network_status_preserves_active_and_pending_dns() {
         );
         assert_eq!(primary.reboot_required, pending);
         assert_eq!(status.reboot_required, pending);
-        assert!(status.redundancy.is_none());
+        let redundancy = status.redundancy.unwrap();
+        assert_eq!(redundancy.current, redundancy.configured);
+        assert!(!redundancy.reboot_required);
     }
 }
 
@@ -59,10 +61,11 @@ fn managed_network_status_rejects_bad_pending_descriptors() {
             "offset {offset}"
         );
     }
-    let mut unknown = data;
-    set_word(&mut unknown, 24, 0x07fe);
-    let status = parse_interface_status(&unknown).unwrap();
-    assert!(status.interfaces[0].configured.is_none());
+    let mut other_revision = data;
+    set_word(&mut other_revision, 24, 0x07fe);
+    let status = parse_interface_status(&other_revision).unwrap();
+    assert_eq!(status.record_protocol_identifier, 0x07fe);
+    assert!(status.interfaces[0].configured.is_some());
 }
 
 #[test]
@@ -182,10 +185,20 @@ fn dhcp_pending_and_applied_are_checked_per_interface() {
 #[test]
 fn interface_configuration_rejects_truncated_records_and_bad_descriptors() {
     let data = captured("a32_static_pending_both");
+    let records_only = 92..=96;
     for length in 0..144 {
         let mut short = data[..length].to_vec();
         if length >= 4 {
             set_word(&mut short, 2, length as u16);
+        }
+        if records_only.contains(&length) {
+            let status = parse_interface_status(&short).unwrap();
+            assert!(status
+                .interfaces
+                .iter()
+                .all(|entry| entry.configured.is_none()));
+            assert!(status.redundancy.is_none());
+            continue;
         }
         assert!(parse_interface_status(&short).is_none(), "length {length}");
     }
@@ -215,13 +228,21 @@ fn duplicate_interface_mac_addresses_are_rejected() {
 }
 
 #[test]
-fn unsupported_revision_or_redundancy_flags_do_not_produce_a_mode() {
+fn redundancy_flags_decode_by_structure_for_any_revision() {
     let mut data = captured("a32_switched_switched");
     set_word(&mut data, 68, 8);
     assert!(parse_interface_status(&data).unwrap().redundancy.is_none());
     set_word(&mut data, 68, 0);
     set_word(&mut data, 24, 0x07fe);
-    assert!(parse_interface_status(&data).unwrap().redundancy.is_none());
+    let status = parse_interface_status(&data).unwrap();
+    assert_eq!(status.record_protocol_identifier, 0x07fe);
+    let redundancy = status.redundancy.unwrap();
+    assert_eq!(redundancy.current, Some(Mode::Switched));
+    assert_eq!(redundancy.configured, Some(Mode::Switched));
+    assert!(status
+        .interfaces
+        .iter()
+        .all(|entry| entry.configured.is_some()));
 }
 
 #[test]
@@ -237,32 +258,69 @@ fn switch_choice_status_preserves_current_and_pending_labels() {
 
 #[test]
 fn redundancy_setters_reproduce_independent_controller_requests() {
-    for (name, protocol, mode) in [
-        ("a32_set_switched", 0x0724, Mode::Switched),
-        ("a32_set_redundant", 0x0724, Mode::Redundant),
-        ("ad4d_set_split_redundant", 0x072e, Mode::SplitRedundant),
+    for (name, protocol, mode, choice) in [
+        ("a32_set_switched", 0x0724, Mode::Switched, None),
+        ("a32_set_redundant", 0x0724, Mode::Redundant, None),
+        (
+            "ad4d_set_split_redundant",
+            0x072e,
+            Mode::SplitRedundant,
+            Some(2),
+        ),
     ] {
         let packet = captured(name);
         let mac = packet[8..14].try_into().unwrap();
         let sequence = read_u16(&packet, 4).unwrap();
-        let encoded =
-            crate::commands::build_set_dante_redundancy(protocol, mode, mac, sequence).unwrap();
+        let encoded = crate::commands::build_set_dante_redundancy(
+            Some(protocol),
+            mode,
+            choice,
+            mac,
+            sequence,
+        )
+        .unwrap();
         assert_eq!(&encoded[24..], &packet[24..], "{name}");
         assert_eq!(&encoded[8..14], &packet[8..14]);
         // Controller's transport-specific prefix word is independent of the
         // command body and the NetAudio host identifier representation.
         assert_eq!(encoded.len(), packet.len());
-        let json = serde_json::json!({"command":"set_dante_redundancy", "record_protocol_identifier":protocol, "mode":mode, "host_mac":"020000000010", "sequence":sequence});
+        let json = serde_json::json!({"command":"set_dante_redundancy", "record_protocol_identifier":protocol, "mode":mode, "switch_configuration_choice":choice, "host_mac":"020000000010", "sequence":sequence});
         assert!(crate::spec::build_command_from_json(&json.to_string()).is_ok());
     }
-    for (protocol, mode) in [
-        (0x0725, Mode::Switched),
-        (0x0724, Mode::SplitRedundant),
-        (0x072e, Mode::Redundant),
-    ] {
-        assert!(crate::commands::build_set_dante_redundancy(protocol, mode, [0; 6], 1).is_err());
-    }
-    assert!(
-        crate::commands::build_set_dante_redundancy(0x0724, Mode::Switched, [0; 6], 0).is_err()
+}
+
+#[test]
+fn redundancy_setter_form_follows_reported_switch_configuration_not_revision() {
+    let flag_form =
+        crate::commands::build_set_dante_redundancy(Some(0x07fe), Mode::Redundant, None, [0; 6], 1)
+            .unwrap();
+    let known_revision =
+        crate::commands::build_set_dante_redundancy(Some(0x0724), Mode::Redundant, None, [0; 6], 1)
+            .unwrap();
+    assert_eq!(flag_form, known_revision);
+    assert_eq!(&flag_form[26..28], &[0x00, 0x13]);
+    let choice_form =
+        crate::commands::build_set_dante_redundancy(None, Mode::Switched, Some(1), [0; 6], 1)
+            .unwrap();
+    assert_eq!(&choice_form[26..28], &[0x00, 0x15]);
+    assert_eq!(
+        &choice_form[choice_form.len() - 4..],
+        &[0x00, 0x01, 0x00, 0x01]
     );
+    assert!(crate::commands::build_set_dante_redundancy(
+        Some(0x072e),
+        Mode::SplitRedundant,
+        None,
+        [0; 6],
+        1
+    )
+    .is_err());
+    assert!(crate::commands::build_set_dante_redundancy(
+        Some(0x0724),
+        Mode::Switched,
+        None,
+        [0; 6],
+        0
+    )
+    .is_err());
 }

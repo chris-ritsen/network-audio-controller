@@ -394,7 +394,15 @@
       ],
       "reboot_required": false,
       "record_protocol_identifier": 1831,
-      "redundancy": null
+      "redundancy": {
+        "current": "switched",
+        "configured": "switched",
+        "supported": [
+          "switched",
+          "redundant"
+        ],
+        "reboot_required": false
+      }
     }
   },
   "interface_status_avio_input_packet_12362180": {
@@ -423,7 +431,15 @@
       ],
       "reboot_required": false,
       "record_protocol_identifier": 1831,
-      "redundancy": null
+      "redundancy": {
+        "current": "switched",
+        "configured": "switched",
+        "supported": [
+          "switched",
+          "redundant"
+        ],
+        "reboot_required": false
+      }
     }
   },
   "interface_status_lx_dante_packet_12362179": {

@@ -1571,9 +1571,11 @@ class DanteApplication:
             timeout,
             "switch configuration",
         )
+        from netaudio.dante.network_configuration import switch_configuration_fields
+
         device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
         if device is not None:
-            apply_device_status(device, STATUS_KIND_SWITCH_CONFIGURATION, {"dante_redundancy": status["redundancy"]})
+            apply_device_status(device, STATUS_KIND_SWITCH_CONFIGURATION, switch_configuration_fields(status))
         return status
 
     async def probe_dante_redundancy(self, device, timeout: float = 2.0) -> dict:

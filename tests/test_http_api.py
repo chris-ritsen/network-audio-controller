@@ -795,7 +795,7 @@ class TestMutationVerification:
             "success": True,
             "reboot_required": False,
             "interfaces": [{"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}}],
-            "interface_configuration_modes": {"primary": []},
+            "interface_configuration_modes": {"primary": ["dhcp", "static"]},
             "redundancy": None,
             "link_speed_mbps": None,
         }
@@ -816,7 +816,7 @@ class TestMutationVerification:
             "success": True,
             "reboot_required": True,
             "interfaces": [{"interface": "primary", "mode": "static", "configured": {"mode": "dynamic"}}],
-            "interface_configuration_modes": {"primary": []},
+            "interface_configuration_modes": {"primary": ["dhcp", "static"]},
             "redundancy": None,
             "link_speed_mbps": None,
         }

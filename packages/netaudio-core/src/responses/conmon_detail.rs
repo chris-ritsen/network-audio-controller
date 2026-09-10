@@ -69,13 +69,9 @@ fn parse_ptp_clock_port_records(data: &[u8]) -> Option<Vec<PtpClockPortRecord>> 
         .checked_add(preceding_count.checked_mul(4)?)?;
     let descriptor_target = usize::from(read_u16(record, descriptor_offset)?);
     let descriptor_code = read_u16(record, descriptor_offset.checked_add(2)?)?;
-    // Observed AVIO 0x0738 layout: twelve-byte descriptor, stride 0x1000.
-    // Interpreting that stride as one byte plus padding is inferred;
-    // the checks below accept only the captured sixteen-byte record size.
-    // See tests/fixtures/clock_status/README.md for capture provenance.
-    let extended = match (read_u16(record, 0)?, descriptor_code) {
-        (_, 0x0004) => false,
-        (0x0738, 0x0c00) => true,
+    let extended = match descriptor_code {
+        0x0004 => false,
+        0x0c00 => true,
         _ => return None,
     };
     let descriptor_size = if extended {
