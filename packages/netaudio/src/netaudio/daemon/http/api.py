@@ -25,6 +25,7 @@ from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
+from netaudio.daemon.http.tls import TLSConfigurationError, TLSSettings, build_ssl_context
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.server_info import server_info
 from netaudio.daemon.subscription_readback import SubscriptionReadback
@@ -139,6 +140,7 @@ class DaemonHTTPServer(
         forget_device=None,
         managed_inventory=None,
         refresh_discovery=None,
+        tls: TLSSettings | None = None,
     ):
         self.application = application
         self.server_info = server_info()
@@ -156,7 +158,11 @@ class DaemonHTTPServer(
         self.mark_offline = mark_offline or application.mark_device_offline
         self.forget_device = forget_device or application.unregister_device
         self.port: int = int(port if port is not None else DEFAULT_DAEMON_PORT)
+        if tls is not None and tls.port == self.port:
+            raise TLSConfigurationError(f"[daemon] tls_port must differ from the plain HTTP port {self.port}")
+        self.tls = tls
         self.tcp_server = None
+        self.tls_server = None
         self.zeroconf = None
         self.service_info = None
         self.sse_clients: dict[asyncio.StreamWriter, _SseClient] = {}
@@ -227,6 +233,12 @@ class DaemonHTTPServer(
         logger.info(f"Daemon HTTP API listening on port {self.port}")
 
         try:
+            if self.tls is not None:
+                context = build_ssl_context(self.tls)
+                self.tls_server = await asyncio.start_server(
+                    self.handle_connection, "0.0.0.0", self.tls.port, ssl=context
+                )
+                logger.info(f"Daemon HTTPS API listening on port {self.tls.port}")
             self._register_events()
             await self._reconcile_bonjour(force=True)
             self._bonjour_monitor_task = asyncio.create_task(self._bonjour_monitor_loop())
@@ -261,14 +273,15 @@ class DaemonHTTPServer(
                     return_exceptions=True,
                 )
 
-            server = self.tcp_server
-            self.tcp_server = None
-            if server:
-                server.close()
-                try:
-                    await _bounded(server.wait_closed(), 5)
-                except asyncio.TimeoutError:
-                    logger.warning("Daemon HTTP API connections did not drain within 5s, abandoning them")
+            for attribute, label in (("tcp_server", "HTTP"), ("tls_server", "HTTPS")):
+                server = getattr(self, attribute)
+                setattr(self, attribute, None)
+                if server:
+                    server.close()
+                    try:
+                        await _bounded(server.wait_closed(), 5)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Daemon {label} API connections did not drain within 5s, abandoning them")
 
             self._unregister_events()
 
@@ -624,6 +637,8 @@ class DaemonHTTPServer(
             properties["server_version"] = version
         if revision := self.server_info.get("git_revision"):
             properties["git_revision"] = revision
+        if self.tls is not None:
+            properties["tls_port"] = str(self.tls.port)
         return ServiceInfo(
             DAEMON_SERVICE_TYPE,
             name or f"{_daemon_service_instance_label(hostname)}.{DAEMON_SERVICE_TYPE}",

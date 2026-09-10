@@ -19,6 +19,7 @@ from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.http.api import DaemonHTTPServer
+from netaudio.daemon.http.tls import daemon_tls_settings
 from netaudio.daemon.log_file import daemon_log_path, truncate_when_oversized
 from netaudio.daemon.managed_inventory import ManagedInventoryRegistry
 from netaudio.daemon.managed_signals import ManagedSignalReceiver
@@ -163,6 +164,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             forget_device=self.forget_device,
             managed_inventory=self.managed_inventory,
             refresh_discovery=self.refresh_discovery,
+            tls=daemon_tls_settings(),
         )
         self.managed_inventory.set_callback(self._on_managed_inventory_changed)
         self.heartbeat: DanteHeartbeatService | None = None
