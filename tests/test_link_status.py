@@ -69,19 +69,22 @@ def test_lx_dante_extension_is_preserved_without_semantic_decoding():
     )
 
 
-def test_a32_labels_require_the_model_and_exact_three_record_layout():
-    a32_layout = core.parse_response("unmapped_0040_status", A32_PACKET)
-    avio_layout = core.parse_response("unmapped_0040_status", AVIO_PACKET)
-    a32 = LinkStatusObservation.from_core(a32_layout, _device("A32 Dante AD/DA Converter"))
-    lx_dante = LinkStatusObservation.from_core(a32_layout, _device("LX-DANTE"))
-    a32_model_with_avio_layout = LinkStatusObservation.from_core(
-        avio_layout,
+def test_three_record_layout_labels_follow_the_record_structure_not_the_model():
+    three_record_layout = core.parse_response("unmapped_0040_status", A32_PACKET)
+    single_record_layout = core.parse_response("unmapped_0040_status", AVIO_PACKET)
+    a32 = LinkStatusObservation.from_core(three_record_layout, _device("A32 Dante AD/DA Converter"))
+    other_model = LinkStatusObservation.from_core(three_record_layout, _device("LX-DANTE"))
+    without_device = LinkStatusObservation.from_core(three_record_layout)
+    a32_model_with_single_record_layout = LinkStatusObservation.from_core(
+        single_record_layout,
         _device("A32 Dante AD/DA Converter"),
     )
 
-    assert [record.label for record in a32.records] == ["selected_link", "switch_port_0", "switch_port_3"]
-    assert [record.label for record in lx_dante.records] == [None, None, None]
-    assert [record.label for record in a32_model_with_avio_layout.records] == [None]
+    expected = ["selected_link", "switch_port_0", "switch_port_3"]
+    assert [record.label for record in a32.records] == expected
+    assert [record.label for record in other_model.records] == expected
+    assert [record.label for record in without_device.records] == expected
+    assert [record.label for record in a32_model_with_single_record_layout.records] == [None]
 
 
 def test_notification_waiter_returns_typed_link_status():
