@@ -51,10 +51,7 @@ async def set_interface(application, device, mode, configuration=None, *, interf
         before = deepcopy(await application.probe_interface_status(device, timeout=timeout))
         before_redundancy = deepcopy(device.dante_redundancy)
         selected = interface_configuration(before, interface)
-        if (
-            mode not in interface_configuration_modes(device.interface_status_protocol, interface)
-            or selected.get("configured") is None
-        ):
+        if mode not in interface_configuration_modes(selected):
             raise NetworkConfigurationError("Network configuration is unavailable for this interface")
         if all(selected["configured"].get(key) == value for key, value in expected.items()):
             return before
@@ -120,18 +117,49 @@ def network_snapshot(device) -> dict:
 
 def network_configuration_modes(device) -> dict:
     return {
-        entry["interface"]: interface_configuration_modes(device.interface_status_protocol, entry["interface"])
+        entry["interface"]: interface_configuration_modes(entry)
         for entry in device.interfaces or []
         if entry.get("interface") in {"primary", "secondary"} and entry.get("configured") is not None
     }
 
 
-def interface_configuration_modes(record_protocol_identifier, interface):
-    if interface == "primary" and record_protocol_identifier in {0x0724, 0x0727, 0x072E, 0x0738, 0x073D}:
-        return ["dhcp", "static"]
-    if interface == "secondary" and record_protocol_identifier == 0x073D:
+def interface_configuration_modes(entry) -> list[str]:
+    if isinstance(entry, dict) and entry.get("configured") is not None:
         return ["dhcp", "static"]
     return []
+
+
+REDUNDANCY_MODE_LABELS = {
+    "Redundant": "redundant",
+    "Split/Redundant": "split_redundant",
+    "Switched": "switched",
+}
+
+
+def switch_configuration_fields(parsed: dict) -> dict:
+    choices = [
+        {
+            "code": choice["code"],
+            "label": choice["label"],
+            "mode": REDUNDANCY_MODE_LABELS.get(choice["label"]),
+        }
+        for choice in parsed.get("choices") or []
+    ]
+    return {"dante_redundancy": parsed["redundancy"], "switch_configuration_choices": choices}
+
+
+def switch_configuration_choice(device, mode: str) -> int | None:
+    for choice in getattr(device, "switch_configuration_choices", None) or []:
+        if choice.get("mode") == mode:
+            return choice.get("code")
+    return None
+
+
+def switch_configuration_expected(device) -> bool:
+    choices = getattr(device, "switch_configuration_choices", None)
+    if choices is not None:
+        return bool(choices)
+    return len(device.interfaces or []) == 2
 
 
 def interface_redundancy_status(parsed: dict, device) -> dict | None:
@@ -141,23 +169,30 @@ def interface_redundancy_status(parsed: dict, device) -> dict | None:
     # A zero mode flag on a single-port product is not evidence that it can
     # become redundant. Keep current-state reads separate from write support.
     known_hardware = (
-        len(parsed.get("interfaces", [])) == 2
-        or getattr(device, "licensed_redundancy_enabled", None) is True
-        or getattr(device, "model", None) == "A32 Dante AD/DA Converter"
-        or getattr(device, "dante_model", None) == "A32 Dante AD/DA Converter"
+        len(parsed.get("interfaces", [])) == 2 or getattr(device, "licensed_redundancy_enabled", None) is True
     )
     if not known_hardware:
         status["supported"] = []
     return status
 
 
+async def probe_switch_configuration_if_reported(application, device, timeout: float = 2.0) -> dict | None:
+    from netaudio.dante.application import CapabilityProbeTimeout
+
+    if not switch_configuration_expected(device):
+        return None
+    try:
+        return await application.probe_switch_configuration(device, timeout=timeout)
+    except (CapabilityProbeTimeout, TimeoutError):
+        if device.switch_configuration_choices is None:
+            device.switch_configuration_choices = []
+            return None
+        raise
+
+
 async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
     await application.probe_interface_status(device, timeout=timeout)
-    protocol = device.interface_status_protocol
-    if protocol in {0x072E, 0x073D}:
-        await application.probe_switch_configuration(device, timeout=timeout)
-    elif protocol != 0x0724:
-        raise NetworkConfigurationError("Dante redundancy is unavailable for this network protocol")
+    await probe_switch_configuration_if_reported(application, device, timeout)
     status = device.dante_redundancy
     if not isinstance(status, dict) or status.get("current") is None or status.get("configured") is None:
         raise NetworkConfigurationError("Dante redundancy status was not reported")
@@ -170,13 +205,13 @@ async def set_redundancy(application, device, mode: str, timeout: float = 2.0) -
     async with device.topology_mutation_lock:
         before = await probe_redundancy(application, device, timeout)
         before_interfaces = deepcopy(device.interfaces)
-        if getattr(device, "requires_managed_control", False) and device.interface_status_protocol != 0x073D:
-            raise NetworkConfigurationError("Managed redundancy changes are unavailable for this network protocol")
         if mode not in before.get("supported", []):
             raise NetworkConfigurationError("The device does not support the selected Dante redundancy mode")
         if before["configured"] == mode:
             return before
-        specification = application.commands.set_dante_redundancy(device.interface_status_protocol, mode)
+        specification = application.commands.set_dante_redundancy(
+            device.interface_status_protocol, mode, switch_configuration_choice(device, mode)
+        )
         try:
             await application._send_settings(device, specification)
             after = await probe_redundancy(application, device, timeout)

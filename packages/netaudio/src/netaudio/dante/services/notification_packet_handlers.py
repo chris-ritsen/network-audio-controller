@@ -32,7 +32,7 @@ from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
 from netaudio.dante.link_status import LinkStatusObservation
 from netaudio.dante.lock_status import LockStatusObservation
-from netaudio.dante.network_configuration import interface_redundancy_status
+from netaudio.dante.network_configuration import interface_redundancy_status, switch_configuration_fields
 from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
@@ -166,7 +166,7 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
         "interfaces": parsed["interfaces"],
         "link_speed_mbps": parsed["link_speed_mbps"],
     }
-    if parsed["record_protocol_identifier"] not in {0x072E, 0x073D}:
+    if not getattr(device, "switch_configuration_choices", None):
         status["dante_redundancy"] = interface_redundancy_status(parsed, device)
     return ParsedStatus(STATUS_KIND_INTERFACE, status, status)
 
@@ -299,7 +299,7 @@ def _parse_switch_configuration_status(data: bytes, source_ip: str, device) -> P
     parsed = _core_parse("switch_configuration_status", data, source_ip, "switch configuration status")
     if parsed is None:
         return None
-    return ParsedStatus(STATUS_KIND_SWITCH_CONFIGURATION, {"dante_redundancy": parsed["redundancy"]}, parsed)
+    return ParsedStatus(STATUS_KIND_SWITCH_CONFIGURATION, switch_configuration_fields(parsed), parsed)
 
 
 CONMON_STATUS_PARSERS = {

@@ -82,18 +82,20 @@ def test_installed_secondary_dhcp_readback_preserves_primary_and_redundancy():
 
 @pytest.mark.parametrize("command", ["set_interface_dhcp", "set_interface_static"])
 @pytest.mark.parametrize("protocol", [None, 0x0724, 0x0738, 0x07FF])
-def test_secondary_encoding_rejects_unobserved_protocols(command, protocol):
-    spec = {
-        "command": command,
-        "interface": "secondary",
-        "host_mac": "020000000062",
-        "sequence": 1,
-        "record_protocol_identifier": protocol,
-    }
-    if command == "set_interface_static":
-        spec.update(ip="198.51.100.102", netmask="255.255.255.0", dns="203.0.113.53", gateway="203.0.113.2")
-    with pytest.raises(core.NetaudioCoreError):
-        core.build_command(spec)
+def test_secondary_encoding_does_not_depend_on_the_reported_revision(command, protocol):
+    def build(record_protocol_identifier):
+        spec = {
+            "command": command,
+            "interface": "secondary",
+            "host_mac": "020000000062",
+            "sequence": 1,
+            "record_protocol_identifier": record_protocol_identifier,
+        }
+        if command == "set_interface_static":
+            spec.update(ip="198.51.100.102", netmask="255.255.255.0", dns="203.0.113.53", gateway="203.0.113.2")
+        return core.build_command(spec)
+
+    assert build(protocol) == build(0x073D)
 
 
 @pytest.mark.parametrize("interface", ["tertiary", "", 1])

@@ -145,6 +145,15 @@ const CONMON_SWITCH_CONFIGURATION_CHOICE_LABEL_OFFSET: usize = 4;
 const CONMON_SWITCH_CONFIGURATION_CHOICE_LABEL_SIZE: usize = 128;
 const CONMON_SWITCH_CONFIGURATION_CHOICE_TRAILING_WORDS_OFFSET: usize = 132;
 
+pub fn redundancy_mode_for_label(label: &str) -> Option<crate::network::DanteRedundancyMode> {
+    match label {
+        "Redundant" => Some(crate::network::DanteRedundancyMode::Redundant),
+        "Split/Redundant" => Some(crate::network::DanteRedundancyMode::SplitRedundant),
+        "Switched" => Some(crate::network::DanteRedundancyMode::Switched),
+        _ => None,
+    }
+}
+
 pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurationStatus> {
     validate_conmon_envelope(data, CONMON_OPCODE_SWITCH_CONFIGURATION_STATUS)?;
     let record = data.get(CONMON_SWITCH_CONFIGURATION_RECORD_OFFSET..)?;
@@ -214,24 +223,17 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
         });
     }
 
-    let protocol_id = read_u16(record, 0)?;
-    let mode_for = |code| match (protocol_id, code) {
-        (0x072e | 0x073d, 1) => Some(crate::network::DanteRedundancyMode::Switched),
-        (0x072e, 2) => Some(crate::network::DanteRedundancyMode::SplitRedundant),
-        (0x073d, 2) => Some(crate::network::DanteRedundancyMode::Redundant),
-        _ => None,
+    let mode_for = |code| {
+        choices
+            .iter()
+            .find(|choice| choice.code == code)
+            .and_then(|choice| redundancy_mode_for_label(&choice.label))
     };
     let current = mode_for(read_u16(record, 20)?);
     let configured = mode_for(read_u16(record, 22)?);
     let supported: Vec<crate::network::DanteRedundancyMode> = choices
         .iter()
-        .filter_map(
-            |choice| match (protocol_id, choice.code, choice.label.as_str()) {
-                (0x072e | 0x073d, 1, "Switched") => mode_for(1),
-                (0x072e, 2, "Split/Redundant") | (0x073d, 2, "Redundant") => mode_for(2),
-                _ => None,
-            },
-        )
+        .filter_map(|choice| redundancy_mode_for_label(&choice.label))
         .collect();
     let current = current.filter(|mode| supported.contains(mode));
     let configured = configured.filter(|mode| supported.contains(mode));
