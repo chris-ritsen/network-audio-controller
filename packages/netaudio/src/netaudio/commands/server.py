@@ -468,11 +468,42 @@ def web(
     url = f"http://127.0.0.1:{effective_port}/"
     typer.echo(url)
     from netaudio.daemon.http.api import advertisement_addresses
+    from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
 
-    for address in advertisement_addresses():
+    addresses = advertisement_addresses()
+    for address in addresses:
         typer.echo(f"http://{address}:{effective_port}/")
+    try:
+        tls = daemon_tls_settings()
+    except TLSConfigurationError as error:
+        typer.echo(f"TLS is misconfigured: {error}", err=True)
+        tls = None
+    if tls is not None:
+        for address in ("127.0.0.1", *addresses):
+            typer.echo(f"https://{address}:{tls.port}/")
+        typer.echo(f"Certificate SHA-256: {certificate_fingerprint(tls.certificate)}")
 
     if open_browser:
         import webbrowser
 
         webbrowser.open(url)
+
+
+@app.command()
+def tls():
+    """Show the daemon's TLS configuration and certificate fingerprint."""
+    from netaudio.common.config_loader import default_config_path
+    from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
+
+    try:
+        settings_value = daemon_tls_settings()
+    except TLSConfigurationError as error:
+        typer.echo(f"TLS is misconfigured: {error}", err=True)
+        raise typer.Exit(code=1)
+    if settings_value is None:
+        typer.echo(f"TLS is not configured. Add tls_certificate and tls_key under [daemon] in {default_config_path()}.")
+        return
+    typer.echo(f"Port: {settings_value.port}")
+    typer.echo(f"Certificate: {settings_value.certificate}")
+    typer.echo(f"Key: {settings_value.key}")
+    typer.echo(f"Certificate SHA-256: {certificate_fingerprint(settings_value.certificate)}")
