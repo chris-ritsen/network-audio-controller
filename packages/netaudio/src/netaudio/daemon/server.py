@@ -21,6 +21,7 @@ from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.daemon.http.api import DaemonHTTPServer
 from netaudio.daemon.log_file import daemon_log_path, truncate_when_oversized
 from netaudio.daemon.managed_inventory import ManagedInventoryRegistry
+from netaudio.daemon.managed_signals import ManagedSignalReceiver
 from netaudio.daemon.metering import MeteringManager
 from netaudio.daemon.network_cache import NetworkStatusCache
 from netaudio.daemon.systemd import notify_systemd as _sd_notify
@@ -148,6 +149,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         self._stop_lock = DeferredAsyncioLock()
         self._stop_complete = False
         self.metering = MeteringManager(self.application)
+        self.managed_signals = ManagedSignalReceiver(self.application, self.metering)
         self.managed_inventory = ManagedInventoryRegistry(managed_configuration)
         self.shure = ShureManager(self.application.dispatcher) if ShureManager else None
         self.http_api = DaemonHTTPServer(
@@ -271,6 +273,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     async def _on_managed_inventory_changed(self) -> None:
         self.http_api._serialized_devices()
+        self.managed_signals.reconcile()
         now = time.monotonic()
         for device in list(self.devices.values()):
             if not device.requires_managed_control or not device.online:
@@ -651,6 +654,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             except (OSError, RuntimeError) as exception:
                 logger.warning(f"Shure stop error: {exception}", exc_info=True)
 
+        try:
+            await self.managed_signals.stop()
+        except (OSError, RuntimeError) as exception:
+            logger.warning("Managed signal receiver stop error: %s", exception, exc_info=True)
         try:
             await self.managed_inventory.stop()
         except (OSError, RuntimeError) as exception:

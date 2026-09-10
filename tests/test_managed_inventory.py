@@ -833,3 +833,21 @@ def test_stable_ddm_identity_correlates_when_enrollment_omits_interface_mac():
     assert list(result) == [direct.server_name]
     assert result[direct.server_name]["mac_address"] == direct.mac_address
     assert result[direct.server_name]["management_state"] == "managed"
+
+
+def test_managed_self_subscription_resolves_to_its_own_transmitter():
+    managed = _managed_device()
+    channel = replace(
+        managed.rx_channels[0],
+        subscribed_device=".",
+        subscribed_channel="managed-tx",
+        status="SUBSCRIBE_SELF",
+        summary="CONNECTED",
+    )
+    managed = replace(managed, rx_channels=(channel,))
+    merged = merge_device_inventory({}, (_observation(managed),), synced_at=1234.0, fresh=True)
+    record = merged["ddm:default:domain-1:managed-1"]
+    subscription = record["subscriptions"][0]
+    assert subscription["tx_device"] == record["name"]
+    assert subscription["tx_channel"] == record["channels"]["transmitters"]["1"]["name"]
+    assert subscription["status"]["state"] == "connected"

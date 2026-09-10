@@ -86,7 +86,7 @@ def _device_rows(devices: list[dict]) -> tuple[list[str], list[list[str]]]:
                 str(len(device.get("rxChannels") or [])),
             ]
         )
-    return ["Name", "ID", "Model", "Dante", "Enrolment", "Connection", "Status", "IP Address", "TX", "RX"], rows
+    return ["Name", "ID", "Model", "Dante", "Enrollment", "Connection", "Status", "IP Address", "TX", "RX"], rows
 
 
 def _generic_rows(items: list[dict]) -> tuple[list[str], list[list[str]]]:

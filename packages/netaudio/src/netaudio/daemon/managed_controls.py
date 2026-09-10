@@ -107,3 +107,30 @@ class ManagedDeviceControls:
 
     def clear(self):
         self.reconcile({})
+
+
+async def refresh_managed_subscriptions(application, device):
+    from netaudio.daemon.managed_inventory import _managed_channels, _managed_subscriptions
+
+    fresh = await application.managed_transport(device).fetch_device(device)
+    if fresh.rx_channels is None:
+        raise RuntimeError("Managed receiver status is unavailable")
+    receivers = _managed_channels(fresh)["receivers"]
+    for number, channel in receivers.items():
+        existing = device.rx_channels.get(int(number))
+        if existing is not None:
+            receivers[number] = {**DanteDeviceSerializer.channel_to_json(existing), **channel}
+    readback = DanteDeviceSerializer.device_from_json(
+        {
+            "name": device.name,
+            "channels": {"receivers": receivers},
+            "subscriptions": _managed_subscriptions(fresh),
+        }
+    )
+    device.rx_channels = readback.rx_channels
+    for channel in device.rx_channels.values():
+        channel.device = device
+    device.subscriptions = readback.subscriptions
+    for subscription in device.subscriptions:
+        subscription.rx_device = device
+    device.rx_count = len(device.rx_channels)

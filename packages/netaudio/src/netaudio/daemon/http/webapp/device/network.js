@@ -15,7 +15,7 @@ function InterfaceCard({ entry, modes, requestName, onReadback }) {
   const [mode, setMode] = useState(configured?.mode === "static" ? "static" : "dhcp");
   const [saving, setSaving] = useState(false);
   const ip = useRef(null), mask = useRef(null), gateway = useRef(null), dns = useRef(null);
-  const editable = modes.length > 0 && configured != null;
+  const editable = modes?.length > 0 && configured != null;
   return html`
     <section class="network-section">
       <h3 class="section-label">${title}</h3>
@@ -64,7 +64,7 @@ function InterfaceCard({ entry, modes, requestName, onReadback }) {
               setSaving(false);
             }
           }}>Save ${title.toLowerCase()} settings<//>
-      ` : configured ? html`<p>Network changes are unavailable for this interface.</p>` : null}
+      ` : configured && modes ? html`<p>Network changes are unavailable for this interface.</p>` : null}
     </section>
   `;
 }
@@ -140,7 +140,7 @@ export function NetworkSection({ device }) {
       ${loadError ? html`<p role="status">The device did not respond. Showing last-known network settings.</p>` : null}
       ${speed ? html`<p>Link speed: ${speed} Mbps</p>` : null}
       ${interfaces.length ? interfaces.map((entry) => html`
-        <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} entry=${entry} modes=${interfaceModes[entry.interface] || []} requestName=${requestName} onReadback=${onReadback} />
+        <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} entry=${entry} modes=${interfaceModes[entry.interface]} requestName=${requestName} onReadback=${onReadback} />
       `) : html`<p>Network settings are unavailable.</p>`}
       <${Redundancy} key=${requestName + status?.configured} status=${status} requestName=${requestName} onReadback=${onReadback} />
     <//>

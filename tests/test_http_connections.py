@@ -188,3 +188,49 @@ async def test_create_domain_rejects_blank_name_without_sending_request():
     server.managed_inventory = SimpleNamespace(services={})
     status, _ = await post(server, "/ddm/domains", {"server": "studio", "name": "   "})
     assert status == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,operation", [("rename", "DomainUpdate"), ("remove", "DomainRemove")])
+@pytest.mark.parametrize("accepted", [True, False])
+async def test_update_domain_uses_exact_server_and_requires_acceptance(action, operation, accepted):
+    from tests.http_api_test_support import FakeWriter
+
+    server = make_http_server()
+    client = SimpleNamespace(execute_async=AsyncMock(return_value=GraphQLResult({operation: {"ok": accepted}}, ())))
+    service = SimpleNamespace(enabled=True, refresh=AsyncMock(), client=client)
+    other = SimpleNamespace(enabled=True, client=SimpleNamespace(execute_async=AsyncMock()))
+    server.managed_inventory = SimpleNamespace(
+        services={"studio": service, "other": other},
+        domains=lambda: [{"id": "domain-1", "ddm_server_profile": "studio"}],
+    )
+    server.publish_inventory_snapshot = AsyncMock()
+    writer = FakeWriter()
+    await server._handle_ddm_update_domain(
+        writer, {"server": "studio", "domain_id": "domain-1", "action": action, "name": " New Name "}
+    )
+    status, body = writer.response()
+    assert status == (200 if accepted else 409)
+    assert client.execute_async.call_args.args[2] == operation
+    expected = {"id": "domain-1", "name": "New Name"} if action == "rename" else {"id": "domain-1"}
+    assert client.execute_async.call_args.args[1] == {"input": expected}
+    assert service.refresh.await_count == int(accepted)
+    assert server.publish_inventory_snapshot.await_count == int(accepted)
+    other.client.execute_async.assert_not_awaited()
+    assert body.get("accepted", False) == accepted
+
+
+@pytest.mark.asyncio
+async def test_domain_update_rejects_another_servers_domain():
+    from tests.http_api_test_support import FakeWriter
+
+    server = make_http_server()
+    client = SimpleNamespace(execute_async=AsyncMock())
+    server.managed_inventory = SimpleNamespace(
+        services={"studio": SimpleNamespace(enabled=True, client=client)},
+        domains=lambda: [{"id": "domain-1", "ddm_server_profile": "other"}],
+    )
+    writer = FakeWriter()
+    await server._handle_ddm_update_domain(writer, {"server": "studio", "domain_id": "domain-1", "action": "remove"})
+    assert writer.response()[0] == 400
+    client.execute_async.assert_not_awaited()

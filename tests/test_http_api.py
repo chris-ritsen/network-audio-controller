@@ -1028,3 +1028,33 @@ async def test_latency_write_requires_configured_readback():
     status, response = await post(server, "/set-latency", {"device": "dev1", "latency": 1.0})
     assert status == 504
     assert "readback" in response["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize(
+    ("path", "params", "records"),
+    [
+        ("/subscribe", {"rx_channel": 1, "tx_channel": "Out", "tx_device": "Mixer"}, [(1, "Out", "Mixer")]),
+        (
+            "/subscribe",
+            {"subscriptions": [{"rx_channel": 1, "tx_channel": "Out", "tx_device": "Mixer"}]},
+            [(1, "Out", "Mixer")],
+        ),
+        ("/unsubscribe", {"rx_channel": 1}, [(1, "", "")]),
+        ("/unsubscribe", {"rx_channels": [1]}, [(1, "", "")]),
+    ],
+)
+async def test_accepted_subscription_starts_targeted_readback(managed, path, params, records):
+    from netaudio.ddm.device_transport import ManagedOperationResult
+
+    device = make_device()
+    device.rx_channels = {1: SimpleNamespace(number=1)}
+    server = make_http_server({"dev1": device})
+    server.subscription_readback.request = MagicMock()
+    response = ManagedOperationResult("subscription") if managed else bytes.fromhex("27ff000a000010010001")
+    server.application.add_subscriptions.return_value = response
+    server.application.remove_subscriptions.return_value = response
+    status, body = await post(server, path, {"rx_device": "dev1", **params})
+    assert status == 200 and body["success"]
+    server.subscription_readback.request.assert_called_once_with(device, records)
