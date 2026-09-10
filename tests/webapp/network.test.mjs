@@ -46,7 +46,7 @@ test("redundancy selection submits immediately and blocks overlapping writes", a
 
 test("network panel separates primary and secondary active/configured values", () => {
   const device = {
-    server_name: "device.local.", interface_configuration_modes: { primary: ["dhcp", "static"] }, interfaces: [
+    server_name: "device.local.", interface_configuration_modes: { primary: ["dhcp", "static"], secondary: [] }, interfaces: [
       { interface: "primary", mode: "static", ip_address: "192.0.2.34", netmask: "255.255.255.0",
         configured: { mode: "static", ip_address: "192.0.2.34", netmask: "255.255.255.0" } },
       { interface: "secondary", mode: "dynamic", ip_address: "198.51.100.62", netmask: "255.255.0.0",

@@ -152,14 +152,19 @@ function markPending(payload) {
   }, PENDING_SUBSCRIPTION_TIMEOUT_MILLISECONDS);
 }
 
-function clearPendingForDevice(device) {
+export function clearPendingForDevice(device) {
   const current = pendingSubscriptions.value;
   const names = new Set([device.name, device.server_name].filter(Boolean));
   let changed = false;
   const next = {};
   for (const [key, entry] of Object.entries(current)) {
-    const receiverName = key.split("\u0000")[0];
-    if (names.has(receiverName)) {
+    const [receiverName, number] = key.split("\u0000");
+    const channel = device.channels?.receivers?.[number];
+    const subscription = channel && (device.subscriptions || []).find((entry) => entry.rx_channel === channel.name);
+    const confirmed = channel && (entry.action === "remove"
+      ? !subscription?.tx_device
+      : subscription?.tx_device === entry.tx_device && subscription?.tx_channel === entry.tx_channel);
+    if (names.has(receiverName) && confirmed) {
       changed = true;
       continue;
     }
@@ -199,11 +204,13 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "device_discovered" || kind === "device_updated") {
-    devices.value = { ...devices.value, [payload.server_name]: payload.device };
+    batch(() => {
+      devices.value = { ...devices.value, [payload.server_name]: payload.device };
+      if (payload.device) {
+        clearPendingForDevice(payload.device);
+      }
+    });
     saveInventorySoon();
-    if (payload.device) {
-      clearPendingForDevice(payload.device);
-    }
     return;
   }
   if (kind === "device_removed") {

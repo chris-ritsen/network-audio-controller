@@ -27,6 +27,7 @@ from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.server_info import server_info
+from netaudio.daemon.subscription_readback import SubscriptionReadback
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import DanteEvent, EventType
 
@@ -148,6 +149,7 @@ class DaemonHTTPServer(
         self.refresh_discovery = refresh_discovery
         self._dismissed_offline_inventory: set[str] = set()
         self.state = state
+        self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
         self.metering = metering
         self.shure = shure
         self.on_shutdown = on_shutdown
@@ -208,6 +210,9 @@ class DaemonHTTPServer(
             "/ddm/enrollment": self._handle_ddm_enrollment,
             "/ddm/domains": self._handle_ddm_create_domain,
             "/ddm/context": self._handle_ddm_context,
+            "/ddm/profile": self._handle_ddm_edit_profile,
+            "/ddm/domains/update": self._handle_ddm_update_domain,
+            "/device-lock-key": self._handle_device_lock_key,
             "/settings/monitoring": self._handle_monitoring_settings,
             "/shutdown": self._handle_shutdown,
         }
@@ -236,6 +241,7 @@ class DaemonHTTPServer(
             self._stop_lock = stop_lock
 
         async with stop_lock:
+            await self.subscription_readback.stop()
             monitor_task = self._bonjour_monitor_task
             self._bonjour_monitor_task = None
             if monitor_task:
@@ -691,7 +697,17 @@ class DaemonHTTPServer(
         if (
             path.startswith("/presets/")
             or path
-            in {"/ddm/login", "/ddm/logout", "/ddm/context", "/ddm/enrollment", "/ddm/domains", "/settings/monitoring"}
+            in {
+                "/ddm/login",
+                "/ddm/logout",
+                "/ddm/context",
+                "/ddm/enrollment",
+                "/ddm/domains",
+                "/ddm/profile",
+                "/ddm/domains/update",
+                "/device-lock-key",
+                "/settings/monitoring",
+            }
         ) and headers:
             origin = headers.get("origin")
             if origin and urlsplit(origin).netloc != headers.get("host"):

@@ -8,6 +8,50 @@ logger = logging.getLogger("netaudio")
 
 
 class DaemonManagedHandlers:
+    async def _handle_ddm_update_domain(self, writer, params):
+        server_name = params.get("server")
+        domain_id = params.get("domain_id")
+        action = params.get("action")
+        registry = self.managed_inventory
+        service = registry.services.get(server_name) if registry is not None and isinstance(server_name, str) else None
+        if service is None or not service.enabled:
+            await self._send_json(writer, {"error": "Log in to the selected DDM server first"}, 409)
+            return
+        if not isinstance(domain_id, str) or not any(
+            domain.get("id") == domain_id and domain.get("ddm_server_profile") == server_name
+            for domain in registry.domains()
+        ):
+            await self._send_json(writer, {"error": "Select a domain on this server"}, 400)
+            return
+        if action == "rename":
+            name = params.get("name")
+            if not isinstance(name, str) or not name.strip():
+                await self._send_json(writer, {"error": "Enter a domain name"}, 400)
+                return
+            operation = "DomainUpdate"
+            values = {"id": domain_id, "name": name.strip()}
+        elif action == "remove":
+            operation = "DomainRemove"
+            values = {"id": domain_id}
+        else:
+            await self._send_json(writer, {"error": "Choose Rename or Remove"}, 400)
+            return
+        try:
+            result = await service.client.execute_async(
+                f"mutation {operation}($input: {operation}Input!) {{ {operation}(input: $input) {{ ok }} }}",
+                {"input": values},
+                operation,
+            )
+        except ManagedAPIError:
+            await self._send_json(writer, {"error": "The request failed. Check the domain before retrying."}, 502)
+            return
+        if result.errors or not ((result.data or {}).get(operation) or {}).get("ok"):
+            await self._send_json(writer, {"error": "The domain could not be changed. Check your permissions."}, 409)
+            return
+        await service.refresh()
+        await self.publish_inventory_snapshot()
+        await self._send_json(writer, {"accepted": True})
+
     async def _handle_ddm_create_domain(self, writer, params):
         server_name = params.get("server")
         name = params.get("name")

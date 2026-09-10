@@ -3,7 +3,7 @@ import { channelGroups, groupChannels, setGroupsExpanded } from "./channel-group
 import { Icon } from "./icons.js";
 import * as format from "./format.js";
 import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
-import { deviceRequestName, pendingKey, pendingSubscriptions } from "./store.js";
+import { deviceRequestName, pendingKey } from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
 
@@ -155,7 +155,7 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
 }
 
 export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitters, receiverFilter, transmitterFilter,
-  groups = { enabled: false, receivers: new Set(), transmitters: new Set() } }) {
+  groups = { enabled: false, receivers: new Set(), transmitters: new Set() }, pending = {} }) {
   const sorted = format.sortedDevices(devices);
   const subscriptionIndex = new Map();
   for (const device of sorted) {
@@ -169,22 +169,35 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
   }
   const subscriptionsFor = (device, channelName) =>
     subscriptionIndex.get(format.deviceLabel(device)).get(channelName) || null;
-  const allSubscriptions = [...subscriptionIndex.entries()].flatMap(([receiver, channels]) =>
-    [...channels.values()].map((subscription) => ({ receiver, subscription })));
-  const summarize = (entry) => {
-    const subscriptions = allSubscriptions.filter((item) =>
-      item.receiver === entry.label && (entry.kind === "device" || (entry.kind === "group"
-        ? entry.channels.some((channel) => channel.name === item.subscription.rx_channel) : item.subscription.rx_channel === entry.name)));
-    return { count: subscriptions.length, severity: severityName(Math.max(0, ...subscriptions.map((item) => severityRank(format.subscriptionTone(item.subscription))))) };
-  };
   const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
   const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
-  for (const entry of rows) entry.activity = summarize(entry);
+  for (const entry of rows) {
+    if (entry.kind !== "channel" && entry.expanded) continue;
+    const channels = entry.kind === "channel" ? [entry] : entry.channels;
+    const severities = channels.flatMap((channel) => {
+      const update = pending[pendingKey(deviceRequestName(entry.device), channel.number)]
+        || pending[pendingKey(entry.label, channel.number)];
+      if (update) return ["pending"];
+      const subscription = subscriptionIndex.get(entry.label).get(channel.name);
+      return subscription ? [subscriptionSeverity(subscription)] : [];
+    });
+    if (!severities.length) continue;
+    const worst = severityName(Math.max(...severities.map(severityRank)));
+    entry.activity = { count: severities.length, severity: worst === "ok" && severities.includes("pending") ? "pending" : worst };
+  }
   return {
     columns,
     rows,
     subscriptionIndex,
   };
+}
+
+function subscriptionSeverity(subscription) {
+  const status = subscription?.status;
+  if (status?.severity === "progress" || ["in_progress", "resolved"].includes(status?.state)) {
+    return "pending";
+  }
+  return severityName(severityRank(format.subscriptionTone(subscription)));
 }
 
 function severityRank(severity) {
@@ -232,7 +245,7 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
     if (!subscription || subscription.tx_device !== column.label || subscription.tx_channel !== column.name) {
       return { kind: "empty" };
     }
-    return { kind: severityName(severityRank(format.subscriptionTone(subscription))), subscription };
+    return { kind: subscriptionSeverity(subscription), subscription };
   }
   if (row.kind === "channel") {
     const subscription = row.subscription;
@@ -293,7 +306,7 @@ function rowLabelText(row) {
   if (row.kind === "device") {
     return `${row.label}  (${row.channelCount})`;
   }
-  return `${row.number}  ${row.name}`;
+  return row.name;
 }
 
 function columnLabelText(column) {
@@ -301,7 +314,7 @@ function columnLabelText(column) {
   if (column.kind === "device") {
     return `${column.label}  (${column.channelCount})`;
   }
-  return `${column.number}  ${column.name}`;
+  return column.name;
 }
 
 export function measureMatrixLayout(context, rows, columns, theme) {
@@ -337,7 +350,7 @@ export function ExpansionButtons({ label, onExpand, onCollapse, vertical = false
 }
 
 export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: receivers, subscriptionIndex, flipped = false,
-  onExpandDevices, receiverFilter = "", transmitterFilter = "", onReceiverFilter, onTransmitterFilter }) {
+  onExpandDevices, receiverFilter = "", transmitterFilter = "", onReceiverFilter, onTransmitterFilter, pending = {} }) {
   const rows = flipped ? transmitters : receivers;
   const columns = flipped ? receivers : transmitters;
   const stage = useRef(null);
@@ -349,7 +362,6 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   const [hover, setHover] = useState(null);
   const [layout, setLayout] = useState({ gutter: MINIMUM_GUTTER, header: MINIMUM_HEADER });
   const busy = useRef(new Set());
-  const pending = pendingSubscriptions.value;
 
   const contentWidth = layout.gutter + columns.length * CELL;
   const contentHeight = layout.header + rows.length * CELL;
@@ -501,7 +513,7 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
   };
 
   const statusHover = hover && ((hover.inHeader && !hover.inGutter && hover.y >= layout.header - CELL && columns[hover.columnIndex]?.activity?.count)
-    || (hover.inGutter && !hover.inHeader && hover.x >= layout.gutter - CELL && rows[hover.rowIndex]?.kind !== "device" && rows[hover.rowIndex]?.activity?.count));
+    || (hover.inGutter && !hover.inHeader && hover.x >= layout.gutter - CELL && rows[hover.rowIndex]?.activity?.count));
   const cellHover = hover && !hover.inHeader && !hover.inGutter
     && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
   const hoverText = hover && (cellHover || statusHover)
@@ -566,14 +578,14 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
     return row.kind === "device"
       ? `${row.label} — ${row.channelCount} ${flipped ? "transmit" : "receive"} channels`
       : row.kind === "group" ? `${row.label} — ${row.name} (${row.channelCount} channels)`
-      : `${row.label} ${row.number} ${row.name}`;
+      : `${row.label} ${row.name}`;
   }
   if (hover.inHeader) {
     const column = columns[hover.columnIndex];
     return column.kind === "device"
       ? `${column.label} — ${column.channelCount} ${flipped ? "receive" : "transmit"} channels`
       : column.kind === "group" ? `${column.label} — ${column.name} (${column.channelCount} channels)`
-      : `${column.label} ${column.number} ${column.name}`;
+      : `${column.label} ${column.name}`;
   }
   const row = flipped ? columns[hover.columnIndex] : rows[hover.rowIndex];
   const column = flipped ? rows[hover.rowIndex] : columns[hover.columnIndex];
@@ -618,14 +630,14 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
   context.fillStyle = theme.cell;
   context.fillRect(gutter, header, size.width - gutter, size.height - header);
   for (let index = firstRow; index < lastRow; index += 1) {
-    if (rows[index].kind === "device") {
-      context.fillStyle = theme.line;
+    if (rows[index].kind !== "channel") {
+      context.fillStyle = theme.panel;
       context.fillRect(gutter, rowY(index), size.width - gutter, CELL);
     }
   }
   for (let index = firstColumn; index < lastColumn; index += 1) {
-    if (columns[index] && columns[index].kind === "device") {
-      context.fillStyle = theme.line;
+    if (columns[index] && columns[index].kind !== "channel") {
+      context.fillStyle = theme.panel;
       context.fillRect(columnX(index), header, CELL, size.height - header);
     }
   }
@@ -688,10 +700,7 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
       const x = columnX(columnIndex);
       const y = rowY(rowIndex);
       if (state.kind === "pending") {
-        context.strokeStyle = theme.text;
-        context.lineWidth = 2;
-        context.strokeRect(x + 5, y + 5, CELL - 10, CELL - 10);
-        context.lineWidth = 1;
+        drawStatusIcon(context, x + CELL / 2, y + CELL / 2, "pending", theme);
         continue;
       }
       const severity = state.kind === "aggregate" ? state.severity
@@ -744,7 +753,23 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
   context.fillStyle = severityColor(theme, severity);
   context.strokeStyle = "#000000";
   context.lineWidth = 1.25;
-  if (severity === "warning") {
+  if (severity === "pending") {
+    context.fillStyle = "#a6abad";
+    context.fillRect(0, 0, 26, 26);
+    context.strokeStyle = "#343a3d";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(5, 4);
+    context.lineTo(21, 4);
+    context.moveTo(5, 22);
+    context.lineTo(21, 22);
+    context.moveTo(7, 4);
+    context.bezierCurveTo(7, 10, 9, 11, 13, 13);
+    context.bezierCurveTo(17, 15, 19, 16, 19, 22);
+    context.moveTo(19, 4);
+    context.bezierCurveTo(19, 10, 17, 11, 13, 13);
+    context.bezierCurveTo(9, 15, 7, 16, 7, 22);
+  } else if (severity === "warning") {
     context.fillRect(0, 0, 26, 26);
     context.beginPath();
     context.moveTo(13, 4); context.lineTo(22, 21); context.lineTo(4, 21); context.closePath();
@@ -753,10 +778,11 @@ function drawStatusIcon(context, x, y, severity, theme, size = CELL - 4) {
     context.moveTo(13, 9); context.lineTo(13, 15);
     context.moveTo(13, 17); context.lineTo(13, 19);
   } else if (severity === "error") {
-    context.beginPath(); context.arc(13, 13, 12, 0, Math.PI * 2); context.fill();
+    context.fillRect(0, 0, 26, 26);
     context.beginPath();
-    context.moveTo(8, 8); context.lineTo(18, 18);
-    context.moveTo(18, 8); context.lineTo(8, 18);
+    context.arc(13, 13, 9, 0, Math.PI * 2);
+    context.moveTo(6.6, 19.4);
+    context.lineTo(19.4, 6.6);
   } else {
     context.fillRect(0, 0, 26, 26);
     context.beginPath();
@@ -791,14 +817,14 @@ function drawGutter(context, { firstRow, gutter, header, hover, rows, scroll, si
     context.fillRect(0, Math.floor(y) + CELL - 2, gutter, 2);
     context.fillStyle = theme.text;
     context.textAlign = "left";
-    if (row.kind !== "device" && row.activity?.count) {
+    if (row.activity?.count) {
       drawStatusIcon(context, gutter - CELL / 2, y + CELL / 2, row.activity.severity, theme, 18);
       context.fillStyle = theme.text;
     }
     if (row.kind === "device") {
       drawExpansionMark(context, CELL / 2, y + CELL / 2, row.expanded, theme);
       context.font = `600 13px ${theme.uiFont}`;
-      context.fillText(fitLabel(context, rowLabelText(row), gutter - CELL - GUTTER_PADDING * 2), CELL + GUTTER_PADDING, y + CELL / 2);
+      context.fillText(fitLabel(context, rowLabelText(row), gutter - CELL - GUTTER_PADDING * 2 - (row.activity ? CELL : 0)), CELL + GUTTER_PADDING, y + CELL / 2);
     } else {
       context.font = `13px ${theme.uiFont}`;
       const x = CELL + GUTTER_PADDING + (row.grouped ? INDENT * 2 : INDENT);

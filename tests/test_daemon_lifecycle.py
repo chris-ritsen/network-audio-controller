@@ -59,6 +59,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon.shure = _component(stop=AsyncMock())
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
+    daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = _component(aclose=AsyncMock())
     daemon.application = _component(shutdown=AsyncMock())
@@ -86,6 +87,7 @@ async def test_concurrent_daemon_stop_is_idempotent_and_awaits_tasks():
     daemon.shure.stop.assert_awaited_once()
     daemon.http_api.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
+    daemon.managed_signals.stop.assert_awaited_once()
     redis.aclose.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
     packet_store.close.assert_called_once()
@@ -115,6 +117,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
     daemon.shure = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
+    daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
@@ -126,6 +129,7 @@ async def test_component_failure_does_not_skip_remaining_shutdown():
 
     daemon.http_api.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
+    daemon.managed_signals.stop.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
     assert daemon._stop_complete is True
 
@@ -147,6 +151,7 @@ async def test_partial_start_failure_unwinds_started_components():
     daemon.shure = _component(stop=AsyncMock())
     daemon.http_api = _component(start=AsyncMock(), stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
+    daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())
@@ -182,6 +187,7 @@ async def test_partial_start_failure_unwinds_started_components():
     daemon.http_api.stop.assert_awaited_once()
     daemon.shure.stop.assert_awaited_once()
     daemon.metering.stop.assert_awaited_once()
+    daemon.managed_signals.stop.assert_awaited_once()
     daemon.application.shutdown.assert_awaited_once()
     assert daemon._stop_complete is True
 
@@ -203,6 +209,7 @@ async def test_concurrent_start_callers_share_one_initialization_and_exit_togeth
     daemon.shure = None
     daemon.http_api = _component(stop=AsyncMock())
     daemon.managed_inventory = _component(start=AsyncMock(), stop=AsyncMock())
+    daemon.managed_signals = _component(stop=AsyncMock(), reconcile=MagicMock())
     daemon.metering = _component(stop=AsyncMock())
     daemon._redis = None
     daemon.application = _component(shutdown=AsyncMock())

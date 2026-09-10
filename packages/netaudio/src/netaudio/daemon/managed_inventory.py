@@ -183,7 +183,7 @@ def _managed_subscriptions(device: Device) -> list[dict]:
                 "rx_channel": channel.name,
                 "rx_device": _managed_name(device),
                 "tx_channel": channel.subscribed_channel,
-                "tx_device": channel.subscribed_device,
+                "tx_device": _managed_name(device) if channel.subscribed_device == "." else channel.subscribed_device,
                 "status": managed_subscription_status(channel.status, channel.status_message, channel.summary),
                 "ddm_status": channel.status,
                 "ddm_status_message": channel.status_message,

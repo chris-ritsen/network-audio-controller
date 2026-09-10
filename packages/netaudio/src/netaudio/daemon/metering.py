@@ -445,11 +445,11 @@ class MeteringManager:
         if event:
             event.set()
 
-    def record_signal_presence(self, record: dict, source_address: tuple) -> None:
+    def record_signal_presence(self, record: dict, source_address: tuple, *, server_name: str | None = None) -> None:
         try:
             source_ip = source_address[0]
             source_port = source_address[1]
-            server_name = self._server_name_for_ip(source_ip)
+            server_name = server_name or self._server_name_for_ip(source_ip)
             if not server_name:
                 return
 

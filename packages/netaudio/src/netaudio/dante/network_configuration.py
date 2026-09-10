@@ -110,15 +110,19 @@ def interface_configuration(interfaces, interface: str) -> dict:
 def network_snapshot(device) -> dict:
     return {
         "interfaces": deepcopy(device.interfaces or []),
-        "interface_configuration_modes": {
-            entry["interface"]: interface_configuration_modes(device.interface_status_protocol, entry["interface"])
-            for entry in device.interfaces or []
-            if entry.get("interface") in {"primary", "secondary"} and entry.get("configured") is not None
-        },
+        "interface_configuration_modes": network_configuration_modes(device),
         "redundancy": deepcopy(device.dante_redundancy),
         "link_speed_mbps": device.link_speed_mbps,
         "reboot_required": device.interface_reboot_required
         or bool((device.dante_redundancy or {}).get("reboot_required")),
+    }
+
+
+def network_configuration_modes(device) -> dict:
+    return {
+        entry["interface"]: interface_configuration_modes(device.interface_status_protocol, entry["interface"])
+        for entry in device.interfaces or []
+        if entry.get("interface") in {"primary", "secondary"} and entry.get("configured") is not None
     }
 
 

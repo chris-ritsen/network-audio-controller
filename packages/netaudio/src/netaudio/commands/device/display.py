@@ -478,7 +478,7 @@ def _device_management_rows(device) -> list[list[str]]:
     if device.ddm_domain_name or device.ddm_domain_id:
         rows.append(["Domain", device.ddm_domain_name or device.ddm_domain_id])
     if device.ddm_enrolment_state:
-        rows.append(["Domain Enrolment", device.ddm_enrolment_state])
+        rows.append(["Domain Enrollment", device.ddm_enrolment_state])
     if device.ddm_connection_state:
         rows.append(["Domain Connection", device.ddm_connection_state])
     if device.control_transports:

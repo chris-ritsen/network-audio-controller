@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Mapping
 
 from netaudio.common.managed_api import DDM_NAME_PATTERN
+from netaudio.common.config_loader import tomllib
+from netaudio.common.managed_api import resolve_ddm_configuration
 
 
 _ASSIGNMENT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
@@ -178,6 +180,52 @@ def logout_ddm_server(path: Path, name: str) -> None:
             "enabled": False,
         },
     )
+    _write_atomic(destination, text)
+
+
+def _remove_table(text: str, header: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        raise ValueError("This configuration format cannot be edited from the app")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].lstrip().startswith("[")), len(lines))
+    return "".join(lines[:start] + lines[end:])
+
+
+def edit_ddm_server(path: Path, *, current_name: str, name: str | None, url: str | None) -> None:
+    destination = path.expanduser().resolve()
+    text = destination.read_text(encoding="utf-8")
+    configuration = resolve_ddm_configuration(tomllib.loads(text), base_directory=destination.parent)
+    existing = configuration.server(current_name)
+    if name is not None:
+        _validate_name(name, "DDM server profile name")
+        if name != current_name and name in configuration.servers:
+            raise ValueError("A profile with that name already exists")
+    old_header = _named_table_header(text, "ddm.servers", current_name)
+    if name is None:
+        text = _remove_table(text, old_header)
+    else:
+        if old_header not in {line.strip() for line in text.splitlines()}:
+            raise ValueError("This configuration format cannot be edited from the app")
+        new_header = f"[ddm.servers.{_toml_string(name)}]"
+        text = "".join(
+            new_header + "\n" if line.strip() == old_header else line for line in text.splitlines(keepends=True)
+        )
+        values = {"url": url}
+        if url != existing.url:
+            values.update(credential_file=None, credential=None, enabled=False)
+        text = _upsert_table(text, new_header, values)
+    for context in configuration.contexts.values():
+        if context.server != current_name:
+            continue
+        header = _named_table_header(text, "ddm.contexts", context.name)
+        if name is None or url != existing.url:
+            text = _remove_table(text, header)
+            if configuration.default_context == context.name:
+                text = _upsert_table(text, "[ddm]", {"default_context": None})
+        else:
+            text = _upsert_table(text, header, {"server": name})
+    resolve_ddm_configuration(tomllib.loads(text), base_directory=destination.parent)
     _write_atomic(destination, text)
 
 

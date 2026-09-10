@@ -1,3 +1,6 @@
+from netaudio.dante.network_configuration import network_configuration_modes
+
+
 DEVICE_SCALAR_FIELDS = (
     "active_latency",
     "aes67_configured",
@@ -194,6 +197,9 @@ class DanteDeviceSerializer:
         gain_level_choices = device.gain_level_choices
         if gain_level_choices is not None:
             as_json["gain_level_choices"] = gain_level_choices
+
+        if device.interfaces is not None:
+            as_json["interface_configuration_modes"] = network_configuration_modes(device)
 
         if device.interface_reboot_required:
             as_json["interface_reboot_required"] = device.interface_reboot_required

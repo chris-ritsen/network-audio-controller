@@ -11,7 +11,7 @@ const FIELDS = [
   "active_latency_ms", "configured_latency_ms", "default_latency_ms", "min_latency_ms", "max_latency_ms",
   "standard_latency_choices_ms", "aes67_supported", "aes67_current", "aes67_configured", "aes67_multicast_prefix",
   "clock_identity", "leader_clock_identity", "clock_source_code", "clock_subdomain", "dante_model",
-  "interfaces", "link_speed_mbps", "dante_redundancy", "interface_reboot_required", "ddm_capabilities",
+  "interfaces", "interface_configuration_modes", "link_speed_mbps", "dante_redundancy", "interface_reboot_required", "ddm_capabilities",
   "ddm_clock_preferences", "ddm_clocking_state", "ddm_connection_state", "ddm_enrolment_state", "ddm_status",
 ];
 

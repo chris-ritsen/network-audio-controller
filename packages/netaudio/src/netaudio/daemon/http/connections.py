@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
+
+from netaudio.common import key_extract
+from netaudio.common.app_config import settings as app_settings
+from netaudio.common.lock_key_qr import normalize_lock_key
 
 from netaudio.common.config_loader import default_config_path, load_config_document
 from netaudio.common.ddm_config_store import (
+    edit_ddm_server,
     logout_ddm_server,
     save_ddm_context,
     save_ddm_server,
@@ -15,6 +21,64 @@ from netaudio.ddm.client import ManagedAPIClient, ManagedAPIError, authenticate_
 
 
 class DaemonConnectionHandlers:
+    async def _handle_device_lock_key(self, writer, params):
+        key = app_settings.device_lock_key
+        if key is None:
+            if sys.platform not in key_extract.DANTE_CONTROLLER_PATHS:
+                await self._send_json(
+                    writer,
+                    {"error": "Key extraction requires a macOS or Windows server with Dante Controller installed"},
+                    501,
+                )
+                return
+            binary = await asyncio.to_thread(key_extract.find_dante_controller_binary)
+            if binary is None:
+                await self._send_json(
+                    writer, {"error": "Install Dante Controller on this server to import its device lock key"}, 404
+                )
+                return
+            key = await asyncio.to_thread(key_extract.extract_key_from_binary, binary)
+            if key is None:
+                await self._send_json(
+                    writer,
+                    {"error": "The device lock key could not be extracted from the installed Dante Controller"},
+                    422,
+                )
+                return
+        await self._send_json(writer, {"key": normalize_lock_key(key.decode("ascii"))})
+
+    async def _handle_ddm_edit_profile(self, writer, params):
+        if self.managed_inventory is None:
+            await self._send_json(writer, {"error": "DDM support is unavailable"}, 503)
+            return
+        async with self._connection_lock:
+            try:
+                configuration, path = self._connection_configuration()
+                source = params.get("server")
+                if not isinstance(source, str) or source not in configuration.servers:
+                    raise ValueError("Select a saved server profile")
+                action = params.get("action")
+                if action == "remove":
+                    name, url = None, None
+                elif action == "edit":
+                    name, url = params.get("name"), params.get("url")
+                    if not isinstance(name, str) or not isinstance(url, str):
+                        raise ValueError("Enter a profile name and server address")
+                    ManagedAPIClient(url)
+                else:
+                    raise ValueError("Choose Save or Remove Profile")
+                await asyncio.to_thread(edit_ddm_server, path, current_name=source, name=name, url=url)
+                await self._reload_connections()
+            except (ValueError, TypeError):
+                await self._send_json(
+                    writer, {"error": "The profile could not be updated. Check its name and address."}, 400
+                )
+                return
+            except OSError:
+                await self._send_json(writer, {"error": "The profile could not be saved"}, 500)
+                return
+        await self._send_json(writer, self._connection_state())
+
     def _connection_configuration(self):
         path = default_config_path()
         return resolve_ddm_configuration(load_config_document(path), base_directory=path.parent), path

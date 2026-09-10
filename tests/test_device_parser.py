@@ -253,3 +253,22 @@ class TestParseBluetoothStatus:
 
     def test_returns_none_for_empty(self):
         assert DanteDeviceParser.parse_bluetooth_status(b"") is None
+
+
+def test_receiver_status_readback_resolves_self_subscription():
+    device = make_device("self-device")
+    device.apply_receiver_channel_status_page(
+        {
+            "records": [
+                {
+                    "channel_number": 1,
+                    "local_channel_name": "Input",
+                    "source_device_name": ".",
+                    "source_channel_name": "Output",
+                    "subscription_status_code": 9,
+                }
+            ]
+        }
+    )
+    assert device.subscriptions[0].tx_device_name == "self-device"
+    assert device.subscriptions[0].tx_channel_name == "Output"

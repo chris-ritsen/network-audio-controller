@@ -2,7 +2,7 @@ import asyncio
 import copy
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -196,6 +196,7 @@ async def test_inventory_poll_schedules_one_managed_refresh_per_device_without_a
     daemon.state = server.state
     daemon.state.refresh_device = AsyncMock()
     daemon.http_api = server
+    daemon.managed_signals = SimpleNamespace(reconcile=Mock())
     daemon.running = True
     daemon._redis = None
     daemon._background_tasks = set()

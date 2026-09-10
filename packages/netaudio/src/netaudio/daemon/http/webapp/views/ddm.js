@@ -83,7 +83,7 @@ const MANAGED_COLUMNS = [
   { cell: (device) => format.deviceLabel(device), id: "device", label: "Device" },
   { cell: (device) => html`<${Value} value=${device.ddm_domain_name} />`, id: "domain", label: "Domain" },
   { cell: (device) => html`<${Value} value=${device.ddm_context} />`, id: "context", label: "Context", defaultHidden: true },
-  { cell: (device) => format.stateLabel(device.ddm_enrolment_state), id: "enrolment", label: "Enrolment" },
+  { cell: (device) => format.stateLabel(device.ddm_enrolment_state), id: "enrollment", label: "Enrollment" },
   { cell: (device) => format.stateLabel(device.ddm_connection_state), id: "connection", label: "Connection" },
   { cell: (device) => format.stateLabel(device.ddm_status?.summary), id: "status", label: "Status" },
   { cell: (device) => html`<${EnrollmentControl} key=${device.server_name} device=${device} />`, id: "actions", label: "Actions" },

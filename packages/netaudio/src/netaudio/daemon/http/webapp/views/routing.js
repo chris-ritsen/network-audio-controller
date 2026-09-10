@@ -6,7 +6,7 @@ import { Icon } from "../icons.js";
 import { buildMatrixModel, expanded, ExpansionButtons, initializeExpansion, RoutingMatrix, setAllExpanded } from "../matrix.js";
 import { channelGroups, enableChannelGroups, groupChannels, setGroupsExpanded } from "../channel-groups.js";
 import { devicePath, navigate } from "../router.js";
-import { contextDevices, deviceRequestName, scopedDevices as devices } from "../store.js";
+import { contextDevices, deviceRequestName, pendingSubscriptions, scopedDevices as devices } from "../store.js";
 import { inventoryFilters, saveRoutingFilters } from "../device-filters.js";
 import { useDropdownDismissal } from "../dropdown.js";
 
@@ -32,6 +32,7 @@ function RoutingView() {
   }, []);
   const state = expanded.value;
   const groups = channelGroups.value;
+  const pending = pendingSubscriptions.value;
 
   if (!all.length) {
     return html`<${Notice}>No Dante devices have been discovered yet.<//>`;
@@ -47,6 +48,7 @@ function RoutingView() {
     receiverFilter,
     transmitterFilter,
     groups,
+    pending,
   });
   const receiverLabels = model.rows.filter((row) => row.kind === "device").map((row) => row.label);
   const transmitterLabels = model.columns.filter((column) => column.kind === "device").map((column) => column.label);
@@ -97,6 +99,7 @@ function RoutingView() {
         : model.rows.length === 0 || model.columns.length === 0
         ? html`<${Notice}>No devices match the current filters.<//>`
         : html`<${RoutingMatrix}
+            pending=${pending}
             key=${flipped ? "transposed" : "normal"}
             flipped=${flipped}
             receiverFilter=${receiverFilter}

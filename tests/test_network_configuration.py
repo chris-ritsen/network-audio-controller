@@ -10,6 +10,7 @@ import pytest
 from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import DanteApplication
+from netaudio.dante.device import DanteDevice
 from netaudio.dante.network_configuration import (
     NetworkConfigurationError,
     NetworkConfigurationUnverified,
@@ -421,3 +422,18 @@ async def test_redundancy_detects_unrelated_network_changes(change):
         await set_redundancy(application, device, "redundant")
     application._send_settings.assert_awaited_once()
     application.reboot.assert_not_awaited()
+
+
+@pytest.mark.parametrize("protocol,secondary_modes", [(0x073D, ["dhcp", "static"]), (0x0727, [])])
+def test_inventory_includes_network_controls_before_a_page_query(protocol, secondary_modes):
+    device = DanteDevice(server_name="network.local.")
+    device.interface_status_protocol = protocol
+    device.interfaces = [
+        {"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}},
+        {"interface": "secondary", "mode": "dynamic", "configured": {"mode": "dynamic"}},
+    ]
+
+    assert device.to_json()["interface_configuration_modes"] == {
+        "primary": ["dhcp", "static"],
+        "secondary": secondary_modes,
+    }
