@@ -15,7 +15,7 @@ test("matrix column headers grow to fit labels and subscription text never affec
   const subscribed = { ...channel, subscription: { tx_device: "source".repeat(100), tx_channel: "channel".repeat(100) } };
   assert.deepEqual(matrix.measureMatrixLayout(context, [subscribed], [channel], theme), baseline);
   const long = { ...channel, name: "long-name".repeat(100) };
-  assert.deepEqual(matrix.measureMatrixLayout(context, [long], [long], theme), { gutter: 340, header: 78 + `1  ${long.name}`.length * 8 });
+  assert.deepEqual(matrix.measureMatrixLayout(context, [long], [long], theme), { gutter: 340, header: 78 + long.name.length * 8 });
 });
 const { groupChannels } = await import(`${WEBAPP}channel-groups.js`);
 
@@ -31,6 +31,7 @@ test("channel groups partition by channel number, expand independently, and reta
     groups: { enabled: true, receivers: new Set(), transmitters: new Set() } };
   const collapsed = matrix.buildMatrixModel(options);
   assert.deepEqual(collapsed.rows.slice(1).map((row) => row.name), ["1–16", "17–32", "33–33"]);
+  assert.equal(collapsed.rows[0].activity, undefined);
   assert.equal(collapsed.rows[1].activity.count, 1);
   assert.equal(collapsed.rows[2].activity.severity, "warning");
   assert.equal(matrix.cellState(collapsed.rows[1], collapsed.columns[1], collapsed.subscriptionIndex, {}).kind, "empty");
@@ -39,6 +40,8 @@ test("channel groups partition by channel number, expand independently, and reta
   const expanded = matrix.buildMatrixModel(options);
   assert.equal(expanded.rows.filter((row) => row.kind === "channel").length, 16);
   const channel = expanded.rows.find((row) => row.kind === "channel");
+  assert.equal(channel.activity.count, 1);
+  assert.ok(expanded.rows.filter((row) => row.kind !== "channel" && row.expanded).every((row) => row.activity === undefined));
   assert.equal(matrix.cellState(channel, expanded.columns[1], expanded.subscriptionIndex, {}).kind, "empty");
   assert.equal(matrix.cellState(channel, expanded.columns[2], expanded.subscriptionIndex, {}).kind, "partial");
   for (const row of expanded.rows) for (const column of expanded.columns) {
@@ -59,9 +62,9 @@ function model(options = {}) {
   });
 }
 
-test("receiver indicators include hidden sources and transmitters have no subscription indicators", () => {
+test("receiver status indicators follow channels and collapsed summaries, including hidden sources", () => {
   const receivers = model({ transmitterFilter: "Windows-PC", expandedReceivers: new Set(["avio-usb-1"]) });
-  assert.equal(receivers.rows.find((row) => row.label === "avio-usb-1" && row.kind === "device").activity.count, 2);
+  assert.equal(receivers.rows.find((row) => row.label === "avio-usb-1" && row.kind === "device").activity, undefined);
   assert.equal(receivers.rows.find((row) => row.label === "avio-usb-1" && row.kind === "channel").activity.count, 1);
   const transmitters = model({ receiverFilter: "avio-bt-1" });
   const source = transmitters.columns.find((column) => column.label === "lx-dante");
@@ -169,4 +172,62 @@ test("collapsed receiver shows a partial marker against a transmitter device it 
   const receiver = rows.find((row) => row.kind === "channel" && row.label === "avio-usb-1" && row.number === 1);
   const transmitter = columns.find((column) => column.kind === "device" && column.label === "lx-dante");
   assert.equal(matrix.cellState(receiver, transmitter, subscriptionIndex, {}).kind, "partial");
+});
+
+test("receiver-reported connection progress remains pending until connected", () => {
+  const receiver = { name: "Receiver", server_name: "receiver", channels: { receivers: { 1: { name: "Input" } } }, subscriptions: [
+    { rx_channel: "Input", tx_device: "Source", tx_channel: "Output", status: { state: "in_progress", severity: "progress" } },
+  ] };
+  const source = { name: "Source", server_name: "source", channels: { transmitters: { 1: { name: "Output" } } } };
+  const options = { devices: { receiver, source }, expandedReceivers: new Set(["Receiver"]), expandedTransmitters: new Set(["Source"]), receiverFilter: "", transmitterFilter: "" };
+  for (const [state, severity, expected] of [["in_progress", "progress", "pending"], ["resolved", "progress", "pending"], ["connected", "ok", "ok"], ["error", "error", "error"]]) {
+    receiver.subscriptions[0].status = { state, severity };
+    const { rows, columns, subscriptionIndex } = matrix.buildMatrixModel(options);
+    const row = rows.find((entry) => entry.kind === "channel");
+    const column = columns.find((entry) => entry.kind === "channel");
+    assert.equal(matrix.cellState(row, column, subscriptionIndex, {}).kind, expected);
+    assert.equal(row.activity.severity, expected);
+  }
+});
+
+test("pending subscriptions update channel, collapsed group, and crosspoint status together", () => {
+  for (const action of ["add", "remove"]) {
+    const subscription = { rx_channel: "Input", tx_device: "Source", tx_channel: "Output", status: { state: "connected", severity: "ok" } };
+    const receiver = { name: "Receiver", server_name: "receiver", channels: { receivers: { 1: { name: "Input" } } }, subscriptions: action === "remove" ? [subscription] : [] };
+    const source = { name: "Source", server_name: "source", channels: { transmitters: { 1: { name: "Output" } } } };
+    const options = { devices: { receiver, source }, expandedReceivers: new Set(["Receiver"]), expandedTransmitters: new Set(["Source"]), receiverFilter: "", transmitterFilter: "",
+      pending: { [store.pendingKey("receiver", 1)]: { action, tx_device: "Source", tx_channel: "Output" } } };
+    const pending = matrix.buildMatrixModel(options);
+    const row = pending.rows.find((entry) => entry.kind === "channel");
+    const column = pending.columns.find((entry) => entry.kind === "channel");
+    assert.equal(row.activity.severity, "pending");
+    assert.equal(matrix.cellState(row, column, pending.subscriptionIndex, options.pending).kind, "pending");
+    const grouped = matrix.buildMatrixModel({ ...options, groups: { enabled: true, receivers: new Set(), transmitters: new Set() } });
+    assert.equal(grouped.rows.find((entry) => entry.kind === "group").activity.severity, "pending");
+    receiver.subscriptions = action === "add" ? [subscription] : [];
+    const confirmed = matrix.buildMatrixModel({ ...options, pending: {} });
+    const confirmedRow = confirmed.rows.find((entry) => entry.kind === "channel");
+    assert.equal(confirmedRow.activity?.severity, action === "add" ? "ok" : undefined);
+    assert.equal(matrix.cellState(confirmedRow, column, confirmed.subscriptionIndex, {}).kind, action === "add" ? "ok" : "empty");
+  }
+});
+
+test("pending routes survive unrelated readbacks and clear only for matching channels", () => {
+  const first = store.pendingKey("Receiver", 1);
+  const second = store.pendingKey("Receiver", 2);
+  store.pendingSubscriptions.value = {
+    [first]: { action: "add", tx_device: "Source", tx_channel: "New" },
+    [second]: { action: "remove" },
+  };
+  const device = { name: "Receiver", channels: { receivers: { 1: { name: "One" }, 2: { name: "Two" } } },
+    subscriptions: [{ rx_channel: "One", tx_device: "Source", tx_channel: "Old" },
+      { rx_channel: "Two", tx_device: "Source", tx_channel: "Old" }] };
+  store.clearPendingForDevice(device);
+  assert.equal(Object.keys(store.pendingSubscriptions.value).length, 2);
+  device.subscriptions[0].tx_channel = "New";
+  store.clearPendingForDevice(device);
+  assert.deepEqual(Object.keys(store.pendingSubscriptions.value), [second]);
+  device.subscriptions.pop();
+  store.clearPendingForDevice(device);
+  assert.deepEqual(store.pendingSubscriptions.value, {});
 });

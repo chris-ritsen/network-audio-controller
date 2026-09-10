@@ -495,7 +495,7 @@ class DanteDevice:
             subscription.rx_channel = channel
             subscription.rx_device_name = self.name
             subscription.rx_channel_name = channel.name
-            subscription.tx_device_name = source_device_name
+            subscription.tx_device_name = self.name if source_device_name == "." else source_device_name
             subscription.tx_channel_name = source_channel_name
             if isinstance(status_code, int):
                 subscription.status_code = status_code

@@ -53,3 +53,27 @@ for (const supported of [true, false]) {
     expect(snapshot.interfaces[0]).toEqual(primary);
   });
 }
+
+test("network controls are ready from inventory while a fresh read is pending", async ({ page }) => {
+  const record = {
+    server_name: "managed-network", name: "Studio Device", online: true,
+    management_state: "managed", channels: { receivers: {}, transmitters: {} },
+    interfaces: ["primary", "secondary"].map((role) => ({
+      interface: role, mode: "dynamic", configured: { mode: "dynamic" },
+    })),
+    interface_configuration_modes: { primary: ["dhcp", "static"], secondary: ["dhcp", "static"] },
+    dante_redundancy: { current: "redundant", configured: "redundant", supported: ["switched", "redundant"] },
+  };
+  await serveWebapp(page, { devices: { [record.server_name]: record } });
+  let releaseRead;
+  const pending = new Promise((resolve) => { releaseRead = resolve; });
+  await page.route("**/interfaces/**", async (route) => {
+    await pending;
+    await route.fulfill({ json: { ...record, redundancy: record.dante_redundancy } });
+  });
+  await page.goto("http://netaudio.test/devices/managed-network/network-config");
+  await expect(page.getByRole("combobox", { name: "Primary address mode", exact: true })).toBeEnabled();
+  await expect(page.getByRole("combobox", { name: "Secondary address mode", exact: true })).toBeEnabled();
+  await expect(page.getByText("Network changes are unavailable", { exact: false })).toHaveCount(0);
+  releaseRead();
+});
