@@ -186,11 +186,12 @@ async def test_ad4d_uses_fresh_choice_status():
     application.probe_switch_configuration.assert_awaited_once_with(device, timeout=2.0)
 
 
-def test_single_port_zero_flags_do_not_advertise_redundancy_changes():
+def test_single_port_zero_flags_do_not_report_a_network_mode():
     parsed = {"interfaces": [{}], "redundancy": redundancy_status()}
-    result = interface_redundancy_status(parsed, network_device())
-    assert result["supported"] == []
+    assert interface_redundancy_status(parsed, network_device()) is None
     assert parsed["redundancy"]["supported"] == ["switched", "redundant"]
+    parsed["interfaces"] = [{}, {}]
+    assert interface_redundancy_status(parsed, network_device()) == redundancy_status()
 
 
 def interface_state(role, configured):

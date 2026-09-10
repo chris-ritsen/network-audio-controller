@@ -172,7 +172,7 @@ def interface_redundancy_status(parsed: dict, device) -> dict | None:
         len(parsed.get("interfaces", [])) == 2 or getattr(device, "licensed_redundancy_enabled", None) is True
     )
     if not known_hardware:
-        status["supported"] = []
+        return None
     return status
 
 
