@@ -16,3 +16,6 @@ packages/netaudio/src/netaudio/core/libnetaudio_core.dylib
 packages/netaudio/src/netaudio/core/netaudio_core.dll
 AGENTS.md
 CLAUDE.md
+
+# Research notes and lab results stay outside the repository
+research/
