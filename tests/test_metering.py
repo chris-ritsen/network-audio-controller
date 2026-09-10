@@ -292,3 +292,21 @@ def test_passive_record_validation_is_atomic_before_cache_update():
     manager.record_signal_presence(malformed, ("192.168.1.61", 8700))
 
     assert manager.get_cached_levels("avio-bt-1") == previous
+
+
+def test_meter_events_use_the_published_friendly_server_name():
+    hardware = SimpleNamespace(name="avio-usb-1", ipv4="192.168.1.247", server_name="AVIOUSB-50368b.local.")
+    friendly = SimpleNamespace(name="avio-usb-1", ipv4="192.168.1.247", server_name="avio-usb-1.local.")
+    application = SimpleNamespace(devices={"AVIOUSB-50368b.local.": hardware, "avio-usb-1.local.": friendly})
+    manager = MeteringManager(application)
+
+    assert manager._server_name_for_ip("192.168.1.247") == "avio-usb-1.local."
+
+
+def test_meter_events_fall_back_to_the_only_matching_entry():
+    hardware = SimpleNamespace(name="a32", ipv4="192.168.1.22", server_name="A32-000028.local.")
+    application = SimpleNamespace(devices={"A32-000028.local.": hardware})
+    manager = MeteringManager(application)
+
+    assert manager._server_name_for_ip("192.168.1.22") == "A32-000028.local."
+    assert manager._server_name_for_ip("192.168.1.99") is None
