@@ -90,6 +90,27 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+##### HTTPS
+
+The daemon serves plain HTTP by default. If you already have a certificate for
+the machine, the daemon can additionally serve HTTPS on a second port; nothing
+is generated or managed for you:
+
+```toml
+[daemon]
+tls_certificate = "/etc/netaudio/daemon.crt"
+tls_key = "/etc/netaudio/daemon.key"
+tls_port = 9443
+```
+
+Relative paths resolve against the config file's directory, `tls_port`
+defaults to 9443, and the HTTP port keeps working for local tools. `netaudio
+daemon tls` shows the active configuration and the certificate's SHA-256
+fingerprint; `netaudio daemon web` lists the HTTPS addresses alongside HTTP.
+The Bonjour record carries the HTTPS port as `tls_port`. Clients trust the
+certificate through their normal trust store, so a certificate signed by a CA
+your devices already trust is the least friction.
+
 ### Documentation
 
 - [Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)

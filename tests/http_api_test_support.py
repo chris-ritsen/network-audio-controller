@@ -83,7 +83,7 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50", kind="h
     return device
 
 
-def make_http_server(devices=None, metering=None, on_shutdown=None):
+def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
     notifications = DanteNotificationService(dispatcher=MagicMock())
 
     def sample_rate_change_result(_device, sample_rate, **_options):
@@ -171,7 +171,7 @@ def make_http_server(devices=None, metering=None, on_shutdown=None):
         refresh_device=AsyncMock(),
         refresh_all_devices=AsyncMock(),
     )
-    http_server = DaemonHTTPServer(application, state, metering=metering, on_shutdown=on_shutdown)
+    http_server = DaemonHTTPServer(application, state, metering=metering, on_shutdown=on_shutdown, tls=tls)
     http_server.audio_capability_verification_timeout = 0.05
     return http_server
 
