@@ -21,7 +21,7 @@ from netaudio.dante.channel_status_paging import (
     modern_arc_protocol_identifier_for_device,
 )
 from netaudio.dante.commands import DanteCommands, channel_status_query_specification, validate_dante_name
-from netaudio.dante.conmon_export import ConmonExport, ConmonExportUnavailableError
+from netaudio.dante.conmon_export import ConmonExport, ConmonExportError, ConmonExportUnavailableError
 from netaudio.dante.const import (
     BLUETOOTH_MODEL_IDS,
     DEVICE_ARC_PORT,
@@ -2105,6 +2105,16 @@ class DanteApplication:
         async def mutate() -> None:
             await self.send_set_sample_rate(device, sample_rate_hertz)
 
+        async def load_channel_capacities() -> None:
+            if getattr(device, "requires_managed_control", False) or device.ipv4 is None:
+                return
+            if device.diagnostic_log_export_supported is False:
+                return
+            try:
+                await self.export_device_logs(str(device.ipv4), timeout=timeout)
+            except (CapabilityProbeTimeout, ConmonExportUnavailableError, ConmonExportError, OSError) as exception:
+                logger.info(f"Channel capacity table unavailable from {device.ipv4}: {exception}")
+
         async with device.topology_mutation_lock:
             return await change_sample_rate_topology_safe(
                 device,
@@ -2112,6 +2122,7 @@ class DanteApplication:
                 probe,
                 mutate,
                 confirm_destructive=confirm_destructive,
+                load_channel_capacities=load_channel_capacities,
             )
 
     async def set_sample_rate_pullup(

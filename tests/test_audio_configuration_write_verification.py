@@ -161,7 +161,7 @@ def test_sample_rate_all_aggregates_readback_failures():
     assert "device reports 44100 Hz instead of 48000 Hz" in result.output
 
 
-def test_sample_rate_refuses_advertised_rate_without_proven_topology_capacity():
+def test_sample_rate_reports_topology_refusals_from_the_application():
     from netaudio.dante.sample_rate_topology import SampleRateTopologyUnsupportedError
 
     device = FakeDevice(
@@ -172,14 +172,16 @@ def test_sample_rate_refuses_advertised_rate_without_proven_topology_capacity():
     application = FakeApplication({"future.local.": device})
 
     async def refuse_unproven_capacity(*_arguments, **_options):
-        raise SampleRateTopologyUnsupportedError("no proven Ferrofish A32 channel capacity is available for 384000 Hz")
+        raise SampleRateTopologyUnsupportedError(
+            "sample-rate contraction affects transmitter flows whose membership transition is not proven"
+        )
 
     application.set_sample_rate = refuse_unproven_capacity
 
     result = _sample_rate(application, 384000)
 
     assert result.exit_code == 1
-    assert "no proven Ferrofish A32 channel capacity" in result.output
+    assert "membership transition is not proven" in result.output
     assert application.sent == []
 
 
