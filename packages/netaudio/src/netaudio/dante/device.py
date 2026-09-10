@@ -116,6 +116,7 @@ class DanteDevice:
         self.interface_reboot_required: bool = False
         self.interface_status_protocol: int | None = None
         self.dante_redundancy: dict | None = None
+        self.switch_configuration_choices: list[dict] | None = None
         self.lock_reset_status: dict | None = None
         self.clear_configuration_status: dict | None = None
         self.diagnostic_log_export_supported: bool | None = None
