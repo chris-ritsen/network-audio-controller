@@ -15,7 +15,7 @@ from netaudio.dante.core_transport import (
 from netaudio.dante.device_kind import device_kind
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.gain import gain_channel_type, gain_level_choices, gain_level_label
-from netaudio.dante.latency import latency_controls_from_settings, standard_latency_choices_for_range
+from netaudio.dante.latency import latency_choices, latency_controls_from_settings
 from netaudio.dante.subscription import DanteSubscription
 
 logger = logging.getLogger("netaudio")
@@ -190,7 +190,7 @@ class DanteDevice:
 
     @property
     def standard_latency_choices(self):
-        return standard_latency_choices_for_range(self.min_latency, self.max_latency)
+        return latency_choices(self.min_latency, self.max_latency, self.active_latency, self.configured_latency)
 
     @property
     def encoding_configurable(self):

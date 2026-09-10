@@ -28,11 +28,28 @@ def standard_latency_choices_for_range(minimum_latency_milliseconds, maximum_lat
         return None
     minimum_latency_milliseconds = float(minimum_latency_milliseconds)
     maximum_latency_milliseconds = float(maximum_latency_milliseconds)
+    if minimum_latency_milliseconds <= 0 or maximum_latency_milliseconds <= minimum_latency_milliseconds:
+        return []
     return [
         latency_milliseconds
         for latency_milliseconds in STANDARD_LATENCY_CHOICES_MILLISECONDS
         if minimum_latency_milliseconds <= latency_milliseconds <= maximum_latency_milliseconds
     ]
+
+
+def latency_choices(
+    minimum_latency_milliseconds,
+    maximum_latency_milliseconds,
+    active_latency_milliseconds=None,
+    configured_latency_milliseconds=None,
+):
+    choices = standard_latency_choices_for_range(minimum_latency_milliseconds, maximum_latency_milliseconds)
+    if choices is None:
+        return None
+    if choices:
+        return choices
+    current = active_latency_milliseconds or configured_latency_milliseconds
+    return [float(current)] if current else []
 
 
 def latency_state_from_settings(settings):
@@ -53,16 +70,25 @@ def latency_state_from_settings(settings):
     choices = standard_latency_choices_for_range(minimum, maximum)
     if choices is None:
         return state
+    fixed = not choices
+    if fixed:
+        choices = (
+            latency_choices(minimum, maximum, state.get("active_latency_ms"), state.get("configured_latency_ms")) or []
+        )
 
     state["latency_options_ms"] = choices
     state["latency_options_ns"] = [milliseconds_to_nanoseconds(choice) for choice in choices]
-    state["latency_options_source"] = "controller_fixed_set_filtered_by_reported_range"
+    state["latency_options_source"] = (
+        "device_reports_no_usable_range" if fixed else "controller_fixed_set_filtered_by_reported_range"
+    )
     for field_name in ("active", "configured"):
         value = state.get(f"{field_name}_latency_ms")
         if value is None:
             continue
         state[f"{field_name}_latency_is_standard_choice"] = value in choices
-        state[f"{field_name}_latency_within_reported_range"] = minimum <= value <= maximum
+        state[f"{field_name}_latency_within_reported_range"] = (
+            value in choices if fixed else minimum <= value <= maximum
+        )
     return state
 
 

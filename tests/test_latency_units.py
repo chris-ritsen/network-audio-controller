@@ -6,6 +6,7 @@ from netaudio.cli_support.output import format_devices_xml
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.latency import (
+    latency_choices,
     latency_state_from_settings,
     milliseconds_to_microseconds,
     nanoseconds_to_milliseconds,
@@ -99,6 +100,33 @@ def test_standard_latency_choices_are_derived_only_from_advertised_range():
     assert standard_latency_choices_for_range(1.0, 20.3125) == [1.0, 2.0, 5.0]
     assert standard_latency_choices_for_range(0.15, 21.333334) == [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
     assert standard_latency_choices_for_range(None, 5.0) is None
+    assert standard_latency_choices_for_range(0.0, 999.0) == []
+    assert standard_latency_choices_for_range(0.25, 0.0) == []
+
+
+def test_device_without_a_usable_range_offers_only_its_current_latency():
+    assert latency_choices(0.0, 999.0, 6.0, 6.0) == [6.0]
+    assert latency_choices(0.25, 0.0, 0.25, 1.0) == [0.25]
+    assert latency_choices(0.25, 0.0, None, 1.0) == [1.0]
+    assert latency_choices(0.0, 0.0, None, None) == []
+    assert latency_choices(1.0, 20.3125, 10.0, 10.0) == [1.0, 2.0, 5.0]
+    assert latency_choices(None, 5.0, 1.0, 1.0) is None
+
+
+def test_latency_state_marks_a_fixed_latency_as_the_only_choice():
+    state = latency_state_from_settings(
+        {
+            "active_latency_ns": 250_000,
+            "configured_latency_ns": 1_000_000,
+            "min_latency_ns": 250_000,
+            "max_latency_ns": 0,
+        }
+    )
+    assert state["latency_options_ms"] == [0.25]
+    assert state["latency_options_source"] == "device_reports_no_usable_range"
+    assert state["active_latency_is_standard_choice"] is True
+    assert state["configured_latency_is_standard_choice"] is False
+    assert state["configured_latency_within_reported_range"] is False
 
 
 def test_latency_state_preserves_raw_units_bounds_choices_and_off_list_status():
