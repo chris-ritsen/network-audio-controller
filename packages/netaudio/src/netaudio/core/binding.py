@@ -74,7 +74,7 @@ _message_id_lock = threading.Lock()
 _message_id_counter = 0
 
 
-class NetaudioCoreError(Exception):
+class NetaudioCoreError(RuntimeError):
     def __init__(self, status: int, context: str = ""):
         self.status = status
         self.detail = last_error_message()
