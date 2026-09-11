@@ -330,7 +330,15 @@ CLOCK_PORT_ROLE_MAP = {
 
 
 def subscription_status_entry(code: int, receiver_status_code: int | None = None) -> dict[str, object]:
-    return _builtin_status_entry(code, receiver_status_code)
+    from netaudio.dante.subscription_status import MANAGED_STATUS_PRESENTATION
+
+    entry = _builtin_status_entry(code, receiver_status_code)
+    presentation = MANAGED_STATUS_PRESENTATION.get(str(entry.get("status") or ""))
+    if presentation is not None:
+        label, detail = presentation
+        entry["label"] = label
+        entry["detail"] = detail or entry.get("detail")
+    return entry
 
 
 def subscription_status_label(code: int, receiver_status_code: int | None = None) -> str:
