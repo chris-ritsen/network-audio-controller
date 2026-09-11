@@ -5,7 +5,7 @@ import typer
 from netaudio import core
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.execution import ReadbackResult, readback_after_notification
-from netaudio.cli_support.output import output_single, output_table
+from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.dante.latency import nanoseconds_to_milliseconds
 from netaudio.dante.state import apply_device_status
 
@@ -102,7 +102,9 @@ def _report_reading_failures(subject, readings):
     raise typer.Exit(code=ExitCode.ERROR)
 
 
-async def _render_cached_reading(targets, all_devices, subject, header, read_target, format_device_value):
+async def _render_cached_reading(
+    targets, all_devices, subject, header, read_target, format_device_value, structured_value=None
+):
     readings = await _collect_target_readings(targets, read_target)
     if readings and all(exception is not None for _, _, exception in readings):
         _report_reading_failures(subject, readings)
@@ -116,11 +118,20 @@ async def _render_cached_reading(targets, all_devices, subject, header, read_tar
                 ]
                 for server_name, device, exception in readings
             ],
+            json_data=None
+            if structured_value is None
+            else {
+                server_name: (structured_value(device) if exception is None else None)
+                for server_name, device, exception in readings
+            },
         )
     else:
         server_name, device, exception = readings[0]
         if exception is not None:
             _report_reading_failures(subject, readings[:1])
+        if structured_value is not None and structured_output_selected():
+            output_single(structured_value(device))
+            return
         output_single(format_device_value(device))
 
 
