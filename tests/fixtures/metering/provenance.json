@@ -1,0 +1,37 @@
+{
+  "source_capture": "ad4d-switch-20260906/control.pcapng",
+  "source_sha256": "d39f4e9f29e57f298d13c5f05bd9b9bc84289596e3a8acc653b84298afed3849",
+  "source_tool": "Dante Controller; version not recorded in this capture run",
+  "source_device": "Shure AD4D",
+  "run": "ad4d-switch-20260906",
+  "interface": "en0",
+  "scope": "Controller to AD4D metering subscription requests",
+  "evidence_class": "observed",
+  "allowed_evidence": [
+    "Endpoint-bounded packet capture from user-operated Controller session"
+  ],
+  "excluded_evidence": [
+    "Static inspection of Controller or firmware"
+  ],
+  "transformations": [
+    "Extract UDP payloads from frames 32 and 34.",
+    "Replace payload bytes 10 through 17 with a synthetic client identifier.",
+    "Replace the start destination IPv4 address at payload bytes 50 through 53 with 192.0.2.10."
+  ],
+  "packets": [
+    {
+      "fixture": "controller_start.bin",
+      "frame": 32,
+      "timestamp_epoch": "1788728178.162376000",
+      "original_payload_sha256": "630917f5bd920a31f0f7eb25f000ad9fec482c57b2fd5e6f7c00b9c363d5c11b",
+      "fixture_sha256": "faa266d68fda543c7536eb6732d2c73ec0b184ac8f28c510828f69d01e5a1fee"
+    },
+    {
+      "fixture": "controller_stop.bin",
+      "frame": 34,
+      "timestamp_epoch": "1788728180.437890000",
+      "original_payload_sha256": "7f7490a23ec2e2ec9d40eae85637980e060a1d24d6882471a0d8476cc1d5048d",
+      "fixture_sha256": "598d95cf54f9da8c9c6b92669f17b7ba34fa6cf4db3774553580958c48139785"
+    }
+  ]
+}
