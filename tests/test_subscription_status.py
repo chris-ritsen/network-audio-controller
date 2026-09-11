@@ -9,6 +9,7 @@ import pytest
 from netaudio.dante.const import subscription_status_entry
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
+from netaudio.dante.subscription_status import MANAGED_STATUS_PRESENTATION
 
 
 FIXTURE = Path(__file__).parent / "fixtures/subscription/status-observations.json"
@@ -34,8 +35,9 @@ def test_every_observed_numeric_mapping(code, api):
     else:
         assert entry["observed_summary"] == api["summary"]
         assert entry["interpretation"] == "observed"
-        assert entry["label"] == api["status"]
-        assert entry["detail"] == api["statusMessage"]
+        expected_label, catalog_detail = MANAGED_STATUS_PRESENTATION.get(api["status"], (api["status"], None))
+        assert entry["label"] == expected_label
+        assert entry["detail"] == (catalog_detail or api["statusMessage"])
         if api["summary"] == "CONNECTED":
             assert entry["state"] == "connected"
         if api["summary"] == "WARNING":
@@ -221,7 +223,7 @@ async def test_cli_displays_success_label_and_additional_warning(monkeypatch, ca
     monkeypatch.setattr(state, "output_format", OutputFormat.plain)
     await commands.run_subscription_list(None, {device.server_name: device}, False)
     output = capsys.readouterr().out
-    assert "DYNAMIC" in output
+    assert "Subscribed (unicast)" in output
     assert "Source name changed" in output
 
 
@@ -231,16 +233,16 @@ def test_managed_success_with_warning_survives_roundtrip_and_text():
     subscription.ddm_summary = "WARNING"
     subscription.ddm_status_message = "Source name changed"
     restored = DanteDeviceSerializer._subscription_from_json(subscription.to_json())
-    assert restored.status_text() == ("DYNAMIC", "WARNING", "Source name changed")
+    assert restored.status_text() == ("Subscribed (unicast)", "Source name changed")
 
 
 @pytest.mark.parametrize(
     "code,expected",
     [
-        (9, "DYNAMIC"),
-        (0x1B, "CLOCK_DOMAIN"),
+        (9, "Subscribed (unicast)"),
+        (0x1B, "Clock domain mismatch"),
         (0xFFFF, "Unknown subscription status"),
-        (None, "status:unknown"),
+        (None, "Status unavailable"),
     ],
 )
 def test_subscription_format_includes_status_only_when_verbose(code, expected):

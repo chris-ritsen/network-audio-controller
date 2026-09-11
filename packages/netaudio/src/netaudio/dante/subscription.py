@@ -61,8 +61,12 @@ class DanteSubscription:
 
     def status_text(self):
         if self.status_code is None:
-            details = tuple(value for value in (self.ddm_status, self.ddm_summary, self.ddm_status_message) if value)
-            return (*details, *self.status_message) or ("status:unknown",)
+            if not any((self.ddm_status, self.ddm_summary, self.ddm_status_message)):
+                return (*self.status_message,) or ("Status unavailable",)
+            from netaudio.dante.subscription_status import managed_status_presentation
+
+            label, detail = managed_status_presentation(self.ddm_status, self.ddm_status_message, self.ddm_summary)
+            return (label, *((detail,) if detail else ()), *self.status_message)
         entry = subscription_status_entry(self.status_code, self.rx_channel_status_code)
         return (str(entry["label"]), *self.status_message)
 

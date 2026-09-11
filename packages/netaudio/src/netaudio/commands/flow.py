@@ -16,7 +16,7 @@ from netaudio.commands.device.display import (
 )
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows, multicast
-from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.const import RESULT_CODE_SUCCESS, subscription_status_entry
 
 app = typer.Typer(
     help="Inspect receiver flows and manage transmitter multicast flows on the selected device.",
@@ -181,7 +181,7 @@ async def run_receiver_flow_list(application, devices) -> None:
             receiver_channel_mapping = f"raw {descriptor}" if descriptor else "unknown"
         subscription_status_code = receiver_flow.get("subscription_status_code")
         if subscription_status_code is not None:
-            status_display = f"0x{subscription_status_code:04X}"
+            status_display = str(subscription_status_entry(subscription_status_code)["label"])
         else:
             offset_62_word = receiver_flow.get("status_code_at_record_offset_62")
             status_display = f"raw 0x{offset_62_word:04X}" if offset_62_word is not None else "unknown"
