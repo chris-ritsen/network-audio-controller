@@ -403,6 +403,9 @@ class DanteApplication:
             )
             if include_channels:
                 await self.apply_modern_arc_status_pages(device)
+            from netaudio.dante.network_configuration import learn_switch_ports
+
+            await learn_switch_ports(self, device, timeout=1.0)
             device.error = None
         except (RuntimeError, OSError) as exception:
             device.error = exception
@@ -1509,13 +1512,19 @@ class DanteApplication:
         target,
         timeout: float = 2.0,
     ) -> LinkStatusObservation:
-        return await self._probe_once(
+        observation = await self._probe_once(
             "link_status",
             target,
             self.send_probe_link_status,
             timeout,
             "link status",
         )
+        device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
+        if device is not None:
+            device.switch_port_count = sum(
+                1 for record in observation.records if (record.label or "").startswith("switch_port")
+            )
+        return observation
 
     async def probe_lock_status(
         self,

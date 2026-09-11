@@ -9,7 +9,7 @@ import pytest
 
 from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.dante.application import DanteApplication
+from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.network_configuration import (
     NetworkConfigurationError,
@@ -49,6 +49,7 @@ def network_device(protocol=0x0724):
         dante_redundancy=None,
         interfaces=[],
         switch_configuration_choices=None,
+        switch_port_count=None,
         interface_reboot_required=False,
         link_speed_mbps=1000,
         requires_managed_control=False,
@@ -75,6 +76,7 @@ def redundancy_application(device, observations):
 
     return SimpleNamespace(
         probe_interface_status=AsyncMock(side_effect=probe),
+        probe_link_status=AsyncMock(side_effect=CapabilityProbeTimeout("link status timed out")),
         probe_switch_configuration=AsyncMock(),
         commands=SimpleNamespace(set_dante_redundancy=Mock(return_value={"command": "set_dante_redundancy"})),
         _send_settings=AsyncMock(),
@@ -184,6 +186,51 @@ async def test_ad4d_uses_fresh_choice_status():
     application.probe_switch_configuration.side_effect = choices
     assert await probe_redundancy(application, device) == expected
     application.probe_switch_configuration.assert_awaited_once_with(device, timeout=2.0)
+
+
+def test_two_reported_switch_ports_count_as_redundancy_hardware():
+    device = network_device()
+    device.switch_port_count = 2
+    parsed = {"interfaces": [{}], "redundancy": redundancy_status()}
+    assert interface_redundancy_status(parsed, device) == redundancy_status()
+
+
+@pytest.mark.asyncio
+async def test_probe_redundancy_learns_switch_ports_from_link_status():
+    device = network_device()
+    device.interfaces = [{"interface": "primary", "configured": {"mode": "dynamic"}}]
+    observations = iter([None, redundancy_status()])
+
+    async def probe(_device, timeout):
+        observation = next(observations)
+        if observation is not None:
+            device.dante_redundancy = observation
+        return device.interfaces
+
+    async def link_status(_device, timeout):
+        device.switch_port_count = 2
+
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(side_effect=probe),
+        probe_link_status=AsyncMock(side_effect=link_status),
+        probe_switch_configuration=AsyncMock(),
+    )
+    assert await probe_redundancy(application, device) == redundancy_status()
+    assert application.probe_interface_status.await_count == 2
+    application.probe_link_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_probe_redundancy_remembers_a_device_without_link_status():
+    device = network_device()
+    device.interfaces = [{"interface": "primary", "configured": {"mode": "dynamic"}}]
+    application = redundancy_application(device, iter([None, None]))
+    with pytest.raises(NetworkConfigurationError):
+        await probe_redundancy(application, device)
+    assert device.switch_port_count == 0
+    with pytest.raises(NetworkConfigurationError):
+        await probe_redundancy(application, device)
+    application.probe_link_status.assert_awaited_once()
 
 
 def test_single_port_zero_flags_do_not_report_a_network_mode():
