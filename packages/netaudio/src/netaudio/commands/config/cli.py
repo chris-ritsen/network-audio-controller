@@ -382,9 +382,21 @@ async def _render_sample_rate_pullup(application, targets, all_devices: bool) ->
     exception = readings[0][2]
     if exception is not None:
         if isinstance(exception, CapabilityProbeTimeout):
-            output_single("unsupported")
+            output_single({"supported": False} if structured_output_selected() else "unsupported")
             return
         _report_reading_failures("sample-rate pull-up", readings[:1])
+    if structured_output_selected():
+        output_single(
+            {
+                "applied": sample_rate_pullup_label(device.sample_rate_pullup_raw_value),
+                "applied_raw_value": device.sample_rate_pullup_raw_value,
+                "requested": sample_rate_pullup_label(device.requested_sample_rate_pullup_raw_value),
+                "requested_raw_value": device.requested_sample_rate_pullup_raw_value,
+                "supported": True,
+                "supported_raw_values": device.supported_sample_rate_pullup_raw_values,
+            }
+        )
+        return
     output_single(sample_rate_pullup_label(device.sample_rate_pullup_raw_value))
 
 
@@ -750,6 +762,7 @@ async def run_clock_source(application, devices, selection: str | None, all_devi
             "Clock Source",
             _read_target,
             lambda device: format_clock_source_code(device.clock_source_code),
+            lambda device: {"clock_source_code": device.clock_source_code},
         )
         return
 
@@ -796,6 +809,12 @@ async def run_clock_subdomain(application, devices, selection: str | None, all_d
             "Clock Subdomain",
             _read_target,
             lambda device: format_clock_subdomain(device.clock_subdomain),
+            lambda device: {
+                "clock_subdomain": None
+                if device.clock_subdomain is None
+                else format_clock_subdomain(device.clock_subdomain),
+                "clock_subdomain_bytes": None if device.clock_subdomain is None else list(device.clock_subdomain),
+            },
         )
         return
 

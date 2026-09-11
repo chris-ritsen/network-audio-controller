@@ -15,7 +15,7 @@ from netaudio.cli_support.execution import (
     readback_after_notification,
     run_command,
 )
-from netaudio.cli_support.output import output_table, output_value
+from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.cli import app as device_config_app
 from netaudio.commands.config.readback import MUTATION_ERRORS
@@ -101,9 +101,14 @@ def device_capabilities(
 
 async def run_identify(application, devices, all_devices: bool) -> None:
     targets = select_device(filter_devices(devices), allow_many=all_devices)
+    identified = []
     for server_name, device in targets:
         await application.identify(device)
-        typer.echo(f"{icon('identify')}Identified: {device.name or server_name}")
+        identified.append(device.name or server_name)
+        if not structured_output_selected():
+            typer.echo(f"{icon('identify')}Identified: {device.name or server_name}")
+    if structured_output_selected():
+        output_single({"identified": identified})
 
 
 @app.command()

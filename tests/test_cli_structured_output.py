@@ -187,3 +187,46 @@ def test_meter_start_and_stop_confirm_each_device(monkeypatch):
     assert start.exit_code == 0 and "Metering started for avio." in start.stdout
     assert stop.exit_code == 0 and "Metering stopped for avio." in stop.stdout
     assert started == ["avio.local."] and stopped == ["avio.local."]
+
+
+def _daemon_device():
+    from netaudio.dante.device import DanteDevice
+
+    device = DanteDevice(server_name="avio.local.")
+    device.name = "avio"
+    device.ipv4 = "192.0.2.10"
+    device.online = True
+    device.clock_source_code = 0
+    device.clock_subdomain = [0] * 16
+    return device
+
+
+def _invoke_with_device(arguments, device, **application_patches):
+    from netaudio.dante.application import DanteApplication
+
+    patches = {"startup": AsyncMock(), "shutdown": AsyncMock(), **application_patches}
+    with (
+        patch(
+            "netaudio.cli_support.execution.get_devices_from_daemon", AsyncMock(return_value={"avio.local.": device})
+        ),
+        patch("netaudio.cli_support.execution._populate_controls", AsyncMock()),
+        patch.multiple(DanteApplication, **patches),
+    ):
+        return runner.invoke(app, ["-j", "-n", "avio", *arguments])
+
+
+def test_clock_source_json_is_a_numeric_code():
+    result = _invoke_with_device(["device", "config", "clock-source"], _daemon_device())
+    assert _json(result) == {"clock_source_code": 0}
+
+
+def test_clock_subdomain_json_carries_text_and_bytes():
+    result = _invoke_with_device(["device", "config", "clock-subdomain"], _daemon_device())
+    assert _json(result) == {"clock_subdomain": "unset", "clock_subdomain_bytes": [0] * 16}
+
+
+def test_identify_json_lists_the_devices():
+    identify = AsyncMock()
+    result = _invoke_with_device(["device", "identify"], _daemon_device(), identify=identify)
+    assert _json(result) == {"identified": ["avio"]}
+    identify.assert_awaited_once()
