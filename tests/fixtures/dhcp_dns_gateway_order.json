@@ -1,0 +1,20 @@
+{
+  "evidence_class": "causal",
+  "description": "Running 0x0011 interface status from the authentic Dante A32 firmware (Ferrofish A32 4.0.8.2, Brooklyn II) executing as the netaudio-a32-emulator lab device A32-000040 on 2026-09-11, primary interface in DHCP mode after taking a lease from a lab dnsmasq whose options were deliberately distinct: router 192.168.1.1 and dns-server 8.8.8.8. The LAN router's DHCP replies to the device MAC were dropped on the bridge so only the lab lease could be accepted; the dnsmasq log recorded DHCPREQUEST and DHCPACK for the device MAC with those options.",
+  "allowed_evidence": [
+    "Device ConMon reply captured in-process by netaudio's own interface-status probe",
+    "Lab DHCP server log establishing the lease options handed to the device"
+  ],
+  "excluded_evidence": [
+    "Proprietary executable or firmware static inspection"
+  ],
+  "claim": "In a dynamic (DHCP) running interface record the DNS server is at record offset +16 and the gateway at +20, the same layout as the static record; the earlier mode-dependent swap read them reversed (GitHub issue #47).",
+  "device_mac": "02:00:00:00:00:40",
+  "lease": {
+    "router": "192.168.1.1",
+    "dns_server": "8.8.8.8"
+  },
+  "source_tool": "netaudio probe_interface_status with an in-process ConMon 0x0011 hook",
+  "hexadecimal": "ffff0060006200000200000000400000417564696e617465072400110000000000010001000003e80001020000000040c0a8012affffff0008080808c0a801010018003000000000000000000000000000000000000000000000000000000000",
+  "sha256": "278431c6f859f12bee0b423458846e897a1c84a0e99476353c5975ec2a58b255"
+}

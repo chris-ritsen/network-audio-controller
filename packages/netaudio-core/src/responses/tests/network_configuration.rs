@@ -324,3 +324,22 @@ fn redundancy_setter_form_follows_reported_switch_configuration_not_revision() {
     )
     .is_err());
 }
+
+fn dhcp_lease_capture() -> Vec<u8> {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/dhcp_dns_gateway_order.json"
+    ))
+    .unwrap();
+    decode_hexadecimal(fixture["hexadecimal"].as_str().unwrap())
+}
+
+#[test]
+fn dynamic_running_record_reads_dns_at_16_and_gateway_at_20() {
+    let status = parse_interface_status(&dhcp_lease_capture()).unwrap();
+    assert_eq!(status.interfaces.len(), 1);
+    let primary = &status.interfaces[0];
+    assert_eq!(primary.mode, "dynamic");
+    assert_eq!(primary.ip_address, "192.168.1.42");
+    assert_eq!(primary.gateway.as_deref(), Some("192.168.1.1"));
+    assert_eq!(primary.dns_server.as_deref(), Some("8.8.8.8"));
+}
