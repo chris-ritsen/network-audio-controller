@@ -243,6 +243,7 @@ class TestDaemonLockStatus:
         device.is_locked = None
         http_server = make_http_server({"dev1": device})
         http_server._broadcast_sse = AsyncMock()
+        http_server.sse_clients[object()] = object()
 
         await http_server._on_device_event(DanteEvent(type=EventType.DEVICE_UPDATED, server_name=device.server_name))
 

@@ -39,6 +39,7 @@ class DanteEventDispatcher:
         self._listeners: dict[EventType, list[EventCallback]] = {}
         self._queue: asyncio.Queue[DanteEvent | None] | None = None
         self._pending_events: deque[DanteEvent] = deque()
+        self._coalesced_events: dict[tuple, DanteEvent] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._running = False
 
@@ -52,7 +53,27 @@ class DanteEventDispatcher:
         if listeners is not None and callback in listeners:
             listeners.remove(callback)
 
+    @staticmethod
+    def _coalescing_key(event: DanteEvent) -> tuple | None:
+        if event.type == EventType.NOTIFICATION_RECEIVED and event.server_name:
+            return (event.type, event.server_name, event.data.get("notification_id"))
+        if event.type == EventType.METER_VALUES and event.data.get("metering_source") == "detailed":
+            return (event.type, event.server_name)
+        return None
+
     def emit_nowait(self, event: DanteEvent) -> None:
+        key = self._coalescing_key(event)
+        if event.type in (EventType.DEVICE_DISCOVERED, EventType.DEVICE_REMOVED):
+            self._coalesced_events.clear()
+        elif event.type == EventType.METER_VALUES and key is None:
+            self._coalesced_events.pop((EventType.METER_VALUES, event.server_name), None)
+        if key is not None:
+            existing = self._coalesced_events.get(key)
+            if existing is not None:
+                existing.device_name = event.device_name
+                existing.data = event.data
+                return
+            self._coalesced_events[key] = event
         queue = self._queue
         if queue is None:
             self._pending_events.append(event)
@@ -60,11 +81,7 @@ class DanteEventDispatcher:
         queue.put_nowait(event)
 
     async def emit(self, event: DanteEvent) -> None:
-        queue = self._queue
-        if queue is None:
-            self._pending_events.append(event)
-            return
-        await queue.put(event)
+        self.emit_nowait(event)
 
     async def start(self) -> None:
         if self._running:
@@ -95,6 +112,9 @@ class DanteEventDispatcher:
             event = await queue.get()
             if event is None:
                 return
+            key = self._coalescing_key(event)
+            if key is not None and self._coalesced_events.get(key) is event:
+                self._coalesced_events.pop(key, None)
             callbacks = self._listeners.get(event.type, [])
             for callback in callbacks:
                 try:
