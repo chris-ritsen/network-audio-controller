@@ -25,10 +25,15 @@ def _normalize_no_args_exit_code(command: click.Command) -> None:
     command._netaudio_normalized_no_args_exit = True
 
 
-def enable_required_parameter_help(command: click.Command) -> None:
+def subcommands(command) -> dict:
+    return getattr(command, "commands", None) or {}
+
+
+def enable_required_parameter_help(command) -> None:
     """Make bare parameterized leaf commands display their full help."""
-    if isinstance(command, click.Group):
-        for child in command.commands.values():
+    children = subcommands(command)
+    if children:
+        for child in children.values():
             enable_required_parameter_help(child)
     elif any(parameter.required for parameter in command.params):
         command.no_args_is_help = True
