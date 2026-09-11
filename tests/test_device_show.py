@@ -180,7 +180,8 @@ async def test_control_population_reports_failures_instead_of_discarding_them(ca
         f"Could not reach {device.server_name} ({device.ipv4}): synthetic population failure"
     )
     assert warnings[0].exc_info is None
-    assert device.online is False
+    assert device.online is True
+    assert isinstance(device.error, RuntimeError)
 
 
 def test_device_show_csv_is_a_two_column_summary(monkeypatch):
