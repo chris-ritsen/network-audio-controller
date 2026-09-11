@@ -8,6 +8,7 @@ from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, sort_devices
+from netaudio.commands.config.redundancy import mode_label
 from netaudio.commands.device.display import format_link_speed_megabits_per_second
 from netaudio.ddm.controller import DAPISessionError
 
@@ -76,10 +77,15 @@ def network_status_rows(
     switch_configuration: dict | None,
     dissect: bool,
     switch_configuration_applicable: bool = True,
+    redundancy: dict | None = None,
 ) -> list[list[str]]:
     switch_mode, switch_mode_codes, available_switch_modes = _switch_mode_summary(switch_configuration, dissect)
     if switch_configuration is None and address:
-        switch_mode = "no response" if switch_configuration_applicable else "N/A"
+        if redundancy and redundancy.get("current"):
+            switch_mode = mode_label(redundancy["current"])
+            available_switch_modes = ", ".join(mode_label(value) for value in redundancy.get("supported") or [])
+        else:
+            switch_mode = "not reported" if switch_configuration_applicable else "N/A"
     if link_status is None:
         link_label = "no response" if address else ""
         row = [device_name, address, "", link_label, "", switch_mode, available_switch_modes]
@@ -174,6 +180,7 @@ async def run_network_status(application, devices, timeout: float) -> None:
             "switch_configuration": switch_configuration,
             "switch_configuration_applicable": switch_configuration_applicable,
             "switch_configuration_available": switch_configuration is not None,
+            "redundancy": getattr(device, "dante_redundancy", None),
         }
         rows.extend(
             network_status_rows(
@@ -183,6 +190,7 @@ async def run_network_status(application, devices, timeout: float) -> None:
                 switch_configuration,
                 dissect,
                 switch_configuration_applicable,
+                getattr(device, "dante_redundancy", None),
             )
         )
 
