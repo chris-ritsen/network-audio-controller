@@ -147,11 +147,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             return None;
         }
         let (gateway, dns_server) = match mode_value {
-            1 => (
-                Some(ipv4_at(data, offset + 16)?),
-                Some(ipv4_at(data, offset + 20)?),
-            ),
-            3 => (
+            1 | 3 => (
                 Some(ipv4_at(data, offset + 20)?),
                 Some(ipv4_at(data, offset + 16)?),
             ),

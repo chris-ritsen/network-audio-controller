@@ -323,8 +323,8 @@ class TestDanteNotificationService:
             bytes.fromhex("001DC1000001"),
             bytes((192, 168, 1, 10)),
             bytes((255, 255, 255, 0)),
-            bytes((192, 168, 1, 1)),
             bytes((1, 1, 1, 1)),
+            bytes((192, 168, 1, 1)),
         )
         packet[0x40:0x44] = bytes.fromhex("DEADBEEF")
         self._write_interface_record(
