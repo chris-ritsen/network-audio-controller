@@ -1,4 +1,4 @@
-.PHONY: core header example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man site-check site-preview site-publish
+.PHONY: core header example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
@@ -92,12 +92,3 @@ install-man: man
 	install -d $(HOME)/.local/share/man/man1
 	install -m644 packages/netaudio/man/*.1 $(HOME)/.local/share/man/man1/
 
-site-check:
-	python3 website/validate.py
-	uv run pytest -q website/tests
-
-site-preview:
-	python3 -m http.server 8765 --directory website/public
-
-site-publish: site-check
-	sudo /usr/bin/python3 website/publish.py --source website/public
