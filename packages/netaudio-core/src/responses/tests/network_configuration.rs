@@ -147,6 +147,16 @@ fn captured_secondary_static_record_is_applied_despite_retained_configuration() 
 }
 
 #[test]
+fn dynamic_interface_keeps_dns_before_gateway() {
+    let mut data = captured("a32_static_active_both");
+    set_word(&mut data, 40, 1);
+    let primary = &parse_interface_status(&data).unwrap().interfaces[0];
+    assert_eq!(primary.mode, "dynamic");
+    assert_eq!(primary.dns_server.as_deref(), Some("8.8.8.8"));
+    assert_eq!(primary.gateway.as_deref(), Some("192.0.2.1"));
+}
+
+#[test]
 fn primary_dns_change_remains_pending_but_matching_static_target_is_applied() {
     let mut data = captured("a32_static_pending_both");
     set_word(&mut data, 40, 3);
