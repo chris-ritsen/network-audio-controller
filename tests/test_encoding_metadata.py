@@ -87,9 +87,10 @@ async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_c
     core_client.get_tx_channels.return_value = []
     core_client.get_device_name.return_value = "avio-input"
     core_client.get_device_settings.return_value = None
+    core_client.execute.return_value = None
     core_client.get_property_directory.return_value = {
         "properties": [{"property_id": 0x8020, "flags": 0x0001}],
-        "aes67_supported": False,
+        "aes67_configured_property_advertised": False,
     }
     device.ipv4 = "192.0.2.10"
 
@@ -100,7 +101,8 @@ async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_c
 
     controls = await device.fetch_controls_data()
 
-    assert controls["aes67_supported"] is False
+    assert controls["aes67_configured_property_advertised"] is False
+    assert "aes67_supported" not in controls
     assert controls["settings_properties"] == [{"property_id": 0x8020, "flags": 0x0001}]
     assert controls["channel_metadata_supported_encodings"] == [24]
     core_client.get_rx_inventory.assert_called_once_with(2)

@@ -360,13 +360,13 @@ fn property_directory_preserves_raw_records_and_derives_aes67_presence() {
             },
         ]
     );
-    assert!(directory.aes67_supported);
+    assert!(directory.aes67_configured_property_advertised);
 
     let unsupported = property_directory_response(&[(0x8020, 0x0001)]);
     assert!(
         !parse_property_directory(&unsupported)
             .unwrap()
-            .aes67_supported
+            .aes67_configured_property_advertised
     );
 }
 

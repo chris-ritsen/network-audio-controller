@@ -525,6 +525,6 @@ def test_property_directory_getter_uses_capture_backed_empty_query(core, client_
         status, directory = rust_client_json(core, "netaudio_client_get_property_directory_json", client)
 
     assert status == NETAUDIO_OK
-    assert directory["aes67_supported"] is False
+    assert directory["aes67_configured_property_advertised"] is False
     assert directory["properties"][0] == {"property_id": 0x8020, "flags": 0x0001}
     assert device.requests == [bytes.fromhex("27ff000a000111020000")]

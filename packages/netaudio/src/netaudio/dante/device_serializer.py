@@ -4,6 +4,7 @@ from netaudio.dante.network_configuration import network_configuration_modes
 DEVICE_SCALAR_FIELDS = (
     "active_latency",
     "aes67_configured",
+    "aes67_configured_property_advertised",
     "aes67_current",
     "aes67_multicast_prefix",
     "aes67_supported",
