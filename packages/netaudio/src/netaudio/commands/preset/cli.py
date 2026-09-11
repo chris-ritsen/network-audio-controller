@@ -9,6 +9,8 @@ from typing import Optional
 
 import typer
 
+from netaudio.cli_support.output import output_single, structured_output_selected
+
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_command
@@ -90,7 +92,7 @@ async def run_preset_save(application, devices, output_path: Path, preset_name: 
     except OSError as exception:
         typer.echo(f"Error: could not save preset to {output_path}: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR) from exception
-    typer.echo(f"Saved {len(devices)} devices to {output_path}", err=True)
+    typer.echo(f"Saved {len(devices)} devices to {output_path}")
 
 
 @app.command("save", help="Save the selected devices' configuration as a preset.")
@@ -131,11 +133,14 @@ def preset_load(
         typer.echo(f"Error: invalid preset {preset_path}: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR) from exception
 
-    typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
-
     if dry_run:
+        if structured_output_selected():
+            output_single({"devices": preset_devices, "name": preset_name, "path": str(preset_path)})
+            return
+        typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)")
         show_preset_dry_run(preset_devices)
         return
+    typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
 
     run_command(run_preset_load, preset_devices, confirm_destructive)
 
