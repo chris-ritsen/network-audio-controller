@@ -977,3 +977,78 @@ class TestDanteApplication:
         }
         assert FakeAsyncZeroconf.instances[0].closed is True
         assert application._browser is None
+
+
+@pytest.mark.asyncio
+async def test_core_inventory_failure_is_recorded_without_escaping_population():
+    from netaudio import core
+
+    application = DanteApplication()
+    device = make_arc_device("device.local.", "192.0.2.10")
+    failure = core.NetaudioCoreError(3, "receiver inventory")
+    device.populate_from_core = AsyncMock(side_effect=failure)
+    application.apply_modern_arc_status_pages = AsyncMock()
+
+    await application._populate_device_controls(device)
+
+    assert device.error is failure
+    application.apply_modern_arc_status_pages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_successful_control_readback_clears_previous_failure():
+    application = DanteApplication()
+    device = make_arc_device("device.local.", "192.0.2.10")
+    device.error = RuntimeError("previous readback failed")
+    device.populate_from_core = AsyncMock(return_value=True)
+    application.apply_modern_arc_status_pages = AsyncMock()
+    await application._populate_device_controls(device)
+    assert device.error is None
+
+
+@pytest.mark.asyncio
+async def test_discovery_retrieves_completed_errors_and_awaits_canceled_reads(monkeypatch, caplog):
+    from types import SimpleNamespace
+
+    application = DanteApplication()
+    devices = {
+        name: make_arc_device(name, address) for name, address in (("failed", "192.0.2.1"), ("slow", "192.0.2.2"))
+    }
+    application.devices = devices
+    browser = SimpleNamespace(
+        services=[],
+        get_zeroconf_kwargs=lambda: {},
+        async_on_service_state_change=lambda *args: None,
+        _assemble_completed_services=lambda: None,
+        async_close=AsyncMock(),
+    )
+    monkeypatch.setattr("netaudio.dante.browser.DanteBrowser", lambda **kwargs: browser)
+    monkeypatch.setattr("zeroconf.asyncio.AsyncZeroconf", lambda **kwargs: SimpleNamespace(zeroconf=object()))
+    monkeypatch.setattr("zeroconf.asyncio.AsyncServiceBrowser", lambda *args, **kwargs: object())
+    application.cmc.register_all = AsyncMock()
+    for name in (
+        "_query_settings_fields",
+        "_query_conmon_all",
+        "_probe_interface_status",
+        "_probe_preferred_leader_all",
+        "_probe_aes67_all",
+        "_probe_sample_rates_all",
+        "_probe_encodings_all",
+        "_probe_gain_levels_all",
+        "_probe_sample_rate_pullups_all",
+    ):
+        setattr(application, name, AsyncMock())
+    canceled = asyncio.Event()
+
+    async def populate(device):
+        if device.server_name == "failed":
+            raise ValueError("unexpected population error")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.set()
+
+    application._populate_device_controls = populate
+    assert await application.discover_and_populate(timeout=0.01) == devices
+    assert canceled.is_set()
+    assert "unexpected population error" in caplog.text
