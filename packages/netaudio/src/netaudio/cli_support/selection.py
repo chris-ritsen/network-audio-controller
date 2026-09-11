@@ -43,6 +43,11 @@ def require_selected_devices(devices: dict[str, DanteDevice]) -> dict[str, Dante
     return devices
 
 
+def _name_matches(name, server_name, patterns) -> bool:
+    candidates = [candidate.casefold() for candidate in (name or "", server_name or "") if candidate]
+    return any(fnmatch(candidate, pattern.casefold()) for candidate in candidates for pattern in patterns)
+
+
 def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
     state = _get_state()
 
@@ -59,7 +64,7 @@ def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) 
         ):
             continue
 
-        if include_names and state.names and not any(fnmatch(device.name or "", pat) for pat in state.names):
+        if include_names and state.names and not _name_matches(device.name, server_name, state.names):
             continue
 
         if state.hosts and not any(str(device.ipv4) == h for h in state.hosts):

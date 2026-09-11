@@ -10,7 +10,11 @@ from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.discovery import discovery_destination
 from netaudio.dante.lock import validate_pin
 from netaudio.dante.application import CapabilityProbeTimeout
-from netaudio.dante.network_configuration import network_snapshot, probe_switch_configuration_if_reported
+from netaudio.dante.network_configuration import (
+    learn_switch_ports,
+    network_snapshot,
+    probe_switch_configuration_if_reported,
+)
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
@@ -195,6 +199,8 @@ class DaemonDeviceHandlers:
 
         try:
             interfaces = await self.application.probe_interface_status(device)
+            if await learn_switch_ports(self.application, device):
+                interfaces = await self.application.probe_interface_status(device)
             await probe_switch_configuration_if_reported(self.application, device)
         except (CapabilityProbeTimeout, TimeoutError):
             await self._send_json(writer, {"error": "The device did not respond to the network settings query"}, 504)

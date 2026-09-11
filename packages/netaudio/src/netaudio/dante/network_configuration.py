@@ -168,12 +168,35 @@ def interface_redundancy_status(parsed: dict, device) -> dict | None:
         return None
     # A zero mode flag on a single-port product is not evidence that it can
     # become redundant. Keep current-state reads separate from write support.
-    known_hardware = (
-        len(parsed.get("interfaces", [])) == 2 or getattr(device, "licensed_redundancy_enabled", None) is True
-    )
-    if not known_hardware:
+    if not redundancy_hardware_reported(device, parsed.get("interfaces", [])):
         return None
     return status
+
+
+def redundancy_hardware_reported(device, interfaces) -> bool:
+    return (
+        len(interfaces or []) == 2
+        or getattr(device, "licensed_redundancy_enabled", None) is True
+        or (getattr(device, "switch_port_count", None) or 0) >= 2
+    )
+
+
+async def learn_switch_ports(application, device, timeout: float = 2.0) -> bool:
+    from netaudio.dante.application import CapabilityProbeTimeout
+
+    if redundancy_hardware_reported(device, getattr(device, "interfaces", None)):
+        return False
+    if getattr(device, "switch_port_count", None) is not None or getattr(device, "requires_managed_control", False):
+        return False
+    probe_link_status = getattr(application, "probe_link_status", None)
+    if probe_link_status is None:
+        return False
+    try:
+        await probe_link_status(device, timeout=timeout)
+    except (CapabilityProbeTimeout, TimeoutError):
+        device.switch_port_count = 0
+        return False
+    return (device.switch_port_count or 0) >= 2
 
 
 async def probe_switch_configuration_if_reported(application, device, timeout: float = 2.0) -> dict | None:
@@ -192,6 +215,8 @@ async def probe_switch_configuration_if_reported(application, device, timeout: f
 
 async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
     await application.probe_interface_status(device, timeout=timeout)
+    if await learn_switch_ports(application, device, timeout):
+        await application.probe_interface_status(device, timeout=timeout)
     await probe_switch_configuration_if_reported(application, device, timeout)
     status = device.dante_redundancy
     if not isinstance(status, dict) or status.get("current") is None or status.get("configured") is None:
