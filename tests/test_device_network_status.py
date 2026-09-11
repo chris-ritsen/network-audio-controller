@@ -69,7 +69,7 @@ def test_network_status_rows_keep_raw_fields_behind_dissect():
 def test_network_status_rows_label_missing_responses():
     rows = network_status_rows("avio-usb-1", "192.168.1.247", None, None, dissect=False)
 
-    assert rows == [["avio-usb-1", "192.168.1.247", "", "no response", "", "no response", ""]]
+    assert rows == [["avio-usb-1", "192.168.1.247", "", "no response", "", "not reported", ""]]
 
 
 def test_network_status_rows_render_switch_ports_in_words():
@@ -88,7 +88,7 @@ def test_network_status_rows_render_switch_ports_in_words():
         ["switch port 0", "up", "1 Gbps"],
         ["switch port 3", "down", "0 Mbps"],
     ]
-    assert rows[0][5] == "no response"
+    assert rows[0][5] == "not reported"
     assert rows[1][5] == ""
 
 
@@ -148,3 +148,12 @@ def test_without_port_column_drops_the_column_only_when_no_row_names_a_port():
     kept_headers, kept_rows = _without_port_column(headers, labeled_rows)
     assert kept_headers == headers
     assert kept_rows == labeled_rows
+
+
+def test_network_status_uses_flag_based_redundancy_without_a_choice_table():
+    from netaudio.commands.device.network_status import network_status_rows
+
+    redundancy = {"current": "switched", "configured": "switched", "supported": ["switched", "redundant"]}
+    rows = network_status_rows("a32", "192.168.1.34", None, None, False, True, redundancy)
+    assert rows[0][5] == "Switched"
+    assert rows[0][6] == "Switched, Redundant"
