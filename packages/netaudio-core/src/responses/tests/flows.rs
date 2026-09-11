@@ -47,6 +47,58 @@ pub(super) fn captured_receiver_flow_response() -> Vec<u8> {
         )
 }
 
+fn receiver_flow_response(
+    channel_descriptor_size: usize,
+    reported_endpoint_size: u16,
+    endpoint: &[u8],
+) -> Vec<u8> {
+    let channel_count = 2usize;
+    let record_offset = 4usize;
+    let record_data_start = record_offset + 20 + channel_count * 2 + 2;
+    let first_channel_offset = record_data_start;
+    let second_channel_offset = first_channel_offset + channel_descriptor_size;
+    let endpoint_offset = second_channel_offset + channel_descriptor_size;
+    let status_offset = endpoint_offset + endpoint.len();
+    let record_end = status_offset + 16;
+
+    let mut body = vec![0u8; record_end];
+    body[0] = 1;
+    body[1] = 1;
+    body[2..4].copy_from_slice(&((record_offset + RESPONSE_HEADER_SIZE) as u16).to_be_bytes());
+    body[record_offset..record_offset + 2].copy_from_slice(&1u16.to_be_bytes());
+    body[record_offset + 2..record_offset + 4].copy_from_slice(&1u16.to_be_bytes());
+    body[record_offset + 4..record_offset + 8].copy_from_slice(&48_000u32.to_be_bytes());
+    body[record_offset + 8..record_offset + 12].copy_from_slice(&24u32.to_be_bytes());
+    body[record_offset + 12..record_offset + 14].copy_from_slice(&1u16.to_be_bytes());
+    body[record_offset + 14..record_offset + 16]
+        .copy_from_slice(&(channel_count as u16).to_be_bytes());
+    body[record_offset + 16..record_offset + 18]
+        .copy_from_slice(&reported_endpoint_size.to_be_bytes());
+    body[record_offset + 18..record_offset + 20]
+        .copy_from_slice(&((endpoint_offset + RESPONSE_HEADER_SIZE) as u16).to_be_bytes());
+    body[record_offset + 20..record_offset + 22]
+        .copy_from_slice(&((first_channel_offset + RESPONSE_HEADER_SIZE) as u16).to_be_bytes());
+    body[record_offset + 22..record_offset + 24]
+        .copy_from_slice(&((second_channel_offset + RESPONSE_HEADER_SIZE) as u16).to_be_bytes());
+    body[record_offset + 24..record_offset + 26]
+        .copy_from_slice(&((status_offset + RESPONSE_HEADER_SIZE) as u16).to_be_bytes());
+    body[first_channel_offset..first_channel_offset + 2].copy_from_slice(&1u16.to_be_bytes());
+    body[second_channel_offset..second_channel_offset + 2].copy_from_slice(&2u16.to_be_bytes());
+    body[endpoint_offset..status_offset].copy_from_slice(endpoint);
+    body[status_offset..status_offset + 2].copy_from_slice(&9u16.to_be_bytes());
+    body[status_offset + 8..status_offset + 12].copy_from_slice(&5_000_000u32.to_be_bytes());
+
+    let mut response = vec![0u8; RESPONSE_HEADER_SIZE];
+    response.extend_from_slice(&body);
+    stamp_arc_response(
+        &mut response,
+        PROTOCOL_DANTE_FLOW,
+        OPCODE_QUERY_RECEIVER_FLOWS,
+        RESULT_CODE_SUCCESS,
+    );
+    response
+}
+
 #[test]
 fn transmitter_channel_name_reconciliation_parser_decodes_controller_avio_response() {
     let response = decode_hexadecimal(
@@ -106,8 +158,10 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
     assert_eq!(first.endpoint_descriptor_hexadecimal, "08023813c0a8016c");
     assert_eq!(first.destination_user_datagram_port, Some(0x3813));
     assert_eq!(
-        first.destination_internet_protocol_version_four_address,
-        "192.168.1.108"
+        first
+            .destination_internet_protocol_version_four_address
+            .as_deref(),
+        Some("192.168.1.108")
     );
     assert_eq!(
         first.channel_descriptors_hexadecimal,
@@ -139,8 +193,10 @@ fn receiver_flow_parser_decodes_shipping_controller_response() {
     assert_eq!(multicast.flow_type.as_deref(), Some("multicast"));
     assert_eq!(multicast.destination_user_datagram_port, Some(0x10e1));
     assert_eq!(
-        multicast.destination_internet_protocol_version_four_address,
-        "239.255.255.56"
+        multicast
+            .destination_internet_protocol_version_four_address
+            .as_deref(),
+        Some("239.255.255.56")
     );
     assert_eq!(multicast.subscription_status_code, 10);
     assert_eq!(multicast.status_field_at_byte_offset_two, 0);
@@ -164,7 +220,45 @@ fn receiver_channel_bitmap_preserves_multiple_and_empty_mappings() {
         Some(vec![1, 21])
     );
     assert_eq!(receiver_channel_numbers(&[0; 16]), Some(Vec::new()));
+    assert_eq!(receiver_channel_numbers(&[0; 8]), Some(Vec::new()));
     assert_eq!(receiver_channel_numbers(&[0; 15]), None);
+}
+
+#[test]
+fn receiver_flow_parser_accepts_tesira_eight_byte_channels_and_short_endpoint() {
+    let response = receiver_flow_response(8, 4, &[0x08, 0x02, 0x38, 0x2d]);
+    let flow = &parse_receiver_flow_page(&response).unwrap().flows[0];
+    assert_eq!(
+        flow.receiver_channel_numbers_by_flow_channel,
+        vec![vec![1], vec![2]]
+    );
+    assert_eq!(
+        flow.channel_descriptors_hexadecimal,
+        vec!["0001000000000000", "0002000000000000"]
+    );
+    assert_eq!(flow.endpoint_descriptor_hexadecimal, "0802382d");
+    assert_eq!(flow.destination_user_datagram_port, Some(0x382d));
+    assert_eq!(
+        flow.destination_internet_protocol_version_four_address,
+        None
+    );
+    assert_eq!(flow.flow_type, None);
+}
+
+#[test]
+fn receiver_flow_parser_bounds_mxwani_endpoint_at_status_pointer() {
+    let response = receiver_flow_response(16, 10, &[0x08, 0x02, 0x38, 0x01, 192, 168, 10, 5]);
+    let flow = &parse_receiver_flow_page(&response).unwrap().flows[0];
+    assert_eq!(flow.endpoint_descriptor_size, 10);
+    assert_eq!(flow.endpoint_descriptor_hexadecimal, "08023801c0a80a05");
+    assert_eq!(flow.destination_user_datagram_port, Some(0x3801));
+    assert_eq!(
+        flow.destination_internet_protocol_version_four_address
+            .as_deref(),
+        Some("192.168.10.5")
+    );
+    assert_eq!(flow.subscription_status_code, 9);
+    assert_eq!(flow.latency_nanoseconds, 5_000_000);
 }
 
 #[test]
