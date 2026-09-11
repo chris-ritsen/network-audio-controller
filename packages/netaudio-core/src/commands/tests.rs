@@ -861,11 +861,11 @@ fn channel_mutations_reject_channel_zero() {
 #[test]
 fn volume_builder_rejects_unrepresentable_names_before_constructing_offsets() {
     assert_eq!(
-        build_volume_start(&"a".repeat(65_521), [0; 4], [0; 6], 0, false, 0),
+        build_volume_start(&"a".repeat(65_521), [0; 4], [0; 6], 0, 0),
         Err(NetaudioError::NameTooLong)
     );
     assert_eq!(
-        build_volume_start("dev\0name", [0; 4], [0; 6], 0, false, 0),
+        build_volume_start("dev\0name", [0; 4], [0; 6], 0, 0),
         Err(NetaudioError::NameInvalidChars)
     );
 }
@@ -878,7 +878,6 @@ fn metering_start_matches_captured_ad4d_packet_7298186() {
                 [192, 168, 1, 156],
                 [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
                 8752,
-                true,
                 0,
             )
             .unwrap(),
@@ -896,7 +895,6 @@ fn metering_start_matches_captured_a32_packet_7298185() {
                 [192, 168, 1, 156],
                 [0x3E, 0x42, 0x27, 0x4C, 0xFF, 0x24],
                 8752,
-                true,
                 0,
             )
             .unwrap(),

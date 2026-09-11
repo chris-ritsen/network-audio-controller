@@ -23,7 +23,3 @@ pub(super) fn default_lock_reset_request_value() -> u32 {
 pub(super) fn default_modern_arc_protocol() -> u16 {
     crate::protocol::PROTOCOL_ARC_2809
 }
-
-pub(super) fn default_true() -> bool {
-    true
-}

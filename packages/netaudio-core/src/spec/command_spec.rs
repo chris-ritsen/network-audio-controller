@@ -151,12 +151,11 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         port: u16,
-        #[serde(default = "default_true")]
-        timeout: bool,
     },
     MeteringStop {
         device_name: String,
         mac: String,
+        port: u16,
     },
     ProbeAes67 {
         #[serde(default)]
@@ -492,12 +491,11 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         port: u16,
-        #[serde(default = "default_true")]
-        timeout: bool,
     },
     VolumeStop {
         device_name: String,
         mac: String,
+        port: u16,
     },
 }
 
@@ -1243,7 +1241,6 @@ pub(super) fn build_command(
             ipv4,
             mac,
             port,
-            timeout,
             message_id,
         }
         | CommandSpec::MeteringStart {
@@ -1251,20 +1248,24 @@ pub(super) fn build_command(
             ipv4,
             mac,
             port,
-            timeout,
             message_id,
         } => commands::build_volume_start(
             &device_name,
             parse_optional_ipv4_address(&ipv4)?,
             parse_mac_required(&mac)?,
             port,
-            timeout,
             message_id,
         )?,
-        CommandSpec::VolumeStop { device_name, mac }
-        | CommandSpec::MeteringStop { device_name, mac } => {
-            commands::build_volume_stop(&device_name, parse_mac_required(&mac)?)?
+        CommandSpec::VolumeStop {
+            device_name,
+            mac,
+            port,
         }
+        | CommandSpec::MeteringStop {
+            device_name,
+            mac,
+            port,
+        } => commands::build_volume_stop(&device_name, parse_mac_required(&mac)?, port)?,
     };
     Ok(packet)
 }

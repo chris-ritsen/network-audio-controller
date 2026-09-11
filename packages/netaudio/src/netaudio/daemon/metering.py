@@ -22,6 +22,7 @@ logger = logging.getLogger("netaudio")
 CACHE_MAX_AGE = 2.0
 HISTORY_MAX_SAMPLES = 3600
 BROADCAST_INTERVAL = 0.05
+STREAM_STALE_SECONDS = 5.0
 
 
 class MeteringManager:
@@ -38,11 +39,13 @@ class MeteringManager:
         self._transport = None
         self._host_ip = None
         self._host_mac = None
-        self._keepalive_task = None
+        self._recovery_task = None
         self._broadcast_task = None
         self._active_port: int | None = None
         self._port_lock = DeferredAsyncioLock()
         self._dirty_devices: set[str] = set()
+        self._started: dict[str, tuple[str, str, float]] = {}
+        self._stream_locks: dict[str, asyncio.Lock] = {}
 
     @staticmethod
     def _probe_port(port: int) -> bool:
@@ -131,35 +134,65 @@ class MeteringManager:
         self._send_tasks.add(task)
         task.add_done_callback(self._send_tasks.discard)
 
-    async def _send_start(self, server_name: str):
-        device = self._get_device(server_name)
-        if not device or not device.online:
-            return
-        device_ip = str(device.ipv4)
-        device_name = device.name or device.server_name
-        logger.debug(f"Sending metering start to {device_name} ({device_ip})")
-        await self._application.cmc.start_metering(
-            device_ip,
-            device_name,
-            self._host_ip,
-            self._host_mac,
-            self._active_port,
-        )
+    def _stream_lock(self, server_name: str) -> asyncio.Lock:
+        return self._stream_locks.setdefault(server_name, asyncio.Lock())
 
-    async def _send_stop(self, server_name: str):
-        device = self._get_device(server_name)
-        if not device or not device.online:
-            return
-        device_ip = str(device.ipv4)
-        device_name = device.name or device.server_name
-        logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
-        await self._application.cmc.stop_metering(
-            device_ip,
-            device_name,
-            self._host_ip,
-            self._host_mac,
-            self._active_port,
-        )
+    async def _send_start(self, server_name: str, *, recover: bool = False):
+        async with self._stream_lock(server_name):
+            device = self._get_device(server_name)
+            if (
+                not self._is_active(server_name)
+                or not device
+                or not device.online
+                or not device.ipv4
+                or getattr(device, "requires_managed_control", False)
+            ):
+                return
+            started = self._started.get(server_name)
+            detailed = self._detailed_levels.get(server_name)
+            if recover:
+                if not started or not detailed or detailed["timestamp"] < started[2]:
+                    return
+                if time.monotonic() - detailed["timestamp"] < STREAM_STALE_SECONDS:
+                    return
+            elif started:
+                return
+            device_ip = str(device.ipv4)
+            device_name = device.name or device.server_name
+            started_at = time.monotonic()
+            logger.debug(f"Sending metering start to {device_name} ({device_ip})")
+            try:
+                await self._application.cmc.start_metering(
+                    device_ip,
+                    device_name,
+                    self._host_ip,
+                    self._host_mac,
+                    self._active_port,
+                )
+            except (RuntimeError, OSError) as error:
+                logger.warning(f"Metering start failed for {device_name}: {error}")
+            finally:
+                self._started[server_name] = (device_ip, device_name, started_at)
+
+    async def _send_stop(self, server_name: str, *, changing_port: bool = False):
+        async with self._stream_lock(server_name):
+            if self._is_active(server_name) and not changing_port:
+                return
+            started = self._started.pop(server_name, None)
+            if started is None:
+                return
+            device_ip, device_name, _ = started
+            logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
+            try:
+                await self._application.cmc.stop_metering(
+                    device_ip,
+                    device_name,
+                    self._host_ip,
+                    self._host_mac,
+                    self._active_port,
+                )
+            except (RuntimeError, OSError) as error:
+                logger.warning(f"Metering stop failed for {device_name}: {error}")
 
     async def start(self):
         self._host_ip = _get_local_ip()
@@ -199,15 +232,17 @@ class MeteringManager:
         )
         logger.info("MeteringManager: UDP listener started on port %d", self._active_port)
 
-        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+        self._recovery_task = asyncio.create_task(self._recovery_loop())
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
 
-    async def _keepalive_loop(self):
+    async def _recovery_loop(self):
         while True:
-            await asyncio.sleep(5)
-            for server_name in list(self._persistent_refs.keys()):
-                if self._persistent_refs.get(server_name):
-                    await self._send_start(server_name)
+            await asyncio.sleep(STREAM_STALE_SECONDS)
+            await self._recover_stale_streams()
+
+    async def _recover_stale_streams(self):
+        for server_name in tuple(self._started):
+            await self._send_start(server_name, recover=True)
 
     async def _broadcast_loop(self):
         while True:
@@ -237,18 +272,17 @@ class MeteringManager:
             self._broadcast_task.cancel()
             self._broadcast_task = None
 
-        if self._keepalive_task:
-            self._keepalive_task.cancel()
-            self._keepalive_task = None
-
-        all_names = set(self._persistent_refs.keys()) | set(
-            name for name, count in self._snapshot_count.items() if count > 0
-        )
-        for server_name in all_names:
-            await self._send_stop(server_name)
+        if self._recovery_task:
+            self._recovery_task.cancel()
+            await asyncio.gather(self._recovery_task, return_exceptions=True)
+            self._recovery_task = None
 
         self._persistent_refs.clear()
         self._snapshot_count.clear()
+        if self._send_tasks:
+            await asyncio.gather(*tuple(self._send_tasks), return_exceptions=True)
+        for server_name in tuple(self._started):
+            await self._send_stop(server_name)
         self._detailed_levels.clear()
         self._signal_presence_levels.clear()
         self._latest_levels.clear()
@@ -267,6 +301,7 @@ class MeteringManager:
         self._signal_presence_levels.pop(server_name, None)
         self._latest_levels.pop(server_name, None)
         self._events.pop(server_name, None)
+        self._started.pop(server_name, None)
 
     def reactivate_device(self, server_name: str):
         if self._persistent_refs.get(server_name):
@@ -324,7 +359,9 @@ class MeteringManager:
                 raise
             old = self._transport
             active = set(self._persistent_refs) | {name for name, count in self._snapshot_count.items() if count}
-            stopped = await asyncio.gather(*(self._send_stop(name) for name in active), return_exceptions=True)
+            stopped = await asyncio.gather(
+                *(self._send_stop(name, changing_port=True) for name in active), return_exceptions=True
+            )
             if any(isinstance(result, Exception) for result in stopped):
                 logger.warning("Some devices did not acknowledge the old monitoring destination")
             self._transport = replacement
@@ -369,7 +406,7 @@ class MeteringManager:
 
     async def snapshot(self, server_name: str, timeout: float = 3.0) -> dict | None:
         device = self._get_device(server_name)
-        if device and not device.online:
+        if not device or not device.online:
             return None
 
         cached = self._selected_sample(server_name)
@@ -383,9 +420,6 @@ class MeteringManager:
         was_active = self._is_active(server_name)
         self._snapshot_count[server_name] = self._snapshot_count.get(server_name, 0) + 1
 
-        if not was_active:
-            await self._send_start(server_name)
-
         event = self._events.get(server_name)
         if event is None:
             event = asyncio.Event()
@@ -394,6 +428,8 @@ class MeteringManager:
             event.clear()
 
         try:
+            if not was_active:
+                await self._send_start(server_name)
             await asyncio.wait_for(event.wait(), timeout=timeout)
             cached = self._selected_sample(server_name)
             if cached:

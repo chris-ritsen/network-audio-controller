@@ -544,7 +544,7 @@ class DanteDeviceCommands:
             }
         )
 
-    def command_metering_start(self, device_name, ipv4, mac, port, timeout=True, transaction_id=0):
+    def command_metering_start(self, device_name, ipv4, mac, port, transaction_id=0):
         return self._control(
             {
                 "command": "metering_start",
@@ -552,13 +552,14 @@ class DanteDeviceCommands:
                 "ipv4": str(ipv4) if ipv4 else "",
                 "mac": _mac_to_hex(mac),
                 "port": port,
-                "timeout": timeout,
                 "transaction_id": transaction_id,
             }
         )
 
     def command_metering_stop(self, device_name, ipv4, mac, port):
-        return self._control({"command": "metering_stop", "device_name": device_name, "mac": _mac_to_hex(mac)})
+        return self._control(
+            {"command": "metering_stop", "device_name": device_name, "mac": _mac_to_hex(mac), "port": port}
+        )
 
     def command_make_model(self, mac):
         return self._build({"command": "make_model", "mac": _mac_to_hex(mac)})
