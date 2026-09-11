@@ -139,6 +139,9 @@ async def run_latency(application, devices, value: float | None, all_devices: bo
         "latency change",
         lambda label: f"Set latency for {label}: {value:g} ms (verified)",
         read_for=lambda device: _read_latency_setting_value(application, device, "active_latency_ns"),
+        describe=lambda nanoseconds: (
+            f"{nanoseconds / 1_000_000:g} ms" if isinstance(nanoseconds, int) else repr(nanoseconds)
+        ),
     )
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)

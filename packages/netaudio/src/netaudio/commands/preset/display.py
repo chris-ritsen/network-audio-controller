@@ -5,7 +5,7 @@ import typer
 
 def show_preset_dry_run(preset_devices: dict[str, dict[str, Any]]) -> None:
     for device_name, config in preset_devices.items():
-        typer.echo(f"\n{device_name}:")
+        typer.echo(f"{device_name}:")
         if "preferred_leader" in config:
             typer.echo(f"  preferred leader: {'on' if config['preferred_leader'] else 'off'}")
         if "sample_rate" in config:

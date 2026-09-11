@@ -250,6 +250,17 @@ def test_fractional_latency_verifies_rounded_nanoseconds():
     assert "Set latency for AVIO: 0.15 ms (verified)" in result.output
 
 
+def test_latency_mismatch_is_reported_in_milliseconds():
+    device = FakeDevice("AVIO", settings={"active_latency_ns": 1_000_000}, min_latency=1.0, max_latency=10.979167)
+    application = FakeApplication({"avio.local.": device})
+
+    result = _latency(application, 2)
+
+    assert result.exit_code == 1
+    assert "the device reports 1 ms instead of 2 ms" in result.output
+    assert "1000000" not in result.output
+
+
 def test_latency_get_uses_active_device_readback():
     device = FakeDevice(
         "AVIO",
@@ -519,7 +530,7 @@ def test_latency_does_not_treat_configured_value_as_applied():
     result = _latency(application, 0.15)
 
     assert result.exit_code == 1
-    assert "1000000 instead of 150000" in result.output
+    assert "reports 1 ms instead of 0.15 ms" in result.output
     assert "Set latency for AVIO" not in result.output
 
 
