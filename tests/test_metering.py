@@ -310,3 +310,103 @@ def test_meter_events_fall_back_to_the_only_matching_entry():
 
     assert manager._server_name_for_ip("192.168.1.22") == "A32-000028.local."
     assert manager._server_name_for_ip("192.168.1.99") is None
+
+
+async def drain_sends(manager):
+    if manager._send_tasks:
+        await asyncio.gather(*tuple(manager._send_tasks))
+
+
+@pytest.mark.asyncio
+async def test_metering_starts_once_and_stops_only_after_last_client_leaves():
+    manager, application, _ = make_manager()
+    manager.add_persistent("avio-bt-1", "first")
+    manager.add_persistent("avio-bt-1", "first")
+    manager.add_persistent("avio-bt-1", "second")
+    await drain_sends(manager)
+    application.cmc.start_metering.assert_awaited_once()
+    manager.remove_persistent("avio-bt-1", "first")
+    manager.remove_persistent("avio-bt-1", "missing")
+    await drain_sends(manager)
+    application.cmc.stop_metering.assert_not_awaited()
+    manager.remove_persistent("avio-bt-1", "second")
+    manager.remove_persistent("avio-bt-1", "second")
+    await drain_sends(manager)
+    application.cmc.stop_metering.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unresponsive_metering_device_is_not_repeatedly_started():
+    manager, application, _ = make_manager()
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    for _ in range(20):
+        await manager._recover_stale_streams()
+    application.cmc.start_metering.assert_awaited_once()
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_metering_recovery_requires_packets_to_have_started_then_stopped(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr(metering_module.time, "monotonic", lambda: now)
+    manager, application, _ = make_manager()
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    for _ in range(24):
+        now += 5
+        manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
+        await manager._recover_stale_streams()
+    application.cmc.start_metering.assert_awaited_once()
+    now += 5
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 2
+    for _ in range(24):
+        now += 5
+        await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 2
+    now += 1
+    manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
+    now += 5
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 3
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_managed_metering_needs_no_direct_start():
+    manager, application, device = make_manager()
+    device.requires_managed_control = True
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    await manager._recover_stale_streams()
+    manager.remove_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    application.cmc.start_metering.assert_not_awaited()
+    application.cmc.stop_metering.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cmc_metering_stop_preserves_start_identity_and_port():
+    from netaudio.dante.services.cmc import DanteCMCService
+
+    transport = SimpleNamespace(execute=AsyncMock())
+    cmc = DanteCMCService(transport, host_media_access_control_address=b"\x02\x00\x00\x00\x00\x01")
+    await cmc.start_metering("192.0.2.1", "receiver", "192.0.2.2", b"\x02\x00\x00\x00\x00\x01", 8752)
+    start = transport.execute.await_args.args[1]
+    await cmc.stop_metering("192.0.2.1", "receiver", "192.0.2.2", b"\x02\x00\x00\x00\x00\x01", 8752)
+    stop = transport.execute.await_args.args[1]
+    for field in ("device_name", "mac", "port"):
+        assert stop[field] == start[field]
+    assert "timeout" not in start
+
+
+@pytest.mark.asyncio
+async def test_passive_indicators_do_not_disable_detailed_metering_on_other_devices():
+    manager, application, device = make_manager()
+    device.model_id = "LX-DANTE"
+    manager.record_signal_presence(PASSIVE_RECORD, ("192.168.1.61", 8700))
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    application.cmc.start_metering.assert_awaited_once()
+    await manager.stop()

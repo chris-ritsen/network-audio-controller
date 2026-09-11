@@ -216,7 +216,6 @@ class DanteCMCService:
                 "ipv4": str(ipv4) if ipv4 else "",
                 "mac": mac.hex() if isinstance(mac, bytes) else mac,
                 "port": port,
-                "timeout": True,
             },
         )
 
@@ -232,6 +231,7 @@ class DanteCMCService:
             str(device_ip),
             {
                 "command": "metering_stop",
+                "port": port,
                 "device_name": device_name,
                 "mac": mac.hex() if isinstance(mac, bytes) else mac,
             },

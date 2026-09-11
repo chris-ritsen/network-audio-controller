@@ -99,7 +99,9 @@ fn representative_commands_keep_their_routes() {
         (Target::Control, IoMode::Request)
     );
     assert_eq!(
-        route_for(r#"{"command":"metering_stop","device_name":"avio","mac":"001122334455"}"#),
+        route_for(
+            r#"{"command":"metering_stop","device_name":"avio","mac":"001122334455","port":8752}"#
+        ),
         (
             Target::Control,
             IoMode::Fire {
