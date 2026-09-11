@@ -101,7 +101,10 @@ class DanteSubscription:
 
     @property
     def rx_device_name(self):
-        return self._rx_device_name
+        if self._rx_device_name:
+            return self._rx_device_name
+        device = getattr(self.rx_channel, "device", None)
+        return getattr(device, "name", None) or self._rx_device_name
 
     @rx_device_name.setter
     def rx_device_name(self, rx_device_name):
