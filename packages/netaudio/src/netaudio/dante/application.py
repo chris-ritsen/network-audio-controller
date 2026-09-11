@@ -405,7 +405,10 @@ class DanteApplication:
                 await self.apply_modern_arc_status_pages(device)
             from netaudio.dante.network_configuration import learn_switch_ports
 
-            await learn_switch_ports(self, device, timeout=1.0)
+            try:
+                await learn_switch_ports(self, device, timeout=1.0)
+            except (RuntimeError, OSError) as exception:
+                logger.debug(f"Switch port learning unavailable for {device.server_name}: {exception}")
             device.error = None
         except (RuntimeError, OSError) as exception:
             device.error = exception

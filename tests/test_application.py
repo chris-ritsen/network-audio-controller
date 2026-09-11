@@ -1007,6 +1007,21 @@ async def test_successful_control_readback_clears_previous_failure():
 
 
 @pytest.mark.asyncio
+async def test_control_readback_succeeds_when_switch_port_learning_probe_fails():
+    from netaudio import core
+
+    application = DanteApplication()
+    device = make_arc_device("device.local.", "192.0.2.10")
+    device.error = RuntimeError("previous readback failed")
+    device.populate_from_core = AsyncMock(return_value=True)
+    application.apply_modern_arc_status_pages = AsyncMock()
+    application.probe_link_status = AsyncMock(side_effect=core.NetaudioCoreError(2, "probe_link_status: invalid mac"))
+    await application._populate_device_controls(device)
+    assert device.error is None
+    application.probe_link_status.assert_awaited()
+
+
+@pytest.mark.asyncio
 async def test_discovery_retrieves_completed_errors_and_awaits_canceled_reads(monkeypatch, caplog):
     from types import SimpleNamespace
 
