@@ -4,15 +4,15 @@ import typer
 from typer.testing import CliRunner
 
 from netaudio.cli import app
+from netaudio.cli_support.context import subcommands
 
 runner = CliRunner()
 
 
 def _walk(command, path):
     yield path, command
-    if isinstance(command, click.Group):
-        for name in sorted(command.commands):
-            yield from _walk(command.commands[name], f"{path} {name}")
+    for name in sorted(subcommands(command)):
+        yield from _walk(subcommands(command)[name], f"{path} {name}")
 
 
 def _command_tree():
@@ -37,8 +37,14 @@ def test_dash_h_displays_help_for_every_command(arguments):
 REQUIRED_PARAMETER_COMMANDS = [
     path.removeprefix("netaudio ").split()
     for path, command in COMMAND_TREE
-    if not isinstance(command, click.Group) and any(parameter.required for parameter in command.params)
+    if not subcommands(command) and any(parameter.required for parameter in command.params)
 ]
+
+
+def test_command_tree_reaches_every_registered_subcommand():
+    paths = {path for path, _ in COMMAND_TREE}
+    assert {"netaudio channel name", "netaudio subscription add", "netaudio device show"} <= paths
+    assert len(REQUIRED_PARAMETER_COMMANDS) > 50
 
 
 @pytest.mark.parametrize("arguments", REQUIRED_PARAMETER_COMMANDS, ids=lambda arguments: " ".join(arguments))
