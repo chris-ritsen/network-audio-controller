@@ -1242,6 +1242,13 @@ class DanteApplication:
             device.aes67_supported = None
             device.aes67_configured_property_advertised = None
             device.dante_model_capabilities = None
+            device.dante_model_monitoring_capabilities = None
+            device.detailed_metering_supported = None
+            device.interface_statistics_supported = None
+            device.clock_monitoring_supported = None
+            device.per_channel_signal_presence_supported = None
+            device.rx_flow_maximum_latency_monitoring_supported = None
+            device.rx_flow_late_packet_monitoring_supported = None
             device.aes67_multicast_prefix = None
             device.settings_properties = None
             device.sample_rate_pullup_raw_value = None

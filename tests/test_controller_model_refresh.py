@@ -71,19 +71,40 @@ def test_board_model_parser_matches_physical_and_authentic_virtual_devices():
         "board_codename": "Bklyn2",
         "board_name": "Brooklyn II",
         "capabilities": 0x8E7CD4CB,
+        "monitoring_capabilities": 0x1B,
         "aes67_supported": True,
+        "detailed_metering_supported": True,
+        "interface_statistics_supported": True,
+        "clock_monitoring_supported": True,
+        "per_channel_signal_presence_supported": False,
+        "rx_flow_maximum_latency_monitoring_supported": True,
+        "rx_flow_late_packet_monitoring_supported": True,
     }
     assert core.parse_response("dante_model", _packet(8)) == {
         "board_codename": "PCIe",
         "board_name": "Dante PCIe IF",
         "capabilities": 0x0E68D3C9,
+        "monitoring_capabilities": 0x1B,
         "aes67_supported": True,
+        "detailed_metering_supported": True,
+        "interface_statistics_supported": True,
+        "clock_monitoring_supported": True,
+        "per_channel_signal_presence_supported": False,
+        "rx_flow_maximum_latency_monitoring_supported": True,
+        "rx_flow_late_packet_monitoring_supported": True,
     }
     assert core.parse_response("dante_model", _packet(12)) == {
         "board_codename": "Bklyn2",
         "board_name": "Brooklyn II",
         "capabilities": 0x8E78F65A,
+        "monitoring_capabilities": 0x1B,
         "aes67_supported": True,
+        "detailed_metering_supported": True,
+        "interface_statistics_supported": True,
+        "clock_monitoring_supported": True,
+        "per_channel_signal_presence_supported": False,
+        "rx_flow_maximum_latency_monitoring_supported": True,
+        "rx_flow_late_packet_monitoring_supported": True,
     }
 
 
@@ -100,6 +121,18 @@ def test_board_model_aes67_capability_bit_follows_the_pinned_mask():
         core.parse_response("dante_model", truncated)
 
 
+def test_board_model_monitoring_capability_bits_follow_the_pinned_masks():
+    for packet_identifier in (6, 8, 12):
+        parsed = core.parse_response("dante_model", _packet(packet_identifier))
+        assert parsed["detailed_metering_supported"] is bool(parsed["capabilities"] & 0x00008000)
+        assert parsed["monitoring_capabilities"] == 0x1B
+        assert parsed["interface_statistics_supported"] is True
+        assert parsed["clock_monitoring_supported"] is True
+        assert parsed["per_channel_signal_presence_supported"] is False
+        assert parsed["rx_flow_maximum_latency_monitoring_supported"] is True
+        assert parsed["rx_flow_late_packet_monitoring_supported"] is True
+
+
 def test_state_service_applies_and_serializes_controller_visible_identity():
     device_ip_address = "10.0.2.15"
     application, device = application_with_device("virtual-a32.local.", device_ip_address)
@@ -112,9 +145,16 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert device.dante_model_id == "Bklyn2"
     assert device.board_name == "Brooklyn II"
     assert device.dante_model_capabilities == 0x8E78F65A
+    assert device.dante_model_monitoring_capabilities == 0x1B
     assert device.aes67_supported is True
+    assert device.detailed_metering_supported is True
+    assert device.per_channel_signal_presence_supported is False
     serialized = DanteDeviceSerializer.to_json(device)
     assert serialized["aes67_supported"] is True
+    assert serialized["dante_model_capabilities"] == 0x8E78F65A
+    assert serialized["dante_model_monitoring_capabilities"] == 0x1B
+    assert serialized["detailed_metering_supported"] is True
+    assert serialized["per_channel_signal_presence_supported"] is False
     assert serialized["manufacturer"] == "Ferrofish GmbH"
     assert serialized["dante_model"] == "A32 Dante AD/DA Converter"
     assert serialized["product_version"] == "1.0.0.0"
@@ -129,13 +169,22 @@ def test_later_versions_response_overwrites_aes67_supported_and_capabilities():
     supported = _packet(12)
     receive_packets(application, [supported], (device_ip_address, 8702))
     assert device.aes67_supported is True
+    assert device.detailed_metering_supported is True
     assert device.dante_model_capabilities == 0x8E78F65A
 
     cleared = bytearray(supported)
     cleared[0x34] &= ~0x04
     receive_packets(application, [bytes(cleared)], (device_ip_address, 8702))
     assert device.aes67_supported is False
+    assert device.detailed_metering_supported is True
     assert device.dante_model_capabilities == 0x8E78F65A & ~0x04000000
+
+    detailed_cleared = bytearray(supported)
+    detailed_cleared[0x36] &= ~0x80
+    receive_packets(application, [bytes(detailed_cleared)], (device_ip_address, 8702))
+    assert device.aes67_supported is True
+    assert device.detailed_metering_supported is False
+    assert device.dante_model_capabilities == 0x8E78F65A & ~0x00008000
 
 
 def test_malformed_versions_response_leaves_existing_capability_unchanged():
@@ -144,7 +193,9 @@ def test_malformed_versions_response_leaves_existing_capability_unchanged():
 
     receive_packets(application, [_packet(12)], (device_ip_address, 8702))
     assert device.aes67_supported is True
+    assert device.detailed_metering_supported is True
 
     receive_packets(application, [_packet(12)[:0x34]], (device_ip_address, 8702))
     assert device.aes67_supported is True
+    assert device.detailed_metering_supported is True
     assert device.dante_model_capabilities == 0x8E78F65A

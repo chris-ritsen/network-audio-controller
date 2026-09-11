@@ -299,6 +299,14 @@ class TestDanteApplication:
         device.supported_sample_rates = [44_100, 48_000]
         device.supported_encodings = [16, 24, 32]
         device.aes67_supported = True
+        device.dante_model_capabilities = 0x8E78F65A
+        device.dante_model_monitoring_capabilities = 0x1B
+        device.detailed_metering_supported = True
+        device.interface_statistics_supported = True
+        device.clock_monitoring_supported = True
+        device.per_channel_signal_presence_supported = False
+        device.rx_flow_maximum_latency_monitoring_supported = True
+        device.rx_flow_late_packet_monitoring_supported = True
         device.aes67_multicast_prefix = "239.69.0.0"
         device.settings_properties = [{"property_id": 0x0063, "flags": 0x0001}]
         device.sample_rate_pullup_raw_value = 0
@@ -314,6 +322,14 @@ class TestDanteApplication:
         assert device.supported_sample_rates is None
         assert device.supported_encodings is None
         assert device.aes67_supported is None
+        assert device.dante_model_capabilities is None
+        assert device.dante_model_monitoring_capabilities is None
+        assert device.detailed_metering_supported is None
+        assert device.interface_statistics_supported is None
+        assert device.clock_monitoring_supported is None
+        assert device.per_channel_signal_presence_supported is None
+        assert device.rx_flow_maximum_latency_monitoring_supported is None
+        assert device.rx_flow_late_packet_monitoring_supported is None
         assert device.aes67_multicast_prefix is None
         assert device.settings_properties is None
         assert device.sample_rate_pullup_raw_value is None

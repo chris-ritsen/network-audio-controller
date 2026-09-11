@@ -335,7 +335,14 @@
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
       "capabilities": 2390292058,
-      "aes67_supported": true
+      "monitoring_capabilities": 27,
+      "aes67_supported": true,
+      "detailed_metering_supported": true,
+      "interface_statistics_supported": true,
+      "clock_monitoring_supported": true,
+      "per_channel_signal_presence_supported": false,
+      "rx_flow_maximum_latency_monitoring_supported": true,
+      "rx_flow_late_packet_monitoring_supported": true
     }
   },
   "dante_model_ad4d_capture": {
@@ -345,7 +352,14 @@
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
       "capabilities": 2390545611,
-      "aes67_supported": true
+      "monitoring_capabilities": 27,
+      "aes67_supported": true,
+      "detailed_metering_supported": true,
+      "interface_statistics_supported": true,
+      "clock_monitoring_supported": true,
+      "per_channel_signal_presence_supported": false,
+      "rx_flow_maximum_latency_monitoring_supported": true,
+      "rx_flow_late_packet_monitoring_supported": true
     }
   },
   "dante_model_lx_dante_capture": {
@@ -355,7 +369,14 @@
       "board_codename": "PCIe",
       "board_name": "Dante PCIe IF",
       "capabilities": 241750985,
-      "aes67_supported": true
+      "monitoring_capabilities": 27,
+      "aes67_supported": true,
+      "detailed_metering_supported": true,
+      "interface_statistics_supported": true,
+      "clock_monitoring_supported": true,
+      "per_channel_signal_presence_supported": false,
+      "rx_flow_maximum_latency_monitoring_supported": true,
+      "rx_flow_late_packet_monitoring_supported": true
     }
   },
   "encoding_status_packet_204720": {
@@ -1024,7 +1045,14 @@
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
       "capabilities": 2,
-      "aes67_supported": false
+      "monitoring_capabilities": null,
+      "aes67_supported": false,
+      "detailed_metering_supported": false,
+      "interface_statistics_supported": null,
+      "clock_monitoring_supported": null,
+      "per_channel_signal_presence_supported": null,
+      "rx_flow_maximum_latency_monitoring_supported": null,
+      "rx_flow_late_packet_monitoring_supported": null
     }
   },
   "synthetic_make_model": {

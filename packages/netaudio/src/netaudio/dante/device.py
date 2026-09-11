@@ -68,6 +68,13 @@ class DanteDevice:
         self.aes67_supported: bool | None = None
         self.aes67_configured_property_advertised: bool | None = None
         self.dante_model_capabilities: int | None = None
+        self.dante_model_monitoring_capabilities: int | None = None
+        self.detailed_metering_supported: bool | None = None
+        self.interface_statistics_supported: bool | None = None
+        self.clock_monitoring_supported: bool | None = None
+        self.per_channel_signal_presence_supported: bool | None = None
+        self.rx_flow_maximum_latency_monitoring_supported: bool | None = None
+        self.rx_flow_late_packet_monitoring_supported: bool | None = None
         self.aes67_multicast_prefix = None
         self.settings_properties: list[dict] | None = None
         self.preferred_leader = None
