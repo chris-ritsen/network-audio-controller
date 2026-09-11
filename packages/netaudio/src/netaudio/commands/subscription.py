@@ -222,11 +222,7 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
             if include_unused or _subscription_has_configured_source(subscription):
                 all_subscriptions.append(subscription)
 
-    if not all_subscriptions:
-        typer.echo("No active subscriptions.")
-        return
-
-    from netaudio.cli_support.execution import ansi
+    from netaudio.cli_support.execution import ansi, report_inventory_failures
     from netaudio.icons import SEVERITY_PRESENTATION, severity_icon
 
     def _status_label(subscription):
@@ -261,7 +257,9 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
             ]
         )
 
-    output_table(headers, rows, json_data=json_data)
+    output_table(headers, rows, json_data=json_data, empty_message="No active subscriptions.")
+    if report_inventory_failures(devices, "subscriptions"):
+        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("list")

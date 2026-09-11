@@ -232,6 +232,24 @@ def _log_unreachable(device: DanteDevice, reason: object) -> None:
         logger.debug(_unreachable_message(device, reason))
 
 
+def inventory_failures(devices: dict[str, DanteDevice]) -> dict[str, BaseException]:
+    return {
+        server_name: device.error
+        for server_name, device in devices.items()
+        if getattr(device, "error", None) is not None
+    }
+
+
+def report_inventory_failures(devices: dict[str, DanteDevice], what: str) -> bool:
+    failures = inventory_failures(devices)
+    for device in (devices[server_name] for server_name in sorted(failures)):
+        typer.echo(
+            f"Error: could not read {what} from {_unreachable_message(device, device.error)[len('Could not reach ') :]}",
+            err=True,
+        )
+    return bool(failures)
+
+
 def _probe_candidates(devices: dict[str, DanteDevice], probe_name: str) -> dict[str, DanteDevice]:
     explicit = _explicit_selection()
     if explicit:
@@ -297,7 +315,7 @@ async def _populate_controls(
             raise result
         logger.warning(_unreachable_message(device, result))
         logger.debug(f"Control population failure for {_device_label(device)}", exc_info=result)
-        device.online = False
+        device.error = result
 
     if managed_devices:
         await asyncio.gather(
