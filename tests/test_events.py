@@ -223,3 +223,67 @@ async def test_start_stop_idempotent(dispatcher):
     assert dispatcher._queue is None
     await dispatcher.stop()
     assert dispatcher._dispatch_task is None
+
+
+@pytest.mark.asyncio
+async def test_notification_burst_keeps_one_pending_readback_per_device(dispatcher):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    received = []
+
+    async def callback(event):
+        received.append((event.server_name, event.data["revision"]))
+        if len(received) == 1:
+            entered.set()
+            await release.wait()
+
+    def notification(device, revision):
+        return DanteEvent(
+            type=EventType.NOTIFICATION_RECEIVED,
+            server_name=device,
+            data={"notification_id": 1, "revision": revision},
+        )
+
+    dispatcher.on(EventType.NOTIFICATION_RECEIVED, callback)
+    await dispatcher.start()
+    dispatcher.emit_nowait(notification("first.local.", 0))
+    await asyncio.wait_for(entered.wait(), 1)
+    try:
+        for revision in range(1, 101):
+            await dispatcher.emit(notification("first.local.", revision))
+        dispatcher.emit_nowait(notification("second.local.", 1))
+    finally:
+        release.set()
+        await dispatcher.stop()
+    assert received == [("first.local.", 0), ("first.local.", 100), ("second.local.", 1)]
+
+
+@pytest.mark.asyncio
+async def test_partial_meter_pages_and_lifecycle_events_preserve_order(dispatcher):
+    received = []
+
+    async def callback(event):
+        received.append(event)
+
+    dispatcher.on(EventType.METER_VALUES, callback)
+    dispatcher.on(EventType.DEVICE_REMOVED, callback)
+    events = [
+        DanteEvent(
+            type=EventType.METER_VALUES, server_name="device", data={"metering_source": "detailed", "rx": {1: 1}}
+        ),
+        DanteEvent(type=EventType.DEVICE_REMOVED, server_name="device"),
+        DanteEvent(
+            type=EventType.METER_VALUES, server_name="device", data={"metering_source": "detailed", "rx": {1: 2}}
+        ),
+        DanteEvent(
+            type=EventType.METER_VALUES, server_name="device", data={"metering_source": "signal_presence", "rx": {2: 3}}
+        ),
+        DanteEvent(
+            type=EventType.METER_VALUES, server_name="device", data={"metering_source": "detailed", "rx": {1: 4}}
+        ),
+    ]
+    for event in events:
+        dispatcher.emit_nowait(event)
+    await dispatcher.start()
+    await dispatcher.stop()
+    assert received == events

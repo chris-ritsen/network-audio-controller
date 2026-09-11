@@ -1058,3 +1058,28 @@ async def test_accepted_subscription_starts_targeted_readback(managed, path, par
     status, body = await post(server, path, {"rx_device": "dev1", **params})
     assert status == 200 and body["success"]
     server.subscription_readback.request.assert_called_once_with(device, records)
+
+
+@pytest.mark.asyncio
+async def test_device_update_does_not_serialize_the_whole_inventory(monkeypatch):
+    from netaudio.daemon.http.api import _SseClient
+    from netaudio.dante.device_serializer import DanteDeviceSerializer
+    from netaudio.dante.events import DanteEvent, EventType
+
+    devices = {str(index): make_device(server_name=str(index)) for index in range(100)}
+    server = make_http_server(devices)
+    client = _SseClient(FakeWriter())
+    server.sse_clients[client.writer] = client
+    serialized = []
+
+    def serialize(device):
+        serialized.append(device.server_name)
+        return {"server_name": device.server_name, "online": device.online}
+
+    monkeypatch.setattr(DanteDeviceSerializer, "to_json", serialize)
+    await server._on_device_event(DanteEvent(type=EventType.DEVICE_UPDATED, server_name="42"))
+    assert serialized == ["42"]
+    assert client.queue.qsize() == 1
+    server.sse_clients.clear()
+    await server._on_device_event(DanteEvent(type=EventType.DEVICE_UPDATED, server_name="43"))
+    assert serialized == ["42"]
