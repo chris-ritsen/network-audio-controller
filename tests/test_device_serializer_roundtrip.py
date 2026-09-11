@@ -19,6 +19,14 @@ def make_device():
     device.encoding = 24
     device.supported_encodings = [24, 16, 32]
     device.aes67_supported = True
+    device.dante_model_capabilities = 0x8E78F65A
+    device.dante_model_monitoring_capabilities = 0x1B
+    device.detailed_metering_supported = True
+    device.interface_statistics_supported = True
+    device.clock_monitoring_supported = True
+    device.per_channel_signal_presence_supported = False
+    device.rx_flow_maximum_latency_monitoring_supported = True
+    device.rx_flow_late_packet_monitoring_supported = True
     device.settings_properties = [
         {"property_id": 0x8020, "flags": 0x0001},
         {"property_id": 0x0063, "flags": 0x0001},
@@ -96,6 +104,14 @@ class TestSerializerRoundtrip:
         assert restored.encoding == 24
         assert restored.supported_encodings == [24, 16, 32]
         assert restored.aes67_supported is True
+        assert restored.dante_model_capabilities == 0x8E78F65A
+        assert restored.dante_model_monitoring_capabilities == 0x1B
+        assert restored.detailed_metering_supported is True
+        assert restored.interface_statistics_supported is True
+        assert restored.clock_monitoring_supported is True
+        assert restored.per_channel_signal_presence_supported is False
+        assert restored.rx_flow_maximum_latency_monitoring_supported is True
+        assert restored.rx_flow_late_packet_monitoring_supported is True
         assert restored.settings_properties == [
             {"property_id": 0x8020, "flags": 0x0001},
             {"property_id": 0x0063, "flags": 0x0001},

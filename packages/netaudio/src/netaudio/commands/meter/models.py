@@ -15,9 +15,6 @@ PASSIVE_SOURCE = "signal_presence"
 DETAILED_SOURCE = "detailed"
 PASSIVE_STALE_SECONDS = 2.5
 DETAILED_STALE_SECONDS = 1.0
-AUTO_DETAILED_DEVICE_IDENTIFIERS = frozenset({"lx-dante"})
-AUTO_DETAILED_DANTE_MODELS = frozenset({"a32 dante ad/da converter"})
-DETAILED_ESCALATION_SECONDS = 3.0
 SEARCH_QUERY_LIMIT = 256
 METER_DISPLAY_FLOOR_DBFS = -61.0
 MOUSE_WHEEL_ROWS = 3
@@ -25,16 +22,16 @@ _STATE_PLACEHOLDER = "¤"
 _METER_PLACEHOLDER = "§"
 
 
-def automatic_detailed_metering_targets(devices: dict) -> list[str]:
-    targets = []
-    for server_name, device in devices.items():
-        if not getattr(device, "online", True) or not getattr(device, "ipv4", None):
-            continue
-        model_id = str(getattr(device, "model_id", "") or "").strip().casefold()
-        dante_model = str(getattr(device, "dante_model", "") or "").strip().casefold()
-        if model_id in AUTO_DETAILED_DEVICE_IDENTIFIERS or dante_model in AUTO_DETAILED_DANTE_MODELS:
-            targets.append(server_name)
-    return sorted(targets)
+def detailed_metering_targets(devices: dict) -> list[str]:
+    """Select devices that advertise detailed metering but not passive signal presence."""
+    return sorted(
+        server_name
+        for server_name, device in devices.items()
+        if getattr(device, "online", True)
+        and getattr(device, "ipv4", None)
+        and getattr(device, "detailed_metering_supported", None) is True
+        and getattr(device, "per_channel_signal_presence_supported", None) is not True
+    )
 
 
 @dataclass(frozen=True)

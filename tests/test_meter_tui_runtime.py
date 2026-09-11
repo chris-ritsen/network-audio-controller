@@ -14,7 +14,7 @@ from tests.test_meter_tui import _channel, _device, _sample
 
 
 @pytest.mark.asyncio
-async def test_tui_does_not_stop_auto_detailed_device_if_terminal_never_opens():
+async def test_tui_does_not_start_or_stop_metering_if_terminal_never_opens():
     class BrokenTerminal:
         def __enter__(self):
             raise OSError("terminal unavailable")
@@ -27,10 +27,17 @@ async def test_tui_does_not_stop_auto_detailed_device_if_terminal_never_opens():
 
     with pytest.raises(OSError, match="terminal unavailable"):
         await run_meter_tui(
-            {"lx.local.": _device("lx.local.", "lx-dante", model_id="LX-DANTE")},
+            {
+                "device.local.": _device(
+                    "device.local.",
+                    "Device",
+                    detailed_metering_supported=True,
+                    per_channel_signal_presence_supported=False,
+                )
+            },
             MeterViewOptions(no_color=True),
             terminal=BrokenTerminal(),
-            stream_factory=_one_sample_stream("lx.local."),
+            stream_factory=_one_sample_stream("device.local."),
             start_metering=start_metering,
             stop_metering=stop_metering,
         )
@@ -147,7 +154,8 @@ async def test_passive_tui_uses_async_events_and_never_starts_or_stops_detailed_
             server_name,
             "Input",
             tx={1: _channel(1, "shelford")},
-            model_id="DIOUSB",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=True,
         ),
     }
     terminal = FakeTerminal(["quit"])
@@ -181,26 +189,28 @@ async def test_passive_tui_uses_async_events_and_never_starts_or_stops_detailed_
 
 
 @pytest.mark.asyncio
-async def test_default_tui_starts_and_stops_detailed_metering_for_lx_dante_and_a32_only():
+async def test_default_tui_starts_detailed_metering_only_when_passive_presence_is_not_advertised():
     devices = {
-        "lx.local.": _device(
-            "lx.local.",
-            "lx-dante",
+        "detailed.local.": _device(
+            "detailed.local.",
+            "Detailed",
             tx={1: _channel(1, "mic")},
-            model_id="LX-DANTE",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=False,
         ),
-        "avio.local.": _device(
-            "avio.local.",
-            "avio-input",
+        "passive.local.": _device(
+            "passive.local.",
+            "Passive",
             tx={1: _channel(1, "input")},
-            model_id="DAI2",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=True,
         ),
-        "a32.local.": _device(
-            "a32.local.",
-            "a32",
+        "unsupported.local.": _device(
+            "unsupported.local.",
+            "Unsupported",
             tx={1: _channel(1, "input")},
-            model_id="_0000000000000001",
-            dante_model="A32 Dante AD/DA Converter",
+            detailed_metering_supported=False,
+            per_channel_signal_presence_supported=False,
         ),
     }
     terminal = FakeTerminal(["quit"])
@@ -211,43 +221,16 @@ async def test_default_tui_starts_and_stops_detailed_metering_for_lx_dante_and_a
         devices,
         MeterViewOptions(no_color=True),
         terminal=terminal,
-        stream_factory=_one_sample_stream("avio.local."),
+        stream_factory=_one_sample_stream("passive.local."),
         start_metering=start_metering,
         stop_metering=stop_metering,
     )
 
-    assert start_metering.await_count == 2
-    assert stop_metering.await_count == 2
-    start_calls = {call.args[0]: call.args[1] for call in start_metering.await_args_list}
-    stop_calls = {call.args[0]: call.args[1] for call in stop_metering.await_args_list}
-    assert set(start_calls) == set(stop_calls) == {"a32.local.", "lx.local."}
-    assert start_calls == stop_calls
+    start_metering.assert_awaited_once()
+    stop_metering.assert_awaited_once()
+    assert start_metering.await_args.args[0] == "detailed.local."
+    assert stop_metering.await_args.args == start_metering.await_args.args
     assert "MIXED/" in terminal.frames[-1]
-
-
-@pytest.mark.asyncio
-async def test_lx_only_tui_is_labeled_detailed_not_mixed():
-    server_name = "lx.local."
-    terminal = FakeTerminal(["quit"])
-
-    await run_meter_tui(
-        {
-            server_name: _device(
-                server_name,
-                "lx-dante",
-                tx={1: _channel(1, "mic")},
-                model_id="LX-DANTE",
-            )
-        },
-        MeterViewOptions(no_color=True),
-        terminal=terminal,
-        stream_factory=_one_sample_stream(server_name),
-        start_metering=AsyncMock(return_value=True),
-        stop_metering=AsyncMock(return_value=True),
-    )
-
-    assert "DETAILED/" in terminal.frames[-1]
-    assert "MIXED" not in terminal.frames[-1]
 
 
 @pytest.mark.asyncio
@@ -554,90 +537,6 @@ async def test_detailed_tui_stops_every_attempted_start_even_when_an_acknowledge
         ("first.local.", client_id),
     ]
     assert terminal.exited is True
-
-
-def _silent_stream():
-    async def stream():
-        await asyncio.Event().wait()
-        yield {}
-
-    return stream
-
-
-@pytest.mark.asyncio
-async def test_passive_tui_escalates_to_detailed_for_devices_with_no_samples(monkeypatch):
-    import netaudio.commands.meter.tui as meter_tui_module
-
-    monkeypatch.setattr(meter_tui_module, "DETAILED_ESCALATION_SECONDS", 0.0)
-    server_name = "silent.local."
-    devices = {
-        server_name: _device(
-            server_name,
-            "Silent",
-            tx={1: _channel(1, "mic")},
-            model_id="UNKNOWN-MODEL",
-        ),
-    }
-    terminal = FakeTerminal(["down", "down", "quit"])
-    start_calls = []
-    stop_calls = []
-
-    async def start_metering(*args):
-        start_calls.append(args)
-        return True
-
-    async def stop_metering(*args):
-        stop_calls.append(args)
-        return True
-
-    await run_meter_tui(
-        devices,
-        MeterViewOptions(no_color=True),
-        terminal=terminal,
-        stream_factory=_silent_stream(),
-        start_metering=start_metering,
-        stop_metering=stop_metering,
-    )
-
-    assert [call[0] for call in start_calls] == [server_name]
-    assert [call[0] for call in stop_calls] == [server_name]
-    assert "MIXED" in terminal.frames[-1]
-
-
-@pytest.mark.asyncio
-async def test_passive_tui_does_not_escalate_for_devices_with_fresh_passive_samples(monkeypatch):
-    import netaudio.commands.meter.tui as meter_tui_module
-
-    monkeypatch.setattr(meter_tui_module, "DETAILED_ESCALATION_SECONDS", 0.0)
-    server_name = "input.local."
-    devices = {
-        server_name: _device(
-            server_name,
-            "Input",
-            tx={1: _channel(1, "shelford")},
-            model_id="DIOUSB",
-        ),
-    }
-    terminal = FakeTerminal(["down", "down", "quit"])
-    start_calls = []
-
-    async def start_metering(*args):
-        start_calls.append(args)
-        return True
-
-    async def stop_metering(*args):
-        return True
-
-    await run_meter_tui(
-        devices,
-        MeterViewOptions(no_color=True),
-        terminal=terminal,
-        stream_factory=_one_sample_stream(server_name),
-        start_metering=start_metering,
-        stop_metering=stop_metering,
-    )
-
-    assert start_calls == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX EOF handling")

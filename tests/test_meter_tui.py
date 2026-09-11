@@ -11,7 +11,7 @@ from netaudio.commands.meter.models import (
     MeterRowKey,
     MeterViewModel,
     MeterViewport,
-    automatic_detailed_metering_targets,
+    detailed_metering_targets,
     format_meter_sample,
 )
 from netaudio.commands.meter.rendering import (
@@ -38,8 +38,8 @@ def _device(
     tx_count: int | None = None,
     rx_count: int | None = None,
     ipv4: str = "192.0.2.10",
-    model_id: str | None = None,
-    dante_model: str | None = None,
+    detailed_metering_supported: bool | None = None,
+    per_channel_signal_presence_supported: bool | None = None,
     online: bool = True,
 ):
     return SimpleNamespace(
@@ -47,8 +47,8 @@ def _device(
         name=name,
         online=online,
         ipv4=ipv4,
-        model_id=model_id,
-        dante_model=dante_model,
+        detailed_metering_supported=detailed_metering_supported,
+        per_channel_signal_presence_supported=per_channel_signal_presence_supported,
         tx_channels=dict(tx or {}),
         rx_channels=dict(rx or {}),
         tx_count=tx_count,
@@ -147,28 +147,49 @@ def test_view_model_rejects_malformed_sample_atomically_and_owns_accepted_maps()
         assert model.samples["input.local."]["tx"] == {1: 0x7B}
 
 
-def test_only_online_lx_dante_is_automatically_started_for_detailed_metering():
+def test_detailed_metering_targets_follow_advertised_capabilities():
     devices = {
-        "lx.local.": _device("lx.local.", "renamed", model_id="LX-DANTE"),
-        "a32.local.": _device(
-            "a32.local.",
-            "renamed-too",
-            model_id="_0000000000000001",
-            dante_model="A32 Dante AD/DA Converter",
+        "detailed.local.": _device(
+            "detailed.local.",
+            "Detailed",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=False,
         ),
-        "avio.local.": _device("avio.local.", "avio-input", model_id="DAI2"),
-        "name-only.local.": _device("name-only.local.", "lx-dante", model_id="OTHER"),
-        "a32-name-only.local.": _device("a32-name-only.local.", "a32", model_id="OTHER"),
-        "offline-lx.local.": _device("offline-lx.local.", "lx-dante", model_id="LX-DANTE", online=False),
-        "addressless-lx.local.": _device(
-            "addressless-lx.local.",
-            "lx-dante",
+        "passive.local.": _device(
+            "passive.local.",
+            "Passive",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=True,
+        ),
+        "unsupported.local.": _device(
+            "unsupported.local.",
+            "Unsupported",
+            detailed_metering_supported=False,
+            per_channel_signal_presence_supported=False,
+        ),
+        "monitoring-unknown.local.": _device(
+            "monitoring-unknown.local.",
+            "Monitoring unknown",
+            detailed_metering_supported=True,
+        ),
+        "unknown.local.": _device("unknown.local.", "Unknown"),
+        "offline.local.": _device(
+            "offline.local.",
+            "Offline",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=False,
+            online=False,
+        ),
+        "addressless.local.": _device(
+            "addressless.local.",
+            "Addressless",
             ipv4="",
-            model_id="LX-DANTE",
+            detailed_metering_supported=True,
+            per_channel_signal_presence_supported=False,
         ),
     }
 
-    assert automatic_detailed_metering_targets(devices) == ["a32.local.", "lx.local."]
+    assert detailed_metering_targets(devices) == ["detailed.local.", "monitoring-unknown.local."]
 
 
 def test_format_meter_sample_preserves_raw_values_and_channel_names():

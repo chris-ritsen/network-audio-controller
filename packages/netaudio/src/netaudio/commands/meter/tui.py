@@ -3,20 +3,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 import uuid
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable
 
 from netaudio.commands.meter.models import (
-    DETAILED_ESCALATION_SECONDS,
     MOUSE_WHEEL_ROWS,
     SEARCH_QUERY_LIMIT,
     MeterFilterDialog,
     MeterRowKey,
     MeterViewModel,
     MeterViewport,
-    automatic_detailed_metering_targets,
+    detailed_metering_targets,
 )
 from netaudio.commands.meter.rendering import meter_page_size, render_meter_filter_prompt, render_meter_frame
 from netaudio.commands.meter.terminal import MeterTerminal
@@ -103,14 +101,10 @@ def _meter_display_mode(detailed: bool, attempted_devices: list[str], device_cou
 
 @dataclass
 class _MeteringState:
-    devices: dict
-    model: MeterViewModel
     start_metering: StartMetering
     client_id: str
     attempted_devices: list[str]
     display_mode: str
-    escalation_done: bool
-    escalation_deadline: float
     issued_devices: list[str] = field(default_factory=list)
     start_task: asyncio.Task[list[object]] | None = None
     detailed_status: str = "starting"
@@ -120,21 +114,16 @@ class _MeteringState:
     def create(
         cls,
         devices: dict,
-        model: MeterViewModel,
         start_metering: StartMetering,
         client_id: str,
         detailed: bool,
     ) -> _MeteringState:
-        attempted_devices = list(devices) if detailed else automatic_detailed_metering_targets(devices)
+        attempted_devices = list(devices) if detailed else detailed_metering_targets(devices)
         return cls(
-            devices=devices,
-            model=model,
             start_metering=start_metering,
             client_id=client_id,
             attempted_devices=attempted_devices,
             display_mode=_meter_display_mode(detailed, attempted_devices, len(devices)),
-            escalation_done=bool(detailed),
-            escalation_deadline=time.monotonic() + DETAILED_ESCALATION_SECONDS,
         )
 
     def issue_initial_starts(self) -> None:
@@ -160,33 +149,6 @@ class _MeteringState:
         self.accepted_starts += sum(result is True for result in results)
         self.detailed_status = f"{self.accepted_starts}/{len(self.issued_devices)} requested"
         self.start_task = None
-
-    def _escalation_is_due(self, now: float) -> bool:
-        return not self.escalation_done and self.start_task is None and now >= self.escalation_deadline
-
-    def _silent_devices(self) -> list[str]:
-        return sorted(
-            server_name
-            for server_name, device in self.devices.items()
-            if server_name not in self.issued_devices
-            and getattr(device, "online", True)
-            and getattr(device, "ipv4", None)
-            and server_name not in self.model.samples
-        )
-
-    def maybe_escalate(self, now: float) -> bool:
-        if not self._escalation_is_due(now):
-            return False
-        self.escalation_done = True
-        silent_devices = self._silent_devices()
-        if not silent_devices:
-            return False
-        self.attempted_devices.extend(silent_devices)
-        self.issued_devices.extend(silent_devices)
-        if self.display_mode == "passive":
-            self.display_mode = "mixed"
-        self._schedule_starts(silent_devices)
-        return True
 
     async def cancel_pending_starts(self) -> None:
         task = self.start_task
@@ -441,8 +403,6 @@ class _MeterRuntime:
             self.interaction.invalidate()
             while True:
                 self.metering.collect_completed_starts()
-                if self.metering.maybe_escalate(time.monotonic()):
-                    self.interaction.invalidate()
                 page_size = _draw_meter_frame(
                     self.terminal,
                     self.metering,
@@ -535,7 +495,7 @@ async def run_meter_tui(
     viewport = MeterViewport()
     consumer = asyncio.create_task(_consume_events(model, stream_factory, cache_reader))
     client_id = f"meter_tui:{os.getpid()}:{uuid.uuid4().hex[:8]}"
-    metering = _MeteringState.create(devices, model, start_metering, client_id, options.detailed)
+    metering = _MeteringState.create(devices, start_metering, client_id, options.detailed)
     interaction = _MeterInteraction(model, viewport)
     runtime = _MeterRuntime(terminal, metering, interaction, options.no_color)
 

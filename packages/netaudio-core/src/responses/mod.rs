@@ -103,8 +103,17 @@ const CONMON_BOARD_CODENAME_OFFSET: usize = 0x2C;
 const CONMON_BOARD_CODENAME_END: usize = 0x34;
 const CONMON_BOARD_NAME_OFFSET: usize = 0x58;
 const CONMON_BOARD_NAME_END: usize = 0x98;
-const CONMON_DANTE_MODEL_CAPABILITIES_OFFSET: usize = 0x34;
+const CONMON_DANTE_MODEL_BODY_OFFSET: usize = 0x18;
+const CONMON_DANTE_MODEL_CAPABILITIES_OFFSET: usize = CONMON_DANTE_MODEL_BODY_OFFSET + 0x1C;
+const CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET: usize =
+    CONMON_DANTE_MODEL_BODY_OFFSET + 0xC0;
 const DANTE_MODEL_AES67_CAPABILITY_MASK: u32 = 0x0400_0000;
+const DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK: u32 = 0x0000_8000;
+const MONITORING_INTERFACE_STATISTICS_MASK: u32 = 0x01;
+const MONITORING_CLOCK_MASK: u32 = 0x02;
+const MONITORING_PER_CHANNEL_SIGNAL_PRESENCE_MASK: u32 = 0x04;
+const MONITORING_RX_FLOW_MAXIMUM_LATENCY_MASK: u32 = 0x08;
+const MONITORING_RX_FLOW_LATE_PACKET_MASK: u32 = 0x10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeviceInfo {
@@ -168,7 +177,14 @@ pub struct DanteModel {
     pub board_codename: String,
     pub board_name: String,
     pub capabilities: u32,
+    pub monitoring_capabilities: Option<u32>,
     pub aes67_supported: Option<bool>,
+    pub detailed_metering_supported: Option<bool>,
+    pub interface_statistics_supported: Option<bool>,
+    pub clock_monitoring_supported: Option<bool>,
+    pub per_channel_signal_presence_supported: Option<bool>,
+    pub rx_flow_maximum_latency_monitoring_supported: Option<bool>,
+    pub rx_flow_late_packet_monitoring_supported: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

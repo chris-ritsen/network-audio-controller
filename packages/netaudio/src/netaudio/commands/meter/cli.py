@@ -217,8 +217,9 @@ def meter_callback(
         False,
         "--detailed",
         help=(
-            "Request detailed metering for every selected device. In the interactive TUI, AVIO monitoring stays "
-            "passive while known detailed-only devices such as lx-dante and Ferrofish A32 are started automatically."
+            "Request detailed metering immediately for every selected device. By default, the interactive TUI uses "
+            "advertised per-channel signal presence when available and otherwise requests detailed metering only "
+            "from devices that advertise it."
         ),
     ),
 ):

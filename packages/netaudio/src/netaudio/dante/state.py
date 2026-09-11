@@ -49,7 +49,20 @@ logger = logging.getLogger("netaudio")
 
 CONMON_RETRY_TIMEOUTS = [3, 5, 10]
 
-ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset({"manufacturer", "aes67_supported", "dante_model_capabilities"})
+ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset(
+    {
+        "manufacturer",
+        "aes67_supported",
+        "dante_model_capabilities",
+        "dante_model_monitoring_capabilities",
+        "detailed_metering_supported",
+        "interface_statistics_supported",
+        "clock_monitoring_supported",
+        "per_channel_signal_presence_supported",
+        "rx_flow_maximum_latency_monitoring_supported",
+        "rx_flow_late_packet_monitoring_supported",
+    }
+)
 STATUS_KIND_DIAGNOSTIC_LOG_EXPORT = "diagnostic_log_export"
 
 FIELD_STATUS_KINDS = frozenset(

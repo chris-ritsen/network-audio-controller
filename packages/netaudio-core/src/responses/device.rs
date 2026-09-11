@@ -342,6 +342,7 @@ pub fn parse_make_model(data: &[u8]) -> Option<MakeModel> {
 pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
     validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
     let capabilities = read_u32(data, CONMON_DANTE_MODEL_CAPABILITIES_OFFSET)?;
+    let monitoring_capabilities = read_u32(data, CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET);
     Some(DanteModel {
         board_codename: conmon_string(
             data,
@@ -350,7 +351,21 @@ pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
         )?,
         board_name: conmon_string(data, CONMON_BOARD_NAME_OFFSET, CONMON_BOARD_NAME_END)?,
         capabilities,
+        monitoring_capabilities,
         aes67_supported: Some(capabilities & DANTE_MODEL_AES67_CAPABILITY_MASK != 0),
+        detailed_metering_supported: Some(
+            capabilities & DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK != 0,
+        ),
+        interface_statistics_supported: monitoring_capabilities
+            .map(|value| value & MONITORING_INTERFACE_STATISTICS_MASK != 0),
+        clock_monitoring_supported: monitoring_capabilities
+            .map(|value| value & MONITORING_CLOCK_MASK != 0),
+        per_channel_signal_presence_supported: monitoring_capabilities
+            .map(|value| value & MONITORING_PER_CHANNEL_SIGNAL_PRESENCE_MASK != 0),
+        rx_flow_maximum_latency_monitoring_supported: monitoring_capabilities
+            .map(|value| value & MONITORING_RX_FLOW_MAXIMUM_LATENCY_MASK != 0),
+        rx_flow_late_packet_monitoring_supported: monitoring_capabilities
+            .map(|value| value & MONITORING_RX_FLOW_LATE_PACKET_MASK != 0),
     })
 }
 
