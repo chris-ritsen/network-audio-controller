@@ -120,3 +120,31 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert serialized["product_version"] == "1.0.0.0"
     assert serialized["dante_model_id"] == "Bklyn2"
     assert serialized["board_name"] == "Brooklyn II"
+
+
+def test_later_versions_response_overwrites_aes67_supported_and_capabilities():
+    device_ip_address = "10.0.2.15"
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+
+    supported = _packet(12)
+    receive_packets(application, [supported], (device_ip_address, 8702))
+    assert device.aes67_supported is True
+    assert device.dante_model_capabilities == 0x8E78F65A
+
+    cleared = bytearray(supported)
+    cleared[0x34] &= ~0x04
+    receive_packets(application, [bytes(cleared)], (device_ip_address, 8702))
+    assert device.aes67_supported is False
+    assert device.dante_model_capabilities == 0x8E78F65A & ~0x04000000
+
+
+def test_malformed_versions_response_leaves_existing_capability_unchanged():
+    device_ip_address = "10.0.2.15"
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+
+    receive_packets(application, [_packet(12)], (device_ip_address, 8702))
+    assert device.aes67_supported is True
+
+    receive_packets(application, [_packet(12)[:0x34]], (device_ip_address, 8702))
+    assert device.aes67_supported is True
+    assert device.dante_model_capabilities == 0x8E78F65A

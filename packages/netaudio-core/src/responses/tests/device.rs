@@ -494,3 +494,50 @@ fn make_model_preserves_unmapped_preceding_field_and_four_part_version() {
     assert_eq!(parsed.product_version, "1.2.0.3");
     assert_eq!(parsed.product_version_components, [1, 2, 0, 3]);
 }
+
+fn dante_model_response(codename: &[u8], capabilities: u32, board_name: &[u8]) -> Vec<u8> {
+    let mut data = vec![0u8; CONMON_BOARD_NAME_END];
+    stamp_conmon_response(&mut data, CONMON_OPCODE_DANTE_MODEL_RESPONSE);
+    data[CONMON_BOARD_CODENAME_OFFSET..CONMON_BOARD_CODENAME_OFFSET + codename.len()]
+        .copy_from_slice(codename);
+    data[CONMON_DANTE_MODEL_CAPABILITIES_OFFSET..CONMON_DANTE_MODEL_CAPABILITIES_OFFSET + 4]
+        .copy_from_slice(&capabilities.to_be_bytes());
+    data[CONMON_BOARD_NAME_OFFSET..CONMON_BOARD_NAME_OFFSET + board_name.len()]
+        .copy_from_slice(board_name);
+    data
+}
+
+#[test]
+fn dante_model_reads_a_full_width_eight_byte_codename_without_bleeding_into_capabilities() {
+    let data = dante_model_response(b"UltimoX4", 0x0400_0000, b"Ultimo X4");
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.board_codename, "UltimoX4");
+    assert_eq!(parsed.board_name, "Ultimo X4");
+    assert_eq!(parsed.capabilities, 0x0400_0000);
+    assert_eq!(parsed.aes67_supported, Some(true));
+}
+
+#[test]
+fn dante_model_aes67_bit_set_reports_supported_and_preserves_the_raw_capability_word() {
+    let data = dante_model_response(b"Bklyn2", 0x8E78_F65A, b"Brooklyn II");
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.capabilities, 0x8E78_F65A);
+    assert_eq!(parsed.aes67_supported, Some(true));
+}
+
+#[test]
+fn dante_model_aes67_bit_cleared_reports_unsupported_and_preserves_the_raw_capability_word() {
+    let data = dante_model_response(b"Bklyn2", 0x8A78_F65A, b"Brooklyn II");
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.capabilities, 0x8A78_F65A);
+    assert_eq!(parsed.aes67_supported, Some(false));
+}
+
+#[test]
+fn dante_model_rejects_a_response_truncated_before_the_capability_word() {
+    let data = dante_model_response(b"Bklyn2", 0x0400_0000, b"Brooklyn II");
+    assert_eq!(
+        parse_dante_model(&data[..CONMON_DANTE_MODEL_CAPABILITIES_OFFSET]),
+        None
+    );
+}
