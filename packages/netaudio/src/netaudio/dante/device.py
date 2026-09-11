@@ -66,6 +66,8 @@ class DanteDevice:
         self.aes67_configured = None
         self.aes67_current = None
         self.aes67_supported: bool | None = None
+        self.aes67_configured_property_advertised: bool | None = None
+        self.dante_model_capabilities: int | None = None
         self.aes67_multicast_prefix = None
         self.settings_properties: list[dict] | None = None
         self.preferred_leader = None
@@ -604,27 +606,20 @@ class DanteDevice:
                     result["property_directory"] = None
             else:
                 result["property_directory"] = None
-            aes67_supported = self.aes67_supported
-            if result["property_directory"] is not None:
-                aes67_supported = result["property_directory"]["aes67_supported"]
-            if aes67_supported is False:
-                result["aes67"] = None
-                result["aes67_multicast_prefix"] = None
-            else:
-                try:
-                    response = client.execute({"command": "query_latency_config"})
-                    if response is None:
-                        result["aes67"] = None
-                        result["aes67_multicast_prefix"] = None
-                    else:
-                        result["aes67"] = core.parse_response("aes67_configured", response)
-                        settings = core.parse_response("device_settings", response)
-                        result["aes67_multicast_prefix"] = (
-                            settings.get("aes67_multicast_prefix") if isinstance(settings, dict) else None
-                        )
-                except core.NetaudioCoreError:
+            try:
+                response = client.execute({"command": "query_latency_config"})
+                if response is None:
                     result["aes67"] = None
                     result["aes67_multicast_prefix"] = None
+                else:
+                    result["aes67"] = core.parse_response("aes67_configured", response)
+                    settings = core.parse_response("device_settings", response)
+                    result["aes67_multicast_prefix"] = (
+                        settings.get("aes67_multicast_prefix") if isinstance(settings, dict) else None
+                    )
+            except core.NetaudioCoreError:
+                result["aes67"] = None
+                result["aes67_multicast_prefix"] = None
             return result
 
         raw = await self.call_core(
@@ -650,7 +645,9 @@ class DanteDevice:
         property_directory = data.get("property_directory")
         if property_directory is not None:
             controls["settings_properties"] = property_directory["properties"]
-            controls["aes67_supported"] = property_directory["aes67_supported"]
+            controls["aes67_configured_property_advertised"] = property_directory[
+                "aes67_configured_property_advertised"
+            ]
         settings_data = data.get("settings")
         if settings_data:
             if settings_data.get("sample_rate"):
@@ -718,8 +715,8 @@ class DanteDevice:
             self.aes67_configured = data["aes67_configured"]
         if "aes67_multicast_prefix" in data:
             self.aes67_multicast_prefix = data["aes67_multicast_prefix"]
-        if "aes67_supported" in data:
-            self.aes67_supported = data["aes67_supported"]
+        if "aes67_configured_property_advertised" in data:
+            self.aes67_configured_property_advertised = data["aes67_configured_property_advertised"]
         if "settings_properties" in data:
             self.settings_properties = data["settings_properties"]
         if self.supported_encodings is None and "channel_metadata_supported_encodings" in data:

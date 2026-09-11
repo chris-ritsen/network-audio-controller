@@ -300,7 +300,7 @@ def test_property_directory_dissects_captured_arc_protocol_variants(protocol_ide
 
     assert result.core_kind == "property_directory"
     assert result.core_fields == {
-        "aes67_supported": False,
+        "aes67_configured_property_advertised": False,
         "properties": [{"flags": 3, "property_id": 0x8204}, {"flags": 1, "property_id": 0x8301}],
     }
 
