@@ -314,7 +314,26 @@ class DaemonHTTPServer(
         self._events_registered = False
 
     async def _on_device_event(self, event: DanteEvent):
-        device_json = self._serialized_devices().get(event.server_name)
+        if not self.sse_clients:
+            return
+        if event.type == EventType.DEVICE_DISCOVERED:
+            device_json = self._serialized_devices().get(event.server_name)
+        else:
+            device = self.application.devices.get(event.server_name)
+            if device is None:
+                return
+            if device.online:
+                self._dismissed_offline_inventory.discard(event.server_name)
+            elif event.server_name in self._dismissed_offline_inventory:
+                return
+            device_json = DanteDeviceSerializer.to_json(device)
+            if (
+                self.managed_inventory is not None
+                and self.managed_inventory.enabled
+                and not device.requires_managed_control
+            ):
+                device_json["availability_state"] = "online" if device.online else "offline"
+                device_json["field_sources"] = {"identity": "direct", "audio_configuration": "direct"}
         if not device_json:
             return
 
