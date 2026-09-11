@@ -7,6 +7,7 @@ from typing import Optional
 import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.output import output_single, structured_output_selected
 
 app = typer.Typer(help="Lock key management.", no_args_is_help=True, context_settings=HELP_CONTEXT_SETTINGS)
 
@@ -36,7 +37,10 @@ def key_get():
 
     value, config_path = get_config_value("device_lock_key")
     if value:
-        typer.echo(value)
+        if structured_output_selected():
+            output_single({"device_lock_key": value})
+        else:
+            typer.echo(value)
     else:
         typer.echo(f"No device_lock_key in {config_path}", err=True)
         raise typer.Exit(code=1)

@@ -32,6 +32,17 @@ def _mac_matches(device_mac: str, pattern: str) -> bool:
     return _normalize_mac(device_mac) == _normalize_mac(pattern)
 
 
+def selection_is_explicit() -> bool:
+    state = _get_state()
+    return bool(state.names or state.hosts or state.server_names or state.macs or state.ddm_context)
+
+
+def require_selected_devices(devices: dict[str, DanteDevice]) -> dict[str, DanteDevice]:
+    if selection_is_explicit() and not devices:
+        select_device(devices)
+    return devices
+
+
 def filter_devices(devices: dict[str, DanteDevice], include_names: bool = True) -> dict[str, DanteDevice]:
     state = _get_state()
 

@@ -38,6 +38,13 @@ async def run_redundancy(application, devices, mode, all_devices):
                     f"Configured Dante redundancy on {device.name or server_name} (verified). No reboot sent.", err=True
                 )
         except (ValueError, RuntimeError, OSError, TimeoutError) as exception:
+            if mode is None and len(device.interfaces or []) < 2 and not device.switch_configuration_choices:
+                data[server_name] = None
+                typer.echo(
+                    f"Dante Redundancy is not available on {device.name or server_name}: one network interface.",
+                    err=True,
+                )
+                continue
             failures += 1
             typer.echo(f"Error: {device.name or server_name}: {exception}", err=True)
     output_table(["Device", "Active", "Configured", "Supported", "Reboot Required"], rows, json_data=data)
