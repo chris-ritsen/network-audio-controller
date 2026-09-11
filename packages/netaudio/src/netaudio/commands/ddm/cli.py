@@ -193,9 +193,21 @@ def _status_rows(result: dict) -> list[list[str]]:
         ("Domains", result.get("domain_count")),
         ("Enrolled Devices", result.get("enrolled_device_count")),
         ("Unenrolled Devices", result.get("unenrolled_device_count")),
-        ("Last Error", result.get("last_error")),
+        ("Last Error", _last_error(result)),
     )
     return [[name, "" if value is None else str(value)] for name, value in fields]
+
+
+def _last_error(result: dict) -> str | None:
+    if result.get("last_error"):
+        return str(result["last_error"])
+    servers = result.get("servers") or {}
+    errors = [
+        f"{name}: {server['last_error']}"
+        for name, server in sorted(servers.items())
+        if isinstance(server, dict) and server.get("last_error")
+    ]
+    return "; ".join(errors) or None
 
 
 @app.command("status")
@@ -214,6 +226,11 @@ def devices() -> None:
     result = asyncio.run(get_ddm_devices_from_daemon(selected_context))
     if result is None:
         fail(DAEMON_UNAVAILABLE)
+    if not result:
+        connection = asyncio.run(get_ddm_status_from_daemon())
+        error = _last_error(connection) if connection else None
+        if error:
+            fail(f"The Managed API is unreachable: {error}")
     rows = []
     selected_devices = {
         key: device

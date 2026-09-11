@@ -146,6 +146,10 @@ def _structured_output_selected() -> bool:
     return _get_state().output_format in (OutputFormat.json, OutputFormat.xml, OutputFormat.yaml)
 
 
+def structured_output_selected() -> bool:
+    return _structured_output_selected()
+
+
 def _render_table_text(headers: list[str], rows: list[list[str]], title: Optional[str]) -> None:
     from netaudio.cli import OutputFormat
 

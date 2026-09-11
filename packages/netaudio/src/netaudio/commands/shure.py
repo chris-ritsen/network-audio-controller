@@ -126,7 +126,10 @@ def shure_device_list():
 
     discovered = _discover_shure_devices()
     if not discovered:
-        typer.echo("No Shure devices found on the network.")
+        if state.output_format.value in ("json", "yaml", "xml"):
+            output_single([])
+        else:
+            typer.echo("No Shure devices found on the network.")
         return
 
     if state.output_format.value in ("json", "yaml", "xml", "csv"):

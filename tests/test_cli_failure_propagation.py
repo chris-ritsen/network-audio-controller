@@ -43,6 +43,16 @@ def _device(inventory_error=None):
     return device
 
 
+@pytest.fixture(autouse=True)
+def _restore_cli_state():
+    from netaudio.cli import state
+
+    snapshot = dict(vars(state))
+    yield
+    vars(state).clear()
+    vars(state).update(snapshot)
+
+
 def _invoke(arguments, devices):
     runner = CliRunner()
     with (
