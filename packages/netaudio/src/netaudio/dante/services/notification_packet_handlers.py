@@ -135,6 +135,9 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
         status["dante_model_id"] = parsed["board_codename"]
     if parsed["board_name"]:
         status["board_name"] = parsed["board_name"]
+    status["dante_model_capabilities"] = parsed["capabilities"]
+    if parsed["aes67_supported"] is not None:
+        status["aes67_supported"] = parsed["aes67_supported"]
     return ParsedStatus(STATUS_KIND_DANTE_MODEL, status, parsed)
 
 

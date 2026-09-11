@@ -1,3 +1,5 @@
+import pytest
+
 from netaudio import core
 from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -68,15 +70,34 @@ def test_board_model_parser_matches_physical_and_authentic_virtual_devices():
     assert core.parse_response("dante_model", _packet(6)) == {
         "board_codename": "Bklyn2",
         "board_name": "Brooklyn II",
+        "capabilities": 0x8E7CD4CB,
+        "aes67_supported": True,
     }
     assert core.parse_response("dante_model", _packet(8)) == {
         "board_codename": "PCIe",
         "board_name": "Dante PCIe IF",
+        "capabilities": 0x0E68D3C9,
+        "aes67_supported": True,
     }
     assert core.parse_response("dante_model", _packet(12)) == {
         "board_codename": "Bklyn2",
         "board_name": "Brooklyn II",
+        "capabilities": 0x8E78F65A,
+        "aes67_supported": True,
     }
+
+
+def test_board_model_aes67_capability_bit_follows_the_pinned_mask():
+    aes67_capability_mask = 0x04000000
+    for packet_identifier in (6, 8, 12):
+        parsed = core.parse_response("dante_model", _packet(packet_identifier))
+        expected = bool(parsed["capabilities"] & aes67_capability_mask)
+        assert parsed["aes67_supported"] is expected
+        assert expected is True
+
+    truncated = _packet(12)[:0x34]
+    with pytest.raises(core.NetaudioCoreError):
+        core.parse_response("dante_model", truncated)
 
 
 def test_state_service_applies_and_serializes_controller_visible_identity():
@@ -90,7 +111,10 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert device.product_version == "1.0.0.0"
     assert device.dante_model_id == "Bklyn2"
     assert device.board_name == "Brooklyn II"
+    assert device.dante_model_capabilities == 0x8E78F65A
+    assert device.aes67_supported is True
     serialized = DanteDeviceSerializer.to_json(device)
+    assert serialized["aes67_supported"] is True
     assert serialized["manufacturer"] == "Ferrofish GmbH"
     assert serialized["dante_model"] == "A32 Dante AD/DA Converter"
     assert serialized["product_version"] == "1.0.0.0"

@@ -103,6 +103,8 @@ const CONMON_BOARD_CODENAME_OFFSET: usize = 0x2C;
 const CONMON_BOARD_CODENAME_END: usize = 0x58;
 const CONMON_BOARD_NAME_OFFSET: usize = 0x58;
 const CONMON_BOARD_NAME_END: usize = 0x98;
+const CONMON_DANTE_MODEL_CAPABILITIES_OFFSET: usize = 0x34;
+const DANTE_MODEL_AES67_CAPABILITY_MASK: u32 = 0x0400_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DeviceInfo {
@@ -148,7 +150,7 @@ pub struct PropertyDirectoryEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PropertyDirectory {
     pub properties: Vec<PropertyDirectoryEntry>,
-    pub aes67_supported: bool,
+    pub aes67_configured_property_advertised: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -165,6 +167,8 @@ pub struct MakeModel {
 pub struct DanteModel {
     pub board_codename: String,
     pub board_name: String,
+    pub capabilities: u32,
+    pub aes67_supported: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

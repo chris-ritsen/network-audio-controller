@@ -254,7 +254,8 @@ pub fn parse_property_directory(response: &[u8]) -> Option<PropertyDirectory> {
     }
 
     Some(PropertyDirectory {
-        aes67_supported: property_ids.contains(&DEVICE_SETTINGS_INFO_AES67_CONFIGURED),
+        aes67_configured_property_advertised: property_ids
+            .contains(&DEVICE_SETTINGS_INFO_AES67_CONFIGURED),
         properties,
     })
 }
@@ -340,6 +341,7 @@ pub fn parse_make_model(data: &[u8]) -> Option<MakeModel> {
 
 pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
     validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
+    let capabilities = read_u32(data, CONMON_DANTE_MODEL_CAPABILITIES_OFFSET)?;
     Some(DanteModel {
         board_codename: conmon_string(
             data,
@@ -347,6 +349,8 @@ pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
             CONMON_BOARD_CODENAME_END,
         )?,
         board_name: conmon_string(data, CONMON_BOARD_NAME_OFFSET, CONMON_BOARD_NAME_END)?,
+        capabilities,
+        aes67_supported: Some(capabilities & DANTE_MODEL_AES67_CAPABILITY_MASK != 0),
     })
 }
 

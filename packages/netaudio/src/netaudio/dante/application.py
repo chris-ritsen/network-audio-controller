@@ -1234,6 +1234,8 @@ class DanteApplication:
             device.supported_sample_rates = None
             device.supported_encodings = None
             device.aes67_supported = None
+            device.aes67_configured_property_advertised = None
+            device.dante_model_capabilities = None
             device.aes67_multicast_prefix = None
             device.settings_properties = None
             device.sample_rate_pullup_raw_value = None
