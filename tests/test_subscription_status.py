@@ -255,3 +255,20 @@ def test_subscription_format_includes_status_only_when_verbose(code, expected):
 
     assert subscription.format(verbose=True) == f"Speaker@Receiver <- Mic@Transmitter [{expected}]"
     assert subscription.format(verbose=False) == "Speaker@Receiver <- Mic@Transmitter"
+
+
+def test_receiver_device_name_falls_back_to_the_owning_device():
+    from netaudio.dante.channel import DanteChannel
+    from netaudio.dante.device import DanteDevice
+
+    device = DanteDevice(server_name="receiver.local.")
+    channel = DanteChannel()
+    channel.device = device
+    subscription = DanteSubscription()
+    subscription.rx_channel = channel
+    subscription.rx_device_name = ""
+    assert not subscription.rx_device_name
+    device.name = "receiver"
+    assert subscription.rx_device_name == "receiver"
+    subscription.rx_device_name = "explicit"
+    assert subscription.rx_device_name == "explicit"
