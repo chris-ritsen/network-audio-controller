@@ -11,6 +11,7 @@ from netaudio.cli_support.execution import readback_after_notification, run_comm
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import (
     filter_devices,
+    require_selected_devices,
     match_device_identifier,
     parse_qualified_channel,
     resolve_channel,
@@ -213,7 +214,7 @@ async def run_subscription_list(application, devices, include_unused: bool) -> N
     )
     from netaudio.dante.device_serializer import DanteDeviceSerializer
 
-    devices = filter_devices(devices)
+    devices = require_selected_devices(filter_devices(devices))
 
     all_subscriptions = []
 

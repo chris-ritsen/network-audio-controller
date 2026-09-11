@@ -13,7 +13,7 @@ import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import ansi, run_command
-from netaudio.cli_support.output import output_single, output_table
+from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import _channel_matches
 from netaudio.commands.meter import tui
@@ -391,7 +391,10 @@ async def run_meter_status(application, devices) -> None:
         raise typer.Exit(code=1)
 
     if not result:
-        typer.echo(f"{icon('meter')}No devices are being metered.")
+        if structured_output_selected():
+            output_single({})
+        else:
+            typer.echo(f"{icon('meter')}No devices are being metered.")
         return
 
     headers = ["Name", "Server Name", "Online", "Receiving"]

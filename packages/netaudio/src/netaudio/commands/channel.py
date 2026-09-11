@@ -13,12 +13,13 @@ from netaudio.cli_support.execution import (
     report_inventory_failures,
     run_command,
 )
-from netaudio.cli_support.output import output_sections
+from netaudio.cli_support.output import output_sections, output_single, structured_output_selected
 from netaudio.cli_support.selection import (
     CHANNEL_REFERENCE_FORMS,
     ChannelReference,
     filter_devices,
     parse_channel_reference,
+    require_selected_devices,
     resolve_channel,
     select_device,
     sort_devices,
@@ -66,7 +67,7 @@ def _channel_section(channels: dict, title: str) -> tuple[str, list[str], list[l
 
 
 async def run_channel_list(application, devices) -> None:
-    devices = filter_devices(devices)
+    devices = require_selected_devices(filter_devices(devices))
     await asyncio.gather(
         *[application.apply_modern_arc_status_pages(device) for device in devices.values()],
         return_exceptions=True,
@@ -117,6 +118,16 @@ async def run_channel_name(application, devices, reference: ChannelReference, ne
     channel_type, found_channel = resolve_channel(device, reference)
 
     if new_name is None:
+        if structured_output_selected():
+            output_single(
+                {
+                    "friendly_name": found_channel.friendly_name,
+                    "name": found_channel.name,
+                    "number": found_channel.number,
+                    "type": channel_type,
+                }
+            )
+            return
         typer.echo(found_channel.friendly_name or found_channel.name)
         return
 

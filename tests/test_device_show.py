@@ -475,13 +475,51 @@ def test_device_show_plain_omits_unnamed_clock_source(monkeypatch):
     assert "_DFLT" in result.output
 
 
-def test_device_show_preserves_raw_clock_port_record_fields():
+def test_device_show_presents_clock_ports_in_controller_terms():
     rows = dict(device_commands._device_show_rows(make_show_device()))
-    assert rows["Clock Port Record 1"] == (
-        "PTP v1 (0x01), transport path multicast (0x01), state 0x0009 (Follower), "
-        "link down no, record flags 0x0000, status flags 0x0007, format 0x02, reserved 0x00, "
-        "network interface index 2 (0x00000002)"
-    )
+    assert rows["Primary v1 Multicast"] == "Follower"
+    assert not any(key.startswith("Clock Port Record") for key in rows)
+    assert not any("0x" in value for key, value in rows.items() if key.startswith("Primary"))
+
+
+def test_device_show_clock_port_states_use_standard_ptp_names():
+    records = [
+        {
+            "record_number": 1,
+            "ptp_version": 1,
+            "transport_path_code": 1,
+            "transport_path": "multicast",
+            "network_interface_index": 2,
+            "state_code": 9,
+            "link_down": False,
+        },
+        {
+            "record_number": 2,
+            "ptp_version": 2,
+            "transport_path_code": 2,
+            "transport_path": "unicast",
+            "network_interface_index": 2,
+            "state_code": 3,
+            "link_down": False,
+        },
+        {
+            "record_number": 3,
+            "ptp_version": 2,
+            "transport_path_code": 1,
+            "transport_path": "multicast",
+            "network_interface_index": 3,
+            "state_code": 3,
+            "link_down": True,
+        },
+    ]
+    names = [device_display.clock_port_name(record, records) for record in records]
+    assert names == ["Primary v1 Multicast", "Primary v2 Unicast", "Secondary v2 Multicast"]
+    assert [device_display._format_clock_port_record(record) for record in records] == [
+        "Follower",
+        "Disabled",
+        "Link down",
+    ]
+    assert device_display.ptp_port_state_name(0xDED4) == "Unknown state (0xDED4)"
 
 
 def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():

@@ -13,7 +13,7 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
-from netaudio.cli_support.output import output_single, output_table, output_value
+from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.latency import run_latency
 from netaudio.dante.clock_config import (
@@ -78,6 +78,9 @@ def config_path():
     """Show the config file path."""
     from netaudio.common.config_loader import default_config_path
 
+    if structured_output_selected():
+        output_single({"path": str(default_config_path())})
+        return
     typer.echo(str(default_config_path()))
 
 
@@ -139,9 +142,14 @@ def config_show():
     from netaudio.common.config_loader import default_config_path
 
     config_path = default_config_path()
-    typer.echo(f"path = {config_path}")
+    structured = structured_output_selected()
+    if not structured:
+        typer.echo(f"path = {config_path}")
     if not config_path.exists():
-        typer.echo("(no configuration file; defaults apply)")
+        if structured:
+            output_single({"path": str(config_path), "configuration": {}})
+        else:
+            typer.echo("(no configuration file; defaults apply)")
         return
 
     try:
@@ -150,6 +158,16 @@ def config_show():
         typer.echo(f"Error: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
 
+    if structured:
+        output_single(
+            {
+                "path": str(config_path),
+                "configuration": {
+                    key: _format_configuration_value(key, value) for key, value in _flatten_configuration(configuration)
+                },
+            }
+        )
+        return
     for key, value in _flatten_configuration(configuration):
         typer.echo(f"{key} = {_format_configuration_value(key, value)}")
 
@@ -569,6 +587,17 @@ async def _render_aes67(application, targets, all_devices: bool) -> None:
             )
     current_label = _aes67_state_label(device.aes67_current)
     configured_label = _aes67_state_label(device.aes67_configured)
+    if structured_output_selected():
+        output_single(
+            {
+                "configured": configured_label,
+                "current": current_label,
+                "multicast_prefix": device.aes67_multicast_prefix,
+                "reboot_required": _aes67_reboot_required(device),
+                "supported": device.aes67_supported,
+            }
+        )
+        return
     if device.aes67_multicast_prefix:
         typer.echo(f"multicast prefix: {device.aes67_multicast_prefix}")
     if device.aes67_current is None and device.aes67_configured is not None:

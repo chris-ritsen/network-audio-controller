@@ -19,6 +19,7 @@ from typing import Any, NoReturn, Optional
 import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.output import output_single, structured_output_selected
 from netaudio.commands.virtual_process import (
     ProcessRecord,
     VirtualLifecycleError,
@@ -747,17 +748,35 @@ def virtual_status() -> None:
     except VirtualLifecycleError as exception:
         _report_lifecycle_error(exception)
 
+    structured = structured_output_selected()
     if record is None:
-        typer.echo("Not running")
+        if structured:
+            output_single({"running": False})
+        else:
+            typer.echo("Not running")
         raise typer.Exit(code=1)
 
     state = _ownership_state(record)
     if state == "owned":
         label = f" '{record.name}'" if record.name else ""
+        if structured:
+            output_single(
+                {
+                    "log": LOGFILE if os.path.exists(LOGFILE) else None,
+                    "name": record.name,
+                    "pid": record.pid,
+                    "running": True,
+                }
+            )
+            return
         typer.echo(f"Running{label} (PID {record.pid})")
         if os.path.exists(LOGFILE):
             typer.echo(f"Log: {LOGFILE}")
         return
+    if structured and state in ("dead", "different"):
+        _remove_process_record(record)
+        output_single({"running": False})
+        raise typer.Exit(code=1)
     if state == "dead":
         _remove_process_record(record)
         typer.echo("Not running (removed stale process record)")

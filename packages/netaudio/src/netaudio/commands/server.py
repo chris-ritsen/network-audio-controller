@@ -11,6 +11,7 @@ logger = logging.getLogger("netaudio")
 import typer
 
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
+from netaudio.cli_support.output import output_single, structured_output_selected
 from netaudio.daemon import service_install
 from netaudio.daemon.client import forget_devices_on_daemon, get_device_summaries_from_daemon, shutdown_daemon
 from netaudio.icons import icon
@@ -215,23 +216,40 @@ def status(
     _pin_client_port(effective_port)
 
     platform = service_install.platform_name()
-    if service_install.is_installed():
+    structured = structured_output_selected()
+    installed = service_install.is_installed()
+    boot_service = {"installed": installed, "platform": platform}
+    if installed:
         managed = "netaudio-managed" if service_install.is_managed_by_netaudio() else "user-managed"
         active = "active" if _service_active() else "inactive"
-        typer.echo(f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_location()}")
-    else:
+        boot_service.update(
+            {"active": active == "active", "location": str(service_install.service_location()), "management": managed}
+        )
+        if not structured:
+            typer.echo(
+                f"Boot service: installed ({platform}, {managed}, {active}) at {service_install.service_location()}"
+            )
+    elif not structured:
         typer.echo("Boot service: not installed (install with: netaudio daemon install)")
 
+    def finish(running: bool, device_count: int | None, message: str) -> None:
+        if structured:
+            output_single(
+                {"boot_service": boot_service, "device_count": device_count, "port": effective_port, "running": running}
+            )
+        else:
+            typer.echo(message)
+
     if not _port_in_use(effective_port):
-        typer.echo(f"{icon('offline')}Daemon is not running.")
+        finish(False, None, f"{icon('offline')}Daemon is not running.")
         raise typer.Exit(code=1)
 
     devices = asyncio.run(get_device_summaries_from_daemon())
     if devices is None:
-        typer.echo("Daemon port is open but the daemon is not responding.")
+        finish(False, None, "Daemon port is open but the daemon is not responding.")
         raise typer.Exit(code=1)
 
-    typer.echo(f"{icon('online')}Daemon is running. {len(devices)} device(s) cached.")
+    finish(True, len(devices), f"{icon('online')}Daemon is running. {len(devices)} device(s) cached.")
 
 
 @app.command()
@@ -466,22 +484,25 @@ def web(
         raise typer.Exit(code=1)
 
     url = f"http://127.0.0.1:{effective_port}/"
-    typer.echo(url)
     from netaudio.daemon.http.api import advertisement_addresses
     from netaudio.daemon.http.tls import TLSConfigurationError, certificate_fingerprint, daemon_tls_settings
 
     addresses = advertisement_addresses()
-    for address in addresses:
-        typer.echo(f"http://{address}:{effective_port}/")
+    urls = [url, *(f"http://{address}:{effective_port}/" for address in addresses)]
     try:
         tls = daemon_tls_settings()
     except TLSConfigurationError as error:
         typer.echo(f"TLS is misconfigured: {error}", err=True)
         tls = None
-    if tls is not None:
-        for address in ("127.0.0.1", *addresses):
-            typer.echo(f"https://{address}:{tls.port}/")
-        typer.echo(f"Certificate SHA-256: {certificate_fingerprint(tls.certificate)}")
+    secure_urls = [] if tls is None else [f"https://{address}:{tls.port}/" for address in ("127.0.0.1", *addresses)]
+    fingerprint = None if tls is None else certificate_fingerprint(tls.certificate)
+    if structured_output_selected():
+        output_single({"certificate_sha256": fingerprint, "https_urls": secure_urls, "urls": urls})
+    else:
+        for line in urls + secure_urls:
+            typer.echo(line)
+        if fingerprint is not None:
+            typer.echo(f"Certificate SHA-256: {fingerprint}")
 
     if open_browser:
         import webbrowser
@@ -501,9 +522,25 @@ def tls():
         typer.echo(f"TLS is misconfigured: {error}", err=True)
         raise typer.Exit(code=1)
     if settings_value is None:
-        typer.echo(f"TLS is not configured. Add tls_certificate and tls_key under [daemon] in {default_config_path()}.")
+        if structured_output_selected():
+            output_single(None)
+        else:
+            typer.echo(
+                f"TLS is not configured. Add tls_certificate and tls_key under [daemon] in {default_config_path()}."
+            )
+        return
+    fingerprint = certificate_fingerprint(settings_value.certificate)
+    if structured_output_selected():
+        output_single(
+            {
+                "certificate": str(settings_value.certificate),
+                "certificate_sha256": fingerprint,
+                "key": str(settings_value.key),
+                "port": settings_value.port,
+            }
+        )
         return
     typer.echo(f"Port: {settings_value.port}")
     typer.echo(f"Certificate: {settings_value.certificate}")
     typer.echo(f"Key: {settings_value.key}")
-    typer.echo(f"Certificate SHA-256: {certificate_fingerprint(settings_value.certificate)}")
+    typer.echo(f"Certificate SHA-256: {fingerprint}")

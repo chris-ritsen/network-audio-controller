@@ -206,23 +206,44 @@ def _format_bluetooth(device) -> str:
     return unknown_or_blank(device, "bluetooth")
 
 
-def _format_clock_port_record(record: dict) -> str:
-    role = record.get("role") or "unknown"
-    transport_path = record.get("transport_path") or "unknown"
-    ptp_version = record["ptp_version"]
-    ptp_version_text = f"PTP v{ptp_version}" if ptp_version in {1, 2} else "PTP version unknown"
-    return (
-        f"{ptp_version_text} (0x{ptp_version:02X}), "
-        f"transport path {transport_path} (0x{record['transport_path_code']:02X}), "
-        f"state 0x{record['state_code']:04X} ({role}), "
-        f"link down {'yes' if record['link_down'] else 'no'}, "
-        f"record flags 0x{record['record_flags']:04X}, "
-        f"status flags 0x{record['status_flags']:04X}, "
-        f"format 0x{record['record_format_code']:02X}, "
-        f"reserved 0x{record['reserved_byte']:02X}, "
-        f"network interface index {record['network_interface_index']} "
-        f"(0x{record['network_interface_index']:08X})"
+PTP_PORT_STATE_NAMES = {
+    1: "Initializing",
+    2: "Faulty",
+    3: "Disabled",
+    4: "Listening",
+    5: "Pre-Leader",
+    6: "Leader",
+    7: "Passive",
+    8: "Uncalibrated",
+    9: "Follower",
+}
+
+
+def ptp_port_state_name(state_code: int | None) -> str:
+    if state_code is None:
+        return ""
+    return PTP_PORT_STATE_NAMES.get(state_code, f"Unknown state (0x{state_code:04X})")
+
+
+def clock_port_name(record: dict, records: list[dict]) -> str:
+    interfaces = sorted({entry["network_interface_index"] for entry in records})
+    position = interfaces.index(record["network_interface_index"])
+    interface = (
+        "Primary"
+        if position == 0
+        else "Secondary"
+        if position == 1
+        else f"Interface {record['network_interface_index']}"
     )
+    version = {1: "v1", 2: "v2"}.get(record["ptp_version"], "")
+    transport = {"multicast": "Multicast", "unicast": "Unicast"}.get(record.get("transport_path") or "", "")
+    return " ".join(part for part in (interface, version, transport) if part)
+
+
+def _format_clock_port_record(record: dict) -> str:
+    if record.get("link_down"):
+        return "Link down"
+    return ptp_port_state_name(record["state_code"])
 
 
 def _format_reference_levels(device) -> str:
@@ -608,15 +629,14 @@ def _device_clock_rows(device) -> list[list[str]]:
                 format_clock_frequency_offset_parts_per_billion(device.clock_frequency_offset_parts_per_billion),
             ]
         )
-    if device.clock_port_state_code is not None:
-        rows.append(["Clock Port State", f"0x{device.clock_port_state_code:04X}"])
-    for record in device.clock_port_records or []:
-        rows.append(
-            [
-                f"Clock Port Record {record['record_number']}",
-                _format_clock_port_record(record),
-            ]
-        )
+    records = list(device.clock_port_records or [])
+    if device.clock_port_state_code is not None and not records:
+        rows.append(["Clock Port State", ptp_port_state_name(device.clock_port_state_code)])
+    for record in sorted(
+        records,
+        key=lambda entry: (entry["network_interface_index"], entry["ptp_version"], entry["transport_path_code"]),
+    ):
+        rows.append([clock_port_name(record, records), _format_clock_port_record(record)])
     return rows
 
 
