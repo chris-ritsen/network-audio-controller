@@ -20,12 +20,18 @@ class ManagedDeviceControls:
     def reconcile(self, records):
         managed_keys = {key for key, record in records.items() if record.get("management_state") == "managed"}
         for key, record in records.items():
-            if record.get("management_state") != "unenrolled":
+            if record.get("management_state") == "managed":
                 continue
             device = self.application.devices.get(key)
             if device is not None and self._owned.get(key) is not device:
                 for field in DEVICE_SCALAR_FIELDS:
-                    if field.startswith("ddm_") or field == "management_state":
+                    if field.startswith("ddm_") or field in {
+                        "management_state",
+                        "inventory_id",
+                        "inventory_sources",
+                        "control_transports",
+                        "direct_control_available",
+                    }:
                         setattr(device, field, copy.deepcopy(record.get(field)))
         for key in self._scopes.keys() - managed_keys:
             device = self._owned.pop(key, None)
