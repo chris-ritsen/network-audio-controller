@@ -7,7 +7,12 @@ import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import CapabilityProbeTimeout, readback_after_notification, run_command
+from netaudio.cli_support.execution import (
+    CapabilityProbeTimeout,
+    readback_after_notification,
+    report_inventory_failures,
+    run_command,
+)
 from netaudio.cli_support.output import output_sections
 from netaudio.cli_support.selection import (
     CHANNEL_REFERENCE_FORMS,
@@ -83,6 +88,8 @@ async def run_channel_list(application, devices) -> None:
         if device.rx_channels:
             sections.append(_channel_section(device.rx_channels, f"{device_label} RX Channels"))
     output_sections(sections, json_data)
+    if report_inventory_failures(devices, "channels"):
+        raise typer.Exit(code=ExitCode.ERROR)
 
 
 @app.command("list")
@@ -198,8 +205,9 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
     if device.gain_levels is None:
         try:
             device_type, channel_levels = await application.probe_gain_status(device)
-        except CapabilityProbeTimeout:
-            pass
+        except CapabilityProbeTimeout as exception:
+            typer.echo(f"Error: could not read gain status: {exception}", err=True)
+            raise typer.Exit(code=ExitCode.ERROR)
         except MUTATION_ERRORS as exception:
             typer.echo(f"Error: could not read gain status: {exception}", err=True)
             raise typer.Exit(code=ExitCode.ERROR)

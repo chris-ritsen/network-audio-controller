@@ -71,7 +71,8 @@ async def test_populate_controls_skips_offline_devices_and_marks_unreachable_dev
     reachable.populate_from_core.assert_awaited_once()
     unreachable.populate_from_core.assert_awaited_once()
     offline.populate_from_core.assert_not_awaited()
-    assert unreachable.online is False
+    assert unreachable.online is True
+    assert isinstance(unreachable.error, OSError)
     assert reachable.online is True
     warnings = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
     assert warnings == ["Could not reach unreachable.local. (192.0.2.11): io error"]
