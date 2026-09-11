@@ -392,7 +392,8 @@ pub struct ReceiverFlow {
     pub endpoint_descriptor_size: u16,
     pub endpoint_descriptor_hexadecimal: String,
     pub destination_user_datagram_port: Option<u16>,
-    pub destination_internet_protocol_version_four_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_internet_protocol_version_four_address: Option<String>,
     pub channel_descriptors_hexadecimal: Vec<String>,
     pub receiver_channel_numbers_by_flow_channel: Vec<Vec<u16>>,
     pub subscription_status_code: u16,

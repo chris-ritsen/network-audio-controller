@@ -585,23 +585,63 @@ fn parse_receiver_flow_record(
     }
     let endpoint_descriptor_offset = usize::from(read_u16(body, record_offset.checked_add(18)?)?)
         .checked_sub(RESPONSE_HEADER_SIZE)?;
-    let endpoint_descriptor_end =
+    let reported_endpoint_descriptor_end =
         endpoint_descriptor_offset.checked_add(usize::from(endpoint_descriptor_size))?;
 
-    let mut channel_descriptor_ranges = Vec::with_capacity(usize::from(channel_count));
+    let mut channel_descriptor_offsets = Vec::with_capacity(usize::from(channel_count));
     for index in 0..usize::from(channel_count) {
         let pointer_position = record_offset
             .checked_add(20)?
             .checked_add(index.checked_mul(2)?)?;
         let descriptor_offset =
             usize::from(read_u16(body, pointer_position)?).checked_sub(RESPONSE_HEADER_SIZE)?;
-        let descriptor_end = descriptor_offset.checked_add(16)?;
-        channel_descriptor_ranges.push((descriptor_offset, descriptor_end));
+        channel_descriptor_offsets.push(descriptor_offset);
     }
 
     let status_offset =
         usize::from(read_u16(body, status_pointer_position)?).checked_sub(RESPONSE_HEADER_SIZE)?;
     let status_end = status_offset.checked_add(16)?;
+
+    // Some Brooklyn devices use 8-byte channel bitmaps while others use 16.
+    // The following structure pointer is the authoritative boundary; retain
+    // the widest supported bitmap that fits before it.
+    let mut structure_offsets = channel_descriptor_offsets.clone();
+    structure_offsets.extend([endpoint_descriptor_offset, status_offset, record_end]);
+    structure_offsets.sort_unstable();
+    structure_offsets.dedup();
+    let mut channel_descriptor_ranges = Vec::with_capacity(usize::from(channel_count));
+    for descriptor_offset in channel_descriptor_offsets {
+        let next_offset = structure_offsets
+            .iter()
+            .copied()
+            .find(|candidate| *candidate > descriptor_offset)?;
+        let available = next_offset.checked_sub(descriptor_offset)?;
+        let descriptor_size = if available >= 16 {
+            16
+        } else if available >= 8 {
+            8
+        } else {
+            return None;
+        };
+        channel_descriptor_ranges.push((
+            descriptor_offset,
+            descriptor_offset.checked_add(descriptor_size)?,
+        ));
+    }
+
+    // MXWANI4 reports ten bytes for an otherwise complete eight-byte IPv4
+    // UDP endpoint. Do not consume the status block when its pointer supplies
+    // an earlier, well-formed endpoint boundary.
+    let endpoint_descriptor_end = if reported_endpoint_descriptor_end <= status_offset {
+        reported_endpoint_descriptor_end
+    } else if endpoint_descriptor_offset.checked_add(8)? == status_offset
+        && body.get(endpoint_descriptor_offset..endpoint_descriptor_offset + 2)
+            == Some(&[0x08, 0x02])
+    {
+        status_offset
+    } else {
+        return None;
+    };
     let mut occupied_ranges = channel_descriptor_ranges.clone();
     occupied_ranges.push((endpoint_descriptor_offset, endpoint_descriptor_end));
     occupied_ranges.push((status_offset, status_end));
@@ -617,17 +657,24 @@ fn parse_receiver_flow_record(
     }
 
     let endpoint_descriptor = body.get(endpoint_descriptor_offset..endpoint_descriptor_end)?;
-    let destination_address_offset = endpoint_descriptor_end.checked_sub(4)?;
-    let destination_address = body.get(destination_address_offset..endpoint_descriptor_end)?;
+    let destination_address_offset = endpoint_descriptor_offset.checked_add(4)?;
     let endpoint_has_version_four_user_datagram_layout =
         endpoint_descriptor.len() == 8 && endpoint_descriptor.get(0..2) == Some(&[0x08, 0x02]);
-    let destination_user_datagram_port = if endpoint_has_version_four_user_datagram_layout {
+    let endpoint_has_user_datagram_header =
+        endpoint_descriptor.len() >= 4 && endpoint_descriptor.get(0..2) == Some(&[0x08, 0x02]);
+    let destination_user_datagram_port = if endpoint_has_user_datagram_header {
         read_u16(endpoint_descriptor, 2)
     } else {
         None
     };
-    let flow_type = endpoint_has_version_four_user_datagram_layout.then(|| {
-        if (224..=239).contains(&destination_address[0]) {
+    let destination_address = endpoint_has_version_four_user_datagram_layout
+        .then(|| ipv4_at(body, destination_address_offset))
+        .flatten();
+    let flow_type = destination_address.as_ref().map(|_| {
+        if body
+            .get(destination_address_offset)
+            .is_some_and(|octet| (224..=239).contains(octet))
+        {
             "multicast".to_owned()
         } else {
             "unicast".to_owned()
@@ -653,10 +700,7 @@ fn parse_receiver_flow_record(
         endpoint_descriptor_size,
         endpoint_descriptor_hexadecimal: bytes_to_hex(endpoint_descriptor),
         destination_user_datagram_port,
-        destination_internet_protocol_version_four_address: ipv4_at(
-            body,
-            destination_address_offset,
-        )?,
+        destination_internet_protocol_version_four_address: destination_address,
         channel_descriptors_hexadecimal,
         receiver_channel_numbers_by_flow_channel,
         subscription_status_code: read_u16(body, status_offset)?,
@@ -670,7 +714,7 @@ fn parse_receiver_flow_record(
 }
 
 pub(super) fn receiver_channel_numbers(descriptor: &[u8]) -> Option<Vec<u16>> {
-    if descriptor.len() != 16 {
+    if !matches!(descriptor.len(), 8 | 16) {
         return None;
     }
     let mut receiver_channel_numbers = Vec::new();
