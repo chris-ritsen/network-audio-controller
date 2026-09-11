@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from weakref import WeakKeyDictionary
 
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante import flows
@@ -115,12 +117,13 @@ class DanteStateService:
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._pending_status: dict[str, list[tuple[str, object]]] = {}
         self._populating: set[str] = set()
+        self._readback_failures = WeakKeyDictionary()
         self._refetching = False
         self._status_applied = False
         self._notification_handlers = {
             NOTIFICATION_AES67_STATUS: self._on_aes67_status,
             NOTIFICATION_CLEAR_CONFIG_STATUS: self._on_device_state_changed,
-            NOTIFICATION_CLOCKING_STATUS: self._on_device_state_changed,
+            NOTIFICATION_CLOCKING_STATUS: self._on_clocking_status,
             NOTIFICATION_DEVICE_REBOOT: self._on_device_reboot,
             NOTIFICATION_ENCODING_STATUS: self._on_encoding_status,
             NOTIFICATION_MANF_VERSIONS_STATUS: self._on_device_state_changed,
@@ -227,7 +230,7 @@ class DanteStateService:
 
         if not self._refetching:
             return
-        if kind == STATUS_KIND_ROUTING_CAPACITY and status["routing_ready"] is True:
+        if kind == STATUS_KIND_ROUTING_CAPACITY and changed and status["routing_ready"] is True:
             await self.fetch_device_controls(device.server_name)
         elif kind == STATUS_KIND_CLEAR_CONFIGURATION:
             await self.fetch_device_controls(device.server_name)
@@ -341,12 +344,16 @@ class DanteStateService:
                 logger.warning(f"Error re-fetching receiver channels for {server_name}: {exception}")
                 return
             try:
-                flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
-                if flow_inventory is None:
-                    logger.warning(f"Receiver flow inventory unavailable for {server_name}")
-                else:
+                flow_inventory = None
+                if self._readback_allowed(device, "receiver flows"):
+                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+                    if flow_inventory is None:
+                        self._readback_failed(device, "receiver flows")
+                        logger.warning(f"Receiver flow inventory unavailable for {server_name}")
+                if flow_inventory is not None:
                     flow_records = flow_inventory.get("flows")
                     if isinstance(flow_records, list):
+                        self._readback_succeeded(device, "receiver flows")
                         device.apply_receiver_flow_status_page(
                             {
                                 "reported_flow_count": len(flow_records),
@@ -354,10 +361,21 @@ class DanteStateService:
                             }
                         )
                     else:
+                        self._readback_failed(device, "receiver flows")
                         logger.warning(f"Malformed receiver flow inventory for {server_name}")
             except (RuntimeError, OSError) as exception:
+                self._readback_failed(device, "receiver flows")
                 logger.warning(f"Error re-fetching receiver flow inventory for {server_name}: {exception}")
         self._emit_device_updated(device)
+
+    async def _on_clocking_status(self, event: DanteEvent) -> None:
+        device = self._online_device(event.server_name)
+        if device is None:
+            return
+        async with self._lock_for(event.server_name):
+            changed = await self._refresh_clock_status(device, "clocking changed")
+        if changed:
+            self._emit_device_updated(device)
 
     async def _on_device_state_changed(self, event: DanteEvent) -> None:
         device = self._online_device(event.server_name)
@@ -432,12 +450,30 @@ class DanteStateService:
             self.application.probe_gain_status,
         )
 
+    def _readback_allowed(self, device, kind: str) -> bool:
+        retry_at, _ = self._readback_failures.get(device, {}).get(kind, (0, 0))
+        return time.monotonic() >= retry_at
+
+    def _readback_failed(self, device, kind: str) -> None:
+        failures = self._readback_failures.setdefault(device, {})
+        _, previous_delay = failures.get(kind, (0, 0))
+        delay = min(300, max(5, previous_delay * 2))
+        failures[kind] = (time.monotonic() + delay, delay)
+
+    def _readback_succeeded(self, device, kind: str) -> None:
+        self._readback_failures.get(device, {}).pop(kind, None)
+
     async def _refresh_capability_status(self, device, reason: str, capability_name: str, probe_status) -> None:
+        if not self._readback_allowed(device, capability_name):
+            return
         logger.info(f"Re-fetching {capability_name} status for {device.server_name} ({reason})")
         try:
             await probe_status(device)
         except (RuntimeError, OSError) as exception:
+            self._readback_failed(device, capability_name)
             logger.warning(f"Error re-fetching {capability_name} status for {device.server_name}: {exception}")
+        else:
+            self._readback_succeeded(device, capability_name)
 
     async def _on_device_reboot(self, event: DanteEvent) -> None:
         server_name = event.server_name

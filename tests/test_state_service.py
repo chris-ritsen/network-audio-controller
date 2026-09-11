@@ -930,3 +930,80 @@ async def test_direct_refresh_repopulates_media_identity_after_basic_channels():
     application.apply_modern_arc_status_pages.side_effect = enrich
     await DanteStateService(application).refetch_device_controls(device.server_name)
     assert device.rx_channels[1].media_type_code == 3
+
+
+@pytest.mark.asyncio
+async def test_repeated_routing_ready_readback_does_not_refetch_controls():
+    device = make_device()
+    application = make_application({device.server_name: device})
+    state = DanteStateService(application)
+    state.register()
+    state.fetch_device_controls = AsyncMock()
+
+    for _ in range(100):
+        await state.on_device_status(status_event("routing_capacity", ROUTING_READY_STATUS))
+
+    state.fetch_device_controls.assert_awaited_once_with(device.server_name)
+    await state.on_device_status(status_event("routing_capacity", ROUTING_TRANSITION_STATUS))
+    await state.on_device_status(status_event("routing_capacity", ROUTING_READY_STATUS))
+    assert state.fetch_device_controls.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_capability_readback_backs_off_and_recovers(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr("netaudio.dante.state.time.monotonic", lambda: now)
+    device = make_device()
+    application = make_application({device.server_name: device})
+    state = DanteStateService(application)
+    probe = application.probe_gain_status
+    probe.side_effect = RuntimeError("unavailable")
+    for _ in range(100):
+        await state._refresh_gain_status(device, "device discovered")
+    assert probe.await_count == 1
+    now += 5
+    await state._refresh_gain_status(device, "device discovered")
+    assert probe.await_count == 2
+    now += 5
+    await state._refresh_gain_status(device, "device discovered")
+    assert probe.await_count == 2
+    now += 5
+    probe.side_effect = None
+    await state._refresh_gain_status(device, "device discovered")
+    await state._refresh_gain_status(device, "device discovered")
+    assert probe.await_count == 4
+
+
+@pytest.mark.asyncio
+async def test_unavailable_flow_inventory_backs_off_without_losing_channel_updates(monkeypatch):
+    device = make_device()
+    device.get_rx_channels = AsyncMock()
+    application = make_application({device.server_name: device})
+    state = DanteStateService(application)
+    query = AsyncMock(return_value=None)
+    monkeypatch.setattr("netaudio.dante.state.flows.query_preferred_receiver_flow_inventory", query)
+    event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name=device.server_name)
+    for _ in range(10):
+        await state._on_receiver_flow_changed(event)
+    query.assert_awaited_once_with(device)
+    assert device.get_rx_channels.await_count == 10
+
+
+@pytest.mark.asyncio
+async def test_clock_notification_does_not_refetch_channels_or_capabilities():
+    from netaudio.dante.const import NOTIFICATION_CLOCKING_STATUS
+
+    device = make_device()
+    application = make_application({device.server_name: device})
+    state = DanteStateService(application)
+    state.fetch_device_controls = AsyncMock()
+    event = DanteEvent(
+        type=EventType.NOTIFICATION_RECEIVED,
+        server_name=device.server_name,
+        data={"notification_id": NOTIFICATION_CLOCKING_STATUS},
+    )
+    await state._on_notification(event)
+    application.probe_clocking_status.assert_awaited_once_with(device)
+    state.fetch_device_controls.assert_not_awaited()
+    application.probe_gain_status.assert_not_awaited()
+    application.probe_encoding_status.assert_not_awaited()
