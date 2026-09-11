@@ -238,8 +238,9 @@ def meter_callback(
 
 
 async def run_meter_start(application, devices) -> None:
-    for server_name, _ in select_device(filter_devices(devices), allow_many=True):
+    for server_name, device in select_device(filter_devices(devices), allow_many=True):
         await daemon_client.meter_start_on_daemon(server_name, "cli")
+        typer.echo(f"{icon('meter')}Metering started for {device.name or server_name}.")
 
 
 @meter_app.command()
@@ -249,8 +250,9 @@ def start():
 
 
 async def run_meter_stop(application, devices) -> None:
-    for server_name, _ in select_device(filter_devices(devices), allow_many=True):
+    for server_name, device in select_device(filter_devices(devices), allow_many=True):
         await daemon_client.meter_stop_on_daemon(server_name, "cli")
+        typer.echo(f"{icon('meter')}Metering stopped for {device.name or server_name}.")
 
 
 @meter_app.command()

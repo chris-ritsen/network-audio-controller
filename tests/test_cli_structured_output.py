@@ -119,3 +119,71 @@ def test_virtual_status_json_for_stale_records(monkeypatch, state):
     result = runner.invoke(app, ["-j", "virtual", "status"])
     assert result.exit_code == 1
     assert _json(result) == {"running": False}
+
+
+def test_preset_show_json_returns_the_parsed_preset(monkeypatch, tmp_path):
+    from netaudio.commands.preset import cli as preset_cli
+
+    preset_path = tmp_path / "probe.xml"
+    preset_path.write_text("<preset/>")
+    monkeypatch.setattr(preset_cli, "resolve_preset_path", lambda name, for_write=False: preset_path)
+    monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0, "name": "avio"}}))
+    result = runner.invoke(app, ["-j", "preset", "show", "probe"])
+    assert result.exit_code == 0
+    assert _json(result) == {
+        "devices": {"avio": {"latency": 1.0, "name": "avio"}},
+        "name": "probe",
+        "path": str(preset_path),
+    }
+
+
+def test_preset_show_plain_prints_the_header_on_stdout(monkeypatch, tmp_path):
+    from netaudio.commands.preset import cli as preset_cli
+
+    preset_path = tmp_path / "probe.xml"
+    preset_path.write_text("<preset/>")
+    monkeypatch.setattr(preset_cli, "resolve_preset_path", lambda name, for_write=False: preset_path)
+    monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0}}))
+    result = runner.invoke(app, ["preset", "show", "probe"])
+    assert result.exit_code == 0
+    assert result.stdout.splitlines()[:2] == ["Preset: probe (1 devices)", "avio:"]
+
+
+def test_meter_start_and_stop_confirm_each_device(monkeypatch):
+    from netaudio.commands.meter import cli as meter_cli
+    from netaudio.dante.device import DanteDevice
+
+    device = DanteDevice(server_name="avio.local.")
+    device.name = "avio"
+    device.ipv4 = "192.0.2.10"
+    device.online = True
+    started, stopped = [], []
+    monkeypatch.setattr(
+        meter_cli.daemon_client,
+        "meter_start_on_daemon",
+        AsyncMock(side_effect=lambda name, owner: started.append(name)),
+    )
+    monkeypatch.setattr(
+        meter_cli.daemon_client, "meter_stop_on_daemon", AsyncMock(side_effect=lambda name, owner: stopped.append(name))
+    )
+    with (
+        patch(
+            "netaudio.cli_support.execution.get_devices_from_daemon", AsyncMock(return_value={"avio.local.": device})
+        ),
+        patch.object(
+            __import__("netaudio.dante.application", fromlist=["DanteApplication"]).DanteApplication,
+            "startup",
+            AsyncMock(),
+        ),
+        patch.object(
+            __import__("netaudio.dante.application", fromlist=["DanteApplication"]).DanteApplication,
+            "shutdown",
+            AsyncMock(),
+        ),
+        patch("netaudio.cli_support.execution._populate_controls", AsyncMock()),
+    ):
+        start = runner.invoke(app, ["-n", "avio", "meter", "start"])
+        stop = runner.invoke(app, ["-n", "avio", "meter", "stop"])
+    assert start.exit_code == 0 and "Metering started for avio." in start.stdout
+    assert stop.exit_code == 0 and "Metering stopped for avio." in stop.stdout
+    assert started == ["avio.local."] and stopped == ["avio.local."]

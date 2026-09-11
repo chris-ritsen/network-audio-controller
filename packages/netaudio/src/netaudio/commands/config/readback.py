@@ -166,7 +166,7 @@ def _readback_from_status(status, expected) -> ReadbackResult:
     return ReadbackResult(matched=observed_value == expected, observed=observed_value, observed_available=True)
 
 
-async def _send_verified_change(targets, mutate_for, expected, action, success_message, read_for=None):
+async def _send_verified_change(targets, mutate_for, expected, action, success_message, read_for=None, describe=repr):
     async def _send_and_read(server_name, device):
         label = device.name or server_name
         try:
@@ -192,7 +192,8 @@ async def _send_verified_change(targets, mutate_for, expected, action, success_m
         failures += 1
         if result.observed_available:
             typer.echo(
-                f"Error: {action} sent to {label}, but the device reports {result.observed!r} instead of {expected!r}.",
+                f"Error: {action} sent to {label}, but the device reports {describe(result.observed)} "
+                f"instead of {describe(expected)}.",
                 err=True,
             )
         else:
