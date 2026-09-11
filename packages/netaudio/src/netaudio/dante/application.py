@@ -394,6 +394,7 @@ class DanteApplication:
                     await self.probe_interface_status(device)
                 except (RuntimeError, OSError) as exception:
                     logger.debug(f"Interface status unavailable for {device.server_name}: {exception}")
+                device.error = None
                 return
             await device.populate_from_core(
                 include_channels=include_channels,
@@ -402,6 +403,7 @@ class DanteApplication:
             )
             if include_channels:
                 await self.apply_modern_arc_status_pages(device)
+            device.error = None
         except (RuntimeError, OSError) as exception:
             device.error = exception
             logger.debug(f"Error populating controls for {device.server_name}: {exception}")
@@ -969,12 +971,17 @@ class DanteApplication:
                 populate_tasks.append(self._populate_device_controls(device))
 
         if populate_tasks:
-            done, pending = await asyncio.wait(
-                [asyncio.create_task(task) for task in populate_tasks],
-                timeout=populate_time,
-            )
-            for task in pending:
-                task.cancel()
+            tasks = [asyncio.create_task(task) for task in populate_tasks]
+            try:
+                await asyncio.wait(tasks, timeout=populate_time)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.warning(f"Failed to populate device controls: {result}")
 
         await self._query_settings_fields()
 
