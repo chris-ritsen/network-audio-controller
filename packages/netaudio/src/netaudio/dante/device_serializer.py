@@ -97,6 +97,7 @@ DEVICE_SCALAR_FIELDS = (
     "supported_gain_levels",
     "supported_sample_rate_pullup_raw_values",
     "supported_sample_rates",
+    "switch_port_count",
     "transmitter_flows",
     "tx_count",
     "tx_count_raw",
