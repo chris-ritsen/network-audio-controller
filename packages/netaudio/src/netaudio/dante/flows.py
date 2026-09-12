@@ -52,8 +52,8 @@ def external_receiver_subscription_specification(
         for value in receiver_channel_ids
     ):
         raise FlowValidationError("receiver channel IDs must be positive 16-bit integers")
-    if receiver_channel_ids != sorted(set(receiver_channel_ids)):
-        raise FlowValidationError("receiver channel IDs must be unique and strictly ascending")
+    if len(receiver_channel_ids) != len(set(receiver_channel_ids)):
+        raise FlowValidationError("receiver channel IDs must be unique")
     advertised_slot_count = getattr(flow, "channel_count", None)
     if (
         isinstance(advertised_slot_count, bool)
@@ -66,11 +66,6 @@ def external_receiver_subscription_specification(
         for value in flow_slot_assignments
     ):
         raise FlowValidationError("flow-slot assignments must be zero or within the advertised slot count")
-    positive_slots = [value for value in flow_slot_assignments if value > 0]
-    if not positive_slots:
-        raise FlowValidationError("all-zero external subscription batches are unsupported")
-    if positive_slots != sorted(set(positive_slots)):
-        raise FlowValidationError("positive flow-slot assignments must be unique and strictly ascending")
     receiver_channels = getattr(device, "rx_channels", None)
     if not isinstance(receiver_channels, dict):
         raise FlowValidationError("receiver channel inventory is unavailable", status=409)

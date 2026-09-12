@@ -88,13 +88,24 @@ def _report_preset_load(report: PresetLoadReport) -> None:
         raise typer.Exit(code=ExitCode.ERROR)
 
 
-async def run_preset_load(application, devices, preset_devices: dict, confirm_destructive: bool) -> None:
+async def run_preset_load(
+    application,
+    devices,
+    preset_devices: dict,
+    confirm_destructive: bool,
+    store_current_configuration: bool,
+) -> None:
     matched_devices = _match_preset_devices(devices, preset_devices)
     try:
         plan = await build_preset_plan(application, matched_devices)
     except PresetValidationError as exception:
         _refuse(exception.lines)
-    report = await apply_preset_plan(application, plan, confirm_destructive=confirm_destructive)
+    report = await apply_preset_plan(
+        application,
+        plan,
+        confirm_destructive=confirm_destructive,
+        store_current_configuration=store_current_configuration,
+    )
     _report_preset_load(report)
 
 

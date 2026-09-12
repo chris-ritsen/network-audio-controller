@@ -247,6 +247,12 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
+    QueryPerformanceSettings {
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
+        property_ids: Vec<u16>,
+    },
     #[serde(rename = "query_modern_arc_receiver_channel_status")]
     QueryModernArcReceiverChannelStatus {
         #[serde(default)]
@@ -437,6 +443,39 @@ pub(super) enum CommandSpec {
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
     },
+    SetReceiveFlowDefaultSlots {
+        default_slots: u16,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
+        supported_property_ids: Vec<u16>,
+    },
+    SetReceiveFlowPerformance {
+        device_software_version: [u16; 3],
+        frames_per_packet: u16,
+        latency_microseconds: u64,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
+        supported_property_ids: Vec<u16>,
+    },
+    SetTransmitFlowPerformance {
+        frames_per_packet: u16,
+        latency_microseconds: u64,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
+        supported_property_ids: Vec<u16>,
+    },
+    SetUnicastPerformance {
+        device_software_version: [u16; 3],
+        frames_per_packet: u16,
+        latency_microseconds: u64,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
+        supported_property_ids: Vec<u16>,
+    },
     SetName {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
@@ -462,6 +501,11 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         raw_value: u32,
+    },
+    StoreCurrentConfiguration {
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        negotiated_protocol_id: u16,
     },
     SubscribeExternalRtp {
         advertised_flow_slot_count: u16,
@@ -563,6 +607,7 @@ impl CommandSpec {
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
             | CommandSpec::PropertyDirectory { message_id, .. }
             | CommandSpec::QueryLatencyConfig { message_id, .. }
+            | CommandSpec::QueryPerformanceSettings { message_id, .. }
             | CommandSpec::QueryModernArcReceiverChannelStatus { message_id, .. }
             | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
             | CommandSpec::QueryReceiverFlows { message_id, .. }
@@ -588,10 +633,15 @@ impl CommandSpec {
             | CommandSpec::SetDanteRedundancy { message_id, .. }
             | CommandSpec::SetInterfaceStatic { message_id, .. }
             | CommandSpec::SetLatency { message_id, .. }
+            | CommandSpec::SetReceiveFlowDefaultSlots { message_id, .. }
+            | CommandSpec::SetReceiveFlowPerformance { message_id, .. }
+            | CommandSpec::SetTransmitFlowPerformance { message_id, .. }
+            | CommandSpec::SetUnicastPerformance { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
             | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
+            | CommandSpec::StoreCurrentConfiguration { message_id, .. }
             | CommandSpec::SubscribeExternalRtp { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
             | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
@@ -641,6 +691,7 @@ impl CommandSpec {
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
             | CommandSpec::PropertyDirectory { message_id, .. }
             | CommandSpec::QueryLatencyConfig { message_id, .. }
+            | CommandSpec::QueryPerformanceSettings { message_id, .. }
             | CommandSpec::QueryModernArcReceiverChannelStatus { message_id, .. }
             | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
             | CommandSpec::QueryReceiverFlows { message_id, .. }
@@ -666,10 +717,15 @@ impl CommandSpec {
             | CommandSpec::SetDanteRedundancy { message_id, .. }
             | CommandSpec::SetInterfaceStatic { message_id, .. }
             | CommandSpec::SetLatency { message_id, .. }
+            | CommandSpec::SetReceiveFlowDefaultSlots { message_id, .. }
+            | CommandSpec::SetReceiveFlowPerformance { message_id, .. }
+            | CommandSpec::SetTransmitFlowPerformance { message_id, .. }
+            | CommandSpec::SetUnicastPerformance { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
             | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
+            | CommandSpec::StoreCurrentConfiguration { message_id, .. }
             | CommandSpec::SubscribeExternalRtp { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
             | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
@@ -698,6 +754,7 @@ impl CommandSpec {
             | CommandSpec::DeviceSettings { .. }
             | CommandSpec::PropertyDirectory { .. }
             | CommandSpec::QueryLatencyConfig { .. }
+            | CommandSpec::QueryPerformanceSettings { .. }
             | CommandSpec::QueryModernArcReceiverChannelStatus { .. }
             | CommandSpec::QueryModernArcReceiverFlowStatus { .. }
             | CommandSpec::QueryReceiverFlows { .. }
@@ -714,7 +771,12 @@ impl CommandSpec {
             | CommandSpec::SetAes67MulticastPrefix { .. }
             | CommandSpec::SetChannelName { .. }
             | CommandSpec::SetLatency { .. }
+            | CommandSpec::SetReceiveFlowDefaultSlots { .. }
+            | CommandSpec::SetReceiveFlowPerformance { .. }
+            | CommandSpec::SetTransmitFlowPerformance { .. }
+            | CommandSpec::SetUnicastPerformance { .. }
             | CommandSpec::SetName { .. }
+            | CommandSpec::StoreCurrentConfiguration { .. }
             | CommandSpec::SubscribeExternalRtp { .. }
             | CommandSpec::SubscriptionPage2729 { .. }
             | CommandSpec::ModernArcSubscriptionPage { .. }
@@ -968,6 +1030,15 @@ pub(super) fn build_command(
         CommandSpec::QueryLatencyConfig { message_id } => {
             commands::build_query_latency_config(message_id)?
         }
+        CommandSpec::QueryPerformanceSettings {
+            negotiated_protocol_id,
+            property_ids,
+            message_id,
+        } => commands::build_query_performance_settings(
+            negotiated_protocol_id,
+            &property_ids,
+            message_id,
+        )?,
         CommandSpec::QueryModernArcReceiverChannelStatus {
             protocol_id,
             media_selector,
@@ -1178,6 +1249,60 @@ pub(super) fn build_command(
             message_id,
             protocol_id,
         } => commands::build_set_latency_for_protocol(protocol_id, latency, message_id)?,
+        CommandSpec::SetReceiveFlowDefaultSlots {
+            default_slots,
+            message_id,
+            negotiated_protocol_id,
+            supported_property_ids,
+        } => commands::build_set_receive_flow_default_slots(
+            negotiated_protocol_id,
+            &supported_property_ids,
+            default_slots,
+            message_id,
+        )?,
+        CommandSpec::SetReceiveFlowPerformance {
+            device_software_version,
+            frames_per_packet,
+            latency_microseconds,
+            message_id,
+            negotiated_protocol_id,
+            supported_property_ids,
+        } => commands::build_set_receive_flow_performance(
+            negotiated_protocol_id,
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            device_software_version,
+            message_id,
+        )?,
+        CommandSpec::SetTransmitFlowPerformance {
+            frames_per_packet,
+            latency_microseconds,
+            message_id,
+            negotiated_protocol_id,
+            supported_property_ids,
+        } => commands::build_set_transmit_flow_performance(
+            negotiated_protocol_id,
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            message_id,
+        )?,
+        CommandSpec::SetUnicastPerformance {
+            device_software_version,
+            frames_per_packet,
+            latency_microseconds,
+            message_id,
+            negotiated_protocol_id,
+            supported_property_ids,
+        } => commands::build_set_unicast_performance(
+            negotiated_protocol_id,
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            device_software_version,
+            message_id,
+        )?,
         CommandSpec::SetName { name, message_id } => {
             crate::protocol::build_set_device_name(&name, message_id)?
         }
@@ -1205,6 +1330,10 @@ pub(super) fn build_command(
             message_id,
             raw_value,
         )?,
+        CommandSpec::StoreCurrentConfiguration {
+            message_id,
+            negotiated_protocol_id,
+        } => commands::build_store_current_configuration(negotiated_protocol_id, message_id)?,
         CommandSpec::SubscribeExternalRtp {
             advertised_flow_slot_count,
             advertisement_supports_multiple_interfaces,

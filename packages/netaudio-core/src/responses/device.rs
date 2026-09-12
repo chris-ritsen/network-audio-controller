@@ -478,9 +478,20 @@ pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     };
     let modern_receiver_port_ranges = envelope.protocol_id == PROTOCOL_ARC_2809
         && envelope.opcode == OPCODE_QUERY_RECEIVER_PORT_RANGES;
+    let device_settings_protocol =
+        crate::protocol::DEVICE_SETTINGS_ARC_PROTOCOL_IDS.contains(&envelope.protocol_id);
+    let device_settings_opcode = matches!(
+        envelope.opcode,
+        OPCODE_DEVICE_SETTINGS | OPCODE_DEVICE_SETTINGS_SET | OPCODE_PROPERTY_DIRECTORY
+    );
+    let device_settings_result = device_settings_protocol && device_settings_opcode;
+    let configuration_storage =
+        device_settings_protocol && envelope.opcode == OPCODE_STORE_CURRENT_CONFIGURATION;
     let valid = (is_common_arc_protocol(envelope.protocol_id) && common_opcode)
         || flow_opcode
-        || modern_receiver_port_ranges;
+        || modern_receiver_port_ranges
+        || device_settings_result
+        || configuration_storage;
     valid.then_some(envelope.result_code)
 }
 

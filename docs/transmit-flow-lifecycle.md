@@ -57,8 +57,10 @@ identity when present. Deletion requires fresh absent readback.
 Unrelated flows are compared through parser-established identity and durable
 configuration fields. Raw records remain in the observations for diagnosis,
 while freshness, extensions, ordering, and diagnostic values do not create a
-false inconsistency. Actual unrelated creation, deletion, or durable
-configuration change is contradictory.
+false inconsistency. Unrelated creation, deletion, or durable configuration
+change is recorded as `concurrent_topology_activity` while target verification
+continues. Only a durable mismatch in the correlated target flow is
+contradictory.
 
 Persistence confirmation remains unknown for direct ARC operations. RTP packet
 reception, clock lock, and decoded audio remain false until separately tested;

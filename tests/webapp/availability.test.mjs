@@ -5,9 +5,12 @@ import { WEBAPP } from "./setup.mjs";
 
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
-const { operationReasonText, operationWritable } = await import(
-  `${WEBAPP}device/availability.js`
-);
+const {
+  operationReasonText,
+  operationWritable,
+  performanceOperationReasonText,
+  performanceOperationWritable,
+} = await import(`${WEBAPP}device/availability.js`);
 const { DeviceConfigSection } = await import(`${WEBAPP}device/config.js`);
 const { ReceiveSection } = await import(`${WEBAPP}device/channels.js`);
 const { LockSection } = await import(`${WEBAPP}device/security.js`);
@@ -122,4 +125,36 @@ test("codec and lock controls appear only when their operations are writable", (
   assert.match(lockMarkup, /Unlocked/);
   assert.match(lockMarkup, /unavailable through managed control/);
   assert.doesNotMatch(lockMarkup, /Device PIN|>Lock</);
+});
+
+test("flow performance controls follow typed backend availability", () => {
+  const device = {
+    name: "Adapter",
+    server_name: "adapter.local.",
+    operation_availability: { identify: available(false, ["unsupported"]) },
+    performance_operation_availability: {
+      receive_flow_performance: available(true),
+      transmit_flow_performance: available(false, [
+        "properties_not_advertised",
+      ]),
+      unicast_performance: available(false, ["software_version_unknown"]),
+      receive_flow_default_slots: available(true),
+      store_current_configuration: available(true),
+    },
+  };
+  assert.equal(
+    performanceOperationWritable(device, "receive_flow_performance"),
+    true,
+  );
+  assert.match(
+    performanceOperationReasonText(device, "unicast_performance"),
+    /software version was not reported/,
+  );
+  const markup = render(h(DeviceConfigSection, { device }));
+  assert.match(markup, /Flow performance/);
+  assert.match(markup, /Receive flow latency in microseconds/);
+  assert.match(markup, /Receive flow default slots/);
+  assert.match(markup, /Store current configuration/);
+  assert.match(markup, /does not advertise the required properties/);
+  assert.doesNotMatch(markup, /Transmit flow latency in microseconds/);
 });

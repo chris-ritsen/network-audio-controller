@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
 use super::*;
@@ -6,14 +7,9 @@ pub const OPCODE_EXTERNAL_RECEIVER_SUBSCRIPTION: u16 = 0x3201;
 pub const EXTERNAL_RTP_DEFAULT_PORT: u16 = 4321;
 
 const EXTERNAL_SUBSCRIPTION_PROTOCOL_CAP: u16 = 0x2809;
-const EXTERNAL_SUBSCRIPTION_MODERN_PROTOCOL: u16 = 0x2800;
 const DESTINATION_DESCRIPTOR_SIZE: usize = 8;
 const IDENTITY_DESCRIPTOR_SIZE: usize = 0x1C;
-const LEGACY_FIXED_HEADER_SIZE: usize = 0x14;
-const MODERN_TOP_RECORD_SIZE: usize = 0x30;
-const MODERN_MAPPING_SCRATCH_LIMIT: usize = 64;
-const MODERN_MAPPING_SEGMENT_HEADER_SIZE: usize = 6;
-const MODERN_GAP_SPLIT_THRESHOLD: u16 = 8;
+const BITMAP_FIXED_HEADER_SIZE: usize = 0x14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalRtpDestination {
@@ -39,12 +35,6 @@ pub struct ExternalReceiverSubscription<'a> {
     pub secondary_destination: Option<ExternalRtpDestination>,
     pub advertisement_supports_multiple_interfaces: bool,
     pub receiver_supports_multiple_interfaces: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ModernMappingSegment {
-    first_receiver_id: u16,
-    assignments: Vec<u8>,
 }
 
 fn checked_pointer(offset: usize) -> Result<u16, NetaudioError> {
@@ -106,36 +96,23 @@ fn validate_mapping(specification: &ExternalReceiverSubscription<'_>) -> Result<
     {
         return Err(NetaudioError::InvalidReceiverMapping);
     }
-    let mut previous_receiver = 0;
-    let mut previous_positive_slot = 0;
-    let mut has_assignment = false;
+    let mut receiver_ids = HashSet::with_capacity(specification.receiver_channel_ids.len());
     for (&receiver_id, &slot) in specification
         .receiver_channel_ids
         .iter()
         .zip(specification.flow_slot_assignments)
     {
-        if receiver_id == 0 || receiver_id <= previous_receiver {
+        if receiver_id == 0 || !receiver_ids.insert(receiver_id) {
             return Err(NetaudioError::InvalidReceiverMapping);
         }
         if slot > specification.advertised_flow_slot_count {
             return Err(NetaudioError::InvalidFlowSlot);
         }
-        if slot != 0 {
-            if slot <= previous_positive_slot {
-                return Err(NetaudioError::InvalidReceiverMapping);
-            }
-            previous_positive_slot = slot;
-            has_assignment = true;
-        }
-        previous_receiver = receiver_id;
-    }
-    if !has_assignment {
-        return Err(NetaudioError::InvalidReceiverMapping);
     }
     Ok(())
 }
 
-fn build_legacy_payload(
+fn build_bitmap_payload(
     specification: &ExternalReceiverSubscription<'_>,
     destinations: &[[u8; DESTINATION_DESCRIPTOR_SIZE]],
     identity: &[u8; IDENTITY_DESCRIPTOR_SIZE],
@@ -145,7 +122,7 @@ fn build_legacy_payload(
         .len()
         .checked_add(slot_count)
         .ok_or(NetaudioError::PacketTooLarge)?;
-    let header_size = LEGACY_FIXED_HEADER_SIZE
+    let header_size = BITMAP_FIXED_HEADER_SIZE
         .checked_add(
             pointer_count
                 .checked_mul(2)
@@ -235,155 +212,6 @@ fn build_legacy_payload(
     Ok(payload)
 }
 
-fn modern_mapping_segments(
-    receiver_channel_ids: &[u16],
-    flow_slot_assignments: &[u16],
-) -> Result<Vec<ModernMappingSegment>, NetaudioError> {
-    let assigned = receiver_channel_ids
-        .iter()
-        .copied()
-        .zip(flow_slot_assignments.iter().copied())
-        .filter(|(_, slot)| *slot != 0)
-        .collect::<Vec<_>>();
-    let mut segments = Vec::<ModernMappingSegment>::new();
-    for (receiver_id, slot) in assigned {
-        let slot = u8::try_from(slot).map_err(|_| NetaudioError::InvalidFlowSlot)?;
-        let should_split = segments.last().is_some_and(|segment| {
-            let last_receiver = segment
-                .first_receiver_id
-                .saturating_add(u16::try_from(segment.assignments.len()).unwrap_or(u16::MAX))
-                .saturating_sub(1);
-            receiver_id.saturating_sub(last_receiver).saturating_sub(1)
-                >= MODERN_GAP_SPLIT_THRESHOLD
-        });
-        if segments.is_empty() || should_split {
-            segments.push(ModernMappingSegment {
-                first_receiver_id: receiver_id,
-                assignments: vec![slot],
-            });
-            continue;
-        }
-        let segment = segments
-            .last_mut()
-            .ok_or(NetaudioError::InvalidReceiverMapping)?;
-        let vector_index = usize::from(receiver_id - segment.first_receiver_id);
-        segment.assignments.resize(vector_index, 0);
-        segment.assignments.push(slot);
-    }
-    Ok(segments)
-}
-
-fn encode_modern_mapping(
-    segments: &[ModernMappingSegment],
-    mapping_offset: usize,
-) -> Result<Vec<u8>, NetaudioError> {
-    let segment_sizes = segments
-        .iter()
-        .map(|segment| {
-            let padded_length = segment
-                .assignments
-                .len()
-                .checked_add(segment.assignments.len() % 2)?;
-            MODERN_MAPPING_SEGMENT_HEADER_SIZE.checked_add(padded_length)
-        })
-        .collect::<Option<Vec<_>>>()
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let total_size = segment_sizes
-        .iter()
-        .try_fold(0usize, |total, size| total.checked_add(*size));
-    let total_size = total_size.ok_or(NetaudioError::PacketTooLarge)?;
-    if total_size > MODERN_MAPPING_SCRATCH_LIMIT {
-        return Err(NetaudioError::PacketTooLarge);
-    }
-
-    let mut encoded = Vec::with_capacity(total_size);
-    let mut segment_offset = mapping_offset;
-    for (index, segment) in segments.iter().enumerate() {
-        let padded_length = segment.assignments.len() + segment.assignments.len() % 2;
-        let next_segment_offset = if index + 1 < segments.len() {
-            segment_offset
-                .checked_add(segment_sizes[index])
-                .ok_or(NetaudioError::PacketTooLarge)?
-        } else {
-            0
-        };
-        encoded.extend_from_slice(&segment.first_receiver_id.to_be_bytes());
-        encoded.extend_from_slice(
-            &u16::try_from(padded_length)
-                .map_err(|_| NetaudioError::PacketTooLarge)?
-                .to_be_bytes(),
-        );
-        encoded.extend_from_slice(&checked_pointer(next_segment_offset)?.to_be_bytes());
-        encoded.extend_from_slice(&segment.assignments);
-        encoded.resize(
-            encoded.len() + (padded_length - segment.assignments.len()),
-            0,
-        );
-        segment_offset = segment_offset
-            .checked_add(segment_sizes[index])
-            .ok_or(NetaudioError::PacketTooLarge)?;
-    }
-    Ok(encoded)
-}
-
-fn build_modern_payload(
-    specification: &ExternalReceiverSubscription<'_>,
-    destinations: &[[u8; DESTINATION_DESCRIPTOR_SIZE]],
-    identity: &[u8; IDENTITY_DESCRIPTOR_SIZE],
-) -> Result<Vec<u8>, NetaudioError> {
-    if specification.advertised_flow_slot_count > u16::from(u8::MAX) {
-        return Err(NetaudioError::InvalidFlowSlot);
-    }
-    let segments = modern_mapping_segments(
-        specification.receiver_channel_ids,
-        specification.flow_slot_assignments,
-    )?;
-    let destination_bytes = destinations
-        .len()
-        .checked_mul(DESTINATION_DESCRIPTOR_SIZE)
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let identity_offset = MODERN_TOP_RECORD_SIZE
-        .checked_add(destination_bytes)
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let mapping_offset = identity_offset
-        .checked_add(IDENTITY_DESCRIPTOR_SIZE)
-        .ok_or(NetaudioError::PacketTooLarge)?;
-    let mapping = encode_modern_mapping(&segments, mapping_offset)?;
-
-    let mut payload = vec![0u8; MODERN_TOP_RECORD_SIZE];
-    payload[2..4].copy_from_slice(&0x4202u16.to_be_bytes());
-    payload[12..14].copy_from_slice(
-        &u16::try_from(destinations.len())
-            .map_err(|_| NetaudioError::PacketTooLarge)?
-            .to_be_bytes(),
-    );
-    for (destination_index, destination) in destinations.iter().enumerate() {
-        let destination_offset = MODERN_TOP_RECORD_SIZE
-            .checked_add(
-                destination_index
-                    .checked_mul(DESTINATION_DESCRIPTOR_SIZE)
-                    .ok_or(NetaudioError::PacketTooLarge)?,
-            )
-            .ok_or(NetaudioError::PacketTooLarge)?;
-        let pointer_offset = 0x12usize
-            .checked_add(
-                destination_index
-                    .checked_mul(2)
-                    .ok_or(NetaudioError::PacketTooLarge)?,
-            )
-            .ok_or(NetaudioError::PacketTooLarge)?;
-        payload[pointer_offset..pointer_offset + 2]
-            .copy_from_slice(&checked_pointer(destination_offset)?.to_be_bytes());
-        payload.extend_from_slice(destination);
-    }
-    payload[0x1C..0x1E].copy_from_slice(&checked_pointer(identity_offset)?.to_be_bytes());
-    payload[0x24..0x26].copy_from_slice(&specification.advertised_flow_slot_count.to_be_bytes());
-    payload[0x26..0x28].copy_from_slice(&checked_pointer(mapping_offset)?.to_be_bytes());
-    payload.extend_from_slice(identity);
-    payload.extend_from_slice(&mapping);
-    Ok(payload)
-}
-
 pub fn build_external_receiver_subscription(
     specification: &ExternalReceiverSubscription<'_>,
     transaction_id: u16,
@@ -391,11 +219,7 @@ pub fn build_external_receiver_subscription(
     validate_mapping(specification)?;
     let destinations = validated_destinations(specification)?;
     let identity = identity_descriptor(specification.flow_identity, specification.clock_offset)?;
-    let payload = if specification.device_protocol < EXTERNAL_SUBSCRIPTION_MODERN_PROTOCOL {
-        build_legacy_payload(specification, &destinations, &identity)?
-    } else {
-        build_modern_payload(specification, &destinations, &identity)?
-    };
+    let payload = build_bitmap_payload(specification, &destinations, &identity)?;
     build_control_packet_for_protocol(
         specification
             .device_protocol
@@ -463,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_payload_uses_per_slot_big_endian_bitmaps() {
+    fn bitmap_payload_uses_per_slot_big_endian_bitmaps() {
         let packet = build_external_receiver_subscription(
             &specification(0x2729, &[1, 2, 17, 18], &[1, 2, 3, 0]),
             0x1234,
@@ -490,36 +314,41 @@ mod tests {
     }
 
     #[test]
-    fn modern_payload_caps_header_protocol_and_splits_large_mapping_gaps() {
+    fn modern_protocol_caps_header_and_keeps_the_bitmap_body() {
         let packet = build_external_receiver_subscription(
             &specification(0x280F, &[1, 3, 12], &[1, 2, 3]),
             0xBEEF,
         )
         .unwrap();
         assert_eq!(&packet[0..2], &0x2809u16.to_be_bytes());
-        assert_eq!(&packet[4..8], &[0xBE, 0xEF, 0x32, 0x01]);
+        assert_eq!(&packet[2..8], &[0, 0x52, 0xBE, 0xEF, 0x32, 0x01]);
         let payload = &packet[8..];
-        assert_eq!(&payload[0..4], &[0, 0, 0x42, 0x02]);
+        assert_eq!(&payload[0..4], &[0, 0, 0x02, 0x02]);
         assert_eq!(&payload[12..14], &[0, 1]);
-        assert_eq!(&payload[0x12..0x14], &[0, 0x30]);
-        assert_eq!(&payload[0x1C..0x1E], &[0, 0x38]);
-        assert_eq!(&payload[0x24..0x28], &[0, 4, 0, 0x54]);
+        assert_eq!(&payload[14..18], &[0, 4, 0, 1]);
         assert_eq!(
-            &payload[0x54..],
-            &[0, 1, 0, 4, 0, 0x5E, 1, 0, 2, 0, 0, 12, 0, 2, 0, 0, 3, 0]
+            &payload[0x12..0x1C],
+            &[0, 0x1E, 0, 0x42, 0, 0x44, 0, 0x46, 0, 0x48]
         );
+        assert_eq!(&payload[0x42..], &[0, 1, 0, 4, 8, 0, 0, 0]);
     }
 
     #[test]
-    fn modern_payload_keeps_gaps_under_eight_in_one_segment() {
-        let packet =
-            build_external_receiver_subscription(&specification(0x2800, &[5, 12], &[1, 2]), 1)
-                .unwrap();
-        let payload = &packet[8..];
+    fn mapping_accepts_unsorted_receivers_shared_slots_and_all_zero_removal() {
+        let packet = build_external_receiver_subscription(
+            &specification(0x2809, &[18, 1, 2], &[1, 1, 0]),
+            1,
+        )
+        .unwrap();
         assert_eq!(
-            &payload[0x54..],
-            &[0, 5, 0, 8, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2]
+            &packet[8 + 0x42..],
+            &[0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         );
+
+        let removal =
+            build_external_receiver_subscription(&specification(0x2809, &[18, 1], &[0, 0]), 2)
+                .unwrap();
+        assert_eq!(&removal[8 + 0x42..], &[0; 16]);
     }
 
     #[test]
@@ -535,42 +364,25 @@ mod tests {
         let packet = build_external_receiver_subscription(&spec, 1).unwrap();
         let payload = &packet[8..];
         assert_eq!(&payload[12..14], &[0, 2]);
-        assert_eq!(&payload[0x12..0x16], &[0, 0x30, 0, 0x38]);
         assert_eq!(
-            &payload[0x30..0x40],
+            &payload[0x12..0x1E],
+            &[0, 0x20, 0, 0x28, 0, 0x4C, 0, 0x4E, 0, 0x50, 0, 0x52]
+        );
+        assert_eq!(
+            &payload[0x20..0x30],
             &[8, 2, 0x10, 0xE1, 239, 69, 1, 2, 8, 2, 0x13, 0x8C, 239, 69, 1, 3]
         );
     }
 
     #[test]
-    fn rejects_invalid_or_unproven_mapping_forms() {
+    fn rejects_invalid_mapping_forms() {
         for (receivers, slots, expected) in [
             (vec![], vec![], NetaudioError::InvalidReceiverMapping),
             (vec![1], vec![], NetaudioError::InvalidReceiverMapping),
             (vec![0], vec![1], NetaudioError::InvalidReceiverMapping),
             (
-                vec![2, 1],
-                vec![1, 2],
-                NetaudioError::InvalidReceiverMapping,
-            ),
-            (
                 vec![1, 1],
                 vec![1, 2],
-                NetaudioError::InvalidReceiverMapping,
-            ),
-            (
-                vec![1, 2],
-                vec![2, 1],
-                NetaudioError::InvalidReceiverMapping,
-            ),
-            (
-                vec![1, 2],
-                vec![1, 1],
-                NetaudioError::InvalidReceiverMapping,
-            ),
-            (
-                vec![1, 2],
-                vec![0, 0],
                 NetaudioError::InvalidReceiverMapping,
             ),
             (vec![1], vec![5], NetaudioError::InvalidFlowSlot),
@@ -580,17 +392,5 @@ mod tests {
                 Err(expected),
             );
         }
-    }
-
-    #[test]
-    fn rejects_modern_mapping_that_exceeds_the_scratch_limit() {
-        let receivers = (1..=59).collect::<Vec<_>>();
-        let assignments = (1..=59).collect::<Vec<_>>();
-        let mut spec = specification(0x2809, &receivers, &assignments);
-        spec.advertised_flow_slot_count = 59;
-        assert_eq!(
-            build_external_receiver_subscription(&spec, 1),
-            Err(NetaudioError::PacketTooLarge)
-        );
     }
 }

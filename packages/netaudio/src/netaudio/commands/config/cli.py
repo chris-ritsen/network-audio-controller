@@ -16,6 +16,13 @@ from netaudio.cli_support.execution import CapabilityProbeTimeout, run_command
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.latency import run_latency
+from netaudio.commands.config.performance import (
+    run_receive_flow_default_slots,
+    run_receive_flow_performance,
+    run_store_current_configuration,
+    run_transmit_flow_performance,
+    run_unicast_performance,
+)
 from netaudio.dante.clock_config import (
     format_clock_source_code,
     format_clock_subdomain,
@@ -520,6 +527,53 @@ def latency(
 ):
     """Get the complete device latency state or set and verify latency."""
     run_command(run_latency, value, all_devices)
+
+
+@app.command("receive-flow-performance")
+def receive_flow_performance(
+    latency_microseconds: int = typer.Argument(..., help="Receive-flow latency in microseconds."),
+    frames_per_packet: int = typer.Argument(..., help="Receive-flow frames per packet."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
+):
+    """Set and verify receive-flow latency and frames per packet."""
+    run_command(run_receive_flow_performance, latency_microseconds, frames_per_packet, all_devices)
+
+
+@app.command("transmit-flow-performance")
+def transmit_flow_performance(
+    latency_microseconds: int = typer.Argument(..., help="Transmit-flow latency in microseconds."),
+    frames_per_packet: int = typer.Argument(..., help="Transmit-flow frames per packet."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
+):
+    """Set and verify transmit-flow latency and frames per packet."""
+    run_command(run_transmit_flow_performance, latency_microseconds, frames_per_packet, all_devices)
+
+
+@app.command("unicast-performance")
+def unicast_performance(
+    latency_microseconds: int = typer.Argument(..., help="Unicast latency in microseconds."),
+    frames_per_packet: int = typer.Argument(..., help="Unicast frames per packet."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
+):
+    """Set and verify the unicast properties advertised by each device."""
+    run_command(run_unicast_performance, latency_microseconds, frames_per_packet, all_devices)
+
+
+@app.command("receive-flow-default-slots")
+def receive_flow_default_slots(
+    slots: int = typer.Argument(..., help="Default receive-flow slot count."),
+    all_devices: bool = typer.Option(False, "--all", help="Apply to all selected devices."),
+):
+    """Set and verify the default receive-flow slot count."""
+    run_command(run_receive_flow_default_slots, slots, all_devices)
+
+
+@app.command("store-current-configuration")
+def store_current_configuration(
+    all_devices: bool = typer.Option(False, "--all", help="Request storage on all selected devices."),
+):
+    """Request storage without claiming persistence confirmation."""
+    run_command(run_store_current_configuration, all_devices)
 
 
 def _aes67_state_label(value):

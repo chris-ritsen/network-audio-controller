@@ -103,6 +103,7 @@ DEVICE_SCALAR_FIELDS = (
     "network_interface_traffic",
     "num_networks",
     "per_channel_signal_presence_supported",
+    "performance_settings",
     "preferred_leader",
     "product_version",
     "receiver_flow_connection_health",
@@ -239,6 +240,9 @@ class DanteDeviceSerializer:
         from netaudio.dante.operation_availability import operation_availability_map
 
         as_json["operation_availability"] = operation_availability_map(device)
+        from netaudio.dante.performance_configuration import performance_operation_availability
+
+        as_json["performance_operation_availability"] = performance_operation_availability(device)
 
         if device.interface_reboot_required:
             as_json["interface_reboot_required"] = device.interface_reboot_required

@@ -216,6 +216,99 @@ class DanteDeviceCommands:
     def command_query_latency_config(self, transaction_id=0):
         return (self._build({"command": "query_latency_config", "transaction_id": transaction_id}), SERVICE_ARC, None)
 
+    def command_query_performance_settings(self, negotiated_protocol_id, property_ids, transaction_id=0):
+        return self._arc(
+            {
+                "command": "query_performance_settings",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "property_ids": list(property_ids),
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_set_receive_flow_performance(
+        self,
+        negotiated_protocol_id,
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+        device_software_version,
+        transaction_id=0,
+    ):
+        return self._arc(
+            {
+                "command": "set_receive_flow_performance",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "supported_property_ids": list(supported_property_ids),
+                "latency_microseconds": latency_microseconds,
+                "frames_per_packet": frames_per_packet,
+                "device_software_version": list(device_software_version),
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_set_transmit_flow_performance(
+        self,
+        negotiated_protocol_id,
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+        transaction_id=0,
+    ):
+        return self._arc(
+            {
+                "command": "set_transmit_flow_performance",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "supported_property_ids": list(supported_property_ids),
+                "latency_microseconds": latency_microseconds,
+                "frames_per_packet": frames_per_packet,
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_set_unicast_performance(
+        self,
+        negotiated_protocol_id,
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+        device_software_version,
+        transaction_id=0,
+    ):
+        return self._arc(
+            {
+                "command": "set_unicast_performance",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "supported_property_ids": list(supported_property_ids),
+                "latency_microseconds": latency_microseconds,
+                "frames_per_packet": frames_per_packet,
+                "device_software_version": list(device_software_version),
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_set_receive_flow_default_slots(
+        self, negotiated_protocol_id, supported_property_ids, default_slots, transaction_id=0
+    ):
+        return self._arc(
+            {
+                "command": "set_receive_flow_default_slots",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "supported_property_ids": list(supported_property_ids),
+                "default_slots": default_slots,
+                "transaction_id": transaction_id,
+            }
+        )
+
+    def command_store_current_configuration(self, negotiated_protocol_id, transaction_id=0):
+        return self._arc(
+            {
+                "command": "store_current_configuration",
+                "negotiated_protocol_id": negotiated_protocol_id,
+                "transaction_id": transaction_id,
+            }
+        )
+
     def command_reboot(self, host_mac=None, sequence=None):
         spec = self._with_host_mac(
             {

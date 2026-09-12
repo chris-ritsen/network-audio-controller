@@ -181,6 +181,13 @@ class DanteCommands:
     def query_latency_config(self) -> dict:
         return {"command": "query_latency_config"}
 
+    def query_performance_settings(self, negotiated_protocol_id: int, property_ids) -> dict:
+        return {
+            "command": "query_performance_settings",
+            "negotiated_protocol_id": negotiated_protocol_id,
+            "property_ids": list(property_ids),
+        }
+
     def query_modern_arc_receiver_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
         return {"command": "query_modern_arc_receiver_flow_status", "protocol_id": protocol_id}
 
@@ -278,6 +285,71 @@ class DanteCommands:
 
     def set_latency(self, latency_milliseconds: float) -> dict:
         return {"command": "set_latency", "latency": latency_milliseconds}
+
+    def set_receive_flow_default_slots(
+        self, negotiated_protocol_id: int, supported_property_ids, default_slots: int
+    ) -> dict:
+        return {
+            "command": "set_receive_flow_default_slots",
+            "negotiated_protocol_id": negotiated_protocol_id,
+            "supported_property_ids": list(supported_property_ids),
+            "default_slots": default_slots,
+        }
+
+    def set_receive_flow_performance(
+        self,
+        negotiated_protocol_id: int,
+        supported_property_ids,
+        latency_microseconds: int,
+        frames_per_packet: int,
+        device_software_version,
+    ) -> dict:
+        return {
+            "command": "set_receive_flow_performance",
+            "negotiated_protocol_id": negotiated_protocol_id,
+            "supported_property_ids": list(supported_property_ids),
+            "latency_microseconds": latency_microseconds,
+            "frames_per_packet": frames_per_packet,
+            "device_software_version": list(device_software_version),
+        }
+
+    def set_transmit_flow_performance(
+        self,
+        negotiated_protocol_id: int,
+        supported_property_ids,
+        latency_microseconds: int,
+        frames_per_packet: int,
+    ) -> dict:
+        return {
+            "command": "set_transmit_flow_performance",
+            "negotiated_protocol_id": negotiated_protocol_id,
+            "supported_property_ids": list(supported_property_ids),
+            "latency_microseconds": latency_microseconds,
+            "frames_per_packet": frames_per_packet,
+        }
+
+    def set_unicast_performance(
+        self,
+        negotiated_protocol_id: int,
+        supported_property_ids,
+        latency_microseconds: int,
+        frames_per_packet: int,
+        device_software_version,
+    ) -> dict:
+        return {
+            "command": "set_unicast_performance",
+            "negotiated_protocol_id": negotiated_protocol_id,
+            "supported_property_ids": list(supported_property_ids),
+            "latency_microseconds": latency_microseconds,
+            "frames_per_packet": frames_per_packet,
+            "device_software_version": list(device_software_version),
+        }
+
+    def store_current_configuration(self, negotiated_protocol_id: int) -> dict:
+        return {
+            "command": "store_current_configuration",
+            "negotiated_protocol_id": negotiated_protocol_id,
+        }
 
     def set_name(self, name: str) -> dict:
         return {"command": "set_name", "name": name}

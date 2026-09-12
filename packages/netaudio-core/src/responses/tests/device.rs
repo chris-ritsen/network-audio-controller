@@ -385,6 +385,14 @@ fn result_code_reads_header_field() {
         Some(0x0030)
     );
     assert_eq!(parse_result_code(&[0u8; 4]), None);
+    assert_eq!(
+        parse_result_code(&decode_hexadecimal("2809000a00011f010001")),
+        Some(RESULT_CODE_SUCCESS)
+    );
+    assert_eq!(
+        parse_result_code(&decode_hexadecimal("2801000a000111010001")),
+        Some(RESULT_CODE_SUCCESS)
+    );
 }
 
 #[test]

@@ -8,7 +8,7 @@ from typing import Any
 from netaudio.dante.transmit_flow import TransmitFlowSpecification
 
 
-PRESET_SCHEMA_VERSION = 2
+PRESET_SCHEMA_VERSION = 3
 PRESET_EXTENSION_TAG = "netaudio_configuration"
 PRESET_EXTENSION_CONTENT_TAG = "json"
 
@@ -40,6 +40,23 @@ def _optional_boolean(value: Any, label: str) -> bool | None:
     if value is None or isinstance(value, bool):
         return value
     raise ValueError(f"{label} must be Boolean or null")
+
+
+def _unsigned_integer(value: Any, label: str, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+        raise ValueError(f"{label} must be an integer from 0 through {maximum}")
+    return value
+
+
+def _performance_pair(value: Any, label: str) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != {"latency_microseconds", "frames_per_packet"}:
+        raise ValueError(f"{label} must contain latency_microseconds and frames_per_packet")
+    return {
+        "latency_microseconds": _unsigned_integer(
+            value["latency_microseconds"], f"{label}.latency_microseconds", 0xFFFFFFFF // 1_000
+        ),
+        "frames_per_packet": _unsigned_integer(value["frames_per_packet"], f"{label}.frames_per_packet", 0xFFFF),
+    }
 
 
 def _name_map(value: Any, label: str) -> dict[int, str]:
@@ -189,6 +206,17 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         pullup = result["sample_rate_pullup"]
         if isinstance(pullup, bool) or not isinstance(pullup, int) or not 0 <= pullup <= 0xFFFFFFFF:
             raise ValueError("sample_rate_pullup must be an unsigned 32-bit integer")
+    for field_name in (
+        "receive_flow_performance",
+        "transmit_flow_performance",
+        "unicast_performance",
+    ):
+        if field_name in result:
+            result[field_name] = _performance_pair(result[field_name], field_name)
+    if "receive_flow_default_slots" in result:
+        result["receive_flow_default_slots"] = _unsigned_integer(
+            result["receive_flow_default_slots"], "receive_flow_default_slots", 0xFFFF
+        )
     if "clock_source_code" in result:
         value = result["clock_source_code"]
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFF:
