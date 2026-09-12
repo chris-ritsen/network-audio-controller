@@ -5,8 +5,26 @@ const { readInventoryCache, writeInventoryCache } = await import(`${WEBAPP}inven
 const key = "netaudio.inventory.v1";
 
 test("last-known backend link speed remains visible during browser startup", () => {
-  writeInventoryCache({ device: { server_name: "device", link_speed_mbps: 1000 } });
+  const operationAvailability = {
+    sample_rate: {
+      supported: true,
+      readable: true,
+      writable: false,
+      reasons: ["device_locked"],
+    },
+  };
+  writeInventoryCache({
+    device: {
+      server_name: "device",
+      link_speed_mbps: 1000,
+      operation_availability: operationAvailability,
+    },
+  });
   assert.equal(readInventoryCache().device.link_speed_mbps, 1000);
+  assert.deepEqual(
+    readInventoryCache().device.operation_availability,
+    operationAvailability,
+  );
   window.localStorage.removeItem(key);
 });
 

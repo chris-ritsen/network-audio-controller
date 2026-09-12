@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "evidence_class": "observed",
+  "claim_scope": "0x0040 outer interface-group and nested record pointer graphs, selected-record discriminator rule, counters, speed, and extension preservation.",
+  "allowed_evidence": [
+    "Retained packet fixtures already present in this repository and the sanitized implementation specification supplied on 2026-09-12."
+  ],
+  "excluded_evidence": [
+    "Dante Controller executables",
+    "firmware",
+    "process memory"
+  ],
+  "transformation": "Files were moved without byte changes from the obsolete link-status fixture directory to interface_statistics; SHA-256 binds each retained packet.",
+  "limitations": "The original capture run, timestamp, and frame are unavailable in the retained fixture set, so these files cannot support claims that depend on those missing details.",
+  "fixtures": {
+    "a32-authentic-vm-0040.bin": {
+      "sha256": "6bdfa678931832273d1c0f92eb3991fded9e2fc8bea3bc7e96da2bce6e187077",
+      "source": "Retained permitted packet fixture; exact original run, timestamp, and frame were not retained with this file.",
+      "provenance_complete": false
+    },
+    "ad4d-0040.bin": {
+      "sha256": "ad4fac04138a6a10beab7cc15e5ab35f77f5251e14e8db530f4179613a931980",
+      "source": "Retained permitted packet fixture; exact original run, timestamp, and frame were not retained with this file.",
+      "provenance_complete": false
+    },
+    "avio-0040.bin": {
+      "sha256": "e00209d12978b641775a29b6aa3096c8e284db01f0c0c3bf670ee74be7fdc919",
+      "source": "Retained permitted packet fixture; exact original run, timestamp, and frame were not retained with this file.",
+      "provenance_complete": false
+    },
+    "lx-dante-0040.bin": {
+      "sha256": "c6691ca67c654ee803d89051ead495c326091c35388fd5c002c49e6138963d0e",
+      "source": "Retained permitted packet fixture; exact original run, timestamp, and frame were not retained with this file.",
+      "provenance_complete": false
+    }
+  }
+}

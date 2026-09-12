@@ -643,7 +643,13 @@ async def test_failed_graphql_refresh_preserves_last_inventory_and_reports_degra
 
 @pytest.mark.asyncio
 async def test_registry_keeps_same_device_id_and_ip_distinct_across_servers_and_domains():
-    east_context = DDMContextConfiguration("east-main", "east", "domain-east", "Main")
+    east_context = DDMContextConfiguration(
+        "east-main",
+        "east",
+        "domain-east",
+        "Main",
+        frozenset({"identify", "sample_rate"}),
+    )
     west_context = DDMContextConfiguration("west-main", "west", "domain-west", "Main")
     east_configuration = ManagedAPIConfiguration(
         url="https://east.example/graphql",
@@ -685,6 +691,8 @@ async def test_registry_keeps_same_device_id_and_ip_distinct_across_servers_and_
         "ddm:west:domain-west:shared",
     }
     assert records["ddm:east:domain-east:shared"]["ddm_context"] == "east-main"
+    assert records["ddm:east:domain-east:shared"]["managed_operation_permissions"]["identify"] is True
+    assert records["ddm:east:domain-east:shared"]["managed_operation_permissions"]["encoding"] is False
     assert records["ddm:west:domain-west:shared"]["ddm_server_profile"] == "west"
     assert registry.client_for_context("east-main") is east_client
     assert registry.client_for_context("west-main") is west_client

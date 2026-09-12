@@ -71,7 +71,13 @@ def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts
     monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
 
     async def probe():
-        return phase["rate"], [44100, 48000, 88200, 96000]
+        return {
+            "current_value": phase["rate"],
+            "requested_value": phase["rate"],
+            "update_mode": 2,
+            "available_values": [44100, 48000, 88200, 96000],
+            "flags": None,
+        }
 
     async def mutate():
         phase["rate"] = 96000

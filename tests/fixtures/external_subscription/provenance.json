@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "evidence_class": "inferred",
+  "claim_scope": "Deterministic 0x3201 serializer layout for the specified legacy and modern protocol generations.",
+  "allowed_evidence": [
+    "Sanitized implementation specification supplied for this task on 2026-09-12."
+  ],
+  "excluded_evidence": [
+    "Dante Controller executables",
+    "firmware",
+    "process memory",
+    "genuine 0x3201 network captures"
+  ],
+  "transformation": "Each packet was independently assembled from the supplied field offsets, descriptor layouts, pointer rules, bitmap or segment mapping rules, and fixed test inputs. The Rust serializer must reproduce these bytes exactly.",
+  "limitations": "These fixtures are synthetic and do not establish device acceptance, subscription readback, RTP reception, clock lock, or decoded audio.",
+  "fixtures": {
+    "legacy-2729-3201.bin": {
+      "sha256": "de9552621280ef22b5a0d774617cc763ada8bdd1955270087da10b20c2b1eed8",
+      "protocol": "0x2729",
+      "opcode": "0x3201",
+      "message_id": "0x1234",
+      "receiver_channel_ids": [
+        1,
+        2,
+        17
+      ],
+      "flow_slot_assignments": [
+        1,
+        2,
+        0
+      ]
+    },
+    "modern-2809-3201.bin": {
+      "sha256": "f292449d0a735ee96e5aaa33293aba05741cd371bd125b186f456f596948081b",
+      "requested_device_protocol": "0x280f",
+      "effective_protocol": "0x2809",
+      "opcode": "0x3201",
+      "message_id": "0x5678",
+      "receiver_channel_ids": [
+        1,
+        3,
+        12,
+        20
+      ],
+      "flow_slot_assignments": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  }
+}

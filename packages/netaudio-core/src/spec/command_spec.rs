@@ -40,6 +40,14 @@ pub(super) struct TransmitterChannelNameReconciliationEntry {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct ExternalRtpDestinationSpec {
+    address: String,
+    #[serde(default)]
+    port: u16,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub(super) enum CommandSpec {
     AddSubscriptions {
@@ -175,7 +183,7 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
-    ProbeGainLevel {
+    ProbeCodecStatus {
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -187,7 +195,9 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
-    ProbeLinkStatus {
+    ProbeInterfaceStatistics {
+        #[serde(default)]
+        extended_073a: bool,
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -453,6 +463,24 @@ pub(super) enum CommandSpec {
         message_id: u16,
         raw_value: u32,
     },
+    SubscribeExternalRtp {
+        advertised_flow_slot_count: u16,
+        #[serde(default)]
+        advertisement_supports_multiple_interfaces: bool,
+        clock_offset: u32,
+        device_protocol: u16,
+        flow_slot_assignments: Vec<u16>,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+        primary_destination: ExternalRtpDestinationSpec,
+        receiver_channel_ids: Vec<u16>,
+        #[serde(default)]
+        receiver_supports_multiple_interfaces: bool,
+        #[serde(default)]
+        secondary_destination: Option<ExternalRtpDestinationSpec>,
+        session_id: u64,
+        source_address: String,
+    },
     #[serde(rename = "subscription_page_2729")]
     SubscriptionPage2729 {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -525,9 +553,9 @@ impl CommandSpec {
             | CommandSpec::ProbeAes67 { message_id, .. }
             | CommandSpec::ProbeClearConfigurationStatus { message_id, .. }
             | CommandSpec::ProbeEncoding { message_id, .. }
-            | CommandSpec::ProbeGainLevel { message_id, .. }
+            | CommandSpec::ProbeCodecStatus { message_id, .. }
             | CommandSpec::ProbeInterfaceStatus { message_id, .. }
-            | CommandSpec::ProbeLinkStatus { message_id, .. }
+            | CommandSpec::ProbeInterfaceStatistics { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
             | CommandSpec::ProbePreferredLeader { message_id, .. }
             | CommandSpec::ProbeSampleRate { message_id, .. }
@@ -564,6 +592,7 @@ impl CommandSpec {
             | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
+            | CommandSpec::SubscribeExternalRtp { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
             | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
             | CommandSpec::TransmitterNames { message_id, .. }
@@ -602,9 +631,9 @@ impl CommandSpec {
             | CommandSpec::ProbeAes67 { message_id, .. }
             | CommandSpec::ProbeClearConfigurationStatus { message_id, .. }
             | CommandSpec::ProbeEncoding { message_id, .. }
-            | CommandSpec::ProbeGainLevel { message_id, .. }
+            | CommandSpec::ProbeCodecStatus { message_id, .. }
             | CommandSpec::ProbeInterfaceStatus { message_id, .. }
-            | CommandSpec::ProbeLinkStatus { message_id, .. }
+            | CommandSpec::ProbeInterfaceStatistics { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
             | CommandSpec::ProbePreferredLeader { message_id, .. }
             | CommandSpec::ProbeSampleRate { message_id, .. }
@@ -641,6 +670,7 @@ impl CommandSpec {
             | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
+            | CommandSpec::SubscribeExternalRtp { message_id, .. }
             | CommandSpec::SubscriptionPage2729 { message_id, .. }
             | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
             | CommandSpec::TransmitterNames { message_id, .. }
@@ -685,6 +715,7 @@ impl CommandSpec {
             | CommandSpec::SetChannelName { .. }
             | CommandSpec::SetLatency { .. }
             | CommandSpec::SetName { .. }
+            | CommandSpec::SubscribeExternalRtp { .. }
             | CommandSpec::SubscriptionPage2729 { .. }
             | CommandSpec::ModernArcSubscriptionPage { .. }
             | CommandSpec::TransmitterNames { .. }
@@ -699,9 +730,9 @@ impl CommandSpec {
             | CommandSpec::ProbeAes67 { .. }
             | CommandSpec::ProbeClearConfigurationStatus { .. }
             | CommandSpec::ProbeEncoding { .. }
-            | CommandSpec::ProbeGainLevel { .. }
+            | CommandSpec::ProbeCodecStatus { .. }
             | CommandSpec::ProbeInterfaceStatus { .. }
-            | CommandSpec::ProbeLinkStatus { .. }
+            | CommandSpec::ProbeInterfaceStatistics { .. }
             | CommandSpec::ProbeLockResetStatus { .. }
             | CommandSpec::ProbePreferredLeader { .. }
             | CommandSpec::ProbeSampleRate { .. }
@@ -870,10 +901,12 @@ pub(super) fn build_command(
             host_mac,
             message_id,
         } => commands::build_probe_encoding(parse_mac(&host_mac, default_host_mac)?, message_id)?,
-        CommandSpec::ProbeGainLevel {
+        CommandSpec::ProbeCodecStatus {
             host_mac,
             message_id,
-        } => commands::build_probe_gain_level(parse_mac(&host_mac, default_host_mac)?, message_id)?,
+        } => {
+            commands::build_probe_codec_status(parse_mac(&host_mac, default_host_mac)?, message_id)?
+        }
         CommandSpec::ProbeInterfaceStatus {
             host_mac,
             message_id,
@@ -881,12 +914,15 @@ pub(super) fn build_command(
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
-        CommandSpec::ProbeLinkStatus {
+        CommandSpec::ProbeInterfaceStatistics {
+            extended_073a,
             host_mac,
             message_id,
-        } => {
-            commands::build_probe_link_status(parse_mac(&host_mac, default_host_mac)?, message_id)?
-        }
+        } => commands::build_probe_interface_statistics(
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
+            extended_073a,
+        )?,
         CommandSpec::ProbeLockResetStatus {
             host_mac,
             message_id,
@@ -1169,6 +1205,51 @@ pub(super) fn build_command(
             message_id,
             raw_value,
         )?,
+        CommandSpec::SubscribeExternalRtp {
+            advertised_flow_slot_count,
+            advertisement_supports_multiple_interfaces,
+            clock_offset,
+            device_protocol,
+            flow_slot_assignments,
+            message_id,
+            primary_destination,
+            receiver_channel_ids,
+            receiver_supports_multiple_interfaces,
+            secondary_destination,
+            session_id,
+            source_address,
+        } => {
+            let destination =
+                |value: ExternalRtpDestinationSpec| -> Result<ExternalRtpDestination, SpecError> {
+                    Ok(ExternalRtpDestination {
+                        address: value
+                            .address
+                            .parse::<Ipv4Addr>()
+                            .map_err(|_| SpecError::InvalidIp)?,
+                        port: value.port,
+                    })
+                };
+            commands::build_external_receiver_subscription(
+                &ExternalReceiverSubscription {
+                    device_protocol,
+                    receiver_channel_ids: &receiver_channel_ids,
+                    flow_slot_assignments: &flow_slot_assignments,
+                    advertised_flow_slot_count,
+                    flow_identity: ExternalFlowIdentity {
+                        source_address: source_address
+                            .parse::<Ipv4Addr>()
+                            .map_err(|_| SpecError::InvalidIp)?,
+                        session_id,
+                    },
+                    clock_offset,
+                    primary_destination: destination(primary_destination)?,
+                    secondary_destination: secondary_destination.map(destination).transpose()?,
+                    advertisement_supports_multiple_interfaces,
+                    receiver_supports_multiple_interfaces,
+                },
+                message_id,
+            )?
+        }
         CommandSpec::SubscriptionPage2729 {
             records,
             message_id,

@@ -148,9 +148,16 @@ async def test_capability_verification_ignores_old_and_unrelated_status():
         mutation_sent.set()
 
     async def probe_status():
-        notifications.notify_waiters("sample_rate", "192.0.2.10", (48_000, [48_000, 96_000]))
+        old_status = {
+            "current_value": 48_000,
+            "requested_value": 48_000,
+            "update_mode": 2,
+            "available_values": [48_000, 96_000],
+            "flags": None,
+        }
+        notifications.notify_waiters("sample_rate", "192.0.2.10", old_status)
         old_status_observed.set()
-        return 48_000, [48_000, 96_000]
+        return old_status
 
     verification_task = asyncio.create_task(
         application.mutate_and_wait_for_capability_value(
@@ -166,12 +173,19 @@ async def test_capability_verification_ignores_old_and_unrelated_status():
     await old_status_observed.wait()
 
     assert not verification_task.done()
-    notifications.notify_waiters("sample_rate", "192.0.2.11", (96_000, [48_000, 96_000]))
-    notifications.notify_waiters("encoding", "192.0.2.10", (96_000, [48_000, 96_000]))
+    requested_status = {
+        "current_value": 96_000,
+        "requested_value": 96_000,
+        "update_mode": 2,
+        "available_values": [48_000, 96_000],
+        "flags": None,
+    }
+    notifications.notify_waiters("sample_rate", "192.0.2.11", requested_status)
+    notifications.notify_waiters("encoding", "192.0.2.10", requested_status)
     assert not verification_task.done()
-    notifications.notify_waiters("sample_rate", "192.0.2.10", (96_000, [48_000, 96_000]))
+    notifications.notify_waiters("sample_rate", "192.0.2.10", requested_status)
 
-    assert await verification_task == (96_000, [48_000, 96_000])
+    assert await verification_task == requested_status
 
 
 @pytest.mark.asyncio
@@ -182,7 +196,13 @@ async def test_capability_value_waiter_unregisters_after_timeout():
         return None
 
     async def probe_status():
-        return 48_000, [48_000, 96_000]
+        return {
+            "current_value": 48_000,
+            "requested_value": 48_000,
+            "update_mode": 2,
+            "available_values": [48_000, 96_000],
+            "flags": None,
+        }
 
     status = await mutate_and_wait_for_capability_value(
         notifications,
@@ -194,7 +214,13 @@ async def test_capability_value_waiter_unregisters_after_timeout():
         0.01,
     )
 
-    assert status == (48_000, [48_000, 96_000])
+    assert status == {
+        "current_value": 48_000,
+        "requested_value": 48_000,
+        "update_mode": 2,
+        "available_values": [48_000, 96_000],
+        "flags": None,
+    }
     assert notifications._waiters == {}
 
 

@@ -37,10 +37,10 @@ test("Controller-style facets use known statuses and do not equate unknown with 
   assert.deepEqual(values("tx-multicast", { transmitter_flows: [{ flow_type: "multicast" }] }), ["Active"]);
   assert.deepEqual(values("tx-multicast", { transmitter_flows: [] }), ["None"]);
   assert.deepEqual(values("tx-multicast", { transmitter_flows: [{}] }), ["Not reported"]);
-  assert.deepEqual(values("aes67", { aes67_supported: false }), ["Unsupported"]);
+  assert.deepEqual(values("aes67", { aes67_configuration_supported: false }), ["Unsupported"]);
   assert.deepEqual(values("aes67", { aes67_current: false }), ["Disabled"]);
   assert.deepEqual(values("aes67", { aes67_current: true }), ["Enabled"]);
-  assert.deepEqual(values("aes67", { aes67_supported: true }), ["Supported, state unknown"]);
+  assert.deepEqual(values("aes67", { aes67_configuration_supported: true }), ["Supported, state unknown"]);
   for (const [raw, label] of ["None", "+4.1667%", "+0.1%", "-0.1%", "-4.0%"].entries()) {
     assert.deepEqual(values("sample-rate-pullup", { sample_rate_pullup_raw_value: raw }), [label]);
   }

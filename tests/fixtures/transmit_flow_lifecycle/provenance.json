@@ -1,0 +1,119 @@
+{
+  "claims": {
+    "inferred": [
+      "Legacy record lengths generalize with validated channel count"
+    ],
+    "observed": [
+      "The retained 0x2729 payload selects global flow 2 and transmitter channel 2",
+      "The retained 0x2809 allocation delegates the global identifier and selects transmitter channels 1 and 2",
+      "The retained 0x2809 delete payload names global flow 2"
+    ],
+    "unknown": [
+      "Legacy original capture frame and timestamp",
+      "0x2809 option-bit meanings",
+      "0x2801 create and delete layout provenance",
+      "RTP/AES67 transmit authoring",
+      "Managed transmit-flow mutation"
+    ]
+  },
+  "cohorts": {
+    "legacy_2729_explicit_slot_multicast": {
+      "evidence_class": "observed",
+      "files": {
+        "legacy-2729-create-request.bin": {
+          "sha256": "836fae46b41a6a85b35a857909312e30b1ff30e44e7e04ab2deb03945378cbb1",
+          "size_bytes": 58
+        },
+        "legacy-2729-delete-request.bin": {
+          "sha256": "fc360d5bc80ab3cd3c56fda3ab854f191e6ce0a7b6fdd061387e0ee9c60ce98a",
+          "size_bytes": 16
+        }
+      },
+      "source": {
+        "device": "AVIO AES3",
+        "limitations": [
+          "Original capture digest, frame number and timestamp were not retained",
+          "No 0x2801 mutation exchange is promoted"
+        ],
+        "originating_tool": "Dante Controller; exact version not retained with the historical fixture",
+        "run": "Historical live flow-mutation fixture retained in tests/test_avio_flow_mutation.py",
+        "scope": "One explicit flow-slot create and delete application payload; no media evidence",
+        "timestamp": "unknown; not retained with the historical fixture"
+      }
+    },
+    "modern_2809_device_allocated_multicast": {
+      "additional_sources": [
+        {
+          "device": "AVIO AES3",
+          "files": [
+            "modern-2809-delete-request.bin",
+            "modern-2809-create-readback.bin",
+            "modern-2809-delete-readback.bin"
+          ],
+          "limitations": [
+            "Original capture digest and frame numbers were not retained for these three files"
+          ],
+          "originating_tool": "Dante Controller and NetAudio; exact association per payload is retained by the test names only",
+          "run": "Historical live flow-mutation fixtures retained in tests/test_avio_flow_mutation.py",
+          "timestamp": "unknown; not retained with the historical fixtures"
+        }
+      ],
+      "evidence_class": "observed",
+      "files": {
+        "modern-2809-create-acknowledgement.bin": {
+          "sha256": "de9985f0b5a8b21df1c347b029eb878c1a335d3044603e27286d1ce15517af58",
+          "size_bytes": 110
+        },
+        "modern-2809-create-readback.bin": {
+          "sha256": "65ade7130a10dcc24b2aae623f2ef7c3fe5d6afd6b2cc46566192124333a8142",
+          "size_bytes": 116
+        },
+        "modern-2809-create-request.bin": {
+          "sha256": "6ce75807cb0f2228501eceeb42aeecfca879bc0ec21489e917af5b9f99d611d9",
+          "size_bytes": 106
+        },
+        "modern-2809-delete-readback.bin": {
+          "sha256": "d51f0c053c769622393435b45442f87f3e6ab06d4c704bf0f161cd4608b91906",
+          "size_bytes": 22
+        },
+        "modern-2809-delete-request.bin": {
+          "sha256": "8be34358eaa3ce84686e072fa5c538f13e3377c75ebb77ff3740437188b5871b",
+          "size_bytes": 34
+        }
+      },
+      "source": {
+        "capture": "controller-both-channels.pcapng",
+        "capture_sha256": "5a9b641dfbb7d85622f4b1926fa95447aaa5fadfa3fd78b47255c8e94699d893",
+        "capture_size_bytes": 31732,
+        "device": "AVIO AES3",
+        "firmware_version": "4.3.0",
+        "originating_tool": "Dante Controller 4.16.1.5, operated by the user",
+        "product_version": "1.2.0.3",
+        "request_frame": 35,
+        "request_timestamp_epoch": "1788695514.992404000",
+        "response_frame": 36,
+        "response_timestamp_epoch": "1788695514.996815000",
+        "run": "netaudio-aes3-allocation-20260906.G5wpTA",
+        "scope": "Bounded Controller allocation and readback on one authorized device; no media",
+        "software_version": "4.1.0"
+      }
+    }
+  },
+  "evidence_boundary": {
+    "allowed_evidence": [
+      "Retained sanitized UDP application payloads",
+      "Existing repository tests",
+      "Controller operations performed through its visible interface"
+    ],
+    "excluded_evidence": [
+      "Proprietary executable or firmware static inspection",
+      "Recovered source or internal symbol catalogs"
+    ]
+  },
+  "schema_version": 1,
+  "transformations": [
+    "Select only the retained application payload",
+    "Decode lowercase hexadecimal to bytes",
+    "Bind each promoted byte fixture with SHA-256"
+  ]
+}

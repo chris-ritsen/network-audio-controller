@@ -14,9 +14,9 @@ from netaudio.dante.const import (
     CONMON_OPCODE_DANTE_MODEL_RESPONSE,
     CONMON_OPCODE_ENCODING_STATUS,
     CONMON_OPCODE_EXPORT_FRAGMENT,
-    CONMON_OPCODE_GAIN_STATUS,
+    CONMON_OPCODE_CODEC_STATUS,
     CONMON_OPCODE_INTERFACE_STATUS,
-    CONMON_OPCODE_LINK_STATUS,
+    CONMON_OPCODE_INTERFACE_STATISTICS,
     CONMON_OPCODE_LOCK_RESET_STATUS,
     CONMON_OPCODE_MAKE_MODEL_RESPONSE,
     CONMON_OPCODE_PTP_CLOCK_STATUS,
@@ -29,8 +29,8 @@ from netaudio.dante.const import (
     PROTOCOL_SETTINGS,
 )
 from netaudio.dante.events import DanteEvent, EventType
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
-from netaudio.dante.link_status import LinkStatusObservation
+from netaudio.dante.gain import codec_status_fields
+from netaudio.dante.interface_statistics import InterfaceStatisticsObservation
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.network_configuration import interface_redundancy_status, switch_configuration_fields
 from netaudio.dante.packet_store import PacketRecord
@@ -44,9 +44,9 @@ STATUS_KIND_CLEAR_CONFIGURATION = "clear_configuration_status"
 STATUS_KIND_CLOCK = "clock_status"
 STATUS_KIND_DANTE_MODEL = "dante_model"
 STATUS_KIND_ENCODING = "encoding"
-STATUS_KIND_GAIN = "gain"
+STATUS_KIND_CODEC = "codec"
 STATUS_KIND_INTERFACE = "interface"
-STATUS_KIND_LINK = "link_status"
+STATUS_KIND_INTERFACE_STATISTICS = "interface_statistics"
 STATUS_KIND_LOCK = "lock_status"
 STATUS_KIND_MAKE_MODEL = "make_model"
 STATUS_KIND_ROUTING_CAPACITY = "routing_capacity"
@@ -135,11 +135,27 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
         status["dante_model_id"] = parsed["board_codename"]
     if parsed["board_name"]:
         status["board_name"] = parsed["board_name"]
-    status["dante_model_capabilities"] = parsed["capabilities"]
+    status["dante_model_record_protocol_version"] = parsed["record_protocol_version"]
+    status["dante_model_primary_capabilities"] = parsed["primary_capabilities"]
+    status["dante_model_read_only_capabilities"] = parsed["read_only_capabilities"]
     status["dante_model_monitoring_capabilities"] = parsed["monitoring_capabilities"]
+    status["dante_model_secondary_capabilities"] = parsed["secondary_capabilities"]
+    status["dante_model_domain_capability_values"] = parsed["domain_capability_values"]
+    status["dante_model_domain_capability_validity"] = parsed["domain_capability_validity"]
     for field_name in (
-        "aes67_supported",
+        "identify_supported",
+        "sample_rate_configuration_supported",
+        "encoding_configuration_supported",
+        "sample_rate_pullup_configuration_supported",
+        "switch_redundancy_supported",
+        "static_ipv4_configuration_supported",
         "detailed_metering_supported",
+        "aes67_configuration_supported",
+        "device_locking_supported",
+        "external_word_clock_read_only",
+        "switch_redundancy_read_only",
+        "static_ipv4_configuration_read_only",
+        "generic_codec_control_supported",
         "interface_statistics_supported",
         "clock_monitoring_supported",
         "per_channel_signal_presence_supported",
@@ -150,16 +166,11 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
     return ParsedStatus(STATUS_KIND_DANTE_MODEL, status, parsed)
 
 
-def _parse_gain_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
-    parsed = _core_parse("gain_status", data, source_ip, "gain status")
+def _parse_codec_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
+    parsed = _core_parse("codec_status", data, source_ip, "codec status")
     if parsed is None:
         return None
-    status = {
-        "gain_device_type": parsed["device_type"],
-        "gain_levels": parsed["channel_levels"],
-        "supported_gain_levels": list(SUPPORTED_GAIN_LEVELS),
-    }
-    return ParsedStatus(STATUS_KIND_GAIN, status, (parsed["device_type"], parsed["channel_levels"]))
+    return ParsedStatus(STATUS_KIND_CODEC, codec_status_fields(device, parsed), parsed)
 
 
 def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -183,16 +194,16 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
     return ParsedStatus(STATUS_KIND_INTERFACE, status, status)
 
 
-def _parse_link_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
+def _parse_interface_statistics(data: bytes, source_ip: str, device) -> ParsedStatus | None:
     from netaudio import core
 
     try:
-        parsed = core.parse_response("unmapped_0040_status", data)
-        observation = LinkStatusObservation.from_core(parsed, device=device)
+        parsed = core.parse_response("interface_statistics_status", data)
+        observation = InterfaceStatisticsObservation.from_core(parsed, source_ip)
     except (core.NetaudioCoreError, KeyError, TypeError, ValueError) as exception:
-        logger.warning(f"Invalid link status from {source_ip}: {exception}")
+        logger.warning(f"Invalid interface statistics from {source_ip}: {exception}")
         return None
-    return ParsedStatus(STATUS_KIND_LINK, observation, observation)
+    return ParsedStatus(STATUS_KIND_INTERFACE_STATISTICS, observation, observation)
 
 
 def _parse_lock_reset_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -273,22 +284,25 @@ def _parse_routing_capacity_status(data: bytes, source_ip: str, device) -> Parse
 def _parse_capability_status(
     kind: str,
     response_kind: str,
-    current_field: str,
-    supported_field: str,
     description: str,
 ):
     def parse(data: bytes, source_ip: str, device) -> ParsedStatus | None:
         parsed = _core_parse(response_kind, data, source_ip, f"{description} status")
         if parsed is None:
             return None
-        current_value = parsed[current_field]
-        supported_values = parsed[supported_field]
+        current_value = parsed["current_value"]
+        supported_values = parsed["available_values"]
         logger.debug(
             f"Conmon {response_kind} from {source_ip} ({len(data)}B): "
             f"current={current_value} supported={supported_values}"
         )
-        status = {kind: current_value, f"supported_{kind}s": supported_values}
-        return ParsedStatus(kind, status, (current_value, supported_values))
+        status = {
+            kind: current_value,
+            f"requested_{kind}": parsed["requested_value"],
+            f"{kind}_update_mode": parsed["update_mode"],
+            f"supported_{kind}s": supported_values,
+        }
+        return ParsedStatus(kind, status, parsed)
 
     return parse
 
@@ -297,14 +311,16 @@ def _parse_sample_rate_pullup_status(data: bytes, source_ip: str, device) -> Par
     parsed = _core_parse("sample_rate_pullup_status", data, source_ip, "sample rate pull-up status")
     if parsed is None:
         return None
-    current_raw_value = parsed["applied_value"]["raw_value"]
-    supported_raw_values = [value["raw_value"] for value in parsed["supported_values"]]
+    current_raw_value = parsed["current_value"]
+    supported_raw_values = parsed["available_values"]
     status = {
-        "requested_sample_rate_pullup_raw_value": parsed["requested_value"]["raw_value"],
+        "requested_sample_rate_pullup_raw_value": parsed["requested_value"],
         "sample_rate_pullup_raw_value": current_raw_value,
+        "sample_rate_pullup_update_mode": parsed["update_mode"],
+        "sample_rate_pullup_flags": parsed["flags"],
         "supported_sample_rate_pullup_raw_values": supported_raw_values,
     }
-    return ParsedStatus(STATUS_KIND_SAMPLE_RATE_PULLUP, status, (current_raw_value, supported_raw_values))
+    return ParsedStatus(STATUS_KIND_SAMPLE_RATE_PULLUP, status, parsed)
 
 
 def _parse_switch_configuration_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -322,13 +338,11 @@ CONMON_STATUS_PARSERS = {
     CONMON_OPCODE_ENCODING_STATUS: _parse_capability_status(
         STATUS_KIND_ENCODING,
         "encoding_status",
-        "current_encoding",
-        "supported_encodings",
         "encoding",
     ),
-    CONMON_OPCODE_GAIN_STATUS: _parse_gain_status,
+    CONMON_OPCODE_CODEC_STATUS: _parse_codec_status,
     CONMON_OPCODE_INTERFACE_STATUS: _parse_interface_status,
-    CONMON_OPCODE_LINK_STATUS: _parse_link_status,
+    CONMON_OPCODE_INTERFACE_STATISTICS: _parse_interface_statistics,
     CONMON_OPCODE_LOCK_RESET_STATUS: _parse_lock_reset_status,
     CONMON_OPCODE_MAKE_MODEL_RESPONSE: _parse_make_model,
     CONMON_OPCODE_PTP_CLOCK_STATUS: _parse_ptp_clock_status,
@@ -337,8 +351,6 @@ CONMON_STATUS_PARSERS = {
     CONMON_OPCODE_SAMPLE_RATE_STATUS: _parse_capability_status(
         STATUS_KIND_SAMPLE_RATE,
         "sample_rate_status",
-        "current_sample_rate",
-        "supported_sample_rates",
         "sample rate",
     ),
     CONMON_OPCODE_SWITCH_CONFIGURATION_STATUS: _parse_switch_configuration_status,
@@ -454,6 +466,9 @@ class NotificationPacketHandlers:
         self.notify_waiters("notification", source_ip, opcode)
         if parsed is None:
             return True
+        if parsed.kind == STATUS_KIND_INTERFACE_STATISTICS:
+            observation = self._interface_statistics_error_baselines.apply(parsed.status)
+            parsed = ParsedStatus(parsed.kind, observation, observation)
 
         self.notify_waiters(parsed.kind, source_ip, parsed.waiter_result)
         if parsed.kind == STATUS_KIND_CLOCK:

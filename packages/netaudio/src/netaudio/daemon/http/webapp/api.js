@@ -10,7 +10,7 @@ export class ApiError extends Error {
 }
 
 async function request(method, path, body) {
-  if (method !== "GET" && !["/presets/preview", "/metering/stop", "/ddm/login", "/ddm/logout", "/ddm/context", "/ddm/domains", "/settings/monitoring"].includes(path) && !inventoryReady.value) {
+  if (method !== "GET" && !["/presets/preview", "/metering/stop", "/ddm/login", "/ddm/logout", "/ddm/context", "/ddm/domains", "/settings/monitoring", "/event-journal"].includes(path) && !inventoryReady.value) {
     throw new ApiError("Waiting for live device inventory. Try again when connected.", 409, null);
   }
   const options = { method, headers: { Accept: "application/json" } };
@@ -49,6 +49,10 @@ async function remove(path) {
   return result;
 }
 
+function destroy(path) {
+  return request("DELETE", path);
+}
+
 export const api = {
   savePreset: (body) => post("/presets/save", body),
   previewPreset: (body) => post("/presets/preview", body),
@@ -75,6 +79,15 @@ export const api = {
   selectDdmContext: (body) => post("/ddm/context", body),
   getMeteringCache: () => get("/metering/cache"),
   getMeteringSnapshot: (name) => get(`/metering/snapshot/${encodeURIComponent(name)}`),
+  getEventJournal: () => get("/event-journal"),
+  getIssues: (state) => get(`/issues${state ? `?state=${encodeURIComponent(state)}` : ""}`),
+  clearEventJournal: () => destroy("/event-journal"),
+  getTransmitFlows: (device) => get(`/transmit-flows/${encodeURIComponent(device)}`),
+  planTransmitFlow: (device, specification) => post("/transmit-flows/plan", { device, specification }),
+  createTransmitFlow: (device, specification) =>
+    post("/transmit-flows/create", { device, specification, confirmed: true }),
+  deleteTransmitFlow: (device, flowId) =>
+    post("/transmit-flows/delete", { device, flow_id: flowId, confirmed: true }),
 
   forgetDevice: (name) => remove(`/devices/${encodeURIComponent(name)}`),
 

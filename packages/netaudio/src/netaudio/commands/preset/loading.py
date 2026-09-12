@@ -34,7 +34,26 @@ def _match_preset_devices(devices: dict, preset_devices: dict[str, dict[str, Any
     matched = []
     unmatched_preset_names = []
     for device_name, config in preset_devices.items():
-        candidates = devices_by_name.get(device_name, [])
+        identity = config.get("device_identity")
+        if isinstance(identity, dict) and any(
+            identity.get(key) for key in ("server_name", "mac_address", "inventory_id")
+        ):
+            candidates = [
+                (server_name, device)
+                for server_name, device in devices.items()
+                if all(
+                    {
+                        "server_name": server_name,
+                        "mac_address": getattr(device, "mac_address", None),
+                        "inventory_id": getattr(device, "inventory_id", None),
+                    }[key]
+                    == value
+                    for key, value in identity.items()
+                    if key in {"server_name", "mac_address", "inventory_id"} and value
+                )
+            ]
+        else:
+            candidates = devices_by_name.get(device_name, [])
         if not candidates:
             unmatched_preset_names.append(device_name)
             continue
@@ -72,8 +91,31 @@ def _report_preset_load(report: PresetLoadReport) -> None:
 async def run_preset_load(application, devices, preset_devices: dict, confirm_destructive: bool) -> None:
     matched_devices = _match_preset_devices(devices, preset_devices)
     try:
-        plan = await build_preset_plan(matched_devices)
+        plan = await build_preset_plan(application, matched_devices)
     except PresetValidationError as exception:
         _refuse(exception.lines)
     report = await apply_preset_plan(application, plan, confirm_destructive=confirm_destructive)
     _report_preset_load(report)
+
+
+async def run_preset_dry_run(application, devices, preset_devices: dict, preset_name: str, preset_path) -> None:
+    from netaudio.cli_support.output import output_single, structured_output_selected
+    from netaudio.commands.preset.display import show_preset_plan
+
+    matched_devices = _match_preset_devices(devices, preset_devices)
+    try:
+        plan = await build_preset_plan(application, matched_devices)
+    except PresetValidationError as exception:
+        _refuse(exception.lines)
+    if structured_output_selected():
+        output_single(
+            {
+                "name": preset_name,
+                "path": str(preset_path),
+                "configuration": preset_devices,
+                "plan": plan.to_dict(),
+            }
+        )
+        return
+    typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)")
+    show_preset_plan(plan)

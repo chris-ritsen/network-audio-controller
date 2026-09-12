@@ -42,11 +42,13 @@ from netaudio.dante.diagnostic_logs import (
     parse_device_log_export,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS
+from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, codec_status_fields, gain_adapter_from_codec_status
 from netaudio.dante.latency import latency_controls_from_settings, nanoseconds_to_milliseconds
-from netaudio.dante.link_status import LinkStatusObservation
+from netaudio.dante.interface_statistics import InterfaceStatisticsObservation
 from netaudio.dante.lock import _validate_lock_key, core_lock_device, core_unlock_device
 from netaudio.dante.lock_status import LockStatusObservation
+from netaudio.dante.operation_availability import probe_supported, require_writable
+from netaudio.dante.sap import SapFlowInventory, SapInventoryChange
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     NOTIFICATION_LATENCY_CHANGE,
@@ -61,19 +63,21 @@ from netaudio.dante.services.notification import (
     mutate_and_wait_for_capability_value,
     mutate_and_wait_for_clear_configuration_status,
     request_and_wait_for_conmon_export,
-    send_and_wait_for_gain_status,
+    send_and_wait_for_gain_adapter,
 )
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
     STATUS_KIND_BLUETOOTH,
     STATUS_KIND_CLOCK,
     STATUS_KIND_ENCODING,
-    STATUS_KIND_GAIN,
+    STATUS_KIND_CODEC,
     STATUS_KIND_INTERFACE,
+    STATUS_KIND_INTERFACE_STATISTICS,
     STATUS_KIND_SAMPLE_RATE,
     STATUS_KIND_SAMPLE_RATE_PULLUP,
     STATUS_KIND_SWITCH_CONFIGURATION,
 )
+from netaudio.dante.services.sap import SapDiscoveryService
 from netaudio.dante.state import STATUS_KIND_DIAGNOSTIC_LOG_EXPORT, DanteStateService, apply_device_status
 
 logger = logging.getLogger("netaudio")
@@ -109,7 +113,14 @@ def _clock_status_snapshot(device) -> dict:
 
 
 class DanteApplication:
-    def __init__(self, packet_store=None, dissect=False, session_id=None, managed_transport=None):
+    def __init__(
+        self,
+        packet_store=None,
+        dissect=False,
+        session_id=None,
+        managed_transport=None,
+        sap_service=None,
+    ):
         from netaudio.common.app_config import settings as app_settings
 
         self.devices: dict = {}
@@ -132,12 +143,38 @@ class DanteApplication:
             dissect=dissect,
         )
         self.notifications.session_id = session_id
+        if sap_service is None:
+            self.external_flows = SapFlowInventory()
+            self.sap = SapDiscoveryService(
+                self.external_flows,
+                interface_name=app_settings.interface,
+                on_change=self._on_external_flow_change,
+            )
+        else:
+            self.sap = sap_service
+            self.external_flows = sap_service.inventory
+            self.sap.set_change_handler(self._on_external_flow_change)
         self.state = DanteStateService(self)
         self._browser = None
         self._started = False
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._managed_transport = managed_transport
         self._managed_transports: dict[str, object] = {}
+
+    def _on_external_flow_change(self, change: SapInventoryChange) -> None:
+        self.dispatcher.emit_nowait(
+            DanteEvent(
+                type=EventType.EXTERNAL_FLOW_CHANGED,
+                data={
+                    "change": change.kind.value,
+                    "identity": {
+                        "source_ipv4": change.identity[0],
+                        "session_id": change.identity[1],
+                    },
+                    "flow": change.flow.to_dict() if change.flow is not None else None,
+                },
+            )
+        )
 
     @staticmethod
     def _apply_device_settings(device, settings) -> None:
@@ -189,18 +226,27 @@ class DanteApplication:
         return device
 
     @staticmethod
-    def _apply_encoding_capability(device, current_encoding: int, supported_encodings: list[int]) -> None:
+    def _apply_encoding_capability(device, status: dict) -> None:
         apply_device_status(
             device,
             STATUS_KIND_ENCODING,
-            {"encoding": current_encoding, "supported_encodings": supported_encodings},
+            {
+                "encoding": status["current_value"],
+                "requested_encoding": status["requested_value"],
+                "encoding_update_mode": status["update_mode"],
+                "supported_encodings": status["available_values"],
+            },
         )
 
     @staticmethod
-    def _apply_gain_capability(device, device_type: str, channel_levels: list[int]) -> None:
+    def _apply_codec_status(device, status: dict) -> None:
+        apply_device_status(device, STATUS_KIND_CODEC, codec_status_fields(device, status))
+
+    @staticmethod
+    def _apply_gain_adapter(device, device_type: str, channel_levels: list[int]) -> None:
         apply_device_status(
             device,
-            STATUS_KIND_GAIN,
+            STATUS_KIND_CODEC,
             {
                 "gain_device_type": device_type,
                 "gain_levels": channel_levels,
@@ -209,25 +255,32 @@ class DanteApplication:
         )
 
     @staticmethod
-    def _apply_sample_rate_capability(device, current_sample_rate: int, supported_sample_rates: list[int]) -> None:
+    def _apply_sample_rate_capability(device, status: dict) -> None:
         apply_device_status(
             device,
             STATUS_KIND_SAMPLE_RATE,
-            {"sample_rate": current_sample_rate, "supported_sample_rates": supported_sample_rates},
+            {
+                "sample_rate": status["current_value"],
+                "requested_sample_rate": status["requested_value"],
+                "sample_rate_update_mode": status["update_mode"],
+                "supported_sample_rates": status["available_values"],
+            },
         )
 
     @staticmethod
     def _apply_sample_rate_pullup_capability(
         device,
-        current_raw_value: int,
-        supported_raw_values: list[int],
+        status: dict,
     ) -> None:
         apply_device_status(
             device,
             STATUS_KIND_SAMPLE_RATE_PULLUP,
             {
-                "sample_rate_pullup_raw_value": current_raw_value,
-                "supported_sample_rate_pullup_raw_values": supported_raw_values,
+                "sample_rate_pullup_raw_value": status["current_value"],
+                "requested_sample_rate_pullup_raw_value": status["requested_value"],
+                "sample_rate_pullup_update_mode": status["update_mode"],
+                "sample_rate_pullup_flags": status["flags"],
+                "supported_sample_rate_pullup_raw_values": status["available_values"],
             },
         )
 
@@ -309,6 +362,17 @@ class DanteApplication:
             names = ", ".join(sorted(device.server_name or device.name for device in matches))
             raise RuntimeError(f"control address {target} is ambiguous across devices: {names}")
         return matches[0] if matches else target
+
+    def _require_probe_supported(self, target, operation: str) -> None:
+        if hasattr(target, "dante_model_primary_capabilities"):
+            candidates = [target]
+        else:
+            key = self._control_key(target)
+            candidates = [
+                device for device in self.devices.values() if device.online and self._control_key(device) == key
+            ]
+        if candidates and all(not probe_supported(device, operation) for device in candidates):
+            raise RuntimeError(f"{operation.replace('_', ' ')} is not supported by the advertised capabilities")
 
     async def _export_conmon_data(
         self,
@@ -403,12 +467,6 @@ class DanteApplication:
             )
             if include_channels:
                 await self.apply_modern_arc_status_pages(device)
-            from netaudio.dante.network_configuration import learn_switch_ports
-
-            try:
-                await learn_switch_ports(self, device, timeout=1.0)
-            except (RuntimeError, OSError) as exception:
-                logger.debug(f"Switch port learning unavailable for {device.server_name}: {exception}")
             device.error = None
         except (RuntimeError, OSError) as exception:
             device.error = exception
@@ -421,7 +479,7 @@ class DanteApplication:
             devices,
             timeout,
             "AES67",
-            skip_device=lambda device: device.aes67_current is not None,
+            skip_device=lambda device: device.aes67_current is not None or not probe_supported(device, "aes67"),
         )
 
     async def _probe_all(
@@ -507,10 +565,9 @@ class DanteApplication:
                 logger.warning(f"Failed to probe {capability_description} for {key}: {result}")
                 continue
             response_count += 1
-            current_value, supported_values = result
             for device in target_devices_by_key[key]:
                 if device.online:
-                    apply_capability(device, current_value, supported_values)
+                    apply_capability(device, result)
 
         logger.debug(
             f"{capability_description.capitalize()}: {response_count}/{len(probe_tasks)} device addresses responded"
@@ -518,7 +575,7 @@ class DanteApplication:
 
     async def _probe_encodings_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
-            lambda device: device.supported_encodings is not None,
+            lambda device: device.supported_encodings is not None or not probe_supported(device, "encoding"),
             self._apply_encoding_capability,
             self.probe_encoding_status,
             "encodings",
@@ -526,12 +583,12 @@ class DanteApplication:
             devices,
         )
 
-    async def _probe_gain_levels_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
+    async def _probe_codec_status_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
-            lambda device: device.supported_gain_levels is not None,
-            self._apply_gain_capability,
-            self.probe_gain_status,
-            "gain levels",
+            lambda device: device.codec_parameters is not None or not probe_supported(device, "codec_control"),
+            self._apply_codec_status,
+            self.probe_codec_status,
+            "codec status",
             timeout,
             devices,
         )
@@ -575,7 +632,10 @@ class DanteApplication:
 
     async def _probe_sample_rate_pullups_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
-            lambda device: device.supported_sample_rate_pullup_raw_values is not None,
+            lambda device: (
+                device.supported_sample_rate_pullup_raw_values is not None
+                or not probe_supported(device, "sample_rate_pullup")
+            ),
             self._apply_sample_rate_pullup_capability,
             self.probe_sample_rate_pullup_status,
             "sample rate pull-ups",
@@ -585,7 +645,7 @@ class DanteApplication:
 
     async def _probe_sample_rates_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
-            lambda device: device.supported_sample_rates is not None,
+            lambda device: device.supported_sample_rates is not None or not probe_supported(device, "sample_rate"),
             self._apply_sample_rate_capability,
             self.probe_sample_rate_status,
             "sample rates",
@@ -999,7 +1059,7 @@ class DanteApplication:
             self._probe_aes67_all(),
             self._probe_sample_rates_all(),
             self._probe_encodings_all(),
-            self._probe_gain_levels_all(),
+            self._probe_codec_status_all(),
             self._probe_sample_rate_pullups_all(),
         )
 
@@ -1171,6 +1231,8 @@ class DanteApplication:
     async def get_aes67_configured(self, device):
         from netaudio import core
 
+        self._require_probe_supported(device, "aes67")
+
         if not getattr(device, "requires_managed_control", False) and device.ipv4 is None:
             return None
         try:
@@ -1221,12 +1283,14 @@ class DanteApplication:
         return settings
 
     async def identify(self, device) -> None:
+        require_writable(device, "identify")
         await self.send_identify(device)
 
     async def lock_device(self, device, pin: str, key: bytes) -> dict:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
+        require_writable(device, "locking")
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("device lock has no verified DDM operation and was not sent")
         if getattr(device, "ipv4", None) is None:
@@ -1238,11 +1302,31 @@ class DanteApplication:
         if device and device.online:
             device.online = False
             device.supported_sample_rates = None
+            device.requested_sample_rate = None
+            device.sample_rate_update_mode = None
             device.supported_encodings = None
-            device.aes67_supported = None
+            device.requested_encoding = None
+            device.encoding_update_mode = None
+            device.aes67_configuration_supported = None
             device.aes67_configured_property_advertised = None
-            device.dante_model_capabilities = None
+            device.dante_model_record_protocol_version = None
+            device.dante_model_primary_capabilities = None
+            device.dante_model_read_only_capabilities = None
             device.dante_model_monitoring_capabilities = None
+            device.dante_model_secondary_capabilities = None
+            device.dante_model_domain_capability_values = None
+            device.dante_model_domain_capability_validity = None
+            device.identify_supported = None
+            device.sample_rate_configuration_supported = None
+            device.encoding_configuration_supported = None
+            device.sample_rate_pullup_configuration_supported = None
+            device.switch_redundancy_supported = None
+            device.static_ipv4_configuration_supported = None
+            device.device_locking_supported = None
+            device.external_word_clock_read_only = None
+            device.switch_redundancy_read_only = None
+            device.static_ipv4_configuration_read_only = None
+            device.generic_codec_control_supported = None
             device.detailed_metering_supported = None
             device.interface_statistics_supported = None
             device.clock_monitoring_supported = None
@@ -1253,7 +1337,14 @@ class DanteApplication:
             device.settings_properties = None
             device.sample_rate_pullup_raw_value = None
             device.requested_sample_rate_pullup_raw_value = None
+            device.sample_rate_pullup_update_mode = None
+            device.sample_rate_pullup_flags = None
             device.supported_sample_rate_pullup_raw_values = None
+            device.codec_parameters = None
+            device.gain_adapter = None
+            device.gain_device_type = None
+            device.gain_levels = None
+            device.supported_gain_levels = None
             device.transmitter_flows = None
             device.tx_flow_count = None
             device.receiver_flows = None
@@ -1275,9 +1366,9 @@ class DanteApplication:
         mutate: Callable[[], Awaitable[object]],
         capability_name: str,
         expected_value: int,
-        probe_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
+        probe_status: Callable[[], Awaitable[dict | None]],
         timeout: float = 2.0,
-    ) -> tuple[int, list[int]] | None:
+    ) -> dict | None:
         key = self._control_key(device)
 
         async def mutate_without_result() -> None:
@@ -1375,7 +1466,7 @@ class DanteApplication:
             ("AES67", self._probe_aes67_all(timeout=timeout, devices=devices)),
             ("sample rates", self._probe_sample_rates_all(timeout=timeout, devices=devices)),
             ("encodings", self._probe_encodings_all(timeout=timeout, devices=devices)),
-            ("gain levels", self._probe_gain_levels_all(timeout=timeout, devices=devices)),
+            ("codec status", self._probe_codec_status_all(timeout=timeout, devices=devices)),
             ("sample rate pull-ups", self._probe_sample_rate_pullups_all(timeout=timeout, devices=devices)),
         ]
         if device_ip_addresses:
@@ -1416,6 +1507,7 @@ class DanteApplication:
                 logger.warning(f"Failed to populate {phase_tasks[task]}: {exception}")
 
     async def probe_aes67_state(self, target, timeout: float = 2.0) -> tuple[bool | None, bool | None]:
+        self._require_probe_supported(target, "aes67")
         status = await self._probe_once(
             "aes67",
             target,
@@ -1478,7 +1570,8 @@ class DanteApplication:
         apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result)
         return _clock_status_snapshot(device)
 
-    async def probe_encoding_status(self, target, timeout: float = 2.0) -> tuple[int, list[int]]:
+    async def probe_encoding_status(self, target, timeout: float = 2.0) -> dict:
+        self._require_probe_supported(target, "encoding")
         return await self._probe_with_retries(
             "encoding",
             target,
@@ -1487,22 +1580,32 @@ class DanteApplication:
             "encoding",
         )
 
-    async def probe_gain_status(
+    async def probe_codec_status(
+        self,
+        target,
+        timeout: float = 2.0,
+    ) -> dict:
+        self._require_probe_supported(target, "codec_control")
+        return await self._probe_with_retries(
+            "codec",
+            target,
+            self.send_probe_codec_status,
+            timeout,
+            "codec status",
+        )
+
+    async def probe_gain_adapter(
         self,
         target,
         timeout: float = 2.0,
     ) -> tuple[str, list[int]]:
-        key = self._control_key(target)
-        async with self._capability_probe_lock("gain", key):
-            result = await send_and_wait_for_gain_status(
-                self.notifications,
-                key,
-                lambda: self.send_probe_gain_level(target),
-                timeout,
-            )
-        if result is None:
-            raise CapabilityProbeTimeout(f"gain status readback timed out for {key}")
-        return result
+        device = self._control_target(target)
+        status = await self.probe_codec_status(target, timeout=timeout)
+        adapter = gain_adapter_from_codec_status(device, status)
+        if adapter is None:
+            raise RuntimeError(f"codec status has no established gain adapter for {self._control_key(target)}")
+        self._apply_codec_status(device, status)
+        return adapter["device_type"], adapter["channel_levels"]
 
     async def probe_interface_status(self, target, timeout: float = 2.0) -> list[dict]:
         status = await self._probe_once(
@@ -1517,23 +1620,21 @@ class DanteApplication:
             apply_device_status(device, STATUS_KIND_INTERFACE, status)
         return status["interfaces"]
 
-    async def probe_link_status(
+    async def probe_interface_statistics(
         self,
         target,
         timeout: float = 2.0,
-    ) -> LinkStatusObservation:
+    ) -> InterfaceStatisticsObservation:
         observation = await self._probe_once(
-            "link_status",
+            "interface_statistics",
             target,
-            self.send_probe_link_status,
+            self.send_probe_interface_statistics,
             timeout,
-            "link status",
+            "interface statistics",
         )
         device = target if hasattr(target, "interfaces") else self._device_by_control_key(self._control_key(target))
         if device is not None:
-            device.switch_port_count = sum(
-                1 for record in observation.records if (record.label or "").startswith("switch_port")
-            )
+            apply_device_status(device, STATUS_KIND_INTERFACE_STATISTICS, observation)
         return observation
 
     async def probe_lock_status(
@@ -1541,6 +1642,7 @@ class DanteApplication:
         target,
         timeout: float = 2.0,
     ) -> LockStatusObservation:
+        self._require_probe_supported(target, "locking")
         return await self._probe_once(
             "lock_status",
             target,
@@ -1569,7 +1671,8 @@ class DanteApplication:
         self,
         target,
         timeout: float = 2.0,
-    ) -> tuple[int, list[int]]:
+    ) -> dict:
+        self._require_probe_supported(target, "sample_rate_pullup")
         return await self._probe_with_retries(
             "sample_rate_pullup",
             target,
@@ -1578,7 +1681,8 @@ class DanteApplication:
             "sample rate pull-up",
         )
 
-    async def probe_sample_rate_status(self, target, timeout: float = 2.0) -> tuple[int, list[int]]:
+    async def probe_sample_rate_status(self, target, timeout: float = 2.0) -> dict:
+        self._require_probe_supported(target, "sample_rate")
         return await self._probe_with_retries(
             "sample_rate",
             target,
@@ -1592,6 +1696,7 @@ class DanteApplication:
         target,
         timeout: float = 2.0,
     ) -> dict:
+        self._require_probe_supported(target, "redundancy")
         status = await self._probe_once(
             "switch_configuration",
             target,
@@ -1639,6 +1744,36 @@ class DanteApplication:
             "transmitter flow status query",
             "transmitter_flow_status_page",
         )
+
+    def plan_transmit_flow(self, device, specification):
+        """Validate a canonical transmit-flow request without sending traffic."""
+        from netaudio.dante.flow_lifecycle import plan_create_transmit_flow
+        from netaudio.dante.transmit_flow import TransmitFlowSpecification
+
+        if isinstance(specification, dict):
+            specification = TransmitFlowSpecification.from_dict(specification)
+        return plan_create_transmit_flow(device, specification)
+
+    async def inspect_transmit_flows(self, device) -> dict:
+        """Return fresh transmitter inventory in the canonical flow schema."""
+        from netaudio.dante.flow_lifecycle import inspect_transmit_flows
+
+        return await inspect_transmit_flows(device)
+
+    async def create_transmit_flow(self, device, specification):
+        """Create one evidence-supported flow and preserve every completion phase."""
+        from netaudio.dante.flow_lifecycle import create_transmit_flow
+        from netaudio.dante.transmit_flow import TransmitFlowSpecification
+
+        if isinstance(specification, dict):
+            specification = TransmitFlowSpecification.from_dict(specification)
+        return await create_transmit_flow(device, specification)
+
+    async def delete_transmit_flow(self, device, flow_id: int):
+        """Delete one supported multicast flow and verify fresh absence."""
+        from netaudio.dante.flow_lifecycle import delete_transmit_flow
+
+        return await delete_transmit_flow(device, flow_id)
 
     async def reboot(self, device, host_mac=None) -> None:
         if getattr(device, "requires_managed_control", False):
@@ -1688,6 +1823,26 @@ class DanteApplication:
             device,
             lambda: self.send_remove_subscriptions(device, channel_numbers),
             SUBSCRIPTION_NOTIFICATION_IDS,
+        )
+
+    async def subscribe_external_rtp(
+        self,
+        device,
+        flow,
+        receiver_channel_ids,
+        flow_slot_assignments,
+        *,
+        receiver_supports_multiple_interfaces: bool,
+    ) -> dict:
+        from netaudio.dante.flows import subscribe_external_rtp
+
+        return await subscribe_external_rtp(
+            self,
+            device,
+            flow,
+            receiver_channel_ids,
+            flow_slot_assignments,
+            receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
         )
 
     async def reset_channel_name(self, device, channel_type: str, channel_number: int):
@@ -1816,14 +1971,23 @@ class DanteApplication:
     async def send_probe_encoding(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_encoding(host_mac))
 
-    async def send_probe_gain_level(self, device_ip_address, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.probe_gain_level(host_mac))
+    async def send_probe_codec_status(self, device_ip_address, host_mac=None) -> None:
+        await self._send_settings(device_ip_address, self.commands.probe_codec_status(host_mac))
 
     async def send_probe_interface_status(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_interface_status(host_mac))
 
-    async def send_probe_link_status(self, device_ip_address, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.probe_link_status(host_mac))
+    async def send_probe_interface_statistics(
+        self,
+        device_ip_address,
+        host_mac=None,
+        *,
+        extended_073a: bool = False,
+    ) -> None:
+        await self._send_settings(
+            device_ip_address,
+            self.commands.probe_interface_statistics(host_mac, extended_073a=extended_073a),
+        )
 
     async def send_probe_lock_reset_status(self, device_ip_address, host_mac=None, request_value: int = 100) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_lock_reset_status(host_mac, request_value))
@@ -1936,6 +2100,8 @@ class DanteApplication:
         await self._send_settings(device_ip_address, self.commands.set_sample_rate_pullup(raw_value, host_mac))
 
     async def set_aes67_enabled(self, device, is_enabled: bool, timeout: float = 2.0):
+        require_writable(device, "aes67")
+
         async def mutate() -> None:
             await self.send_enable_aes67(device, is_enabled)
             await self.send_probe_aes67(device)
@@ -1946,6 +2112,8 @@ class DanteApplication:
 
     async def set_aes67_multicast_prefix(self, device, prefix: str) -> str | None:
         from netaudio.dante.device import device_advertises_aes67_multicast_prefix
+
+        require_writable(device, "aes67")
 
         try:
             normalized_prefix = str(ipaddress.IPv4Address(prefix))
@@ -1998,9 +2166,10 @@ class DanteApplication:
             DEVICE_NAME_NOTIFICATION_IDS,
         )
 
-    async def set_encoding(self, device, encoding: int, timeout: float = 2.0) -> tuple[int, list[int]] | None:
+    async def set_encoding(self, device, encoding: int, timeout: float = 2.0) -> dict | None:
         if isinstance(encoding, bool) or not isinstance(encoding, int) or not 0 < encoding <= 0xFFFFFFFF:
             raise ValueError("encoding must be an integer from 1 through 4294967295")
+        require_writable(device, "encoding", encoding)
         supported_encodings = device.supported_encodings
         if supported_encodings is not None and encoding not in supported_encodings:
             raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
@@ -2017,7 +2186,7 @@ class DanteApplication:
             timeout,
         )
         if result is not None:
-            self._apply_encoding_capability(device, *result)
+            self._apply_encoding_capability(device, result)
         return result
 
     async def set_gain_level(
@@ -2028,6 +2197,7 @@ class DanteApplication:
         device_type: str,
         timeout: float = 4.0,
     ) -> tuple[str, list[int]] | None:
+        require_writable(device, "codec_control", gain_level)
         if device_type not in ("input", "output"):
             raise ValueError("device_type must be 'input' or 'output'")
         if isinstance(channel_number, bool) or not isinstance(channel_number, int) or not 1 <= channel_number <= 0xFFFF:
@@ -2043,8 +2213,9 @@ class DanteApplication:
 
         key = self._control_key(device)
         async with self._capability_probe_lock("gain", key):
-            result = await send_and_wait_for_gain_status(
+            result = await send_and_wait_for_gain_adapter(
                 self.notifications,
+                device,
                 key,
                 lambda: self.send_set_gain_level(
                     device,
@@ -2059,7 +2230,7 @@ class DanteApplication:
             )
             if result is not None:
                 observed_device_type, channel_levels = result
-                self._apply_gain_capability(device, observed_device_type, channel_levels)
+                self._apply_gain_adapter(device, observed_device_type, channel_levels)
             return result
 
     async def set_interface(
@@ -2127,6 +2298,8 @@ class DanteApplication:
     ):
         from netaudio.dante.sample_rate_topology import change_sample_rate_topology_safe
 
+        require_writable(device, "sample_rate", sample_rate_hertz)
+
         async def probe():
             return await self.probe_sample_rate_status(device, timeout=timeout)
 
@@ -2158,9 +2331,10 @@ class DanteApplication:
         device,
         raw_value: int,
         timeout: float = 4.0,
-    ) -> tuple[int, list[int]] | None:
+    ) -> dict | None:
         if isinstance(raw_value, bool) or not isinstance(raw_value, int) or not 0 <= raw_value <= 0xFFFFFFFF:
             raise ValueError("raw_value must be an integer from 0 through 4294967295")
+        require_writable(device, "sample_rate_pullup", raw_value)
         supported_raw_values = device.supported_sample_rate_pullup_raw_values
         if supported_raw_values is not None and raw_value not in supported_raw_values:
             raise ValueError(
@@ -2180,13 +2354,14 @@ class DanteApplication:
             timeout,
         )
         if result is not None:
-            self._apply_sample_rate_pullup_capability(device, *result)
+            self._apply_sample_rate_pullup_capability(device, result)
         return result
 
     async def shutdown(self) -> None:
         if not self._started:
             return
 
+        await self.sap.stop()
         await self.notifications.stop()
         await self.cmc.stop()
         await self.dispatcher.stop()
@@ -2227,6 +2402,7 @@ class DanteApplication:
             self.state.attach()
             await self.dispatcher.start()
             await self.notifications.start()
+            await self.sap.start()
         except BaseException:
             await self.shutdown()
             raise
@@ -2236,6 +2412,7 @@ class DanteApplication:
         key_error = _validate_lock_key(key)
         if key_error:
             return key_error
+        require_writable(device, "locking")
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("device unlock has no verified DDM operation and was not sent")
         if getattr(device, "ipv4", None) is None:

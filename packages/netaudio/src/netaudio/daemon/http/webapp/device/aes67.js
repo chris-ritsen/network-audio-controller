@@ -31,7 +31,16 @@ export function Aes67Section({ device }) {
   const knownPrefix = typeof device.aes67_multicast_prefix === "string" && device.aes67_multicast_prefix.length > 0;
   return html`
     <${Panel} title="AES67 config">
-      <p role="status" class=${status.pending ? "state-warn" : undefined}>${status.label}</p>
+      <p role="status" class=${status.pending ? "state-warn" : undefined}>
+        ${status.label}
+      </p>
+      ${
+        !status.canConfigure
+          ? html`<p class="text-sm opacity-70">
+              AES67 configuration unavailable: ${status.unavailableReason}
+            </p>`
+          : null
+      }
       ${status.managed ? html`<${ManagedReadiness} status=${status} device=${device} />` : null}
       ${!status.managed && status.supported !== false && status.pending
         ? html`<${Fields} entries=${[
@@ -52,7 +61,7 @@ export function Aes67Section({ device }) {
             onRun=${() => api.setAes67(requestName, false)}
           >Disable<//>
         <//>
-        ${knownPrefix ? html`
+        ${!status.managed && knownPrefix ? html`
           <${FieldRow} label="Multicast address prefix">
             <input key=${`aes67-prefix-${requestName}`} ref=${prefix} type="text" size="16"
               aria-label="AES67 multicast address prefix" defaultValue=${device.aes67_multicast_prefix} />

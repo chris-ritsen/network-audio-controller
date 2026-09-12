@@ -40,7 +40,7 @@ def test_channel_count_preserves_u16_counts():
 
 
 @pytest.mark.parametrize(
-    ("payload_hexadecimal", "expected_link_status_words", "expected_link_speeds"),
+    ("payload_hexadecimal", "expected_discriminators", "expected_speeds"),
     [
         (
             "ffff008c000b00000200000000010000417564696e6174650724004000000000000100240010000000140000000000010000000000000000000000070003002c0044005c0000000000000000000000000000000000000001000003e80000000000000000000000000000000001000001000003e8000000000000000000000000000000000101000000000000",
@@ -64,23 +64,17 @@ def test_channel_count_preserves_u16_counts():
         ),
     ],
 )
-def test_unmapped_0040_status_exposes_link_state_and_speed(
+def test_interface_statistics_preserves_raw_discriminators_and_speeds(
     payload_hexadecimal,
-    expected_link_status_words,
-    expected_link_speeds,
+    expected_discriminators,
+    expected_speeds,
 ):
-    parsed = core.parse_response("unmapped_0040_status", bytes.fromhex(payload_hexadecimal))
+    parsed = core.parse_response("interface_statistics_status", bytes.fromhex(payload_hexadecimal))
+    records = parsed["interface_groups"][0]["raw_records"]
 
-    assert [record["unmapped_prefix_words"] for record in parsed["records"]] == [
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-    ]
-    assert [record["raw_link_status_word"] for record in parsed["records"]] == expected_link_status_words
-    assert [record["link_up"] for record in parsed["records"]] == [
-        bool(status_word & 1) for status_word in expected_link_status_words
-    ]
-    assert [record["link_speed_megabits_per_second"] for record in parsed["records"]] == expected_link_speeds
+    assert [record["discriminator_status_word"] for record in records] == expected_discriminators
+    assert [record["speed_megabits_per_second"] for record in records] == expected_speeds
+    assert parsed["interface_groups"][0]["selected_stats"] == records[0]
 
 
 @pytest.mark.parametrize(

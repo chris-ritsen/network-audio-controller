@@ -214,7 +214,7 @@ pub fn build_set_sample_rate_pullup(
     build_sample_rate_pullup_control(host_mac, message_id, 1, raw_value)
 }
 
-pub fn build_probe_gain_level(
+pub fn build_probe_codec_status(
     host_mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
@@ -283,13 +283,18 @@ pub fn build_probe_interface_status(
     settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
 }
 
-pub fn build_probe_link_status(mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
+pub fn build_probe_interface_statistics(
+    mac: [u8; 6],
+    message_id: u16,
+    extended_073a: bool,
+) -> Result<Vec<u8>, NetaudioError> {
     if message_id == 0 {
         return Err(NetaudioError::InvalidSequence);
     }
-    let mut tail = Vec::with_capacity(30);
+    let body_length = if extended_073a { 30 } else { 8 };
+    let mut tail = Vec::with_capacity(body_length);
     tail.extend_from_slice(&0x0041u16.to_be_bytes());
-    tail.extend(std::iter::repeat_n(0, 28));
+    tail.resize(body_length, 0);
     settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
 }
 

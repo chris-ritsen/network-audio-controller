@@ -16,6 +16,8 @@ logger = logging.getLogger("netaudio")
 
 OFFLINE_THRESHOLD_SECONDS = 15.0
 SWEEP_INTERVAL_SECONDS = 5.0
+INTERFACE_TRAFFIC_FRESHNESS_SECONDS = 5.0
+INTERFACE_TRAFFIC_TRANSPORT_SOURCE = "heartbeat_0x8000"
 
 
 def parse_signal_presence_records(data: bytes) -> list[dict]:
@@ -72,7 +74,7 @@ def parse_connection_health_records(data: bytes) -> dict | None:
         return None
     if not isinstance(records, dict):
         return None
-    if not records.get("latency_records") and not records.get("raw_impairment_records"):
+    if not records.get("latency_records") and not records.get("late_packet_records"):
         return None
     return records
 
@@ -102,7 +104,8 @@ class DanteHeartbeatService(DanteMulticastService):
         self._on_device_updated = on_device_updated
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._wall_clock = wall_clock or time.time
-        self._previous_interface_traffic_samples: dict[str, tuple[int, float]] = {}
+        self._previous_interface_traffic_sequences: dict[str, int] = {}
+        self._interface_traffic_observed_monotonic: dict[str, float] = {}
         self._connection_health = ReceiverFlowConnectionHealthTracker(
             freshness_seconds=connection_health_freshness_seconds
         )
@@ -153,6 +156,8 @@ class DanteHeartbeatService(DanteMulticastService):
                 device,
                 device_extended_unique_identifier,
                 interface_traffic_records[-1],
+                source_ip,
+                observed_wall_time,
                 observed_monotonic,
             ):
                 device_state_changed = True
@@ -184,43 +189,38 @@ class DanteHeartbeatService(DanteMulticastService):
         device,
         device_extended_unique_identifier: str,
         record: dict,
-        observed_at: float,
+        packet_source: str,
+        observed_wall_time: float,
+        observed_monotonic: float,
     ) -> bool:
         sequence = record["sequence"]
-        previous = self._previous_interface_traffic_samples.get(device_extended_unique_identifier)
-        if previous is not None and sequence == previous[0]:
+        previous_sequence = self._previous_interface_traffic_sequences.get(device_extended_unique_identifier)
+        if previous_sequence == sequence:
             return False
-
-        interval_seconds = None
-        if previous is not None and ((sequence - previous[0]) & 0xFFFF) == 1:
-            elapsed_seconds = observed_at - previous[1]
-            if elapsed_seconds > 0:
-                interval_seconds = elapsed_seconds
-        self._previous_interface_traffic_samples[device_extended_unique_identifier] = (sequence, observed_at)
-
-        interfaces = []
-        for parsed_interface in record["interfaces"]:
-            interface = dict(parsed_interface)
-            if interval_seconds is not None:
-                interface["estimated_transmit_bits_per_second"] = interface["transmit_octets"] * 8 / interval_seconds
-                interface["estimated_receive_bits_per_second"] = interface["receive_octets"] * 8 / interval_seconds
-            interfaces.append(interface)
-
-        total_transmit_octets = sum(interface["transmit_octets"] for interface in interfaces)
-        total_receive_octets = sum(interface["receive_octets"] for interface in interfaces)
+        self._previous_interface_traffic_sequences[device_extended_unique_identifier] = sequence
+        self._interface_traffic_observed_monotonic[device_extended_unique_identifier] = observed_monotonic
+        interfaces = [dict(parsed_interface) for parsed_interface in record["interfaces"]]
         state = {
             "device_extended_unique_identifier": device_extended_unique_identifier,
             "sequence": sequence,
-            "interval_seconds": interval_seconds,
             "interface_entry_count": record["interface_entry_count"],
             "interface_entry_width": record["interface_entry_width"],
+            "packet_source": packet_source,
+            "observed_at": self._observation_timestamp(observed_wall_time),
+            "observation_timestamp_source": "local_receive_time",
+            "freshness_seconds": INTERFACE_TRAFFIC_FRESHNESS_SECONDS,
+            "fresh": True,
+            "transport_source": INTERFACE_TRAFFIC_TRANSPORT_SOURCE,
             "interfaces": interfaces,
-            "total_transmit_octets": total_transmit_octets,
-            "total_receive_octets": total_receive_octets,
+            "total_transmit_rate_bits_per_second": sum(
+                interface["transmit_rate_bits_per_second"] for interface in interfaces
+            ),
+            "total_receive_rate_bits_per_second": sum(
+                interface["receive_rate_bits_per_second"] for interface in interfaces
+            ),
+            "total_transmit_error_count": sum(interface["transmit_error_count"] for interface in interfaces),
+            "total_receive_error_count": sum(interface["receive_error_count"] for interface in interfaces),
         }
-        if interval_seconds is not None:
-            state["estimated_total_transmit_bits_per_second"] = total_transmit_octets * 8 / interval_seconds
-            state["estimated_total_receive_bits_per_second"] = total_receive_octets * 8 / interval_seconds
         device.network_interface_traffic = state
         return True
 
@@ -239,7 +239,8 @@ class DanteHeartbeatService(DanteMulticastService):
 
     def _discard_device_identity(self, device_extended_unique_identifier: str) -> None:
         device = self._heartbeat_devices.pop(device_extended_unique_identifier, None)
-        self._previous_interface_traffic_samples.pop(device_extended_unique_identifier, None)
+        self._previous_interface_traffic_sequences.pop(device_extended_unique_identifier, None)
+        self._interface_traffic_observed_monotonic.pop(device_extended_unique_identifier, None)
         self._connection_health.remove_device(device_extended_unique_identifier)
         expiry_handle = self._connection_health_expiry_handles.pop(device_extended_unique_identifier, None)
         if expiry_handle is not None:
@@ -313,6 +314,12 @@ class DanteHeartbeatService(DanteMulticastService):
             return
         device.receiver_flow_connection_health = state
         self._notify_device_updated(device)
+        remaining_seconds = self._connection_health.seconds_until_expiry(
+            device_extended_unique_identifier,
+            observed_monotonic,
+        )
+        if remaining_seconds is not None:
+            self._schedule_connection_health_expiry(device_extended_unique_identifier, remaining_seconds)
 
     async def _sweep_loop(self) -> None:
         while True:
@@ -334,6 +341,19 @@ class DanteHeartbeatService(DanteMulticastService):
             return
 
         now = self._wall_clock()
+        observed_monotonic = self._monotonic_clock()
+
+        for device_extended_unique_identifier, device in self._heartbeat_devices.items():
+            traffic = getattr(device, "network_interface_traffic", None)
+            traffic_observed = self._interface_traffic_observed_monotonic.get(device_extended_unique_identifier)
+            if (
+                isinstance(traffic, dict)
+                and traffic.get("fresh") is True
+                and traffic_observed is not None
+                and observed_monotonic - traffic_observed >= INTERFACE_TRAFFIC_FRESHNESS_SECONDS
+            ):
+                device.network_interface_traffic = {**traffic, "fresh": False}
+                self._notify_device_updated(device)
 
         for server_name, device in list(devices.items()):
             if not device.online:

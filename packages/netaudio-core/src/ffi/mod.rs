@@ -50,10 +50,13 @@ pub enum NetaudioStatus {
     InternalPanic = 33,
     UnknownKind = 34,
     InvalidLength = 35,
+    InvalidDestination = 36,
+    InvalidFlowIdentity = 37,
+    InvalidReceiverMapping = 38,
 }
 
 impl NetaudioStatus {
-    pub const ALL: [NetaudioStatus; 36] = [
+    pub const ALL: [NetaudioStatus; 39] = [
         NetaudioStatus::Ok,
         NetaudioStatus::NullPointer,
         NetaudioStatus::InvalidUtf8,
@@ -90,6 +93,9 @@ impl NetaudioStatus {
         NetaudioStatus::InternalPanic,
         NetaudioStatus::UnknownKind,
         NetaudioStatus::InvalidLength,
+        NetaudioStatus::InvalidDestination,
+        NetaudioStatus::InvalidFlowIdentity,
+        NetaudioStatus::InvalidReceiverMapping,
     ];
 
     pub fn from_code(code: i32) -> Option<NetaudioStatus> {
@@ -107,7 +113,9 @@ impl NetaudioStatus {
             NetaudioStatus::InvalidChannel => c"invalid_channel",
             NetaudioStatus::InvalidChannelType => c"invalid_channel_type",
             NetaudioStatus::InvalidDeviceType => c"invalid_device_type",
+            NetaudioStatus::InvalidDestination => c"invalid_destination",
             NetaudioStatus::InvalidEncoding => c"invalid_encoding",
+            NetaudioStatus::InvalidFlowIdentity => c"invalid_flow_identity",
             NetaudioStatus::InvalidFlowProtocol => c"invalid_flow_protocol",
             NetaudioStatus::InvalidFlowSlot => c"invalid_flow_slot",
             NetaudioStatus::InvalidGainLevel => c"invalid_gain_level",
@@ -119,6 +127,7 @@ impl NetaudioStatus {
             NetaudioStatus::InvalidMac => c"invalid_mac",
             NetaudioStatus::InvalidPage => c"invalid_page",
             NetaudioStatus::InvalidPin => c"invalid_pin",
+            NetaudioStatus::InvalidReceiverMapping => c"invalid_receiver_mapping",
             NetaudioStatus::InvalidSampleRate => c"invalid_sample_rate",
             NetaudioStatus::InvalidSequence => c"invalid_sequence",
             NetaudioStatus::InvalidSubscriptionChannel => c"invalid_subscription_channel",
@@ -172,12 +181,15 @@ impl From<NetaudioError> for NetaudioStatus {
     fn from(error: NetaudioError) -> Self {
         match error {
             NetaudioError::InvalidChannel => NetaudioStatus::InvalidChannel,
+            NetaudioError::InvalidDestination => NetaudioStatus::InvalidDestination,
             NetaudioError::InvalidEncoding => NetaudioStatus::InvalidEncoding,
+            NetaudioError::InvalidFlowIdentity => NetaudioStatus::InvalidFlowIdentity,
             NetaudioError::InvalidFlowProtocol => NetaudioStatus::InvalidFlowProtocol,
             NetaudioError::InvalidFlowSlot => NetaudioStatus::InvalidFlowSlot,
             NetaudioError::InvalidGainLevel => NetaudioStatus::InvalidGainLevel,
             NetaudioError::InvalidLatency => NetaudioStatus::InvalidLatency,
             NetaudioError::InvalidPage => NetaudioStatus::InvalidPage,
+            NetaudioError::InvalidReceiverMapping => NetaudioStatus::InvalidReceiverMapping,
             NetaudioError::InvalidSampleRate => NetaudioStatus::InvalidSampleRate,
             NetaudioError::InvalidSequence => NetaudioStatus::InvalidSequence,
             NetaudioError::InvalidSubscriptionChannel => NetaudioStatus::InvalidSubscriptionChannel,

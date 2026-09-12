@@ -24,6 +24,10 @@ class FakeA32:
         self.board_name = None
         self.sample_rate = None
         self.supported_sample_rates = None
+        self.sample_rate_update_mode = 2
+        self.sample_rate_configuration_supported = True
+        self.is_locked = False
+        self.diagnostic_log_export_supported = False
         self.sample_rate_channel_capacities = None
         self.rx_channels = {}
         self.tx_channels = {}
@@ -75,6 +79,16 @@ def _phase(receive_channel_count, flows_state, subscriptions=(), transmit_channe
     if transmit_channel_count is not None:
         phase["transmit_channel_count"] = transmit_channel_count
     return phase
+
+
+def _sample_rate_status(current_value, available_values):
+    return {
+        "current_value": current_value,
+        "requested_value": current_value,
+        "update_mode": 2,
+        "available_values": available_values,
+        "flags": None,
+    }
 
 
 def _multicast_flow(flow_number, members, sample_rate=48_000):
@@ -140,7 +154,7 @@ async def test_preflight_distinguishes_reversible_receiver_clipping_from_destruc
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
+        return _sample_rate_status(48_000, [44_100, 48_000, 88_200, 96_000, 176_400, 192_000])
 
     preflight = await preflight_sample_rate_change(device, 192_000, probe)
 
@@ -168,7 +182,7 @@ async def test_destructive_change_is_refused_before_mutation_without_confirmatio
     mutation_called = False
 
     async def probe():
-        return 48_000, [48_000, 192_000]
+        return _sample_rate_status(48_000, [48_000, 192_000])
 
     async def mutate():
         nonlocal mutation_called
@@ -209,7 +223,7 @@ async def test_confirmed_change_verifies_rate_receiver_clipping_and_exact_flow_r
     install_flow_inventory(device)
 
     async def probe():
-        return (48_000 if device.phase_index == 0 else 192_000), [48_000, 192_000]
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 192_000, [48_000, 192_000])
 
     async def mutate():
         device.phase_index = 1
@@ -239,7 +253,7 @@ async def test_unicast_flow_blocks_capacity_reduction_even_with_destructive_conf
     mutation_called = False
 
     async def probe():
-        return 48_000, [48_000, 192_000]
+        return _sample_rate_status(48_000, [48_000, 192_000])
 
     async def mutate():
         nonlocal mutation_called
@@ -264,7 +278,7 @@ async def test_all_out_of_range_multicast_flow_blocks_unproven_transition(instal
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 192_000]
+        return _sample_rate_status(48_000, [48_000, 192_000])
 
     async def mutate():
         raise AssertionError("uncharacterized topology must not be mutated")
@@ -292,7 +306,7 @@ async def test_post_write_readback_rejects_unexpected_loss_of_retained_member(in
     install_flow_inventory(device)
 
     async def probe():
-        return (48_000 if device.phase_index == 0 else 192_000), [48_000, 192_000]
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 192_000, [48_000, 192_000])
 
     async def mutate():
         device.phase_index = 1
@@ -322,7 +336,7 @@ async def test_post_write_readback_rejects_lost_in_capacity_receiver_subscriptio
     install_flow_inventory(device)
 
     async def probe():
-        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 96_000, [48_000, 96_000])
 
     async def mutate():
         device.phase_index = 1
@@ -344,7 +358,7 @@ async def test_post_write_readback_rejects_disappeared_unaffected_transmitter_fl
     install_flow_inventory(device)
 
     async def probe():
-        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 96_000, [48_000, 96_000])
 
     async def mutate():
         device.phase_index = 1
@@ -361,7 +375,7 @@ async def test_mutation_exception_reports_unknown_outcome_instead_of_pre_send_re
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 96_000]
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
     async def mutate():
         raise OSError("synthetic transport failure")
@@ -376,7 +390,7 @@ async def test_post_write_rate_mismatch_reports_changed_but_unverified(install_f
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 96_000]
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
     async def mutate():
         return None
@@ -419,7 +433,7 @@ async def test_preflight_accepts_proven_zero_directional_capacities(
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 96_000]
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
     preflight = await preflight_sample_rate_change(device, 96_000, probe)
 
@@ -440,7 +454,7 @@ async def test_unknown_model_with_reported_rates_proceeds_and_verifies_by_readba
         loads.append(True)
 
     async def probe():
-        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 96_000, [48_000, 96_000])
 
     async def mutate():
         device.phase_index = 1
@@ -467,7 +481,7 @@ async def test_unknown_capacity_with_transmitter_flows_requires_confirmation(ins
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 96_000]
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
     async def refuse_write():
         raise AssertionError("an unconfirmed change must not send a write")
@@ -487,7 +501,7 @@ async def test_reported_capacity_table_is_used_for_any_model(install_flow_invent
     install_flow_inventory(device)
 
     async def probe():
-        return 48_000, [48_000, 96_000]
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
     preflight = await preflight_sample_rate_change(device, 96_000, probe)
 
@@ -507,7 +521,13 @@ async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_sending
     async def probe_sample_rate_status(target, timeout):
         assert target is device
         assert timeout == 4.0
-        return 96_000, [48_000, 96_000]
+        return {
+            "current_value": 96_000,
+            "requested_value": 96_000,
+            "update_mode": 2,
+            "available_values": [48_000, 96_000],
+            "flags": None,
+        }
 
     async def refuse_write(*_arguments, **_options):
         raise AssertionError("a same-rate no-op must not send a write")
@@ -540,7 +560,14 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
     async def probe_sample_rate_status(target, timeout):
         assert device.topology_mutation_lock.locked()
         calls.append(("probe", target, timeout))
-        return (48_000 if device.phase_index == 0 else 96_000), [48_000, 96_000]
+        current = 48_000 if device.phase_index == 0 else 96_000
+        return {
+            "current_value": current,
+            "requested_value": current,
+            "update_mode": 2,
+            "available_values": [48_000, 96_000],
+            "flags": None,
+        }
 
     async def set_sample_rate(target, sample_rate):
         assert device.topology_mutation_lock.locked()

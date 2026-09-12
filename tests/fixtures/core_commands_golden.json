@@ -419,9 +419,9 @@
     },
     "hex": "ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000"
   },
-  "probe_gain_level_packet_716": {
+  "probe_codec_status_packet_716": {
     "spec": {
-      "command": "probe_gain_level",
+      "command": "probe_codec_status",
       "host_mac": "842f5774e86d",
       "sequence": 1114
     },

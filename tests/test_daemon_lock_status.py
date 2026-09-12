@@ -146,6 +146,12 @@ class TestDaemonLockStatus:
             "status_code": 0,
             "observed_at": "2026-08-21T20:57:35.396345+00:00",
             "observation_source": "observed_after_0x1008",
+            "operation_availability": {
+                "supported": True,
+                "readable": True,
+                "writable": True,
+                "reasons": [],
+            },
         }
         assert device.is_locked is False
         assert device.lock_reset_status["lock_state_code"] == 0

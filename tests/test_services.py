@@ -6,7 +6,7 @@ import pytest
 
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.const import (
-    CONMON_OPCODE_GAIN_STATUS,
+    CONMON_OPCODE_CODEC_STATUS,
     CONMON_OPCODE_INTERFACE_STATUS,
     CONMON_OPCODE_ROUTING_CAPACITY_STATUS,
 )
@@ -16,7 +16,7 @@ from netaudio.dante.services.notification import (
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher, EventType
-from netaudio.dante.services.notification import _gain_status_accepts
+from netaudio.dante.services.notification import _gain_adapter_accepts
 from tests.status_test_support import (
     application_with_device,
     count_events,
@@ -178,10 +178,10 @@ class TestApplicationSettingsCommands:
         application = DanteApplication()
         application.transport = transport
 
-        await application.send_probe_gain_level("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        await application.send_probe_codec_status("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
 
         [(address, specification)] = _executed(transport)
-        assert specification["command"] == "probe_gain_level"
+        assert specification["command"] == "probe_codec_status"
         assert specification["host_mac"] == "102030405060"
 
     @pytest.mark.asyncio
@@ -361,7 +361,7 @@ class TestDanteNotificationService:
             (257, "TX Channel Change"),
             (258, "RX Channel Change"),
             (4103, "AES67 Status"),
-            (4107, "Gain Status"),
+            (4107, "Codec Status"),
             (0xABCD, "Unknown(0xABCD)"),
         ],
     )
@@ -554,10 +554,14 @@ class TestDanteNotificationService:
         service._on_packet(SAMPLE_RATE_STATUS_PACKET, ("192.168.1.108", 1032))
 
         assert waiter.is_set()
-        assert waiter.latest_result == (
-            44_100,
-            [44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
-        )
+        assert waiter.latest_result == {
+            "record_protocol_version": 0x0724,
+            "current_value": 44_100,
+            "requested_value": 0,
+            "update_mode": 2,
+            "available_values": [44_100, 48_000, 88_200, 96_000, 176_400, 192_000],
+            "flags": None,
+        }
         service.unregister_waiter(waiter)
         assert not service.is_waiting("sample_rate", "192.168.1.108")
 
@@ -606,7 +610,14 @@ class TestDanteNotificationService:
         events = receive_packets(application, [SAMPLE_RATE_PULLUP_STATUS_PACKET], ("10.0.2.15", 8702))
 
         assert waiter.is_set()
-        assert waiter.latest_result == (1, [0, 1, 2, 3, 4])
+        assert waiter.latest_result == {
+            "record_protocol_version": 0x0724,
+            "current_value": 1,
+            "requested_value": 1,
+            "update_mode": 2,
+            "available_values": [0, 1, 2, 3, 4],
+            "flags": 0,
+        }
         assert device.sample_rate_pullup_raw_value == 1
         assert device.requested_sample_rate_pullup_raw_value == 1
         assert device.supported_sample_rate_pullup_raw_values == [0, 1, 2, 3, 4]
@@ -624,7 +635,14 @@ class TestDanteNotificationService:
 
         assert matching_waiter.is_set()
         assert not unrelated_waiter.is_set()
-        assert matching_waiter.latest_result == (24, [24])
+        assert matching_waiter.latest_result == {
+            "record_protocol_version": 0x0724,
+            "current_value": 24,
+            "requested_value": 0,
+            "update_mode": 0,
+            "available_values": [24],
+            "flags": None,
+        }
         assert unrelated_waiter.latest_result is None
         service.unregister_waiter(matching_waiter)
         service.unregister_waiter(unrelated_waiter)
@@ -649,20 +667,21 @@ class TestDanteNotificationService:
         assert device.encoding == 24
         assert device.supported_encodings == [24]
 
-    def test_live_avio_gain_status_parses_when_unmapped_header_byte_changes(self):
+    def test_live_avio_codec_status_parses_when_unmapped_header_byte_changes(self):
         from netaudio import core
 
-        assert core.parse_response("gain_status", LIVE_AVIO_INPUT_GAIN_STATUS_PACKET) == {
-            "device_type": "input",
-            "channel_levels": [4, 4],
+        assert core.parse_response("codec_status", LIVE_AVIO_INPUT_GAIN_STATUS_PACKET) == {
+            "record_protocol_version": 0x0738,
+            "parameters": [{"parameter_type": 1, "mode": 2, "values": [4, 4]}],
         }
-        assert core.parse_response("gain_status", LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET) == {
-            "device_type": "output",
-            "channel_levels": [4, 4],
+        assert core.parse_response("codec_status", LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET) == {
+            "record_protocol_version": 0x0738,
+            "parameters": [{"parameter_type": 2, "mode": 1, "values": [4, 4]}],
         }
 
-    def test_input_gain_status_updates_device_and_exposes_protocol_levels(self):
+    def test_input_codec_status_applies_the_device_scoped_gain_adapter(self):
         application, device = application_with_device("avio-input.local.", "192.168.1.108")
+        device.model_id = "avio-dai2"
 
         events = receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
 
@@ -678,50 +697,69 @@ class TestDanteNotificationService:
         ]
         assert count_events(events, EventType.DEVICE_UPDATED) == 1
         [status_event] = status_events(events)
-        assert status_event.data["notification_id"] == CONMON_OPCODE_GAIN_STATUS
+        assert status_event.data["notification_id"] == CONMON_OPCODE_CODEC_STATUS
 
-    def test_output_gain_status_notifies_only_matching_device_waiters(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
+    def test_generic_codec_status_clears_a_stale_device_scoped_gain_adapter(self):
+        application, device = application_with_device("avio-input.local.", "192.168.1.108")
+        device.model_id = "avio-dai2"
+        receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
+
+        generic = bytearray(INPUT_GAIN_STATUS_PACKET)
+        generic[40] = 9
+        receive_packets(application, [bytes(generic)], ("192.168.1.108", 8700))
+
+        assert device.codec_parameters == [{"parameter_type": 9, "mode": 2, "values": [5, 1]}]
+        assert device.gain_adapter is None
+        assert device.gain_device_type is None
+        assert device.gain_levels is None
+        assert device.supported_gain_levels is None
+
+    def test_output_codec_status_notifies_only_matching_device_waiters(self):
+        device = SimpleNamespace(model_id="avio-dao2", name="AVIO Output", server_name="avio-output.local.")
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
         matching_waiter = service.register_waiter(
-            "gain",
+            "codec",
             "192.168.1.108",
-            accept=_gain_status_accepts(None, 2, 4),
+            accept=_gain_adapter_accepts(device, None, 2, 4),
         )
         unrelated_waiter = service.register_waiter(
-            "gain",
+            "codec",
             "192.168.1.109",
-            accept=_gain_status_accepts(None, 2, 4),
+            accept=_gain_adapter_accepts(device, None, 2, 4),
         )
 
         service._on_packet(OUTPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
 
         assert matching_waiter.is_set()
-        assert matching_waiter.latest_result == ("output", [4, 4])
+        assert matching_waiter.latest_result["parameters"] == [{"parameter_type": 2, "mode": 1, "values": [4, 4]}]
         assert not unrelated_waiter.is_set()
 
     def test_gain_write_waiter_ignores_nonmatching_level_but_retains_readback(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
-        waiter = service.register_waiter("gain", "192.168.1.108", accept=_gain_status_accepts(None, 1, 3))
+        device = SimpleNamespace(model_id="avio-dai2", name="AVIO Input", server_name="avio-input.local.")
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
+        waiter = service.register_waiter("codec", "192.168.1.108", accept=_gain_adapter_accepts(device, None, 1, 3))
 
         service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
 
         assert not waiter.is_set()
-        assert waiter.latest_result == ("input", [5, 1])
+        assert waiter.latest_result["parameters"] == [{"parameter_type": 1, "mode": 2, "values": [5, 1]}]
 
     def test_gain_write_waiter_ignores_nonmatching_direction(self):
-        service = DanteNotificationService(dispatcher=MagicMock())
-        waiter = service.register_waiter("gain", "192.168.1.108", accept=_gain_status_accepts("output", 1, 5))
+        device = SimpleNamespace(model_id="avio-dai2", name="AVIO Input", server_name="avio-input.local.")
+        service = DanteNotificationService(dispatcher=MagicMock(), device_lookup=lambda _source_ip: device)
+        waiter = service.register_waiter("codec", "192.168.1.108", accept=_gain_adapter_accepts(device, "output", 1, 5))
 
         service._on_packet(INPUT_GAIN_STATUS_PACKET, ("192.168.1.108", 8700))
 
         assert not waiter.is_set()
-        assert waiter.latest_result == ("input", [5, 1])
+        assert waiter.latest_result["parameters"] == [{"parameter_type": 1, "mode": 2, "values": [5, 1]}]
 
-    def test_gain_status_is_applied_when_device_appears(self):
+    def test_pending_codec_status_applies_gain_adapter_when_device_appears(self):
         application = DanteApplication()
         receive_packets(application, [INPUT_GAIN_STATUS_PACKET], ("192.168.1.108", 8700))
         device = DanteDevice(server_name="avio-input.local.")
         device.ipv4 = "192.168.1.108"
+        device.model_id = "avio-dai2"
 
         application.register_device(device.server_name, device)
 

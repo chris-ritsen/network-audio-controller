@@ -19,7 +19,6 @@ pub const MODERN_ARC_PROTOCOL_IDS: [u16; 2] = [PROTOCOL_ARC_2809, PROTOCOL_ARC_2
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
 const CONMON_MINIMUM_SIZE: usize = 28;
 const CONMON_MAGIC_OFFSET: usize = 16;
-const CONMON_FAMILY_OFFSET: usize = 24;
 const CONMON_OPCODE_OFFSET: usize = 26;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +85,6 @@ pub fn conmon_opcode(data: &[u8]) -> Option<u16> {
         || usize::from(crate::bytes::read_u16(data, 2)?) != data.len()
         || crate::bytes::read_u16(data, 6)? != 0
         || data.get(CONMON_MAGIC_OFFSET..CONMON_MAGIC_OFFSET + 8)? != b"Audinate"
-        || data.get(CONMON_FAMILY_OFFSET).copied()? != 0x07
     {
         return None;
     }
@@ -100,12 +98,15 @@ pub fn validate_conmon_envelope(data: &[u8], expected_opcode: u16) -> Option<()>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetaudioError {
     InvalidChannel,
+    InvalidDestination,
     InvalidEncoding,
+    InvalidFlowIdentity,
     InvalidFlowProtocol,
     InvalidFlowSlot,
     InvalidGainLevel,
     InvalidLatency,
     InvalidPage,
+    InvalidReceiverMapping,
     InvalidSampleRate,
     InvalidSequence,
     InvalidSubscriptionChannel,
@@ -123,7 +124,13 @@ impl std::fmt::Display for NetaudioError {
             NetaudioError::InvalidChannel => {
                 "channel number must be at least 1 and fit the protocol"
             }
+            NetaudioError::InvalidDestination => {
+                "external RTP destination is invalid or unsupported"
+            }
             NetaudioError::InvalidEncoding => "encoding value must be nonzero",
+            NetaudioError::InvalidFlowIdentity => {
+                "external flow source and session identity must be nonzero"
+            }
             NetaudioError::InvalidFlowProtocol => "unsupported flow protocol for this operation",
             NetaudioError::InvalidFlowSlot => "flow slot must be from 1 through 32",
             NetaudioError::InvalidGainLevel => "gain level must be an integer from 1 through 5",
@@ -131,6 +138,9 @@ impl std::fmt::Display for NetaudioError {
                 "latency must be finite, nonnegative, and fit on the wire"
             }
             NetaudioError::InvalidPage => "page exceeds the protocol channel range",
+            NetaudioError::InvalidReceiverMapping => {
+                "receiver IDs and assigned flow slots must be ordered, unique, and nonempty"
+            }
             NetaudioError::InvalidSampleRate => "sample rate must be nonzero",
             NetaudioError::InvalidSequence => {
                 "message_id must be nonzero; omit it to let a client assign one"

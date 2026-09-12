@@ -301,9 +301,10 @@ def _capacity_for_rate(device, sample_rate_hertz: int) -> SampleRateChannelCapac
 def _validated_sample_rate_status(status) -> tuple[int, tuple[int, ...]]:
     if status is None:
         raise SampleRateTopologyReadbackError("sample-rate readback was unavailable")
-    if not isinstance(status, tuple) or len(status) != 2:
+    if not isinstance(status, dict):
         raise SampleRateTopologyVerificationError("sample-rate readback was unavailable")
-    current_sample_rate, supported_sample_rates = status
+    current_sample_rate = status.get("current_value")
+    supported_sample_rates = status.get("available_values")
     current_sample_rate = _positive_integer(current_sample_rate, "current sample rate")
     if not isinstance(supported_sample_rates, list) or not supported_sample_rates:
         raise SampleRateTopologyVerificationError("supported sample-rate readback was unavailable")
@@ -547,7 +548,7 @@ def _classify_transmitter_flows(
 async def preflight_sample_rate_change(
     device,
     target_sample_rate_hertz: int,
-    probe_sample_rate_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
+    probe_sample_rate_status: Callable[[], Awaitable[dict | None]],
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyPreflight:
     target_sample_rate_hertz = _positive_integer(target_sample_rate_hertz, "target sample rate")
@@ -675,7 +676,7 @@ def _verify_resulting_topology(
 async def change_sample_rate_topology_safe(
     device,
     target_sample_rate_hertz: int,
-    probe_sample_rate_status: Callable[[], Awaitable[tuple[int, list[int]] | None]],
+    probe_sample_rate_status: Callable[[], Awaitable[dict | None]],
     mutate: Callable[[], Awaitable[None]],
     confirm_destructive: bool = False,
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,

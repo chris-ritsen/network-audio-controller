@@ -1,5 +1,5 @@
 use super::conmon::{
-    captured_encoding_status_packet_204720, captured_input_gain_status_packet_1528,
+    captured_avio_input_codec_status_packet_1528, captured_encoding_status_packet_204720,
     captured_sample_rate_pullup_status_packet, captured_sample_rate_status_packet_28101,
 };
 use super::device::{aes67_settings_response, captured_selective_device_settings_packet_9084571};
@@ -65,9 +65,9 @@ fn typed_parsers_reject_every_truncated_prefix_without_panicking() {
         );
     }
 
-    let gain_status = captured_input_gain_status_packet_1528();
-    for length in 0..gain_status.len() {
-        assert_eq!(parse_gain_status(&gain_status[..length]), None);
+    let codec_status = captured_avio_input_codec_status_packet_1528();
+    for length in 0..codec_status.len() {
+        assert_eq!(parse_codec_status(&codec_status[..length]), None);
     }
 
     let metering = metering_frame(&[0xFE, 0x7D, 0xA0], &[0x88, 0x00]);
@@ -145,7 +145,7 @@ fn hostile_bytes_never_panic_or_decode_as_typed_responses() {
         assert_eq!(parse_sample_rate_status(&data), None);
         assert_eq!(parse_encoding_status(&data), None);
         assert_eq!(parse_sample_rate_pullup_status(&data), None);
-        assert_eq!(parse_gain_status(&data), None);
+        assert_eq!(parse_codec_status(&data), None);
         assert_eq!(parse_metering_frame(&data), None);
         assert_eq!(
             parse_dante_brooklyn_control_protocol_flow_setup_request(&data),

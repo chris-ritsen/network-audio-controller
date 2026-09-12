@@ -9,6 +9,19 @@ from typing import Mapping
 
 DEFAULT_DDM_REFRESH_INTERVAL = 10.0
 DDM_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+MANAGED_PERMISSION_OPERATIONS = frozenset(
+    {
+        "aes67",
+        "codec_control",
+        "encoding",
+        "identify",
+        "locking",
+        "redundancy",
+        "sample_rate",
+        "sample_rate_pullup",
+        "static_ipv4",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +62,7 @@ class DDMContextConfiguration:
     server: str
     domain_id: str
     domain_name: str | None = None
+    operation_permissions: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +127,18 @@ def _optional_bool(value: object, name: str) -> bool | None:
         if normalized in {"0", "false", "no", "off"}:
             return False
     raise ValueError(f"{name} must be true or false")
+
+
+def _operation_permissions(value: object, name: str) -> frozenset[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{name} must be an array of operation names")
+    permissions = frozenset(value)
+    unknown = sorted(permissions - MANAGED_PERMISSION_OPERATIONS)
+    if unknown:
+        raise ValueError(f"{name} contains unknown operations: {', '.join(unknown)}")
+    return permissions
 
 
 def _name(value: object, description: str) -> str:
@@ -188,7 +214,11 @@ def resolve_ddm_configuration(
         name = _name(raw_name, "DDM context name")
         if not isinstance(value, Mapping):
             raise ValueError(f"ddm.contexts.{name} must be a table")
-        _reject_unknown_keys(value, {"server", "domain_id", "domain_name"}, f"ddm.contexts.{name} settings")
+        _reject_unknown_keys(
+            value,
+            {"server", "domain_id", "domain_name", "operation_permissions"},
+            f"ddm.contexts.{name} settings",
+        )
         server_name = _name(value.get("server"), f"ddm.contexts.{name}.server")
         if server_name not in servers:
             raise ValueError(f"ddm.contexts.{name} references unknown server profile {server_name!r}")
@@ -206,6 +236,10 @@ def resolve_ddm_configuration(
             server=server_name,
             domain_id=domain_id,
             domain_name=_optional_string(value.get("domain_name")),
+            operation_permissions=_operation_permissions(
+                value.get("operation_permissions"),
+                f"ddm.contexts.{name}.operation_permissions",
+            ),
         )
 
     default_context = _optional_string(ddm_mapping.get("default_context"))
@@ -227,6 +261,7 @@ __all__ = [
     "DDMConfiguration",
     "DDMContextConfiguration",
     "DDM_NAME_PATTERN",
+    "MANAGED_PERMISSION_OPERATIONS",
     "ManagedAPIConfiguration",
     "resolve_ddm_configuration",
     "resolve_managed_api_configuration",

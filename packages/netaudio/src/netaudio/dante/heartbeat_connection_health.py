@@ -9,19 +9,30 @@ CONNECTION_HEALTH_HISTORY_LIMIT = 300
 
 
 @dataclass
-class _FlowState:
+class _LatencyFlowState:
     history: deque
-    raw_impairment_value: int
+
+
+@dataclass
+class _LatePacketFlowState:
+    history: deque
+    count: int
+
+
+@dataclass
+class _StreamState:
+    sequence: int
+    observed_at: str
+    observed_monotonic: float
+    fresh: bool
+    flows: dict
 
 
 @dataclass
 class _DeviceState:
     device_extended_unique_identifier: str
-    sequence: int
-    observed_at: str
-    observed_monotonic: float
-    fresh: bool
-    flows: dict[int, _FlowState]
+    latency: _StreamState | None = None
+    late_packets: _StreamState | None = None
 
 
 class ReceiverFlowConnectionHealthTracker:
@@ -42,270 +53,251 @@ class ReceiverFlowConnectionHealthTracker:
     def freshness_seconds(self) -> float:
         return self._freshness_seconds
 
-    def update(
-        self,
-        parsed_records: dict,
-        observed_at: str,
-        observed_monotonic: float,
-    ) -> dict | None:
-        paired = self._pair_records(parsed_records)
-        if paired is None:
+    def update(self, parsed_records: dict, observed_at: str, observed_monotonic: float) -> dict | None:
+        if not isinstance(parsed_records, dict):
             return None
-        device_extended_unique_identifier, sequence, measurements = paired
-        previous_device = self._devices.get(device_extended_unique_identifier)
-        preserve_history = False
-        consecutive_sequence = False
+        device_id = parsed_records.get("device_extended_unique_identifier")
+        if not self._is_device_extended_unique_identifier(device_id):
+            return None
+        latency_records = parsed_records.get("latency_records")
+        late_packet_records = parsed_records.get("late_packet_records")
+        if not isinstance(latency_records, list) or not isinstance(late_packet_records, list):
+            return None
+        if not latency_records and not late_packet_records:
+            return None
 
-        if previous_device is not None:
-            if observed_monotonic < previous_device.observed_monotonic:
+        state = self._devices.get(device_id) or _DeviceState(device_extended_unique_identifier=device_id)
+        changed = False
+        if latency_records:
+            measurements = self._latency_measurements(latency_records)
+            if measurements is None:
                 return None
-            previous_is_fresh = (
-                previous_device.fresh
-                and observed_monotonic - previous_device.observed_monotonic < self._freshness_seconds
-            )
-            if previous_is_fresh:
-                sequence_delta = (sequence - previous_device.sequence) & 0xFFFF
-                if sequence_delta == 0 or sequence_delta >= 0x8000:
-                    return None
-                preserve_history = True
-                consecutive_sequence = sequence_delta == 1
-            else:
-                previous_device.fresh = False
-
-        previous_flows = previous_device.flows if preserve_history and previous_device else {}
-        flows = {}
-        for measurement in measurements:
-            receiver_flow_index = measurement["receiver_flow_index"]
-            latency_sample_count = measurement["latency_sample_count"]
-            raw_impairment_value = measurement["raw_impairment_value"]
-            if latency_sample_count == 0 and raw_impairment_value == 0:
-                continue
-
-            previous_flow = previous_flows.get(receiver_flow_index)
-            if previous_flow is not None and raw_impairment_value < previous_flow.raw_impairment_value:
-                previous_flow = None
-            history = (
-                deque(previous_flow.history, maxlen=self._history_limit)
-                if previous_flow is not None
-                else deque(maxlen=self._history_limit)
-            )
-            raw_impairment_delta = (
-                raw_impairment_value - previous_flow.raw_impairment_value
-                if previous_flow is not None and consecutive_sequence
-                else None
-            )
-            sample_rate_hertz = measurement["sample_rate_hertz"]
-            latency_nanoseconds = self._latency_nanoseconds(latency_sample_count, sample_rate_hertz)
-            history.append(
-                {
-                    "sequence": sequence,
-                    "observed_at": observed_at,
-                    "latency_sample_count": latency_sample_count,
-                    "sample_rate_hertz": sample_rate_hertz,
-                    "latency_nanoseconds": latency_nanoseconds,
-                    "raw_impairment_value": raw_impairment_value,
-                    "raw_impairment_delta": raw_impairment_delta,
-                }
-            )
-            flows[receiver_flow_index] = _FlowState(
-                history=history,
-                raw_impairment_value=raw_impairment_value,
-            )
-
-        device_state = _DeviceState(
-            device_extended_unique_identifier=device_extended_unique_identifier,
-            sequence=sequence,
-            observed_at=observed_at,
-            observed_monotonic=observed_monotonic,
-            fresh=True,
-            flows=flows,
-        )
-        self._devices[device_extended_unique_identifier] = device_state
-        return self._serialize(device_state)
+            updated = self._update_latency_stream(state.latency, measurements, observed_at, observed_monotonic)
+            if updated is not None:
+                state.latency = updated
+                changed = True
+        if late_packet_records:
+            measurements = self._late_packet_measurements(late_packet_records)
+            if measurements is None:
+                return None
+            updated = self._update_late_packet_stream(state.late_packets, measurements, observed_at, observed_monotonic)
+            if updated is not None:
+                state.late_packets = updated
+                changed = True
+        if not changed:
+            return None
+        self._devices[device_id] = state
+        return self._serialize(state)
 
     def history_snapshot(self, device_extended_unique_identifier: str) -> dict | None:
-        device_state = self._devices.get(device_extended_unique_identifier)
-        return self._serialize(device_state, include_history=True) if device_state is not None else None
+        state = self._devices.get(device_extended_unique_identifier)
+        return self._serialize(state, include_history=True) if state is not None else None
 
     def remove_device(self, device_extended_unique_identifier: str) -> bool:
         return self._devices.pop(device_extended_unique_identifier, None) is not None
 
-    def seconds_until_expiry(
-        self,
-        device_extended_unique_identifier: str,
-        observed_monotonic: float,
-    ) -> float | None:
-        device_state = self._devices.get(device_extended_unique_identifier)
-        if device_state is None or not device_state.fresh:
+    def seconds_until_expiry(self, device_extended_unique_identifier: str, observed_monotonic: float) -> float | None:
+        state = self._devices.get(device_extended_unique_identifier)
+        if state is None:
             return None
-        age = observed_monotonic - device_state.observed_monotonic
-        return max(0.0, self._freshness_seconds - age)
+        remaining = [
+            max(0.0, self._freshness_seconds - (observed_monotonic - stream.observed_monotonic))
+            for stream in (state.latency, state.late_packets)
+            if stream is not None and stream.fresh
+        ]
+        return min(remaining) if remaining else None
 
     def expire_device(self, device_extended_unique_identifier: str, observed_monotonic: float) -> dict | None:
-        device_state = self._devices.get(device_extended_unique_identifier)
-        if device_state is None or not device_state.fresh:
+        state = self._devices.get(device_extended_unique_identifier)
+        if state is None:
             return None
-        if observed_monotonic - device_state.observed_monotonic < self._freshness_seconds:
-            return None
-        device_state.fresh = False
-        return self._serialize(device_state)
+        changed = False
+        for stream in (state.latency, state.late_packets):
+            if (
+                stream is not None
+                and stream.fresh
+                and observed_monotonic - stream.observed_monotonic >= self._freshness_seconds
+            ):
+                stream.fresh = False
+                changed = True
+        return self._serialize(state) if changed else None
 
     def expire(self, observed_monotonic: float) -> list[tuple[str, dict]]:
         expired = []
-        for device_extended_unique_identifier in tuple(self._devices):
-            state = self.expire_device(device_extended_unique_identifier, observed_monotonic)
+        for device_id in tuple(self._devices):
+            state = self.expire_device(device_id, observed_monotonic)
             if state is not None:
-                expired.append((device_extended_unique_identifier, state))
+                expired.append((device_id, state))
         return expired
 
-    def _pair_records(self, parsed_records: dict) -> tuple[str, int, list[dict]] | None:
-        if not isinstance(parsed_records, dict):
-            return None
-        device_extended_unique_identifier = parsed_records.get("device_extended_unique_identifier")
-        if not self._is_device_extended_unique_identifier(device_extended_unique_identifier):
-            return None
-        latency_records = parsed_records.get("latency_records")
-        raw_impairment_records = parsed_records.get("raw_impairment_records")
-        if not isinstance(latency_records, list) or not isinstance(raw_impairment_records, list):
-            return None
-        if not latency_records or len(latency_records) != len(raw_impairment_records):
-            return None
+    def _stream_is_current(self, stream: _StreamState | None, sequence: int, observed_monotonic: float):
+        if stream is None:
+            return True, False, False
+        if observed_monotonic < stream.observed_monotonic:
+            return False, False, False
+        was_fresh = stream.fresh and observed_monotonic - stream.observed_monotonic < self._freshness_seconds
+        if not was_fresh:
+            stream.fresh = False
+            return True, False, False
+        sequence_delta = (sequence - stream.sequence) & 0xFFFF
+        if sequence_delta == 0 or sequence_delta >= 0x8000:
+            return False, False, False
+        return True, True, sequence_delta == 1
 
-        latency_by_key = self._records_by_key(latency_records)
-        raw_impairment_by_key = self._records_by_key(raw_impairment_records)
-        if latency_by_key is None or raw_impairment_by_key is None:
+    def _update_latency_stream(self, previous, measurements, observed_at, observed_monotonic):
+        sequence, values = measurements
+        accepted, preserve, _ = self._stream_is_current(previous, sequence, observed_monotonic)
+        if not accepted:
             return None
-        if set(latency_by_key) != set(raw_impairment_by_key):
-            return None
+        previous_flows = previous.flows if preserve and previous else {}
+        flows = {}
+        for flow_index, sample_count, sample_rate_hertz in values:
+            prior = previous_flows.get(flow_index)
+            history = deque(prior.history, maxlen=self._history_limit) if prior else deque(maxlen=self._history_limit)
+            latency_nanoseconds = self._latency_nanoseconds(sample_count, sample_rate_hertz)
+            history.append(
+                {
+                    "sequence": sequence,
+                    "observed_at": observed_at,
+                    "latency_sample_count": sample_count,
+                    "sample_rate_hertz": sample_rate_hertz,
+                    "latency_nanoseconds": latency_nanoseconds,
+                }
+            )
+            flows[flow_index] = _LatencyFlowState(history=history)
+        return _StreamState(sequence, observed_at, observed_monotonic, True, flows)
 
-        sequences = {key[0] for key in latency_by_key}
-        if len(sequences) != 1:
+    def _update_late_packet_stream(self, previous, measurements, observed_at, observed_monotonic):
+        sequence, values = measurements
+        accepted, preserve, consecutive = self._stream_is_current(previous, sequence, observed_monotonic)
+        if not accepted:
             return None
-        sequence = sequences.pop()
+        previous_flows = previous.flows if preserve and previous else {}
+        flows = {}
+        for flow_index, count in values:
+            prior = previous_flows.get(flow_index)
+            if prior is not None and count < prior.count:
+                prior = None
+            history = deque(prior.history, maxlen=self._history_limit) if prior else deque(maxlen=self._history_limit)
+            delta = count - prior.count if prior is not None and consecutive else None
+            history.append(
+                {
+                    "sequence": sequence,
+                    "observed_at": observed_at,
+                    "late_packet_count": count,
+                    "late_packet_delta": delta,
+                }
+            )
+            flows[flow_index] = _LatePacketFlowState(history=history, count=count)
+        return _StreamState(sequence, observed_at, observed_monotonic, True, flows)
+
+    def _latency_measurements(self, records):
+        sequence, entries = self._records(records, require_sample_rate=True)
+        if sequence is None:
+            return None
+        return sequence, [
+            (entry["receiver_flow_index"], entry["latency_sample_count"], sample_rate) for entry, sample_rate in entries
+        ]
+
+    def _late_packet_measurements(self, records):
+        sequence, entries = self._records(records, require_sample_rate=False)
+        if sequence is None:
+            return None
+        return sequence, [(entry["receiver_flow_index"], entry["late_packet_count"]) for entry, _ in entries]
+
+    def _records(self, records, *, require_sample_rate):
+        sequences = set()
+        occupied = set()
         measurements = []
-        occupied_indices = set()
-        for key in sorted(latency_by_key, key=lambda record_key: record_key[1]):
-            latency_record = latency_by_key[key]
-            raw_impairment_record = raw_impairment_by_key[key]
-            sample_rate_hertz = latency_record.get("sample_rate_hertz")
-            if not self._is_unsigned_integer(sample_rate_hertz, 32) or sample_rate_hertz == 0:
-                return None
-            latency_entries = latency_record.get("entries")
-            raw_impairment_entries = raw_impairment_record.get("entries")
-            if not isinstance(latency_entries, list) or not isinstance(raw_impairment_entries, list):
-                return None
-            if len(latency_entries) != key[2] or len(raw_impairment_entries) != key[2]:
-                return None
-
-            for entry_offset, (latency_entry, raw_impairment_entry) in enumerate(
-                zip(latency_entries, raw_impairment_entries)
-            ):
-                if not isinstance(latency_entry, dict) or not isinstance(raw_impairment_entry, dict):
-                    return None
-                receiver_flow_index = latency_entry.get("receiver_flow_index")
-                if receiver_flow_index != raw_impairment_entry.get("receiver_flow_index"):
-                    return None
-                if not self._is_unsigned_integer(receiver_flow_index, 16):
-                    return None
-                if receiver_flow_index != key[1] + entry_offset:
-                    return None
-                if receiver_flow_index in occupied_indices:
-                    return None
-                latency_sample_count = latency_entry.get("latency_sample_count")
-                raw_impairment_value = raw_impairment_entry.get("raw_impairment_value")
-                if not self._is_unsigned_integer(latency_sample_count, 32):
-                    return None
-                if not self._is_unsigned_integer(raw_impairment_value, 32):
-                    return None
-                occupied_indices.add(receiver_flow_index)
-                measurements.append(
-                    {
-                        "receiver_flow_index": receiver_flow_index,
-                        "latency_sample_count": latency_sample_count,
-                        "sample_rate_hertz": sample_rate_hertz,
-                        "raw_impairment_value": raw_impairment_value,
-                    }
-                )
-        return device_extended_unique_identifier, sequence, measurements
-
-    def _records_by_key(self, records: list[dict]) -> dict[tuple[int, int, int], dict] | None:
-        indexed = {}
         for record in records:
             if not isinstance(record, dict):
-                return None
+                return None, None
             sequence = record.get("sequence")
-            start_receiver_flow_index = record.get("start_receiver_flow_index")
-            entry_count = record.get("entry_count")
-            if not self._is_unsigned_integer(sequence, 16):
-                return None
-            if not self._is_unsigned_integer(start_receiver_flow_index, 16):
-                return None
-            if not self._is_unsigned_integer(entry_count, 16) or entry_count == 0:
-                return None
-            if start_receiver_flow_index + entry_count > 1 << 16:
-                return None
-            key = (sequence, start_receiver_flow_index, entry_count)
-            if key in indexed:
-                return None
-            indexed[key] = record
-        return indexed
+            entries = record.get("entries")
+            if not self._is_unsigned_integer(sequence, 16) or not isinstance(entries, list):
+                return None, None
+            sample_rate = record.get("sample_rate_hertz") if require_sample_rate else None
+            if require_sample_rate and (not self._is_unsigned_integer(sample_rate, 32) or sample_rate == 0):
+                return None, None
+            sequences.add(sequence)
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    return None, None
+                flow_index = entry.get("receiver_flow_index")
+                field = "latency_sample_count" if require_sample_rate else "late_packet_count"
+                value = entry.get(field)
+                if (
+                    not self._is_unsigned_integer(flow_index, 16)
+                    or not self._is_unsigned_integer(value, 32)
+                    or flow_index in occupied
+                ):
+                    return None, None
+                occupied.add(flow_index)
+                measurements.append((entry, sample_rate))
+        if len(sequences) != 1:
+            return None, None
+        return sequences.pop(), measurements
 
-    def _serialize(self, device_state: _DeviceState, include_history: bool = False) -> dict:
+    def _serialize(self, state: _DeviceState, include_history: bool = False) -> dict:
+        flow_indices = set()
+        for stream in (state.latency, state.late_packets):
+            if stream is not None:
+                flow_indices.update(stream.flows)
         flows = []
-        for receiver_flow_index, flow_state in sorted(device_state.flows.items()):
-            history = list(flow_state.history)
-            latency_values = [
-                sample["latency_nanoseconds"] for sample in history if sample["latency_nanoseconds"] is not None
-            ]
-            current = history[-1]
-            flow: dict = {
-                "receiver_flow_index": receiver_flow_index,
-                "receiver_flow_slot": receiver_flow_index + 1,
-                "current_latency_nanoseconds": current["latency_nanoseconds"],
-                "average_latency_nanoseconds": self._rounded_average(latency_values),
-                "peak_latency_nanoseconds": max(latency_values) if latency_values else None,
-                "latency_sample_count": current["latency_sample_count"],
-                "sample_rate_hertz": current["sample_rate_hertz"],
-                "raw_impairment_value": current["raw_impairment_value"],
-                "raw_impairment_delta": current["raw_impairment_delta"],
-                "history_sample_count": len(history),
-            }
-            if include_history:
-                flow["history"] = history
+        for flow_index in sorted(flow_indices):
+            latency_flow = state.latency.flows.get(flow_index) if state.latency else None
+            late_flow = state.late_packets.flows.get(flow_index) if state.late_packets else None
+            latency_history = list(latency_flow.history) if latency_flow else []
+            late_history = list(late_flow.history) if late_flow else []
+            flow = {"receiver_flow_index": flow_index, "receiver_flow_slot": flow_index + 1}
+            if latency_history:
+                latencies = [item["latency_nanoseconds"] for item in latency_history]
+                flow.update(
+                    current_latency_nanoseconds=latencies[-1],
+                    average_latency_nanoseconds=round(sum(latencies) / len(latencies)),
+                    peak_latency_nanoseconds=max(latencies),
+                    latency_history_sample_count=len(latency_history),
+                )
+                if include_history:
+                    flow["latency_history"] = latency_history
+            if late_history:
+                flow.update(
+                    late_packet_count=late_history[-1]["late_packet_count"],
+                    late_packet_delta=late_history[-1]["late_packet_delta"],
+                    late_packet_history_sample_count=len(late_history),
+                )
+                if include_history:
+                    flow["late_packet_history"] = late_history
             flows.append(flow)
         return {
-            "device_extended_unique_identifier": device_state.device_extended_unique_identifier,
-            "fresh": device_state.fresh,
-            "freshness_seconds": self._freshness_seconds,
-            "history_limit": self._history_limit,
-            "sequence": device_state.sequence,
-            "observed_at": device_state.observed_at,
+            "device_extended_unique_identifier": state.device_extended_unique_identifier,
+            "fresh": any(stream is not None and stream.fresh for stream in (state.latency, state.late_packets)),
+            "latency_stream": self._stream_metadata(state.latency),
+            "late_packet_stream": self._stream_metadata(state.late_packets),
             "observation_timestamp_source": "local_receive_time",
             "flows": flows,
         }
 
     @staticmethod
-    def _is_device_extended_unique_identifier(value: object) -> TypeGuard[str]:
-        return (
-            isinstance(value, str)
-            and len(value) == 16
-            and value not in {"0000000000000000", "ffffffffffffffff"}
-            and all(character in "0123456789abcdef" for character in value)
-        )
+    def _stream_metadata(stream):
+        if stream is None:
+            return None
+        return {"sequence": stream.sequence, "observed_at": stream.observed_at, "fresh": stream.fresh}
+
+    @staticmethod
+    def _latency_nanoseconds(sample_count: int, sample_rate_hertz: int) -> int:
+        return round(sample_count * 1_000_000_000 / sample_rate_hertz)
 
     @staticmethod
     def _is_unsigned_integer(value: object, bits: int) -> TypeGuard[int]:
-        return type(value) is int and 0 <= value < 1 << bits
+        return isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 1 << bits
 
     @staticmethod
-    def _latency_nanoseconds(latency_sample_count: int, sample_rate_hertz: int) -> int | None:
-        if latency_sample_count == 0:
-            return None
-        numerator = latency_sample_count * 1_000_000_000
-        return (numerator + sample_rate_hertz // 2) // sample_rate_hertz
-
-    @staticmethod
-    def _rounded_average(values: list[int]) -> int | None:
-        if not values:
-            return None
-        return (sum(values) + len(values) // 2) // len(values)
+    def _is_device_extended_unique_identifier(value: object) -> TypeGuard[str]:
+        if not isinstance(value, str) or len(value) != 16:
+            return False
+        try:
+            decoded = bytes.fromhex(value)
+        except ValueError:
+            return False
+        return len(decoded) == 8 and any(decoded)

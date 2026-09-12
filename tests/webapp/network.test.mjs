@@ -8,6 +8,11 @@ const { NetworkSection } = await import(`${WEBAPP}device/network.js`);
 const { options } = await import("preact");
 const { api } = await import(`${WEBAPP}api.js`);
 
+const writableNetwork = {
+  static_ipv4: { supported: true, readable: true, writable: true, reasons: [] },
+  redundancy: { supported: true, readable: true, writable: true, reasons: [] },
+};
+
 test("redundancy selection submits immediately and blocks overlapping writes", async () => {
   const previousVNode = options.vnode;
   const previousSet = api.setRedundancy;
@@ -23,9 +28,19 @@ test("redundancy selection submits immediately and blocks overlapping writes", a
     return new Promise((resolve) => { finish = resolve; });
   };
   try {
-    render(h(NetworkSection, { device: { server_name: "test.local.", dante_redundancy: {
-      current: "switched", configured: "switched", supported: ["switched", "redundant"],
-    } } }));
+    render(
+      h(NetworkSection, {
+        device: {
+          server_name: "test.local.",
+          operation_availability: writableNetwork,
+          dante_redundancy: {
+            current: "switched",
+            configured: "switched",
+            supported: ["switched", "redundant"],
+          },
+        },
+      }),
+    );
     assert.equal(typeof change, "function");
     await change({ currentTarget: { value: "switched" } });
     assert.equal(calls.length, 0);
@@ -54,6 +69,7 @@ test("network panel separates primary and secondary active/configured values", (
     ], dante_redundancy: {
       current: "switched", configured: "redundant", supported: ["switched", "redundant"], reboot_required: true,
     },
+    operation_availability: writableNetwork,
   };
   const markup = render(h(NetworkSection, { device }));
   for (const value of ["Primary", "Secondary", "192.0.2.34", "192.0.2.244", "198.51.100.62", "Switched", "Redundant", "Configured address"]) {
@@ -83,14 +99,28 @@ test("supported secondary configuration submits distinct DNS and gateway fields"
   };
   api.setInterface = async (value) => { request = value; return { interfaces: [] }; };
   try {
-    const markup = render(h(NetworkSection, { device: {
-      server_name: "wing.local.",
-      interface_configuration_modes: { secondary: ["dhcp", "static"] },
-      interfaces: [{ interface: "secondary", mode: "dynamic", configured: {
-        mode: "static", ip_address: "198.51.100.102", netmask: "255.255.255.0",
-        gateway: "203.0.113.2", dns_server: "203.0.113.53",
-      } }],
-    } }));
+    const markup = render(
+      h(NetworkSection, {
+        device: {
+          server_name: "wing.local.",
+          operation_availability: writableNetwork,
+          interface_configuration_modes: { secondary: ["dhcp", "static"] },
+          interfaces: [
+            {
+              interface: "secondary",
+              mode: "dynamic",
+              configured: {
+                mode: "static",
+                ip_address: "198.51.100.102",
+                netmask: "255.255.255.0",
+                gateway: "203.0.113.2",
+                dns_server: "203.0.113.53",
+              },
+            },
+          ],
+        },
+      }),
+    );
     assert.match(markup, /Save secondary settings/);
     assert.match(markup, /Secondary address mode/);
     assert.equal(typeof save, "function");
@@ -111,4 +141,45 @@ test("unknown network state has no refresh or guessed write controls", () => {
   assert.match(markup, /Network settings are unavailable/);
   assert.doesNotMatch(markup, /Refresh/);
   assert.doesNotMatch(markup, /Save primary settings|Save redundancy mode/);
+});
+
+test("readable network state keeps backend denial reasons and hides writes", () => {
+  const device = {
+    server_name: "locked.local.",
+    interfaces: [
+      {
+        interface: "primary",
+        mode: "dynamic",
+        configured: { mode: "dynamic" },
+      },
+    ],
+    interface_configuration_modes: { primary: ["dhcp", "static"] },
+    dante_redundancy: {
+      current: "switched",
+      configured: "switched",
+      supported: ["switched", "redundant"],
+    },
+    operation_availability: {
+      static_ipv4: {
+        supported: true,
+        readable: true,
+        writable: false,
+        reasons: ["read_only"],
+      },
+      redundancy: {
+        supported: true,
+        readable: true,
+        writable: false,
+        reasons: ["device_locked"],
+      },
+    },
+  };
+  const markup = render(h(NetworkSection, { device }));
+  assert.match(markup, /Active mode<\/dt><dd>DHCP/);
+  assert.match(markup, /setting is read-only/);
+  assert.match(markup, /device is locked/);
+  assert.doesNotMatch(
+    markup,
+    /Save primary settings|aria-label="Dante Redundancy"/,
+  );
 });

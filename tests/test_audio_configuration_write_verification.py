@@ -31,7 +31,7 @@ def _operations(application):
 
 
 def test_gain_getter_reports_configured_reference_level():
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
+    device = FakeChannelDevice(channel_reads="unused", gain_adapter_status=("input", [5]))
     application = FakeApplication({"avio.local.": device})
 
     result = _gain(application, "tx:1")
@@ -42,7 +42,7 @@ def test_gain_getter_reports_configured_reference_level():
 
 
 def test_gain_getter_uses_the_device_reported_channel_side():
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
+    device = FakeChannelDevice(channel_reads="unused", gain_adapter_status=("input", [5]))
     application = FakeApplication({"avio.local.": device})
 
     result = _gain(application, "1")
@@ -52,7 +52,7 @@ def test_gain_getter_uses_the_device_reported_channel_side():
 
 
 def test_gain_setter_reports_success_only_after_matching_readback():
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]))
+    device = FakeChannelDevice(channel_reads="unused", gain_adapter_status=("input", [5]))
     application = FakeApplication({"avio.local.": device})
 
     result = _gain(application, "tx:1", 3)
@@ -65,7 +65,7 @@ def test_gain_setter_reports_success_only_after_matching_readback():
 def test_gain_setter_rejects_mismatched_readback():
     device = FakeChannelDevice(
         channel_reads="unused",
-        gain_status=("input", [5]),
+        gain_adapter_status=("input", [5]),
         gain_write_status=("input", [5]),
     )
     application = FakeApplication({"avio.local.": device})
@@ -78,7 +78,7 @@ def test_gain_setter_rejects_mismatched_readback():
 
 
 def test_gain_setter_rejects_missing_readback():
-    device = FakeChannelDevice(channel_reads="unused", gain_status=("input", [5]), gain_write_status=None)
+    device = FakeChannelDevice(channel_reads="unused", gain_adapter_status=("input", [5]), gain_write_status=None)
     application = FakeApplication({"avio.local.": device})
 
     result = _gain(application, "tx:1", 3)
@@ -587,7 +587,7 @@ def test_aes67_verifies_configured_state_not_current_state():
 
 
 def test_aes67_rejects_known_unsupported_device_without_sending():
-    device = FakeDevice("LX-DANTE", aes67_supported=False)
+    device = FakeDevice("LX-DANTE", aes67_configuration_supported=False)
     application = FakeApplication({"lx.local.": device})
 
     result = _aes67(application, "on")

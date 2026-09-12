@@ -143,7 +143,7 @@ class TestSettingsCommandPacketFormat:
             ("command_factory_reset", ()),
             ("command_enable_aes67", (True,)),
             ("command_probe_interface_status", ()),
-            ("command_probe_link_status", ()),
+            ("command_probe_interface_statistics", ()),
             ("command_set_interface_dhcp", ()),
             (
                 "command_set_interface_static",
@@ -237,10 +237,10 @@ class TestSettingsCommandPacketFormat:
         assert packet[46:48] == bytes.fromhex("0001")
         assert packet[48:52] == bytes.fromhex("00000005")
 
-    def test_probe_gain_level_packet_format(self):
+    def test_probe_codec_status_packet_format(self):
         host_mac = bytes.fromhex("842f5774e86d")
         commands = DanteDeviceCommands(host_mac=host_mac)
-        packet, _, port = commands.command_probe_gain_level(sequence=0x045A)
+        packet, _, port = commands.command_probe_codec_status(sequence=0x045A)
         assert port == 8700
         self._check_header(packet, 0x10, 0x0A)
         assert packet.hex() == "ffff0028045a0000842f5774e86d0000417564696e617465073a100a000000000000000000000000"

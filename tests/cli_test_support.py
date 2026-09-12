@@ -63,7 +63,7 @@ class FakeDevice:
         encoding=None,
         supported_sample_rates=None,
         supported_encodings=None,
-        aes67_supported=None,
+        aes67_configuration_supported=None,
         min_latency=None,
         max_latency=None,
         server_name=None,
@@ -79,6 +79,8 @@ class FakeDevice:
         self.supported_sample_rates = supported_sample_rates
         self.sample_rate_pullup_raw_value = None
         self.requested_sample_rate_pullup_raw_value = None
+        self.sample_rate_pullup_update_mode = None
+        self.sample_rate_pullup_flags = None
         self.supported_sample_rate_pullup_raw_values = None
         self.encoding = encoding
         self.supported_encodings = supported_encodings
@@ -90,7 +92,7 @@ class FakeDevice:
         self.max_latency = max_latency
         self.aes67_current = None
         self.aes67_configured = None
-        self.aes67_supported = aes67_supported
+        self.aes67_configuration_supported = aes67_configuration_supported
         self.aes67_multicast_prefix = None
         self.settings_properties = None
         self.clock_subdomain = None
@@ -120,7 +122,7 @@ class FakeChannelDevice(FakeDevice):
         *,
         channel_reads,
         channel_type="tx",
-        gain_status=("input", [5]),
+        gain_adapter_status=("input", [5]),
         gain_write_status="applied",
     ):
         super().__init__("AVIO")
@@ -131,10 +133,10 @@ class FakeChannelDevice(FakeDevice):
         self.transmitter_channel_name_protocol_identifier = 0x2729
         self._channel_reads = channel_reads
         self.channel_read_calls = 0
-        self.gain_probe_status = gain_status
+        self.gain_adapter_probe_status = gain_adapter_status
         self.gain_write_status = gain_write_status
-        if gain_status is not None:
-            self.gain_device_type, self.gain_levels = gain_status
+        if gain_adapter_status is not None:
+            self.gain_device_type, self.gain_levels = gain_adapter_status
             self.supported_gain_levels = [1, 2, 3, 4, 5]
 
     async def get_tx_channels(self):
@@ -274,23 +276,41 @@ class FakeApplication:
         if not isinstance(settings, dict) or settings.get("sample_rate") is None:
             raise RuntimeError("sample rate status unavailable")
         current_sample_rate = settings["sample_rate"]
-        return current_sample_rate, device.supported_sample_rates or [current_sample_rate]
+        return {
+            "current_value": current_sample_rate,
+            "requested_value": current_sample_rate,
+            "update_mode": 2,
+            "available_values": device.supported_sample_rates or [current_sample_rate],
+            "flags": None,
+        }
 
     async def probe_encoding_status(self, target, timeout=2.0):
         device = self._device(target)
         if device.encoding is None or device.supported_encodings is None:
             raise RuntimeError("encoding status unavailable")
-        return device.encoding, device.supported_encodings
+        return {
+            "current_value": device.encoding,
+            "requested_value": device.encoding,
+            "update_mode": 2,
+            "available_values": device.supported_encodings,
+            "flags": None,
+        }
 
     async def probe_sample_rate_pullup_status(self, target, timeout=2.0):
         device = self._device(target)
         if device.supported_sample_rate_pullup_raw_values is None:
             raise CapabilityProbeTimeout("sample rate pull-up readback timed out")
-        return device.sample_rate_pullup_raw_value, device.supported_sample_rate_pullup_raw_values
+        return {
+            "current_value": device.sample_rate_pullup_raw_value,
+            "requested_value": device.requested_sample_rate_pullup_raw_value,
+            "update_mode": device.sample_rate_pullup_update_mode or 2,
+            "available_values": device.supported_sample_rate_pullup_raw_values,
+            "flags": device.sample_rate_pullup_flags,
+        }
 
-    async def probe_gain_status(self, target, timeout=2.0):
+    async def probe_gain_adapter(self, target, timeout=2.0):
         device = self._device(target)
-        status = device.gain_probe_status
+        status = device.gain_adapter_probe_status
         if status is None:
             raise CapabilityProbeTimeout("gain status readback timed out")
         return status

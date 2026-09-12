@@ -147,6 +147,7 @@ fn arc_packet_with_reserved_word(
 }
 
 mod device;
+mod external_subscription;
 mod flows;
 mod metering;
 mod multicast;
@@ -155,6 +156,7 @@ mod settings;
 mod subscriptions;
 
 pub use device::*;
+pub use external_subscription::*;
 pub use flows::*;
 pub use metering::*;
 pub use multicast::*;

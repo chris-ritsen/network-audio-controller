@@ -52,7 +52,7 @@ CONMON_PARSE_KINDS = {
     0x0022: "unmapped_0022_status",
     0x0024: "unmapped_0024_status",
     0x0026: "unmapped_0026_status",
-    0x0040: "unmapped_0040_status",
+    0x0040: "interface_statistics_status",
     0x0060: "dante_model",
     0x0078: "clear_configuration_status",
     0x0080: "sample_rate_status",
@@ -66,7 +66,7 @@ CONMON_PARSE_KINDS = {
     0x0106: "unmapped_0106_status",
     0x1007: "aes67_status",
     0x1009: "lock_reset_status",
-    0x100B: "gain_status",
+    0x100B: "codec_status",
     0x100E: "bluetooth_status",
     0xFF05: "conmon_export_fragment",
 }

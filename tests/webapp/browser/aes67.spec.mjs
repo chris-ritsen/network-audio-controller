@@ -5,6 +5,28 @@ function inventoryWith(state) {
   const source = structuredClone(Object.values(deviceFixture).find((device) => device.name === "avio-bt-1"));
   for (const key of Object.keys(source)) if (key.startsWith("aes67_") || key.startsWith("ddm_")) delete source[key];
   Object.assign(source, state);
+  const supported =
+    typeof source.aes67_configuration_supported === "boolean"
+      ? source.aes67_configuration_supported
+      : null;
+  const managed =
+    source.ddm_enrolment_state === "ENROLLED" && Boolean(source.ddm_domain_id);
+  const writable = supported === true && !managed;
+  source.operation_availability = {
+    ...(source.operation_availability || {}),
+    aes67: {
+      supported,
+      readable: source.aes67_current != null || source.aes67_configured != null,
+      writable,
+      reasons: writable
+        ? []
+        : supported === false
+          ? ["unsupported"]
+          : supported === null
+            ? ["capability_unknown"]
+            : ["managed_permission_missing"],
+    },
+  };
   return { [source.server_name]: source };
 }
 
@@ -19,8 +41,16 @@ test("AES67 readiness views make no writes and unknown support has no controls",
   expect(writes).toEqual([]);
 });
 
-test("pending AES67 changes show current and configured modes on desktop and mobile", async ({ page }) => {
-  await serveWebapp(page, { devices: inventoryWith({ aes67_supported: true, aes67_current: false, aes67_configured: true }) });
+test("pending AES67 changes show current and configured modes on desktop and mobile", async ({
+  page,
+}) => {
+  await serveWebapp(page, {
+    devices: inventoryWith({
+      aes67_configuration_supported: true,
+      aes67_current: false,
+      aes67_configured: true,
+    }),
+  });
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
@@ -35,12 +65,22 @@ test("pending AES67 changes show current and configured modes on desktop and mob
   expect(writes).toEqual([]);
 });
 
-test("enrolled devices show DDM RTP readiness without local configuration buttons", async ({ page }) => {
-  await serveWebapp(page, { devices: inventoryWith({
-    aes67_supported: true, aes67_current: true,
-    ddm_enrolment_state: "ENROLLED", ddm_domain_id: "test-domain", ddm_domain_name: "Test domain",
-    ddm_capabilities: { rtp_audio_supported: true, rtp_audio_support_suppressed: true },
-  }) });
+test("enrolled devices show DDM RTP readiness without local configuration buttons", async ({
+  page,
+}) => {
+  await serveWebapp(page, {
+    devices: inventoryWith({
+      aes67_configuration_supported: true,
+      aes67_current: true,
+      ddm_enrolment_state: "ENROLLED",
+      ddm_domain_id: "test-domain",
+      ddm_domain_name: "Test domain",
+      ddm_capabilities: {
+        rtp_audio_supported: true,
+        rtp_audio_support_suppressed: true,
+      },
+    }),
+  });
   const writes = [];
   page.on("request", (request) => { if (request.method() !== "GET") writes.push(request.url()); });
   await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
@@ -51,8 +91,42 @@ test("enrolled devices show DDM RTP readiness without local configuration button
   expect(writes).toEqual([]);
 });
 
-test("known direct devices retain explicit mode and multicast-prefix actions", async ({ page }) => {
-  await serveWebapp(page, { devices: inventoryWith({ aes67_supported: true, aes67_current: false, aes67_configured: false, aes67_multicast_prefix: "239.69.0.0" }) });
+test("managed AES67 permission exposes mode actions without a local prefix action", async ({
+  page,
+}) => {
+  const devices = inventoryWith({
+    aes67_configuration_supported: true,
+    aes67_current: false,
+    aes67_multicast_prefix: "239.69.0.0",
+    ddm_enrolment_state: "ENROLLED",
+    ddm_domain_id: "test-domain",
+    ddm_domain_name: "Test domain",
+  });
+  const device = Object.values(devices)[0];
+  device.operation_availability.aes67 = {
+    supported: true,
+    readable: true,
+    writable: true,
+    reasons: [],
+  };
+  await serveWebapp(page, { devices });
+  await page.goto("http://netaudio.test/devices/avio-bt-1/aes67-config");
+  await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeEnabled();
+  await expect(page.getByLabel("AES67 multicast address prefix")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toHaveCount(0);
+});
+
+test("known direct devices retain explicit mode and multicast-prefix actions", async ({
+  page,
+}) => {
+  await serveWebapp(page, {
+    devices: inventoryWith({
+      aes67_configuration_supported: true,
+      aes67_current: false,
+      aes67_configured: false,
+      aes67_multicast_prefix: "239.69.0.0",
+    }),
+  });
   const writes = [];
   await page.route("**/set-aes67", (route) => {
     writes.push(route.request().postDataJSON());

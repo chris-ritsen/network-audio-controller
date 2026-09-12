@@ -10,7 +10,12 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
 
-from netaudio.common.managed_api import DDMConfiguration, DDMContextConfiguration, ManagedAPIConfiguration
+from netaudio.common.managed_api import (
+    MANAGED_PERMISSION_OPERATIONS,
+    DDMConfiguration,
+    DDMContextConfiguration,
+    ManagedAPIConfiguration,
+)
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import managed_subscription_status
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
@@ -30,6 +35,7 @@ class ManagedDeviceObservation:
     fresh: bool | None = None
     server_profile: str = "default"
     context_name: str | None = None
+    operation_permissions: frozenset[str] | None = None
 
 
 def _normalized_mac(value: object) -> str | None:
@@ -204,6 +210,14 @@ def _managed_metadata(observation: ManagedDeviceObservation, synced_at: float) -
         "ddm_device_id": device.id,
         "ddm_server_profile": observation.server_profile,
         "ddm_context": observation.context_name,
+        "managed_operation_permissions": (
+            {
+                operation: operation in observation.operation_permissions
+                for operation in sorted(MANAGED_PERMISSION_OPERATIONS)
+            }
+            if observation.operation_permissions is not None
+            else None
+        ),
         "ddm_domain_id": observation.domain_id,
         "ddm_domain_name": observation.domain_name,
         "ddm_enrolment_state": device.enrolment_state,
@@ -390,7 +404,7 @@ class ManagedInventoryService:
         self.client = client or self._make_client(configuration)
         self.clock = clock
         self.contexts = contexts
-        self._contexts_by_domain = {context.domain_id: context.name for context in contexts}
+        self._contexts_by_domain = {context.domain_id: context for context in contexts}
         self._domains: dict[str, Domain] = {}
         self._unenrolled: dict[str, Device] = {}
         self._superseded_enrollments: set[str] = set()
@@ -552,7 +566,12 @@ class ManagedInventoryService:
                     self._domains_last_success,
                     domains_fresh,
                     self.configuration.name,
-                    self._contexts_by_domain.get(domain.id),
+                    self._contexts_by_domain.get(domain.id).name if domain.id in self._contexts_by_domain else None,
+                    (
+                        self._contexts_by_domain.get(domain.id).operation_permissions
+                        if domain.id in self._contexts_by_domain
+                        else None
+                    ),
                 )
         unenrolled_fresh = self._root_fresh(self._unenrolled_last_success, self._unenrolled_current)
         for device_id, device in self._unenrolled.items():

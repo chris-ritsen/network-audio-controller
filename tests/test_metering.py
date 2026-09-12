@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from netaudio import core
 from netaudio.daemon import metering as metering_module
 from netaudio.daemon.metering import MeteringManager
 from netaudio.dante.events import EventType
@@ -53,11 +52,26 @@ def test_metering_levels_use_embedded_channel_counts():
     }
 
 
-def test_metering_levels_reject_count_mismatch():
+def test_metering_levels_use_a_trailing_byte_when_the_counts_claim_it():
     data = bytes.fromhex("ffff00211f810000001dc119245c0000417564696e617465020402fefe7da08800")
 
-    with pytest.raises(core.NetaudioCoreError, match="malformed response"):
-        parse_metering_levels(data)
+    assert parse_metering_levels(data) == {
+        "tx": {1: 0xFE, 2: 0xFE, 3: 0x7D, 4: 0xA0},
+        "rx": {1: 0x88, 2: 0x00},
+    }
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_metering_versions_one_and_two_ignore_trailing_bytes(version):
+    data = bytearray(METERING_FRAME)
+    data[24] = version
+    data.extend([0xAA, 0xBB])
+    data[2:4] = len(data).to_bytes(2, "big")
+
+    assert parse_metering_levels(bytes(data)) == {
+        "tx": {1: 0xFE, 2: 0xFE, 3: 0x7D},
+        "rx": {1: 0xA0, 2: 0x88},
+    }
 
 
 def test_metering_v3_levels_use_sixteen_bit_channel_counts():
@@ -69,6 +83,18 @@ def test_metering_v3_levels_use_sixteen_bit_channel_counts():
     assert len(levels["rx"]) == 128
     assert levels["tx"][17] == 0xFE
     assert levels["rx"][4] == 0xFE
+
+
+def test_metering_v3_ignores_the_reserved_byte_and_trailing_bytes():
+    data = bytearray(METERING_FRAME_V3)
+    data[25] = 0xA5
+    data.extend([0xAA, 0xBB])
+    data[2:4] = len(data).to_bytes(2, "big")
+
+    levels = parse_metering_levels(bytes(data))
+
+    assert len(levels["tx"]) == 128
+    assert len(levels["rx"]) == 128
 
 
 def test_metering_manager_uses_frame_counts_without_device_inventory():

@@ -334,15 +334,31 @@
     "parsed": {
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
-      "capabilities": 2390292058,
       "monitoring_capabilities": 27,
-      "aes67_supported": true,
       "detailed_metering_supported": true,
       "interface_statistics_supported": true,
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "aes67_configuration_supported": true,
+      "device_locking_supported": true,
+      "domain_capability_validity": 3,
+      "domain_capability_values": 3,
+      "encoding_configuration_supported": true,
+      "external_word_clock_read_only": false,
+      "generic_codec_control_supported": false,
+      "identify_supported": false,
+      "primary_capabilities": 2390292058,
+      "read_only_capabilities": 0,
+      "record_protocol_version": 1828,
+      "sample_rate_configuration_supported": true,
+      "sample_rate_pullup_configuration_supported": true,
+      "secondary_capabilities": 1,
+      "static_ipv4_configuration_read_only": false,
+      "static_ipv4_configuration_supported": true,
+      "switch_redundancy_read_only": false,
+      "switch_redundancy_supported": true
     }
   },
   "dante_model_ad4d_capture": {
@@ -351,15 +367,31 @@
     "parsed": {
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
-      "capabilities": 2390545611,
       "monitoring_capabilities": 27,
-      "aes67_supported": true,
       "detailed_metering_supported": true,
       "interface_statistics_supported": true,
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "aes67_configuration_supported": true,
+      "device_locking_supported": true,
+      "domain_capability_validity": 7,
+      "domain_capability_values": 7,
+      "encoding_configuration_supported": false,
+      "external_word_clock_read_only": false,
+      "generic_codec_control_supported": false,
+      "identify_supported": true,
+      "primary_capabilities": 2390545611,
+      "read_only_capabilities": 0,
+      "record_protocol_version": 1838,
+      "sample_rate_configuration_supported": true,
+      "sample_rate_pullup_configuration_supported": false,
+      "secondary_capabilities": 65,
+      "static_ipv4_configuration_read_only": false,
+      "static_ipv4_configuration_supported": true,
+      "switch_redundancy_read_only": false,
+      "switch_redundancy_supported": false
     }
   },
   "dante_model_lx_dante_capture": {
@@ -368,59 +400,95 @@
     "parsed": {
       "board_codename": "PCIe",
       "board_name": "Dante PCIe IF",
-      "capabilities": 241750985,
       "monitoring_capabilities": 27,
-      "aes67_supported": true,
       "detailed_metering_supported": true,
       "interface_statistics_supported": true,
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "aes67_configuration_supported": true,
+      "device_locking_supported": true,
+      "domain_capability_validity": 3,
+      "domain_capability_values": 3,
+      "encoding_configuration_supported": false,
+      "external_word_clock_read_only": false,
+      "generic_codec_control_supported": false,
+      "identify_supported": true,
+      "primary_capabilities": 241750985,
+      "read_only_capabilities": 0,
+      "record_protocol_version": 1828,
+      "sample_rate_configuration_supported": true,
+      "sample_rate_pullup_configuration_supported": true,
+      "secondary_capabilities": 1,
+      "static_ipv4_configuration_read_only": false,
+      "static_ipv4_configuration_supported": true,
+      "switch_redundancy_read_only": false,
+      "switch_redundancy_supported": false
     }
   },
   "encoding_status_packet_204720": {
     "hex": "ffff003c21020000001dc11073320000417564696e617465072400820000000000180003000000180000000000020000000000180000001000000020",
     "kind": "encoding_status",
     "parsed": {
-      "current_encoding": 24,
-      "supported_encodings": [
+      "available_values": [
         24,
         16,
         32
-      ]
+      ],
+      "current_value": 24,
+      "flags": null,
+      "record_protocol_version": 1828,
+      "requested_value": 0,
+      "update_mode": 2
     }
   },
   "encoding_status_packet_645566": {
     "hex": "ffff003479b20000001dc1fffe50cac5417564696e61746507380082000000000018000100000018000000180001000000000018",
     "kind": "encoding_status",
     "parsed": {
-      "current_encoding": 24,
-      "supported_encodings": [
+      "available_values": [
         24
-      ]
+      ],
+      "current_value": 24,
+      "flags": null,
+      "record_protocol_version": 1848,
+      "requested_value": 24,
+      "update_mode": 1
     }
   },
-  "gain_status_input_packet_1528": {
+  "codec_status_avio_input_packet_1528": {
     "hex": "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000000000010008001001020002000400180000000500000001",
-    "kind": "gain_status",
+    "kind": "codec_status",
     "parsed": {
-      "device_type": "input",
-      "channel_levels": [
-        5,
-        1
-      ]
+      "parameters": [
+        {
+          "mode": 2,
+          "parameter_type": 1,
+          "values": [
+            5,
+            1
+          ]
+        }
+      ],
+      "record_protocol_version": 1831
     }
   },
-  "gain_status_output_packet_1585": {
+  "codec_status_avio_output_packet_1585": {
     "hex": "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004",
-    "kind": "gain_status",
+    "kind": "codec_status",
     "parsed": {
-      "device_type": "output",
-      "channel_levels": [
-        4,
-        4
-      ]
+      "parameters": [
+        {
+          "mode": 1,
+          "parameter_type": 2,
+          "values": [
+            4,
+            4
+          ]
+        }
+      ],
+      "record_protocol_version": 1831
     }
   },
   "interface_status_avio_applied_dhcp_packet_12362281": {
@@ -676,6 +744,10 @@
         254,
         254,
         254
+      ],
+      "message_version": 2,
+      "trailing_bytes": [
+        0
       ]
     }
   },
@@ -755,6 +827,10 @@
       ],
       "rx_levels": [
         254
+      ],
+      "message_version": 2,
+      "trailing_bytes": [
+        0
       ]
     }
   },
@@ -1004,38 +1080,50 @@
     "hex": "ffff004816310000001dc10812580000417564696e6174650724008000000000001800060000ac4400000000000200000000ac440000bb8000015888000177000002b1100002ee00",
     "kind": "sample_rate_status",
     "parsed": {
-      "current_sample_rate": 44100,
-      "supported_sample_rates": [
+      "available_values": [
         44100,
         48000,
         88200,
         96000,
         176400,
         192000
-      ]
+      ],
+      "current_value": 44100,
+      "flags": null,
+      "record_protocol_version": 1828,
+      "requested_value": 0,
+      "update_mode": 2
     }
   },
   "sample_rate_status_packet_4170820": {
     "hex": "ffff0034061a0000001dc10812580000417564696e6174650724008000000000001800010000bb8000000000000200000000bb80",
     "kind": "sample_rate_status",
     "parsed": {
-      "current_sample_rate": 48000,
-      "supported_sample_rates": [
+      "available_values": [
         48000
-      ]
+      ],
+      "current_value": 48000,
+      "flags": null,
+      "record_protocol_version": 1828,
+      "requested_value": 0,
+      "update_mode": 2
     }
   },
   "sample_rate_status_packet_9695783": {
     "hex": "ffff0040fd2a0000001dc1fffe53ef37417564696e6174650738008000000000001800040000bb800000bb80000200000000ac440000bb800001588800017700",
     "kind": "sample_rate_status",
     "parsed": {
-      "current_sample_rate": 48000,
-      "supported_sample_rates": [
+      "available_values": [
         44100,
         48000,
         88200,
         96000
-      ]
+      ],
+      "current_value": 48000,
+      "flags": null,
+      "record_protocol_version": 1848,
+      "requested_value": 48000,
+      "update_mode": 2
     }
   },
   "synthetic_dante_model": {
@@ -1044,15 +1132,31 @@
     "parsed": {
       "board_codename": "Bklyn2",
       "board_name": "Brooklyn II",
-      "capabilities": 2,
-      "monitoring_capabilities": null,
-      "aes67_supported": false,
+      "monitoring_capabilities": 0,
       "detailed_metering_supported": false,
-      "interface_statistics_supported": null,
-      "clock_monitoring_supported": null,
-      "per_channel_signal_presence_supported": null,
-      "rx_flow_maximum_latency_monitoring_supported": null,
-      "rx_flow_late_packet_monitoring_supported": null
+      "interface_statistics_supported": false,
+      "clock_monitoring_supported": false,
+      "per_channel_signal_presence_supported": false,
+      "rx_flow_maximum_latency_monitoring_supported": false,
+      "rx_flow_late_packet_monitoring_supported": false,
+      "aes67_configuration_supported": false,
+      "device_locking_supported": false,
+      "domain_capability_validity": 0,
+      "domain_capability_values": 0,
+      "encoding_configuration_supported": false,
+      "external_word_clock_read_only": false,
+      "generic_codec_control_supported": false,
+      "identify_supported": false,
+      "primary_capabilities": 2,
+      "read_only_capabilities": 0,
+      "record_protocol_version": 1792,
+      "sample_rate_configuration_supported": false,
+      "sample_rate_pullup_configuration_supported": false,
+      "secondary_capabilities": 0,
+      "static_ipv4_configuration_read_only": false,
+      "static_ipv4_configuration_supported": false,
+      "switch_redundancy_read_only": false,
+      "switch_redundancy_supported": false
     }
   },
   "synthetic_make_model": {

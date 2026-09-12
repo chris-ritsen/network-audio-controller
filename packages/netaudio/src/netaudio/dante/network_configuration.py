@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from ipaddress import IPv4Address, IPv4Network
 
+from netaudio.dante.operation_availability import operation_availability, probe_supported, require_writable
+
 
 class NetworkConfigurationError(RuntimeError):
     pass
@@ -45,13 +47,14 @@ def validate_interface_configuration(mode, configuration=None):
 
 async def set_interface(application, device, mode, configuration=None, *, interface="primary", timeout=2.0):
     expected = validate_interface_configuration(mode, configuration)
+    require_writable(device, "static_ipv4")
     if not isinstance(interface, str) or interface not in {"primary", "secondary"}:
         raise ValueError("interface must be 'primary' or 'secondary'")
     async with device.topology_mutation_lock:
         before = deepcopy(await application.probe_interface_status(device, timeout=timeout))
         before_redundancy = deepcopy(device.dante_redundancy)
         selected = interface_configuration(before, interface)
-        if mode not in interface_configuration_modes(selected):
+        if mode not in interface_configuration_modes(selected, device):
             raise NetworkConfigurationError("Network configuration is unavailable for this interface")
         if all(selected["configured"].get(key) == value for key, value in expected.items()):
             return before
@@ -112,19 +115,27 @@ def network_snapshot(device) -> dict:
         "link_speed_mbps": device.link_speed_mbps,
         "reboot_required": device.interface_reboot_required
         or bool((device.dante_redundancy or {}).get("reboot_required")),
+        "operation_availability": {
+            operation: operation_availability(device, operation).to_dict()
+            for operation in ("static_ipv4", "redundancy")
+        },
     }
 
 
 def network_configuration_modes(device) -> dict:
     return {
-        entry["interface"]: interface_configuration_modes(entry)
+        entry["interface"]: interface_configuration_modes(entry, device)
         for entry in device.interfaces or []
         if entry.get("interface") in {"primary", "secondary"} and entry.get("configured") is not None
     }
 
 
-def interface_configuration_modes(entry) -> list[str]:
-    if isinstance(entry, dict) and entry.get("configured") is not None:
+def interface_configuration_modes(entry, device) -> list[str]:
+    if (
+        isinstance(entry, dict)
+        and entry.get("configured") is not None
+        and operation_availability(device, "static_ipv4").writable
+    ):
         return ["dhcp", "static"]
     return []
 
@@ -174,35 +185,13 @@ def interface_redundancy_status(parsed: dict, device) -> dict | None:
 
 
 def redundancy_hardware_reported(device, interfaces) -> bool:
-    return (
-        len(interfaces or []) == 2
-        or getattr(device, "licensed_redundancy_enabled", None) is True
-        or (getattr(device, "switch_port_count", None) or 0) >= 2
-    )
-
-
-async def learn_switch_ports(application, device, timeout: float = 2.0) -> bool:
-    from netaudio.dante.application import CapabilityProbeTimeout
-
-    if redundancy_hardware_reported(device, getattr(device, "interfaces", None)):
-        return False
-    if getattr(device, "switch_port_count", None) is not None or getattr(device, "requires_managed_control", False):
-        return False
-    probe_link_status = getattr(application, "probe_link_status", None)
-    if probe_link_status is None:
-        return False
-    try:
-        await probe_link_status(device, timeout=timeout)
-    except (CapabilityProbeTimeout, TimeoutError):
-        device.switch_port_count = 0
-        return False
-    return (device.switch_port_count or 0) >= 2
+    return len(interfaces or []) == 2 or getattr(device, "licensed_redundancy_enabled", None) is True
 
 
 async def probe_switch_configuration_if_reported(application, device, timeout: float = 2.0) -> dict | None:
     from netaudio.dante.application import CapabilityProbeTimeout
 
-    if not switch_configuration_expected(device):
+    if not probe_supported(device, "redundancy") or not switch_configuration_expected(device):
         return None
     try:
         return await application.probe_switch_configuration(device, timeout=timeout)
@@ -215,8 +204,6 @@ async def probe_switch_configuration_if_reported(application, device, timeout: f
 
 async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
     await application.probe_interface_status(device, timeout=timeout)
-    if await learn_switch_ports(application, device, timeout):
-        await application.probe_interface_status(device, timeout=timeout)
     await probe_switch_configuration_if_reported(application, device, timeout)
     status = device.dante_redundancy
     if not isinstance(status, dict) or status.get("current") is None or status.get("configured") is None:
@@ -227,6 +214,7 @@ async def probe_redundancy(application, device, timeout: float = 2.0) -> dict:
 async def set_redundancy(application, device, mode: str, timeout: float = 2.0) -> dict:
     if not isinstance(mode, str) or mode not in {"switched", "redundant", "split_redundant"}:
         raise ValueError("mode must be switched, redundant, or split_redundant")
+    require_writable(device, "redundancy")
     async with device.topology_mutation_lock:
         before = await probe_redundancy(application, device, timeout)
         before_interfaces = deepcopy(device.interfaces)

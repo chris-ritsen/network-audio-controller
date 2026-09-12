@@ -49,6 +49,8 @@ def _device(*, enrolled=True, direct=True):
     device.ddm_enrolment_state = "ENROLLED" if enrolled else "UNENROLLED"
     device.management_state = "managed" if enrolled else "unenrolled"
     device.direct_control_available = direct
+    device.identify_supported = True
+    device.managed_operation_permissions = {"identify": True} if enrolled else None
     return device
 
 

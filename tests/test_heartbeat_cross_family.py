@@ -48,11 +48,12 @@ def device_state(name: str):
         "connection_frame_number",
         "expected_identifier",
         "expected_interface_count",
+        "expected_receiver_flow_count",
         "expected_active_receiver_flow_indices",
     ),
     [
-        ("lx-dante-1031.json", 11, 12, "001dc10812580000", 2, [0, 3, 4, 6]),
-        ("a32-1032.json", 1345, 1332, "001dc119245c0000", 1, [0, 1, 2, 3]),
+        ("lx-dante-1031.json", 11, 12, "001dc10812580000", 2, 64, [0, 3, 4, 6]),
+        ("a32-1032.json", 1345, 1332, "001dc119245c0000", 1, 32, [0, 1, 2, 3]),
     ],
 )
 def test_authentic_non_8700_heartbeat_families_parse_and_update_devices(
@@ -61,6 +62,7 @@ def test_authentic_non_8700_heartbeat_families_parse_and_update_devices(
     connection_frame_number,
     expected_identifier,
     expected_interface_count,
+    expected_receiver_flow_count,
     expected_active_receiver_flow_indices,
 ):
     fixture = load_fixture(fixture_name)
@@ -92,12 +94,12 @@ def test_authentic_non_8700_heartbeat_families_parse_and_update_devices(
     assert device.network_interface_traffic["device_extended_unique_identifier"] == expected_identifier
     assert device.network_interface_traffic["interface_entry_count"] == expected_interface_count
     assert device.receiver_flow_connection_health["device_extended_unique_identifier"] == expected_identifier
-    assert [flow["receiver_flow_index"] for flow in device.receiver_flow_connection_health["flows"]] == (
-        expected_active_receiver_flow_indices
-    )
-    assert [flow["receiver_flow_slot"] for flow in device.receiver_flow_connection_health["flows"]] == [
-        receiver_flow_index + 1 for receiver_flow_index in expected_active_receiver_flow_indices
-    ]
+    flows = device.receiver_flow_connection_health["flows"]
+    assert [flow["receiver_flow_index"] for flow in flows] == list(range(expected_receiver_flow_count))
+    assert [
+        flow["receiver_flow_index"] for flow in flows if flow["current_latency_nanoseconds"] > 0
+    ] == expected_active_receiver_flow_indices
+    assert [flow["receiver_flow_slot"] for flow in flows] == list(range(1, expected_receiver_flow_count + 1))
     assert device.update_last_seen.call_count == 2
     assert on_device_updated.call_count == 2
 
@@ -162,7 +164,7 @@ def test_removed_device_identity_discards_connection_and_interface_history():
     assert device.receiver_flow_connection_health is None
     assert device.network_interface_traffic is None
     assert service._heartbeat_devices == {}
-    assert service._previous_interface_traffic_samples == {}
+    assert service._previous_interface_traffic_sequences == {}
 
 
 def test_replaced_device_object_starts_new_identity_owned_history():
@@ -178,10 +180,10 @@ def test_replaced_device_object_starts_new_identity_owned_history():
     )
     source_address = (fixture["source_ipv4"], fixture["source_udp_port"])
     service._on_packet(connection_payload, source_address)
-    assert first_device.receiver_flow_connection_health["flows"][0]["history_sample_count"] == 1
+    assert first_device.receiver_flow_connection_health["flows"][0]["latency_history_sample_count"] == 1
 
     current_device = replacement_device
     service._on_packet(connection_payload, source_address)
 
     assert first_device.receiver_flow_connection_health is None
-    assert replacement_device.receiver_flow_connection_health["flows"][0]["history_sample_count"] == 1
+    assert replacement_device.receiver_flow_connection_health["flows"][0]["latency_history_sample_count"] == 1

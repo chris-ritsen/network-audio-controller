@@ -1,8 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
 from netaudio import core
 from netaudio.dante.services.heartbeat import (
     DanteHeartbeatService,
@@ -31,18 +29,21 @@ def test_causal_avio_and_two_interface_lx_dante_records_parse():
     [lx_dante] = parse_interface_traffic_records(LX_DANTE_PACKET)
 
     assert baseline["sequence"] == 41958
-    assert baseline["interfaces"][0]["transmit_octets"] == 546351
-    assert baseline["interfaces"][0]["receive_octets"] == 624893
+    assert baseline["interfaces"][0]["transmit_rate_raw"] == 546351
+    assert baseline["interfaces"][0]["receive_rate_raw"] == 624893
+    assert baseline["interfaces"][0]["transmit_rate_bits_per_second"] == 546351 * 8
+    assert baseline["interfaces"][0]["receive_rate_bits_per_second"] == 624893 * 8
+    assert baseline["interfaces"][0]["transmit_error_count"] == 0
+    assert baseline["interfaces"][0]["receive_error_count"] == 0
     assert treatment["sequence"] == 41959
-    assert treatment["interfaces"][0]["transmit_octets"] == 554047
-    assert treatment["interfaces"][0]["receive_octets"] == 775632
+    assert treatment["interfaces"][0]["transmit_rate_raw"] == 554047
+    assert treatment["interfaces"][0]["receive_rate_raw"] == 775632
     assert lx_dante["interface_entry_count"] == 2
-    assert lx_dante["interfaces"][1]["transmit_octets"] == 0
-    assert lx_dante["interfaces"][1]["receive_octets"] == 0
+    assert lx_dante["interfaces"][1]["transmit_rate_raw"] == 0
+    assert lx_dante["interfaces"][1]["receive_rate_raw"] == 0
 
 
-def test_consecutive_samples_update_device_with_raw_octets_and_estimated_rates():
-    monotonic_times = iter([100.0, 101.2])
+def test_each_sample_exposes_wire_rates_without_local_arrival_time_calculation():
     device = SimpleNamespace(
         server_name="avio-usb-1",
         online=True,
@@ -52,26 +53,23 @@ def test_consecutive_samples_update_device_with_raw_octets_and_estimated_rates()
     )
     service = DanteHeartbeatService(
         device_by_ip=lambda _source_ip: device,
-        monotonic_clock=lambda: next(monotonic_times),
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
-    assert device.network_interface_traffic["interval_seconds"] is None
+    assert device.network_interface_traffic["total_transmit_rate_bits_per_second"] == 546351 * 8
 
     service._on_packet(TREATMENT_PACKET, ("192.168.1.247", 8700))
     traffic = device.network_interface_traffic
 
-    assert traffic["interval_seconds"] == pytest.approx(1.2)
-    assert traffic["total_transmit_octets"] == 554047
-    assert traffic["total_receive_octets"] == 775632
-    assert traffic["estimated_total_transmit_bits_per_second"] == pytest.approx(554047 * 8 / 1.2)
-    assert traffic["estimated_total_receive_bits_per_second"] == pytest.approx(775632 * 8 / 1.2)
-    assert traffic["interfaces"][0]["estimated_transmit_bits_per_second"] == pytest.approx(554047 * 8 / 1.2)
-    assert traffic["interfaces"][0]["estimated_receive_bits_per_second"] == pytest.approx(775632 * 8 / 1.2)
+    assert traffic["total_transmit_rate_bits_per_second"] == 554047 * 8
+    assert traffic["total_receive_rate_bits_per_second"] == 775632 * 8
+    assert traffic["total_transmit_error_count"] == 0
+    assert traffic["total_receive_error_count"] == 0
+    assert traffic["interfaces"][0]["transmit_rate_bits_per_second"] == 554047 * 8
+    assert traffic["interfaces"][0]["receive_rate_bits_per_second"] == 775632 * 8
 
 
-def test_sequence_gap_preserves_raw_octets_without_deriving_a_rate():
-    monotonic_times = iter([100.0, 101.2])
+def test_sequence_gap_still_preserves_the_reported_rate():
     device = SimpleNamespace(
         server_name="avio-usb-1",
         online=True,
@@ -81,7 +79,6 @@ def test_sequence_gap_preserves_raw_octets_without_deriving_a_rate():
     )
     service = DanteHeartbeatService(
         device_by_ip=lambda _source_ip: device,
-        monotonic_clock=lambda: next(monotonic_times),
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
@@ -90,13 +87,11 @@ def test_sequence_gap_preserves_raw_octets_without_deriving_a_rate():
     service._on_packet(bytes(skipped_sequence_packet), ("192.168.1.247", 8700))
 
     traffic = device.network_interface_traffic
-    assert traffic["interval_seconds"] is None
-    assert "estimated_total_transmit_bits_per_second" not in traffic
-    assert "estimated_transmit_bits_per_second" not in traffic["interfaces"][0]
+    assert traffic["total_transmit_rate_bits_per_second"] == 554047 * 8
+    assert traffic["interfaces"][0]["transmit_rate_raw"] == 554047
 
 
-def test_duplicate_sequence_does_not_shift_the_next_rate_interval():
-    monotonic_times = iter([100.0, 100.2, 101.2])
+def test_duplicate_sequence_is_ignored_and_next_sequence_replaces_state():
     device = SimpleNamespace(
         server_name="avio-usb-1",
         online=True,
@@ -106,14 +101,14 @@ def test_duplicate_sequence_does_not_shift_the_next_rate_interval():
     )
     service = DanteHeartbeatService(
         device_by_ip=lambda _source_ip: device,
-        monotonic_clock=lambda: next(monotonic_times),
     )
 
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
     service._on_packet(BASELINE_PACKET, ("192.168.1.247", 8700))
     service._on_packet(TREATMENT_PACKET, ("192.168.1.247", 8700))
 
-    assert device.network_interface_traffic["interval_seconds"] == pytest.approx(1.2)
+    assert device.network_interface_traffic["sequence"] == 41959
+    assert device.network_interface_traffic["total_transmit_rate_bits_per_second"] == 554047 * 8
 
 
 def test_malformed_packet_does_not_replace_live_state():

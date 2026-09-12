@@ -77,6 +77,8 @@ async def test_set_aes67_multicast_prefix_state_writes_and_reads_back():
     device = DanteDevice()
     device.ipv4 = "192.0.2.10"
     device.aes67_multicast_prefix = "239.69.0.0"
+    device.aes67_configuration_supported = True
+    device.is_locked = False
 
     async def readback(_device):
         device.aes67_multicast_prefix = "239.238.0.0"

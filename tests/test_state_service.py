@@ -43,7 +43,7 @@ def make_application(devices):
         probe_aes67_state=AsyncMock(return_value=None),
         probe_clocking_status=AsyncMock(return_value=None),
         probe_encoding_status=AsyncMock(return_value=None),
-        probe_gain_status=AsyncMock(return_value=None),
+        probe_codec_status=AsyncMock(return_value=None),
         probe_interface_status=AsyncMock(return_value=None),
         probe_lock_status=AsyncMock(return_value=None),
         probe_preferred_leader_state=AsyncMock(return_value=None),
@@ -501,7 +501,7 @@ class TestFetchDeviceControls:
         application.probe_encoding_status.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_initial_fetch_probes_unknown_gain_capabilities(self):
+    async def test_initial_fetch_probes_unknown_codec_status(self):
         device = make_device()
         application = make_application({"dev1.local.": device})
         device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
@@ -509,19 +509,19 @@ class TestFetchDeviceControls:
 
         await state.fetch_device_controls("dev1.local.")
 
-        application.probe_gain_status.assert_awaited_once_with(device)
+        application.probe_codec_status.assert_awaited_once_with(device)
 
     @pytest.mark.asyncio
-    async def test_initial_fetch_preserves_known_gain_capabilities_without_reprobing(self):
+    async def test_initial_fetch_preserves_known_codec_status_without_reprobing(self):
         device = make_device()
-        device.supported_gain_levels = [1, 2, 3, 4, 5]
+        device.codec_parameters = []
         application = make_application({"dev1.local.": device})
         device.fetch_controls_data = AsyncMock(return_value={"name": "Device1", "tx_count": 2, "rx_count": 2})
         state = DanteStateService(application)
 
         await state.fetch_device_controls("dev1.local.")
 
-        application.probe_gain_status.assert_not_awaited()
+        application.probe_codec_status.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_initial_fetch_tolerates_probe_timeouts(self):
@@ -956,21 +956,21 @@ async def test_failed_capability_readback_backs_off_and_recovers(monkeypatch):
     device = make_device()
     application = make_application({device.server_name: device})
     state = DanteStateService(application)
-    probe = application.probe_gain_status
+    probe = application.probe_codec_status
     probe.side_effect = RuntimeError("unavailable")
     for _ in range(100):
-        await state._refresh_gain_status(device, "device discovered")
+        await state._refresh_codec_status(device, "device discovered")
     assert probe.await_count == 1
     now += 5
-    await state._refresh_gain_status(device, "device discovered")
+    await state._refresh_codec_status(device, "device discovered")
     assert probe.await_count == 2
     now += 5
-    await state._refresh_gain_status(device, "device discovered")
+    await state._refresh_codec_status(device, "device discovered")
     assert probe.await_count == 2
     now += 5
     probe.side_effect = None
-    await state._refresh_gain_status(device, "device discovered")
-    await state._refresh_gain_status(device, "device discovered")
+    await state._refresh_codec_status(device, "device discovered")
+    await state._refresh_codec_status(device, "device discovered")
     assert probe.await_count == 4
 
 
@@ -1005,5 +1005,5 @@ async def test_clock_notification_does_not_refetch_channels_or_capabilities():
     await state._on_notification(event)
     application.probe_clocking_status.assert_awaited_once_with(device)
     state.fetch_device_controls.assert_not_awaited()
-    application.probe_gain_status.assert_not_awaited()
+    application.probe_codec_status.assert_not_awaited()
     application.probe_encoding_status.assert_not_awaited()

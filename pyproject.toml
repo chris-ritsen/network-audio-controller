@@ -120,7 +120,6 @@ include = [
     "packages/netaudio/src/netaudio/dante/latency.py",
     "packages/netaudio/src/netaudio/dante/lock.py",
     "packages/netaudio/src/netaudio/dante/metering.py",
-    "packages/netaudio/src/netaudio/dante/multicast.py",
     "packages/netaudio/src/netaudio/dante/sample_rate_topology.py",
     "packages/netaudio/src/netaudio/dante/services/cmc.py",
     "packages/netaudio/src/netaudio/dante/services/heartbeat.py",

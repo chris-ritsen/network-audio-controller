@@ -30,15 +30,21 @@ fn lock_reset_probe_matches_shipping_controller_request() {
 }
 
 #[test]
-fn link_status_probe_matches_authentic_a32_request() {
+fn interface_statistics_probe_preserves_both_observed_request_variants() {
     assert_eq!(
-        build_probe_link_status([0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0x0047).unwrap(),
+        build_probe_interface_statistics([0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0x0047, false)
+            .unwrap(),
+        decode_hexadecimal("ffff00220047000052550a0002020000417564696e617465073a0041000000000000")
+    );
+    assert_eq!(
+        build_probe_interface_statistics([0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0x0047, true)
+            .unwrap(),
         decode_hexadecimal(
             "ffff00380047000052550a0002020000417564696e617465073a004100000000000000000000000000000000000000000000000000000000"
         )
     );
     assert_eq!(
-        build_probe_link_status([0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0),
+        build_probe_interface_statistics([0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0, false),
         Err(NetaudioError::InvalidSequence)
     );
 }

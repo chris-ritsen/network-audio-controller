@@ -124,7 +124,7 @@ def test_format_aes67_reads_as_on_off_with_prefix_in_parentheses():
     device.failed_queries.add("aes67")
     assert device_display._format_aes67(device) == "unknown"
 
-    device.aes67_supported = False
+    device.aes67_configuration_supported = False
     assert device_display._format_aes67(device) == "unsupported"
 
 

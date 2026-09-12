@@ -215,7 +215,7 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
 
     if device.gain_levels is None:
         try:
-            device_type, channel_levels = await application.probe_gain_status(device)
+            device_type, channel_levels = await application.probe_gain_adapter(device)
         except CapabilityProbeTimeout as exception:
             typer.echo(f"Error: could not read gain status: {exception}", err=True)
             raise typer.Exit(code=ExitCode.ERROR)

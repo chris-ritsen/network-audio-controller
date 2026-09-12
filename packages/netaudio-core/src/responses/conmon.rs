@@ -2,9 +2,13 @@ use super::conmon_common::*;
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SampleRateStatus {
-    pub current_sample_rate: u32,
-    pub supported_sample_rates: Vec<u32>,
+pub struct ConfigurableU32Status {
+    pub record_protocol_version: u16,
+    pub current_value: u32,
+    pub requested_value: u32,
+    pub update_mode: u16,
+    pub available_values: Vec<u32>,
+    pub flags: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -53,43 +57,16 @@ pub struct SwitchConfigurationStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EncodingStatus {
-    pub current_encoding: u32,
-    pub supported_encodings: Vec<u32>,
+pub struct CodecParameterStatus {
+    pub parameter_type: u8,
+    pub mode: u8,
+    pub values: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SampleRatePullupMeaning {
-    NoPullupOrPulldown,
-    PositiveFourPointOneSixSixSevenPercent,
-    PositiveOneTenthPercent,
-    NegativeOneTenthPercent,
-    NegativeFourPercent,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SampleRatePullupValue {
-    pub raw_value: u32,
-    pub meaning: SampleRatePullupMeaning,
-    pub rate_multiplier_numerator: Option<u32>,
-    pub rate_multiplier_denominator: Option<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SampleRatePullupStatus {
-    pub applied_value: SampleRatePullupValue,
-    pub requested_value: SampleRatePullupValue,
-    pub mode_code: u16,
-    pub unmapped_word_at_body_offset_20: u32,
-    pub supported_values: Vec<SampleRatePullupValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct GainStatus {
-    pub device_type: String,
-    pub channel_levels: Vec<u32>,
+pub struct CodecStatus {
+    pub record_protocol_version: u16,
+    pub parameters: Vec<CodecParameterStatus>,
 }
 
 pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfigurationStatus> {
@@ -261,43 +238,91 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
     })
 }
 
-fn parse_supported_u32_values(
+const CONMON_BODY_OFFSET: usize = 0x18;
+const CONFIGURABLE_VECTOR_POINTER_BODY_OFFSET: usize = 0x08;
+const CONFIGURABLE_VECTOR_COUNT_BODY_OFFSET: usize = 0x0A;
+const CONFIGURABLE_CURRENT_VALUE_BODY_OFFSET: usize = 0x0C;
+const CONFIGURABLE_REQUESTED_VALUE_BODY_OFFSET: usize = 0x10;
+const CONFIGURABLE_UPDATE_MODE_BODY_OFFSET: usize = 0x14;
+const CONFIGURABLE_MINIMUM_VECTOR_BODY_OFFSET: usize = 0x18;
+const CONFIGURABLE_UPDATE_MODE_VERSION: u16 = 0x0501;
+const SAMPLE_RATE_PULLUP_FLAGS_VERSION: u16 = 0x070F;
+const SAMPLE_RATE_PULLUP_FLAGS_BODY_OFFSET: usize = 0x1C;
+
+fn parse_configurable_u32_status(
     data: &[u8],
     expected_opcode: u16,
-    supported_value_count_offset: usize,
-    current_value_offset: usize,
-    supported_values_offset: usize,
-) -> Option<(u32, Vec<u32>)> {
+    pre_0501_reboot_mode: bool,
+    pullup_flags: bool,
+) -> Option<ConfigurableU32Status> {
     validate_conmon_envelope(data, expected_opcode)?;
-    let supported_value_count = usize::from(read_u16(data, supported_value_count_offset)?);
-    let current_value = read_u32(data, current_value_offset)?;
-    let supported_values_byte_length = supported_value_count.checked_mul(4)?;
-    let supported_values_end = supported_values_offset.checked_add(supported_values_byte_length)?;
-    data.get(supported_values_offset..supported_values_end)?;
+    let record_protocol_version = read_u16(data, CONMON_BODY_OFFSET)?;
+    let vector_body_offset = usize::from(read_u16(
+        data,
+        CONMON_BODY_OFFSET + CONFIGURABLE_VECTOR_POINTER_BODY_OFFSET,
+    )?);
+    let vector_count = usize::from(read_u16(
+        data,
+        CONMON_BODY_OFFSET + CONFIGURABLE_VECTOR_COUNT_BODY_OFFSET,
+    )?);
+    let minimum_vector_body_offset =
+        if pullup_flags && record_protocol_version >= SAMPLE_RATE_PULLUP_FLAGS_VERSION {
+            SAMPLE_RATE_PULLUP_FLAGS_BODY_OFFSET + 4
+        } else {
+            CONFIGURABLE_MINIMUM_VECTOR_BODY_OFFSET
+        };
+    if vector_body_offset % 4 != 0
+        || (vector_count != 0 && vector_body_offset < minimum_vector_body_offset)
+    {
+        return None;
+    }
+    let vector_offset = CONMON_BODY_OFFSET.checked_add(vector_body_offset)?;
+    let vector_byte_length = vector_count.checked_mul(4)?;
+    let vector_end = vector_offset.checked_add(vector_byte_length)?;
+    data.get(vector_offset..vector_end)?;
 
-    let mut supported_values = Vec::with_capacity(supported_value_count);
-    for supported_value_index in 0..supported_value_count {
-        let supported_value_offset =
-            supported_values_offset.checked_add(supported_value_index.checked_mul(4)?)?;
-        supported_values.push(read_u32(data, supported_value_offset)?);
+    let mut available_values = Vec::with_capacity(vector_count);
+    for vector_index in 0..vector_count {
+        let value_offset = vector_offset.checked_add(vector_index.checked_mul(4)?)?;
+        available_values.push(read_u32(data, value_offset)?);
     }
 
-    Some((current_value, supported_values))
+    let update_mode =
+        if pre_0501_reboot_mode && record_protocol_version < CONFIGURABLE_UPDATE_MODE_VERSION {
+            1
+        } else {
+            read_u16(
+                data,
+                CONMON_BODY_OFFSET + CONFIGURABLE_UPDATE_MODE_BODY_OFFSET,
+            )?
+        };
+    let flags = if pullup_flags && record_protocol_version >= SAMPLE_RATE_PULLUP_FLAGS_VERSION {
+        Some(read_u32(
+            data,
+            CONMON_BODY_OFFSET + SAMPLE_RATE_PULLUP_FLAGS_BODY_OFFSET,
+        )?)
+    } else {
+        None
+    };
+
+    Some(ConfigurableU32Status {
+        record_protocol_version,
+        current_value: read_u32(
+            data,
+            CONMON_BODY_OFFSET + CONFIGURABLE_CURRENT_VALUE_BODY_OFFSET,
+        )?,
+        requested_value: read_u32(
+            data,
+            CONMON_BODY_OFFSET + CONFIGURABLE_REQUESTED_VALUE_BODY_OFFSET,
+        )?,
+        update_mode,
+        available_values,
+        flags,
+    })
 }
 
-pub fn parse_sample_rate_status(data: &[u8]) -> Option<SampleRateStatus> {
-    let (current_sample_rate, supported_sample_rates) = parse_supported_u32_values(
-        data,
-        CONMON_OPCODE_SAMPLE_RATE_STATUS,
-        CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET,
-        CONMON_CURRENT_SAMPLE_RATE_OFFSET,
-        CONMON_SUPPORTED_SAMPLE_RATES_OFFSET,
-    )?;
-
-    Some(SampleRateStatus {
-        current_sample_rate,
-        supported_sample_rates,
-    })
+pub fn parse_sample_rate_status(data: &[u8]) -> Option<ConfigurableU32Status> {
+    parse_configurable_u32_status(data, CONMON_OPCODE_SAMPLE_RATE_STATUS, true, false)
 }
 
 const CONMON_0022_BODY_OFFSET: usize = 28;
@@ -308,9 +333,16 @@ const CONMON_0024_BODY_OFFSET: usize = 28;
 const CONMON_0024_MINIMUM_SIZE: usize = 48;
 const CONMON_0026_MINIMUM_SIZE: usize = 76;
 const CONMON_0026_NAME_POINTER_OFFSET: usize = 40;
-const CONMON_0040_COUNT_OFFSET: usize = 60;
-const CONMON_0040_POINTERS_OFFSET: usize = 62;
-const CONMON_0040_RECORD_SIZE: usize = 24;
+const INTERFACE_STATISTICS_BODY_OFFSET: usize = 0x18;
+const INTERFACE_STATISTICS_GROUP_COUNT_BODY_OFFSET: usize = 0x08;
+const INTERFACE_STATISTICS_GROUP_POINTERS_BODY_OFFSET: usize = 0x0A;
+const INTERFACE_STATISTICS_HEADER_CAPABILITY_MASK_OFFSET: usize = 0x10;
+const INTERFACE_STATISTICS_MINIMUM_RECORD_SIZE: usize = 24;
+const INTERFACE_STATISTICS_CAPABILITIES_VERSION: u16 = 0x0713;
+const INTERFACE_STATISTICS_LEGACY_CAPABILITY_MASK: u32 = 0x0000_0003;
+const INTERFACE_STATISTICS_UTILIZATION_CAPABILITY: u32 = 0x0000_0001;
+const INTERFACE_STATISTICS_ERRORS_CAPABILITY: u32 = 0x0000_0002;
+const INTERFACE_STATISTICS_CLEAR_ERRORS_CAPABILITY: u32 = 0x0000_0004;
 const CONMON_0086_BODY_OFFSET: usize = 28;
 const CONMON_0086_MINIMUM_SIZE: usize = 40;
 const CONMON_00E0_BODY_OFFSET: usize = 28;
@@ -488,217 +520,312 @@ pub fn parse_unmapped_0026_status(data: &[u8]) -> Option<Unmapped0026Status> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Unmapped0040Record {
+pub struct InterfaceStatisticsRecord {
     pub record_pointer: u16,
     pub record_size_bytes: usize,
-    pub unmapped_prefix_words: [u32; 4],
-    pub raw_link_status_word: u32,
-    pub link_up: bool,
-    pub link_speed_megabits_per_second: u32,
-    pub unmapped_trailing_hexadecimal: String,
+    pub transmit_raw_bytes_per_second: u32,
+    pub receive_raw_bytes_per_second: u32,
+    pub transmit_bits_per_second: u64,
+    pub receive_bits_per_second: u64,
+    pub cumulative_transmit_errors: u32,
+    pub cumulative_receive_errors: u32,
+    pub discriminator_status_word: u32,
+    pub speed_megabits_per_second: u32,
+    pub extension_hexadecimal: String,
     pub raw_record_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Unmapped0040Status {
+pub struct InterfaceStatisticsGroup {
+    pub group_index: u16,
+    pub group_pointer: u16,
     pub record_count: u16,
     pub record_pointers: Vec<u16>,
-    pub records: Vec<Unmapped0040Record>,
+    pub selected_stats: Option<InterfaceStatisticsRecord>,
+    pub raw_records: Vec<InterfaceStatisticsRecord>,
 }
 
-pub fn parse_unmapped_0040_status(data: &[u8]) -> Option<Unmapped0040Status> {
-    validate_conmon_envelope(data, CONMON_OPCODE_UNMAPPED_0040_STATUS)?;
-    if data.len() < CONMON_0040_POINTERS_OFFSET + 2 {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InterfaceStatisticsStatus {
+    pub record_protocol_version: u16,
+    pub header_record_pointer: u16,
+    pub header_record_size_bytes: usize,
+    pub header_record_hexadecimal: String,
+    pub capability_mask: u32,
+    pub utilization_supported: bool,
+    pub errors_supported: bool,
+    pub clear_errors_supported: bool,
+    pub interface_group_count: u16,
+    pub interface_group_pointers: Vec<u16>,
+    pub interface_groups: Vec<InterfaceStatisticsGroup>,
+    pub raw_body_hexadecimal: String,
+}
+
+fn interface_statistics_record(
+    data: &[u8],
+    record_pointer: u16,
+    record_end_body_offset: usize,
+) -> Option<InterfaceStatisticsRecord> {
+    let record_body_offset = usize::from(record_pointer);
+    let record_size_bytes = record_end_body_offset.checked_sub(record_body_offset)?;
+    if record_size_bytes < INTERFACE_STATISTICS_MINIMUM_RECORD_SIZE {
         return None;
     }
-    let record_count = read_u16(data, CONMON_0040_COUNT_OFFSET)?;
-    if record_count == 0 {
+    let record_offset = INTERFACE_STATISTICS_BODY_OFFSET.checked_add(record_body_offset)?;
+    let record_end = INTERFACE_STATISTICS_BODY_OFFSET.checked_add(record_end_body_offset)?;
+    let record = data.get(record_offset..record_end)?;
+    let transmit_raw_bytes_per_second = read_u32(record, 0)?;
+    let receive_raw_bytes_per_second = read_u32(record, 4)?;
+    Some(InterfaceStatisticsRecord {
+        record_pointer,
+        record_size_bytes,
+        transmit_raw_bytes_per_second,
+        receive_raw_bytes_per_second,
+        transmit_bits_per_second: u64::from(transmit_raw_bytes_per_second).checked_mul(8)?,
+        receive_bits_per_second: u64::from(receive_raw_bytes_per_second).checked_mul(8)?,
+        cumulative_transmit_errors: read_u32(record, 8)?,
+        cumulative_receive_errors: read_u32(record, 12)?,
+        discriminator_status_word: read_u32(record, 16)?,
+        speed_megabits_per_second: read_u32(record, 20)?,
+        extension_hexadecimal: bytes_to_hex(
+            record.get(INTERFACE_STATISTICS_MINIMUM_RECORD_SIZE..)?,
+        ),
+        raw_record_hexadecimal: bytes_to_hex(record),
+    })
+}
+
+pub fn parse_interface_statistics_status(data: &[u8]) -> Option<InterfaceStatisticsStatus> {
+    validate_conmon_envelope(data, CONMON_OPCODE_INTERFACE_STATISTICS_STATUS)?;
+    let body = data.get(INTERFACE_STATISTICS_BODY_OFFSET..)?;
+    let record_protocol_version = read_u16(body, 0)?;
+    let interface_group_count = read_u16(body, INTERFACE_STATISTICS_GROUP_COUNT_BODY_OFFSET)?;
+    if interface_group_count == 0 {
         return None;
     }
-    let pointers_end =
-        CONMON_0040_POINTERS_OFFSET.checked_add((record_count as usize).checked_mul(2)?)?;
-    if pointers_end > data.len() {
+    let group_pointers_end = INTERFACE_STATISTICS_GROUP_POINTERS_BODY_OFFSET
+        .checked_add(usize::from(interface_group_count).checked_mul(2)?)?;
+    let outer_structure_end = group_pointers_end.checked_add(2)?;
+    if outer_structure_end > body.len() {
         return None;
     }
-    let mut record_pointers = Vec::with_capacity(record_count as usize);
-    for record_index in 0..record_count as usize {
-        let pointer = read_u16(
-            data,
-            CONMON_0040_POINTERS_OFFSET.checked_add(record_index.checked_mul(2)?)?,
-        )?;
-        let record_offset = CONMON_CLOCK_RECORD_PAYLOAD_OFFSET.checked_add(usize::from(pointer))?;
-        if record_offset < pointers_end || record_offset > data.len() {
+    let header_record_pointer = read_u16(body, group_pointers_end)?;
+    let header_record_offset = usize::from(header_record_pointer);
+    if header_record_offset < outer_structure_end || header_record_offset >= body.len() {
+        return None;
+    }
+    let capability_mask = if record_protocol_version >= INTERFACE_STATISTICS_CAPABILITIES_VERSION {
+        let capability_mask_end = header_record_offset
+            .checked_add(INTERFACE_STATISTICS_HEADER_CAPABILITY_MASK_OFFSET)?
+            .checked_add(4)?;
+        if capability_mask_end > body.len() {
             return None;
         }
-        if let Some(previous_pointer) = record_pointers.last() {
-            if pointer <= *previous_pointer {
-                return None;
-            }
-        }
-        record_pointers.push(pointer);
-    }
-    let mut records = Vec::with_capacity(record_count as usize);
-    for record_index in 0..record_count as usize {
-        let pointer = record_pointers[record_index];
-        let record_offset = CONMON_CLOCK_RECORD_PAYLOAD_OFFSET.checked_add(usize::from(pointer))?;
-        let record_end = if let Some(next_pointer) = record_pointers.get(record_index + 1) {
-            CONMON_CLOCK_RECORD_PAYLOAD_OFFSET.checked_add(usize::from(*next_pointer))?
-        } else {
-            data.len()
-        };
-        if record_end < record_offset.checked_add(CONMON_0040_RECORD_SIZE)?
-            || record_end > data.len()
+        read_u32(
+            body,
+            header_record_offset.checked_add(INTERFACE_STATISTICS_HEADER_CAPABILITY_MASK_OFFSET)?,
+        )?
+    } else {
+        INTERFACE_STATISTICS_LEGACY_CAPABILITY_MASK
+    };
+
+    let mut interface_group_pointers = Vec::with_capacity(usize::from(interface_group_count));
+    let mut occupied_group_pointers = HashSet::new();
+    for group_index in 0..usize::from(interface_group_count) {
+        let pointer_offset = INTERFACE_STATISTICS_GROUP_POINTERS_BODY_OFFSET
+            .checked_add(group_index.checked_mul(2)?)?;
+        let pointer = read_u16(body, pointer_offset)?;
+        let group_body_offset = usize::from(pointer);
+        if group_body_offset < outer_structure_end
+            || group_body_offset.checked_add(2)? > body.len()
+            || !occupied_group_pointers.insert(pointer)
         {
             return None;
         }
-        let record = data.get(record_offset..record_end)?;
-        let raw_link_status_word = read_u32(record, 16)?;
-        records.push(Unmapped0040Record {
-            record_pointer: pointer,
-            record_size_bytes: record.len(),
-            unmapped_prefix_words: [
-                read_u32(record, 0)?,
-                read_u32(record, 4)?,
-                read_u32(record, 8)?,
-                read_u32(record, 12)?,
-            ],
-            raw_link_status_word,
-            link_up: raw_link_status_word & 1 != 0,
-            link_speed_megabits_per_second: read_u32(record, 20)?,
-            unmapped_trailing_hexadecimal: bytes_to_hex(record.get(CONMON_0040_RECORD_SIZE..)?),
-            raw_record_hexadecimal: bytes_to_hex(record),
+        interface_group_pointers.push(pointer);
+    }
+
+    let mut group_record_pointers = Vec::with_capacity(usize::from(interface_group_count));
+    let mut group_ranges = Vec::with_capacity(usize::from(interface_group_count));
+    let header_minimum_end = if record_protocol_version >= INTERFACE_STATISTICS_CAPABILITIES_VERSION
+    {
+        header_record_offset
+            .checked_add(INTERFACE_STATISTICS_HEADER_CAPABILITY_MASK_OFFSET)?
+            .checked_add(4)?
+    } else {
+        header_record_offset
+    };
+    for group_pointer in &interface_group_pointers {
+        let group_body_offset = usize::from(*group_pointer);
+        let record_count = read_u16(body, group_body_offset)?;
+        let record_pointers_offset = group_body_offset.checked_add(2)?;
+        let record_pointers_end =
+            record_pointers_offset.checked_add(usize::from(record_count).checked_mul(2)?)?;
+        if record_pointers_end > body.len() {
+            return None;
+        }
+        group_ranges.push((group_body_offset, record_pointers_end));
+        group_record_pointers.push((record_count, Vec::with_capacity(usize::from(record_count))));
+    }
+    for (index, (start, end)) in group_ranges.iter().copied().enumerate() {
+        let overlaps_outer = start < outer_structure_end;
+        let overlaps_header = start < header_minimum_end && end > header_record_offset;
+        let overlaps_group =
+            group_ranges
+                .iter()
+                .enumerate()
+                .any(|(other_index, (other_start, other_end))| {
+                    other_index != index && start < *other_end && end > *other_start
+                });
+        if overlaps_outer || overlaps_header || overlaps_group {
+            return None;
+        }
+    }
+
+    let mut structural_offsets = interface_group_pointers
+        .iter()
+        .map(|pointer| usize::from(*pointer))
+        .collect::<Vec<_>>();
+    structural_offsets.push(header_record_offset);
+    let mut occupied_record_pointers = HashSet::new();
+    for ((record_count, pointers), group_pointer) in group_record_pointers
+        .iter_mut()
+        .zip(interface_group_pointers.iter())
+    {
+        let group_body_offset = usize::from(*group_pointer);
+        let record_pointers_offset = group_body_offset.checked_add(2)?;
+        for record_index in 0..usize::from(*record_count) {
+            let pointer = read_u16(
+                body,
+                record_pointers_offset.checked_add(record_index.checked_mul(2)?)?,
+            )?;
+            let record_body_offset = usize::from(pointer);
+            let overlaps_structure = record_body_offset < outer_structure_end
+                || (record_body_offset >= header_record_offset
+                    && record_body_offset < header_minimum_end)
+                || group_ranges
+                    .iter()
+                    .any(|(start, end)| record_body_offset >= *start && record_body_offset < *end);
+            if overlaps_structure
+                || record_body_offset.checked_add(INTERFACE_STATISTICS_MINIMUM_RECORD_SIZE)?
+                    > body.len()
+                || !occupied_record_pointers.insert(pointer)
+            {
+                return None;
+            }
+            pointers.push(pointer);
+            structural_offsets.push(record_body_offset);
+        }
+    }
+    structural_offsets.push(body.len());
+    structural_offsets.sort_unstable();
+    structural_offsets.dedup();
+    let header_record_end = structural_offsets
+        .iter()
+        .copied()
+        .find(|offset| *offset > header_record_offset)?;
+    let header_record = body.get(header_record_offset..header_record_end)?;
+
+    let mut interface_groups = Vec::with_capacity(usize::from(interface_group_count));
+    for (group_index, ((record_count, record_pointers), group_pointer)) in group_record_pointers
+        .into_iter()
+        .zip(interface_group_pointers.iter().copied())
+        .enumerate()
+    {
+        let mut raw_records = Vec::with_capacity(usize::from(record_count));
+        for record_pointer in &record_pointers {
+            let record_body_offset = usize::from(*record_pointer);
+            let next_offset = structural_offsets
+                .iter()
+                .copied()
+                .find(|offset| *offset > record_body_offset)?;
+            raw_records.push(interface_statistics_record(
+                data,
+                *record_pointer,
+                next_offset,
+            )?);
+        }
+        let selected_stats = raw_records
+            .iter()
+            .find(|record| record.discriminator_status_word & 0xFFFF_0000 == 0)
+            .cloned();
+        interface_groups.push(InterfaceStatisticsGroup {
+            group_index: u16::try_from(group_index).ok()?,
+            group_pointer,
+            record_count,
+            record_pointers,
+            selected_stats,
+            raw_records,
         });
     }
-    Some(Unmapped0040Status {
-        record_count,
-        record_pointers,
-        records,
+
+    Some(InterfaceStatisticsStatus {
+        record_protocol_version,
+        header_record_pointer,
+        header_record_size_bytes: header_record.len(),
+        header_record_hexadecimal: bytes_to_hex(header_record),
+        capability_mask,
+        utilization_supported: capability_mask & INTERFACE_STATISTICS_UTILIZATION_CAPABILITY != 0,
+        errors_supported: capability_mask & INTERFACE_STATISTICS_ERRORS_CAPABILITY != 0,
+        clear_errors_supported: capability_mask & INTERFACE_STATISTICS_CLEAR_ERRORS_CAPABILITY != 0,
+        interface_group_count,
+        interface_group_pointers,
+        interface_groups,
+        raw_body_hexadecimal: bytes_to_hex(body),
     })
 }
 
-pub fn parse_encoding_status(data: &[u8]) -> Option<EncodingStatus> {
-    let (current_encoding, supported_encodings) = parse_supported_u32_values(
-        data,
-        CONMON_OPCODE_ENCODING_STATUS,
-        CONMON_SUPPORTED_ENCODING_COUNT_OFFSET,
-        CONMON_CURRENT_ENCODING_OFFSET,
-        CONMON_SUPPORTED_ENCODINGS_OFFSET,
-    )?;
-
-    Some(EncodingStatus {
-        current_encoding,
-        supported_encodings,
-    })
+pub fn parse_encoding_status(data: &[u8]) -> Option<ConfigurableU32Status> {
+    parse_configurable_u32_status(data, CONMON_OPCODE_ENCODING_STATUS, true, false)
 }
 
-pub(super) fn sample_rate_pullup_value(raw_value: u32) -> SampleRatePullupValue {
-    let (meaning, multiplier) = match raw_value {
-        0 => (SampleRatePullupMeaning::NoPullupOrPulldown, Some((1, 1))),
-        1 => (
-            SampleRatePullupMeaning::PositiveFourPointOneSixSixSevenPercent,
-            Some((25, 24)),
-        ),
-        2 => (
-            SampleRatePullupMeaning::PositiveOneTenthPercent,
-            Some((1001, 1000)),
-        ),
-        3 => (
-            SampleRatePullupMeaning::NegativeOneTenthPercent,
-            Some((999, 1000)),
-        ),
-        4 => (SampleRatePullupMeaning::NegativeFourPercent, Some((24, 25))),
-        _ => (SampleRatePullupMeaning::Unknown, None),
-    };
-    let (rate_multiplier_numerator, rate_multiplier_denominator) = multiplier
-        .map(|(numerator, denominator)| (Some(numerator), Some(denominator)))
-        .unwrap_or((None, None));
-
-    SampleRatePullupValue {
-        raw_value,
-        meaning,
-        rate_multiplier_numerator,
-        rate_multiplier_denominator,
-    }
+pub fn parse_sample_rate_pullup_status(data: &[u8]) -> Option<ConfigurableU32Status> {
+    parse_configurable_u32_status(data, CONMON_OPCODE_SAMPLE_RATE_PULLUP_STATUS, false, true)
 }
 
-pub fn parse_sample_rate_pullup_status(data: &[u8]) -> Option<SampleRatePullupStatus> {
-    validate_conmon_envelope(data, CONMON_OPCODE_SAMPLE_RATE_PULLUP_STATUS)?;
-    let relative_vector_offset = usize::from(read_u16(
-        data,
-        CONMON_SAMPLE_RATE_PULLUP_VECTOR_OFFSET_FIELD,
-    )?);
-    let vector_offset =
-        CONMON_SAMPLE_RATE_PULLUP_VECTOR_OFFSET_BASE.checked_add(relative_vector_offset)?;
-    if vector_offset < CONMON_SAMPLE_RATE_PULLUP_FIXED_FIELDS_END {
+pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
+    validate_conmon_envelope(data, CONMON_OPCODE_CODEC_STATUS)?;
+    let record_protocol_version = read_u16(data, CONMON_BODY_OFFSET)?;
+    let parameter_count = usize::try_from(read_u32(data, CONMON_BODY_OFFSET + 8)?).ok()?;
+    let descriptor_width = usize::from(read_u16(data, CONMON_BODY_OFFSET + 12)?);
+    let descriptor_body_offset = usize::from(read_u16(data, CONMON_BODY_OFFSET + 14)?);
+    if descriptor_width != 8 || descriptor_body_offset % 2 != 0 {
         return None;
     }
-    let vector_count = usize::from(read_u16(
-        data,
-        CONMON_SAMPLE_RATE_PULLUP_VECTOR_COUNT_FIELD,
-    )?);
-    if vector_count == 0 {
-        return None;
+    let descriptors_offset = CONMON_BODY_OFFSET.checked_add(descriptor_body_offset)?;
+    let descriptors_end =
+        descriptors_offset.checked_add(parameter_count.checked_mul(descriptor_width)?)?;
+    data.get(descriptors_offset..descriptors_end)?;
+
+    let mut parameters = Vec::with_capacity(parameter_count);
+    for parameter_index in 0..parameter_count {
+        let descriptor_offset =
+            descriptors_offset.checked_add(parameter_index.checked_mul(descriptor_width)?)?;
+        let parameter_type = *data.get(descriptor_offset)?;
+        let mode = *data.get(descriptor_offset + 1)?;
+        let value_count = usize::from(read_u16(data, descriptor_offset + 2)?);
+        let value_width = usize::from(read_u16(data, descriptor_offset + 4)?);
+        let values_body_offset = usize::from(read_u16(data, descriptor_offset + 6)?);
+        if value_width != 4 || values_body_offset % 4 != 0 {
+            return None;
+        }
+        let values_offset = CONMON_BODY_OFFSET.checked_add(values_body_offset)?;
+        let values_end = values_offset.checked_add(value_count.checked_mul(value_width)?)?;
+        data.get(values_offset..values_end)?;
+        let mut values = Vec::with_capacity(value_count);
+        for value_index in 0..value_count {
+            values.push(read_u32(
+                data,
+                values_offset.checked_add(value_index.checked_mul(value_width)?)?,
+            )?);
+        }
+        parameters.push(CodecParameterStatus {
+            parameter_type,
+            mode,
+            values,
+        });
     }
-    let vector_byte_length = vector_count.checked_mul(4)?;
-    let vector_end = vector_offset.checked_add(vector_byte_length)?;
-    data.get(vector_offset..vector_end)?;
-
-    let mut supported_values = Vec::with_capacity(vector_count);
-    for vector_index in 0..vector_count {
-        let value_offset = vector_offset.checked_add(vector_index.checked_mul(4)?)?;
-        supported_values.push(sample_rate_pullup_value(read_u32(data, value_offset)?));
-    }
-
-    Some(SampleRatePullupStatus {
-        applied_value: sample_rate_pullup_value(read_u32(
-            data,
-            CONMON_SAMPLE_RATE_PULLUP_APPLIED_VALUE_OFFSET,
-        )?),
-        requested_value: sample_rate_pullup_value(read_u32(
-            data,
-            CONMON_SAMPLE_RATE_PULLUP_REQUESTED_VALUE_OFFSET,
-        )?),
-        mode_code: read_u16(data, CONMON_SAMPLE_RATE_PULLUP_MODE_OFFSET)?,
-        unmapped_word_at_body_offset_20: read_u32(
-            data,
-            CONMON_SAMPLE_RATE_PULLUP_UNMAPPED_WORD_OFFSET,
-        )?,
-        supported_values,
-    })
-}
-
-pub fn parse_gain_status(data: &[u8]) -> Option<GainStatus> {
-    validate_conmon_envelope(data, CONMON_OPCODE_GAIN_STATUS)?;
-    if data.get(28..40)?
-        != [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10,
-        ]
-        || data.get(44..48)? != [0x00, 0x04, 0x00, 0x18]
-    {
-        return None;
-    }
-
-    let device_type = match read_u16(data, CONMON_GAIN_DIRECTION_OFFSET)? {
-        CONMON_GAIN_INPUT_DIRECTION => "input",
-        CONMON_GAIN_OUTPUT_DIRECTION => "output",
-        _ => return None,
-    };
-    let channel_count = usize::from(read_u16(data, CONMON_GAIN_CHANNEL_COUNT_OFFSET)?);
-    if channel_count == 0 {
-        return None;
-    }
-    let levels_byte_length = channel_count.checked_mul(4)?;
-    let levels_end = CONMON_GAIN_LEVELS_OFFSET.checked_add(levels_byte_length)?;
-    data.get(CONMON_GAIN_LEVELS_OFFSET..levels_end)?;
-
-    let mut channel_levels = Vec::with_capacity(channel_count);
-    for channel_index in 0..channel_count {
-        let level_offset = CONMON_GAIN_LEVELS_OFFSET.checked_add(channel_index.checked_mul(4)?)?;
-        channel_levels.push(read_u32(data, level_offset)?);
-    }
-
-    Some(GainStatus {
-        device_type: device_type.to_owned(),
-        channel_levels,
+    Some(CodecStatus {
+        record_protocol_version,
+        parameters,
     })
 }

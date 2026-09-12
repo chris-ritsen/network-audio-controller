@@ -67,6 +67,9 @@ _STATUS_NAMES = {
     33: "internal panic",
     34: "unknown response or page kind",
     35: "byte buffer has the wrong length",
+    36: "invalid external RTP destination",
+    37: "invalid external flow identity",
+    38: "invalid external receiver mapping",
 }
 
 _MESSAGE_ID_KEYS = ("message_id", "sequence", "transaction_id")

@@ -3440,7 +3440,7 @@
     "aes67_configured": false,
     "aes67_current": false,
     "aes67_multicast_prefix": "239.69.0.0",
-    "aes67_supported": true,
+    "aes67_configuration_supported": true,
     "availability_state": "online",
     "board_name": "DIOBT",
     "channels": {
@@ -3635,25 +3635,24 @@
     "name": "avio-bt-1",
     "network_interface_traffic": {
       "device_extended_unique_identifier": "001dc1fffe5279b6",
-      "estimated_total_receive_bits_per_second": 7224164.601299154,
-      "estimated_total_transmit_bits_per_second": 3680097.810774605,
       "interface_entry_count": 1,
       "interface_entry_width": 16,
       "interfaces": [
         {
           "entry_index": 0,
-          "estimated_receive_bits_per_second": 7224164.601299154,
-          "estimated_transmit_bits_per_second": 3680097.810774605,
-          "receive_octets": 894530,
-          "transmit_octets": 455687,
-          "unknown_word_at_offset_12": 1,
-          "unknown_word_at_offset_8": 0
+          "transmit_rate_raw": 455687,
+          "transmit_rate_bits_per_second": 3645496,
+          "receive_rate_raw": 894530,
+          "receive_rate_bits_per_second": 7156240,
+          "transmit_error_count": 0,
+          "receive_error_count": 1
         }
       ],
-      "interval_seconds": 0.990597583935596,
       "sequence": 21828,
-      "total_receive_octets": 894530,
-      "total_transmit_octets": 455687
+      "total_transmit_rate_bits_per_second": 3645496,
+      "total_receive_rate_bits_per_second": 7156240,
+      "total_transmit_error_count": 0,
+      "total_receive_error_count": 1
     },
     "online": true,
     "preferred_leader": false,
@@ -3664,22 +3663,27 @@
         {
           "average_latency_nanoseconds": 380390,
           "current_latency_nanoseconds": 375000,
-          "history_sample_count": 201,
-          "latency_sample_count": 18,
           "peak_latency_nanoseconds": 541667,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 65,
           "receiver_flow_index": 0,
           "receiver_flow_slot": 1,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 201,
+          "late_packet_history_sample_count": 201,
+          "late_packet_count": 65,
+          "late_packet_delta": 0
         }
       ],
       "fresh": true,
-      "freshness_seconds": 5.0,
-      "history_limit": 300,
       "observation_timestamp_source": "local_receive_time",
-      "observed_at": "2026-09-05T12:09:14.553397Z",
-      "sequence": 21828
+      "latency_stream": {
+        "sequence": 21828,
+        "observed_at": "2026-09-05T12:09:14.553397Z",
+        "fresh": true
+      },
+      "late_packet_stream": {
+        "sequence": 21828,
+        "observed_at": "2026-09-05T12:09:14.553397Z",
+        "fresh": true
+      }
     },
     "rx_count": 1,
     "rx_count_raw": 1,
@@ -3896,7 +3900,7 @@
     "aes67_configured": false,
     "aes67_current": false,
     "aes67_multicast_prefix": "239.69.0.0",
-    "aes67_supported": true,
+    "aes67_configuration_supported": true,
     "availability_state": "online",
     "board_name": "DIOUSB",
     "channels": {
@@ -4172,25 +4176,24 @@
     "name": "avio-usb-1",
     "network_interface_traffic": {
       "device_extended_unique_identifier": "001dc1fffe50368b",
-      "estimated_total_receive_bits_per_second": 4085757.015059477,
-      "estimated_total_transmit_bits_per_second": 3560305.419692525,
       "interface_entry_count": 1,
       "interface_entry_width": 16,
       "interfaces": [
         {
           "entry_index": 0,
-          "estimated_receive_bits_per_second": 4085757.015059477,
-          "estimated_transmit_bits_per_second": 3560305.419692525,
-          "receive_octets": 627966,
-          "transmit_octets": 547206,
-          "unknown_word_at_offset_12": 0,
-          "unknown_word_at_offset_8": 0
+          "transmit_rate_raw": 547206,
+          "transmit_rate_bits_per_second": 4377648,
+          "receive_rate_raw": 627966,
+          "receive_rate_bits_per_second": 5023728,
+          "transmit_error_count": 0,
+          "receive_error_count": 0
         }
       ],
-      "interval_seconds": 1.2295709170866758,
       "sequence": 40394,
-      "total_receive_octets": 627966,
-      "total_transmit_octets": 547206
+      "total_transmit_rate_bits_per_second": 4377648,
+      "total_receive_rate_bits_per_second": 5023728,
+      "total_transmit_error_count": 0,
+      "total_receive_error_count": 0
     },
     "online": true,
     "preferred_leader": false,
@@ -4201,22 +4204,27 @@
         {
           "average_latency_nanoseconds": 365211,
           "current_latency_nanoseconds": 437500,
-          "history_sample_count": 166,
-          "latency_sample_count": 21,
           "peak_latency_nanoseconds": 437500,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 0,
           "receiver_flow_index": 0,
           "receiver_flow_slot": 1,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 166,
+          "late_packet_history_sample_count": 166,
+          "late_packet_count": 0,
+          "late_packet_delta": 0
         }
       ],
       "fresh": true,
-      "freshness_seconds": 5.0,
-      "history_limit": 300,
       "observation_timestamp_source": "local_receive_time",
-      "observed_at": "2026-09-05T12:09:14.041458Z",
-      "sequence": 40394
+      "latency_stream": {
+        "sequence": 40394,
+        "observed_at": "2026-09-05T12:09:14.041458Z",
+        "fresh": true
+      },
+      "late_packet_stream": {
+        "sequence": 40394,
+        "observed_at": "2026-09-05T12:09:14.041458Z",
+        "fresh": true
+      }
     },
     "rx_count": 2,
     "rx_count_raw": 2,
@@ -4559,7 +4567,7 @@
     "active_latency_ms": 1.0,
     "aes67_configured": false,
     "aes67_current": false,
-    "aes67_supported": false,
+    "aes67_configuration_supported": false,
     "availability_state": "online",
     "channels": {
       "receivers": {
@@ -6774,34 +6782,33 @@
     "name": "lx-dante",
     "network_interface_traffic": {
       "device_extended_unique_identifier": "001dc10812580000",
-      "estimated_total_receive_bits_per_second": 21265679.767496582,
-      "estimated_total_transmit_bits_per_second": 24159859.8529316,
       "interface_entry_count": 2,
       "interface_entry_width": 16,
       "interfaces": [
         {
           "entry_index": 0,
-          "estimated_receive_bits_per_second": 21265679.767496582,
-          "estimated_transmit_bits_per_second": 24159859.8529316,
-          "receive_octets": 2449310,
-          "transmit_octets": 2782652,
-          "unknown_word_at_offset_12": 0,
-          "unknown_word_at_offset_8": 0
+          "transmit_rate_raw": 2782652,
+          "transmit_rate_bits_per_second": 22261216,
+          "receive_rate_raw": 2449310,
+          "receive_rate_bits_per_second": 19594480,
+          "transmit_error_count": 0,
+          "receive_error_count": 0
         },
         {
           "entry_index": 1,
-          "estimated_receive_bits_per_second": 0.0,
-          "estimated_transmit_bits_per_second": 0.0,
-          "receive_octets": 0,
-          "transmit_octets": 0,
-          "unknown_word_at_offset_12": 0,
-          "unknown_word_at_offset_8": 0
+          "transmit_rate_raw": 0,
+          "transmit_rate_bits_per_second": 0,
+          "receive_rate_raw": 0,
+          "receive_rate_bits_per_second": 0,
+          "transmit_error_count": 0,
+          "receive_error_count": 0
         }
       ],
-      "interval_seconds": 0.9214132919441909,
       "sequence": 11527,
-      "total_receive_octets": 2449310,
-      "total_transmit_octets": 2782652
+      "total_transmit_rate_bits_per_second": 22261216,
+      "total_receive_rate_bits_per_second": 19594480,
+      "total_transmit_error_count": 0,
+      "total_receive_error_count": 0
     },
     "online": true,
     "preferred_leader": true,
@@ -6812,70 +6819,71 @@
         {
           "average_latency_nanoseconds": 360239,
           "current_latency_nanoseconds": 354167,
-          "history_sample_count": 199,
-          "latency_sample_count": 17,
           "peak_latency_nanoseconds": 375000,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 0,
           "receiver_flow_index": 0,
           "receiver_flow_slot": 1,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 199,
+          "late_packet_history_sample_count": 199,
+          "late_packet_count": 0,
+          "late_packet_delta": 0
         },
         {
           "average_latency_nanoseconds": 356575,
           "current_latency_nanoseconds": 354167,
-          "history_sample_count": 199,
-          "latency_sample_count": 17,
           "peak_latency_nanoseconds": 375000,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 0,
           "receiver_flow_index": 1,
           "receiver_flow_slot": 2,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 199,
+          "late_packet_history_sample_count": 199,
+          "late_packet_count": 0,
+          "late_packet_delta": 0
         },
         {
           "average_latency_nanoseconds": 354900,
           "current_latency_nanoseconds": 354167,
-          "history_sample_count": 199,
-          "latency_sample_count": 17,
           "peak_latency_nanoseconds": 375000,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 0,
           "receiver_flow_index": 2,
           "receiver_flow_slot": 3,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 199,
+          "late_packet_history_sample_count": 199,
+          "late_packet_count": 0,
+          "late_packet_delta": 0
         },
         {
           "average_latency_nanoseconds": 4400735,
           "current_latency_nanoseconds": 2687500,
-          "history_sample_count": 34,
-          "latency_sample_count": 129,
           "peak_latency_nanoseconds": 67187500,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 23,
           "receiver_flow_index": 3,
           "receiver_flow_slot": 4,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 34,
+          "late_packet_history_sample_count": 34,
+          "late_packet_count": 23,
+          "late_packet_delta": 0
         },
         {
           "average_latency_nanoseconds": 356365,
           "current_latency_nanoseconds": 354167,
-          "history_sample_count": 199,
-          "latency_sample_count": 17,
           "peak_latency_nanoseconds": 375000,
-          "raw_impairment_delta": 0,
-          "raw_impairment_value": 0,
           "receiver_flow_index": 6,
           "receiver_flow_slot": 7,
-          "sample_rate_hertz": 48000
+          "latency_history_sample_count": 199,
+          "late_packet_history_sample_count": 199,
+          "late_packet_count": 0,
+          "late_packet_delta": 0
         }
       ],
       "fresh": true,
-      "freshness_seconds": 5.0,
-      "history_limit": 300,
       "observation_timestamp_source": "local_receive_time",
-      "observed_at": "2026-09-05T12:09:14.577362Z",
-      "sequence": 11446
+      "latency_stream": {
+        "sequence": 11446,
+        "observed_at": "2026-09-05T12:09:14.577362Z",
+        "fresh": true
+      },
+      "late_packet_stream": {
+        "sequence": 11446,
+        "observed_at": "2026-09-05T12:09:14.577362Z",
+        "fresh": true
+      }
     },
     "rx_count": 128,
     "rx_count_raw": 128,

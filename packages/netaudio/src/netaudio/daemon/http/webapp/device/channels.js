@@ -5,7 +5,9 @@ import { html, useEffect, useLayoutEffect, useRef, useState } from "../lib/preac
 import { RoutePicker } from "../route-picker.js";
 import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
+import { operationReasonText, operationWritable } from "./availability.js";
 import { SubscriptionStatus } from "./receiver-status.js";
+import { TransmitFlows } from "./flows.js";
 
 function gainChannelType(device) {
   if (device.gain_device_type === "input") {
@@ -137,6 +139,14 @@ function GainCell({ channel, channelNumber, channelType, device, requestName }) 
   const choices = device.gain_level_choices;
   if (!choices || gainChannelType(device) !== channelType) {
     return html`<span>${html`<${Value} value=${channel.gain_level_label} />`}</span>`;
+  }
+  if (!operationWritable(device, "codec_control")) {
+    return html`<span
+      ><${Value} value=${channel.gain_level_label} />
+      <span class="text-sm opacity-70"
+        >${operationReasonText(device, "codec_control")}</span
+      ></span
+    >`;
   }
   return html`
     <span class="cell-actions">
@@ -327,6 +337,7 @@ export function TransmitSection({ device }) {
             rowKey=${(row) => row.number}
           />`}
     <//>
+    <${TransmitFlows} device=${device} />
     </div>
   `;
 }

@@ -2,82 +2,66 @@ use super::flows::flow_query_response;
 use super::*;
 
 #[test]
-fn metering_v2_does_not_consume_trailer_or_require_a_muted_first_channel() {
-    let mut data = metering_frame(&[0x21, 0x42], &[0x63, 0x84]);
-    *data.last_mut().unwrap() = 0;
-    let parsed = parse_metering_frame(&data).unwrap();
-    assert_eq!(parsed.tx_levels, [0x21, 0x42]);
-    assert_eq!(parsed.rx_levels, [0x63, 0x84]);
-    data[27] = 0;
-    assert_eq!(parse_metering_frame(&data).unwrap().tx_levels[0], 0);
+fn metering_versions_one_and_two_use_byte_counts_and_accept_bounded_trailing_data() {
+    for version in [1, 2] {
+        let mut data = metering_frame(&[0x21, 0x42], &[0x63, 0x84]);
+        data[METERING_FAMILY_OFFSET] = version;
+        data.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        let length = u16::try_from(data.len()).unwrap();
+        data[2..4].copy_from_slice(&length.to_be_bytes());
+        let parsed = parse_metering_frame(&data).unwrap();
+        assert_eq!(parsed.message_version, version);
+        assert_eq!(parsed.tx_levels, [0x21, 0x42]);
+        assert_eq!(parsed.rx_levels, [0x63, 0x84]);
+        assert_eq!(parsed.trailing_bytes, [0xAA, 0xBB, 0xCC]);
+    }
 }
 
 #[test]
-fn metering_frame_parses_embedded_counts_and_level_order() {
-    let data = metering_frame(&[0xFE, 0x7D, 0xA0], &[0x88, 0x00]);
+fn metering_v3_frame_parses_sixteen_bit_counts_and_trailing_data() {
+    let tx_levels = vec![0xFE; 128];
+    let rx_levels = vec![0x7D; 128];
+    let mut data = metering_frame_v3(&tx_levels, &rx_levels);
+    data.extend_from_slice(&[1, 2]);
+    let length = u16::try_from(data.len()).unwrap();
+    data[2..4].copy_from_slice(&length.to_be_bytes());
     assert_eq!(
         parse_metering_frame(&data),
         Some(MeteringFrame {
-            sequence: 0x1F81,
-            source_eui64: "001dc119245c0000".to_owned(),
-            tx_count: 3,
-            rx_count: 2,
-            tx_levels: vec![0xFE, 0x7D, 0xA0],
-            rx_levels: vec![0x88, 0x00],
-        })
-    );
-}
-
-#[test]
-fn metering_v3_frame_parses_sixteen_bit_counts_and_level_order() {
-    let mut tx_levels = vec![0xFE; 128];
-    let mut rx_levels = vec![0xFE; 128];
-    tx_levels[16] = 0x7E;
-    tx_levels[17] = 0x9F;
-    rx_levels[2] = 0x70;
-    rx_levels[3] = 0x71;
-    let data = metering_frame_v3(&tx_levels, &rx_levels);
-
-    assert_eq!(data.len(), 286);
-    assert_eq!(
-        parse_metering_frame(&data),
-        Some(MeteringFrame {
+            message_version: 3,
             sequence: 0xDDFB,
             source_eui64: "001dc10812580000".to_owned(),
             tx_count: 128,
             rx_count: 128,
             tx_levels,
             rx_levels,
+            trailing_bytes: vec![1, 2],
         })
     );
 }
 
 #[test]
-fn metering_frame_rejects_invalid_envelope_and_count_mismatch() {
-    let original = metering_frame(&[0xFE, 0x7D], &[0x88]);
+fn metering_v3_ignores_the_reserved_byte() {
+    let mut data = metering_frame_v3(&[0xFE, 0x7D], &[0x88]);
+    data[METERING_FAMILY_OFFSET + 1] = 0xA5;
 
+    let parsed = parse_metering_frame(&data).unwrap();
+    assert_eq!(parsed.message_version, 3);
+    assert_eq!(parsed.tx_levels, [0xFE, 0x7D]);
+    assert_eq!(parsed.rx_levels, [0x88]);
+}
+
+#[test]
+fn metering_frame_rejects_invalid_envelope_and_truncated_declared_levels() {
+    let original = metering_frame(&[0xFE, 0x7D], &[0x88]);
     for (offset, value) in [(0, 0x12), (6, 0x01), (16, b'X'), (24, 0x07)] {
         let mut data = original.clone();
         data[offset] = value;
         assert_eq!(parse_metering_frame(&data), None);
     }
-
-    let mut wrong_declared_length = original.clone();
-    wrong_declared_length[2..4].copy_from_slice(&(original.len() as u16 - 1).to_be_bytes());
-    assert_eq!(parse_metering_frame(&wrong_declared_length), None);
-
-    let mut wrong_count = original.clone();
-    wrong_count[METERING_V2_TX_COUNT_OFFSET] += 1;
-    assert_eq!(parse_metering_frame(&wrong_count), None);
-
-    let original_v3 = metering_frame_v3(&[0xFE, 0x7D], &[0x88]);
-    let mut wrong_reserved = original_v3.clone();
-    wrong_reserved[METERING_V3_RESERVED_OFFSET] = 1;
-    assert_eq!(parse_metering_frame(&wrong_reserved), None);
-
-    let mut wrong_v3_count = original_v3;
-    wrong_v3_count[METERING_V3_TX_COUNT_OFFSET + 1] += 1;
-    assert_eq!(parse_metering_frame(&wrong_v3_count), None);
+    let mut truncated = original;
+    truncated[METERING_V2_TX_COUNT_OFFSET] = 4;
+    assert_eq!(parse_metering_frame(&truncated), None);
 }
 
 #[test]
@@ -496,78 +480,113 @@ fn make_model_preserves_unmapped_preceding_field_and_four_part_version() {
 }
 
 fn dante_model_response(
-    codename: &[u8],
-    capabilities: u32,
-    monitoring_capabilities: u32,
-    board_name: &[u8],
+    version: u16,
+    primary: u32,
+    read_only: u32,
+    monitoring: u32,
+    secondary: u32,
+    domain_values: u32,
+    domain_validity: u32,
 ) -> Vec<u8> {
-    let mut data = vec![0u8; CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET + 4];
+    let mut data = vec![0u8; CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALIDITY_OFFSET + 4];
     stamp_conmon_response(&mut data, CONMON_OPCODE_DANTE_MODEL_RESPONSE);
-    data[CONMON_BOARD_CODENAME_OFFSET..CONMON_BOARD_CODENAME_OFFSET + codename.len()]
-        .copy_from_slice(codename);
-    data[CONMON_DANTE_MODEL_CAPABILITIES_OFFSET..CONMON_DANTE_MODEL_CAPABILITIES_OFFSET + 4]
-        .copy_from_slice(&capabilities.to_be_bytes());
-    data[CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET
-        ..CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET + 4]
-        .copy_from_slice(&monitoring_capabilities.to_be_bytes());
-    data[CONMON_BOARD_NAME_OFFSET..CONMON_BOARD_NAME_OFFSET + board_name.len()]
-        .copy_from_slice(board_name);
+    data[CONMON_DANTE_MODEL_BODY_OFFSET..CONMON_DANTE_MODEL_BODY_OFFSET + 2]
+        .copy_from_slice(&version.to_be_bytes());
+    data[CONMON_BOARD_CODENAME_OFFSET..CONMON_BOARD_CODENAME_OFFSET + 6].copy_from_slice(b"Bklyn2");
+    data[CONMON_BOARD_NAME_OFFSET..CONMON_BOARD_NAME_OFFSET + 11].copy_from_slice(b"Brooklyn II");
+    for (offset, value) in [
+        (CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET, primary),
+        (CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET, read_only),
+        (
+            CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET,
+            monitoring,
+        ),
+        (CONMON_DANTE_MODEL_SECONDARY_CAPABILITIES_OFFSET, secondary),
+        (
+            CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALUES_OFFSET,
+            domain_values,
+        ),
+        (
+            CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALIDITY_OFFSET,
+            domain_validity,
+        ),
+    ] {
+        data[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+    }
     data
 }
 
 #[test]
-fn dante_model_reads_a_full_width_eight_byte_codename_without_bleeding_into_capabilities() {
-    let data = dante_model_response(b"UltimoX4", 0x0400_0000, 0x04, b"Ultimo X4");
-    let parsed = parse_dante_model(&data).unwrap();
-    assert_eq!(parsed.board_codename, "UltimoX4");
-    assert_eq!(parsed.board_name, "Ultimo X4");
-    assert_eq!(parsed.capabilities, 0x0400_0000);
-    assert_eq!(parsed.aes67_supported, Some(true));
-    assert_eq!(parsed.detailed_metering_supported, Some(false));
-    assert_eq!(parsed.monitoring_capabilities, Some(0x04));
-    assert_eq!(parsed.per_channel_signal_presence_supported, Some(true));
+fn dante_model_decodes_all_versioned_capability_groups() {
+    let primary = 0x0C00_E219;
+    let parsed = parse_dante_model(&dante_model_response(
+        0x0723,
+        primary,
+        0x0000_6080,
+        0x0000_001F,
+        0x0000_0008,
+        0xA5A5_0001,
+        0xFFFF_0001,
+    ))
+    .unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0723);
+    assert_eq!(parsed.primary_capabilities, primary);
+    assert_eq!(parsed.read_only_capabilities, 0x0000_6080);
+    assert_eq!(parsed.monitoring_capabilities, 0x1F);
+    assert_eq!(parsed.secondary_capabilities, 8);
+    assert_eq!(parsed.domain_capability_values, 0xA5A5_0001);
+    assert_eq!(parsed.domain_capability_validity, 0xFFFF_0001);
+    assert!(parsed.identify_supported);
+    assert!(parsed.sample_rate_configuration_supported);
+    assert!(parsed.encoding_configuration_supported);
+    assert!(parsed.sample_rate_pullup_configuration_supported);
+    assert!(parsed.switch_redundancy_supported);
+    assert!(parsed.static_ipv4_configuration_supported);
+    assert!(parsed.detailed_metering_supported);
+    assert!(parsed.aes67_configuration_supported);
+    assert!(parsed.device_locking_supported);
+    assert!(parsed.external_word_clock_read_only);
+    assert!(parsed.switch_redundancy_read_only);
+    assert!(parsed.static_ipv4_configuration_read_only);
+    assert!(parsed.generic_codec_control_supported);
+    assert!(parsed.interface_statistics_supported);
+    assert!(parsed.clock_monitoring_supported);
+    assert!(parsed.per_channel_signal_presence_supported);
+    assert!(parsed.rx_flow_maximum_latency_monitoring_supported);
+    assert!(parsed.rx_flow_late_packet_monitoring_supported);
 }
 
 #[test]
-fn dante_model_aes67_bit_set_reports_supported_and_preserves_the_raw_capability_word() {
-    let data = dante_model_response(b"Bklyn2", 0x8E78_F65A, 0x1B, b"Brooklyn II");
-    let parsed = parse_dante_model(&data).unwrap();
-    assert_eq!(parsed.capabilities, 0x8E78_F65A);
-    assert_eq!(parsed.aes67_supported, Some(true));
-    assert_eq!(parsed.detailed_metering_supported, Some(true));
+fn dante_model_ignores_physically_present_fields_before_each_version_threshold() {
+    let cases = [
+        (0x01FF, [0, 0, 0, 0, 0, 0]),
+        (0x0709, [1, 0, 0, 0, 0, 0]),
+        (0x0716, [1, 1, 0, 0, 0, 0]),
+        (0x071D, [1, 1, 1, 0, 0, 0]),
+        (0x0722, [1, 1, 1, 1, 0, 0]),
+        (0x0723, [1, 1, 1, 1, 1, 1]),
+    ];
+    for (version, expected) in cases {
+        let parsed = parse_dante_model(&dante_model_response(version, 1, 1, 1, 1, 1, 1)).unwrap();
+        assert_eq!(
+            [
+                parsed.primary_capabilities,
+                parsed.read_only_capabilities,
+                parsed.monitoring_capabilities,
+                parsed.secondary_capabilities,
+                parsed.domain_capability_values,
+                parsed.domain_capability_validity,
+            ],
+            expected
+        );
+    }
 }
 
 #[test]
-fn dante_model_aes67_bit_cleared_reports_unsupported_and_preserves_the_raw_capability_word() {
-    let data = dante_model_response(b"Bklyn2", 0x8A78_F65A, 0, b"Brooklyn II");
-    let parsed = parse_dante_model(&data).unwrap();
-    assert_eq!(parsed.capabilities, 0x8A78_F65A);
-    assert_eq!(parsed.aes67_supported, Some(false));
-    assert_eq!(parsed.detailed_metering_supported, Some(true));
-}
-
-#[test]
-fn dante_model_decodes_independent_monitoring_capability_bits() {
-    let data = dante_model_response(b"Bklyn2", 0x8E78_765A, 0x8000_001B, b"Brooklyn II");
-    let parsed = parse_dante_model(&data).unwrap();
-
-    assert_eq!(parsed.detailed_metering_supported, Some(false));
-    assert_eq!(parsed.monitoring_capabilities, Some(0x8000_001B));
-    assert_eq!(parsed.interface_statistics_supported, Some(true));
-    assert_eq!(parsed.clock_monitoring_supported, Some(true));
-    assert_eq!(parsed.per_channel_signal_presence_supported, Some(false));
+fn dante_model_requires_every_field_valid_for_its_advertised_version() {
+    let data = dante_model_response(0x0723, 0, 0, 0, 0, 0, 0);
     assert_eq!(
-        parsed.rx_flow_maximum_latency_monitoring_supported,
-        Some(true)
-    );
-    assert_eq!(parsed.rx_flow_late_packet_monitoring_supported, Some(true));
-}
-
-#[test]
-fn dante_model_rejects_a_response_truncated_before_the_capability_word() {
-    let data = dante_model_response(b"Bklyn2", 0x0400_0000, 0, b"Brooklyn II");
-    assert_eq!(
-        parse_dante_model(&data[..CONMON_DANTE_MODEL_CAPABILITIES_OFFSET]),
+        parse_dante_model(&data[..CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALIDITY_OFFSET + 3]),
         None
     );
 }

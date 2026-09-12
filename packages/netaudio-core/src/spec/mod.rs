@@ -2,7 +2,10 @@ use std::net::Ipv4Addr;
 
 use serde::Deserialize;
 
-use crate::commands::{self, ChannelType, ReceiveChannelNamePageRecord, SubscriptionPageRecord};
+use crate::commands::{
+    self, ChannelType, ExternalFlowIdentity, ExternalReceiverSubscription, ExternalRtpDestination,
+    ReceiveChannelNamePageRecord, SubscriptionPageRecord,
+};
 use crate::protocol::NetaudioError;
 
 mod command_defaults;

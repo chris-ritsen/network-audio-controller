@@ -1,16 +1,14 @@
-use serde::Serialize;
-use std::collections::BTreeSet;
-
 use crate::bytes::{read_u16, read_u32};
 use crate::heartbeat::{
     parse_heartbeat_device_extended_unique_identifier, parse_heartbeat_records,
 };
+use serde::Serialize;
 
 const FLOW_LATENCY_RECORD_TYPE: u16 = 0x8003;
-const RAW_IMPAIRMENT_RECORD_TYPE: u16 = 0x8004;
+const LATE_PACKET_RECORD_TYPE: u16 = 0x8004;
 const EXTENSION_LENGTH: u16 = 4;
 const FLOW_LATENCY_VECTOR_OFFSET: u16 = 24;
-const RAW_IMPAIRMENT_VECTOR_OFFSET: u16 = 20;
+const LATE_PACKET_VECTOR_OFFSET: u16 = 20;
 const VECTOR_ENTRY_WIDTH: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35,13 +33,13 @@ pub struct HeartbeatFlowLatencyRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HeartbeatRawImpairmentEntry {
+pub struct HeartbeatLatePacketEntry {
     pub receiver_flow_index: u16,
-    pub raw_impairment_value: u32,
+    pub late_packet_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HeartbeatRawImpairmentRecord {
+pub struct HeartbeatLatePacketRecord {
     pub record_length: u16,
     pub extension_length: u16,
     pub payload_length: u16,
@@ -51,14 +49,14 @@ pub struct HeartbeatRawImpairmentRecord {
     pub start_receiver_flow_index: u16,
     pub vector_offset: u16,
     pub unknown_word_at_offset_18: u16,
-    pub entries: Vec<HeartbeatRawImpairmentEntry>,
+    pub entries: Vec<HeartbeatLatePacketEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HeartbeatConnectionHealthRecords {
     pub device_extended_unique_identifier: String,
     pub latency_records: Vec<HeartbeatFlowLatencyRecord>,
-    pub raw_impairment_records: Vec<HeartbeatRawImpairmentRecord>,
+    pub late_packet_records: Vec<HeartbeatLatePacketRecord>,
 }
 
 fn validate_vector_geometry(
@@ -103,6 +101,10 @@ fn parse_flow_latency_record(record: &[u8]) -> Option<HeartbeatFlowLatencyRecord
     let (record_length, extension_length, payload_length, entry_count) =
         validate_vector_geometry(record, 24, FLOW_LATENCY_VECTOR_OFFSET)?;
     let start_receiver_flow_index = read_u16(record, 14)?;
+    let sample_rate_hertz = read_u32(record, 20)?;
+    if sample_rate_hertz == 0 {
+        return None;
+    }
     let mut entries = Vec::with_capacity(usize::from(entry_count));
     for entry_index in 0..entry_count {
         let entry_offset = usize::from(FLOW_LATENCY_VECTOR_OFFSET)
@@ -123,26 +125,26 @@ fn parse_flow_latency_record(record: &[u8]) -> Option<HeartbeatFlowLatencyRecord
         start_receiver_flow_index,
         vector_offset: read_u16(record, 16)?,
         unknown_word_at_offset_18: read_u16(record, 18)?,
-        sample_rate_hertz: read_u32(record, 20)?,
+        sample_rate_hertz,
         entries,
     })
 }
 
-fn parse_raw_impairment_record(record: &[u8]) -> Option<HeartbeatRawImpairmentRecord> {
+fn parse_late_packet_record(record: &[u8]) -> Option<HeartbeatLatePacketRecord> {
     let (record_length, extension_length, payload_length, entry_count) =
-        validate_vector_geometry(record, 20, RAW_IMPAIRMENT_VECTOR_OFFSET)?;
+        validate_vector_geometry(record, 20, LATE_PACKET_VECTOR_OFFSET)?;
     let start_receiver_flow_index = read_u16(record, 14)?;
     let mut entries = Vec::with_capacity(usize::from(entry_count));
     for entry_index in 0..entry_count {
-        let entry_offset = usize::from(RAW_IMPAIRMENT_VECTOR_OFFSET)
+        let entry_offset = usize::from(LATE_PACKET_VECTOR_OFFSET)
             .checked_add(usize::from(entry_index).checked_mul(VECTOR_ENTRY_WIDTH)?)?;
-        entries.push(HeartbeatRawImpairmentEntry {
+        entries.push(HeartbeatLatePacketEntry {
             receiver_flow_index: start_receiver_flow_index.checked_add(entry_index)?,
-            raw_impairment_value: read_u32(record, entry_offset)?,
+            late_packet_count: read_u32(record, entry_offset)?,
         });
     }
 
-    Some(HeartbeatRawImpairmentRecord {
+    Some(HeartbeatLatePacketRecord {
         record_length,
         extension_length,
         payload_length,
@@ -156,84 +158,33 @@ fn parse_raw_impairment_record(record: &[u8]) -> Option<HeartbeatRawImpairmentRe
     })
 }
 
-fn paired_record_keys(
-    latency_records: &[HeartbeatFlowLatencyRecord],
-    raw_impairment_records: &[HeartbeatRawImpairmentRecord],
-) -> Option<BTreeSet<(u16, u16, u16)>> {
-    if latency_records.is_empty() || latency_records.len() != raw_impairment_records.len() {
-        return None;
-    }
-
-    let mut latency_keys = BTreeSet::new();
-    for record in latency_records {
-        if record.sample_rate_hertz == 0
-            || !latency_keys.insert((
-                record.sequence,
-                record.start_receiver_flow_index,
-                record.entry_count,
-            ))
-        {
-            return None;
-        }
-    }
-
-    let mut raw_impairment_keys = BTreeSet::new();
-    for record in raw_impairment_records {
-        if !raw_impairment_keys.insert((
-            record.sequence,
-            record.start_receiver_flow_index,
-            record.entry_count,
-        )) {
-            return None;
-        }
-    }
-    if latency_keys != raw_impairment_keys {
-        return None;
-    }
-
-    let mut sequence = None;
-    let mut previous_range_end = None;
-    for (record_sequence, start_receiver_flow_index, entry_count) in &latency_keys {
-        if sequence.is_some_and(|value| value != *record_sequence) {
-            return None;
-        }
-        sequence = Some(*record_sequence);
-        if previous_range_end
-            .is_some_and(|range_end| u32::from(*start_receiver_flow_index) < range_end)
-        {
-            return None;
-        }
-        previous_range_end = Some(u32::from(*start_receiver_flow_index) + u32::from(*entry_count));
-    }
-
-    Some(latency_keys)
-}
-
 pub fn parse_heartbeat_connection_health_packet(
     data: &[u8],
 ) -> Option<HeartbeatConnectionHealthRecords> {
     let records = parse_heartbeat_records(data)?;
     let mut latency_records = Vec::new();
-    let mut raw_impairment_records = Vec::new();
+    let mut late_packet_records = Vec::new();
 
     for record in records {
         match record.record_type {
             FLOW_LATENCY_RECORD_TYPE => {
                 latency_records.push(parse_flow_latency_record(record.bytes)?);
             }
-            RAW_IMPAIRMENT_RECORD_TYPE => {
-                raw_impairment_records.push(parse_raw_impairment_record(record.bytes)?);
+            LATE_PACKET_RECORD_TYPE => {
+                late_packet_records.push(parse_late_packet_record(record.bytes)?);
             }
             _ => {}
         }
     }
 
-    paired_record_keys(&latency_records, &raw_impairment_records)?;
+    if latency_records.is_empty() && late_packet_records.is_empty() {
+        return None;
+    }
 
     Some(HeartbeatConnectionHealthRecords {
         device_extended_unique_identifier: parse_heartbeat_device_extended_unique_identifier(data)?,
         latency_records,
-        raw_impairment_records,
+        late_packet_records,
     })
 }
 
@@ -253,35 +204,35 @@ mod tests {
         data
     }
 
-    fn paired_records(sequence: u16, latency: [u32; 2], raw_impairment: [u32; 2]) -> Vec<u8> {
+    fn paired_records(sequence: u16, latency: [u32; 2], late_packet_counts: [u32; 2]) -> Vec<u8> {
         let mut latency_record =
             decode_hexadecimal("00208003000400140000000000020000001800000000bb800000000000000000");
         latency_record[8..10].copy_from_slice(&sequence.to_be_bytes());
         latency_record[24..28].copy_from_slice(&latency[0].to_be_bytes());
         latency_record[28..32].copy_from_slice(&latency[1].to_be_bytes());
 
-        let mut raw_impairment_record =
+        let mut late_packet_record =
             decode_hexadecimal("001c8004000400100000000000020000001400000000000000000000");
-        raw_impairment_record[8..10].copy_from_slice(&sequence.to_be_bytes());
-        raw_impairment_record[20..24].copy_from_slice(&raw_impairment[0].to_be_bytes());
-        raw_impairment_record[24..28].copy_from_slice(&raw_impairment[1].to_be_bytes());
-        latency_record.extend_from_slice(&raw_impairment_record);
+        late_packet_record[8..10].copy_from_slice(&sequence.to_be_bytes());
+        late_packet_record[20..24].copy_from_slice(&late_packet_counts[0].to_be_bytes());
+        late_packet_record[24..28].copy_from_slice(&late_packet_counts[1].to_be_bytes());
+        latency_record.extend_from_slice(&late_packet_record);
         latency_record
     }
 
     #[test]
-    fn reproduces_baseline_treatment_and_latched_raw_impairment_records() {
+    fn reproduces_baseline_treatment_and_cumulative_late_packet_records() {
         let cases = [
             (41130, [14, 0], [0, 0]),
             (41132, [1006, 0], [825, 0]),
             (41133, [14, 0], [825, 0]),
         ];
 
-        for (sequence, latency, raw_impairment) in cases {
+        for (sequence, latency, late_packet_counts) in cases {
             let parsed = parse_heartbeat_connection_health_packet(&packet(&paired_records(
                 sequence,
                 latency,
-                raw_impairment,
+                late_packet_counts,
             )))
             .unwrap();
 
@@ -293,8 +244,8 @@ mod tests {
                 latency[0]
             );
             assert_eq!(
-                parsed.raw_impairment_records[0].entries[0].raw_impairment_value,
-                raw_impairment[0]
+                parsed.late_packet_records[0].entries[0].late_packet_count,
+                late_packet_counts[0]
             );
         }
     }
@@ -309,7 +260,7 @@ mod tests {
         assert_eq!(parsed.latency_records[0].entries[0].receiver_flow_index, 7);
         assert_eq!(parsed.latency_records[0].entries[1].receiver_flow_index, 8);
         assert_eq!(
-            parsed.raw_impairment_records[0].entries[1].receiver_flow_index,
+            parsed.late_packet_records[0].entries[1].receiver_flow_index,
             8
         );
     }
@@ -328,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_zero_rate_unpaired_and_overlapping_vectors() {
+    fn accepts_independent_record_families_and_rejects_invalid_records() {
         let valid = paired_records(41132, [1006, 0], [825, 0]);
 
         let mut zero_count = valid.clone();
@@ -345,20 +296,23 @@ mod tests {
             None
         );
 
-        assert_eq!(
-            parse_heartbeat_connection_health_packet(&packet(&valid[..32])),
-            None
-        );
+        let latency_only = parse_heartbeat_connection_health_packet(&packet(&valid[..32])).unwrap();
+        assert_eq!(latency_only.latency_records.len(), 1);
+        assert!(latency_only.late_packet_records.is_empty());
+
+        let late_packet_only =
+            parse_heartbeat_connection_health_packet(&packet(&valid[32..])).unwrap();
+        assert!(late_packet_only.latency_records.is_empty());
+        assert_eq!(late_packet_only.late_packet_records.len(), 1);
 
         let mut overlapping = valid.clone();
         let mut second_pair = paired_records(41132, [18, 0], [7, 0]);
         second_pair[14..16].copy_from_slice(&1u16.to_be_bytes());
         second_pair[32 + 14..32 + 16].copy_from_slice(&1u16.to_be_bytes());
         overlapping.extend_from_slice(&second_pair);
-        assert_eq!(
-            parse_heartbeat_connection_health_packet(&packet(&overlapping)),
-            None
-        );
+        let overlapping = parse_heartbeat_connection_health_packet(&packet(&overlapping)).unwrap();
+        assert_eq!(overlapping.latency_records.len(), 2);
+        assert_eq!(overlapping.late_packet_records.len(), 2);
 
         let mut missing_identity = packet(&valid);
         missing_identity[8..16].fill(0);

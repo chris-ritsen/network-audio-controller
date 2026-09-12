@@ -9,13 +9,10 @@ from typing import Optional
 
 import typer
 
-from netaudio.cli_support.output import output_single, structured_output_selected
-
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import run_command
-from netaudio.commands.preset.display import show_preset_dry_run
-from netaudio.commands.preset.loading import run_preset_load
+from netaudio.commands.preset.loading import run_preset_dry_run, run_preset_load
 from netaudio.presets.parsing import parse_preset
 
 app = typer.Typer(
@@ -134,11 +131,7 @@ def preset_load(
         raise typer.Exit(code=ExitCode.ERROR) from exception
 
     if dry_run:
-        if structured_output_selected():
-            output_single({"devices": preset_devices, "name": preset_name, "path": str(preset_path)})
-            return
-        typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)")
-        show_preset_dry_run(preset_devices)
+        run_command(run_preset_dry_run, preset_devices, preset_name, preset_path)
         return
     typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
 

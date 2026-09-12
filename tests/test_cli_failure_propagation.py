@@ -15,7 +15,7 @@ PROBES = (
     "get_latency_settings",
     "probe_clocking_status",
     "probe_encoding_status",
-    "probe_gain_status",
+    "probe_gain_adapter",
     "probe_lock_status",
     "probe_sample_rate_status",
     "query_modern_arc_receiver_channel_status",

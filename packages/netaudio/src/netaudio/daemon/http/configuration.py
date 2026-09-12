@@ -3,8 +3,13 @@ from __future__ import annotations
 import ipaddress
 import json
 
-from netaudio.dante import flows, multicast
-from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante import flows
+from netaudio.dante.flow_lifecycle import (
+    create_transmit_flow,
+    delete_transmit_flow,
+    inspect_transmit_flows,
+    plan_create_transmit_flow,
+)
 from netaudio.dante.network_configuration import (
     NetworkConfigurationError,
     NetworkConfigurationUnverified,
@@ -12,6 +17,7 @@ from netaudio.dante.network_configuration import (
     network_snapshot,
     validate_interface_configuration,
 )
+from netaudio.dante.transmit_flow import FlowLifecycleState, TransmitFlowSpecification
 
 STATUS_TEXT = {
     200: "OK",
@@ -27,6 +33,79 @@ STATUS_TEXT = {
 
 
 class DaemonConfigurationHandlers:
+    async def _handle_get_transmit_flows(self, writer, device_name):
+        device = await self._require_online_device(writer, device_name)
+        if not device:
+            return
+        try:
+            inventory = await inspect_transmit_flows(device)
+        except flows.FlowValidationError as exception:
+            await self._send_json(writer, {"error": str(exception)}, exception.status)
+            return
+        await self._send_json(writer, {"device": device.server_name, **inventory})
+
+    async def _handle_plan_transmit_flow(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            specification = TransmitFlowSpecification.from_dict(params.get("specification"))
+            plan = plan_create_transmit_flow(device, specification)
+        except (TypeError, ValueError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        await self._send_json(writer, {"device": device.server_name, "plan": plan.to_dict()})
+
+    @staticmethod
+    def _transmit_flow_result_status(result) -> int:
+        return {
+            FlowLifecycleState.CONFIRMED: 200,
+            FlowLifecycleState.DELETED: 200,
+            FlowLifecycleState.PARTIAL: 202,
+            FlowLifecycleState.PENDING: 202,
+            FlowLifecycleState.INCONSISTENT: 502,
+            FlowLifecycleState.REJECTED: 409,
+            FlowLifecycleState.UNSUPPORTED: 409,
+        }.get(result.state, 500)
+
+    async def _handle_create_transmit_flow(self, writer, params):
+        if params.get("confirmed") is not True:
+            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
+            return
+        device = await self._require_online_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            specification = TransmitFlowSpecification.from_dict(params.get("specification"))
+            result = await create_transmit_flow(device, specification)
+        except (TypeError, ValueError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        payload = result.to_dict()
+        status = self._transmit_flow_result_status(result)
+        if status >= 400:
+            payload["error"] = result.message
+        await self._send_json(writer, payload, status)
+
+    async def _handle_delete_transmit_flow(self, writer, params):
+        if params.get("confirmed") is not True:
+            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
+            return
+        device = await self._require_online_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            flow_id = flows.validate_flow_slot(params.get("flow_id"))
+            result = await delete_transmit_flow(device, flow_id)
+        except flows.FlowValidationError as exception:
+            await self._send_json(writer, {"error": str(exception)}, exception.status)
+            return
+        payload = result.to_dict()
+        status = self._transmit_flow_result_status(result)
+        if status >= 400:
+            payload["error"] = result.message
+        await self._send_json(writer, payload, status)
+
     async def _handle_set_gain(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
@@ -171,7 +250,7 @@ class DaemonConfigurationHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        if device.aes67_supported is False:
+        if device.aes67_configuration_supported is False:
             await self._send_json(writer, {"error": "device does not support AES67 configuration"}, 409)
             return
         expected = params.get("enabled")
@@ -345,207 +424,6 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
         await self._send_json(writer, {"success": True, "redundancy": status})
-
-    async def _handle_get_tx_flows(self, writer, device_name):
-        snapshot = await self._tx_flow_snapshot(writer, device_name, prefer_status=True)
-        if snapshot is None:
-            return
-
-        device, flow_protocol_id, flow_inventory = snapshot
-        await self._send_json(
-            writer,
-            {
-                "device": device.server_name,
-                "flow_protocol_id": flow_protocol_id,
-                "max_flow_slots": flow_inventory["max_flow_slots"],
-                "flows": flow_inventory["flows"],
-            },
-        )
-
-    async def _handle_allocate_multicast_flow(self, writer, params):
-        if params.get("confirmed") is not True:
-            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
-            return
-        if "flow_slot" in params:
-            await self._send_json(
-                writer, {"error": "allocation assigns the global flow identifier; omit flow_slot"}, 400
-            )
-            return
-        device = await self._require_device(writer, params.get("device"))
-        if not device:
-            return
-        if not device.online:
-            await self._send_json(writer, {"error": "device is offline"}, 503)
-            return
-        try:
-            result = await multicast.create_multicast_flow_2809(
-                device, params.get("channels"), params.get("request_options_word", 0)
-            )
-        except flows.FlowValidationError as exception:
-            await self._send_json(writer, {"error": str(exception)}, exception.status)
-            return
-        await self._send_json(writer, {"success": True, **result})
-
-    async def _handle_create_tx_flow(self, writer, params):
-        if params.get("confirmed") is not True:
-            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
-            return
-
-        try:
-            flow_slot = flows.validate_flow_slot(params.get("flow_slot"))
-            channel_numbers = flows.validate_flow_channels(params.get("channels"))
-        except flows.FlowValidationError as exception:
-            await self._send_json(writer, {"error": str(exception)}, exception.status)
-            return
-
-        device_name = params.get("device")
-        snapshot = await self._tx_flow_snapshot(writer, device_name)
-        if snapshot is None:
-            return
-        device, flow_protocol_id, flow_inventory = snapshot
-        device_flows = flow_inventory["flows"]
-
-        available_channels = {int(number) for number in (device.tx_channels or {}).keys()}
-        try:
-            flows.require_creatable_flow_protocol(flow_protocol_id)
-            flows.require_supported_flow_slot(flow_slot, flow_inventory["max_flow_slots"])
-            flows.require_available_tx_channels(channel_numbers, available_channels)
-            flows.require_available_flow_slot(device_flows, flow_slot)
-        except flows.FlowValidationError as exception:
-            await self._send_json(writer, {"error": str(exception)}, exception.status)
-            return
-
-        async with device.topology_mutation_lock:
-            result_code = await flows.create_tx_flow(
-                str(device.ipv4),
-                self._flow_arc_port(device),
-                flow_protocol_id,
-                flow_slot,
-                channel_numbers,
-                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
-            )
-        if result_code is None:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-            return
-        if result_code != RESULT_CODE_SUCCESS:
-            await self._send_json(
-                writer,
-                {
-                    "error": f"device rejected flow creation with result 0x{result_code:04X}",
-                    "result_code": result_code,
-                },
-                409,
-            )
-            return
-
-        await self._send_json(
-            writer,
-            {
-                "success": True,
-                "flow_protocol_id": flow_protocol_id,
-                "flow_slot": flow_slot,
-                "channels": channel_numbers,
-            },
-        )
-
-    async def _handle_delete_tx_flow(self, writer, params):
-        if params.get("confirmed") is not True:
-            await self._send_json(writer, {"error": "confirmed must be true"}, 400)
-            return
-
-        try:
-            flow_slot = flows.validate_flow_slot(params.get("flow_slot"))
-        except flows.FlowValidationError as exception:
-            await self._send_json(writer, {"error": str(exception)}, exception.status)
-            return
-
-        snapshot = await self._tx_flow_snapshot(writer, params.get("device"))
-        if snapshot is None:
-            return
-        device, flow_protocol_id, flow_inventory = snapshot
-        device_flows = flow_inventory["flows"]
-
-        try:
-            flows.require_deletable_flow_protocol(flow_protocol_id, flow_slot)
-            flows.require_multicast_flow(device_flows, flow_slot)
-        except flows.FlowValidationError as exception:
-            await self._send_json(writer, {"error": str(exception)}, exception.status)
-            return
-
-        async with device.topology_mutation_lock:
-            result_code = await flows.delete_tx_flow(
-                str(device.ipv4),
-                self._flow_arc_port(device),
-                flow_protocol_id,
-                flow_slot,
-                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
-            )
-        if result_code is None:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-            return
-        if result_code != RESULT_CODE_SUCCESS:
-            await self._send_json(
-                writer,
-                {
-                    "error": f"device rejected flow deletion with result 0x{result_code:04X}",
-                    "result_code": result_code,
-                },
-                409,
-            )
-            return
-
-        await self._send_json(
-            writer,
-            {
-                "success": True,
-                "flow_protocol_id": flow_protocol_id,
-                "flow_slot": flow_slot,
-            },
-        )
-
-    async def _tx_flow_snapshot(self, writer, device_name, *, prefer_status=False):
-        device = await self._require_device(writer, device_name)
-        if not device:
-            return None
-        if not device.online:
-            await self._send_json(writer, {"error": "device is offline"}, 503)
-            return None
-        if not getattr(device, "requires_managed_control", False) and not device.ipv4:
-            await self._send_json(writer, {"error": "device has no control address"}, 503)
-            return None
-
-        device_address = str(device.ipv4) if device.ipv4 else ""
-
-        flow_protocol_id = device.flow_protocol_id
-        if flow_protocol_id is None:
-            flow_protocol_id = await flows.detect_flow_protocol(
-                device_address,
-                self._flow_arc_port(device),
-                **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
-            )
-            if flow_protocol_id is None:
-                await self._send_json(writer, {"error": "flow protocol is not supported or did not respond"}, 503)
-                return None
-            device.flow_protocol_id = flow_protocol_id
-
-        # Mutation preflight must use the same protocol as the subsequent write.
-        query_inventory = flows.query_preferred_tx_flow_inventory if prefer_status else flows.query_tx_flow_inventory
-        flow_inventory = await query_inventory(
-            device_address,
-            self._flow_arc_port(device),
-            flow_protocol_id,
-            **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
-        )
-        if flow_inventory is None:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-            return None
-        if prefer_status:
-            flow_protocol_id = flow_inventory["flow_protocol_id"]
-        return device, flow_protocol_id, flow_inventory
-
-    @staticmethod
-    def _flow_arc_port(device) -> int:
-        return device._arc_port()
 
     async def _require_device(self, writer, name, error="device not found"):
         device = self._find_device(name)

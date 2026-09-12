@@ -21,6 +21,49 @@ OUTPUT_GAIN_LEVEL_LABELS = {
 
 SUPPORTED_GAIN_LEVELS = (1, 2, 3, 4, 5)
 
+GAIN_CODEC_ADAPTERS = {
+    "avio-dai2": {"parameter_type": 1, "mode": 2, "device_type": "input"},
+    "avio-dao2": {"parameter_type": 2, "mode": 1, "device_type": "output"},
+}
+
+
+def gain_adapter_from_codec_status(device, codec_status: dict) -> dict | None:
+    model_id = (getattr(device, "model_id", None) or "").lower()
+    adapter = GAIN_CODEC_ADAPTERS.get(model_id)
+    if adapter is None:
+        return None
+    matches = [
+        parameter
+        for parameter in codec_status.get("parameters") or []
+        if parameter.get("parameter_type") == adapter["parameter_type"] and parameter.get("mode") == adapter["mode"]
+    ]
+    if len(matches) != 1:
+        return None
+    values = matches[0].get("values")
+    if not isinstance(values, list) or any(
+        isinstance(value, bool) or not isinstance(value, int) or value not in SUPPORTED_GAIN_LEVELS for value in values
+    ):
+        return None
+    return {**adapter, "channel_levels": list(values), "supported_levels": list(SUPPORTED_GAIN_LEVELS)}
+
+
+def codec_status_fields(device, codec_status: dict) -> dict:
+    adapter = gain_adapter_from_codec_status(device, codec_status)
+    fields = {
+        "codec_parameters": codec_status.get("parameters") or [],
+        "gain_adapter": adapter,
+        "gain_device_type": None,
+        "gain_levels": None,
+        "supported_gain_levels": None,
+    }
+    if adapter is not None:
+        fields.update(
+            gain_device_type=adapter["device_type"],
+            gain_levels=adapter["channel_levels"],
+            supported_gain_levels=adapter["supported_levels"],
+        )
+    return fields
+
 
 def gain_level_labels(device_type: str) -> dict[int, str] | None:
     if device_type == "input":

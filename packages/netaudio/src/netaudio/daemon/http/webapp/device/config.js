@@ -3,6 +3,7 @@ import { AsyncButton, FieldRow, Panel } from "../components.js";
 import * as format from "../format.js";
 import { html, useRef, useState } from "../lib/preact.js";
 import { deviceRequestName, inventoryReady } from "../store.js";
+import { operationReasonText, operationWritable } from "./availability.js";
 import { isEnrolled } from "./managed.js";
 
 
@@ -27,6 +28,7 @@ function SampleRateControl({ device, requestName }) {
   const select = useRef(null);
   const [pending, setPending] = useState(null);
   const supported = device.supported_sample_rates_hz || [];
+  const writable = operationWritable(device, "sample_rate");
   const apply = async () => {
     setPending(null);
     const rate = Number(select.current.value);
@@ -40,9 +42,12 @@ function SampleRateControl({ device, requestName }) {
       setPending({ requestName, rate, losses: preflight.destructive_transmitter_membership_loss });
     }
   };
-  if (!supported.length) {
+  if (!writable || !supported.length) {
     return html`<${FieldRow} label="Sample rate">
-      <span>${format.sampleRate(device.sample_rate_hz)}${inventoryReady.value ? " — supported values unavailable" : ""}</span>
+      <span>${format.sampleRate(device.sample_rate_hz)}</span>
+      <span class="text-sm opacity-70">${writable
+        ? inventoryReady.value ? "Supported values are unavailable." : "Loading supported values."
+        : operationReasonText(device, "sample_rate")}</span>
     <//>`;
   }
   return html`
@@ -82,9 +87,13 @@ function SampleRateControl({ device, requestName }) {
 function EncodingControl({ device, requestName }) {
   const select = useRef(null);
   const supported = device.supported_encodings || [];
-  if (!supported.length) {
+  const writable = operationWritable(device, "encoding");
+  if (!writable || !supported.length) {
     return html`<${FieldRow} label="Encoding">
-      <span>${format.text(device.encoding)}${inventoryReady.value ? " — supported values unavailable" : ""}</span>
+      <span>${format.text(device.encoding)}</span>
+      <span class="text-sm opacity-70">${writable
+        ? inventoryReady.value ? "Supported values are unavailable." : "Loading supported values."
+        : operationReasonText(device, "encoding")}</span>
     <//>`;
   }
   return html`
@@ -112,8 +121,16 @@ function PullupControl({ device, requestName }) {
   const select = useRef(null);
   const labels = new Map([[0, "None"], [1, "+4.1667%"], [2, "+0.1%"], [3, "−0.1%"], [4, "−4.0%"]]);
   const supported = (device.supported_sample_rate_pullup_raw_values || []).filter((value) => labels.has(value));
-  if (!supported.length) {
-    return null;
+  const writable = operationWritable(device, "sample_rate_pullup");
+  if (!writable || !supported.length) {
+    const current = labels.get(Number(device.sample_rate_pullup_raw_value))
+      ?? format.text(device.sample_rate_pullup_raw_value);
+    return html`<${FieldRow} label="Sample rate pull-up">
+      <span>${current}</span>
+      <span class="text-sm opacity-70">${writable
+        ? "Supported values are unavailable."
+        : operationReasonText(device, "sample_rate_pullup")}</span>
+    <//>`;
   }
   return html`
     <${FieldRow} label="Sample rate pull-up">
@@ -193,13 +210,16 @@ function ClockingControls({ device, requestName }) {
 
 export function DeviceConfigSection({ device }) {
   const requestName = deviceRequestName(device);
+  const identifyWritable = operationWritable(device, "identify");
   return html`
     <div class="flex flex-col gap-4">
       <${Panel}
         title="Device config"
         actions=${html`
           <${AsyncButton} small description=${`refresh settings for ${device.name || "device"}`} onRun=${() => api.refresh(requestName)}>Refresh settings<//>
-          <${AsyncButton} small description=${`identify ${device.name || "device"}`} onRun=${() => api.identify(requestName)}>Identify<//>
+          ${identifyWritable
+            ? html`<${AsyncButton} small description=${`identify ${device.name || "device"}`} onRun=${() => api.identify(requestName)}>Identify<//>`
+            : html`<span class="text-sm opacity-70">Identify unavailable: ${operationReasonText(device, "identify")}</span>`}
           <${AsyncButton} small variant="danger" description=${`reboot ${device.name || "device"}`} onRun=${() => api.reboot(requestName)}>Reboot<//>
         `}
       >

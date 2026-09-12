@@ -7,14 +7,15 @@ import math
 from netaudio.common.app_config import settings as app_settings
 from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
 from netaudio.dante.const import RESULT_CODE_SUCCESS
+from netaudio.dante.flows import FlowValidationError
 from netaudio.dante.discovery import discovery_destination
 from netaudio.dante.lock import validate_pin
 from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.network_configuration import (
-    learn_switch_ports,
     network_snapshot,
     probe_switch_configuration_if_reported,
 )
+from netaudio.dante.operation_availability import operation_availability
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
@@ -199,8 +200,6 @@ class DaemonDeviceHandlers:
 
         try:
             interfaces = await self.application.probe_interface_status(device)
-            if await learn_switch_ports(self.application, device):
-                interfaces = await self.application.probe_interface_status(device)
             await probe_switch_configuration_if_reported(self.application, device)
         except (CapabilityProbeTimeout, TimeoutError):
             await self._send_json(writer, {"error": "The device did not respond to the network settings query"}, 504)
@@ -305,6 +304,41 @@ class DaemonDeviceHandlers:
             return
         self.subscription_readback.request(device, [(rx_channel_number, tx_channel_name, tx_device_name)])
         await self._send_json(writer, {"success": True})
+
+    async def _handle_subscribe_external_rtp(self, writer, params):
+        device = await self._require_device(writer, params.get("rx_device"), "rx device not found")
+        if not device:
+            return
+        try:
+            flow = self.application.external_flows.get(params.get("source_ipv4"), params.get("session_id"))
+        except (TypeError, ValueError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        if flow is None:
+            await self._send_json(writer, {"error": "external flow not found"}, 404)
+            return
+        try:
+            result = await self.application.subscribe_external_rtp(
+                device,
+                flow,
+                params.get("receiver_channel_ids"),
+                params.get("flow_slot_assignments"),
+                receiver_supports_multiple_interfaces=params.get(
+                    "receiver_supports_multiple_interfaces",
+                    False,
+                ),
+            )
+        except FlowValidationError as exception:
+            await self._send_json(writer, {"error": str(exception)}, exception.status)
+            return
+        except (NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 502)
+            return
+        if not result["request_acknowledged"]:
+            status = 504 if result["result_code"] is None else 409
+            await self._send_json(writer, {"error": "external subscription was not acknowledged", **result}, status)
+            return
+        await self._send_json(writer, {"success": True, **result})
 
     async def _handle_unsubscribe(self, writer, params):
         device = await self._require_device(writer, params.get("rx_device"), "rx device not found")
@@ -597,6 +631,7 @@ class DaemonDeviceHandlers:
             "status_code": observation.status_code,
             "observed_at": observation.observed_at,
             "observation_source": "observed_after_0x1008",
+            "operation_availability": operation_availability(device, "locking").to_dict(),
         }
 
     def _get_lock_key(self):
@@ -865,8 +900,11 @@ class DaemonDeviceHandlers:
             await self._send_json(writer, {"error": f"{capability_description} readback was unavailable"}, 504)
             return
 
-        observed_value, supported_values = status
+        observed_value = status["current_value"]
+        supported_values = status["available_values"]
         setattr(device, current_value_field, observed_value)
+        setattr(device, f"requested_{current_value_field}", status["requested_value"])
+        setattr(device, f"{current_value_field}_update_mode", status["update_mode"])
         setattr(device, supported_values_field, supported_values)
         if observed_value != requested_value:
             await self._send_json(

@@ -15,7 +15,7 @@ from netaudio.dante.const import (
     NOTIFICATION_CLOCKING_STATUS,
     NOTIFICATION_DEVICE_REBOOT,
     NOTIFICATION_ENCODING_STATUS,
-    NOTIFICATION_GAIN_STATUS,
+    NOTIFICATION_CODEC_STATUS,
     NOTIFICATION_INTERFACE_STATUS,
     NOTIFICATION_LATENCY_CHANGE,
     NOTIFICATION_MANF_VERSIONS_STATUS,
@@ -41,6 +41,8 @@ from netaudio.dante.conmon_export import (
     ConmonExportUnavailableError,
 )
 from netaudio.dante.events import DanteEventDispatcher
+from netaudio.dante.gain import gain_adapter_from_codec_status
+from netaudio.dante.interface_statistics import InterfaceStatisticsErrorBaselines
 from netaudio.dante.service import DanteMulticastService
 from netaudio.dante.services.notification_packet_handlers import NotificationPacketHandlers
 
@@ -52,7 +54,7 @@ __all__ = [
     "NOTIFICATION_CLOCKING_STATUS",
     "NOTIFICATION_DEVICE_REBOOT",
     "NOTIFICATION_ENCODING_STATUS",
-    "NOTIFICATION_GAIN_STATUS",
+    "NOTIFICATION_CODEC_STATUS",
     "NOTIFICATION_INTERFACE_STATUS",
     "NOTIFICATION_LATENCY_CHANGE",
     "NOTIFICATION_MANF_VERSIONS_STATUS",
@@ -74,7 +76,7 @@ __all__ = [
     "mutate_and_wait_for_capability_value",
     "mutate_and_wait_for_clear_configuration_status",
     "request_and_wait_for_conmon_export",
-    "send_and_wait_for_gain_status",
+    "send_and_wait_for_gain_adapter",
 ]
 
 logger = logging.getLogger("netaudio")
@@ -135,25 +137,30 @@ class ConmonExportWaiter(Waiter):
             self.event.set()
 
 
-def _gain_status_accepts(
+def _gain_adapter_accepts(
+    device,
     expected_device_type: str | None,
     channel_number: int | None,
     expected_level: int | None,
-) -> Callable[[tuple[str, list[int]]], bool]:
-    def accept(result: tuple[str, list[int]]) -> bool:
-        device_type, channel_levels = result
-        if expected_device_type is not None and device_type != expected_device_type:
+) -> Callable[[dict], bool]:
+    def accept(result: dict) -> bool:
+        adapter = gain_adapter_from_codec_status(device, result)
+        if adapter is None:
+            return False
+        if expected_device_type is not None and adapter["device_type"] != expected_device_type:
             return False
         if channel_number is None or expected_level is None:
             return True
         channel_index = channel_number - 1
-        return 0 <= channel_index < len(channel_levels) and channel_levels[channel_index] == expected_level
+        levels = adapter["channel_levels"]
+        return 0 <= channel_index < len(levels) and levels[channel_index] == expected_level
 
     return accept
 
 
-async def send_and_wait_for_gain_status(
+async def send_and_wait_for_gain_adapter(
     notifications: DanteNotificationService,
+    device,
     device_ip_address: str,
     send_operation: Callable[[], Awaitable[None]],
     timeout: float,
@@ -162,9 +169,9 @@ async def send_and_wait_for_gain_status(
     expected_level: int | None = None,
 ) -> tuple[str, list[int]] | None:
     waiter = notifications.register_waiter(
-        "gain",
+        "codec",
         device_ip_address,
-        accept=_gain_status_accepts(expected_device_type, channel_number, expected_level),
+        accept=_gain_adapter_accepts(device, expected_device_type, channel_number, expected_level),
     )
     try:
         event_loop = asyncio.get_running_loop()
@@ -183,8 +190,12 @@ async def send_and_wait_for_gain_status(
                 await asyncio.wait_for(waiter.wait(), timeout=attempt_timeout)
             except asyncio.TimeoutError:
                 continue
-            return waiter.latest_result
-        return waiter.latest_result
+        if waiter.latest_result is None:
+            return None
+        adapter = gain_adapter_from_codec_status(device, waiter.latest_result)
+        if adapter is None:
+            return None
+        return adapter["device_type"], adapter["channel_levels"]
     finally:
         notifications.unregister_waiter(waiter)
 
@@ -211,6 +222,7 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         self._dispatcher = dispatcher
         self._pending_conmon: dict[str, dict] = {}
         self._waiters: dict[tuple[str, str], set[Waiter]] = {}
+        self._interface_statistics_error_baselines = InterfaceStatisticsErrorBaselines()
 
     def set_device_lookup(self, lookup_func):
         self._device_lookup = lookup_func
@@ -299,11 +311,11 @@ async def mutate_and_wait_for_capability_value(
     mutate,
     probe_status,
     timeout: float,
-) -> tuple[int, list[int]] | None:
+) -> dict | None:
     waiter = notifications.register_waiter(
         capability_name,
         device_ip_address,
-        accept=lambda result: result[0] == expected_value,
+        accept=lambda result: result["current_value"] == expected_value,
     )
     probe_task = None
 

@@ -12,10 +12,12 @@ const INTERFACE_TRAFFIC_ENTRY_WIDTH: u16 = 16;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HeartbeatInterfaceTrafficEntry {
     pub entry_index: u16,
-    pub transmit_octets: u32,
-    pub receive_octets: u32,
-    pub unknown_word_at_offset_8: u32,
-    pub unknown_word_at_offset_12: u32,
+    pub transmit_rate_raw: u32,
+    pub receive_rate_raw: u32,
+    pub transmit_rate_bits_per_second: u64,
+    pub receive_rate_bits_per_second: u64,
+    pub transmit_error_count: u32,
+    pub receive_error_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -60,12 +62,16 @@ fn parse_interface_traffic_record(record: &[u8]) -> Option<HeartbeatInterfaceTra
         let entry_offset = INTERFACE_TRAFFIC_HEADER_SIZE.checked_add(
             usize::from(entry_index).checked_mul(usize::from(interface_entry_width))?,
         )?;
+        let transmit_rate_raw = read_u32(record, entry_offset)?;
+        let receive_rate_raw = read_u32(record, entry_offset + 4)?;
         interfaces.push(HeartbeatInterfaceTrafficEntry {
             entry_index,
-            transmit_octets: read_u32(record, entry_offset)?,
-            receive_octets: read_u32(record, entry_offset + 4)?,
-            unknown_word_at_offset_8: read_u32(record, entry_offset + 8)?,
-            unknown_word_at_offset_12: read_u32(record, entry_offset + 12)?,
+            transmit_rate_raw,
+            receive_rate_raw,
+            transmit_rate_bits_per_second: u64::from(transmit_rate_raw) * 8,
+            receive_rate_bits_per_second: u64::from(receive_rate_raw) * 8,
+            transmit_error_count: read_u32(record, entry_offset + 8)?,
+            receive_error_count: read_u32(record, entry_offset + 12)?,
         });
     }
 
@@ -128,15 +134,23 @@ mod tests {
             ),
         ];
 
-        for (encoded, sequence, transmit_octets, receive_octets) in cases {
+        for (encoded, sequence, transmit_rate_raw, receive_rate_raw) in cases {
             let parsed =
                 parse_heartbeat_interface_traffic_packet(&packet(&decode_hexadecimal(encoded)))
                     .unwrap();
             assert_eq!(parsed.len(), 1);
             assert_eq!(parsed[0].sequence, sequence);
             assert_eq!(parsed[0].interface_entry_count, 1);
-            assert_eq!(parsed[0].interfaces[0].transmit_octets, transmit_octets);
-            assert_eq!(parsed[0].interfaces[0].receive_octets, receive_octets);
+            assert_eq!(parsed[0].interfaces[0].transmit_rate_raw, transmit_rate_raw);
+            assert_eq!(parsed[0].interfaces[0].receive_rate_raw, receive_rate_raw);
+            assert_eq!(
+                parsed[0].interfaces[0].transmit_rate_bits_per_second,
+                u64::from(transmit_rate_raw) * 8
+            );
+            assert_eq!(
+                parsed[0].interfaces[0].receive_rate_bits_per_second,
+                u64::from(receive_rate_raw) * 8
+            );
         }
     }
 
@@ -149,10 +163,10 @@ mod tests {
 
         assert_eq!(parsed[0].interface_entry_count, 2);
         assert_eq!(parsed[0].interfaces.len(), 2);
-        assert_eq!(parsed[0].interfaces[0].transmit_octets, 2123682);
-        assert_eq!(parsed[0].interfaces[0].receive_octets, 1363122);
-        assert_eq!(parsed[0].interfaces[1].transmit_octets, 0);
-        assert_eq!(parsed[0].interfaces[1].receive_octets, 0);
+        assert_eq!(parsed[0].interfaces[0].transmit_rate_raw, 2123682);
+        assert_eq!(parsed[0].interfaces[0].receive_rate_raw, 1363122);
+        assert_eq!(parsed[0].interfaces[1].transmit_rate_raw, 0);
+        assert_eq!(parsed[0].interfaces[1].receive_rate_raw, 0);
     }
 
     #[test]

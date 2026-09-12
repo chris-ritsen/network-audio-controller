@@ -18,8 +18,8 @@ def make_device():
     device.supported_sample_rates = [44100, 48000]
     device.encoding = 24
     device.supported_encodings = [24, 16, 32]
-    device.aes67_supported = True
-    device.dante_model_capabilities = 0x8E78F65A
+    device.aes67_configuration_supported = True
+    device.dante_model_primary_capabilities = 0x8E78F65A
     device.dante_model_monitoring_capabilities = 0x1B
     device.detailed_metering_supported = True
     device.interface_statistics_supported = True
@@ -103,8 +103,8 @@ class TestSerializerRoundtrip:
         assert restored.supported_sample_rates == [44100, 48000]
         assert restored.encoding == 24
         assert restored.supported_encodings == [24, 16, 32]
-        assert restored.aes67_supported is True
-        assert restored.dante_model_capabilities == 0x8E78F65A
+        assert restored.aes67_configuration_supported is True
+        assert restored.dante_model_primary_capabilities == 0x8E78F65A
         assert restored.dante_model_monitoring_capabilities == 0x1B
         assert restored.detailed_metering_supported is True
         assert restored.interface_statistics_supported is True
