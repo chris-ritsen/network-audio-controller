@@ -16,7 +16,9 @@ from netaudio.monitoring.model import (
     EventSeverity,
     MonitoringEvent,
     MonitoringEventKind,
+    OperationLifecyclePhase,
 )
+from netaudio.monitoring.operations import MutationAuditRecorder, OperationHandle, remote_recorder
 
 __all__ = [
     "DerivationStatus",
@@ -34,4 +36,8 @@ __all__ = [
     "MonitoringEvent",
     "MonitoringEventJournal",
     "MonitoringEventKind",
+    "OperationLifecyclePhase",
+    "MutationAuditRecorder",
+    "OperationHandle",
+    "remote_recorder",
 ]

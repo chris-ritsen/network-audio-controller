@@ -404,9 +404,10 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
     assert record["management_state"] == "managed"
     assert record["direct_control_available"] is False
     assert record["online"] is True
-    assert record["product_version"] == "1.2.3"
-    assert record["software_version"] == "4.5.6"
-    assert record["firmware_version"] == "4.2.4.1"
+    assert record["ddm_product_version"] == "1.2.3"
+    assert record["ddm_product_software_version"] == "4.5.6"
+    assert record["ddm_dante_version"] == "4.2.4.1"
+    assert record["ddm_dante_hardware_version"] == "4.2.3.4"
     assert record["preferred_leader"] is True
     assert record["ddm_identity"]["dante_hardware_version"] == "4.2.3.4"
     assert record["channels"]["receivers"]["1"] == {

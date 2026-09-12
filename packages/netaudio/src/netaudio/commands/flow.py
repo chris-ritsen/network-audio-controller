@@ -179,7 +179,12 @@ def flow_plan(
 
 async def run_flow_apply(application, devices, specification: TransmitFlowSpecification) -> None:
     device, _ = _selected_device(devices)
-    result = await create_transmit_flow(device, specification)
+    operation = getattr(application, "create_transmit_flow", None)
+    result = (
+        await operation(device, specification)
+        if operation is not None
+        else await create_transmit_flow(device, specification)
+    )
     _require_successful_result(result)
 
 
@@ -530,7 +535,12 @@ async def run_flow_delete(application, devices, flow_slot: int) -> None:
         typer.echo("Error: could not detect flow protocol for this device.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
     try:
-        result = await delete_transmit_flow(device, flow_slot)
+        operation = getattr(application, "delete_transmit_flow", None)
+        result = (
+            await operation(device, flow_slot)
+            if operation is not None
+            else await delete_transmit_flow(device, flow_slot)
+        )
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         typer.echo(f"Error: flow deletion failed: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR) from exception

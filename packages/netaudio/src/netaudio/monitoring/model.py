@@ -28,6 +28,18 @@ class DerivationStatus(str, Enum):
     DERIVED = "derived"
 
 
+class OperationLifecyclePhase(str, Enum):
+    REQUESTED = "requested"
+    REQUEST_ACKNOWLEDGED = "request_acknowledged"
+    REQUEST_REJECTED = "request_rejected"
+    EFFECTIVE_STATE_CONFIRMED = "effective_state_confirmed"
+    PARTIAL_UNOBSERVABLE = "partial_unobservable"
+    INCONSISTENT = "inconsistent"
+    TRANSPORT_OR_VALIDATION_FAILURE = "transport_or_validation_failure"
+    PERSISTENCE_REQUEST_ACKNOWLEDGED = "persistence_request_acknowledged"
+    PERSISTENCE_CONFIRMED = "persistence_confirmed"
+
+
 class MonitoringEventKind(str, Enum):
     CLOCK_ROLE_CHANGED = "clock_role_changed"
     DEVICE_DISAPPEARED = "device_disappeared"
@@ -48,6 +60,8 @@ class MonitoringEventKind(str, Enum):
     RECEIVER_FLOW_LATENCY_RECOVERED = "receiver_flow_latency_recovered"
     SUBSCRIPTION_FAILED = "subscription_failed"
     SUBSCRIPTION_RECOVERED = "subscription_recovered"
+    CONFIGURATION_OPERATION = "configuration_operation"
+    PRESET_RUN = "preset_run"
 
 
 @dataclass(frozen=True)
@@ -106,6 +120,18 @@ class MonitoringEvent:
     interface_identity: str | None = None
     channel_identity: str | None = None
     flow_identity: str | None = None
+    operation_id: str | None = None
+    correlation_id: str | None = None
+    parent_preset_run_id: str | None = None
+    operation_name: str | None = None
+    lifecycle_phase: str | None = None
+    requested_values: Any = None
+    acknowledgement_result_code: int | None = None
+    transport: str | None = None
+    effective_values: Any = None
+    final_operation_state: str | None = None
+    persistence_request_acknowledgement: Any = None
+    persistence_confirmation: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +150,18 @@ class MonitoringEvent:
             "raw": _json_safe(self.raw),
             "observation_source": self.observation_source,
             "derivation_status": self.derivation_status.value,
+            "operation_id": self.operation_id,
+            "correlation_id": self.correlation_id,
+            "parent_preset_run_id": self.parent_preset_run_id,
+            "operation_name": self.operation_name,
+            "lifecycle_phase": self.lifecycle_phase,
+            "requested_values": _json_safe(self.requested_values),
+            "acknowledgement_result_code": self.acknowledgement_result_code,
+            "transport": self.transport,
+            "effective_values": _json_safe(self.effective_values),
+            "final_operation_state": self.final_operation_state,
+            "persistence_request_acknowledgement": _json_safe(self.persistence_request_acknowledgement),
+            "persistence_confirmation": self.persistence_confirmation,
         }
 
     @classmethod
@@ -159,6 +197,18 @@ class MonitoringEvent:
             raw=_json_safe(raw),
             observation_source=observation_source,
             derivation_status=DerivationStatus(value["derivation_status"]),
+            operation_id=_optional_string(value.get("operation_id")),
+            correlation_id=_optional_string(value.get("correlation_id")),
+            parent_preset_run_id=_optional_string(value.get("parent_preset_run_id")),
+            operation_name=_optional_string(value.get("operation_name")),
+            lifecycle_phase=_optional_string(value.get("lifecycle_phase")),
+            requested_values=_json_safe(value.get("requested_values")),
+            acknowledgement_result_code=_optional_integer(value.get("acknowledgement_result_code")),
+            transport=_optional_string(value.get("transport")),
+            effective_values=_json_safe(value.get("effective_values")),
+            final_operation_state=_optional_string(value.get("final_operation_state")),
+            persistence_request_acknowledgement=_json_safe(value.get("persistence_request_acknowledgement")),
+            persistence_confirmation=_optional_boolean(value.get("persistence_confirmation")),
         )
 
 
@@ -172,6 +222,14 @@ def _finite_number(value: Any, default: float, label: str) -> float:
 
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _optional_integer(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _optional_boolean(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
 
 
 def _parse_timestamp(value: Any) -> datetime | None:

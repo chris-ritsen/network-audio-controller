@@ -1065,8 +1065,8 @@ class TestDanteApplication:
         assert str(device.ipv4) == "192.168.1.108"
         assert device.model_id == "LX-DANTE"
         assert device.manufacturer == "Digigram"
-        assert device.firmware_version == "4.0.1"
-        assert device.software_version == "4.0.0"
+        assert device.router_protocol_version == "4.0.1"
+        assert device.cmc_server_version == "4.0.0"
         assert device.mac_address == "001dc10812580000"
         assert set(device.services) == {
             f"lx-dante.{SERVICE_ARC}",

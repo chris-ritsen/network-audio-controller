@@ -97,14 +97,14 @@ def _negotiated_protocol_id(device) -> int:
     return protocol_id
 
 
-def _software_version(device) -> tuple[int, int, int]:
-    value = getattr(device, "software_version", None)
+def _platform_software_version(device) -> tuple[int, int, int]:
+    value = getattr(device, "platform_software_version", None)
     match = _VERSION_PATTERN.fullmatch(value) if isinstance(value, str) else None
     if match is None:
-        raise RuntimeError("device software version is unavailable or is not an x.y.z version")
+        raise RuntimeError("platform software version is unavailable or is not an x.y.z version")
     version = tuple(int(part) for part in match.groups())
     if any(part > 0xFFFF for part in version):
-        raise RuntimeError("device software version component exceeds the supported range")
+        raise RuntimeError("platform software version component exceeds the supported range")
     return version  # type: ignore[return-value]
 
 
@@ -133,7 +133,7 @@ def performance_operation_availability(device) -> dict[str, dict[str, Any]]:
     except RuntimeError:
         supported = frozenset()
     try:
-        version = _software_version(device)
+        version = _platform_software_version(device)
     except RuntimeError:
         version = None
 
@@ -150,7 +150,7 @@ def performance_operation_availability(device) -> dict[str, dict[str, Any]]:
         elif not supported.intersection(required) if any_of else not required.issubset(supported):
             reasons.append("properties_not_advertised")
         if needs_version and version is None:
-            reasons.append("software_version_unknown")
+            reasons.append("platform_software_version_unknown")
         elif needs_version and version < (3, 0, 0) and PROPERTY_PRE_3_COMPATIBILITY not in supported:
             reasons.append("compatibility_property_not_advertised")
         return {
@@ -228,7 +228,7 @@ def requested_performance_properties(device, operation: str, payload: dict[str, 
                 PROPERTY_RX_FLOW_LATENCY_NS: latency_ns,
                 PROPERTY_RX_FLOW_FRAMES_PER_PACKET: frames,
             }
-            if _software_version(device) < (3, 0, 0):
+            if _platform_software_version(device) < (3, 0, 0):
                 requested[PROPERTY_PRE_3_COMPATIBILITY] = 1
         elif operation == "transmit_flow_performance":
             requested = {
@@ -247,7 +247,7 @@ def requested_performance_properties(device, operation: str, payload: dict[str, 
                 )
                 if property_id in supported
             }
-            if _software_version(device) < (3, 0, 0):
+            if _platform_software_version(device) < (3, 0, 0):
                 requested[PROPERTY_PRE_3_COMPATIBILITY] = 1_000
             if not requested:
                 raise RuntimeError("device advertises no supported unicast performance properties")
@@ -439,7 +439,7 @@ async def set_receive_flow_performance(device, latency_microseconds: int, frames
     _require_direct_device(device)
     latency_ns = _latency_nanoseconds(latency_microseconds)
     frames = _integer("frames_per_packet", frames_per_packet, 0xFFFF)
-    version = _software_version(device)
+    version = _platform_software_version(device)
     requested = {PROPERTY_RX_FLOW_LATENCY_NS: latency_ns, PROPERTY_RX_FLOW_FRAMES_PER_PACKET: frames}
     if version < (3, 0, 0):
         requested[PROPERTY_PRE_3_COMPATIBILITY] = 1
@@ -452,7 +452,7 @@ async def set_receive_flow_performance(device, latency_microseconds: int, frames
         command_fields={
             "latency_microseconds": latency_microseconds,
             "frames_per_packet": frames,
-            "device_software_version": list(version),
+            "platform_software_version": list(version),
         },
     )
 
@@ -475,7 +475,7 @@ async def set_unicast_performance(device, latency_microseconds: int, frames_per_
     _require_direct_device(device)
     latency_ns = _latency_nanoseconds(latency_microseconds)
     frames = _integer("frames_per_packet", frames_per_packet, 0xFFFF)
-    version = _software_version(device)
+    version = _platform_software_version(device)
     supported = advertised_performance_property_ids(device)
     requested = {}
     for property_id, value in (
@@ -499,7 +499,7 @@ async def set_unicast_performance(device, latency_microseconds: int, frames_per_
         command_fields={
             "latency_microseconds": latency_microseconds,
             "frames_per_packet": frames,
-            "device_software_version": list(version),
+            "platform_software_version": list(version),
         },
     )
 

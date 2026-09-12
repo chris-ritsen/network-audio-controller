@@ -28,6 +28,9 @@ def snapshot_from_device(device) -> dict[str, Any]:
 
 
 def _device_identity(snapshot: Mapping[str, Any]) -> str:
+    device_identity = snapshot.get("device_identity")
+    if isinstance(device_identity, str) and device_identity:
+        return device_identity
     server_name = snapshot.get("server_name")
     if isinstance(server_name, str) and server_name:
         return server_name

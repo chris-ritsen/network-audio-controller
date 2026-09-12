@@ -22,7 +22,7 @@ from netaudio.presets.serialization import device_preset_config, format_preset_c
 def _device() -> DanteDevice:
     device = DanteDevice("desk.local.")
     device.name = "Desk"
-    device.software_version = "3.0.0"
+    device.platform_software_version = "3.0.0"
     device.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.9"}}}
     device.settings_properties = [
         {"property_id": PROPERTY_RX_FLOW_LATENCY_NS, "flags": 0},
@@ -62,6 +62,49 @@ def test_device_preset_save_projects_observed_performance_values():
     assert config["receive_flow_performance"] == {
         "latency_microseconds": 250,
         "frames_per_packet": 8,
+    }
+
+
+def test_device_preset_preserves_distinct_version_namespaces_and_provenance():
+    device = _device()
+    device.product_name = "Product"
+    device.platform_model_name = "Platform"
+    device.platform_software_version = "4.2.4.1"
+    device.platform_hardware_version = "4.2.3.4"
+    device.product_version = "1.3.4"
+    device.friendly_product_version = "Release 1.3.4"
+    device.manufacturer_software_version = "7.8.9"
+    device.manufacturer_firmware_version = "2.3.4"
+    device.cmc_server_version = "2.8.2"
+    device.router_protocol_version = "4.0.2"
+    device.ddm_product_version = "1.3.5"
+    device.ddm_dante_version = "4.2.5.1"
+    device.field_sources = {
+        "platform_software_version": "conmon_platform_record",
+        "product_version": "conmon_manufacturer_record",
+        "cmc_server_version": "dns_sd",
+        "ddm_dante_version": "ddm",
+        "audio_configuration": "direct",
+    }
+
+    config = device_preset_config(device, {"audio"})
+    identity = config["device_identity"]
+
+    assert identity["platform_software_version"] == "4.2.4.1"
+    assert identity["platform_hardware_version"] == "4.2.3.4"
+    assert identity["product_version"] == "1.3.4"
+    assert identity["friendly_product_version"] == "Release 1.3.4"
+    assert identity["manufacturer_software_version"] == "7.8.9"
+    assert identity["manufacturer_firmware_version"] == "2.3.4"
+    assert identity["cmc_server_version"] == "2.8.2"
+    assert identity["router_protocol_version"] == "4.0.2"
+    assert identity["ddm_product_version"] == "1.3.5"
+    assert identity["ddm_dante_version"] == "4.2.5.1"
+    assert identity["field_sources"] == {
+        "platform_software_version": "conmon_platform_record",
+        "product_version": "conmon_manufacturer_record",
+        "cmc_server_version": "dns_sd",
+        "ddm_dante_version": "ddm",
     }
 
 

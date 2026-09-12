@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
@@ -16,6 +17,7 @@ from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyChangedButUnverifiedError,
     SampleRateTopologyMutationOutcomeUnknownError,
 )
+from netaudio.monitoring import MonitoringEventKind
 
 
 @dataclass
@@ -526,11 +528,16 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
                     )
                 )
             else:
+                reason = (
+                    "fresh inventory does not expose all requested durable flow fields; destructive replacement is refused"
+                    if comparison.unavailable_fields and not comparison.differences
+                    else "the identified flow has different durable state; destructive replacement is refused"
+                )
                 actions.append(
                     _ambiguous(
                         "transmit_flow",
                         desired.to_dict(),
-                        "the identified flow has different durable state; destructive replacement is refused",
+                        reason,
                         current=current.to_dict(),
                     )
                 )
@@ -1552,7 +1559,11 @@ async def _apply_plan(
     *,
     stop_on_failure: bool = False,
     store_current_configuration: bool = False,
+    preset_run_id: str | None = None,
+    summary_states: list[str] | None = None,
 ) -> None:
+    processed_action_count = 0
+    planned_action_count = sum(len(entry.actions) for entry in plan.device_actions)
     for entry in plan.device_actions:
         if not entry.actions:
             context.report.record(entry.device_name, "no supported changes")
@@ -1563,11 +1574,30 @@ async def _apply_plan(
         for action in entry.actions:
             operation_count = len(context.report.operations)
             result_count = len(context.report.results)
+            recorder = None
+            handle = None
             if action.state is not PresetActionState.CHANGE:
                 await _apply_skipped(context, entry, action)
             else:
                 changed = True
-                await ACTION_HANDLERS[action.kind](context, entry, action)
+                recorder = getattr(context.application, "operation_recorder", None)
+                if recorder is not None:
+                    handle = await recorder.begin_operation(
+                        entry.device,
+                        action.kind,
+                        action.payload,
+                        parent_preset_run_id=preset_run_id,
+                    )
+                try:
+                    if recorder is None:
+                        await ACTION_HANDLERS[action.kind](context, entry, action)
+                    else:
+                        with recorder.suppress_automatic_operations():
+                            await ACTION_HANDLERS[action.kind](context, entry, action)
+                except Exception as exception:
+                    if recorder is not None and handle is not None:
+                        await recorder.fail_operation(entry.device, handle, exception)
+                    raise
             if len(context.report.operations) == operation_count:
                 for _, message in context.report.results[result_count:]:
                     context.report.operations.append(
@@ -1579,11 +1609,57 @@ async def _apply_plan(
                             message=message,
                         )
                     )
+            action_results = context.report.operations[operation_count:]
+            action_summary_state = (
+                _preset_summary_state(action_results)
+                if action.state is PresetActionState.CHANGE
+                else "unchanged"
+                if action.state is PresetActionState.UNCHANGED
+                else "unavailable"
+            )
+            processed_action_count += 1
+            if summary_states is not None:
+                summary_states.append(action_summary_state)
+            if action.state is PresetActionState.CHANGE and recorder is not None and handle is not None:
+                if len(action_results) == 1:
+                    operation_result = action_results[0]
+                    audit_result = {
+                        "state": operation_result.state,
+                        "requested_values": operation_result.requested,
+                        "effective_values": operation_result.effective,
+                        "request_acknowledgement": operation_result.request_acknowledgement,
+                        "device_confirmation": operation_result.device_confirmation,
+                        "effective_state_confirmation": operation_result.effective_state_confirmation,
+                        "persistence_request_acknowledgement": (operation_result.persistence_request_acknowledgement),
+                        "persistence_confirmation": operation_result.persistence_confirmation,
+                        "verification_observations": operation_result.verification_observations,
+                        "message": operation_result.message,
+                    }
+                else:
+                    state = action_summary_state
+                    audit_result = {
+                        "state": state,
+                        "requested_values": action.payload,
+                        "effective_values": [result.effective for result in action_results],
+                        "effective_state_confirmation": True
+                        if state == "confirmed"
+                        else False
+                        if state == "inconsistent"
+                        else None,
+                        "verification_observations": [
+                            {"kind": result.kind, "state": result.state, "message": result.message}
+                            for result in action_results
+                        ],
+                        "message": "; ".join(result.message for result in action_results),
+                    }
+                await recorder.complete_operation(entry.device, handle, audit_result)
             if stop_on_failure and (context.report.failures or context.report.unverified):
                 context.report.record(
                     entry.device_name,
                     "Stopped after an unsuccessful or unverified change; remaining settings were not sent.",
                 )
+                if summary_states is not None:
+                    summary_states.extend("skipped" for _ in range(planned_action_count - processed_action_count))
                 return
         if (
             store_current_configuration
@@ -1591,8 +1667,21 @@ async def _apply_plan(
             and context.report.failures == entry_failures
             and context.report.unverified == entry_unverified
         ):
+            recorder = getattr(context.application, "operation_recorder", None)
+            handle = None
+            if recorder is not None:
+                handle = await recorder.begin_operation(
+                    entry.device,
+                    "store_current_configuration",
+                    {},
+                    parent_preset_run_id=preset_run_id,
+                )
             try:
-                result = await context.application.store_current_configuration(entry.device)
+                if recorder is None:
+                    result = await context.application.store_current_configuration(entry.device)
+                else:
+                    with recorder.suppress_automatic_operations():
+                        result = await context.application.store_current_configuration(entry.device)
             except MUTATION_ERRORS as exception:
                 context.report.operation(
                     entry.device_name,
@@ -1601,6 +1690,10 @@ async def _apply_plan(
                     f"configuration storage: FAILED ({exception})",
                     failed=True,
                 )
+                if recorder is not None and handle is not None:
+                    await recorder.fail_operation(entry.device, handle, exception)
+                if summary_states is not None:
+                    summary_states.append("failed")
             else:
                 payload = result.to_dict()
                 acknowledged = bool(payload.get("persistence_request_acknowledgement", {}).get("accepted"))
@@ -1614,6 +1707,45 @@ async def _apply_plan(
                     failed=not acknowledged,
                     verified=acknowledged,
                 )
+                if recorder is not None and handle is not None:
+                    await recorder.complete_operation(entry.device, handle, result)
+                if summary_states is not None:
+                    summary_states.append(_preset_summary_state(context.report.operations[-1:]))
+
+
+def _preset_summary_state(results: list[PresetOperationResult]) -> str:
+    states = [result.state for result in results]
+    if "failed" in states:
+        return "failed"
+    if any(value in {"contradicted", "inconsistent"} for value in states):
+        return "inconsistent"
+    if "rejected" in states:
+        return "rejected"
+    if any(value in {"unsupported", "unavailable", "ambiguous"} for value in states):
+        return "unavailable"
+    if states and all(value in {"confirmed", "deleted"} for value in states):
+        return "confirmed"
+    if states and all(value == "unchanged" for value in states):
+        return "unchanged"
+    if states and all(value == "skipped" for value in states):
+        return "skipped"
+    return "partial"
+
+
+def _preset_summary(states: list[str]) -> dict[str, int]:
+    summary = {
+        "confirmed": 0,
+        "partial": 0,
+        "inconsistent": 0,
+        "rejected": 0,
+        "unavailable": 0,
+        "failed": 0,
+        "unchanged": 0,
+        "skipped": 0,
+    }
+    for state in states:
+        summary[state] += 1
+    return summary
 
 
 async def apply_preset_plan(
@@ -1630,10 +1762,69 @@ async def apply_preset_plan(
         confirm_destructive=confirm_destructive,
         report=report if report is not None else PresetLoadReport(),
     )
-    await _apply_plan(
-        context,
-        plan,
-        stop_on_failure=stop_on_failure,
-        store_current_configuration=store_current_configuration,
-    )
+    recorder = getattr(application, "operation_recorder", None)
+    preset_handle = None
+    summary_states: list[str] = []
+    scope = None
+    if recorder is not None:
+        run_id = str(uuid.uuid4())
+        scope = {
+            "device_identity": f"preset-run:{run_id}",
+            "name": "Preset",
+            "server_name": "",
+        }
+        preset_handle = await recorder.begin_operation(
+            scope,
+            "apply_preset",
+            {
+                "devices": [entry.server_name for entry in plan.device_actions],
+                "action_count": sum(len(entry.actions) for entry in plan.device_actions),
+                "store_current_configuration": store_current_configuration,
+            },
+            transport="preset",
+            operation_id=run_id,
+            kind=MonitoringEventKind.PRESET_RUN,
+        )
+    try:
+        await _apply_plan(
+            context,
+            plan,
+            stop_on_failure=stop_on_failure,
+            store_current_configuration=store_current_configuration,
+            preset_run_id=preset_handle.operation_id if preset_handle is not None else None,
+            summary_states=summary_states if preset_handle is not None else None,
+        )
+    except Exception as exception:
+        if recorder is not None and preset_handle is not None:
+            assert scope is not None
+            await recorder.fail_operation(scope, preset_handle, exception)
+        raise
+    if recorder is not None and preset_handle is not None:
+        assert scope is not None
+        summary = _preset_summary(summary_states)
+        if summary["failed"]:
+            state = "failed"
+        elif summary["inconsistent"]:
+            state = "inconsistent"
+        elif summary["rejected"]:
+            state = "rejected"
+        elif summary["partial"] or summary["unavailable"]:
+            state = "partial"
+        else:
+            state = "confirmed"
+        await recorder.complete_operation(
+            scope,
+            preset_handle,
+            {
+                "state": state,
+                "effective_values": summary,
+                "effective_state_confirmation": True
+                if state == "confirmed"
+                else False
+                if state == "inconsistent"
+                else None,
+                "message": "preset application completed",
+                "verification_observations": [{"summary": summary}],
+            },
+        )
     return context.report

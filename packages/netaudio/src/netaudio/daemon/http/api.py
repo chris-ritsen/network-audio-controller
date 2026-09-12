@@ -19,7 +19,14 @@ from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import DDMConfiguration
-from netaudio.monitoring import MonitoringEvent, MonitoringEventJournal
+from netaudio.monitoring import (
+    DerivationStatus,
+    EventSeverity,
+    MonitoringEvent,
+    MonitoringEventJournal,
+    MonitoringEventKind,
+    MutationAuditRecorder,
+)
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
@@ -158,6 +165,15 @@ class DaemonHTTPServer(
         self.managed_inventory = managed_inventory
         self.refresh_discovery = refresh_discovery
         self.event_journal = event_journal or MonitoringEventJournal(path=None)
+        self.operation_recorder = MutationAuditRecorder.from_journal(
+            self.event_journal,
+            publish=self.publish_journal_event,
+        )
+        configure_recorder = getattr(self.application, "set_operation_recorder", None)
+        if configure_recorder is None:
+            self.application.operation_recorder = self.operation_recorder
+        else:
+            configure_recorder(self.operation_recorder)
         self._dismissed_offline_inventory: set[str] = set()
         self.state = state
         self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
@@ -235,10 +251,11 @@ class DaemonHTTPServer(
             "/ddm/domains/update": self._handle_ddm_update_domain,
             "/device-lock-key": self._handle_device_lock_key,
             "/settings/monitoring": self._handle_monitoring_settings,
+            "/event-journal/operations": self._handle_append_operation_event,
             "/shutdown": self._handle_shutdown,
         }
         self.post_body_optional = {"/ddm/refresh", "/refresh", "/shutdown"}
-        self.loopback_only_paths = {"/shutdown"}
+        self.loopback_only_paths = {"/shutdown", "/event-journal/operations"}
 
     async def start(self):
         if self.tcp_server is not None:
@@ -742,7 +759,7 @@ class DaemonHTTPServer(
             logger.warning("Daemon HTTP API connection error", exc_info=True)
 
     async def _route(self, method, path, body, writer, reader, headers=None):
-        if method == "GET" and urlsplit(path).path == "/events":
+        if method == "GET" and urlsplit(path).path == "/events" and not prefers_web_page(headers):
             await self._handle_sse(writer, reader, parse_qs(urlsplit(path).query))
             return
 
@@ -901,6 +918,57 @@ class DaemonHTTPServer(
                 "scope": "local_event_journal",
                 "device_commands_sent": 0,
             },
+        )
+
+    async def _handle_append_operation_event(self, writer, params) -> None:
+        snapshot = params.pop("device_snapshot", None)
+        observe_device = params.pop("observe_device", False)
+        if not isinstance(snapshot, dict):
+            await self._send_json(writer, {"error": "device_snapshot must be an object"}, 400)
+            return
+        allowed = {
+            "operation_id",
+            "correlation_id",
+            "parent_preset_run_id",
+            "operation_name",
+            "lifecycle_phase",
+            "requested_values",
+            "acknowledgement_result_code",
+            "transport",
+            "effective_values",
+            "final_operation_state",
+            "persistence_request_acknowledgement",
+            "persistence_confirmation",
+            "evidence",
+            "observation_source",
+            "interface_identity",
+            "channel_identity",
+            "flow_identity",
+        }
+        if set(params) - (allowed | {"kind", "severity", "derivation_status"}):
+            await self._send_json(writer, {"error": "operation event contains unsupported fields"}, 400)
+            return
+        try:
+            kind = MonitoringEventKind(params.pop("kind"))
+            if kind not in {MonitoringEventKind.CONFIGURATION_OPERATION, MonitoringEventKind.PRESET_RUN}:
+                raise ValueError("operation event kind must be configuration_operation or preset_run")
+            event = self.event_journal.record_operation_transition(
+                snapshot,
+                kind=kind,
+                severity=EventSeverity(params.pop("severity")),
+                derivation_status=DerivationStatus(params.pop("derivation_status")),
+                **params,
+            )
+            await self.publish_journal_event(event)
+            observed_events = self.event_journal.observe_snapshot(snapshot) if observe_device is True else []
+            for observed_event in observed_events:
+                await self.publish_journal_event(observed_event)
+        except (KeyError, TypeError, ValueError) as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        await self._send_json(
+            writer,
+            {"event": event.to_dict(), "observed_events": [item.to_dict() for item in observed_events]},
         )
 
     async def _handle_get_issues(self, writer, query: dict[str, list[str]]) -> None:

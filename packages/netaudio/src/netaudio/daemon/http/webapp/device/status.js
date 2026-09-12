@@ -4,8 +4,12 @@ import * as format from "../format.js";
 import { html } from "../lib/preact.js";
 
 export function StatusSection({ device }) {
-  const subscriptions = (device.subscriptions || []).filter((entry) => entry.tx_device);
-  const problems = subscriptions.filter((entry) => entry.status && entry.status.severity !== "ok");
+  const subscriptions = (device.subscriptions || []).filter(
+    (entry) => entry.tx_device,
+  );
+  const problems = subscriptions.filter(
+    (entry) => entry.status && entry.status.severity !== "ok",
+  );
   return html`
     <div class="flex flex-col gap-4">
       <div class="split">
@@ -14,14 +18,90 @@ export function StatusSection({ device }) {
             entries=${[
               ["State", html`<${OnlineState} online=${device.online} />`],
               ["Manufacturer", html`<${Value} value=${device.manufacturer} />`],
-              ["Model", html`<${Value} value=${format.deviceModelName(device)} />`],
-              ["Dante model", html`<${Value} value=${device.board_name} />`],
-              ["Product version", html`<${Value} value=${device.product_version} />`],
-              ["Dante firmware", html`<${Value} value=${device.firmware_version} />`],
-              ["Dante software", html`<${Value} value=${device.software_version} />`],
+              [
+                "Model",
+                html`<${Value} value=${format.deviceModelName(device)} />`,
+              ],
+              [
+                "Dante platform model",
+                html`<${Value} value=${device.platform_model_name} />`,
+              ],
+              [
+                "Product version",
+                html`<${Value}
+                  value=${device.friendly_product_version || device.product_version}
+                />`,
+              ],
+              [
+                "Numeric product version",
+                html`<${Value}
+                  value=${device.friendly_product_version ? device.product_version : null}
+                />`,
+              ],
+              [
+                "Manufacturer software version",
+                html`<${Value}
+                  value=${device.manufacturer_software_version}
+                />`,
+              ],
+              [
+                "Manufacturer firmware version",
+                html`<${Value}
+                  value=${device.manufacturer_firmware_version}
+                />`,
+              ],
+              [
+                device.platform_hardware_version
+                  ? "Dante firmware version"
+                  : "Dante software version",
+                html`<${Value} value=${device.platform_software_version} />`,
+              ],
+              [
+                "Hardware version",
+                html`<${Value} value=${device.platform_hardware_version} />`,
+              ],
+              [
+                "ROM/Boot version",
+                html`<${Value} value=${device.rom_boot_version} />`,
+              ],
+              [
+                "Dante API version",
+                html`<${Value} value=${device.platform_api_version} />`,
+              ],
+              [
+                "CMC server version (DNS-SD)",
+                html`<${Value} value=${device.cmc_server_version} />`,
+              ],
+              [
+                "Router protocol version (DNS-SD)",
+                html`<${Value} value=${device.router_protocol_version} />`,
+              ],
+              [
+                "DDM product version",
+                html`<${Value} value=${device.ddm_product_version} />`,
+              ],
+              [
+                "DDM product software version",
+                html`<${Value} value=${device.ddm_product_software_version} />`,
+              ],
+              [
+                "DDM Dante version",
+                html`<${Value} value=${device.ddm_dante_version} />`,
+              ],
+              [
+                "DDM Dante hardware version",
+                html`<${Value} value=${device.ddm_dante_hardware_version} />`,
+              ],
               ["Primary address", html`<${Value} value=${device.ipv4} />`],
               ["MAC address", format.macAddress(device)],
-              ["Device lock", device.is_locked == null ? "Unknown" : device.is_locked ? "Locked" : "Unlocked"],
+              [
+                "Device lock",
+                device.is_locked == null
+                  ? "Unknown"
+                  : device.is_locked
+                    ? "Locked"
+                    : "Unlocked",
+              ],
               ["Last seen", format.timestamp(device.last_seen)],
             ]}
           />
@@ -30,12 +110,24 @@ export function StatusSection({ device }) {
           <${Fields}
             entries=${[
               ["Sample rate", format.sampleRate(device.sample_rate_hz)],
-              ["Encoding", device.encoding ? `PCM ${device.encoding}` : format.ABSENT],
+              [
+                "Encoding",
+                device.encoding ? `PCM ${device.encoding}` : format.ABSENT,
+              ],
               ["Latency", format.latency(device.latency_ms)],
               ["Clock role", html`<${Value} value=${device.clock_role} />`],
-              ["Preferred leader", format.preferredLeader(device.preferred_leader)],
-              ["Clock source", format.clockSourceCode(device.clock_source_code)],
-              ["Clock subdomain", format.clockSubdomain(device.clock_subdomain)],
+              [
+                "Preferred leader",
+                format.preferredLeader(device.preferred_leader),
+              ],
+              [
+                "Clock source",
+                format.clockSourceCode(device.clock_source_code),
+              ],
+              [
+                "Clock subdomain",
+                format.clockSubdomain(device.clock_subdomain),
+              ],
               ["AES67", aes67Status(device).label],
             ]}
           />
@@ -50,7 +142,10 @@ export function StatusSection({ device }) {
             [
               "Subscription problems",
               problems.length
-                ? html`<span class="state-warn">${problems.length} — ${problems.map((entry) => `${entry.rx_channel}: ${format.subscriptionStatusText(entry)}`).join("; ")}</span>`
+                ? html`<span class="state-warn"
+                    >${problems.length} —
+                    ${problems.map((entry) => `${entry.rx_channel}: ${format.subscriptionStatusText(entry)}`).join("; ")}</span
+                  >`
                 : "none",
             ],
           ]}

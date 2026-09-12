@@ -152,7 +152,7 @@ pub fn build_set_receive_flow_performance(
     supported_property_ids: &[u16],
     latency_microseconds: u64,
     frames_per_packet: u16,
-    device_software_version: [u16; 3],
+    platform_software_version: [u16; 3],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let mut properties = vec![
@@ -165,7 +165,7 @@ pub fn build_set_receive_flow_performance(
             PropertyValue::InlineU16(frames_per_packet),
         ),
     ];
-    if device_software_version < [3, 0, 0] {
+    if platform_software_version < [3, 0, 0] {
         properties.push((
             PROPERTY_PRE_3_COMPATIBILITY,
             PropertyValue::ReferencedU32(1),
@@ -213,7 +213,7 @@ pub fn build_set_unicast_performance(
     supported_property_ids: &[u16],
     latency_microseconds: u64,
     frames_per_packet: u16,
-    device_software_version: [u16; 3],
+    platform_software_version: [u16; 3],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let latency_ns = latency_nanoseconds(latency_microseconds)?;
@@ -240,7 +240,7 @@ pub fn build_set_unicast_performance(
             properties.push((property_id, value));
         }
     }
-    if device_software_version < [3, 0, 0] {
+    if platform_software_version < [3, 0, 0] {
         require_properties(supported_property_ids, &[PROPERTY_PRE_3_COMPATIBILITY])?;
         properties.push((
             PROPERTY_PRE_3_COMPATIBILITY,

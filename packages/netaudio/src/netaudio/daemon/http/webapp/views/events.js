@@ -1,70 +1,63 @@
-import { Notice, Panel } from "../components.js";
+import { Notice, Panel, Tabs } from "../components.js";
 import { api } from "../api.js";
 import * as format from "../format.js";
-import { html, useEffect, useRef, useState } from "../lib/preact.js";
+import { html, useEffect, useState } from "../lib/preact.js";
 import { events } from "../store.js";
 
 const EVENT_LABELS = {
-  device_discovered: "device discovered",
-  device_removed: "device removed",
-  device_updated: "device updated",
-  parse_error: "parse error",
-  shure_device_discovered: "Shure device discovered",
-  shure_device_removed: "Shure device removed",
-  shure_device_updated: "Shure device updated",
-  snapshot: "inventory snapshot",
-  subscription_pending: "subscription pending",
-  monitoring_event: "monitoring journal event",
+  clock_role_changed: "Clock role changed",
+  device_disappeared: "Device disappeared",
+  device_reappeared: "Device reappeared",
+  interface_error_counter_increased: "Interface error count increased",
+  interface_error_counter_reset: "Interface error count reset",
+  interface_utilization_high: "Interface utilization high",
+  interface_utilization_recovered: "Interface utilization recovered",
+  issue_opened: "Issue opened",
+  issue_resolved: "Issue resolved",
+  issue_updated: "Issue updated",
+  leader_identity_changed: "Leader identity changed",
+  late_packet_count_increased: "Late packet count increased",
+  late_packet_counter_reset: "Late packet count reset",
+  mute_state_changed: "Mute state changed",
+  ptp_port_state_changed: "PTP port state changed",
+  receiver_flow_latency_high: "Receiver flow latency high",
+  receiver_flow_latency_recovered: "Receiver flow latency recovered",
+  subscription_failed: "Subscription failed",
+  subscription_recovered: "Subscription recovered",
+  configuration_operation: "Configuration operation",
+  preset_run: "Preset application",
 };
 
-function subjectOf(payload) {
-  return payload.server_name || payload.mac || payload.device_name || "";
+const OPERATION_PHASE_LABELS = {
+  requested: "requested",
+  request_acknowledged: "request acknowledged",
+  request_rejected: "request rejected",
+  effective_state_confirmed: "effective state confirmed",
+  partial_unobservable: "partial or unobservable",
+  inconsistent: "inconsistent",
+  transport_or_validation_failure: "transport or validation failure",
+  persistence_request_acknowledged: "persistence request acknowledged",
+  persistence_confirmed: "persistence confirmed",
+};
+
+const OPERATION_LABELS = {
+  apply_preset: "Apply preset",
+  create_transmit_flow: "Create transmit flow",
+  delete_transmit_flow: "Delete transmit flow",
+  remove_subscription_associations: "Remove subscription associations",
+  set_receive_flow_default_slots: "Set receive-flow default slots",
+  set_receive_flow_performance: "Set receive-flow performance",
+  set_transmit_flow_performance: "Set transmit-flow performance",
+  set_unicast_performance: "Set unicast performance",
+  store_current_configuration: "Store current configuration",
+  subscribe_external_rtp: "Subscribe external RTP",
+};
+
+function operationLabel(name) {
+  return OPERATION_LABELS[name] || format.stateLabel(name);
 }
 
-function summaryOf(payload) {
-  if (payload.event === "snapshot") {
-    const onlineCount = (records) =>
-      Object.values(records || {}).filter(
-        (device) =>
-          device.online === true && device.availability_state !== "offline",
-      ).length;
-    return `${onlineCount(payload.devices)} Dante devices online · ${onlineCount(payload.shure_devices)} Shure devices online`;
-  }
-  if (payload.device) {
-    const device = payload.device;
-    return [
-      format.deviceModelName(device),
-      device.ipv4,
-      device.online === true
-        ? "online"
-        : device.online === false
-          ? "offline"
-          : "availability not reported",
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
-  if (payload.event === "parse_error") {
-    return "Could not read a server update";
-  }
-  return "";
-}
-
-function EventRow({ entry }) {
-  const payload = entry.payload || {};
-  const kind = payload.event || "unknown";
-  return html`
-    <div>
-      <div class="event-row">
-        <span>${format.timestamp(entry.received)}</span>
-        <span class="event-kind">${EVENT_LABELS[kind] || kind}</span>
-        <span class="event-summary"
-          >${[subjectOf(payload), summaryOf(payload)].filter(Boolean).join("  ·  ")}</span
-        >
-      </div>
-    </div>
-  `;
-}
+const SEVERITY_RANK = { info: 0, warning: 1, error: 2 };
 
 function journalSubject(entry) {
   return (
@@ -75,24 +68,376 @@ function journalSubject(entry) {
   );
 }
 
+function eventDevice(entry) {
+  return (
+    entry.device_name ||
+    entry.server_name ||
+    entry.device_identity ||
+    "Unknown device"
+  );
+}
+
+function eventLabel(entry) {
+  const issue = entry.current_value;
+  if (
+    entry.kind?.startsWith("issue_") &&
+    issue &&
+    typeof issue === "object" &&
+    typeof issue.title === "string" &&
+    issue.title
+  ) {
+    return issue.title;
+  }
+  if (EVENT_LABELS[entry.kind]) return EVENT_LABELS[entry.kind];
+  const words = String(entry.kind || "Unknown event").replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function journalValue(value) {
   if (value === null || value === undefined) return "unknown";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "object") {
+    for (const key of ["summary", "label", "title", "state", "kind"]) {
+      if (typeof value[key] === "string" && value[key]) return value[key];
+    }
+    return JSON.stringify(value);
+  }
   return String(value);
 }
 
-function JournalRow({ entry }) {
-  const device =
-    entry.device_name || entry.server_name || entry.device_identity || "";
-  const transition = `${journalValue(entry.previous_value)} → ${journalValue(entry.current_value)}`;
+function eventMessage(entry) {
+  if (entry.operation_name) {
+    const operation = operationLabel(entry.operation_name);
+    const phase =
+      OPERATION_PHASE_LABELS[entry.lifecycle_phase] ||
+      format.stateLabel(entry.lifecycle_phase);
+    return [operation, phase, journalSubject(entry)]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const parts = [eventLabel(entry)];
+  const subject = journalSubject(entry);
+  if (subject) parts.push(subject);
+  if (entry.kind?.startsWith("issue_")) {
+    const summary = entry.current_value?.summary;
+    if (typeof summary === "string" && summary && summary !== parts[0]) {
+      parts.push(summary);
+    }
+  } else if (
+    entry.previous_value !== null &&
+    entry.previous_value !== undefined &&
+    entry.current_value !== null &&
+    entry.current_value !== undefined
+  ) {
+    parts.push(
+      `${journalValue(entry.previous_value)} → ${journalValue(entry.current_value)}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+function severityLabel(severity) {
+  return (
+    { info: "Information", warning: "Warning", error: "Error" }[severity] ||
+    "Unknown"
+  );
+}
+
+function SeverityIcon({ severity }) {
+  const label = severityLabel(severity);
   return html`
-    <div class="event-row">
-      <span>${format.timestamp(entry.timestamp)}</span>
-      <span class="event-kind">${entry.kind || "unknown"}</span>
-      <span class="event-summary"
-        >${[entry.severity, device, journalSubject(entry), transition].filter(Boolean).join(" · ")}</span
-      >
-    </div>
+    <span
+      class="event-severity-icon ${severity || "unknown"}"
+      title=${label}
+      aria-label=${label}
+      >${severity === "error" ? "×" : severity === "warning" ? "!" : "i"}</span
+    >
+  `;
+}
+
+function downloadJournal(journal) {
+  const entries = journal.events || [];
+  const payload = {
+    schema_version: journal.schema_version,
+    retention_limit: journal.retention_limit,
+    count: entries.length,
+    events: entries,
+  };
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+    type: "application/json",
+  });
+  const link = document.createElement("a");
+  const timestamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(/\.\d{3}Z$/, "Z");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `netaudio-events-${timestamp}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function EventDetails({ entry }) {
+  const change = `${journalValue(entry.previous_value)} → ${journalValue(entry.current_value)}`;
+  const evidence = `${format.stateLabel(entry.derivation_status)} from ${format.stateLabel(entry.observation_source)}`;
+  return html`
+    <section class="event-detail-panel" aria-label="Event details">
+      <div class="event-detail-heading">
+        <div>
+          <span class="event-detail-kicker">Event details</span>
+          <h3>${eventLabel(entry)}</h3>
+        </div>
+        <${SeverityIcon} severity=${entry.severity} />
+      </div>
+      <dl class="event-detail-grid">
+        <dt>Timestamp</dt>
+        <dd>${format.timestamp(entry.timestamp)}</dd>
+        <dt>Device</dt>
+        <dd>${eventDevice(entry)}</dd>
+        <dt>Subject</dt>
+        <dd>${journalSubject(entry) || "—"}</dd>
+        <dt>Change</dt>
+        <dd>${change}</dd>
+        <dt>Evidence</dt>
+        <dd>${evidence}</dd>
+        <dt>Sequence</dt>
+        <dd>${entry.sequence}</dd>
+        ${
+          entry.operation_id
+            ? html`
+                <dt>Operation</dt>
+                <dd>${operationLabel(entry.operation_name)}</dd>
+                <dt>Lifecycle phase</dt>
+                <dd>
+                  ${
+                    OPERATION_PHASE_LABELS[entry.lifecycle_phase] ||
+                    format.stateLabel(entry.lifecycle_phase)
+                  }
+                </dd>
+                <dt>Operation ID</dt>
+                <dd>${entry.operation_id}</dd>
+                <dt>Correlation ID</dt>
+                <dd>${entry.correlation_id || "—"}</dd>
+                <dt>Requested values</dt>
+                <dd>${journalValue(entry.requested_values)}</dd>
+                <dt>Effective values</dt>
+                <dd>${journalValue(entry.effective_values)}</dd>
+                <dt>Transport</dt>
+                <dd>${entry.transport || "—"}</dd>
+                <dt>Final state</dt>
+                <dd>
+                  ${
+                    OPERATION_PHASE_LABELS[entry.final_operation_state] ||
+                    format.stateLabel(entry.final_operation_state) ||
+                    "—"
+                  }
+                </dd>
+                <dt>Persistence confirmation</dt>
+                <dd>${journalValue(entry.persistence_confirmation)}</dd>
+              `
+            : null
+        }
+      </dl>
+      ${
+        entry.raw && Object.keys(entry.raw).length
+          ? html`<details class="event-raw-evidence">
+              <summary>Raw supporting evidence</summary>
+              <pre>${JSON.stringify(entry.raw, null, 2)}</pre>
+            </details>`
+          : null
+      }
+    </section>
+  `;
+}
+
+function EventLog() {
+  const [payload, setPayload] = useState(null);
+  const [error, setError] = useState(null);
+  const [minimumSeverity, setMinimumSeverity] = useState("info");
+  const [filter, setFilter] = useState("");
+  const [selectedSequence, setSelectedSequence] = useState(null);
+  const [clearing, setClearing] = useState(false);
+  const latestJournalSequence = events.value.find(
+    (entry) => entry.payload?.event === "monitoring_event",
+  )?.payload?.journal_event?.sequence;
+
+  useEffect(() => {
+    let disposed = false;
+    api.getEventJournal().then(
+      (value) => {
+        if (!disposed) {
+          setPayload({
+            ...value,
+            events: Array.isArray(value?.events) ? value.events : [],
+          });
+          setError(null);
+        }
+      },
+      (failure) => {
+        if (!disposed) setError(failure.message);
+      },
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [latestJournalSequence]);
+
+  const entries = payload?.events || [];
+  const minimumRank = SEVERITY_RANK[minimumSeverity];
+  const needle = filter.trim().toLowerCase();
+  const visible = entries.filter((entry) => {
+    if ((SEVERITY_RANK[entry.severity] ?? -1) < minimumRank) return false;
+    if (!needle) return true;
+    return `${eventDevice(entry)} ${eventMessage(entry)} ${entry.severity || ""}`
+      .toLowerCase()
+      .includes(needle);
+  });
+  const selected = visible.find((entry) => entry.sequence === selectedSequence);
+
+  const clear = async () => {
+    if (
+      !window.confirm(
+        `Clear ${entries.length} locally retained event${entries.length === 1 ? "" : "s"}? Device state and counters will not be changed.`,
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    try {
+      await api.clearEventJournal();
+      setPayload({ ...payload, count: 0, events: [] });
+      setSelectedSequence(null);
+      setError(null);
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return html`
+    <${Panel} title="Event log" wide>
+      ${
+        error
+          ? html`<${Notice}>${error}<//>`
+          : payload === null
+            ? html`<${Notice}>Loading retained events…<//>`
+            : html`
+                <div class="table-wrapper event-log-table-wrapper">
+                  <table class="data event-log-table" aria-label="Event log">
+                    <thead>
+                      <tr>
+                        <th><span class="sr-only">Severity</span></th>
+                        <th>Timestamp</th>
+                        <th>Device Name</th>
+                        <th>Event</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${visible.map((entry) => {
+                        const message = eventMessage(entry);
+                        const active = entry.sequence === selectedSequence;
+                        return html`<tr
+                          key=${entry.sequence}
+                          class=${active ? "active" : ""}
+                        >
+                          <td class="event-severity-cell" data-label="Severity">
+                            <${SeverityIcon} severity=${entry.severity} />
+                          </td>
+                          <td class="event-timestamp" data-label="Timestamp">
+                            ${format.timestamp(entry.timestamp)}
+                          </td>
+                          <td class="event-device" data-label="Device Name">
+                            ${eventDevice(entry)}
+                          </td>
+                          <td class="event-message" data-label="Event">
+                            <button
+                              type="button"
+                              class="event-message-button"
+                              aria-expanded=${active ? "true" : "false"}
+                              aria-label=${`${active ? "Hide" : "View"} details for ${message}`}
+                              onClick=${() =>
+                                setSelectedSequence(
+                                  active ? null : entry.sequence,
+                                )}
+                            >
+                              ${message}
+                            </button>
+                          </td>
+                        </tr>`;
+                      })}
+                    </tbody>
+                  </table>
+                  ${
+                    visible.length === 0
+                      ? html`<div class="event-log-empty">
+                          ${
+                            needle || minimumSeverity !== "info"
+                              ? "No events match the current filters."
+                              : "No retained monitoring events."
+                          }
+                        </div>`
+                      : null
+                  }
+                </div>
+                <div class="event-log-controls">
+                  <label class="event-severity-filter">
+                    <span>Show</span>
+                    <select
+                      aria-label="Minimum severity"
+                      value=${minimumSeverity}
+                      onChange=${(event) => {
+                        setMinimumSeverity(event.target.value);
+                        setSelectedSequence(null);
+                      }}
+                    >
+                      <option value="info">Information</option>
+                      <option value="warning">Warning</option>
+                      <option value="error">Error</option>
+                    </select>
+                  </label>
+                  <input
+                    type="search"
+                    class="event-log-search"
+                    aria-label="Search event log"
+                    placeholder="Search device or event"
+                    value=${filter}
+                    onInput=${(event) => {
+                      setFilter(event.target.value);
+                      setSelectedSequence(null);
+                    }}
+                  />
+                  <div class="event-log-actions">
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      disabled=${!entries.length}
+                      title="Save all retained events as JSON"
+                      onClick=${() => downloadJournal(payload)}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      disabled=${!entries.length || clearing}
+                      aria-busy=${clearing ? "true" : null}
+                      onClick=${clear}
+                    >
+                      ${clearing ? "Clearing…" : "Clear"}
+                    </button>
+                  </div>
+                  <span class="event-log-count">
+                    ${visible.length} of ${entries.length} retained
+                  </span>
+                </div>
+                ${selected ? html`<${EventDetails} entry=${selected} />` : null}
+              `
+      }
+    <//>
   `;
 }
 
@@ -138,7 +483,7 @@ function IssuePanel() {
   >
     ${
       error
-        ? html`<${Notice} tone="danger">${error}<//>`
+        ? html`<${Notice}>${error}<//>`
         : payload === null
           ? html`<${Notice}>Loading issues…<//>`
           : issues.length === 0
@@ -161,7 +506,13 @@ function IssuePanel() {
                       ><span>${issue.severity}</span><span>${issue.state}</span>
                     </div>
                     <p class="text-sm">
-                      ${[scope.device_name || scope.server_name, subject, issue.summary].filter(Boolean).join(" · ")}
+                      ${[
+                        scope.device_name || scope.server_name,
+                        subject,
+                        issue.summary,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                     <p class="text-sm">
                       Evidence: ${issue.evidence_class} from
@@ -180,175 +531,19 @@ function IssuePanel() {
   <//>`;
 }
 
-function JournalPanel() {
-  const [entries, setEntries] = useState(null);
-  const [error, setError] = useState(null);
-  const [filter, setFilter] = useState("");
-  const latestJournalSequence = events.value.find(
-    (entry) => entry.payload?.event === "monitoring_event",
-  )?.payload?.journal_event?.sequence;
-
-  useEffect(() => {
-    let disposed = false;
-    api.getEventJournal().then(
-      (payload) => {
-        if (!disposed) {
-          setEntries(Array.isArray(payload?.events) ? payload.events : []);
-          setError(null);
-        }
-      },
-      (failure) => {
-        if (!disposed) setError(failure.message);
-      },
-    );
-    return () => {
-      disposed = true;
-    };
-  }, [latestJournalSequence]);
-
-  const clear = () =>
-    api.clearEventJournal().then(
-      () => {
-        setEntries([]);
-        setError(null);
-      },
-      (failure) => setError(failure.message),
-    );
-  const needle = filter.trim().toLowerCase();
-  const visible = (entries || []).filter((entry) => {
-    if (!needle) return true;
-    return `${entry.kind || ""} ${entry.severity || ""} ${entry.device_identity || ""} ${entry.device_name || ""} ${journalSubject(entry)}`
-      .toLowerCase()
-      .includes(needle);
-  });
-
-  return html`
-    <${Panel}
-      title="Monitoring journal"
-      actions=${html`
-        <input
-          type="search"
-          class="w-full sm:w-64"
-          aria-label="Filter journal"
-          placeholder="Filter journal"
-          value=${filter}
-          onInput=${(event) => setFilter(event.target.value)}
-        />
-        <button
-          type="button"
-          class="btn btn-sm"
-          disabled=${!entries?.length}
-          onClick=${clear}
-        >
-          Clear local history
-        </button>
-      `}
-    >
-      ${
-        error
-          ? html`<${Notice} tone="danger">${error}<//>`
-          : entries === null
-            ? html`<${Notice}>Loading retained events…<//>`
-            : visible.length === 0
-              ? html`<${Notice}
-                  >${needle ? "No matching journal events." : "No retained monitoring events."}<//
-                >`
-              : html`<div class="event-log">
-                  ${visible.map(
-                    (entry) =>
-                      html`<${JournalRow}
-                        key=${entry.sequence}
-                        entry=${entry}
-                      />`,
-                  )}
-                </div>`
-      }
-    <//>
-  `;
-}
-
 function EventsView() {
-  const [filter, setFilter] = useState("");
-  const [paused, setPaused] = useState(true);
-  const [snapshot, setSnapshot] = useState(() => events.value);
-  const root = useRef(null);
-  const current = paused ? snapshot : events.value;
-  const hasNew = events.value[0] !== current[0];
-  const pause = () => {
-    setSnapshot(events.value);
-    setPaused(true);
-  };
-  useEffect(() => {
-    if (paused) return;
-    const content = root.current?.closest("main");
-    const onScroll = () => {
-      if (content.scrollTop > 0) pause();
-    };
-    content?.addEventListener("scroll", onScroll, { passive: true });
-    return () => content?.removeEventListener("scroll", onScroll);
-  }, [paused]);
-  const needle = filter.trim().toLowerCase();
-  const entries = current.filter((entry) => {
-    if (!needle) {
-      return true;
-    }
-    const payload = entry.payload || {};
-    return `${payload.event || ""} ${subjectOf(payload)} ${summaryOf(payload)}`
-      .toLowerCase()
-      .includes(needle);
-  });
-
+  const [active, setActive] = useState("log");
   return html`
-    <div ref=${root} class="flex flex-col gap-4">
-      <${IssuePanel} />
-      <${JournalPanel} />
-      <${Panel}
-        title="Recent events"
-        actions=${html`
-          <input
-            type="search"
-            class="w-full sm:w-64"
-            aria-label="Filter events"
-            placeholder="Filter events"
-            value=${filter}
-            onFocus=${() => {
-              if (!paused) pause();
-            }}
-            onInput=${(event) => setFilter(event.target.value)}
-          />
-          <button
-            type="button"
-            class="btn btn-sm"
-            disabled=${!paused || !hasNew}
-            onClick=${() => setSnapshot(events.value)}
-          >
-            Show new events
-          </button>
-          <label class="event-live-control"
-            ><input
-              type="checkbox"
-              checked=${!paused}
-              onChange=${(event) => (event.target.checked ? setPaused(false) : pause())}
-            />Live updates</label
-          >
-        `}
-      >
-        ${
-          entries.length === 0
-            ? html`<${Notice}
-                >${needle ? "No matching events." : "No recent events."}<//
-              >`
-            : html`<div class="event-log">
-                ${entries.map(
-                (entry, index) =>
-                  html`<${EventRow}
-                    key=${`${entry.received}-${index}`}
-                    entry=${entry}
-                  />`,
-              )}
-              </div>`
-        }
-      <//>
+    <div class="flex flex-col gap-4">
+      <${Tabs}
+        active=${active}
+        onSelect=${setActive}
+        items=${[
+          { id: "log", label: "Event log" },
+          { id: "issues", label: "Issues" },
+        ]}
+      />
+      ${active === "issues" ? html`<${IssuePanel} />` : html`<${EventLog} />`}
     </div>
   `;
 }

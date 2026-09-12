@@ -128,13 +128,21 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
         return None
     logger.debug(
         f"Conmon dante_model from {source_ip} ({len(data)}B): "
-        f"codename={parsed['board_codename']!r} board_name={parsed['board_name']!r}"
+        f"identifier={parsed['platform_model_identifier']!r} "
+        f"model_name={parsed['platform_model_name']!r} "
+        f"software={parsed['platform_software_version']!r}"
     )
-    status = {}
-    if parsed["board_codename"]:
-        status["dante_model_id"] = parsed["board_codename"]
-    if parsed["board_name"]:
-        status["board_name"] = parsed["board_name"]
+    status = {"platform_versions_record": parsed}
+    for field_name in (
+        "platform_model_identifier",
+        "platform_model_name",
+        "platform_software_version",
+        "platform_hardware_version",
+        "platform_api_version",
+        "rom_boot_version",
+    ):
+        if parsed.get(field_name) is not None:
+            status[field_name] = parsed[field_name]
     status["dante_model_record_protocol_version"] = parsed["record_protocol_version"]
     status["dante_model_primary_capabilities"] = parsed["primary_capabilities"]
     status["dante_model_read_only_capabilities"] = parsed["read_only_capabilities"]
@@ -228,11 +236,17 @@ def _parse_make_model(data: bytes, source_ip: str, device) -> ParsedStatus | Non
         f"name={parsed['product_name']!r} version={parsed['product_version']!r} "
         f"manufacturer={parsed['manufacturer']!r}"
     )
-    status = {}
+    status = {"manufacturer_versions_record": parsed}
     if parsed["product_name"]:
-        status["dante_model"] = parsed["product_name"]
-    if parsed["product_version"]:
-        status["product_version"] = parsed["product_version"]
+        status["product_name"] = parsed["product_name"]
+    for field_name in (
+        "product_version",
+        "friendly_product_version",
+        "manufacturer_software_version",
+        "manufacturer_firmware_version",
+    ):
+        if parsed.get(field_name) is not None:
+            status[field_name] = parsed[field_name]
     if parsed["manufacturer"]:
         status["manufacturer"] = parsed["manufacturer"]
     return ParsedStatus(STATUS_KIND_MAKE_MODEL, status, parsed)

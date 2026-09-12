@@ -34,8 +34,8 @@ def make_show_device() -> DanteDevice:
     device.mac_address = "001dc10812580000"
     device.model_id = "LX-DANTE"
     device.manufacturer = "Digigram"
-    device.firmware_version = "4.0.1"
-    device.software_version = "4.0.0"
+    device.platform_hardware_version = "4.0.1"
+    device.platform_software_version = "4.0.0"
     device.link_speed_mbps = 1000
     device.tx_count = 128
     device.rx_count = 128

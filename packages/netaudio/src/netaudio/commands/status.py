@@ -69,7 +69,12 @@ def _dante_row_from_device(device) -> list[str]:
         _status_label(device.online),
         device.kind,
         device.manufacturer or "",
-        device.dante_model or device.model_id or "",
+        device.product_name
+        or device.model
+        or device.platform_model_name
+        or device.dante_model
+        or device.model_id
+        or "",
         str(device.ipv4) if device.ipv4 else "",
         str(len(device.tx_channels) if device.tx_channels else (device.tx_count or 0)),
         str(len(device.rx_channels) if device.rx_channels else (device.rx_count or 0)),

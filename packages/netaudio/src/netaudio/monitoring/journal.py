@@ -19,6 +19,7 @@ from netaudio.monitoring.model import (
     EventSeverity,
     MonitoringEvent,
     MonitoringEventKind,
+    OperationLifecyclePhase,
     _json_safe,
     _parse_timestamp,
 )
@@ -217,6 +218,100 @@ class MonitoringEventJournal:
         self._persist()
         return count
 
+    def record_operation_transition(
+        self,
+        device_or_snapshot,
+        *,
+        kind: MonitoringEventKind,
+        operation_id: str,
+        correlation_id: str,
+        operation_name: str,
+        lifecycle_phase: str,
+        requested_values: Any = None,
+        acknowledgement_result_code: int | None = None,
+        transport: str | None = None,
+        effective_values: Any = None,
+        final_operation_state: str | None = None,
+        persistence_request_acknowledgement: Any = None,
+        persistence_confirmation: bool | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        observation_source: str,
+        derivation_status: DerivationStatus,
+        parent_preset_run_id: str | None = None,
+        interface_identity: str | None = None,
+        channel_identity: str | None = None,
+        flow_identity: str | None = None,
+        severity: EventSeverity = EventSeverity.INFO,
+        timestamp: str | None = None,
+    ) -> MonitoringEvent:
+        """Persist one meaningful configuration-operation lifecycle transition."""
+        for label, value in (
+            ("operation_id", operation_id),
+            ("correlation_id", correlation_id),
+            ("operation_name", operation_name),
+            ("observation_source", observation_source),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{label} must be a non-empty string")
+        lifecycle_phase = OperationLifecyclePhase(lifecycle_phase).value
+        if parent_preset_run_id is not None and (not isinstance(parent_preset_run_id, str) or not parent_preset_run_id):
+            raise ValueError("parent_preset_run_id must be a non-empty string or null")
+        if acknowledgement_result_code is not None and (
+            isinstance(acknowledgement_result_code, bool) or not isinstance(acknowledgement_result_code, int)
+        ):
+            raise ValueError("acknowledgement_result_code must be an integer or null")
+        if persistence_confirmation is not None and not isinstance(persistence_confirmation, bool):
+            raise ValueError("persistence_confirmation must be Boolean or null")
+        if isinstance(device_or_snapshot, Mapping):
+            snapshot = {
+                "device_identity": device_or_snapshot.get("device_identity"),
+                "server_name": device_or_snapshot.get("server_name"),
+                "name": device_or_snapshot.get("name"),
+                "inventory_id": device_or_snapshot.get("inventory_id"),
+                "mac_address": device_or_snapshot.get("mac_address"),
+            }
+        else:
+            snapshot = {
+                "server_name": getattr(device_or_snapshot, "server_name", None),
+                "name": getattr(device_or_snapshot, "name", None),
+                "inventory_id": getattr(device_or_snapshot, "inventory_id", None),
+                "mac_address": getattr(device_or_snapshot, "mac_address", None),
+            }
+        snapshot["device_identity"] = _device_identity(snapshot)
+        current_value = {
+            "operation": operation_name,
+            "phase": lifecycle_phase,
+            "state": final_operation_state,
+        }
+        event = self._append(
+            snapshot,
+            timestamp or self._timestamp(),
+            kind,
+            severity,
+            None,
+            current_value,
+            evidence or {},
+            observation_source,
+            derivation_status,
+            interface_identity=interface_identity,
+            channel_identity=channel_identity,
+            flow_identity=flow_identity,
+            operation_id=operation_id,
+            correlation_id=correlation_id,
+            parent_preset_run_id=parent_preset_run_id,
+            operation_name=operation_name,
+            lifecycle_phase=lifecycle_phase,
+            requested_values=requested_values,
+            acknowledgement_result_code=acknowledgement_result_code,
+            transport=transport,
+            effective_values=effective_values,
+            final_operation_state=final_operation_state,
+            persistence_request_acknowledgement=persistence_request_acknowledgement,
+            persistence_confirmation=persistence_confirmation,
+        )
+        self._persist()
+        return event
+
     def _timestamp(self) -> str:
         value = self._wall_clock()
         if value.tzinfo is None:
@@ -238,6 +333,18 @@ class MonitoringEventJournal:
         interface_identity: str | None = None,
         channel_identity: str | None = None,
         flow_identity: str | None = None,
+        operation_id: str | None = None,
+        correlation_id: str | None = None,
+        parent_preset_run_id: str | None = None,
+        operation_name: str | None = None,
+        lifecycle_phase: str | None = None,
+        requested_values: Any = None,
+        acknowledgement_result_code: int | None = None,
+        transport: str | None = None,
+        effective_values: Any = None,
+        final_operation_state: str | None = None,
+        persistence_request_acknowledgement: Any = None,
+        persistence_confirmation: bool | None = None,
     ) -> MonitoringEvent:
         context = _observation_context(snapshot)
         raw_evidence = dict(raw)
@@ -259,6 +366,18 @@ class MonitoringEventJournal:
             raw=_json_safe(raw_evidence),
             observation_source=observation_source,
             derivation_status=derivation_status,
+            operation_id=operation_id,
+            correlation_id=correlation_id,
+            parent_preset_run_id=parent_preset_run_id,
+            operation_name=operation_name,
+            lifecycle_phase=lifecycle_phase,
+            requested_values=_json_safe(requested_values),
+            acknowledgement_result_code=acknowledgement_result_code,
+            transport=transport,
+            effective_values=_json_safe(effective_values),
+            final_operation_state=final_operation_state,
+            persistence_request_acknowledgement=_json_safe(persistence_request_acknowledgement),
+            persistence_confirmation=persistence_confirmation,
         )
         self._next_sequence += 1
         self._events.append(event)

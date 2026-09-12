@@ -15,95 +15,346 @@ import { deviceByName, scopedDevices as devices } from "../store.js";
 import { ConfigurableTable } from "../table.js";
 
 const INFO_COLUMNS = [
-  { cell: (device) => html`<${OnlineState} online=${device.online} />`, id: "state", label: "State" },
+  {
+    cell: (device) => html`<${OnlineState} online=${device.online} />`,
+    id: "state",
+    label: "State",
+  },
   { cell: (device) => format.deviceLabel(device), id: "name", label: "Name" },
-  { cell: (device) => format.text(format.deviceModelName(device)), id: "model", label: "Model name" },
-  { cell: (device) => format.text(device.manufacturer), id: "manufacturer", label: "Manufacturer", defaultHidden: true },
-  { cell: (device) => format.text(device.product_version), id: "product-version", label: "Product version", defaultHidden: true },
-  { cell: (device) => format.text(device.firmware_version), id: "dante-version", label: "Dante firmware" },
-  { cell: (device) => format.text(device.software_version), id: "software-version", label: "Dante software", defaultHidden: true },
-  { cell: (device) => device.is_locked == null ? "Unknown" : device.is_locked ? "Locked" : "Unlocked", id: "lock", label: "Device lock" },
-  { cell: (device) => format.text(device.ipv4), id: "primary-address", label: "Primary address" },
-  { cell: (device) => (device.link_speed_mbps ? `${device.link_speed_mbps} Mbps` : format.ABSENT), id: "link-speed", label: "Primary link speed" },
-  { cell: (device) => format.sampleRate(device.sample_rate_hz), id: "sample-rate", label: "Sample rate" },
-  { cell: (device) => (device.encoding ? `PCM ${device.encoding}` : format.ABSENT), id: "encoding", label: "Encoding", defaultHidden: true },
-  { cell: (device) => format.latency(device.latency_ms), id: "latency", label: "Latency" },
-  { align: "right", cell: (device) => format.text(device.tx_count), id: "transmit", label: "Tx channels" },
-  { align: "right", cell: (device) => format.text(device.rx_count), id: "receive", label: "Rx channels" },
+  {
+    cell: (device) => format.text(format.deviceModelName(device)),
+    id: "model",
+    label: "Model name",
+  },
+  {
+    cell: (device) => format.text(device.manufacturer),
+    id: "manufacturer",
+    label: "Manufacturer",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) =>
+      format.text(
+        device.friendly_product_version ||
+          device.product_version ||
+          device.ddm_product_version,
+      ),
+    id: "product-version",
+    label: "Product version",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) =>
+      format.text(device.platform_software_version || device.ddm_dante_version),
+    id: "dante-version",
+    label: "Dante software/firmware",
+  },
+  {
+    cell: (device) =>
+      format.text(
+        device.platform_hardware_version || device.ddm_dante_hardware_version,
+      ),
+    id: "hardware-version",
+    label: "Hardware version",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.cmc_server_version),
+    id: "cmc-server-version",
+    label: "CMC server version",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.router_protocol_version),
+    id: "router-protocol-version",
+    label: "Router protocol version",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) =>
+      device.is_locked == null
+        ? "Unknown"
+        : device.is_locked
+          ? "Locked"
+          : "Unlocked",
+    id: "lock",
+    label: "Device lock",
+  },
+  {
+    cell: (device) => format.text(device.ipv4),
+    id: "primary-address",
+    label: "Primary address",
+  },
+  {
+    cell: (device) =>
+      device.link_speed_mbps ? `${device.link_speed_mbps} Mbps` : format.ABSENT,
+    id: "link-speed",
+    label: "Primary link speed",
+  },
+  {
+    cell: (device) => format.sampleRate(device.sample_rate_hz),
+    id: "sample-rate",
+    label: "Sample rate",
+  },
+  {
+    cell: (device) =>
+      device.encoding ? `PCM ${device.encoding}` : format.ABSENT,
+    id: "encoding",
+    label: "Encoding",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.latency(device.latency_ms),
+    id: "latency",
+    label: "Latency",
+  },
   {
     align: "right",
-    cell: (device) => (device.subscriptions || []).filter((entry) => entry.tx_device).length,
+    cell: (device) => format.text(device.tx_count),
+    id: "transmit",
+    label: "Tx channels",
+  },
+  {
+    align: "right",
+    cell: (device) => format.text(device.rx_count),
+    id: "receive",
+    label: "Rx channels",
+  },
+  {
+    align: "right",
+    cell: (device) =>
+      (device.subscriptions || []).filter((entry) => entry.tx_device).length,
     id: "subscriptions",
     label: "Subscriptions",
   },
-  { cell: (device) => format.macAddress(device), id: "mac", label: "MAC address" },
-  { cell: (device) => format.text(device.board_name), id: "dante-model", label: "Dante model", defaultHidden: true },
-  { cell: (device) => format.text(device.kind), id: "kind", label: "Kind", defaultHidden: true },
-  { cell: (device) => format.text(device.inventory_sources), id: "sources", label: "Inventory sources", defaultHidden: true },
-  { cell: (device) => format.text(device.ddm_domain_name), id: "domain", label: "Domain", defaultHidden: true },
-  { cell: (device) => format.timestamp(device.last_seen), id: "last-seen", label: "Last seen", defaultHidden: true },
-  { cell: (device) => format.text(device.clock_role), id: "clock-role", label: "Clock role" },
-  { cell: (device) => format.clockLeaderName(device, devices.value), id: "clock-leader", label: "Clock leader", defaultHidden: true },
-  { cell: (device) => format.preferredLeader(device.preferred_leader), id: "preferred-leader", label: "Preferred leader", defaultHidden: true },
-  { cell: (device) => format.clockSourceCode(device.clock_source_code), id: "clock-source", label: "Clock source", defaultHidden: true },
-  { cell: (device) => format.clockSubdomain(device.clock_subdomain), id: "clock-subdomain", label: "Clock subdomain", defaultHidden: true },
-  { cell: (device) => format.text(device.ddm_clocking_state?.locked), id: "clock-sync", label: "Clock sync", defaultHidden: true },
-  { cell: (device) => device.clock_frequency_offset_parts_per_billion == null ? format.ABSENT : `${device.clock_frequency_offset_parts_per_billion} ppb`, id: "frequency-offset", label: "Frequency offset", defaultHidden: true },
-  { cell: (device) => aes67Status(device).label, id: "aes67", label: "AES67", defaultHidden: true },
-  { cell: (device) => format.text(device.interfaces?.[0]?.mode), id: "primary-mode", label: "Primary mode", defaultHidden: true },
-  { cell: (device) => format.text(device.interfaces?.[1]?.ip_address), id: "secondary-address", label: "Secondary address", defaultHidden: true },
-  { cell: (device) => {
-    const speed = device.interfaces?.[1]?.link_speed_mbps ?? device.interfaces?.[1]?.speed;
-    return speed == null ? format.ABSENT : `${speed} Mbps`;
-  }, id: "secondary-link-speed", label: "Secondary link speed", defaultHidden: true },
-  { cell: (device) => format.text(device.interfaces?.[0]?.gateway), id: "gateway", label: "Gateway", defaultHidden: true },
-  { cell: (device) => format.text(device.interfaces?.[0]?.dns_server), id: "dns", label: "DNS", defaultHidden: true },
-  { cell: (device) => format.text(device.interface_reboot_required), id: "reboot-required", label: "Reboot required", defaultHidden: true },
-  ...[["tx", "transmit"], ["rx", "receive"]].map(([direction, field]) => ({
-    id: `${direction}-bandwidth`, label: `${direction === "tx" ? "Tx" : "Rx"} bandwidth`, defaultHidden: true,
+  {
+    cell: (device) => format.macAddress(device),
+    id: "mac",
+    label: "MAC address",
+  },
+  {
+    cell: (device) => format.text(device.platform_model_name),
+    id: "dante-model",
+    label: "Dante platform model",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.kind),
+    id: "kind",
+    label: "Kind",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.inventory_sources),
+    id: "sources",
+    label: "Inventory sources",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.ddm_domain_name),
+    id: "domain",
+    label: "Domain",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.timestamp(device.last_seen),
+    id: "last-seen",
+    label: "Last seen",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.clock_role),
+    id: "clock-role",
+    label: "Clock role",
+  },
+  {
+    cell: (device) => format.clockLeaderName(device, devices.value),
+    id: "clock-leader",
+    label: "Clock leader",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.preferredLeader(device.preferred_leader),
+    id: "preferred-leader",
+    label: "Preferred leader",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.clockSourceCode(device.clock_source_code),
+    id: "clock-source",
+    label: "Clock source",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.clockSubdomain(device.clock_subdomain),
+    id: "clock-subdomain",
+    label: "Clock subdomain",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.ddm_clocking_state?.locked),
+    id: "clock-sync",
+    label: "Clock sync",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) =>
+      device.clock_frequency_offset_parts_per_billion == null
+        ? format.ABSENT
+        : `${device.clock_frequency_offset_parts_per_billion} ppb`,
+    id: "frequency-offset",
+    label: "Frequency offset",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => aes67Status(device).label,
+    id: "aes67",
+    label: "AES67",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.interfaces?.[0]?.mode),
+    id: "primary-mode",
+    label: "Primary mode",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.interfaces?.[1]?.ip_address),
+    id: "secondary-address",
+    label: "Secondary address",
+    defaultHidden: true,
+  },
+  {
     cell: (device) => {
-      const value = device.network_interface_traffic?.[`total_${field}_rate_bits_per_second`];
-      return value == null || !Number.isFinite(Number(value)) ? format.ABSENT : `${(Number(value) / 1_000_000).toFixed(2)} Mbps`;
+      const speed =
+        device.interfaces?.[1]?.link_speed_mbps ??
+        device.interfaces?.[1]?.speed;
+      return speed == null ? format.ABSENT : `${speed} Mbps`;
+    },
+    id: "secondary-link-speed",
+    label: "Secondary link speed",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.interfaces?.[0]?.gateway),
+    id: "gateway",
+    label: "Gateway",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.interfaces?.[0]?.dns_server),
+    id: "dns",
+    label: "DNS",
+    defaultHidden: true,
+  },
+  {
+    cell: (device) => format.text(device.interface_reboot_required),
+    id: "reboot-required",
+    label: "Reboot required",
+    defaultHidden: true,
+  },
+  ...[
+    ["tx", "transmit"],
+    ["rx", "receive"],
+  ].map(([direction, field]) => ({
+    id: `${direction}-bandwidth`,
+    label: `${direction === "tx" ? "Tx" : "Rx"} bandwidth`,
+    defaultHidden: true,
+    cell: (device) => {
+      const value =
+        device.network_interface_traffic?.[
+          `total_${field}_rate_bits_per_second`
+        ];
+      return value == null || !Number.isFinite(Number(value))
+        ? format.ABSENT
+        : `${(Number(value) / 1_000_000).toFixed(2)} Mbps`;
     },
   })),
 ];
 
 const INVENTORY_VIEWS = {
   devices: {
-    columns: ["state", "name", "model", "primary-address", "sample-rate", "receive", "transmit", "lock", "domain"] },
+    columns: [
+      "state",
+      "name",
+      "model",
+      "primary-address",
+      "sample-rate",
+      "receive",
+      "transmit",
+      "lock",
+      "domain",
+    ],
+  },
   "clock-status": {
-    columns: ["state", "name", "clock-role", "clock-leader", "preferred-leader", "clock-source", "clock-sync", "sample-rate", "domain"] },
+    columns: [
+      "state",
+      "name",
+      "clock-role",
+      "clock-leader",
+      "preferred-leader",
+      "clock-source",
+      "clock-sync",
+      "sample-rate",
+      "domain",
+    ],
+  },
   "network-status": {
-    columns: ["state", "name", "primary-address", "link-speed", "secondary-address", "secondary-link-speed", "tx-bandwidth", "rx-bandwidth", "reboot-required"] },
+    columns: [
+      "state",
+      "name",
+      "primary-address",
+      "link-speed",
+      "secondary-address",
+      "secondary-link-speed",
+      "tx-bandwidth",
+      "rx-bandwidth",
+      "reboot-required",
+    ],
+  },
 };
 
 function DeviceInfo({ location }) {
   const mode = INVENTORY_VIEWS[location.view] ? location.view : "devices";
   const view = INVENTORY_VIEWS[mode];
-  const columns = [...INFO_COLUMNS].sort((a, b) => {
-    const rank = (column) => view.columns.includes(column.id) ? view.columns.indexOf(column.id) : view.columns.length;
-    return rank(a) - rank(b);
-  }).map((column) => ({ ...column, defaultHidden: !view.columns.includes(column.id) }));
+  const columns = [...INFO_COLUMNS]
+    .sort((a, b) => {
+      const rank = (column) =>
+        view.columns.includes(column.id)
+          ? view.columns.indexOf(column.id)
+          : view.columns.length;
+      return rank(a) - rank(b);
+    })
+    .map((column) => ({
+      ...column,
+      defaultHidden: !view.columns.includes(column.id),
+    }));
   const filter = location.query.filter || "";
   const all = format.sortedDevices(devices.value);
   const needle = filter.trim().toLowerCase();
-  const visible = all.filter((device) => !needle || format.deviceHaystack(device).includes(needle));
+  const visible = all.filter(
+    (device) => !needle || format.deviceHaystack(device).includes(needle),
+  );
   const online = all.filter((device) => device.online).length;
 
   return html`
     <div class="flex flex-col gap-4 pb-6">
       <${Panel}>
-        ${all.length === 0
-          ? html`<${Notice}>No Dante devices have been discovered yet. The daemon browses mDNS continuously.<//>`
-          : html`<${ConfigurableTable}
-              key=${mode}
-              tableId=${mode}
-              mobileSummary=${(device) => ({ title: format.deviceLabel(device), detail: html`<${OnlineState} online=${device.online} />` })}
-              columns=${columns}
-              rows=${visible}
-              rowKey=${(device) => device.server_name || device.name}
-              rowHref=${(device) => devicePath("devices", format.deviceLabel(device), "receive")}
-              toolbar=${html`
+        ${
+          all.length === 0
+            ? html`<${Notice}
+                >No Dante devices have been discovered yet. The daemon browses
+                mDNS continuously.<//
+              >`
+            : html`<${ConfigurableTable}
+                key=${mode}
+                tableId=${mode}
+                mobileSummary=${(device) => ({ title: format.deviceLabel(device), detail: html`<${OnlineState} online=${device.online} />` })}
+                columns=${columns}
+                rows=${visible}
+                rowKey=${(device) => device.server_name || device.name}
+                rowHref=${(device) => devicePath("devices", format.deviceLabel(device), "receive")}
+                toolbar=${html`
                 <input
                   type="search"
                   placeholder="Find a device…"
@@ -112,9 +363,12 @@ function DeviceInfo({ location }) {
                   value=${filter}
                   onInput=${(event) => setQueryParameter("filter", event.target.value)}
                 />
-                <span class="nav-count">${visible.length} devices · ${online} online</span>
+                <span class="nav-count"
+                  >${visible.length} devices · ${online} online</span
+                >
               `}
-            />`}
+              />`
+        }
       <//>
     </div>
   `;
@@ -164,16 +418,22 @@ function DeviceView({ location }) {
   const device = deviceByName(deviceName);
   if (!device) {
     return html`<${Notice}>
-      No device named ${deviceName} is visible in this view. It may be offline, filtered out, or forgotten.
+      No device named ${deviceName} is visible in this view. It may be offline,
+      filtered out, or forgotten.
     <//>`;
   }
   if (!device.online) {
     return html`<div class="flex flex-col gap-4">
       <h1 class="content-title">${format.deviceLabel(device)}</h1>
-      <${Notice}>This device is offline. Controls are unavailable until it reconnects.<//>
+      <${Notice}
+        >This device is offline. Controls are unavailable until it
+        reconnects.<//
+      >
     </div>`;
   }
-  const tabs = isEnrolled(device) ? [...DEVICE_TABS, { id: "domain", label: "Domain" }] : DEVICE_TABS;
+  const tabs = isEnrolled(device)
+    ? [...DEVICE_TABS, { id: "domain", label: "Domain" }]
+    : DEVICE_TABS;
   const tab = location.parameters.section || "receive";
 
   return html`
@@ -181,9 +441,13 @@ function DeviceView({ location }) {
       <div class="device-header">
         <div class="device-heading">
           <h1 class="content-title">${format.deviceLabel(device)}</h1>
-          <label class="device-switcher">Device
-            <select aria-label="Switch device" value=${deviceRequestIdentifier(device)}
-              onChange=${(event) => navigate(devicePath("devices", event.target.value, tab))}>
+          <label class="device-switcher"
+            >Device
+            <select
+              aria-label="Switch device"
+              value=${deviceRequestIdentifier(device)}
+              onChange=${(event) => navigate(devicePath("devices", event.target.value, tab))}
+            >
               ${format.sortedDevices(devices.value).map((entry) => html`<option value=${deviceRequestIdentifier(entry)}>${format.deviceLabel(entry)}</option>`)}
             </select>
           </label>
@@ -193,8 +457,11 @@ function DeviceView({ location }) {
       </div>
       <label class="device-section-menu">
         <span class="sr-only">Device section</span>
-        <select aria-label="Device section" value=${tab}
-          onChange=${(event) => navigate(devicePath("devices", format.deviceLabel(device), event.target.value))}>
+        <select
+          aria-label="Device section"
+          value=${tab}
+          onChange=${(event) => navigate(devicePath("devices", format.deviceLabel(device), event.target.value))}
+        >
           ${tabs.map((entry) => html`<option value=${entry.id}>${entry.label}</option>`)}
         </select>
       </label>
@@ -234,5 +501,13 @@ export const devicesView = {
   label: "Device Info",
 };
 
-export const clockStatusView = { component: DeviceInfo, id: "clock-status", label: "Clock Status" };
-export const networkStatusView = { component: DeviceInfo, id: "network-status", label: "Network Status" };
+export const clockStatusView = {
+  component: DeviceInfo,
+  id: "clock-status",
+  label: "Clock Status",
+};
+export const networkStatusView = {
+  component: DeviceInfo,
+  id: "network-status",
+  label: "Network Status",
+};

@@ -18,7 +18,17 @@ app = typer.Typer(
     context_settings=HELP_CONTEXT_SETTINGS,
 )
 
-EVENT_HEADERS = ["Timestamp", "Severity", "Kind", "Device", "Subject", "Previous", "Current"]
+EVENT_HEADERS = [
+    "Timestamp",
+    "Severity",
+    "Kind",
+    "Device",
+    "Subject",
+    "Operation",
+    "Phase",
+    "Previous",
+    "Current",
+]
 
 
 def _daemon_error(status: int | None, data: dict | None) -> None:
@@ -78,6 +88,8 @@ def _rows(events: list[dict]) -> list[list[str]]:
             str(event.get("kind") or ""),
             str(event.get("device_name") or event.get("server_name") or event.get("device_identity") or ""),
             _subject(event),
+            str(event.get("operation_name") or ""),
+            str(event.get("lifecycle_phase") or ""),
             _compact(event.get("previous_value")),
             _compact(event.get("current_value")),
         ]

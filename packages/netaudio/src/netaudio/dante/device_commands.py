@@ -232,7 +232,7 @@ class DanteDeviceCommands:
         supported_property_ids,
         latency_microseconds,
         frames_per_packet,
-        device_software_version,
+        platform_software_version,
         transaction_id=0,
     ):
         return self._arc(
@@ -242,7 +242,7 @@ class DanteDeviceCommands:
                 "supported_property_ids": list(supported_property_ids),
                 "latency_microseconds": latency_microseconds,
                 "frames_per_packet": frames_per_packet,
-                "device_software_version": list(device_software_version),
+                "platform_software_version": list(platform_software_version),
                 "transaction_id": transaction_id,
             }
         )
@@ -272,7 +272,7 @@ class DanteDeviceCommands:
         supported_property_ids,
         latency_microseconds,
         frames_per_packet,
-        device_software_version,
+        platform_software_version,
         transaction_id=0,
     ):
         return self._arc(
@@ -282,7 +282,7 @@ class DanteDeviceCommands:
                 "supported_property_ids": list(supported_property_ids),
                 "latency_microseconds": latency_microseconds,
                 "frames_per_packet": frames_per_packet,
-                "device_software_version": list(device_software_version),
+                "platform_software_version": list(platform_software_version),
                 "transaction_id": transaction_id,
             }
         )

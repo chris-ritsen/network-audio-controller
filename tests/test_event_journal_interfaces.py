@@ -13,7 +13,7 @@ from netaudio.commands import events as events_cli
 from netaudio.daemon.server import NetaudioDaemon
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.monitoring import MonitoringEventJournal
-from tests.http_api_test_support import FakeWriter, get, make_http_server
+from tests.http_api_test_support import FakeWriter, get, make_http_server, post
 
 runner = CliRunner()
 
@@ -60,6 +60,46 @@ async def test_http_event_journal_rejects_invalid_filter():
     status, payload = await get(server, "/event-journal?kind=not_an_event")
     assert status == 400
     assert "not_an_event" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_loopback_operation_event_endpoint_persists_and_publishes_once():
+    server = make_http_server()
+    server.publish_journal_event = AsyncMock()
+    payload = {
+        "kind": "configuration_operation",
+        "operation_id": "operation-1",
+        "correlation_id": "operation-1",
+        "parent_preset_run_id": None,
+        "operation_name": "set_receive_flow_default_slots",
+        "lifecycle_phase": "requested",
+        "requested_values": {"default_slots": 8},
+        "acknowledgement_result_code": None,
+        "transport": "direct",
+        "effective_values": None,
+        "final_operation_state": "requested",
+        "persistence_request_acknowledgement": None,
+        "persistence_confirmation": None,
+        "evidence": {"request": {"default_slots": 8}},
+        "observation_source": "user_request",
+        "derivation_status": "derived",
+        "interface_identity": None,
+        "channel_identity": None,
+        "flow_identity": None,
+        "severity": "info",
+        "device_snapshot": {
+            "server_name": "receiver.local.",
+            "name": "Receiver",
+        },
+        "observe_device": False,
+    }
+
+    status, response = await post(server, "/event-journal/operations", payload)
+
+    assert status == 200
+    [event] = server.event_journal.list_events()
+    assert response["event"] == event.to_dict()
+    server.publish_journal_event.assert_awaited_once_with(event)
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,9 @@ const FIELDS = [
   "ipv4",
   "mac_address",
   "model",
+  "product_name",
+  "platform_model_name",
+  "platform_model_identifier",
   "manufacturer",
   "tx_count",
   "rx_count",
@@ -17,9 +20,20 @@ const FIELDS = [
   "clock_role",
   "preferred_leader",
   "is_locked",
-  "firmware_version",
   "product_version",
-  "software_version",
+  "friendly_product_version",
+  "platform_software_version",
+  "platform_hardware_version",
+  "platform_api_version",
+  "rom_boot_version",
+  "manufacturer_software_version",
+  "manufacturer_firmware_version",
+  "cmc_server_version",
+  "router_protocol_version",
+  "ddm_product_version",
+  "ddm_product_software_version",
+  "ddm_dante_version",
+  "ddm_dante_hardware_version",
   "last_seen",
   "kind",
   "inventory_sources",
@@ -69,9 +83,28 @@ const FIELDS = [
 export function readInventoryCache() {
   try {
     const cached = JSON.parse(window.localStorage.getItem(KEY));
-    if (!cached || !Number.isFinite(cached.savedAt) || cached.savedAt > Date.now()) return {};
-    if (!cached.devices || typeof cached.devices !== "object" || Array.isArray(cached.devices)) return {};
-    if (Object.values(cached.devices).some((device) => !device || typeof device !== "object" || Array.isArray(device) || typeof device.server_name !== "string")) return {};
+    if (
+      !cached ||
+      !Number.isFinite(cached.savedAt) ||
+      cached.savedAt > Date.now()
+    )
+      return {};
+    if (
+      !cached.devices ||
+      typeof cached.devices !== "object" ||
+      Array.isArray(cached.devices)
+    )
+      return {};
+    if (
+      Object.values(cached.devices).some(
+        (device) =>
+          !device ||
+          typeof device !== "object" ||
+          Array.isArray(device) ||
+          typeof device.server_name !== "string",
+      )
+    )
+      return {};
     return cached.devices;
   } catch {
     return {};
@@ -80,10 +113,21 @@ export function readInventoryCache() {
 
 export function writeInventoryCache(devices) {
   try {
-    const snapshot = Object.fromEntries(Object.entries(devices).map(([key, device]) => [key,
-      Object.fromEntries(FIELDS.filter((field) => device[field] !== undefined).map((field) => [field, device[field]])),
-    ]));
-    window.localStorage.setItem(KEY, JSON.stringify({ savedAt: Date.now(), devices: snapshot }));
+    const snapshot = Object.fromEntries(
+      Object.entries(devices).map(([key, device]) => [
+        key,
+        Object.fromEntries(
+          FIELDS.filter((field) => device[field] !== undefined).map((field) => [
+            field,
+            device[field],
+          ]),
+        ),
+      ]),
+    );
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({ savedAt: Date.now(), devices: snapshot }),
+    );
   } catch {
     // Storage may be disabled or full; live updates remain available.
   }

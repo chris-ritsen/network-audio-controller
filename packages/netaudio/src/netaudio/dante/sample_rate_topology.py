@@ -276,7 +276,7 @@ def _fallback_capacity_table(device) -> dict[int, tuple[int, int]]:
     for value in (
         getattr(device, "model", None),
         getattr(device, "dante_model", None),
-        getattr(device, "board_name", None),
+        getattr(device, "platform_model_name", None),
     ):
         if not isinstance(value, str):
             continue

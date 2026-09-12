@@ -99,9 +99,9 @@ fn every_typed_response_parser_rejects_truncation() {
     bluetooth[50..54].copy_from_slice(&[0x18, 0x09, 0x22, 0x08]);
     bluetooth[54..62].copy_from_slice(&[0x0A, 0x06, 0x12, 0x04, 0x0A, 0x02, 0x08, 0x02]);
 
-    let mut make_model = vec![0u8; CONMON_PRODUCT_VERSION_END];
+    let mut make_model = vec![0u8; CONMON_DANTE_MODEL_BODY_OFFSET + 0x138];
     stamp_conmon_response(&mut make_model, CONMON_OPCODE_MAKE_MODEL_RESPONSE);
-    let mut dante_model = vec![0u8; CONMON_BOARD_NAME_END];
+    let mut dante_model = vec![0u8; CONMON_DANTE_MODEL_BODY_OFFSET + 0xc0];
     stamp_conmon_response(&mut dante_model, CONMON_OPCODE_DANTE_MODEL_RESPONSE);
 
     for length in 0..device_info.len() {

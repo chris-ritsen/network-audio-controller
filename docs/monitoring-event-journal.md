@@ -1,10 +1,11 @@
 # Monitoring event journal
 
-The netaudio daemon retains a bounded local timeline derived from telemetry that
-the application already parses. It does not issue additional protocol requests.
-The journal is stored as `event-journal.json` beside the active netaudio
-configuration and is rewritten atomically when an event is added or the journal
-is cleared.
+The netaudio daemon retains a bounded local timeline of parsed telemetry
+transitions and user-initiated configuration operations. The journal is the
+canonical mutation audit trail for CLI, HTTP, browser, and preset operations; it
+does not issue additional protocol requests. It is stored as
+`event-journal.json` beside the active netaudio configuration and is rewritten
+atomically when an event is added or the journal is cleared.
 
 Each event has a sequence number, UTC timestamp, stable device identity, event
 kind, severity, optional interface/channel/flow identity, previous and current
@@ -12,6 +13,11 @@ values, supporting raw state, observation source, and derivation status. The
 existing mDNS server name is the preferred device identity; managed inventory ID
 or MAC address is used only when a server name is unavailable. JSON exports keep
 those fields unchanged. Human-readable output summarizes the same records.
+Configuration records also include an operation ID, correlation ID, optional
+parent preset-run ID, operation and lifecycle phase, requested and effective
+values, acknowledgement result and transport, final state, and separate
+persistence-request and persistence-confirmation fields. Supporting evidence is
+depth-, item-, and string-bounded, and credential-like fields are redacted.
 
 ## Event inputs
 
@@ -37,6 +43,14 @@ The first version supports:
 - `issue_opened`, `issue_updated`, and `issue_resolved` for transitions from the
   unified issue engine. The event retains the issue ID, kind, evidence class,
   raw source fields, and suggested action.
+- `configuration_operation` for transmit-flow creation and deletion, external
+  RTP subscription and association removal, receive/transmit/unicast
+  performance, receive-flow default slots, configuration storage, and each
+  mutation applied by a preset.
+- `preset_run` for the parent preset lifecycle and its final counts of
+  confirmed, partial, inconsistent, rejected, unavailable, failed, unchanged,
+  and skipped actions. Unchanged or skipped actions contribute only to this
+  summary.
 
 An explicit clock-synchronization boolean is deferred because current device
 state does not expose one consistently. Clock role and PTP port states are
@@ -53,6 +67,23 @@ threshold condition. Derived warning text and severity do not replace the raw
 measurement. Device errors, failed queries, managed-status errors, and
 field-source metadata present at observation time are retained under
 `raw.observation_context`.
+
+Configuration operations record only meaningful lifecycle transitions:
+`requested`, `request_acknowledged`, `request_rejected`,
+`effective_state_confirmed`, `partial_unobservable`, `inconsistent`,
+`transport_or_validation_failure`, `persistence_request_acknowledged`, and
+`persistence_confirmed`. A transport acknowledgement never establishes the
+effective state. Missing fresh readback produces `partial_unobservable` rather
+than success or failure. A configuration-storage acknowledgement leaves
+`persistence_confirmation` null until an independent observation exists. Fresh
+parsed readback updates the application device and passes through the same
+journal observation path as ordinary telemetry, allowing subscription and issue
+transitions to arise from observed state instead of request intent. Verification
+polls are retained in bounded terminal evidence and do not each become events.
+
+Preset child operations use their own operation IDs and the parent preset-run ID
+as their shared correlation ID. This keeps each actual mutation reviewable while
+avoiding entries for settings that preflight proved unchanged.
 
 Receiver-flow latency uses the configured flow latency when available, or the
 device's existing receiver-flow latency setting. The default warning boundary
@@ -87,7 +118,11 @@ fresh observations so startup does not turn unknown state into a transition.
 Use `netaudio events list` to inspect recent entries. It accepts `--device`,
 `--kind`, `--severity`, `--since`, and `--limit`. Use `netaudio events export`
 to write stable JSON to stdout or `--file`. The daemon also serves
-`GET /event-journal`, and the existing browser Events page shows that history.
+`GET /event-journal`. The browser Events page presents the retained history as
+a timestamp, device, and event table with cumulative Information, Warning, and
+Error filtering. Search narrows the visible rows, selecting a row reveals its
+transition and supporting evidence, and Save downloads the complete unfiltered
+JSON journal.
 
 `netaudio events clear` and `DELETE /event-journal` remove only retained local
 events. Clearing does not send a device command, clear a hardware counter, or

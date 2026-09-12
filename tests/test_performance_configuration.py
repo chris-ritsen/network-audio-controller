@@ -56,10 +56,10 @@ def _settings_response(properties: dict[int, int]) -> bytes:
 
 
 class FakeDevice:
-    def __init__(self, supported, responses, *, software_version="3.0.0", managed=False):
+    def __init__(self, supported, responses, *, platform_software_version="3.0.0", managed=False):
         self.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.15"}}}
         self.settings_properties = [{"property_id": property_id, "flags": 0} for property_id in supported]
-        self.software_version = software_version
+        self.platform_software_version = platform_software_version
         self.requires_managed_control = managed
         self.topology_mutation_lock = DeferredAsyncioLock()
         self.performance_settings = None
@@ -83,7 +83,9 @@ async def test_receive_performance_sends_once_then_verifies_every_property():
         PROPERTY_RX_FLOW_FRAMES_PER_PACKET: 8,
         PROPERTY_PRE_3_COMPATIBILITY: 1,
     }
-    device = FakeDevice(expected, [_arc_response(0x1101), _settings_response(expected)], software_version="2.9.9")
+    device = FakeDevice(
+        expected, [_arc_response(0x1101), _settings_response(expected)], platform_software_version="2.9.9"
+    )
 
     result = await set_receive_flow_performance(device, 250, 8)
 
@@ -96,7 +98,7 @@ async def test_receive_performance_sends_once_then_verifies_every_property():
         "set_receive_flow_performance",
         "query_performance_settings",
     ]
-    assert device.specifications[0]["device_software_version"] == [2, 9, 9]
+    assert device.specifications[0]["platform_software_version"] == [2, 9, 9]
     assert device.specifications[1]["property_ids"] == list(expected)
 
 
@@ -201,7 +203,7 @@ def test_latency_overflow_and_software_version_are_rejected_before_writes():
     with pytest.raises(ValueError, match="too large"):
         set_transmit_flow_performance(device, 0xFFFFFFFF // 1_000 + 1, 1).send(None)
 
-    device.software_version = "3.0.0.1"
+    device.platform_software_version = "3.0.0.1"
     with pytest.raises(RuntimeError, match="x.y.z"):
         set_receive_flow_performance(device, 1, 1).send(None)
 
@@ -237,7 +239,7 @@ def test_python_command_frontends_expose_typed_serializers():
         "supported_property_ids": [PROPERTY_RX_FLOW_LATENCY_NS, PROPERTY_RX_FLOW_FRAMES_PER_PACKET],
         "latency_microseconds": 250,
         "frames_per_packet": 8,
-        "device_software_version": [3, 0, 0],
+        "platform_software_version": [3, 0, 0],
     }
 
     packet, service = DanteDeviceCommands().command_store_current_configuration(0x280F, 0x1234)

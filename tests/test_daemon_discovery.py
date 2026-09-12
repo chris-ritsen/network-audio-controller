@@ -143,8 +143,8 @@ async def test_new_cmc_service_registers_identity_metadata_and_queries(monkeypat
     assert device.model_id == "A32 Dante"
     assert device.manufacturer_mdns == "Ferrofish"
     assert device.manufacturer == "Ferrofish"
-    assert device.software_version == "4.2.1"
-    assert device.firmware_version == "4.2.0"
+    assert device.cmc_server_version == "4.2.1"
+    assert device.router_protocol_version == "4.2.0"
     assert device.sample_rate == 48000
     assert device.latency == 1.0
     assert device.services[instance_name] == {
@@ -220,7 +220,7 @@ async def test_existing_arc_service_emits_single_update_and_fetches_controls(mon
     device = DanteDevice(server_name="rack.local.")
     device.ipv4 = "192.0.2.30"
     device.name = "Old Name"
-    device.software_version = "keep-me"
+    device.platform_software_version = "keep-me"
     device.fetch_device_name = AsyncMock(return_value="New Name")
     daemon = _DiscoveryHarness({"rack.local.": device})
 
@@ -235,7 +235,7 @@ async def test_existing_arc_service_emits_single_update_and_fetches_controls(mon
     assert daemon.devices["rack.local."] is device
     assert str(device.ipv4) == "192.0.2.31"
     assert device.name == "New Name"
-    assert device.software_version == "keep-me"
+    assert device.platform_software_version == "keep-me"
     device.fetch_device_name.assert_awaited_once()
     daemon.state.fetch_device_controls.assert_called_once_with("rack.local.")
     assert daemon.spawned == ["delayed-controls:rack.local."]

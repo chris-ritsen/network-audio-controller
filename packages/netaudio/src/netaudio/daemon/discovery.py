@@ -220,9 +220,11 @@ class DanteDiscoveryMixin:
             if not device.manufacturer:
                 device.manufacturer = properties["mf"]
         if "server_vers" in properties and service.service_type == SERVICE_CMC:
-            device.software_version = properties["server_vers"]
+            device.cmc_server_version = properties["server_vers"]
+            device.field_sources = {**(device.field_sources or {}), "cmc_server_version": "dns_sd"}
         if "router_vers" in properties:
-            device.firmware_version = properties["router_vers"]
+            device.router_protocol_version = properties["router_vers"]
+            device.field_sources = {**(device.field_sources or {}), "router_protocol_version": "dns_sd"}
         if "rate" in properties:
             device.sample_rate = int(properties["rate"])
         if "latency_ns" in properties:
@@ -236,9 +238,9 @@ class DanteDiscoveryMixin:
         if not (device.ipv4 and device.mac_address):
             return
 
-        if not device.dante_model:
+        if device.manufacturer_versions_record is None:
             await self.application._send_conmon_query_for_device(device, self.application.send_make_model_request)
-        if not device.dante_model_id:
+        if device.platform_versions_record is None:
             await self.application._send_conmon_query_for_device(device, self.application.send_dante_model_request)
             self._spawn_background(
                 self.state.retry_conmon_query(service.device_key),
