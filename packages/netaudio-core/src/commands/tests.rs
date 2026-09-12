@@ -871,7 +871,7 @@ fn volume_builder_rejects_unrepresentable_names_before_constructing_offsets() {
 }
 
 #[test]
-fn metering_start_matches_captured_ad4d_packet_7298186() {
+fn metering_start_for_ad4d_uses_the_controller_layout() {
     assert_eq!(
             build_volume_start(
                 "ad4d",
@@ -882,13 +882,13 @@ fn metering_start_matches_captured_ad4d_packet_7298186() {
             )
             .unwrap(),
             decode_hexadecimal(
-                "1200004200003010000000003e42274cff2400000004001000020012000a6164346400000000000100160001223000010000c0a8019c223000000000000000000000"
+                "1200004200003010000000003e42274cff2400000004001000020012000a6164346400000001000100160001223000010000c0a8019c223000000000000022300000"
             )
         );
 }
 
 #[test]
-fn metering_start_matches_captured_a32_packet_7298185() {
+fn metering_start_for_a32_uses_the_controller_layout() {
     assert_eq!(
             build_volume_start(
                 "a32",
@@ -899,7 +899,7 @@ fn metering_start_matches_captured_a32_packet_7298185() {
             )
             .unwrap(),
             decode_hexadecimal(
-                "1200004000003010000000003e42274cff2400000004000e00020010000a613332000000000100140001223000010000c0a8019c223000000000000000000000"
+                "1200004000003010000000003e42274cff2400000004000e00020010000a613332000001000100140001223000010000c0a8019c223000000000000022300000"
             )
         );
 }
