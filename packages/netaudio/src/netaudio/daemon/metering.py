@@ -22,7 +22,9 @@ logger = logging.getLogger("netaudio")
 CACHE_MAX_AGE = 2.0
 HISTORY_MAX_SAMPLES = 3600
 BROADCAST_INTERVAL = 0.05
-STREAM_STALE_SECONDS = 5.0
+METERING_ABANDON_SECONDS = 60.0
+METERING_KEEPALIVE_SECONDS = 4.0
+STREAM_RECOVERY_INTERVAL_SECONDS = 1.0
 
 
 class MeteringManager:
@@ -151,9 +153,10 @@ class MeteringManager:
             started = self._started.get(server_name)
             detailed = self._detailed_levels.get(server_name)
             if recover:
-                if not started or not detailed or detailed["timestamp"] < started[2]:
+                now = time.monotonic()
+                if not started or not detailed or now - detailed["timestamp"] > METERING_ABANDON_SECONDS:
                     return
-                if time.monotonic() - detailed["timestamp"] < STREAM_STALE_SECONDS:
+                if now - started[2] < METERING_KEEPALIVE_SECONDS:
                     return
             elif started:
                 return
@@ -237,7 +240,7 @@ class MeteringManager:
 
     async def _recovery_loop(self):
         while True:
-            await asyncio.sleep(STREAM_STALE_SECONDS)
+            await asyncio.sleep(STREAM_RECOVERY_INTERVAL_SECONDS)
             await self._recover_stale_streams()
 
     async def _recover_stale_streams(self):
