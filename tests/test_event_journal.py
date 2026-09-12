@@ -385,3 +385,19 @@ def test_device_adapter_uses_serializer_state_and_keeps_observation_errors():
         "device_error": "partial readback",
         "failed_queries": ["clock status"],
     }
+
+
+def test_partial_receiver_inventory_cannot_report_latency_recovery(tmp_path):
+    journal = MonitoringEventJournal(tmp_path / "events.json")
+    value = snapshot()
+    value["receiver_flow_completeness"] = "complete"
+    observe(journal, value, 0)
+    value["receiver_flow_connection_health"]["flows"][0]["current_latency_nanoseconds"] = 950_000
+    observe(journal, value, 1)
+    partial = deepcopy(value)
+    partial["receiver_flow_completeness"] = "partial"
+    partial["receiver_flow_status_page"] = {"page_disposition": "more_pages", "result_code": 0x8112, "flows": []}
+    partial["receiver_flow_connection_health"]["flows"][0]["current_latency_nanoseconds"] = 100_000
+    generated = observe(journal, partial, 2)
+    assert all(event.kind is not MonitoringEventKind.RECEIVER_FLOW_LATENCY_RECOVERED for event in generated)
+    assert partial["receiver_flow_status_page"]["result_code"] == 0x8112

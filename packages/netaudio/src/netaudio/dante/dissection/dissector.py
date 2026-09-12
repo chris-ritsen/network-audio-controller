@@ -204,7 +204,7 @@ def core_parse_kind(header: dict) -> tuple[str, bool] | None:
     return (kind, False)
 
 
-def _core_fields(payload: bytes, header: dict) -> tuple[str | None, dict | None]:
+def _core_fields(payload: bytes, header: dict, request: bytes | None) -> tuple[str | None, dict | None]:
     from netaudio import core
 
     parse_kind = core_parse_kind(header)
@@ -213,7 +213,17 @@ def _core_fields(payload: bytes, header: dict) -> tuple[str | None, dict | None]
     kind, paged = parse_kind
     try:
         if paged:
-            parsed = core.parse_page(kind, payload, 1)
+            if request is not None:
+                request_header = parse_packet_header(request)
+                if (
+                    request_header is None
+                    or request_header["result_code"] != RESULT_CODE_REQUEST
+                    or any(request_header[key] != header[key] for key in ("protocol_id", "opcode", "transaction_id"))
+                ):
+                    return kind, None
+            starting_channel = core.parse_response("channel_page_start", request if request is not None else payload)
+            parsed = [] if starting_channel is None else core.parse_page(kind, payload, starting_channel)
+            parsed = {"records": parsed, "starting_channel": starting_channel}
         else:
             parsed = core.parse_response(kind, payload)
     except core.NetaudioCoreError as exception:
@@ -229,6 +239,7 @@ def dissect(
     facts: list[dict] | None = None,
     facts_path: Path | None = None,
     direction: str | None = None,
+    request: bytes | None = None,
 ) -> DissectedPacket:
     if facts is None:
         facts = _load_facts_for_packet(payload, facts_path)
@@ -259,7 +270,7 @@ def dissect(
 
     header = parse_packet_header(payload)
     if header is not None:
-        result.core_kind, result.core_fields = _core_fields(payload, header)
+        result.core_kind, result.core_fields = _core_fields(payload, header, request)
         protocol_label = PROTOCOL_LABELS.get(header["protocol_id"], f"0x{header['protocol_id']:04X}")
         if header["length"] != len(payload):
             result.header_summary = (

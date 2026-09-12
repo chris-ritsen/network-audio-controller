@@ -119,3 +119,62 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 14)), services=services)
     with pytest.raises(RuntimeError, match="result 0x0030"):
         await DanteApplication().query_modern_arc_receiver_flow_status(rejected_device)
+
+
+def test_issue_59_partial_receiver_flow_records_and_result_survive_ffi():
+    from tests.issue_59_fixtures import packet
+
+    response = packet("receiver_flow_partial.bin")
+    page = core.parse_response("modern_arc_receiver_flow_status_page", response)
+    assert len(response) == 1400
+    assert page["result_code"] == 0x8112
+    assert page["page_disposition"] == "more_pages"
+    assert page["maximum_flow_slots"] == 16
+    assert page["reported_flow_count"] == len(page["flows"]) == 15
+    assert page["raw_body_hexadecimal"] == response[10:].hex()
+    complete = bytearray(response)
+    complete[8:10] = (1).to_bytes(2, "big")
+    completed = core.parse_response("modern_arc_receiver_flow_status_page", bytes(complete))
+    assert completed["page_disposition"] == "complete"
+    assert completed["result_code"] == 1
+    assert completed["flows"] == page["flows"]
+    for code in (0, 2, 0x30, 65535):
+        complete[8:10] = code.to_bytes(2, "big")
+        with pytest.raises(core.NetaudioCoreError):
+            core.parse_response("modern_arc_receiver_flow_status_page", bytes(complete))
+
+
+@pytest.mark.asyncio
+async def test_partial_flow_query_does_not_guess_a_continuation_request():
+    from tests.issue_59_fixtures import packet
+
+    device = SimpleNamespace(
+        execute=AsyncMock(return_value=packet("receiver_flow_partial.bin")),
+        services={"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}},
+    )
+    page = await DanteApplication().query_modern_arc_receiver_flow_status(device)
+    assert page["page_disposition"] == "more_pages"
+    assert len(page["flows"]) == 15
+    device.execute.assert_awaited_once_with({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809})
+
+
+@pytest.mark.asyncio
+async def test_partial_flow_readback_is_unavailable_for_effective_state_decisions(monkeypatch):
+    from netaudio.dante import flows
+    from netaudio.dante.device import DanteDevice
+    from tests.issue_59_fixtures import packet
+
+    device = DanteDevice(server_name="receiver.local.")
+    page = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
+    device._app = SimpleNamespace(query_modern_arc_receiver_flow_status=AsyncMock(return_value=page))
+    fallback = AsyncMock()
+    monkeypatch.setattr(flows, "query_receiver_flow_inventory", fallback)
+    assert await flows.query_preferred_receiver_flow_inventory(device) is None
+    assert device.receiver_flow_completeness == "partial"
+    assert device.receiver_flow_status_page == page
+    diagnostic = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
+    assert len(diagnostic["flows"]) == 15
+    assert diagnostic["page_disposition"] == "more_pages"
+    assert diagnostic["result_code"] == 0x8112
+    assert diagnostic["status_page"] == page
+    fallback.assert_not_awaited()

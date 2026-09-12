@@ -159,11 +159,13 @@ def _flow_map(health: Any) -> dict[str, dict[str, Any]]:
 
 
 def _configured_flow_latency(snapshot: Mapping[str, Any], health_flow: Mapping[str, Any]) -> int | None:
+    if snapshot.get("receiver_flow_completeness") in ("partial", "unknown"):
+        return None
     slot = health_flow.get("receiver_flow_slot")
     receiver_flows = snapshot.get("receiver_flows")
     if _positive_integer(slot) and isinstance(receiver_flows, list):
         for flow in receiver_flows:
-            if not isinstance(flow, dict) or flow.get("flow_number") != slot:
+            if not isinstance(flow, dict) or flow.get("global_flow_id", flow.get("flow_number")) != slot:
                 continue
             configured = flow.get("latency_nanoseconds")
             if _positive_integer(configured):

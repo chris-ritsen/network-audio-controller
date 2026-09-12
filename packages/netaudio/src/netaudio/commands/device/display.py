@@ -679,7 +679,10 @@ def _device_show_rows(device) -> list[list[str]]:
     rows.extend(_device_audio_rows(device))
     rows.extend(_device_sample_rate_pullup_rows(device))
     rows.extend(_device_transmitter_flow_rows(device))
-    rows.extend(_receiver_flow_setting_rows(device.receiver_flows))
+    if device.receiver_flow_completeness == "partial":
+        rows.append(["Receiver Flows", "Partial — complete inventory unavailable"])
+    elif device.receiver_flow_completeness == "complete":
+        rows.extend(_receiver_flow_setting_rows(device.receiver_flows))
     rows.extend(_connection_health_rows(device.receiver_flow_connection_health))
     rows.extend(_device_control_rows(device))
     rows.extend(_device_clock_rows(device))

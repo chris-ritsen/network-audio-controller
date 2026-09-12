@@ -211,7 +211,9 @@ impl From<ClientError> for NetaudioStatus {
             ClientError::InvalidAddress => NetaudioStatus::InvalidAddress,
             ClientError::InvalidLength => NetaudioStatus::InvalidLength,
             ClientError::Io(_) => NetaudioStatus::IoError,
-            ClientError::MalformedResponse => NetaudioStatus::MalformedResponse,
+            ClientError::MalformedResponse | ClientError::MalformedResponseAt(_) => {
+                NetaudioStatus::MalformedResponse
+            }
             ClientError::Protocol(protocol_error) => protocol_error.into(),
             ClientError::Spec(spec_error) => spec_error.into(),
             ClientError::Timeout => NetaudioStatus::Timeout,

@@ -449,6 +449,7 @@ pub struct ModernArcReceiverFlowStatusPage {
     pub transaction_id: u16,
     pub opcode: u16,
     pub result_code: u16,
+    pub page_disposition: ModernArcPageDisposition,
     pub maximum_flow_slots: u8,
     pub reported_flow_count: u8,
     pub flows: Vec<ModernArcReceiverFlowStatus>,
@@ -481,6 +482,8 @@ pub struct ReceiverFlow {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReceiverFlowPage {
+    pub result_code: u16,
+    pub page_disposition: ModernArcPageDisposition,
     pub maximum_flow_slots: u8,
     pub flows: Vec<ReceiverFlow>,
 }

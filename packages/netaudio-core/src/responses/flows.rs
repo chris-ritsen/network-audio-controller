@@ -497,6 +497,12 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
     }
 
     Some(ReceiverFlowPage {
+        result_code: envelope.result_code,
+        page_disposition: if envelope.result_code == RESULT_CODE_SUCCESS {
+            ModernArcPageDisposition::Complete
+        } else {
+            ModernArcPageDisposition::MorePages
+        },
         maximum_flow_slots: u8::try_from(maximum_records).ok()?,
         flows,
     })
