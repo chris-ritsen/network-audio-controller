@@ -1117,3 +1117,33 @@ async def test_device_update_does_not_serialize_the_whole_inventory(monkeypatch)
     server.sse_clients.clear()
     await server._on_device_event(DanteEvent(type=EventType.DEVICE_UPDATED, server_name="43"))
     assert serialized == ["42"]
+
+
+@pytest.mark.asyncio
+async def test_partial_receiver_inventory_metadata_reaches_http_and_sse():
+    from netaudio import core
+    from netaudio.dante.device import DanteDevice
+    from netaudio.daemon.http.sse_view import SseDeviceView
+    from tests.issue_59_fixtures import packet
+
+    device = DanteDevice(server_name="receiver.local.")
+    device.name = "Receiver"
+    device.apply_receiver_flow_status_page(
+        {"result_code": 1, "page_disposition": "complete", "flows": [{"global_flow_id": i} for i in range(1, 17)]}
+    )
+    partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
+    device.apply_receiver_flow_status_page(partial)
+    server = make_http_server(devices={device.server_name: device})
+    status, payload = await get(server, "/devices")
+    assert status == 200
+    record = payload[device.server_name]
+    assert record["receiver_flow_completeness"] == "partial"
+    assert record["rx_flow_count"] == len(record["receiver_flows"]) == 16
+    assert record["receiver_flow_status_page"]["result_code"] == 0x8112
+    assert len(record["receiver_flow_status_page"]["flows"]) == 15
+    view = SseDeviceView(patches=True, telemetry=False)
+    view.initial_snapshot({"event": "snapshot", "devices": {device.server_name: {"name": "Receiver"}}})
+    [patch] = view.events_for({"event": "device_updated", "server_name": device.server_name, "device": record})
+    assert patch["changed"]["receiver_flow_completeness"] == "partial"
+    assert patch["changed"]["receiver_flow_status_page"]["result_code"] == 0x8112
+    assert len(patch["changed"]["receiver_flows"]) == 16

@@ -172,10 +172,10 @@ def test_rx_page_gap_and_bad_pointer_do_not_return_partial_records():
 def test_tx_page_gap_and_group_change_do_not_return_partial_records():
     gap = bytearray(TX_INFO_PAGE)
     gap[20:22] = (3).to_bytes(2, "big")
-    with pytest.raises(core.NetaudioCoreError, match="malformed response"):
+    with pytest.raises(core.NetaudioCoreError, match="malformed binary response"):
         core.parse_page("tx_info", bytes(gap), 1)
 
     group_change = bytearray(TX_INFO_PAGE)
     group_change[24:26] = (0x1234).to_bytes(2, "big")
-    with pytest.raises(core.NetaudioCoreError, match="malformed response"):
+    with pytest.raises(core.NetaudioCoreError, match="malformed binary response"):
         core.parse_page("tx_info", bytes(group_change), 1)

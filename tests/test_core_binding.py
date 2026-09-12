@@ -128,3 +128,45 @@ def test_require_reports_missing_library_without_io_error_status(monkeypatch):
     assert "ABI-incompatible" not in message
     assert "make core" in message
     assert f"{missing}: not found" in message
+
+
+@pytest.mark.parametrize(
+    ("status", "category", "label"),
+    [
+        (10, "binary_response", "malformed binary response"),
+        (8, "transport", "io error"),
+        (9, "transport", "device did not respond"),
+        (11, "api_serialization", "FFI/API serialization failure"),
+        (13, "json_input", "invalid command json"),
+    ],
+)
+def test_core_errors_distinguish_binary_transport_and_serialization(monkeypatch, status, category, label):
+    monkeypatch.setattr(binding, "last_error_message", lambda: "")
+    error = binding.NetaudioCoreError(status, "transmitter names")
+    assert error.category == category
+    assert error.context == "transmitter names"
+    assert label in str(error)
+    assert "malformed JSON" not in str(error)
+
+
+@pytest.mark.parametrize("payload", [b"{", b"not JSON", b"\xff"])
+def test_invalid_ffi_json_has_a_distinct_decoding_error(payload):
+    with pytest.raises(binding.NetaudioCoreJsonError, match="JSON decoding failed") as caught:
+        binding._decode_json_output(payload, "test getter")
+    assert caught.value.category == "json_decoding"
+    assert caught.value.context == "test getter"
+    assert repr(payload) not in str(caught.value)
+
+
+def test_invalid_command_object_is_a_json_encoding_error():
+    with pytest.raises(binding.NetaudioCoreJsonError, match="JSON encoding failed") as caught:
+        binding._encode_command_spec({"command": object()})
+    assert caught.value.category == "json_encoding"
+
+
+def test_exact_issue_59_names_parse_through_python_ffi():
+    from tests.issue_59_fixtures import packet
+
+    data = packet("transmitter_names.bin")
+    assert len(data) == 199
+    assert binding.parse_page("tx_friendly", data, 1) == [[number, f"TX {number}"] for number in range(1, 17)]

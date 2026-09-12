@@ -383,20 +383,18 @@ class DanteStateService:
             try:
                 flow_inventory = None
                 if self._readback_allowed(device, "receiver flows"):
-                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
                     if flow_inventory is None:
                         self._readback_failed(device, "receiver flows")
                         logger.warning(f"Receiver flow inventory unavailable for {server_name}")
                 if flow_inventory is not None:
                     flow_records = flow_inventory.get("flows")
                     if isinstance(flow_records, list):
-                        self._readback_succeeded(device, "receiver flows")
-                        device.apply_receiver_flow_status_page(
-                            {
-                                "reported_flow_count": len(flow_records),
-                                "flows": flow_records,
-                            }
-                        )
+                        device.apply_receiver_flow_status_page(flow_inventory)
+                        if device.receiver_flow_completeness == "complete":
+                            self._readback_succeeded(device, "receiver flows")
+                        else:
+                            self._readback_failed(device, "receiver flows")
                     else:
                         self._readback_failed(device, "receiver flows")
                         logger.warning(f"Malformed receiver flow inventory for {server_name}")

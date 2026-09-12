@@ -196,11 +196,17 @@ def flow_apply(
 
 async def run_receiver_flow_list(application, devices) -> None:
     device, arc_port = _selected_device(devices)
-    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
     if flow_inventory is None:
         typer.echo("Error: failed to query receiver flows.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
     receiver_flows = flow_inventory["flows"]
+    complete = flow_inventory.get("page_disposition") == "complete"
+    if not complete:
+        typer.echo(
+            f"Partial receiver-flow inventory: {len(receiver_flows)} flows returned; remaining flows unavailable.",
+            err=True,
+        )
     headers = [
         "Slot",
         "Type",
@@ -214,7 +220,11 @@ async def run_receiver_flow_list(application, devices) -> None:
         "Latency",
     ]
 
-    empty_message = f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
+    empty_message = (
+        f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
+        if complete
+        else "Receiver-flow inventory unavailable."
+    )
 
     rows = []
     for receiver_flow in receiver_flows:
@@ -225,18 +235,19 @@ async def run_receiver_flow_list(application, devices) -> None:
                 for receiver_channel_numbers in channel_lists
             )
         else:
-            descriptor = receiver_flow.get("receiver_mapping_descriptor_hexadecimal")
-            receiver_channel_mapping = f"raw {descriptor}" if descriptor else "unknown"
+            receiver_channel_mapping = "unknown"
         subscription_status_code = receiver_flow.get("subscription_status_code")
         if subscription_status_code is not None:
             status_display = str(subscription_status_entry(subscription_status_code)["label"])
         else:
-            offset_62_word = receiver_flow.get("status_code_at_record_offset_62")
-            status_display = f"raw 0x{offset_62_word:04X}" if offset_62_word is not None else "unknown"
+            status_display = "unknown"
+        flow_type = receiver_flow["flow_type"]
+        if not flow_type or flow_type.startswith("0x"):
+            flow_type = "unknown"
         rows.append(
             [
                 str(receiver_flow["flow_number"]),
-                receiver_flow["flow_type"] or "unknown",
+                flow_type,
                 receiver_channel_mapping,
                 status_display,
                 receiver_flow["destination_internet_protocol_version_four_address"],

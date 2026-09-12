@@ -140,6 +140,11 @@ has no verified DDM transport for them.
 
 ### Documentation
 
+Receiver flow queries retain partial replies and identify them as incomplete. The
+last complete inventory remains available, but a partial readback cannot confirm
+missing flows or completed changes. Automatic retrieval of receiver-flow
+continuation pages is not yet supported.
+
 - [External RTP discovery and interface statistics](docs/external-rtp-and-interface-statistics.md)
 - [Monitoring event journal](docs/monitoring-event-journal.md)
 - [Transmit-flow lifecycle](docs/transmit-flow-lifecycle.md)

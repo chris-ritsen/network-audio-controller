@@ -435,6 +435,7 @@ def dissect_and_render(
     color: bool | None = None,
     icons: bool | None = None,
     direction: str | None = None,
+    request: bytes | None = None,
 ) -> str:
     if color is None:
         from netaudio.common.app_config import settings as app_settings
@@ -444,7 +445,7 @@ def dissect_and_render(
         icons = _resolve_icons_setting()
     from netaudio.dante.dissection.dissector import dissect
 
-    dissected = dissect(payload, facts=facts, facts_path=facts_path, direction=direction)
+    dissected = dissect(payload, facts=facts, facts_path=facts_path, direction=direction, request=request)
     return render_dissection(
         dissected, indent=indent, show_unknown_hexdump=show_unknown_hexdump, color=color, icons=icons
     )
