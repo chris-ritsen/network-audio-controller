@@ -32,6 +32,7 @@ module netaudio_core {
 MODULEMAP
 
 cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios
+cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios-macabi
 cargo build --release --manifest-path "$crate/Cargo.toml" --target aarch64-apple-ios-sim
 
 rm -rf "$root/dist/netaudio_core.xcframework" "$root/dist/netaudio_core.xcframework.zip"
@@ -39,6 +40,7 @@ mkdir -p "$root/dist"
 
 xcodebuild -create-xcframework \
     -library "$crate/target/aarch64-apple-ios/release/libnetaudio_core.a" -headers "$crate/include" \
+    -library "$crate/target/aarch64-apple-ios-macabi/release/libnetaudio_core.a" -headers "$crate/include" \
     -library "$crate/target/aarch64-apple-ios-sim/release/libnetaudio_core.a" -headers "$crate/include" \
     -output "$root/dist/netaudio_core.xcframework"
 
@@ -53,6 +55,7 @@ fi
 cp "$root/LICENSE" "$framework_path/LICENSE"
 
 device_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64/libnetaudio_core.a" | awk '{print $1}')"
+mac_catalyst_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64-maccatalyst/libnetaudio_core.a" | awk '{print $1}')"
 simulator_library_checksum="$(shasum -a 256 "$framework_path/ios-arm64-simulator/libnetaudio_core.a" | awk '{print $1}')"
 framework_manifest_checksum="$(shasum -a 256 "$framework_path/Info.plist" | awk '{print $1}')"
 header_checksum="$(shasum -a 256 "$framework_path/ios-arm64/Headers/netaudio_core.h" | awk '{print $1}')"
@@ -73,6 +76,7 @@ cat > "$framework_path/PROVENANCE.md" <<EOF
 | Artifact | SHA-256 |
 | --- | --- |
 | \`ios-arm64/libnetaudio_core.a\` | \`$device_library_checksum\` |
+| \`ios-arm64-maccatalyst/libnetaudio_core.a\` | \`$mac_catalyst_library_checksum\` |
 | \`ios-arm64-simulator/libnetaudio_core.a\` | \`$simulator_library_checksum\` |
 | \`Info.plist\` | \`$framework_manifest_checksum\` |
 | \`netaudio_core.h\` | \`$header_checksum\` |
