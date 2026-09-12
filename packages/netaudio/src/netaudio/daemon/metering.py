@@ -22,7 +22,8 @@ logger = logging.getLogger("netaudio")
 CACHE_MAX_AGE = 2.0
 HISTORY_MAX_SAMPLES = 3600
 BROADCAST_INTERVAL = 0.05
-STREAM_STALE_SECONDS = 5.0
+STREAM_RECOVERY_INTERVAL_SECONDS = 1.0
+STREAM_STALE_SECONDS = 1.5
 
 
 class MeteringManager:
@@ -237,7 +238,7 @@ class MeteringManager:
 
     async def _recovery_loop(self):
         while True:
-            await asyncio.sleep(STREAM_STALE_SECONDS)
+            await asyncio.sleep(STREAM_RECOVERY_INTERVAL_SECONDS)
             await self._recover_stale_streams()
 
     async def _recover_stale_streams(self):
