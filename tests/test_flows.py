@@ -1,8 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from netaudio import core
 from netaudio.dante import flows
-from netaudio.dante.const import RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED
+from netaudio.dante.const import RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED, SERVICE_ARC
 
 
 @pytest.mark.asyncio
@@ -146,6 +148,25 @@ async def test_preferred_inventory_falls_back_to_mutation_protocol(monkeypatch):
     assert queried == [0x2809, 0x2729]
     assert inventory["flow_protocol_id"] == 0x2729
     assert inventory["flows"][0]["flow_number"] == 32
+
+
+@pytest.mark.asyncio
+async def test_preferred_inventory_for_legacy_advertised_device_uses_settings_status_then_mutation(monkeypatch):
+    queried = []
+
+    async def query(device_ip, arc_port, flow_protocol_id, device=None):
+        queried.append(flow_protocol_id)
+        if flow_protocol_id == 0x2809:
+            return None
+        return {"max_flow_slots": 32, "flows": []}
+
+    device = SimpleNamespace(services={"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.41"}}})
+    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+
+    inventory = await flows.query_preferred_tx_flow_inventory("192.0.2.10", 4440, 0x2729, device=device)
+
+    assert queried == [0x2809, 0x2729]
+    assert inventory["flow_protocol_id"] == 0x2729
 
 
 @pytest.mark.parametrize("identifier", ["flow_number", "global_flow_id"])
