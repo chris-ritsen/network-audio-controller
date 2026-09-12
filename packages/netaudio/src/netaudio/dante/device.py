@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import time
+from copy import deepcopy
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.channel import DanteChannel
@@ -114,6 +115,8 @@ class DanteDevice:
         self.rx_flow_count: int | None = None
         self.receiver_flow_latency_nanoseconds: int | None = None
         self.receiver_flows: list[dict] | None = None
+        self.receiver_flow_completeness = "unknown"
+        self.receiver_flow_status_page: dict | None = None
         self.flow_protocol_id: int | None = None
         self.media_types: list[str] | None = None
         self.receiver_channel_name_protocol_identifier: int | None = None
@@ -388,7 +391,29 @@ class DanteDevice:
         return tx_channels
 
     def apply_receiver_flow_status_page(self, page: dict) -> None:
-        flows = [dict(flow) for flow in page.get("flows") or [] if isinstance(flow, dict)]
+        self.receiver_flow_status_page = deepcopy(page)
+        disposition = page.get("page_disposition")
+        self.receiver_flow_completeness = (
+            {
+                "complete": "complete",
+                "more_pages": "partial",
+            }.get(disposition, "unknown")
+            if isinstance(disposition, str)
+            else "unknown"
+        )
+        if self.receiver_flow_completeness != "complete" or page.get("result_code") != 1:
+            if self.receiver_flow_completeness == "complete":
+                self.receiver_flow_completeness = "unknown"
+            return
+        records = page.get("flows")
+        if (
+            not isinstance(records, list)
+            or not all(isinstance(flow, dict) for flow in records)
+            or page.get("reported_flow_count", len(records)) != len(records)
+        ):
+            self.receiver_flow_completeness = "unknown"
+            return
+        flows = [dict(flow) for flow in records]
         self.receiver_flows = flows
         reported_flow_count = page.get("reported_flow_count")
         if isinstance(reported_flow_count, int):

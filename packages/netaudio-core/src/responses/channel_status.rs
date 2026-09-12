@@ -392,8 +392,13 @@ pub fn parse_modern_arc_receiver_flow_status_page(
     let envelope = validate_response_envelope(
         response,
         &modern_arc_protocol_opcodes(OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809),
-        &[RESULT_CODE_SUCCESS],
+        &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
+    if envelope.result_code == crate::protocol::RESULT_CODE_MORE_PAGES
+        && envelope.protocol_id != PROTOCOL_ARC_2809
+    {
+        return None;
+    }
     let body = envelope.body;
     if body.len() < 8 {
         return None;
@@ -402,6 +407,9 @@ pub fn parse_modern_arc_receiver_flow_status_page(
     let maximum_flow_slots = *body.get(6)?;
     let reported_flow_count = *body.get(7)?;
     if !(1..=32).contains(&maximum_flow_slots) || reported_flow_count > maximum_flow_slots {
+        return None;
+    }
+    if reported_flow_count == 0 && envelope.result_code != RESULT_CODE_SUCCESS {
         return None;
     }
 
@@ -434,6 +442,7 @@ pub fn parse_modern_arc_receiver_flow_status_page(
         transaction_id: envelope.transaction_id,
         opcode: envelope.opcode,
         result_code: envelope.result_code,
+        page_disposition: modern_arc_page_disposition(envelope.result_code)?,
         maximum_flow_slots,
         reported_flow_count,
         flows,

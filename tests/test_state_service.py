@@ -297,6 +297,8 @@ class TestRoutingNotifications:
         query = AsyncMock(
             return_value={
                 "maximum_flow_slots": 16,
+                "page_disposition": "complete",
+                "result_code": 1,
                 "flows": [
                     {
                         "flow_number": 1,
@@ -316,7 +318,7 @@ class TestRoutingNotifications:
         await state._on_receiver_flow_changed(event)
 
         device.get_rx_channels.assert_awaited_once()
-        query.assert_awaited_once_with(device)
+        query.assert_awaited_once_with(device, require_complete=False)
         assert device.rx_flow_count == 1
         assert device.receiver_flow_latency_nanoseconds == 1000000
         assert device.receiver_flows == [
@@ -985,7 +987,7 @@ async def test_unavailable_flow_inventory_backs_off_without_losing_channel_updat
     event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name=device.server_name)
     for _ in range(10):
         await state._on_receiver_flow_changed(event)
-    query.assert_awaited_once_with(device)
+    query.assert_awaited_once_with(device, require_complete=False)
     assert device.get_rx_channels.await_count == 10
 
 
@@ -1007,3 +1009,27 @@ async def test_clock_notification_does_not_refetch_channels_or_capabilities():
     state.fetch_device_controls.assert_not_awaited()
     application.probe_codec_status.assert_not_awaited()
     application.probe_encoding_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partial_receiver_flow_notification_keeps_last_complete_state(monkeypatch):
+    from netaudio import core
+    from netaudio.dante import flows
+    from tests.issue_59_fixtures import packet
+
+    device = make_device()
+    complete = {"result_code": 1, "page_disposition": "complete", "flows": [{"flow_number": i} for i in range(1, 17)]}
+    device.apply_receiver_flow_status_page(complete)
+    device.get_rx_channels = AsyncMock()
+    application = make_application({device.server_name: device})
+    state = DanteStateService(application)
+    partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
+    query = AsyncMock(return_value=flows.inventory_from_receiver_flow_status_page(partial))
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
+    event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name=device.server_name)
+    await state._on_receiver_flow_changed(event)
+    assert device.receiver_flow_completeness == "partial"
+    assert device.rx_flow_count == 16
+    assert device.receiver_flows == complete["flows"]
+    assert device.receiver_flow_status_page["result_code"] == 0x8112
+    assert len(device.receiver_flow_status_page["flows"]) == 15

@@ -293,15 +293,16 @@ class DanteApplication:
         return lock
 
     async def _capture_writer(self) -> None:
-        from netaudio._capture import _dissect, _record
+        from netaudio._capture import PacketDissector, _record
 
+        dissect_packet = PacketDissector()
         while True:
             item = await self._capture_queue.get()
             if item is None:
                 return
             payload, device_ip, port, direction, source_type = item
             if self._dissect:
-                _dissect(payload, device_ip, port, direction)
+                dissect_packet(payload, device_ip, port, direction)
             if self._packet_store is not None:
                 _record(self._packet_store, self.capture_session_id, payload, device_ip, port, direction, source_type)
 
@@ -804,7 +805,9 @@ class DanteApplication:
             if isinstance(result, Exception):
                 logger.debug(f"Bluetooth status unavailable: {result}")
 
-    async def _query_modern_arc_status_page(self, device, specification, description, page_kind):
+    async def _query_modern_arc_status_page(
+        self, device, specification, description, page_kind, *, allow_partial=False
+    ):
         from netaudio import core
 
         response = await device.execute(specification)
@@ -816,7 +819,7 @@ class DanteApplication:
             raise RuntimeError(f"{description} returned an invalid response") from exception
         if not isinstance(result_code, int):
             raise RuntimeError(f"{description} returned an invalid response")
-        if result_code != RESULT_CODE_SUCCESS:
+        if result_code != RESULT_CODE_SUCCESS and not (allow_partial and result_code == RESULT_CODE_SUCCESS_EXTENDED):
             raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
         return self._parse_status_page(response, description, page_kind)
 
@@ -1353,6 +1356,8 @@ class DanteApplication:
             device.transmitter_flows = None
             device.tx_flow_count = None
             device.receiver_flows = None
+            device.receiver_flow_completeness = "unknown"
+            device.receiver_flow_status_page = None
             device.rx_flow_count = None
             device.gain_device_type = None
             device.gain_levels = None
@@ -1736,6 +1741,7 @@ class DanteApplication:
             self.commands.query_modern_arc_receiver_flow_status(protocol_id),
             "receiver flow status query",
             "modern_arc_receiver_flow_status_page",
+            allow_partial=True,
         )
 
     async def query_modern_arc_transmitter_channel_status(self, device):

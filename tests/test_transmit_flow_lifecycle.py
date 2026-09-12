@@ -763,3 +763,11 @@ async def test_delete_correlated_target_change_is_inconsistent(monkeypatch):
     assert result.state is FlowLifecycleState.INCONSISTENT
     assert result.effective_state_confirmation is False
     assert result.comparison is not None and not result.comparison.matches
+
+
+def test_partial_inventory_cannot_supply_effective_flow_or_preset_comparison_state():
+    from tests.issue_59_fixtures import packet
+
+    partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
+    with pytest.raises(flow_lifecycle.flows.FlowValidationError, match="complete flow inventory is unavailable"):
+        flow_lifecycle.canonical_inventory(partial, 0x2809)

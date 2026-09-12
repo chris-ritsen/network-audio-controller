@@ -56,6 +56,7 @@ pub enum ClientError {
     InvalidLength,
     Io(io::Error),
     MalformedResponse,
+    MalformedResponseAt(&'static str),
     Protocol(NetaudioError),
     Spec(SpecError),
     Timeout,
@@ -73,7 +74,10 @@ impl std::fmt::Display for ClientError {
             ),
             ClientError::Io(error) => write!(formatter, "socket error: {error}"),
             ClientError::MalformedResponse => {
-                formatter.write_str("device reply did not parse as the expected response")
+                formatter.write_str("binary device reply did not parse as the expected response")
+            }
+            ClientError::MalformedResponseAt(stage) => {
+                write!(formatter, "binary device reply did not parse as {stage}")
             }
             ClientError::Protocol(error) => write!(formatter, "{error}"),
             ClientError::Spec(error) => write!(formatter, "{error}"),
@@ -440,7 +444,9 @@ impl Client {
             let message_id = self.next_message_id();
             let packet = commands::build_transmitter_names(tx_count, message_id)?;
             let response = self.request(&packet, message_id)?;
-            parse_tx_friendly_page(&response, 1).ok_or(ClientError::MalformedResponse)?
+            parse_tx_friendly_page(&response, 1).ok_or(ClientError::MalformedResponseAt(
+                "transmitter friendly names",
+            ))?
         };
 
         let mut channels = Vec::new();
@@ -1068,5 +1074,63 @@ mod tests {
             .unwrap();
         let mut buffer = [0u8; 64];
         assert!(device.socket.recv_from(&mut buffer).is_err());
+    }
+    #[test]
+    fn issue_59_device_loading_continues_after_transmitter_names() {
+        let device = FakeDevice::new();
+        let mut client = test_client(device.port());
+        let device_thread = thread::spawn(move || {
+            let (request, source) = device.receive();
+            device.reply_with_arc_body(
+                &request,
+                source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &[0, 0, 0, 16, 0, 16],
+            );
+            let (request, source) = device.receive();
+            assert_eq!(
+                &request[6..8],
+                &crate::protocol::OPCODE_TX_CHANNEL_NAMES.to_be_bytes()
+            );
+            let names = include_bytes!("../../../tests/fixtures/issue_59/transmitter_names.bin");
+            device.reply_with_arc_body(
+                &request,
+                source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &names[10..],
+            );
+            let (request, source) = device.receive();
+            assert_eq!(
+                &request[6..8],
+                &crate::protocol::OPCODE_TX_CHANNEL_INFO.to_be_bytes()
+            );
+            let mut body = vec![16, 16];
+            let mut strings = Vec::new();
+            for number in 1u16..=16 {
+                body.extend_from_slice(&number.to_be_bytes());
+                body.extend_from_slice(&[0, 0]);
+                body.extend_from_slice(&140u16.to_be_bytes());
+                body.extend_from_slice(&(156u16 + strings.len() as u16).to_be_bytes());
+                strings.extend_from_slice(format!("{number}\0").as_bytes());
+            }
+            body.extend_from_slice(&[0, 0, 0xBB, 0x80, 1, 1, 0, 24, 4, 0, 0, 24, 0, 24, 0, 14]);
+            body.extend_from_slice(&strings);
+            device.reply_with_arc_body(
+                &request,
+                source,
+                crate::protocol::RESULT_CODE_SUCCESS,
+                &body,
+            );
+        });
+        let channels = client.get_tx_channels().unwrap();
+        device_thread.join().unwrap();
+        assert_eq!(channels.len(), 16);
+        for channel in channels {
+            assert_eq!(channel.name, Some(channel.number.to_string()));
+            assert_eq!(
+                channel.friendly_name,
+                Some(format!("TX {}", channel.number))
+            );
+        }
     }
 }

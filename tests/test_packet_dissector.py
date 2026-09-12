@@ -2,6 +2,7 @@ import struct
 
 import pytest
 from netaudio.dante.dissection.dissector import dissect
+from tests.issue_59_fixtures import later_pages
 
 
 def _arc_packet(protocol_identifier: int, opcode: int, status: int, body: bytes = b"") -> bytes:
@@ -96,6 +97,7 @@ def test_rx_channels_response_renders_core_records():
 
     assert result.core_kind == "rx"
     assert result.core_fields == {
+        "starting_channel": 1,
         "records": [
             {
                 "number": 1,
@@ -105,7 +107,7 @@ def test_rx_channels_response_renders_core_records():
                 "tx_channel_name": "tx1",
                 "tx_device_name": "dev",
             }
-        ]
+        ],
     }
 
 
@@ -342,3 +344,74 @@ def test_disproved_facts_never_reach_runtime_labeling(tmp_path, monkeypatch):
         assert "conmon:0x03D7" not in labels
     finally:
         capture_packets._FACT_LABEL_CACHE = None
+
+
+@pytest.mark.parametrize("entry", later_pages())
+def test_issue_59_later_pages_use_request_context(entry):
+    from netaudio import core
+
+    response = bytes.fromhex(entry["response"])
+    request = bytes.fromhex(entry["request"])
+    result = dissect(response, facts=[], direction="response", request=request)
+    expected = core.parse_page(entry["kind"], response, entry["starting_channel"])
+    assert result.core_fields == {"records": expected, "starting_channel": entry["starting_channel"]}
+    standalone = dissect(response, facts=[], direction="response")
+    assert standalone.core_fields["records"] == expected
+    assert standalone.core_fields["starting_channel"] == (entry["starting_channel"] if expected else None)
+
+
+def test_dissection_keeps_consecutive_channel_checks():
+    from tests.issue_59_fixtures import later_pages
+
+    entry = later_pages()[0]
+    response = bytearray.fromhex(entry["response"])
+    response[32:34] = response[12:14]
+    assert dissect(bytes(response), facts=[], request=bytes.fromhex(entry["request"])).core_fields is None
+    assert dissect(bytes(response), facts=[]).core_fields is None
+
+
+def test_dissection_rejects_mismatched_request_transaction():
+    from tests.issue_59_fixtures import later_pages
+
+    entry = later_pages()[0]
+    request = bytearray.fromhex(entry["request"])
+    request[4:6] = (65535).to_bytes(2, "big")
+    assert dissect(bytes.fromhex(entry["response"]), facts=[], request=bytes(request)).core_fields is None
+
+
+def test_packet_dissection_correlates_by_peer_and_transaction(monkeypatch):
+    from netaudio import _capture
+    from netaudio import core
+
+    seen = []
+    monkeypatch.setattr(_capture, "_dissect", lambda *args, **kwargs: seen.append((args, kwargs)))
+    observer = _capture.PacketDissector()
+    entry = later_pages()[0]
+    request = bytes.fromhex(entry["request"])
+    response = bytes.fromhex(entry["response"])
+    observer(request, "192.0.2.1", 4440, "request")
+    observer(response, "192.0.2.2", 4440, "response")
+    assert seen[-1][1]["request"] is None
+    observer(response, "192.0.2.1", 4441, "response")
+    assert seen[-1][1]["request"] is None
+    unrelated = bytearray(response)
+    unrelated[4:6] = (65535).to_bytes(2, "big")
+    observer(bytes(unrelated), "192.0.2.1", 4440, "response")
+    assert seen[-1][1]["request"] is None
+    observer(response, "192.0.2.1", 4440, "response")
+    assert seen[-1][1]["request"] == request
+    assert not observer.requests
+    for transaction in range(1, 301):
+        request = core.build_command({"command": "receivers", "page": 1, "message_id": transaction})
+        observer(request, "192.0.2.1", 4440, "request")
+    assert len(observer.requests) == 256
+
+
+def test_empty_uncorrelated_page_does_not_claim_a_start():
+    from netaudio import core
+
+    response = _arc_packet(0x27FF, 0x3000, 1, b"\0\0")
+    assert core.parse_response("channel_page_start", response) is None
+    assert dissect(response, facts=[]).core_fields == {"records": [], "starting_channel": None}
+    request = core.build_command({"command": "receivers", "page": 3, "message_id": 0x1234})
+    assert dissect(response, facts=[], request=request).core_fields == {"records": [], "starting_channel": 49}

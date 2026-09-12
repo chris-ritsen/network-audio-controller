@@ -267,3 +267,28 @@ def test_cli_lists_current_issues_with_structured_output(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "subscription_failure" in result.stdout
     fetch.assert_awaited_once()
+
+
+def test_partial_receiver_inventory_cannot_resolve_an_absent_flow_issue():
+    engine = IssueEngine()
+    value = snapshot()
+    value["receiver_flow_completeness"] = "complete"
+    value["receiver_flows"] = [{"global_flow_id": number} for number in range(1, 17)]
+    value["receiver_flow_connection_health"] = {"flows": [{"receiver_flow_slot": 16, "healthy": False}]}
+    transitions = engine.observe_snapshot(value, timestamp="2026-09-12T12:00:00Z")
+    issue = next(
+        transition.current
+        for transition in transitions
+        if transition.current.kind is IssueKind.RECEIVER_HEALTH_DEGRADED
+    )
+    partial = deepcopy(value)
+    partial["receiver_flow_completeness"] = "partial"
+    partial["receiver_flow_status_page"] = {
+        "page_disposition": "more_pages",
+        "result_code": 0x8112,
+        "flows": value["receiver_flows"][:15],
+    }
+    partial["receiver_flow_connection_health"] = {"flows": []}
+    transitions = engine.observe_snapshot(partial, timestamp="2026-09-12T12:00:01Z")
+    assert all(transition.kind is not IssueTransitionKind.RESOLVED for transition in transitions)
+    assert any(current.issue_id == issue.issue_id for current in engine.list_issues(state="open"))

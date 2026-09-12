@@ -107,7 +107,9 @@ DEVICE_SCALAR_FIELDS = (
     "preferred_leader",
     "product_version",
     "receiver_flow_connection_health",
+    "receiver_flow_completeness",
     "receiver_flow_latency_nanoseconds",
+    "receiver_flow_status_page",
     "receiver_flows",
     "requested_sample_rate_pullup_raw_value",
     "routing_capacity_receive_channel_count",
@@ -265,6 +267,9 @@ class DanteDeviceSerializer:
             json_field_name = device_json_field_name(field_name)
             if json_field_name in data:
                 setattr(device, field_name, data[json_field_name])
+
+        if isinstance(device.receiver_flow_status_page, dict):
+            device.apply_receiver_flow_status_page(device.receiver_flow_status_page)
 
         if data.get("interface_reboot_required"):
             device.interface_reboot_required = True
