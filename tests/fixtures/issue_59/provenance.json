@@ -1,0 +1,60 @@
+{
+  "issue_url": "https://github.com/chris-ritsen/network-audio-controller/issues/59",
+  "attachment_url": "https://github.com/user-attachments/files/32145285/netaudio.log",
+  "attachment_sha256": "69eb4f25456585da95a5cc3057457346bd6dc22aa3de1284c5c2091a27300f6d",
+  "source_tool": "Reporter NetAudio 0.3.9 debug dissection log",
+  "extraction": "Bytes reconstructed from ANSI-formatted packet hex dumps; row offsets and declared dump lengths verified.",
+  "timestamp_timezone": "Not supplied by the reporter",
+  "allowed_evidence": [
+    "User-supplied protocol specification",
+    "Public issue and attachment",
+    "NetAudio source and permitted fixtures"
+  ],
+  "excluded_evidence": [
+    "Proprietary executables and firmware",
+    "Decompiled material and internal symbol catalogs",
+    "Private research artifacts"
+  ],
+  "evidence_class": "observed",
+  "scope": "Historical reporter packets and deterministic offline parser regressions; pointer-layout and partial-result semantics supplied by the implementation specification. No live verification.",
+  "packets": {
+    "transmitter_names.bin": {
+      "timestamp": "2026-09-12 16:49:51",
+      "log_line": 337,
+      "source_sha256": "68726bfdb44eb935d2f91bcdecfdd0c9f713a834fe98e8ced1f350066af8db4a",
+      "fixture_sha256": "68726bfdb44eb935d2f91bcdecfdd0c9f713a834fe98e8ced1f350066af8db4a",
+      "source_device_label": "Fetide",
+      "transformation": "None; all 199 bytes retained unchanged."
+    },
+    "receiver_flow_partial.bin": {
+      "timestamp": "2026-09-12 16:49:51",
+      "log_line": 5695,
+      "source_sha256": "097e8660ad17a0f8bdb9cf5643c2acfc10e56db089db2d5e30d897c17a479e90",
+      "fixture_sha256": "a61af08f81e409a115f404dbe0ce9e704509f6717f2564be4e908d5c57e33370",
+      "transformation": {
+        "method": "Replace each flow endpoint IPv4 address with documentation address 192.0.2.1; preserve lengths, offsets, pointers, counts, and result.",
+        "packet_offsets": [
+          132,
+          220,
+          308,
+          396,
+          484,
+          572,
+          660,
+          748,
+          836,
+          928,
+          1020,
+          1116,
+          1208,
+          1300,
+          1388
+        ]
+      }
+    },
+    "later_pages.json": {
+      "fixture_sha256": "ed93006571b5026093acc0705415116ad53b290da3c22496fbbe52aa6f9808f7",
+      "scope": "12 receiver and 4 transmitter-information responses with matching requests; per-packet digests and transformations are included in each entry."
+    }
+  }
+}

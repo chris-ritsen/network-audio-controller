@@ -41,8 +41,8 @@ _STATUS_NAMES = {
     7: "invalid address",
     8: "io error",
     9: "device did not respond",
-    10: "malformed response",
-    11: "serialization error",
+    10: "malformed binary response",
+    11: "FFI/API serialization failure",
     12: "subscription count must be 1-16",
     13: "invalid command json",
     14: "invalid mac",
@@ -80,11 +80,41 @@ _message_id_counter = 0
 class NetaudioCoreError(RuntimeError):
     def __init__(self, status: int, context: str = ""):
         self.status = status
+        self.context = context
+        self.category = {
+            8: "transport",
+            9: "transport",
+            10: "binary_response",
+            11: "api_serialization",
+            13: "json_input",
+        }.get(status, "api")
         self.detail = last_error_message()
         message = _STATUS_NAMES.get(status, f"status {status}")
         if self.detail:
             message = f"{message} ({self.detail})"
         super().__init__(f"{context}: {message}" if context else message)
+
+
+class NetaudioCoreJsonError(ValueError):
+    def __init__(self, category: str, context: str):
+        self.category = category
+        self.context = context
+        operation = "decoding" if category == "json_decoding" else "encoding"
+        super().__init__(f"{context}: JSON {operation} failed")
+
+
+def _decode_json_output(data: bytes, context: str):
+    try:
+        return json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exception:
+        raise NetaudioCoreJsonError("json_decoding", context) from exception
+
+
+def _encode_command_spec(spec: dict) -> bytes:
+    try:
+        return json.dumps(spec, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exception:
+        raise NetaudioCoreJsonError("json_encoding", "command specification") from exception
 
 
 class NetaudioCoreLibraryMissing(RuntimeError):
@@ -371,10 +401,10 @@ def next_message_id() -> int:
 
 def build_command(spec: dict) -> bytes:
     lib = require()
-    status, data = _call_buffer(lib.netaudio_build_command, json.dumps(spec).encode("utf-8"))
+    status, data = _call_buffer(lib.netaudio_build_command, _encode_command_spec(spec))
     if status == STATUS_INVALID_SEQUENCE and not any(key in spec for key in _MESSAGE_ID_KEYS):
         spec = {**spec, "message_id": next_message_id()}
-        status, data = _call_buffer(lib.netaudio_build_command, json.dumps(spec).encode("utf-8"))
+        status, data = _call_buffer(lib.netaudio_build_command, _encode_command_spec(spec))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"build_command {spec.get('command')}")
     return data
@@ -386,7 +416,7 @@ def parse_response(kind: str, data: bytes):
     status, out = _call_buffer(lib.netaudio_parse_response, kind.encode("utf-8"), in_buffer, len(data))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"parse_response {kind}")
-    return json.loads(out)
+    return _decode_json_output(out, f"parse {kind}")
 
 
 def parse_page(kind: str, data: bytes, starting_channel: int):
@@ -395,7 +425,7 @@ def parse_page(kind: str, data: bytes, starting_channel: int):
     status, out = _call_buffer(lib.netaudio_parse_page, kind.encode("utf-8"), in_buffer, len(data), starting_channel)
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"parse_page {kind}")
-    return json.loads(out)
+    return _decode_json_output(out, f"parse {kind}")
 
 
 def lock_token(pin: str, nonce: bytes, key: bytes) -> bytes:
@@ -629,7 +659,7 @@ class CoreClient:
         library = self._require_library()
         with self._native_lock:
             status = library.netaudio_client_execute(
-                self._handle, json.dumps(spec).encode("utf-8"), out, 65536, ctypes.byref(length)
+                self._handle, _encode_command_spec(spec), out, 65536, ctypes.byref(length)
             )
             data = bytes(out[: length.value])
         if status != STATUS_OK:
@@ -645,7 +675,7 @@ class CoreClient:
             data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
-        return json.loads(data)
+        return _decode_json_output(data, name)
 
     def get_rx_channels(self):
         return self._json_getter("netaudio_client_get_rx_channels_json")
@@ -665,7 +695,7 @@ class CoreClient:
             data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "netaudio_client_get_rx_inventory_json")
-        return json.loads(data)
+        return _decode_json_output(data, "receiver inventory")
 
     def get_tx_channels(self):
         return self._json_getter("netaudio_client_get_tx_channels_json")
@@ -751,7 +781,7 @@ class CoreClient:
             data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
-        return json.loads(data)
+        return _decode_json_output(data, "Rust API response")
 
 
 def subscription_status(code: int, receiver_status_code: int | None = None) -> dict:
@@ -764,7 +794,7 @@ def subscription_status(code: int, receiver_status_code: int | None = None) -> d
     )
     if status != STATUS_OK:
         raise NetaudioCoreError(status, "subscription_status")
-    return json.loads(data)
+    return _decode_json_output(data, "Rust API response")
 
 
 def subscription_state_for_identifier(identifier: str | None) -> str:
@@ -775,4 +805,4 @@ def subscription_state_for_identifier(identifier: str | None) -> str:
     status, data = _call_buffer(require().netaudio_subscription_state_for_identifier, identifier.encode("utf-8"))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, "subscription_state_for_identifier")
-    return json.loads(data)
+    return _decode_json_output(data, "Rust API response")

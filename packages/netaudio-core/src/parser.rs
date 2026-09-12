@@ -169,6 +169,45 @@ fn expected_channel_number(starting_channel: u16, index: usize) -> Option<u16> {
     starting_channel.checked_add(offset)
 }
 
+pub fn parse_channel_page_start(packet: &[u8]) -> Option<Option<u16>> {
+    let envelope = response_envelope(packet)?;
+    if !is_common_arc_protocol(envelope.protocol_id)
+        || ![
+            OPCODE_RX_CHANNELS,
+            OPCODE_TX_CHANNEL_INFO,
+            OPCODE_TX_CHANNEL_NAMES,
+        ]
+        .contains(&envelope.opcode)
+    {
+        return None;
+    }
+    if envelope.result_code == 0 {
+        if envelope.body.len() != 6 || read_u16(envelope.body, 0)? != 1 {
+            return None;
+        }
+        let start = read_u16(envelope.body, 2)?;
+        let end = read_u16(envelope.body, 4)?;
+        return (start != 0 && (end == 0 || end >= start)).then_some(Some(start));
+    }
+    if ![RESULT_CODE_SUCCESS, RESULT_CODE_MORE_PAGES].contains(&envelope.result_code) {
+        return None;
+    }
+    let offset = if envelope.opcode == OPCODE_TX_CHANNEL_NAMES {
+        4
+    } else {
+        2
+    };
+    let start = read_u16(envelope.body, offset).unwrap_or(0).max(1);
+    // A standalone dissection can infer its page origin, but still validates the full page.
+    let count = match envelope.opcode {
+        OPCODE_RX_CHANNELS => parse_rx_page(packet, start)?.len(),
+        OPCODE_TX_CHANNEL_INFO => parse_tx_info_page(packet, start)?.len(),
+        OPCODE_TX_CHANNEL_NAMES => parse_tx_friendly_page(packet, start)?.len(),
+        _ => return None,
+    };
+    Some((count != 0).then_some(start))
+}
+
 fn pointed_string(response: &[u8], pointer: u16, minimum_pointer: usize) -> Option<String> {
     if usize::from(pointer) < minimum_pointer {
         return None;
@@ -333,13 +372,13 @@ pub fn parse_tx_friendly_page(
     }
     let live_records_size = named_count.checked_mul(TX_FRIENDLY_RECORD_SIZE)?;
     let live_records_end = BODY_HEADER_SIZE.checked_add(live_records_size)?;
-    let padded_records_size = maximum_records.checked_mul(TX_RECORD_SIZE)?;
-    let padded_records_end = BODY_HEADER_SIZE.checked_add(padded_records_size)?;
-    body.get(..padded_records_end)?;
     if named_count == 0 {
+        let padded_records_size = maximum_records.checked_mul(TX_RECORD_SIZE)?;
+        let padded_records_end = BODY_HEADER_SIZE.checked_add(padded_records_size)?;
         return (body.len() == padded_records_end).then(Vec::new);
     }
-    let minimum_name_pointer = RESPONSE_HEADER_SIZE.checked_add(padded_records_end)?;
+    body.get(..live_records_end)?;
+    let minimum_name_pointer = RESPONSE_HEADER_SIZE.checked_add(live_records_end)?;
     names.reserve(named_count);
     let mut channel_numbers = HashSet::with_capacity(named_count);
     for index in 0..named_count {
@@ -353,7 +392,6 @@ pub fn parse_tx_friendly_page(
         let friendly_name = pointed_string(response, name_pointer, minimum_name_pointer)?;
         names.push((channel_number, friendly_name));
     }
-    body.get(live_records_end..padded_records_end)?;
     Some(names)
 }
 
@@ -850,5 +888,89 @@ mod tests {
             assert_eq!(parse_tx_info_page(&data, 1), None);
             assert_eq!(parse_tx_friendly_page(&data, 1), None);
         }
+    }
+    #[test]
+    fn issue_59_transmitter_names_use_live_six_byte_records() {
+        let response = include_bytes!("../../../tests/fixtures/issue_59/transmitter_names.bin");
+        assert_eq!(response.len(), 199);
+        let names = parse_tx_friendly_page(response, 1).unwrap();
+        assert_eq!(
+            names,
+            (1..=16)
+                .map(|number| (number, format!("TX {number}")))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(parse_channel_page_start(response), Some(Some(1)));
+    }
+
+    #[test]
+    fn issue_59_transmitter_names_reject_invalid_counts_channels_and_pointers() {
+        let original = include_bytes!("../../../tests/fixtures/issue_59/transmitter_names.bin");
+        for (offset, value) in [
+            (10, 0),
+            (10, 33),
+            (11, 17),
+            (14, 0),
+            (20, 0),
+            (20, 1),
+            (16, 107),
+            (16, 199),
+            (16, u16::MAX),
+        ] {
+            let mut response = original.to_vec();
+            if offset < 12 {
+                response[offset] = value as u8;
+            } else {
+                response[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+            }
+            assert_eq!(
+                parse_tx_friendly_page(&response, 1),
+                None,
+                "offset {offset}, value {value}"
+            );
+        }
+        for length in 0..original.len() {
+            let mut response = original[..length].to_vec();
+            if length >= 4 {
+                response[2..4].copy_from_slice(&(length as u16).to_be_bytes());
+            }
+            assert_eq!(
+                parse_tx_friendly_page(&response, 1),
+                None,
+                "length {length}"
+            );
+        }
+        let mut unterminated = original.to_vec();
+        *unterminated.last_mut().unwrap() = b'X';
+        assert_eq!(parse_tx_friendly_page(&unterminated, 1), None);
+    }
+
+    #[test]
+    fn issue_59_transmitter_names_accept_bounded_padding() {
+        let original = include_bytes!("../../../tests/fixtures/issue_59/transmitter_names.bin");
+        for padding in [0usize, 1, 4, 28, 64] {
+            let mut response = original[..108].to_vec();
+            response.resize(108 + padding, 0);
+            response.extend_from_slice(&original[112..]);
+            for index in 0..16 {
+                let offset = 16 + index * TX_FRIENDLY_RECORD_SIZE;
+                let pointer = read_u16(original, offset).unwrap() as usize - 4 + padding;
+                response[offset..offset + 2].copy_from_slice(&(pointer as u16).to_be_bytes());
+            }
+            let length = response.len() as u16;
+            response[2..4].copy_from_slice(&length.to_be_bytes());
+            assert_eq!(parse_tx_friendly_page(&response, 1).unwrap().len(), 16);
+        }
+    }
+
+    #[test]
+    fn uncorrelated_empty_channel_page_has_no_start() {
+        let mut response = vec![0u8; 12];
+        stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_SUCCESS);
+        assert_eq!(parse_channel_page_start(&response), Some(None));
+        assert_eq!(
+            parse_channel_page_start(&crate::commands::build_receivers(3, 7).unwrap()),
+            Some(Some(49))
+        );
     }
 }

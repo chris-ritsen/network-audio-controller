@@ -352,6 +352,8 @@ def test_empty_flow_inspect_preserves_canonical_structured_output(monkeypatch):
 
 
 RECEIVER_FLOW_INVENTORY = {
+    "page_disposition": "complete",
+    "result_code": 1,
     "maximum_flow_slots": 16,
     "flows": [
         {
@@ -375,7 +377,8 @@ def test_receiver_flow_list_preserves_structured_output(monkeypatch):
 
     application, devices, _ = _flow_context()
 
-    async def query(*_args):
+    async def query(*_args, require_complete):
+        assert require_complete is False
         return RECEIVER_FLOW_INVENTORY
 
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
@@ -392,7 +395,8 @@ def test_receiver_flow_list_displays_endpoint_type_and_port(monkeypatch):
 
     application, devices, _ = _flow_context()
 
-    async def query(*_args):
+    async def query(*_args, require_complete):
+        assert require_complete is False
         return RECEIVER_FLOW_INVENTORY
 
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)

@@ -221,6 +221,7 @@ def test_device_show_distinguishes_disconnected_bluetooth_from_unknown():
 
 def test_device_show_distinguishes_receiver_flow_setting_from_measured_latency():
     device = make_show_device()
+    device.receiver_flow_completeness = "complete"
     device.receiver_flows = [
         {
             "flow_number": 1,

@@ -501,11 +501,14 @@ def inventory_from_receiver_flow_status_page(page: dict) -> dict:
         )
     return {
         "maximum_flow_slots": page.get("maximum_flow_slots"),
+        "page_disposition": page.get("page_disposition", "unknown"),
+        "result_code": page.get("result_code"),
+        "status_page": page,
         "flows": receiver_flows,
     }
 
 
-async def query_preferred_receiver_flow_inventory(device) -> dict | None:
+async def query_preferred_receiver_flow_inventory(device, *, require_complete: bool = True) -> dict | None:
     application = device.application
     status_page = None
     if application is not None:
@@ -514,6 +517,11 @@ async def query_preferred_receiver_flow_inventory(device) -> dict | None:
         except RuntimeError:
             status_page = None
     if status_page is not None:
+        apply_page = getattr(device, "apply_receiver_flow_status_page", None)
+        if apply_page is not None:
+            apply_page(status_page)
+        if require_complete and status_page.get("page_disposition") != "complete":
+            return None
         return inventory_from_receiver_flow_status_page(status_page)
     if getattr(device, "requires_managed_control", False):
         return None

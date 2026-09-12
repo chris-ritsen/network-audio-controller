@@ -279,6 +279,9 @@ export function ReceiveSection({ device }) {
   const rows = receiveRows(device);
   return html`
     <div class="flex flex-col gap-4">
+      ${device.receiver_flow_completeness === "partial"
+        ? html`<${Notice}>Receiver flow inventory is incomplete.<//>`
+        : null}
       ${routing
         ? html`<${RoutePicker}
             receiver=${device}

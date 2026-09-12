@@ -209,12 +209,15 @@ def _flow_list_device():
 def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
     from typer.testing import CliRunner
 
+    from netaudio.cli import OutputFormat, state
     from netaudio.commands import flow as flow_commands
 
+    monkeypatch.setattr(state, "output_format", OutputFormat.plain)
     device = _flow_list_device()
 
-    async def query_inventory(queried_device):
+    async def query_inventory(queried_device, *, require_complete):
         assert queried_device is device
+        assert require_complete is False
         return {
             "flows": [
                 {
@@ -231,6 +234,8 @@ def test_receiver_flow_list_formats_latency_in_milliseconds(monkeypatch):
                 }
             ],
             "maximum_flow_slots": 2,
+            "page_disposition": "complete",
+            "result_code": 1,
         }
 
     monkeypatch.setattr(flow_commands, "_selected_device", lambda _devices: (device, 4440))

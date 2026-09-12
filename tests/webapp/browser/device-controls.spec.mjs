@@ -162,3 +162,16 @@ test("header controls are labeled and desktop sorting never shows the mobile dir
   const card = page.locator(".expandable-row").first();
   expect(await card.evaluate((node) => getComputedStyle(node).overflow)).toBe("hidden");
 });
+
+test("partial receiver-flow inventory is labeled without showing raw evidence", async ({ page }) => {
+  const inventory = structuredClone(deviceFixture);
+  const device = inventory["avio-bt-1.local."] || Object.values(inventory).find((entry) => entry.name === "avio-bt-1");
+  device.receiver_flow_completeness = "partial";
+  device.receiver_flow_status_page = { page_disposition: "more_pages", result_code: 33042,
+    reported_flow_count: 15, raw_body_hexadecimal: "feedbeef", flows: [] };
+  await serveWebapp(page, { devices: inventory });
+  await page.goto("http://netaudio.test/devices/avio-bt-1/receive");
+  await expect(page.getByText("Receiver flow inventory is incomplete.", { exact: true })).toBeVisible();
+  await expect(page.locator("#content")).not.toContainText("feedbeef");
+  await expect(page.locator("#content")).not.toContainText("33042");
+});

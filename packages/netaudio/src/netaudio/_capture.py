@@ -2,12 +2,35 @@ import asyncio
 import logging
 import sqlite3
 import struct
+from collections import OrderedDict
 
 from netaudio import core
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
+
+
+class PacketDissector:
+    def __init__(self):
+        self.requests = OrderedDict()
+
+    def __call__(self, payload, device_ip, port, direction):
+        from netaudio.dante.dissection.dissector import ARC_RESPONSE_PAGE_KINDS
+        from netaudio.dante.dissection.header import parse_packet_header
+
+        request = None
+        header = parse_packet_header(payload)
+        if header is not None and header["opcode"] in ARC_RESPONSE_PAGE_KINDS:
+            key = (device_ip, port, header["protocol_id"], header["opcode"], header["transaction_id"])
+            if direction == "request":
+                self.requests[key] = payload
+                self.requests.move_to_end(key)
+                if len(self.requests) > 256:
+                    self.requests.popitem(last=False)
+            elif direction == "response":
+                request = self.requests.pop(key, None)
+        _dissect(payload, device_ip, port, direction, request=request)
 
 
 def open_capture_session():
@@ -31,16 +54,17 @@ class CaptureObserver:
         self.store = store
         self.session_id = session_id
         self.dissect = dissect
+        self.packet_dissector = PacketDissector()
         self.buffer = []
 
     def __call__(self, packet, response, device_ip, port):
         self.buffer.append((packet, device_ip, port, "request", "netaudio_request"))
         if self.dissect:
-            _dissect(packet, device_ip, port, "request")
+            self.packet_dissector(packet, device_ip, port, "request")
         if response is not None:
             self.buffer.append((response, device_ip, port, "response", "netaudio_response"))
             if self.dissect:
-                _dissect(response, device_ip, port, "response")
+                self.packet_dissector(response, device_ip, port, "response")
 
     def flush(self):
         if not self.store:
@@ -74,14 +98,14 @@ def _record(store, session_id, payload, device_ip, port, direction, source_type)
         logger.warning(f"PacketStore error ({direction}): {exception}", exc_info=True)
 
 
-def _dissect(payload, device_ip, port, direction):
+def _dissect(payload, device_ip, port, direction, request=None):
     try:
         from netaudio.common.app_config import settings
         from netaudio.dante.dissection.rendering import dissect_and_render, format_dissect_label
 
         color = not settings.no_color
         label = format_dissect_label(direction, f"{device_ip}:{port}", color=color)
-        rendered = dissect_and_render(payload, indent="  ", color=color)
+        rendered = dissect_and_render(payload, indent="  ", color=color, direction=direction, request=request)
         logger.info(f"Dissect [{label}] {len(payload)}B:\n{rendered}")
     except (LookupError, ValueError, NetaudioCoreError, struct.error) as exception:
         logger.warning(f"Dissect error: {exception}", exc_info=True)

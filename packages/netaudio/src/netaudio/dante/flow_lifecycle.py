@@ -253,6 +253,8 @@ def plan_delete_transmit_flow(device, flow_id: int) -> FlowOperationPlan:
 
 
 def canonical_inventory(flow_inventory: dict, protocol_id: int) -> dict[str, Any]:
+    if "page_disposition" in flow_inventory and flow_inventory["page_disposition"] != "complete":
+        raise flows.FlowValidationError("complete flow inventory is unavailable", status=409)
     records = flow_inventory.get("flows")
     if not isinstance(records, list):
         raise flows.FlowValidationError("transmitter flow inventory is malformed", status=502)

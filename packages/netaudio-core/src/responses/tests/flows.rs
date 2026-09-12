@@ -175,6 +175,8 @@ fn receiver_flow_parser_accepts_authentic_empty_virtual_a32_response() {
     assert_eq!(
         parse_receiver_flow_page(&response),
         Some(ReceiverFlowPage {
+            result_code: RESULT_CODE_SUCCESS,
+            page_disposition: ModernArcPageDisposition::Complete,
             maximum_flow_slots: 16,
             flows: Vec::new(),
         })
@@ -1012,4 +1014,34 @@ fn modern_arc_280f_video_flow_pages_do_not_mislabel_the_format_as_audio() {
         rx.receiver_mapping_descriptor_hexadecimal,
         "0001000200000100"
     );
+}
+
+#[test]
+fn issue_59_receiver_flow_partial_page_preserves_result_and_disposition() {
+    let response =
+        include_bytes!("../../../../../tests/fixtures/issue_59/receiver_flow_partial.bin");
+    assert_eq!(response.len(), 1400);
+    let page = parse_modern_arc_receiver_flow_status_page(response).unwrap();
+    assert_eq!(page.result_code, crate::protocol::RESULT_CODE_MORE_PAGES);
+    assert_eq!(page.page_disposition, ModernArcPageDisposition::MorePages);
+    assert_eq!(page.maximum_flow_slots, 16);
+    assert_eq!(page.flows.len(), 15);
+    let mut complete = response.to_vec();
+    complete[8..10].copy_from_slice(&RESULT_CODE_SUCCESS.to_be_bytes());
+    let complete_page = parse_modern_arc_receiver_flow_status_page(&complete).unwrap();
+    assert_eq!(
+        complete_page.page_disposition,
+        ModernArcPageDisposition::Complete
+    );
+    assert_eq!(complete_page.flows, page.flows);
+    for result in [0, 2, 0x30, 0xffff] {
+        complete[8..10].copy_from_slice(&u16::to_be_bytes(result));
+        assert_eq!(parse_modern_arc_receiver_flow_status_page(&complete), None);
+    }
+    for length in 0..response.len() {
+        assert_eq!(
+            parse_modern_arc_receiver_flow_status_page(&response[..length]),
+            None
+        );
+    }
 }

@@ -10,6 +10,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             serialize_optional(kind, crate::parser::parse_channel_audio_metadata(bytes))
         }
         "channel_count" => serialize_optional(kind, crate::parser::parse_channel_count(bytes)),
+        "channel_page_start" => {
+            serialize_optional(kind, crate::parser::parse_channel_page_start(bytes))
+        }
         "clear_configuration_status" => {
             serialize_optional(kind, responses::parse_clear_configuration_status(bytes))
         }
