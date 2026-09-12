@@ -63,7 +63,7 @@ async def test_lock_device_uses_core_helper_without_trusting_acknowledgement_sta
 
     monkeypatch.setattr("netaudio.dante.application.core_lock_device", fake_core_lock_device)
 
-    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=False)
+    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=False, device_locking_supported=True)
     result = await DanteApplication().lock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True
@@ -80,7 +80,7 @@ async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_s
 
     monkeypatch.setattr("netaudio.dante.application.core_unlock_device", fake_core_unlock_device)
 
-    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=True)
+    device = SimpleNamespace(ipv4="192.0.2.10", _app=None, is_locked=True, device_locking_supported=True)
     result = await DanteApplication().unlock_device(device, "1234", b"x" * 32)
 
     assert result["success"] is True
@@ -90,7 +90,7 @@ async def test_unlock_device_uses_core_helper_without_trusting_acknowledgement_s
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["lock_device", "unlock_device"])
 async def test_application_lock_operations_reject_devices_without_an_address(operation):
-    device = SimpleNamespace(ipv4=None)
+    device = SimpleNamespace(ipv4=None, is_locked=False, device_locking_supported=True)
 
     with pytest.raises(RuntimeError, match="no control address"):
         await getattr(DanteApplication(), operation)(device, "1234", b"x" * 32)

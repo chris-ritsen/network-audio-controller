@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "evidence_class": "inferred",
+  "claim_scope": "Strict SAP version 1 framing and SDP field normalization.",
+  "allowed_evidence": [
+    "Sanitized implementation specification supplied for this task on 2026-09-12.",
+    "Public SAP and SDP protocol syntax."
+  ],
+  "excluded_evidence": [
+    "Dante Controller executables",
+    "firmware",
+    "process memory",
+    "natural SAP announcements"
+  ],
+  "transformation": "Constructed a minimal deterministic announcement with an eight-byte authentication field, two IPv4 connection addresses, linear PCM rtpmap, decimal packet time, media clock, PTP reference, direction, and an origin marker.",
+  "limitations": "This synthetic packet does not establish natural announcement compatibility, network discovery, receiver subscription, or media transport.",
+  "fixtures": {
+    "synthetic-aes67-announcement.bin": {
+      "sha256": "85c89f3d91c8d7ab4f154e501e2ac2897cd8664f5641381aec5403860a14ccb2",
+      "source_ipv4": "192.0.2.44",
+      "session_id": 123456789012,
+      "message_hash": "0x1234"
+    }
+  }
+}

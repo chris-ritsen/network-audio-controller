@@ -69,7 +69,11 @@ test("metering omits timestamp and source address metadata", async ({ page }) =>
 });
 
 test("lock controls show relevant state without internal diagnostics and clear the PIN", async ({ page }) => {
-  await serveWebapp(page);
+  const inventory = structuredClone(deviceFixture);
+  inventory["avio-bt-1.local."].operation_availability = {
+    locking: { supported: true, readable: true, writable: true, reasons: [] },
+  };
+  await serveWebapp(page, { devices: inventory });
   let locked = false;
   const writes = [];
   await page.route("**/lock-status/**", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({
@@ -97,10 +101,16 @@ test("lock controls show relevant state without internal diagnostics and clear t
 });
 
 test("an unknown lock state is not presented as unlocked", async ({ page }) => {
-  await serveWebapp(page);
+  const inventory = structuredClone(deviceFixture);
+  inventory["Windows-PC.local."].operation_availability = {
+    locking: { supported: null, readable: false, writable: false, reasons: ["capability_unknown", "lock_state_unknown"] },
+  };
+  await serveWebapp(page, { devices: inventory });
   await page.goto("http://netaudio.test/devices/Windows-PC/lock");
   await expect(page.getByText("Lock state unavailable", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Lock", exact: true })).toBeDisabled();
+  await expect(page.getByText("Lock changes are unavailable", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Lock", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Device PIN", { exact: true })).toHaveCount(0);
 });
 
 test("receivers show subscription icons on desktop and collapsed mobile cards", async ({ page }) => {

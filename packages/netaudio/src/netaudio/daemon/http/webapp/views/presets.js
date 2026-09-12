@@ -46,7 +46,7 @@ function SavePreset() {
         </label>`) : html`<p class="text-sm">No devices in this view.</p>`}
       </fieldset>
       <fieldset disabled=${busy} class="flex flex-col gap-2"><legend class="mb-2">Include</legend>
-        ${[["routing", "Receiver routing and transmitter names"], ["audio", "Sample rate, encoding, latency and preferred leader"], ["network", "Network settings (single interface only)"]].map(([id, label]) => html`<label key=${id} class="flex items-center gap-2"><input type="checkbox" checked=${sections.includes(id)} onChange=${(event) => setSections(toggle(sections, id, event.target.checked))} />${label}</label>`)}
+        ${[["routing", "Channel names, receiver routing and transmit flows"], ["audio", "Clock, format, latency, pull-up and codec gain"], ["network", "All interfaces and redundancy settings"]].map(([id, label]) => html`<label key=${id} class="flex items-center gap-2"><input type="checkbox" checked=${sections.includes(id)} onChange=${(event) => setSections(toggle(sections, id, event.target.checked))} />${label}</label>`)}
       </fieldset>
       <div><button type="submit" class="btn btn-primary btn-sm" disabled=${busy || !ready || !valid || !name.trim() || !sections.length}><${Icon} name="download" />${busy ? "Reading settings…" : "Download XML"}</button></div>
       ${message ? html`<p role="status" class="text-sm">${message}</p>` : null}
@@ -118,7 +118,7 @@ function LoadPreset() {
           ${preview.devices.map((device, index) => html`<div key=${device.name} class="flex flex-col gap-2 border border-base-300 rounded-lg p-3">
             <label class="flex items-center gap-2"><input type="checkbox" checked=${choices[index].include} onChange=${(event) => change(index, { include: event.target.checked })} /><span class="font-semibold">${device.name}</span></label>
             ${device.settings.length ? html`<ul class="text-sm">${device.settings.map((setting) => html`<li>${setting.label}: ${readable(setting.value)}</li>`)}</ul>` : html`<p class="text-sm">No supported settings in this entry.</p>`}
-            ${device.unsupported.length ? html`<p class="text-sm text-error">Unsupported: ${device.unsupported.join(", ")}. Skip this device to continue.</p>` : null}
+            ${device.preserved.length ? html`<p class="text-sm">Preserved and skipped when no verified writer is available: ${device.preserved.join(", ")}.</p>` : null}
             ${choices[index].include ? html`<label class="flex flex-col gap-2 text-sm">Target for ${device.name}
               <select value=${choices[index].target} onChange=${(event) => change(index, { target: event.target.value })}>
                 <option value="">${device.targets.some((target) => target.online) ? "Choose a device" : "No online matching device — skip this entry"}</option>
@@ -129,11 +129,11 @@ function LoadPreset() {
           <p class="text-sm">Applying can interrupt audio or change network access. Changes are not rolled back automatically. No devices will be rebooted.</p>
           <label class="flex items-start gap-2"><input type="checkbox" checked=${confirmed} disabled=${!valid || !inventoryReady.value} onChange=${(event) => setConfirmed(event.target.checked)} />I have reviewed the selected devices and settings and want to apply them.</label>
         </fieldset>
-        <div><button type="submit" class="btn btn-primary btn-sm" disabled=${busy || !valid || !confirmed || !inventoryReady.value || preview.devices.some((device, index) => choices[index].include && device.unsupported.length)}>${busy ? "Applying preset…" : `Apply to ${selected.length} device${selected.length === 1 ? "" : "s"}`}</button></div>
+        <div><button type="submit" class="btn btn-primary btn-sm" disabled=${busy || !valid || !confirmed || !inventoryReady.value}>${busy ? "Applying preset…" : `Apply to ${selected.length} device${selected.length === 1 ? "" : "s"}`}</button></div>
       </form>` : null}
       ${error ? html`<p role="alert" class="alert alert-error">${error}</p>` : null}
       ${result ? html`<div class="flex flex-col gap-2" role="status"><h3 class="font-semibold">${result.complete ? "Preset applied and verified" : "Preset not fully applied or verified"}</h3>
-        <ul class="text-sm">${result.report.results.map(([name, message]) => html`<li>${name}: ${readable(message)}</li>`)}</ul>
+        <ul class="text-sm">${result.report.operations.map((operation) => html`<li><strong>${operation.state}</strong> · ${operation.device_name}: ${readable(operation.message)}</li>`)}</ul>
         ${result.report.needs_reboot.length ? html`<p class="text-sm">Reboot pending: ${result.report.needs_reboot.join(", ")}. Review each device before rebooting.</p>` : null}
       </div>` : null}
     </div>
@@ -142,7 +142,7 @@ function LoadPreset() {
 
 function PresetsView() {
   return html`<div class="flex flex-col gap-6 w-full max-w-3xl">
-    <p class="text-sm">Save and load Dante preset XML files. Supported settings are receiver subscriptions, transmitter names, sample rate, encoding, latency, preferred leader and single-interface network configuration. This is not a full device backup: receiver names, AES67 and other settings are not restored.</p>
+    <p class="text-sm">Save, plan and load versioned Dante preset XML. NetAudio preserves device identity, channel names, receiver routing, transmit flows, clock and format settings, codec gain, redundancy and every reported interface. Each load reports skipped, acknowledged, confirmed and failed operations separately.</p>
     ${!inventoryReady.value ? html`<p class="text-sm" role="status">Waiting for live inventory. You can still preview a file.</p>` : null}
     <${SavePreset} key=${`save:${selectedContext.value}`} />
     <${LoadPreset} key=${`load:${selectedContext.value}`} />

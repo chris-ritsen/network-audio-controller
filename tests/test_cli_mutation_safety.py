@@ -291,9 +291,13 @@ def _flow_device():
         ipv4="192.0.2.30",
         mac_address="00:1d:c1:00:00:30",
         flow_protocol_id=0x2729,
+        is_locked=False,
+        sample_rate=48000,
+        encoding=24,
         services={},
         tx_channels={1: _channel(1, "Tx1"), 2: _channel(2, "Tx2")},
         topology_mutation_lock=DeferredAsyncioLock(),
+        _arc_port=lambda: 4440,
     )
 
 
@@ -303,7 +307,7 @@ def _flow_context(device=None):
     return FakeApplication(devices), devices, device
 
 
-def test_flow_create_rejects_malformed_channels_before_discovery(monkeypatch):
+def test_flow_apply_requires_confirmation_before_discovery(monkeypatch):
     calls = 0
 
     def run_command(*_arguments, **_options):
@@ -314,30 +318,37 @@ def test_flow_create_rejects_malformed_channels_before_discovery(monkeypatch):
 
     result = runner.invoke(
         flow_commands.app,
-        ["create", "--slot", "17", "--channels", "1,"],
+        ["apply", "flow.json"],
     )
 
     assert result.exit_code == 1
-    assert "comma-separated list of integers" in result.output
+    assert "--yes is required" in result.output
     assert calls == 0
 
 
-def test_empty_flow_list_preserves_structured_output(monkeypatch):
+def test_empty_flow_inspect_preserves_canonical_structured_output(monkeypatch):
     from netaudio.cli import OutputFormat, state
 
     application, devices, _ = _flow_context()
-    flow_inventory = {"max_flow_slots": 16, "flows": []}
+    flow_inventory = {
+        "schema_version": 1,
+        "flow_protocol_id": 0x2729,
+        "max_flow_slots": 16,
+        "reported_flow_count": 0,
+        "flows": [],
+        "unparsed_records": [],
+    }
 
-    async def query(*_args):
+    async def inspect(_device):
         return flow_inventory
 
-    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
+    monkeypatch.setattr(flow_commands, "inspect_transmit_flows", inspect)
     state.output_format = OutputFormat.json
 
-    result = invoke(flow_commands.run_flow_list, application, devices)
+    result = invoke(flow_commands.run_flow_inspect, application, devices)
 
     assert result.exit_code == 0
-    assert json.loads(result.output) == {**flow_inventory, "flow_protocol_id": 0x2809}
+    assert json.loads(result.output) == flow_inventory
 
 
 RECEIVER_FLOW_INVENTORY = {
@@ -517,68 +528,6 @@ def test_transmit_channel_capabilities_preserve_structured_output(monkeypatch):
     assert json.loads(result.output) == capabilities
 
 
-def test_flow_create_refuses_occupied_slot(monkeypatch):
-    application, devices, _ = _flow_context()
-    create_calls = 0
-
-    async def query(*_args):
-        return {"max_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "multicast"}]}
-
-    async def create(*_args):
-        nonlocal create_calls
-        create_calls += 1
-
-    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
-    monkeypatch.setattr(flows, "create_tx_flow", create)
-
-    result = invoke(flow_commands.run_flow_create, application, devices, 17, [1])
-
-    assert result.exit_code == 1
-    assert "already in use" in result.output
-    assert create_calls == 0
-
-
-def test_flow_create_confirms_success(monkeypatch):
-    application, devices, device = _flow_context()
-
-    async def query(*_args):
-        return {"max_flow_slots": 32, "flows": []}
-
-    async def create(*_args):
-        assert device.topology_mutation_lock.locked()
-        return 1
-
-    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
-    monkeypatch.setattr(flows, "create_tx_flow", create)
-
-    result = invoke(flow_commands.run_flow_create, application, devices, 17, [1, 2])
-
-    assert result.exit_code == 0
-    assert "Created multicast TX flow" in result.output
-    assert "device confirmed" in result.output
-
-
-def test_flow_create_refuses_slot_above_device_capacity(monkeypatch):
-    application, devices, _ = _flow_context()
-    create_calls = 0
-
-    async def query(*_args):
-        return {"max_flow_slots": 16, "flows": []}
-
-    async def create(*_args):
-        nonlocal create_calls
-        create_calls += 1
-
-    monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
-    monkeypatch.setattr(flows, "create_tx_flow", create)
-
-    result = invoke(flow_commands.run_flow_create, application, devices, 17, [1])
-
-    assert result.exit_code == 1
-    assert "exceeds the device capacity of 16" in result.output
-    assert create_calls == 0
-
-
 def test_flow_delete_requires_confirmation_before_discovery(monkeypatch):
     calls = 0
 
@@ -602,7 +551,7 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
     application, devices, _ = _flow_context()
     delete_calls = 0
 
-    async def query(*_args):
+    async def query(*_args, **_kwargs):
         return {"max_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "unicast"}]}
 
     async def delete(*_args):
@@ -610,10 +559,15 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
         delete_calls += 1
 
     monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
-    monkeypatch.setattr(flows, "delete_tx_flow", delete)
+    device = devices["flow.local."]
+
+    async def call_core(*_args, **_kwargs):
+        await delete()
+
+    device.call_core = call_core
 
     result = invoke(flow_commands.run_flow_delete, application, devices, 17)
 
     assert result.exit_code == 1
-    assert "is not multicast" in result.output
+    assert "only multicast transmit-flow deletion is supported" in result.output
     assert delete_calls == 0

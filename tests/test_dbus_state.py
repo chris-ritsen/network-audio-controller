@@ -206,7 +206,7 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
-    device.aes67_supported = False
+    device.aes67_configuration_supported = False
     device.aes67_multicast_prefix = "239.69.0.0"
     device.sample_rate_pullup_raw_value = 1
     device.requested_sample_rate_pullup_raw_value = 1
@@ -260,8 +260,8 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["supported_sample_rates"] == [48_000, 96_000]
     assert snapshot["supported_encodings"] == [16, 24, 32]
     assert snapshot["aes67_current"] is False
-    assert snapshot["aes67_supported"] is False
-    assert snapshot["aes67_support_known"] is True
+    assert snapshot["aes67_configuration_supported"] is False
+    assert snapshot["aes67_configuration_support_known"] is True
     assert snapshot["aes67_multicast_prefix"] == "239.69.0.0"
     assert snapshot["sample_rate_pullup_raw_value"] == 1
     assert snapshot["requested_sample_rate_pullup_raw_value"] == 1
@@ -351,7 +351,7 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.link_speed_mbps = 2500
     device.aes67_current = False
     device.aes67_configured = True
-    device.aes67_supported = False
+    device.aes67_configuration_supported = False
     device.is_locked = None
     device.clock_frequency_offset_parts_per_billion = -1_601
     device.clock_port_state_code = 0x0009
@@ -387,8 +387,8 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.SupportedEncodings() == [16, 24, 32]
     assert interface.LinkSpeedMbps() == 2500
     assert interface.Aes67Enabled() is False
-    assert interface.Aes67Supported() is False
-    assert interface.Aes67SupportKnown() is True
+    assert interface.Aes67ConfigurationSupported() is False
+    assert interface.Aes67ConfigurationSupportKnown() is True
     assert interface.Aes67MulticastPrefix() == ""
     assert interface.SampleRatePullupKnown() is False
     assert interface.TransmitterFlows() == []

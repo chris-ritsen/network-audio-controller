@@ -118,7 +118,14 @@ def test_encoding_status_dissects_current_and_supported_encodings():
     result = dissect(payload, facts=[])
 
     assert result.core_kind == "encoding_status"
-    assert result.core_fields == {"current_encoding": 24, "supported_encodings": [24, 16, 32]}
+    assert result.core_fields == {
+        "record_protocol_version": 0x0724,
+        "current_value": 24,
+        "requested_value": 0,
+        "update_mode": 2,
+        "available_values": [24, 16, 32],
+        "flags": None,
+    }
 
 
 def test_encoding_control_request_keeps_fact_spans_without_a_core_parser():

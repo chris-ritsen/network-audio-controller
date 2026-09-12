@@ -8,6 +8,13 @@ import pytest
 from tests.http_api_test_support import FakeWriter, get, make_device, make_http_server, post
 
 
+def assert_writable_network_availability(payload):
+    assert payload.pop("operation_availability") == {
+        "static_ipv4": {"supported": True, "readable": True, "writable": True, "reasons": []},
+        "redundancy": {"supported": True, "readable": False, "writable": True, "reasons": []},
+    }
+
+
 class TestRouting:
     @pytest.mark.asyncio
     async def test_unknown_path_returns_404(self):
@@ -297,7 +304,13 @@ class TestMutationVerification:
                 {"device": "dev1", "encoding": 24},
                 "send_set_encoding",
                 "probe_encoding_status",
-                (24, [16, 24, 32]),
+                {
+                    "current_value": 24,
+                    "requested_value": 24,
+                    "update_mode": 2,
+                    "available_values": [16, 24, 32],
+                    "flags": None,
+                },
             ),
         ],
     )
@@ -331,8 +344,20 @@ class TestMutationVerification:
                 "send_set_encoding",
                 "probe_encoding_status",
                 "encoding",
-                (24, [16, 24, 32]),
-                (32, [16, 24, 32]),
+                {
+                    "current_value": 24,
+                    "requested_value": 24,
+                    "update_mode": 2,
+                    "available_values": [16, 24, 32],
+                    "flags": None,
+                },
+                {
+                    "current_value": 32,
+                    "requested_value": 32,
+                    "update_mode": 2,
+                    "available_values": [16, 24, 32],
+                    "flags": None,
+                },
             ),
         ],
     )
@@ -355,7 +380,7 @@ class TestMutationVerification:
             http_server.application.notifications.notify_waiters(
                 capability_name,
                 "192.168.1.50",
-                (old_status[0], old_status[1]),
+                old_status,
             )
             old_status_observed.set()
             return old_status
@@ -368,18 +393,18 @@ class TestMutationVerification:
         http_server.application.notifications.notify_waiters(
             capability_name,
             "192.168.1.99",
-            (requested_status[0], requested_status[1]),
+            requested_status,
         )
         http_server.application.notifications.notify_waiters(
             "encoding" if capability_name == "sample_rate" else "sample_rate",
             "192.168.1.50",
-            (requested_status[0], requested_status[1]),
+            requested_status,
         )
         assert not request_task.done()
         http_server.application.notifications.notify_waiters(
             capability_name,
             "192.168.1.50",
-            (requested_status[0], requested_status[1]),
+            requested_status,
         )
 
         status, response = await request_task
@@ -412,7 +437,13 @@ class TestMutationVerification:
     ):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        getattr(http_server.application, probe_name).return_value = (observed, supported)
+        getattr(http_server.application, probe_name).return_value = {
+            "current_value": observed,
+            "requested_value": observed,
+            "update_mode": 2,
+            "available_values": supported,
+            "flags": None,
+        }
 
         status, response = await post(http_server, path, body)
 
@@ -645,7 +676,7 @@ class TestMutationVerification:
     @pytest.mark.asyncio
     async def test_aes67_rejects_device_without_directory_property(self):
         device = make_device()
-        device.aes67_supported = False
+        device.aes67_configuration_supported = False
         http_server = make_http_server({"dev1": device})
 
         status, response = await post(http_server, "/set-aes67", {"device": "dev1", "enabled": True})
@@ -791,6 +822,7 @@ class TestMutationVerification:
         status, response = await post(http_server, "/interface", {"device": "dev1", "mode": "dhcp"})
 
         assert status == 200
+        assert_writable_network_availability(response)
         assert response == {
             "success": True,
             "reboot_required": False,
@@ -812,6 +844,7 @@ class TestMutationVerification:
         status, response = await post(http_server, "/interface", {"device": "dev1", "mode": "dhcp"})
 
         assert status == 200
+        assert_writable_network_availability(response)
         assert response == {
             "success": True,
             "reboot_required": True,
@@ -875,6 +908,7 @@ class TestDeviceLookup:
         status, body = await get(http_server, "/interfaces/Device1")
 
         assert status == 200
+        assert_writable_network_availability(body)
         assert body == {
             "device": "dev1",
             "interfaces": [{"mode": "dynamic", "ip_address": "192.168.1.50"}],

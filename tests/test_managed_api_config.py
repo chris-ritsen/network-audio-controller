@@ -22,6 +22,7 @@ def _configuration_document(*, enabled=True, credential_file="secrets/managed-cr
                     "server": "studio",
                     "domain_id": "domain-1",
                     "domain_name": "Studio",
+                    "operation_permissions": ["identify", "sample_rate"],
                 }
             },
         }
@@ -141,6 +142,16 @@ def test_named_servers_and_contexts_bind_domain_to_one_credential(tmp_path):
     assert configuration.selected_server().name == "east"
     assert configuration.selected_server("west-production").name == "west"
     assert configuration.servers["east"].credential_file == (tmp_path / "credentials" / "east").resolve()
+
+
+def test_context_operation_permissions_are_explicit_and_validated():
+    configuration = resolve_ddm_configuration(_configuration_document())
+    assert configuration.context("studio-main").operation_permissions == frozenset({"identify", "sample_rate"})
+
+    document = _configuration_document()
+    document["ddm"]["contexts"]["studio-main"]["operation_permissions"] = ["identify", "invented"]
+    with pytest.raises(ValueError, match="unknown operations: invented"):
+        resolve_ddm_configuration(document)
 
 
 def test_server_is_not_selected_without_an_explicit_or_default_context():

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import secrets
 
 from netaudio.dante.const import (
@@ -292,10 +294,10 @@ class DanteDeviceCommands:
         )
         return self._settings(command_specification)
 
-    def command_probe_gain_level(self, host_mac=None, sequence=None):
+    def command_probe_codec_status(self, host_mac=None, sequence=None):
         command_specification = self._with_host_mac(
             {
-                "command": "probe_gain_level",
+                "command": "probe_codec_status",
                 "sequence": self._next_settings_sequence() if sequence is None else sequence,
             },
             host_mac,
@@ -326,6 +328,40 @@ class DanteDeviceCommands:
             None,
         )
 
+    def command_subscribe_external_rtp(
+        self,
+        *,
+        device_protocol: int,
+        receiver_channel_ids,
+        flow_slot_assignments,
+        advertised_flow_slot_count: int,
+        source_address: str,
+        session_id: int,
+        clock_offset: int,
+        primary_destination: dict,
+        secondary_destination: dict | None = None,
+        advertisement_supports_multiple_interfaces: bool = False,
+        receiver_supports_multiple_interfaces: bool = False,
+        transaction_id: int = 0,
+    ):
+        specification = {
+            "command": "subscribe_external_rtp",
+            "device_protocol": device_protocol,
+            "receiver_channel_ids": list(receiver_channel_ids),
+            "flow_slot_assignments": list(flow_slot_assignments),
+            "advertised_flow_slot_count": advertised_flow_slot_count,
+            "source_address": source_address,
+            "session_id": session_id,
+            "clock_offset": clock_offset,
+            "primary_destination": dict(primary_destination),
+            "advertisement_supports_multiple_interfaces": advertisement_supports_multiple_interfaces,
+            "receiver_supports_multiple_interfaces": receiver_supports_multiple_interfaces,
+            "transaction_id": transaction_id,
+        }
+        if secondary_destination is not None:
+            specification["secondary_destination"] = dict(secondary_destination)
+        return self._arc(specification)
+
     def command_enable_aes67(self, is_enabled: bool, host_mac=None, sequence=None):
         spec = self._with_host_mac(
             {
@@ -341,10 +377,11 @@ class DanteDeviceCommands:
         spec = self._with_host_mac({"command": "probe_interface_status"}, host_mac)
         return self._settings(spec)
 
-    def command_probe_link_status(self, host_mac=None, sequence=None):
+    def command_probe_interface_statistics(self, host_mac=None, sequence=None, *, extended_073a=False):
         spec = self._with_host_mac(
             {
-                "command": "probe_link_status",
+                "command": "probe_interface_statistics",
+                "extended_073a": extended_073a,
                 "sequence": self._next_settings_sequence() if sequence is None else sequence,
             },
             host_mac,

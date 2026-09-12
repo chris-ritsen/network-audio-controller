@@ -224,7 +224,7 @@ async def test_refresh_populates_the_persistent_managed_device():
         "probe_aes67_state",
         "probe_sample_rate_status",
         "probe_encoding_status",
-        "probe_gain_status",
+        "probe_codec_status",
         "probe_preferred_leader_state",
         "probe_interface_status",
         "probe_clocking_status",
@@ -234,14 +234,14 @@ async def test_refresh_populates_the_persistent_managed_device():
     device = server._find_device(record["server_name"])
     device.supported_sample_rates = [48000]
     device.supported_encodings = [24]
-    device.supported_gain_levels = [1, 2, 3, 4, 5]
+    device.codec_parameters = []
     writer = FakeWriter()
     await server._dispatch("POST", "/refresh", json.dumps({"device": device.server_name}).encode(), writer)
     assert writer.response() == (200, {"success": True})
     app._populate_device_controls.assert_awaited_once_with(device)
     app.probe_sample_rate_status.assert_awaited_once_with(device)
     app.probe_encoding_status.assert_awaited_once_with(device)
-    app.probe_gain_status.assert_awaited_once_with(device)
+    app.probe_codec_status.assert_awaited_once_with(device)
     app.probe_lock_status.assert_not_awaited()
 
 
@@ -286,6 +286,7 @@ def test_unenrollment_clears_restored_direct_metadata_before_first_managed_poll(
     server, _ = server_with_inventory(record)
     direct = DanteDevice(record["server_name"])
     direct.management_state = "managed"
+    direct.managed_operation_permissions = {"identify": True}
     direct.ddm_enrolment_state = "ENROLLED"
     direct.ddm_domain_id = "previous-domain"
     direct.configured_latency = 2.0
@@ -294,6 +295,7 @@ def test_unenrollment_clears_restored_direct_metadata_before_first_managed_poll(
     assert server._find_device(direct.server_name) is direct
     assert direct.requires_managed_control is False
     assert direct.ddm_domain_id is None
+    assert direct.managed_operation_permissions is None
     assert direct.configured_latency == 2.0
 
 

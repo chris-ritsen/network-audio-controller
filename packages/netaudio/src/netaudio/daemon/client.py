@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.dante.device import DanteDevice
@@ -123,6 +123,59 @@ async def get_device_summaries_from_daemon() -> dict | None:
     if status != 200:
         return None
     return data
+
+
+async def get_event_journal_from_daemon(
+    *,
+    device: str | None = None,
+    kind: str | None = None,
+    severity: str | None = None,
+    since: str | None = None,
+    limit: int | None = None,
+) -> tuple[int | None, dict | None]:
+    query = {
+        name: value
+        for name, value in (
+            ("device", device),
+            ("kind", kind),
+            ("severity", severity),
+            ("since", since),
+            ("limit", limit),
+        )
+        if value is not None
+    }
+    path = f"/event-journal?{urlencode(query)}" if query else "/event-journal"
+    status, data = await _daemon_request("GET", path)
+    return status, data if isinstance(data, dict) else None
+
+
+async def clear_event_journal_on_daemon() -> tuple[int | None, dict | None]:
+    status, data = await _daemon_request("DELETE", "/event-journal")
+    return status, data if isinstance(data, dict) else None
+
+
+async def get_issues_from_daemon(
+    *,
+    device: str | None = None,
+    kind: str | None = None,
+    severity: str | None = None,
+    state: str | None = None,
+    limit: int | None = None,
+) -> tuple[int | None, dict | None]:
+    query = {
+        name: value
+        for name, value in (
+            ("device", device),
+            ("kind", kind),
+            ("severity", severity),
+            ("state", state),
+            ("limit", limit),
+        )
+        if value is not None
+    }
+    path = f"/issues?{urlencode(query)}" if query else "/issues"
+    status, data = await _daemon_request("GET", path)
+    return status, data if isinstance(data, dict) else None
 
 
 async def execute_ddm_graphql_on_daemon(

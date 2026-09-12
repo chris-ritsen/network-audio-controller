@@ -59,7 +59,7 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "device_name" => serialize_optional(kind, responses::parse_device_name(bytes)),
         "device_settings" => serialize_optional(kind, responses::parse_device_settings(bytes)),
         "encoding_status" => serialize_optional(kind, responses::parse_encoding_status(bytes)),
-        "gain_status" => serialize_optional(kind, responses::parse_gain_status(bytes)),
+        "codec_status" => serialize_optional(kind, responses::parse_codec_status(bytes)),
         "heartbeat_clock_frequency_offset" => serialize_optional(
             kind,
             crate::heartbeat_clock::parse_heartbeat_clock_frequency_offset_packet(bytes),
@@ -142,8 +142,8 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "unmapped_0026_status" => {
             serialize_optional(kind, responses::parse_unmapped_0026_status(bytes))
         }
-        "unmapped_0040_status" => {
-            serialize_optional(kind, responses::parse_unmapped_0040_status(bytes))
+        "interface_statistics_status" => {
+            serialize_optional(kind, responses::parse_interface_statistics_status(bytes))
         }
         "unmapped_0086_status" => {
             serialize_optional(kind, responses::parse_unmapped_0086_status(bytes))

@@ -8,7 +8,9 @@ async def fake_sample_rate_change(application, device, sample_rate, confirm_dest
         SampleRateTopologyUnsupportedError,
     )
 
-    current_sample_rate, supported_sample_rates = await application.probe_sample_rate_status(device)
+    status = await application.probe_sample_rate_status(device)
+    current_sample_rate = status["current_value"]
+    supported_sample_rates = status["available_values"]
     if sample_rate not in supported_sample_rates:
         raise SampleRateTopologyUnsupportedError(
             f"requested sample rate {sample_rate} is not supported; device reports {supported_sample_rates}"
@@ -45,7 +47,9 @@ async def fake_sample_rate_change(application, device, sample_rate, confirm_dest
             f"sample-rate mutation failed after it was attempted; device state is unknown: {exception}",
             preflight,
         ) from exception
-    observed_sample_rate, observed_supported_sample_rates = await application.probe_sample_rate_status(device)
+    status = await application.probe_sample_rate_status(device)
+    observed_sample_rate = status["current_value"]
+    observed_supported_sample_rates = status["available_values"]
     if observed_sample_rate != sample_rate:
         raise SampleRateTopologyChangedButUnverifiedError(
             f"sample-rate change was sent, but complete post-write verification failed: "

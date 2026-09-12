@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -128,12 +129,37 @@ def test_preset_show_json_returns_the_parsed_preset(monkeypatch, tmp_path):
     preset_path.write_text("<preset/>")
     monkeypatch.setattr(preset_cli, "resolve_preset_path", lambda name, for_write=False: preset_path)
     monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0, "name": "avio"}}))
+    device = SimpleNamespace(name="avio", server_name="avio.local.")
+
+    application = SimpleNamespace(get_device_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}))
+
+    def run_command(run, *arguments, **_options):
+        return asyncio.run(run(application, {device.server_name: device}, *arguments))
+
+    monkeypatch.setattr(preset_cli, "run_command", run_command)
     result = runner.invoke(app, ["-j", "preset", "show", "probe"])
     assert result.exit_code == 0
     assert _json(result) == {
-        "devices": {"avio": {"latency": 1.0, "name": "avio"}},
+        "configuration": {"avio": {"latency": 1.0, "name": "avio"}},
         "name": "probe",
         "path": str(preset_path),
+        "plan": {
+            "devices": [
+                {
+                    "actions": [
+                        {
+                            "current": 1.0,
+                            "kind": "latency",
+                            "reason": "fresh readback matches requested value",
+                            "requested": 1.0,
+                            "state": "unchanged",
+                        }
+                    ],
+                    "device_name": "avio",
+                    "server_name": "avio.local.",
+                }
+            ]
+        },
     }
 
 
@@ -144,9 +170,21 @@ def test_preset_show_plain_prints_the_header_on_stdout(monkeypatch, tmp_path):
     preset_path.write_text("<preset/>")
     monkeypatch.setattr(preset_cli, "resolve_preset_path", lambda name, for_write=False: preset_path)
     monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0}}))
+    device = SimpleNamespace(name="avio", server_name="avio.local.")
+
+    application = SimpleNamespace(get_device_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}))
+
+    def run_command(run, *arguments, **_options):
+        return asyncio.run(run(application, {device.server_name: device}, *arguments))
+
+    monkeypatch.setattr(preset_cli, "run_command", run_command)
     result = runner.invoke(app, ["preset", "show", "probe"])
     assert result.exit_code == 0
-    assert result.stdout.splitlines()[:2] == ["Preset: probe (1 devices)", "avio:"]
+    assert result.stdout.splitlines() == [
+        "Preset: probe (1 devices)",
+        "avio [avio.local.]:",
+        "  latency: unchanged; 1.0 -> 1 ms (fresh readback matches requested value)",
+    ]
 
 
 def test_meter_start_and_stop_confirm_each_device(monkeypatch):

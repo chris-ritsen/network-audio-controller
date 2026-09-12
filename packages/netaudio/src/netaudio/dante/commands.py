@@ -134,14 +134,17 @@ class DanteCommands:
     def probe_encoding(self, host_mac=None) -> dict:
         return self._with_host_mac({"command": "probe_encoding"}, host_mac)
 
-    def probe_gain_level(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_gain_level"}, host_mac)
+    def probe_codec_status(self, host_mac=None) -> dict:
+        return self._sequenced({"command": "probe_codec_status"}, host_mac)
 
     def probe_interface_status(self, host_mac=None) -> dict:
         return self._sequenced({"command": "probe_interface_status"}, host_mac)
 
-    def probe_link_status(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_link_status"}, host_mac)
+    def probe_interface_statistics(self, host_mac=None, *, extended_073a: bool = False) -> dict:
+        return self._sequenced(
+            {"command": "probe_interface_statistics", "extended_073a": extended_073a},
+            host_mac,
+        )
 
     def probe_lock_reset_status(self, host_mac=None, request_value: int = 100) -> dict:
         return self._sequenced({"command": "probe_lock_reset_status", "request_value": request_value}, host_mac)
@@ -290,3 +293,35 @@ class DanteCommands:
 
     def set_sample_rate_pullup(self, raw_value: int, host_mac=None) -> dict:
         return self._sequenced({"command": "set_sample_rate_pullup", "raw_value": raw_value}, host_mac)
+
+    def subscribe_external_rtp(
+        self,
+        *,
+        device_protocol: int,
+        receiver_channel_ids,
+        flow_slot_assignments,
+        advertised_flow_slot_count: int,
+        source_address: str,
+        session_id: int,
+        clock_offset: int,
+        primary_destination: dict,
+        secondary_destination: dict | None = None,
+        advertisement_supports_multiple_interfaces: bool = False,
+        receiver_supports_multiple_interfaces: bool = False,
+    ) -> dict:
+        specification = {
+            "command": "subscribe_external_rtp",
+            "device_protocol": device_protocol,
+            "receiver_channel_ids": list(receiver_channel_ids),
+            "flow_slot_assignments": list(flow_slot_assignments),
+            "advertised_flow_slot_count": advertised_flow_slot_count,
+            "source_address": source_address,
+            "session_id": session_id,
+            "clock_offset": clock_offset,
+            "primary_destination": dict(primary_destination),
+            "advertisement_supports_multiple_interfaces": advertisement_supports_multiple_interfaces,
+            "receiver_supports_multiple_interfaces": receiver_supports_multiple_interfaces,
+        }
+        if secondary_destination is not None:
+            specification["secondary_destination"] = dict(secondary_destination)
+        return self._sequenced(specification)

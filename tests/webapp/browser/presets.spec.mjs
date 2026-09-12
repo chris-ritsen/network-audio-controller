@@ -4,7 +4,7 @@ import { deviceFixture, serveWebapp } from "./fixture.mjs";
 const [id, device] = Object.entries(deviceFixture).find(([, record]) => record.online);
 const xml = '<preset><name>Show</name></preset>';
 const preview = { name: "Show", digest: "not-shown-in-ui", devices: [{ name: device.name,
-  settings: [{ label: "Preferred leader", value: "On" }], unsupported: [],
+  settings: [{ label: "Preferred leader", value: "On" }], preserved: [],
   targets: [{ id, name: device.name, address: device.ipv4, online: true }] }] };
 
 async function setup(page, { data = preview, result } = {}) {
@@ -15,7 +15,7 @@ async function setup(page, { data = preview, result } = {}) {
     writes.push({ path, body: route.request().postDataJSON() });
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(path.endsWith("preview") ? data
       : path.endsWith("save") ? { filename: "Show.xml", xml }
-        : result || { complete: true, report: { results: [[device.name, "preferred leader on (verified)"]], needs_reboot: [] } }) });
+        : result || { complete: true, report: { operations: [{ device_name: device.name, state: "confirmed", message: "preferred leader on (verified)" }], needs_reboot: [] } }) });
   });
   await page.goto("http://netaudio.test/presets");
   await expect(page.getByRole("heading", { name: "Save preset", exact: true })).toBeVisible();
@@ -58,8 +58,8 @@ test("opening previews only; apply requires confirmation and shows verification"
 
 test("missing entries must be explicitly skipped; partial results are honest", async ({ page }) => {
   const data = structuredClone(preview);
-  data.devices.push({ name: "Missing", settings: [], unsupported: [], targets: [] });
-  const writes = await setup(page, { data, result: { complete: false, report: { results: [[device.name, "Change requested; readback unavailable"]], needs_reboot: [device.name] } } });
+  data.devices.push({ name: "Missing", settings: [], preserved: [], targets: [] });
+  const writes = await setup(page, { data, result: { complete: false, report: { operations: [{ device_name: device.name, state: "acknowledged", message: "Change requested; readback unavailable" }], needs_reboot: [device.name] } } });
   await open(page);
   await expect(page.getByLabel("I have reviewed", { exact: false })).toBeDisabled();
   await page.getByRole("checkbox", { name: "Missing", exact: true }).uncheck();

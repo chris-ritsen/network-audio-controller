@@ -180,12 +180,12 @@ class DanteDeviceInterface(ServiceInterface):
         return aes67_enabled(self._device)
 
     @dbus_property(access=RO)
-    def Aes67Supported(self) -> "b":
-        return self._device.aes67_supported is True
+    def Aes67ConfigurationSupported(self) -> "b":
+        return self._device.aes67_configuration_supported is True
 
     @dbus_property(access=RO)
-    def Aes67SupportKnown(self) -> "b":
-        return self._device.aes67_supported is not None
+    def Aes67ConfigurationSupportKnown(self) -> "b":
+        return self._device.aes67_configuration_supported is not None
 
     @dbus_property(access=RO)
     def Aes67MulticastPrefix(self) -> "s":

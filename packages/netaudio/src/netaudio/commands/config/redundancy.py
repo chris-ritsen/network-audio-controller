@@ -42,7 +42,7 @@ async def run_redundancy(application, devices, mode, all_devices):
                 mode is None
                 and len(device.interfaces or []) < 2
                 and not device.switch_configuration_choices
-                and (device.switch_port_count or 0) < 2
+                and getattr(device, "licensed_redundancy_enabled", None) is not True
             ):
                 data[server_name] = None
                 typer.echo(

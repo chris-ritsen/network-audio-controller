@@ -22,7 +22,7 @@ def server():
     device.get_tx_channels = AsyncMock()
     result = make_http_server({device.server_name: device})
     result.application.get_device_settings = AsyncMock(return_value={"configured_latency_ns": 1_000_000})
-    result.application.probe_preferred_leader_state = AsyncMock(return_value=True)
+    result.application.probe_preferred_leader_state = AsyncMock(side_effect=[False, True])
     result.publish_inventory_snapshot = AsyncMock()
     return result
 
@@ -123,11 +123,12 @@ async def test_load_rechecks_availability_and_identity(server, offline, identity
 
 
 @pytest.mark.asyncio
-async def test_all_preflight_happens_before_any_write(server):
+async def test_unsupported_action_is_reported_without_blocking_other_planned_changes(server):
     content = xml('<preferred_master value="true"/><encoding>7</encoding>')
     status, data = await post(server, "/presets/load", load_body(content))
-    assert status == 409 and "No changes were sent" in data["error"]
-    server.application.set_preferred_leader.assert_not_called()
+    assert status == 200 and data["complete"] is True
+    assert any(operation["state"] == "unsupported" for operation in data["report"]["operations"])
+    server.application.set_preferred_leader.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -174,7 +175,13 @@ async def test_save_routing_excludes_unselected_categories(server):
         server, "/presets/save", {"name": "Show", "devices": ["device.local."], "sections": ["routing"]}
     )
     assert status == 200 and data["filename"] == "Show.xml"
-    assert parse_preset_xml(data["xml"])[1] == {"Desk": {"name": "Desk"}}
+    assert parse_preset_xml(data["xml"])[1] == {
+        "Desk": {
+            "name": "Desk",
+            "device_name": "Desk",
+            "device_identity": {"server_name": "device.local."},
+        }
+    }
     server.application.get_device_settings.assert_not_called()
     server.application.probe_interface_status.assert_not_called()
     server.application.devices["device.local."].get_rx_channels.assert_awaited_once()
@@ -182,6 +189,8 @@ async def test_save_routing_excludes_unselected_categories(server):
 
 @pytest.mark.asyncio
 async def test_save_audio_uses_fresh_readback(server):
+    server.application.probe_preferred_leader_state.side_effect = None
+    server.application.probe_preferred_leader_state.return_value = True
     status, data = await post(
         server, "/presets/save", {"name": "Show", "devices": ["device.local."], "sections": ["audio"]}
     )

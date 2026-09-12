@@ -19,6 +19,32 @@ function device(managed = true) {
     standard_latency_choices_ms: [1, 2, 5],
     min_latency_ms: 1,
     max_latency_ms: 20.3125,
+    operation_availability: {
+      identify: {
+        supported: true,
+        readable: false,
+        writable: true,
+        reasons: [],
+      },
+      sample_rate: {
+        supported: true,
+        readable: true,
+        writable: true,
+        reasons: [],
+      },
+      encoding: {
+        supported: true,
+        readable: true,
+        writable: true,
+        reasons: [],
+      },
+      sample_rate_pullup: {
+        supported: true,
+        readable: false,
+        writable: true,
+        reasons: [],
+      },
+    },
   };
 }
 

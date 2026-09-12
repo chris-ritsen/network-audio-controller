@@ -68,7 +68,7 @@ Commands that act on one device report `device not found` or
 
 ```bash
 netaudio -n avio-usb-1 device show
-netaudio -n avio-usb-1 flow list
+netaudio -n avio-usb-1 flow inspect
 netaudio --host 192.168.1.50 lock set 1234
 ```
 

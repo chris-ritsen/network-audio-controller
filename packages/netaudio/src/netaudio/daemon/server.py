@@ -18,6 +18,7 @@ from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsync
 from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
+from netaudio.monitoring import MonitoringEventJournal
 from netaudio.daemon.http.api import DaemonHTTPServer
 from netaudio.daemon.http.tls import daemon_tls_settings
 from netaudio.daemon.log_file import daemon_log_path, truncate_when_oversized
@@ -102,7 +103,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         from netaudio.common.managed_api import resolve_ddm_configuration
 
         profile_cfg, _ = load_capture_profile(None, None)
-        app_settings.stale_device_minutes = _stale_device_minutes_from_config(load_daemon_config())
+        daemon_config = load_daemon_config()
+        app_settings.stale_device_minutes = _stale_device_minutes_from_config(daemon_config)
         managed_configuration = resolve_ddm_configuration(
             load_config_document(),
             base_directory=default_config_path().parent,
@@ -139,6 +141,10 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         )
         self.state = self.application.state
         self.network_status_cache = NetworkStatusCache(default_config_path().parent / "network-status.json")
+        self.event_journal = MonitoringEventJournal.from_daemon_config(
+            default_config_path().parent / "event-journal.json",
+            daemon_config,
+        )
         self.zeroconf: AsyncZeroconf | None = None
         self.browser: AsyncServiceBrowser | None = None
         self.running = False
@@ -164,6 +170,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             forget_device=self.forget_device,
             managed_inventory=self.managed_inventory,
             refresh_discovery=self.refresh_discovery,
+            event_journal=self.event_journal,
             tls=daemon_tls_settings(),
         )
         self.managed_inventory.set_callback(self._on_managed_inventory_changed)
@@ -467,6 +474,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if device:
             device.update_last_seen()
             logger.info(f"Device discovered (event): {event.server_name}")
+            await self._publish_journal_events(self.event_journal.observe_device(device))
             if device.ipv4 and not device.requires_managed_control:
                 await self.application.cmc.register_device(str(device.ipv4))
             await self._publish_device_to_redis(device)
@@ -475,6 +483,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
     async def _on_device_updated(self, event: DanteEvent):
         device = self.devices.get(event.server_name)
         if device:
+            await self._publish_journal_events(self.event_journal.observe_device(device))
             await self._publish_device_to_redis(device)
             await self._republish_correlated_shure(device)
 
@@ -483,11 +492,21 @@ class NetaudioDaemon(DanteDiscoveryMixin):
         if self.metering:
             self.metering.cleanup_device(event.server_name)
         device = self.devices.get(event.server_name)
+        disappearance_subject = device or {
+            "server_name": event.server_name,
+            "name": event.device_name,
+            "online": False,
+        }
+        await self._publish_journal_events(self.event_journal.observe_disappearance(disappearance_subject))
         if device:
             await self._publish_device_to_redis(device)
             await self.state.refresh_affected_subscriptions(device)
         else:
             await self._delete_device_from_redis(event.server_name)
+
+    async def _publish_journal_events(self, events) -> None:
+        for event in events:
+            await self.http_api.publish_journal_event(event)
 
     async def start(self):
         async with self._start_lock:

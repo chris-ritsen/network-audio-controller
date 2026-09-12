@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.daemon.http.api import DaemonHTTPServer
 from netaudio.dante.lock_status import LockStatusObservation
+from netaudio.dante.sap import SapFlowInventory
 from netaudio.dante.services.notification import DanteNotificationService
 
 
@@ -65,15 +66,27 @@ def make_device(server_name="dev1", name="Device1", ipv4="192.168.1.50", kind="h
         dante_redundancy=None,
         interface_status_protocol=None,
         sample_rate=None,
+        requested_sample_rate=None,
+        sample_rate_update_mode=2,
         supported_sample_rates=None,
-        aes67_supported=None,
+        sample_rate_configuration_supported=True,
+        aes67_configuration_supported=None,
         aes67_multicast_prefix=None,
         settings_properties=None,
         sample_rate_pullup_raw_value=None,
         requested_sample_rate_pullup_raw_value=None,
+        sample_rate_pullup_update_mode=2,
         supported_sample_rate_pullup_raw_values=None,
         encoding=None,
+        requested_encoding=None,
+        encoding_update_mode=2,
         supported_encodings=None,
+        encoding_configuration_supported=True,
+        static_ipv4_configuration_supported=True,
+        static_ipv4_configuration_read_only=False,
+        switch_redundancy_supported=True,
+        switch_redundancy_read_only=False,
+        device_locking_supported=True,
         gain_device_type=None,
         gain_levels=None,
         supported_gain_levels=None,
@@ -102,6 +115,7 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
         add_subscriptions=AsyncMock(return_value=arc_success),
         devices=devices or {},
         dispatcher=MagicMock(),
+        external_flows=SapFlowInventory(),
         identify=AsyncMock(),
         lock_device=AsyncMock(return_value={"success": True, "lock_state": 1}),
         notifications=notifications,
@@ -115,12 +129,29 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
         set_device_name=AsyncMock(return_value=arc_success),
         set_gain_level=AsyncMock(return_value=("input", [3])),
         set_latency=AsyncMock(return_value=arc_success),
+        subscribe_external_rtp=AsyncMock(),
         get_latency_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}),
         unlock_device=AsyncMock(return_value={"success": True, "lock_state": 0}),
-        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
+        probe_sample_rate_status=AsyncMock(
+            return_value={
+                "current_value": 48000,
+                "requested_value": 48000,
+                "update_mode": 2,
+                "available_values": [48000, 96000],
+                "flags": None,
+            }
+        ),
         set_sample_rate=AsyncMock(side_effect=sample_rate_change_result),
-        probe_encoding_status=AsyncMock(return_value=(24, [16, 24, 32])),
-        probe_gain_status=AsyncMock(return_value=("input", [3])),
+        probe_encoding_status=AsyncMock(
+            return_value={
+                "current_value": 24,
+                "requested_value": 24,
+                "update_mode": 2,
+                "available_values": [16, 24, 32],
+                "flags": None,
+            }
+        ),
+        probe_gain_adapter=AsyncMock(return_value=("input", [3])),
         probe_interface_status=AsyncMock(return_value=[{"mode": "dynamic", "ip_address": "192.168.1.50"}]),
         probe_lock_status=AsyncMock(
             return_value=LockStatusObservation(

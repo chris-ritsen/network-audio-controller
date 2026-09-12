@@ -62,7 +62,7 @@ const INFO_COLUMNS = [
   ...[["tx", "transmit"], ["rx", "receive"]].map(([direction, field]) => ({
     id: `${direction}-bandwidth`, label: `${direction === "tx" ? "Tx" : "Rx"} bandwidth`, defaultHidden: true,
     cell: (device) => {
-      const value = device.network_interface_traffic?.[`estimated_total_${field}_bits_per_second`];
+      const value = device.network_interface_traffic?.[`total_${field}_rate_bits_per_second`];
       return value == null || !Number.isFinite(Number(value)) ? format.ABSENT : `${(Number(value) / 1_000_000).toFixed(2)} Mbps`;
     },
   })),

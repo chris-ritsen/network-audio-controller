@@ -247,7 +247,7 @@ def test_device_show_distinguishes_receiver_flow_setting_from_measured_latency()
     assert rows["Receiver Flow Slot 1 Latency"] == "current 0.291667 ms; average 0.3 ms; peak 0.5 ms"
 
 
-def test_device_show_exposes_receiver_flow_connection_health_without_assigning_raw_semantics():
+def test_device_show_exposes_receiver_flow_latency_and_late_packet_counts():
     device = make_show_device()
     device.receiver_flow_connection_health = {
         "fresh": True,
@@ -259,8 +259,8 @@ def test_device_show_exposes_receiver_flow_connection_health_without_assigning_r
                 "current_latency_nanoseconds": 291667,
                 "average_latency_nanoseconds": 5458334,
                 "peak_latency_nanoseconds": 20958333,
-                "raw_impairment_value": 825,
-                "raw_impairment_delta": 0,
+                "late_packet_count": 825,
+                "late_packet_delta": 0,
             }
         ],
     }
@@ -269,7 +269,7 @@ def test_device_show_exposes_receiver_flow_connection_health_without_assigning_r
 
     assert rows["Receiver Flow Connection Health"] == "fresh; received 2026-08-22T11:54:36.273409Z"
     assert rows["Receiver Flow Slot 1 Latency"] == "current 0.291667 ms; average 5.45833 ms; peak 20.9583 ms"
-    assert rows["Receiver Flow Slot 1 Raw Impairment"] == "value 825; delta +0"
+    assert rows["Receiver Flow Slot 1 Late Packets"] == "count 825; delta +0"
 
 
 def test_device_show_includes_clock_frequency_offset_in_controller_units():
@@ -411,7 +411,7 @@ def test_device_show_plain_is_concise_and_formats_capabilities(monkeypatch):
 
 def test_device_show_plain_labels_known_unsupported_aes67(monkeypatch):
     device = make_show_device()
-    device.aes67_supported = False
+    device.aes67_configuration_supported = False
 
     async def load_device(application, include_channels):
         assert include_channels is False

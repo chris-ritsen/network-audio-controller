@@ -19,6 +19,7 @@ from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import DDMConfiguration
+from netaudio.monitoring import MonitoringEvent, MonitoringEventJournal
 from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
@@ -140,6 +141,7 @@ class DaemonHTTPServer(
         forget_device=None,
         managed_inventory=None,
         refresh_discovery=None,
+        event_journal=None,
         tls: TLSSettings | None = None,
     ):
         self.application = application
@@ -149,6 +151,7 @@ class DaemonHTTPServer(
         self.managed_controls = ManagedDeviceControls(application)
         self.managed_inventory = managed_inventory
         self.refresh_discovery = refresh_discovery
+        self.event_journal = event_journal or MonitoringEventJournal(path=None)
         self._dismissed_offline_inventory: set[str] = set()
         self.state = state
         self.subscription_readback = SubscriptionReadback(self._emit_device_updated, application)
@@ -206,9 +209,10 @@ class DaemonHTTPServer(
             "/metering/start": self._handle_metering_start,
             "/metering/stop": self._handle_metering_stop,
             "/report-unresponsive": self._handle_report_unresponsive,
-            "/flows/create": self._handle_create_tx_flow,
-            "/flows/allocate": self._handle_allocate_multicast_flow,
-            "/flows/delete": self._handle_delete_tx_flow,
+            "/transmit-flows/plan": self._handle_plan_transmit_flow,
+            "/transmit-flows/create": self._handle_create_transmit_flow,
+            "/transmit-flows/delete": self._handle_delete_transmit_flow,
+            "/external-flows/subscribe": self._handle_subscribe_external_rtp,
             "/ddm/graphql": self._handle_ddm_graphql,
             "/ddm/refresh": self._handle_ddm_refresh,
             "/ddm/login": self._handle_ddm_login,
@@ -291,6 +295,7 @@ class DaemonHTTPServer(
         dispatcher = self.application.dispatcher
         dispatcher.on(EventType.DEVICE_DISCOVERED, self._on_device_event)
         dispatcher.on(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.on(EventType.EXTERNAL_FLOW_CHANGED, self._on_external_flow_changed)
         dispatcher.on(EventType.DEVICE_REMOVED, self._on_device_removed)
         dispatcher.on(EventType.METER_VALUES, self._on_meter_values)
         dispatcher.on(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_event)
@@ -305,6 +310,7 @@ class DaemonHTTPServer(
         dispatcher = self.application.dispatcher
         dispatcher.off(EventType.DEVICE_DISCOVERED, self._on_device_event)
         dispatcher.off(EventType.DEVICE_UPDATED, self._on_device_event)
+        dispatcher.off(EventType.EXTERNAL_FLOW_CHANGED, self._on_external_flow_changed)
         dispatcher.off(EventType.DEVICE_REMOVED, self._on_device_removed)
         dispatcher.off(EventType.METER_VALUES, self._on_meter_values)
         dispatcher.off(EventType.SHURE_DEVICE_DISCOVERED, self._on_shure_event)
@@ -352,6 +358,9 @@ class DaemonHTTPServer(
                 "server_name": event.server_name,
             }
         )
+
+    async def _on_external_flow_changed(self, event: DanteEvent):
+        await self._broadcast_sse({"event": "external_flow_changed", **event.data})
 
     async def _on_meter_values(self, event: DanteEvent):
         await self._broadcast_sse(
@@ -432,6 +441,7 @@ class DaemonHTTPServer(
         return {
             "event": "snapshot",
             "devices": self._serialized_devices(),
+            "external_flows": self.application.external_flows.to_dict(),
             "shure_devices": shure_state,
             "metering": metering_state,
             "managed": {
@@ -766,6 +776,8 @@ class DaemonHTTPServer(
                 await self._handle_get_shure_device(writer, route[len("/shure/devices/") :])
             elif route == "/devices":
                 await self._handle_get_devices(writer, context_name)
+            elif route == "/external-flows":
+                await self._send_json(writer, self.application.external_flows.to_dict())
             elif route == "/ddm/devices":
                 await self._handle_get_ddm_devices(writer, context_name)
             elif route == "/ddm/domains":
@@ -780,21 +792,27 @@ class DaemonHTTPServer(
                 await self._handle_get_redundancy(writer, unquote(route[len("/redundancy/") :]))
             elif route.startswith("/lock-status/"):
                 await self._handle_get_lock_status(writer, unquote(route[len("/lock-status/") :]))
-            elif route.startswith("/flows/"):
-                await self._handle_get_tx_flows(writer, unquote(route[len("/flows/") :]))
+            elif route.startswith("/transmit-flows/"):
+                await self._handle_get_transmit_flows(writer, unquote(route[len("/transmit-flows/") :]))
             elif route == "/metering/status":
                 await self._handle_metering_status(writer)
             elif route == "/metering/cache":
                 await self._handle_metering_cache(writer)
             elif route.startswith("/metering/snapshot/"):
                 await self._handle_metering_snapshot(writer, unquote(route[len("/metering/snapshot/") :]))
+            elif route == "/event-journal":
+                await self._handle_get_event_journal(writer, query)
+            elif route == "/issues":
+                await self._handle_get_issues(writer, query)
             else:
                 await self._handle_web_asset(writer, unquote(route))
             return
 
         if method == "DELETE":
             route, _, query = path.partition("?")
-            if route == "/devices":
+            if route == "/event-journal":
+                await self._handle_clear_event_journal(writer)
+            elif route == "/devices":
                 await self._handle_forget_devices(writer, parse_qs(query))
             elif route.startswith("/devices/"):
                 await self._handle_forget_device(writer, unquote(route[len("/devices/") :]))
@@ -830,6 +848,62 @@ class DaemonHTTPServer(
             return
 
         await handler(writer, params)
+
+    async def _handle_get_event_journal(self, writer, query: dict[str, list[str]]) -> None:
+        def first(name: str) -> str | None:
+            values = query.get(name)
+            return values[0] if values else None
+
+        limit_text = first("limit")
+        try:
+            limit = int(limit_text) if limit_text is not None else None
+            payload = self.event_journal.export(
+                device=first("device"),
+                kind=first("kind"),
+                severity=first("severity"),
+                since=first("since"),
+                limit=limit,
+            )
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        await self._send_json(writer, payload)
+
+    async def _handle_clear_event_journal(self, writer) -> None:
+        cleared = self.event_journal.clear()
+        await self._send_json(
+            writer,
+            {
+                "cleared": cleared,
+                "scope": "local_event_journal",
+                "device_commands_sent": 0,
+            },
+        )
+
+    async def _handle_get_issues(self, writer, query: dict[str, list[str]]) -> None:
+        def first(name: str) -> str | None:
+            values = query.get(name)
+            return values[0] if values else None
+
+        limit_text = first("limit")
+        try:
+            limit = int(limit_text) if limit_text is not None else None
+            payload = self.event_journal.export_issues(
+                device=first("device"),
+                kind=first("kind"),
+                severity=first("severity"),
+                state=first("state"),
+                limit=limit,
+            )
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        await self._send_json(writer, payload)
+
+    async def publish_journal_event(self, event: MonitoringEvent) -> None:
+        if not self.sse_clients:
+            return
+        await self._broadcast_sse({"event": "monitoring_event", "journal_event": event.to_dict()})
 
     async def _handle_sse(self, writer, reader):
         client = None

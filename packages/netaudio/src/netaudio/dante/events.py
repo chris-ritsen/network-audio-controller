@@ -15,6 +15,7 @@ class EventType(Enum):
     DEVICE_REMOVED = auto()
     DEVICE_STATUS_RECEIVED = auto()
     DEVICE_UPDATED = auto()
+    EXTERNAL_FLOW_CHANGED = auto()
     METER_VALUES = auto()
     NOTIFICATION_RECEIVED = auto()
     SHURE_DEVICE_DISCOVERED = auto()

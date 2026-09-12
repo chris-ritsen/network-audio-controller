@@ -31,6 +31,7 @@ class ManagedDeviceControls:
                         "inventory_sources",
                         "control_transports",
                         "direct_control_available",
+                        "managed_operation_permissions",
                     }:
                         setattr(device, field, copy.deepcopy(record.get(field)))
         for key in self._scopes.keys() - managed_keys:
@@ -88,6 +89,7 @@ class ManagedDeviceControls:
                     "inventory_sources",
                     "control_transports",
                     "direct_control_available",
+                    "managed_operation_permissions",
                     "management_state",
                     "preferred_leader",
                     "rx_count",

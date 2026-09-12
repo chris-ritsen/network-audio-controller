@@ -498,8 +498,8 @@ fn sample_rate_pullup_control_matches_authentic_a32_requests() {
 }
 
 #[test]
-fn probe_gain_level_matches_captured_input_packet_716() {
-    let packet = build_probe_gain_level([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x045A).unwrap();
+fn probe_codec_status_matches_captured_input_packet_716() {
+    let packet = build_probe_codec_status([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x045A).unwrap();
     assert_eq!(
         packet,
         [

@@ -28,6 +28,7 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.latency import unavailable_latency_controls
+from netaudio.dante.operation_availability import probe_supported
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
     STATUS_KIND_BLUETOOTH,
@@ -35,8 +36,9 @@ from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_CLOCK,
     STATUS_KIND_DANTE_MODEL,
     STATUS_KIND_ENCODING,
-    STATUS_KIND_GAIN,
+    STATUS_KIND_CODEC,
     STATUS_KIND_INTERFACE,
+    STATUS_KIND_INTERFACE_STATISTICS,
     STATUS_KIND_LOCK,
     STATUS_KIND_MAKE_MODEL,
     STATUS_KIND_ROUTING_CAPACITY,
@@ -52,9 +54,25 @@ CONMON_RETRY_TIMEOUTS = [3, 5, 10]
 ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset(
     {
         "manufacturer",
-        "aes67_supported",
-        "dante_model_capabilities",
+        "aes67_configuration_supported",
+        "dante_model_record_protocol_version",
+        "dante_model_primary_capabilities",
+        "dante_model_read_only_capabilities",
         "dante_model_monitoring_capabilities",
+        "dante_model_secondary_capabilities",
+        "dante_model_domain_capability_values",
+        "dante_model_domain_capability_validity",
+        "identify_supported",
+        "sample_rate_configuration_supported",
+        "encoding_configuration_supported",
+        "sample_rate_pullup_configuration_supported",
+        "switch_redundancy_supported",
+        "static_ipv4_configuration_supported",
+        "device_locking_supported",
+        "external_word_clock_read_only",
+        "switch_redundancy_read_only",
+        "static_ipv4_configuration_read_only",
+        "generic_codec_control_supported",
         "detailed_metering_supported",
         "interface_statistics_supported",
         "clock_monitoring_supported",
@@ -72,7 +90,7 @@ FIELD_STATUS_KINDS = frozenset(
         STATUS_KIND_DIAGNOSTIC_LOG_EXPORT,
         STATUS_KIND_CLOCK,
         STATUS_KIND_ENCODING,
-        STATUS_KIND_GAIN,
+        STATUS_KIND_CODEC,
         STATUS_KIND_INTERFACE,
         STATUS_KIND_LOCK,
         STATUS_KIND_SAMPLE_RATE,
@@ -119,6 +137,8 @@ def apply_device_status(device, kind: str, status) -> bool:
             fields["rx_count"] = status["routing_capacity_receive_channel_count"]
             fields["rx_count_raw"] = status["routing_capacity_receive_channel_count"]
         return _assign_changed(device, fields)
+    if kind == STATUS_KIND_INTERFACE_STATISTICS:
+        return _assign_changed(device, {"interface_statistics": status.to_dict()})
     if kind in FIELD_STATUS_KINDS:
         return _assign_changed(device, status)
     return False
@@ -213,6 +233,10 @@ class DanteStateService:
         if not pending:
             return
         for kind, status in pending:
+            if kind == "codec" and isinstance(status, dict):
+                from netaudio.dante.gain import codec_status_fields
+
+                status = codec_status_fields(device, {"parameters": status.get("codec_parameters") or []})
             apply_device_status(device, kind, status)
         logger.debug(f"Applied pending status for {device.ipv4}: {sorted({kind for kind, _ in pending})}")
 
@@ -455,12 +479,12 @@ class DanteStateService:
             self.application.probe_encoding_status,
         )
 
-    async def _refresh_gain_status(self, device, reason: str) -> None:
+    async def _refresh_codec_status(self, device, reason: str) -> None:
         await self._refresh_capability_status(
             device,
             reason,
-            "gain",
-            self.application.probe_gain_status,
+            "codec",
+            self.application.probe_codec_status,
         )
 
     def _readback_allowed(self, device, kind: str) -> bool:
@@ -627,19 +651,26 @@ class DanteStateService:
                 if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
                     await self.application.send_bluetooth_status_request(device)
 
-                await self._probe_with_retries(
-                    device,
-                    "AES67",
-                    lambda: self.application.probe_aes67_state(device),
-                )
+                if probe_supported(device, "aes67"):
+                    await self._probe_with_retries(
+                        device,
+                        "AES67",
+                        lambda: self.application.probe_aes67_state(device),
+                    )
 
                 capability_tasks = []
-                if device.requires_managed_control or device.supported_sample_rates is None:
+                if (device.requires_managed_control or device.supported_sample_rates is None) and probe_supported(
+                    device, "sample_rate"
+                ):
                     capability_tasks.append(self._refresh_sample_rate_status(device, "device discovered"))
-                if device.requires_managed_control or device.supported_encodings is None:
+                if (device.requires_managed_control or device.supported_encodings is None) and probe_supported(
+                    device, "encoding"
+                ):
                     capability_tasks.append(self._refresh_encoding_status(device, "device discovered"))
-                if device.requires_managed_control or device.supported_gain_levels is None:
-                    capability_tasks.append(self._refresh_gain_status(device, "device discovered"))
+                if (device.requires_managed_control or device.codec_parameters is None) and probe_supported(
+                    device, "codec_control"
+                ):
+                    capability_tasks.append(self._refresh_codec_status(device, "device discovered"))
                 if capability_tasks:
                     await asyncio.gather(*capability_tasks)
 

@@ -1,4 +1,3 @@
-use super::super::conmon::sample_rate_pullup_value;
 use super::*;
 
 #[test]
@@ -159,60 +158,70 @@ pub(super) fn captured_sample_rate_status_packet_28101() -> Vec<u8> {
 }
 
 #[test]
-fn sample_rate_status_parses_captured_packet_28101() {
-    let parsed = parse_sample_rate_status(&captured_sample_rate_status_packet_28101()).unwrap();
-    assert_eq!(parsed.current_sample_rate, 44_100);
+fn configurable_u32_status_preserves_all_fields_and_follows_relocated_vector() {
+    let original = captured_sample_rate_status_packet_28101();
+    let parsed = parse_sample_rate_status(&original).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0724);
+    assert_eq!(parsed.current_value, 44_100);
+    assert_eq!(parsed.requested_value, 0);
+    assert_eq!(parsed.update_mode, 2);
     assert_eq!(
-        parsed.supported_sample_rates,
+        parsed.available_values,
         vec![44_100, 48_000, 88_200, 96_000, 176_400, 192_000]
     );
-}
+    assert_eq!(parsed.flags, None);
 
-#[test]
-fn sample_rate_status_parses_captured_packet_4170820() {
-    let data = [
-        0xFF, 0xFF, 0x00, 0x34, 0x06, 0x1A, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x08, 0x12, 0x58, 0x00,
-        0x00, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x24, 0x00, 0x80, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x18, 0x00, 0x01, 0x00, 0x00, 0xBB, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x02, 0x00, 0x00, 0x00, 0x00, 0xBB, 0x80,
-    ];
-    let parsed = parse_sample_rate_status(&data).unwrap();
-    assert_eq!(parsed.current_sample_rate, 48_000);
-    assert_eq!(parsed.supported_sample_rates, vec![48_000]);
-}
-
-#[test]
-fn sample_rate_status_parses_captured_packet_9695783() {
-    let data = [
-        0xFF, 0xFF, 0x00, 0x40, 0xFD, 0x2A, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x53, 0xEF,
-        0x37, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x00, 0x80, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x18, 0x00, 0x04, 0x00, 0x00, 0xBB, 0x80, 0x00, 0x00, 0xBB, 0x80, 0x00,
-        0x02, 0x00, 0x00, 0x00, 0x00, 0xAC, 0x44, 0x00, 0x00, 0xBB, 0x80, 0x00, 0x01, 0x58, 0x88,
-        0x00, 0x01, 0x77, 0x00,
-    ];
-    let parsed = parse_sample_rate_status(&data).unwrap();
-    assert_eq!(parsed.current_sample_rate, 48_000);
+    let values = original[48..72].to_vec();
+    let mut relocated = original[..48].to_vec();
+    relocated.resize(56, 0xA5);
+    relocated.extend_from_slice(&values);
+    relocated[32..34].copy_from_slice(&0x0020u16.to_be_bytes());
+    let length = u16::try_from(relocated.len()).unwrap();
+    relocated[2..4].copy_from_slice(&length.to_be_bytes());
     assert_eq!(
-        parsed.supported_sample_rates,
-        vec![44_100, 48_000, 88_200, 96_000]
+        parse_sample_rate_status(&relocated)
+            .unwrap()
+            .available_values,
+        parsed.available_values
     );
 }
 
 #[test]
-fn sample_rate_status_rejects_count_exceeding_packet() {
-    let mut data = captured_sample_rate_status_packet_28101();
-    data[CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET..CONMON_SUPPORTED_SAMPLE_RATE_COUNT_OFFSET + 2]
-        .copy_from_slice(&7u16.to_be_bytes());
-    assert_eq!(parse_sample_rate_status(&data), None);
+fn configurable_u32_status_accepts_zero_and_one_choice_and_pre_0501_reboot_mode() {
+    let mut zero = captured_sample_rate_status_packet_28101();
+    zero.truncate(48);
+    zero[34..36].copy_from_slice(&0u16.to_be_bytes());
+    zero[2..4].copy_from_slice(&48u16.to_be_bytes());
+    assert_eq!(
+        parse_sample_rate_status(&zero).unwrap().available_values,
+        Vec::<u32>::new()
+    );
+
+    let mut one = captured_sample_rate_status_packet_28101();
+    one.truncate(52);
+    one[34..36].copy_from_slice(&1u16.to_be_bytes());
+    one[2..4].copy_from_slice(&52u16.to_be_bytes());
+    assert_eq!(
+        parse_sample_rate_status(&one).unwrap().available_values,
+        vec![44_100]
+    );
+
+    one[24..26].copy_from_slice(&0x0400u16.to_be_bytes());
+    one[44..46].copy_from_slice(&0xFFFFu16.to_be_bytes());
+    assert_eq!(parse_sample_rate_status(&one).unwrap().update_mode, 1);
 }
 
 #[test]
-fn sample_rate_status_preserves_uninterpreted_trailing_bytes() {
-    let mut data = captured_sample_rate_status_packet_28101();
-    data.extend_from_slice(&[0x12, 0x34]);
-    let packet_length = u16::try_from(data.len()).unwrap();
-    data[2..4].copy_from_slice(&packet_length.to_be_bytes());
-    assert!(parse_sample_rate_status(&data).is_some());
+fn configurable_u32_status_rejects_misaligned_overlapping_and_out_of_bounds_vectors() {
+    let original = captured_sample_rate_status_packet_28101();
+    for pointer in [0x0014u16, 0x0019] {
+        let mut invalid = original.clone();
+        invalid[32..34].copy_from_slice(&pointer.to_be_bytes());
+        assert_eq!(parse_sample_rate_status(&invalid), None);
+    }
+    let mut oversized = original;
+    oversized[34..36].copy_from_slice(&u16::MAX.to_be_bytes());
+    assert_eq!(parse_sample_rate_status(&oversized), None);
 }
 
 pub(super) fn captured_encoding_status_packet_204720() -> Vec<u8> {
@@ -225,126 +234,67 @@ pub(super) fn captured_encoding_status_packet_204720() -> Vec<u8> {
 }
 
 #[test]
-fn encoding_status_parses_captured_packet_204720() {
-    let parsed = parse_encoding_status(&captured_encoding_status_packet_204720()).unwrap();
-    assert_eq!(parsed.current_encoding, 24);
-    assert_eq!(parsed.supported_encodings, vec![24, 16, 32]);
-}
-
-#[test]
-fn encoding_status_parses_captured_packet_645566() {
-    let data = [
-        0xFF, 0xFF, 0x00, 0x34, 0x79, 0xB2, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50, 0xCA,
-        0xC5, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x00, 0x82, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x18, 0x00, 0x01, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x18, 0x00,
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18,
-    ];
-    let parsed = parse_encoding_status(&data).unwrap();
-    assert_eq!(parsed.current_encoding, 24);
-    assert_eq!(parsed.supported_encodings, vec![24]);
-}
-
-#[test]
-fn encoding_status_rejects_invalid_envelope_and_oversized_count() {
-    let mut wrong_protocol = captured_encoding_status_packet_204720();
-    wrong_protocol[0..2].copy_from_slice(&PROTOCOL_ID.to_be_bytes());
-    assert_eq!(parse_encoding_status(&wrong_protocol), None);
-
-    let mut wrong_opcode = captured_encoding_status_packet_204720();
-    wrong_opcode[26..28].copy_from_slice(&CONMON_OPCODE_SAMPLE_RATE_STATUS.to_be_bytes());
-    assert_eq!(parse_encoding_status(&wrong_opcode), None);
-
-    let mut wrong_declared_length = captured_encoding_status_packet_204720();
-    wrong_declared_length[2..4].copy_from_slice(&59u16.to_be_bytes());
-    assert_eq!(parse_encoding_status(&wrong_declared_length), None);
-
-    let mut oversized_count = captured_encoding_status_packet_204720();
-    oversized_count
-        [CONMON_SUPPORTED_ENCODING_COUNT_OFFSET..CONMON_SUPPORTED_ENCODING_COUNT_OFFSET + 2]
-        .copy_from_slice(&4u16.to_be_bytes());
-    assert_eq!(parse_encoding_status(&oversized_count), None);
-}
-
-pub(super) fn captured_sample_rate_pullup_status_packet() -> Vec<u8> {
-    decode_hexadecimal(
-            "ffff005c001e00000200000000010000417564696e6174650724008400000000003000050000000000000000000200000000000100000000000000000000000000000000000000000000000000000001000000020000000300000004",
-        )
-}
-
-#[test]
-fn sample_rate_pullup_status_parses_authentic_a32_packet_and_semantics() {
-    let parsed =
-        parse_sample_rate_pullup_status(&captured_sample_rate_pullup_status_packet()).unwrap();
-
-    assert_eq!(parsed.applied_value, sample_rate_pullup_value(0));
-    assert_eq!(parsed.requested_value, sample_rate_pullup_value(0));
-    assert_eq!(parsed.mode_code, 2);
-    assert_eq!(parsed.unmapped_word_at_body_offset_20, 1);
+fn encoding_uses_the_shared_configurable_u32_layout() {
     assert_eq!(
-        parsed.supported_values,
-        (0..=4).map(sample_rate_pullup_value).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        parsed.supported_values[1],
-        SampleRatePullupValue {
-            raw_value: 1,
-            meaning: SampleRatePullupMeaning::PositiveFourPointOneSixSixSevenPercent,
-            rate_multiplier_numerator: Some(25),
-            rate_multiplier_denominator: Some(24),
+        parse_encoding_status(&captured_encoding_status_packet_204720()).unwrap(),
+        ConfigurableU32Status {
+            record_protocol_version: 0x0724,
+            current_value: 24,
+            requested_value: 0,
+            update_mode: 2,
+            available_values: vec![24, 16, 32],
+            flags: None,
         }
     );
 }
 
-fn retained_sample_rate_pullup_status_packet() -> Vec<u8> {
+pub(super) fn captured_sample_rate_pullup_status_packet() -> Vec<u8> {
     decode_hexadecimal(
-            "ffff005c000c00000200000000010000417564696e6174650724008400000000003000050000000100000001000200000000000100000000000000000000000000000000000000000000000000000001000000020000000300000004",
-        )
+        "ffff005c001e00000200000000010000417564696e6174650724008400000000003000050000000000000000000200000000000100000000000000000000000000000000000000000000000000000001000000020000000300000004",
+    )
 }
 
 #[test]
-fn sample_rate_pullup_status_parses_retained_raw_one_publication() {
-    let parsed =
-        parse_sample_rate_pullup_status(&retained_sample_rate_pullup_status_packet()).unwrap();
+fn sample_rate_pullup_preserves_mode_flags_and_zero_choice_state() {
+    let mut packet = captured_sample_rate_pullup_status_packet();
+    packet[52..56].copy_from_slice(&1u32.to_be_bytes());
+    let parsed = parse_sample_rate_pullup_status(&packet).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0724);
+    assert_eq!(parsed.current_value, 0);
+    assert_eq!(parsed.requested_value, 0);
+    assert_eq!(parsed.update_mode, 2);
+    assert_eq!(parsed.flags, Some(1));
+    assert_eq!(parsed.available_values, vec![0, 1, 2, 3, 4]);
 
-    assert_eq!(parsed.applied_value, sample_rate_pullup_value(1));
-    assert_eq!(parsed.requested_value, sample_rate_pullup_value(1));
-    assert_eq!(parsed.mode_code, 2);
-    assert_eq!(parsed.unmapped_word_at_body_offset_20, 1);
-    assert_eq!(
-        parsed.supported_values,
-        (0..=4).map(sample_rate_pullup_value).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        parsed.applied_value.meaning,
-        SampleRatePullupMeaning::PositiveFourPointOneSixSixSevenPercent
-    );
+    packet[34..36].copy_from_slice(&0u16.to_be_bytes());
+    assert!(parse_sample_rate_pullup_status(&packet)
+        .unwrap()
+        .available_values
+        .is_empty());
 }
 
 #[test]
-fn sample_rate_pullup_status_preserves_unknown_values_and_rejects_invalid_vectors() {
-    let mut unknown = captured_sample_rate_pullup_status_packet();
-    unknown[CONMON_SAMPLE_RATE_PULLUP_APPLIED_VALUE_OFFSET
-        ..CONMON_SAMPLE_RATE_PULLUP_APPLIED_VALUE_OFFSET + 4]
-        .copy_from_slice(&9u32.to_be_bytes());
-    unknown[88..92].copy_from_slice(&9u32.to_be_bytes());
-    let parsed = parse_sample_rate_pullup_status(&unknown).unwrap();
-    assert_eq!(parsed.applied_value, sample_rate_pullup_value(9));
-    assert_eq!(parsed.supported_values[4], sample_rate_pullup_value(9));
+fn sample_rate_pullup_uses_reported_mode_before_0501_and_protects_the_flags_field() {
+    let mut packet = captured_sample_rate_pullup_status_packet();
+    packet[24..26].copy_from_slice(&0x0400u16.to_be_bytes());
+    packet[44..46].copy_from_slice(&0u16.to_be_bytes());
+    assert_eq!(
+        parse_sample_rate_pullup_status(&packet)
+            .unwrap()
+            .update_mode,
+        0
+    );
+    assert_eq!(
+        parse_sample_rate_pullup_status(&packet).unwrap().flags,
+        None
+    );
 
-    let mut overlapping_vector = captured_sample_rate_pullup_status_packet();
-    overlapping_vector[CONMON_SAMPLE_RATE_PULLUP_VECTOR_OFFSET_FIELD
-        ..CONMON_SAMPLE_RATE_PULLUP_VECTOR_OFFSET_FIELD + 2]
-        .copy_from_slice(&0x0010u16.to_be_bytes());
-    assert_eq!(parse_sample_rate_pullup_status(&overlapping_vector), None);
-
-    let mut oversized_vector = captured_sample_rate_pullup_status_packet();
-    oversized_vector[CONMON_SAMPLE_RATE_PULLUP_VECTOR_COUNT_FIELD
-        ..CONMON_SAMPLE_RATE_PULLUP_VECTOR_COUNT_FIELD + 2]
-        .copy_from_slice(&6u16.to_be_bytes());
-    assert_eq!(parse_sample_rate_pullup_status(&oversized_vector), None);
+    packet[24..26].copy_from_slice(&0x0724u16.to_be_bytes());
+    packet[32..34].copy_from_slice(&0x001Cu16.to_be_bytes());
+    assert_eq!(parse_sample_rate_pullup_status(&packet), None);
 }
 
-pub(super) fn captured_input_gain_status_packet_1528() -> Vec<u8> {
+pub(super) fn captured_avio_input_codec_status_packet_1528() -> Vec<u8> {
     vec![
         0xFF, 0xFF, 0x00, 0x38, 0x06, 0x11, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50, 0x69,
         0x2E, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x27, 0x10, 0x0B, 0x00, 0x00,
@@ -354,77 +304,40 @@ pub(super) fn captured_input_gain_status_packet_1528() -> Vec<u8> {
 }
 
 #[test]
-fn gain_status_parses_captured_input_packet_1528() {
+fn codec_status_preserves_generic_parameter_type_mode_and_raw_values() {
     assert_eq!(
-        parse_gain_status(&captured_input_gain_status_packet_1528()),
-        Some(GainStatus {
-            device_type: "input".to_owned(),
-            channel_levels: vec![5, 1],
+        parse_codec_status(&captured_avio_input_codec_status_packet_1528()),
+        Some(CodecStatus {
+            record_protocol_version: 0x0727,
+            parameters: vec![CodecParameterStatus {
+                parameter_type: 1,
+                mode: 2,
+                values: vec![5, 1],
+            }],
         })
     );
-}
 
-fn live_avio_input_gain_status_with_unmapped_header_byte() -> Vec<u8> {
-    vec![
-        0xFF, 0xFF, 0x00, 0x38, 0xEE, 0xE5, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50, 0x69,
-        0x2E, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x10, 0x0B, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10, 0x01, 0x02, 0x00, 0x02, 0x00,
-        0x04, 0x00, 0x18, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
-    ]
-}
-
-#[test]
-fn gain_status_parses_live_avio_packets_when_unmapped_header_byte_changes() {
-    assert_eq!(
-        parse_gain_status(&live_avio_input_gain_status_with_unmapped_header_byte()),
-        Some(GainStatus {
-            device_type: "input".to_owned(),
-            channel_levels: vec![4, 4],
-        })
-    );
-    let live_output = [
-        0xFF, 0xFF, 0x00, 0x38, 0xEF, 0xB0, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50, 0x7B,
-        0x8D, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x38, 0x10, 0x0B, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10, 0x02, 0x01, 0x00, 0x02, 0x00,
-        0x04, 0x00, 0x18, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
-    ];
-    assert_eq!(
-        parse_gain_status(&live_output),
-        Some(GainStatus {
-            device_type: "output".to_owned(),
-            channel_levels: vec![4, 4],
-        })
-    );
+    let mut unknown = captured_avio_input_codec_status_packet_1528();
+    unknown[40] = 0xA5;
+    unknown[41] = 0x5A;
+    let parameter = &parse_codec_status(&unknown).unwrap().parameters[0];
+    assert_eq!((parameter.parameter_type, parameter.mode), (0xA5, 0x5A));
+    assert_eq!(parameter.values, vec![5, 1]);
 }
 
 #[test]
-fn gain_status_parses_captured_output_packet_1585() {
-    let data = [
-        0xFF, 0xFF, 0x00, 0x38, 0x08, 0x10, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0xFF, 0xFE, 0x50, 0x7B,
-        0x8D, 0x41, 0x75, 0x64, 0x69, 0x6E, 0x61, 0x74, 0x65, 0x07, 0x27, 0x10, 0x0B, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x10, 0x02, 0x01, 0x00, 0x02, 0x00,
-        0x04, 0x00, 0x18, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
-    ];
-    assert_eq!(
-        parse_gain_status(&data),
-        Some(GainStatus {
-            device_type: "output".to_owned(),
-            channel_levels: vec![4, 4],
-        })
-    );
-}
+fn codec_status_rejects_invalid_descriptor_geometry_but_accepts_empty_values() {
+    let mut empty = captured_avio_input_codec_status_packet_1528();
+    empty[42..44].copy_from_slice(&0u16.to_be_bytes());
+    assert!(parse_codec_status(&empty).unwrap().parameters[0]
+        .values
+        .is_empty());
 
-#[test]
-fn gain_status_rejects_unknown_direction_and_inconsistent_channel_count() {
-    let mut unknown_direction = captured_input_gain_status_packet_1528();
-    unknown_direction[CONMON_GAIN_DIRECTION_OFFSET..CONMON_GAIN_DIRECTION_OFFSET + 2]
-        .copy_from_slice(&0x0101u16.to_be_bytes());
-    assert_eq!(parse_gain_status(&unknown_direction), None);
-
-    let mut oversized_count = captured_input_gain_status_packet_1528();
-    oversized_count[CONMON_GAIN_CHANNEL_COUNT_OFFSET..CONMON_GAIN_CHANNEL_COUNT_OFFSET + 2]
-        .copy_from_slice(&3u16.to_be_bytes());
-    assert_eq!(parse_gain_status(&oversized_count), None);
+    for (range, value) in [(36..38, 6u16), (44..46, 2u16), (46..48, 0x0019u16)] {
+        let mut invalid = captured_avio_input_codec_status_packet_1528();
+        invalid[range].copy_from_slice(&value.to_be_bytes());
+        assert_eq!(parse_codec_status(&invalid), None);
+    }
 }
 
 fn authentic_0086_status_packet() -> Vec<u8> {
@@ -602,172 +515,268 @@ fn authentic_ad4d_0040_status_packet() -> Vec<u8> {
 }
 
 #[test]
-fn unmapped_0040_status_parses_authentic_a32_pointer_table() {
-    let parsed = parse_unmapped_0040_status(&authentic_0040_status_packet()).unwrap();
-    assert_eq!(parsed.record_count, 3);
-    assert_eq!(parsed.record_pointers, vec![0x002C, 0x0044, 0x005C]);
-    assert_eq!(parsed.records.len(), 3);
-    assert_eq!(parsed.records[0].unmapped_prefix_words, [0, 0, 0, 0]);
-    assert_eq!(parsed.records[0].raw_link_status_word, 1);
-    assert!(parsed.records[0].link_up);
-    assert_eq!(parsed.records[0].link_speed_megabits_per_second, 1000);
-    assert_eq!(parsed.records[1].unmapped_prefix_words, [0, 0, 0, 0]);
-    assert_eq!(parsed.records[1].raw_link_status_word, 0x0100_0001);
-    assert!(parsed.records[1].link_up);
-    assert_eq!(parsed.records[1].link_speed_megabits_per_second, 1000);
-    assert_eq!(parsed.records[2].unmapped_prefix_words, [0, 0, 0, 0]);
-    assert_eq!(parsed.records[2].raw_link_status_word, 0x0101_0000);
-    assert!(!parsed.records[2].link_up);
-    assert_eq!(parsed.records[2].link_speed_megabits_per_second, 0);
-    assert_eq!(parsed.records[0].record_pointer, 0x002C);
-    assert_eq!(parsed.records[0].record_size_bytes, 24);
-    assert_eq!(parsed.records[0].unmapped_trailing_hexadecimal, "");
-    assert_eq!(parsed.records[0].raw_record_hexadecimal.len(), 48);
+fn interface_statistics_parses_a32_outer_and_nested_pointer_tables() {
+    let parsed = parse_interface_statistics_status(&authentic_0040_status_packet()).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0724);
+    assert_eq!(parsed.header_record_pointer, 0x0010);
+    assert_eq!(parsed.header_record_size_bytes, 20);
+    assert_eq!(parsed.header_record_hexadecimal.len(), 40);
+    assert!(parsed.raw_body_hexadecimal.starts_with("0724004000000000"));
+    assert_eq!(parsed.capability_mask, 7);
+    assert!(parsed.utilization_supported);
+    assert!(parsed.errors_supported);
+    assert!(parsed.clear_errors_supported);
+    assert_eq!(parsed.interface_group_count, 1);
+    assert_eq!(parsed.interface_group_pointers, vec![0x0024]);
+    let group = &parsed.interface_groups[0];
+    assert_eq!(group.record_count, 3);
+    assert_eq!(group.record_pointers, vec![0x002C, 0x0044, 0x005C]);
+    assert_eq!(group.raw_records.len(), 3);
+    let selected = group.selected_stats.as_ref().unwrap();
+    assert_eq!(selected.record_pointer, 0x002C);
+    assert_eq!(selected.record_size_bytes, 24);
+    assert_eq!(selected.transmit_raw_bytes_per_second, 0);
+    assert_eq!(selected.receive_raw_bytes_per_second, 0);
+    assert_eq!(selected.transmit_bits_per_second, 0);
+    assert_eq!(selected.receive_bits_per_second, 0);
+    assert_eq!(selected.cumulative_transmit_errors, 0);
+    assert_eq!(selected.cumulative_receive_errors, 0);
+    assert_eq!(selected.discriminator_status_word, 1);
+    assert_eq!(selected.speed_megabits_per_second, 1000);
+    assert_eq!(selected.extension_hexadecimal, "");
+    assert_eq!(selected.raw_record_hexadecimal.len(), 48);
+    assert_eq!(group.raw_records[1].discriminator_status_word, 0x0100_0001);
+    assert_eq!(group.raw_records[2].discriminator_status_word, 0x0101_0000);
 }
 
 #[test]
-fn unmapped_0040_status_preserves_lx_dante_record_extension() {
-    let parsed = parse_unmapped_0040_status(&authentic_lx_dante_0040_status_packet()).unwrap();
-    assert_eq!(parsed.record_count, 1);
-    assert_eq!(parsed.record_pointers, vec![0x0028]);
-    assert_eq!(parsed.records[0].record_pointer, 0x0028);
-    assert_eq!(parsed.records[0].record_size_bytes, 52);
+fn interface_statistics_preserves_two_lx_interface_groups() {
+    let parsed =
+        parse_interface_statistics_status(&authentic_lx_dante_0040_status_packet()).unwrap();
+    assert_eq!(parsed.interface_group_count, 2);
+    assert_eq!(parsed.interface_group_pointers, vec![0x0024, 0x0040]);
+    assert_eq!(parsed.interface_groups.len(), 2);
+    let primary = parsed.interface_groups[0].selected_stats.as_ref().unwrap();
+    assert_eq!(primary.record_pointer, 0x0028);
+    assert_eq!(primary.record_size_bytes, 24);
+    assert_eq!(primary.transmit_raw_bytes_per_second, 0x0020_6738);
+    assert_eq!(primary.receive_raw_bytes_per_second, 0x0014_CBA8);
     assert_eq!(
-        parsed.records[0].unmapped_prefix_words,
-        [0x0020_6738, 0x0014_CBA8, 0, 0]
+        primary.transmit_bits_per_second,
+        u64::from(0x0020_6738u32) * 8
     );
-    assert_eq!(parsed.records[0].raw_link_status_word, 1);
-    assert!(parsed.records[0].link_up);
-    assert_eq!(parsed.records[0].link_speed_megabits_per_second, 1000);
     assert_eq!(
-        parsed.records[0].unmapped_trailing_hexadecimal,
-        "00010044000000000000000000000000000000000000000000000000"
+        primary.receive_bits_per_second,
+        u64::from(0x0014_CBA8u32) * 8
     );
-    assert_eq!(parsed.records[0].raw_record_hexadecimal.len(), 104);
+    assert_eq!(primary.discriminator_status_word, 1);
+    assert_eq!(primary.speed_megabits_per_second, 1000);
+    assert_eq!(primary.extension_hexadecimal, "");
+    let secondary = parsed.interface_groups[1].selected_stats.as_ref().unwrap();
+    assert_eq!(secondary.record_pointer, 0x0044);
+    assert_eq!(secondary.record_size_bytes, 24);
+    assert_eq!(secondary.transmit_raw_bytes_per_second, 0);
+    assert_eq!(secondary.speed_megabits_per_second, 0);
 }
 
 #[test]
-fn unmapped_0040_status_preserves_avio_record() {
-    let parsed = parse_unmapped_0040_status(&authentic_avio_0040_status_packet()).unwrap();
-    assert_eq!(parsed.record_count, 1);
-    assert_eq!(parsed.record_pointers, vec![0x0028]);
-    assert_eq!(parsed.records[0].record_pointer, 0x0028);
-    assert_eq!(parsed.records[0].record_size_bytes, 24);
+fn interface_statistics_preserves_avio_rates_and_speed() {
+    let parsed = parse_interface_statistics_status(&authentic_avio_0040_status_packet()).unwrap();
+    let record = parsed.interface_groups[0].selected_stats.as_ref().unwrap();
+    assert_eq!(record.transmit_raw_bytes_per_second, 0x0008_5FD8);
+    assert_eq!(record.receive_raw_bytes_per_second, 0x0009_926D);
+    assert_eq!(record.cumulative_transmit_errors, 0);
+    assert_eq!(record.cumulative_receive_errors, 0);
+    assert_eq!(record.discriminator_status_word, 1);
+    assert_eq!(record.speed_megabits_per_second, 100);
+}
+
+#[test]
+fn interface_statistics_accepts_ad4d_conmon_family() {
+    let parsed = parse_interface_statistics_status(&authentic_ad4d_0040_status_packet()).unwrap();
+    let record = parsed.interface_groups[0].selected_stats.as_ref().unwrap();
+    assert_eq!(record.transmit_raw_bytes_per_second, 0x0016_9E8C);
+    assert_eq!(record.receive_raw_bytes_per_second, 0x0007_0964);
+    assert_eq!(record.record_size_bytes, 24);
+    assert_eq!(record.discriminator_status_word, 1);
+    assert_eq!(record.speed_megabits_per_second, 1000);
+}
+
+#[test]
+fn interface_statistics_preserves_record_extensions() {
+    let mut packet = authentic_avio_0040_status_packet();
+    packet.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+    let packet_length = u16::try_from(packet.len()).unwrap();
+    packet[2..4].copy_from_slice(&packet_length.to_be_bytes());
+
+    let parsed = parse_interface_statistics_status(&packet).unwrap();
+    let selected = parsed.interface_groups[0].selected_stats.as_ref().unwrap();
+    assert_eq!(selected.record_size_bytes, 28);
+    assert_eq!(selected.extension_hexadecimal, "deadbeef");
+    assert!(selected.raw_record_hexadecimal.ends_with("deadbeef"));
+}
+
+#[test]
+fn interface_statistics_uses_legacy_capability_default_before_0713() {
+    let mut packet = authentic_avio_0040_status_packet();
+    packet[24..26].copy_from_slice(&0x0712u16.to_be_bytes());
+    packet[56..60].copy_from_slice(&u32::MAX.to_be_bytes());
+
+    let parsed = parse_interface_statistics_status(&packet).unwrap();
+    assert_eq!(parsed.capability_mask, 3);
+    assert!(parsed.utilization_supported);
+    assert!(parsed.errors_supported);
+    assert!(!parsed.clear_errors_supported);
+}
+
+#[test]
+fn interface_statistics_accepts_a_shorter_legacy_header_record() {
+    let mut packet = authentic_avio_0040_status_packet();
+    packet[24..26].copy_from_slice(&0x0712u16.to_be_bytes());
+    packet[34..36].copy_from_slice(&0x0020u16.to_be_bytes());
+    let nested_table = packet[60..64].to_vec();
+    packet[56..60].copy_from_slice(&nested_table);
+
+    let parsed = parse_interface_statistics_status(&packet).unwrap();
+    assert_eq!(parsed.header_record_size_bytes, 16);
+    assert_eq!(parsed.capability_mask, 3);
+    assert_eq!(parsed.interface_group_pointers, vec![0x0020]);
+    assert_eq!(parsed.interface_groups[0].record_pointers, vec![0x0028]);
+}
+
+#[test]
+fn interface_statistics_accepts_unordered_structural_pointers() {
+    let mut packet = authentic_lx_dante_0040_status_packet();
+    packet[34..38].copy_from_slice(&[0x00, 0x40, 0x00, 0x24]);
+
+    let parsed = parse_interface_statistics_status(&packet).unwrap();
+    assert_eq!(parsed.interface_group_pointers, vec![0x0040, 0x0024]);
+    assert_eq!(parsed.interface_groups[0].record_pointers, vec![0x0044]);
+    assert_eq!(parsed.interface_groups[1].record_pointers, vec![0x0028]);
+}
+
+#[test]
+fn interface_statistics_allows_a_group_without_an_eligible_selected_record() {
+    let mut packet = authentic_0040_status_packet();
+    packet[84] = 1;
+
+    let parsed = parse_interface_statistics_status(&packet).unwrap();
+    assert_eq!(parsed.interface_groups[0].selected_stats, None);
+    assert_eq!(parsed.interface_groups[0].raw_records.len(), 3);
+}
+
+#[test]
+fn interface_statistics_rejects_malformed_pointer_tables() {
+    let mut group_count_overruns_packet = authentic_0040_status_packet();
+    group_count_overruns_packet[32..34].copy_from_slice(&u16::MAX.to_be_bytes());
     assert_eq!(
-        parsed.records[0].unmapped_prefix_words,
-        [0x0008_5FD8, 0x0009_926D, 0, 0]
+        parse_interface_statistics_status(&group_count_overruns_packet),
+        None
     );
-    assert_eq!(parsed.records[0].raw_link_status_word, 1);
-    assert!(parsed.records[0].link_up);
-    assert_eq!(parsed.records[0].link_speed_megabits_per_second, 100);
-    assert_eq!(parsed.records[0].unmapped_trailing_hexadecimal, "");
-}
 
-#[test]
-fn unmapped_0040_status_accepts_ad4d_conmon_family() {
-    let parsed = parse_unmapped_0040_status(&authentic_ad4d_0040_status_packet()).unwrap();
-    assert_eq!(parsed.record_count, 1);
-    assert_eq!(parsed.record_pointers, vec![0x0028]);
-    assert_eq!(parsed.records[0].record_size_bytes, 24);
-    assert_eq!(parsed.records[0].raw_link_status_word, 1);
-    assert!(parsed.records[0].link_up);
-    assert_eq!(parsed.records[0].link_speed_megabits_per_second, 1000);
-    assert_eq!(parsed.records[0].unmapped_trailing_hexadecimal, "");
-}
+    let mut group_pointer_before_header = authentic_0040_status_packet();
+    group_pointer_before_header[34..36].copy_from_slice(&0u16.to_be_bytes());
+    assert_eq!(
+        parse_interface_statistics_status(&group_pointer_before_header),
+        None
+    );
 
-#[test]
-fn unmapped_0040_status_rejects_malformed_pointer_tables() {
     let mut pointer_before_table = authentic_0040_status_packet();
     pointer_before_table[62..64].copy_from_slice(&0u16.to_be_bytes());
-    assert_eq!(parse_unmapped_0040_status(&pointer_before_table), None);
+    assert_eq!(
+        parse_interface_statistics_status(&pointer_before_table),
+        None
+    );
 
     let mut duplicate_pointer = authentic_0040_status_packet();
     duplicate_pointer[64..66].copy_from_slice(&0x002Cu16.to_be_bytes());
-    assert_eq!(parse_unmapped_0040_status(&duplicate_pointer), None);
+    assert_eq!(parse_interface_statistics_status(&duplicate_pointer), None);
 
     let mut undersized_record = authentic_0040_status_packet();
     undersized_record[64..66].copy_from_slice(&0x0030u16.to_be_bytes());
-    assert_eq!(parse_unmapped_0040_status(&undersized_record), None);
+    assert_eq!(parse_interface_statistics_status(&undersized_record), None);
+
+    let mut group_overlaps_header = authentic_0040_status_packet();
+    group_overlaps_header[34..36].copy_from_slice(&0x0018u16.to_be_bytes());
+    assert_eq!(
+        parse_interface_statistics_status(&group_overlaps_header),
+        None
+    );
+
+    let mut record_starts_inside_header = authentic_0040_status_packet();
+    record_starts_inside_header[62..64].copy_from_slice(&0x0014u16.to_be_bytes());
+    assert_eq!(
+        parse_interface_statistics_status(&record_starts_inside_header),
+        None
+    );
 }
 
 #[test]
-fn unmapped_0040_status_exposes_causally_varied_link_speed() {
-    let one_thousand = parse_unmapped_0040_status(&authentic_0040_status_packet()).unwrap();
-    let one_hundred =
-        parse_unmapped_0040_status(&authentic_0040_status_packet_at_100_megabits_per_second())
-            .unwrap();
+fn interface_statistics_exposes_causally_varied_speed_without_naming_discriminators() {
+    let one_thousand = parse_interface_statistics_status(&authentic_0040_status_packet()).unwrap();
+    let one_hundred = parse_interface_statistics_status(
+        &authentic_0040_status_packet_at_100_megabits_per_second(),
+    )
+    .unwrap();
 
     assert_eq!(
-        one_thousand
-            .records
+        one_thousand.interface_groups[0]
+            .raw_records
             .iter()
-            .map(|record| record.link_speed_megabits_per_second)
+            .map(|record| record.speed_megabits_per_second)
             .collect::<Vec<_>>(),
         vec![1000, 1000, 0]
     );
     assert_eq!(
-        one_hundred
-            .records
+        one_hundred.interface_groups[0]
+            .raw_records
             .iter()
-            .map(|record| record.link_speed_megabits_per_second)
+            .map(|record| record.speed_megabits_per_second)
             .collect::<Vec<_>>(),
         vec![100, 100, 0]
     );
     assert_eq!(
-        one_thousand
-            .records
+        one_thousand.interface_groups[0]
+            .raw_records
             .iter()
-            .map(|record| record.raw_link_status_word)
+            .map(|record| record.discriminator_status_word)
             .collect::<Vec<_>>(),
-        one_hundred
-            .records
+        one_hundred.interface_groups[0]
+            .raw_records
             .iter()
-            .map(|record| record.raw_link_status_word)
+            .map(|record| record.discriminator_status_word)
             .collect::<Vec<_>>()
     );
 }
 
 #[test]
-fn unmapped_0040_status_maps_switch_port_link_state_to_records() {
-    let port_zero = parse_unmapped_0040_status(&authentic_0040_status_packet()).unwrap();
+fn interface_statistics_selects_only_first_zero_discriminator_record() {
+    let port_zero = parse_interface_statistics_status(&authentic_0040_status_packet()).unwrap();
     let port_three =
-        parse_unmapped_0040_status(&authentic_0040_status_packet_on_switch_port_three()).unwrap();
-    let port_three_at_one_hundred = parse_unmapped_0040_status(
+        parse_interface_statistics_status(&authentic_0040_status_packet_on_switch_port_three())
+            .unwrap();
+    let port_three_at_one_hundred = parse_interface_statistics_status(
         &authentic_0040_status_packet_on_switch_port_three_at_100_megabits_per_second(),
     )
     .unwrap();
 
+    for parsed in [&port_zero, &port_three, &port_three_at_one_hundred] {
+        assert_eq!(
+            parsed.interface_groups[0]
+                .selected_stats
+                .as_ref()
+                .unwrap()
+                .record_pointer,
+            0x002C
+        );
+    }
     assert_eq!(
-        port_zero
-            .records
-            .iter()
-            .map(|record| (record.raw_link_status_word, record.link_up))
-            .collect::<Vec<_>>(),
-        vec![(1, true), (0x0100_0001, true), (0x0101_0000, false)]
+        port_three.interface_groups[0].raw_records[1].discriminator_status_word,
+        0x0100_0000
     );
     assert_eq!(
-        port_three
-            .records
-            .iter()
-            .map(|record| (record.raw_link_status_word, record.link_up))
-            .collect::<Vec<_>>(),
-        vec![(1, true), (0x0100_0000, false), (0x0101_0001, true)]
-    );
-    assert_eq!(
-        port_three
-            .records
-            .iter()
-            .map(|record| record.link_speed_megabits_per_second)
-            .collect::<Vec<_>>(),
-        vec![1000, 0, 1000]
-    );
-    assert_eq!(
-        port_three_at_one_hundred
-            .records
-            .iter()
-            .map(|record| record.link_speed_megabits_per_second)
-            .collect::<Vec<_>>(),
-        vec![100, 0, 100]
+        port_three.interface_groups[0].raw_records[2].discriminator_status_word,
+        0x0101_0001
     );
 }
 

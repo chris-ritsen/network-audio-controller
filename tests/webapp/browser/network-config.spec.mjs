@@ -2,9 +2,31 @@ import { test, expect } from "@playwright/test";
 import { serveWebapp } from "./fixture.mjs";
 
 for (const supported of [true, false]) {
-  test(`secondary configuration ${supported ? "saves static and DHCP settings" : "stays unavailable for unsupported devices"}`, async ({ page }) => {
-    const record = { server_name: "ddm:manager:domain:wing", name: "Studio Wing", online: true,
-      management_state: "managed", inventory_sources: ["ddm"], channels: { receivers: {}, transmitters: {} } };
+  test(`secondary configuration ${supported ? "saves static and DHCP settings" : "stays unavailable for unsupported devices"}`, async ({
+    page,
+  }) => {
+    const record = {
+      server_name: "ddm:manager:domain:wing",
+      name: "Studio Wing",
+      online: true,
+      management_state: "managed",
+      inventory_sources: ["ddm"],
+      channels: { receivers: {}, transmitters: {} },
+      operation_availability: {
+        static_ipv4: {
+          supported: true,
+          readable: true,
+          writable: true,
+          reasons: [],
+        },
+        redundancy: {
+          supported: true,
+          readable: true,
+          writable: false,
+          reasons: ["managed_permission_denied"],
+        },
+      },
+    };
     const snapshot = {
       interfaces: [
         { interface: "primary", mode: "dynamic", configured: { mode: "static", ip_address: "192.0.2.101", netmask: "255.255.255.0", gateway: "203.0.113.1", dns_server: "203.0.113.54" } },
@@ -61,8 +83,29 @@ test("network controls are ready from inventory while a fresh read is pending", 
     interfaces: ["primary", "secondary"].map((role) => ({
       interface: role, mode: "dynamic", configured: { mode: "dynamic" },
     })),
-    interface_configuration_modes: { primary: ["dhcp", "static"], secondary: ["dhcp", "static"] },
-    dante_redundancy: { current: "redundant", configured: "redundant", supported: ["switched", "redundant"] },
+    interface_configuration_modes: {
+      primary: ["dhcp", "static"],
+      secondary: ["dhcp", "static"],
+    },
+    dante_redundancy: {
+      current: "redundant",
+      configured: "redundant",
+      supported: ["switched", "redundant"],
+    },
+    operation_availability: {
+      static_ipv4: {
+        supported: true,
+        readable: true,
+        writable: true,
+        reasons: [],
+      },
+      redundancy: {
+        supported: true,
+        readable: true,
+        writable: true,
+        reasons: [],
+      },
+    },
   };
   await serveWebapp(page, { devices: { [record.server_name]: record } });
   let releaseRead;

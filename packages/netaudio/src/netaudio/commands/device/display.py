@@ -265,7 +265,7 @@ def _format_reference_options(device) -> str:
 
 
 def _format_aes67(device) -> str:
-    if device.aes67_supported is False:
+    if device.aes67_configuration_supported is False:
         return "unsupported"
     current = device.aes67_current
     configured = device.aes67_configured
@@ -360,14 +360,14 @@ def _connection_health_rows(connection_health: dict | None) -> list[list[str]]:
                 f"current {current}; average {average}; peak {peak}",
             ]
         )
-        raw_impairment_value = flow.get("raw_impairment_value")
-        raw_impairment_delta = flow.get("raw_impairment_delta")
-        value_label = str(raw_impairment_value) if type(raw_impairment_value) is int else "unknown"
-        delta_label = f"{raw_impairment_delta:+d}" if type(raw_impairment_delta) is int else "unknown"
+        late_packet_count = flow.get("late_packet_count")
+        late_packet_delta = flow.get("late_packet_delta")
+        value_label = str(late_packet_count) if type(late_packet_count) is int else "unknown"
+        delta_label = f"{late_packet_delta:+d}" if type(late_packet_delta) is int else "unknown"
         rows.append(
             [
-                f"Receiver Flow Slot {receiver_flow_slot} Raw Impairment",
-                f"value {value_label}; delta {delta_label}",
+                f"Receiver Flow Slot {receiver_flow_slot} Late Packets",
+                f"count {value_label}; delta {delta_label}",
             ]
         )
     return rows

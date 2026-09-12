@@ -4,7 +4,10 @@ import asyncio
 import logging
 
 from netaudio.common.app_config import settings as app_settings
-from netaudio.dante.channel_status_paging import modern_arc_protocol_identifier_for_device
+from netaudio.dante.channel_status_paging import (
+    advertised_arc_protocol_identifier_for_device,
+    modern_arc_protocol_identifier_for_device,
+)
 from netaudio.dante.const import (
     FLOW_CREATE_PROTOCOL_IDS,
     FLOW_DELETE_PROTOCOL_IDS,
@@ -22,6 +25,126 @@ class FlowValidationError(ValueError):
     def __init__(self, message: str, *, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def external_receiver_subscription_specification(
+    commands,
+    device,
+    flow,
+    receiver_channel_ids,
+    flow_slot_assignments,
+    *,
+    receiver_supports_multiple_interfaces: bool,
+) -> dict:
+    if not getattr(flow, "routable", False):
+        reasons = "; ".join(getattr(flow, "routability_errors", ()) or ("flow is not routable",))
+        raise FlowValidationError(f"external flow is not routable: {reasons}")
+    if not isinstance(receiver_channel_ids, (list, tuple)) or not isinstance(flow_slot_assignments, (list, tuple)):
+        raise FlowValidationError("receiver channels and flow-slot assignments must be lists")
+    if not isinstance(receiver_supports_multiple_interfaces, bool):
+        raise FlowValidationError("receiver multiple-interface support must be Boolean")
+    receiver_channel_ids = list(receiver_channel_ids)
+    flow_slot_assignments = list(flow_slot_assignments)
+    if not receiver_channel_ids or len(receiver_channel_ids) != len(flow_slot_assignments):
+        raise FlowValidationError("receiver channels and flow-slot assignments must be parallel non-empty lists")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535
+        for value in receiver_channel_ids
+    ):
+        raise FlowValidationError("receiver channel IDs must be positive 16-bit integers")
+    if receiver_channel_ids != sorted(set(receiver_channel_ids)):
+        raise FlowValidationError("receiver channel IDs must be unique and strictly ascending")
+    advertised_slot_count = getattr(flow, "channel_count", None)
+    if (
+        isinstance(advertised_slot_count, bool)
+        or not isinstance(advertised_slot_count, int)
+        or advertised_slot_count <= 0
+    ):
+        raise FlowValidationError("external flow has no positive advertised slot count")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= advertised_slot_count
+        for value in flow_slot_assignments
+    ):
+        raise FlowValidationError("flow-slot assignments must be zero or within the advertised slot count")
+    positive_slots = [value for value in flow_slot_assignments if value > 0]
+    if not positive_slots:
+        raise FlowValidationError("all-zero external subscription batches are unsupported")
+    if positive_slots != sorted(set(positive_slots)):
+        raise FlowValidationError("positive flow-slot assignments must be unique and strictly ascending")
+    receiver_channels = getattr(device, "rx_channels", None)
+    if not isinstance(receiver_channels, dict):
+        raise FlowValidationError("receiver channel inventory is unavailable", status=409)
+    known_receiver_ids = set(receiver_channels)
+    unavailable = sorted(set(receiver_channel_ids) - known_receiver_ids)
+    if unavailable:
+        raise FlowValidationError(f"receiver channel not found: {', '.join(map(str, unavailable))}", status=404)
+
+    device_protocol = advertised_arc_protocol_identifier_for_device(device)
+    if device_protocol is None:
+        raise FlowValidationError("device has no ARC protocol metadata")
+    if getattr(device, "requires_managed_control", False):
+        raise FlowValidationError(
+            "direct external RTP subscription is unavailable for managed-only devices", status=409
+        )
+
+    primary_address = getattr(flow, "primary_destination_address", None)
+    primary_port = getattr(flow, "primary_destination_port", None)
+    if not primary_address or not primary_port:
+        raise FlowValidationError("external flow has no primary destination socket")
+    secondary_address = getattr(flow, "secondary_destination_address", None)
+    secondary_port = getattr(flow, "secondary_destination_port", None)
+    advertisement_supports_multiple_interfaces = secondary_address is not None and secondary_port is not None
+    secondary_destination = None
+    if advertisement_supports_multiple_interfaces and receiver_supports_multiple_interfaces:
+        secondary_destination = {"address": secondary_address, "port": secondary_port}
+
+    return commands.subscribe_external_rtp(
+        device_protocol=device_protocol,
+        receiver_channel_ids=receiver_channel_ids,
+        flow_slot_assignments=flow_slot_assignments,
+        advertised_flow_slot_count=advertised_slot_count,
+        source_address=flow.source_ipv4,
+        session_id=flow.session_id,
+        clock_offset=flow.clock_offset or 0,
+        primary_destination={"address": primary_address, "port": primary_port},
+        secondary_destination=secondary_destination,
+        advertisement_supports_multiple_interfaces=advertisement_supports_multiple_interfaces,
+        receiver_supports_multiple_interfaces=bool(receiver_supports_multiple_interfaces),
+    )
+
+
+async def subscribe_external_rtp(
+    application,
+    device,
+    flow,
+    receiver_channel_ids,
+    flow_slot_assignments,
+    *,
+    receiver_supports_multiple_interfaces: bool,
+) -> dict:
+    specification = external_receiver_subscription_specification(
+        application.commands,
+        device,
+        flow,
+        receiver_channel_ids,
+        flow_slot_assignments,
+        receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
+    )
+    async with device.topology_mutation_lock:
+        response = await device.execute(specification)
+    result_code = _parsed_response("result_code", response) if response else None
+    acknowledged = result_code in {RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED}
+    return {
+        "result_code": result_code,
+        "request_acknowledged": acknowledged,
+        "subscription_readback_confirmed": False,
+        "rtp_packet_reception_confirmed": False,
+        "clock_lock_confirmed": False,
+        "decoded_audio_confirmed": False,
+        "flow_identity": {"source_ipv4": flow.source_ipv4, "session_id": flow.session_id},
+        "receiver_channel_ids": list(receiver_channel_ids),
+        "flow_slot_assignments": list(flow_slot_assignments),
+    }
 
 
 def validate_flow_slot(flow_slot) -> int:

@@ -19,32 +19,28 @@ pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
         return None;
     }
 
-    let (tx_count, rx_count, levels_offset, trailing_length) =
-        match data.get(METERING_FAMILY_OFFSET).copied()? {
-            0x02 => (
-                u16::from(data.get(METERING_V2_TX_COUNT_OFFSET).copied()?),
-                u16::from(data.get(METERING_V2_RX_COUNT_OFFSET).copied()?),
-                METERING_V2_LEVELS_OFFSET,
-                1,
-            ),
-            0x03 => {
-                if data.len() < METERING_V3_HEADER_SIZE
-                    || data.get(METERING_V3_RESERVED_OFFSET).copied()? != 0
-                {
-                    return None;
-                }
-                (
-                    read_u16(data, METERING_V3_TX_COUNT_OFFSET)?,
-                    read_u16(data, METERING_V3_RX_COUNT_OFFSET)?,
-                    METERING_V3_LEVELS_OFFSET,
-                    0,
-                )
+    let message_version = data.get(METERING_FAMILY_OFFSET).copied()?;
+    let (tx_count, rx_count, levels_offset) = match message_version {
+        0x01 | 0x02 => (
+            u16::from(data.get(METERING_V2_TX_COUNT_OFFSET).copied()?),
+            u16::from(data.get(METERING_V2_RX_COUNT_OFFSET).copied()?),
+            METERING_V2_LEVELS_OFFSET,
+        ),
+        0x03 => {
+            if data.len() < METERING_V3_HEADER_SIZE {
+                return None;
             }
-            _ => return None,
-        };
+            (
+                read_u16(data, METERING_V3_TX_COUNT_OFFSET)?,
+                read_u16(data, METERING_V3_RX_COUNT_OFFSET)?,
+                METERING_V3_LEVELS_OFFSET,
+            )
+        }
+        _ => return None,
+    };
     let tx_levels_end = levels_offset.checked_add(usize::from(tx_count))?;
     let rx_levels_end = tx_levels_end.checked_add(usize::from(rx_count))?;
-    if rx_levels_end.checked_add(trailing_length)? != data.len() {
+    if rx_levels_end > data.len() {
         return None;
     }
 
@@ -54,12 +50,14 @@ pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
     }
 
     Some(MeteringFrame {
+        message_version,
         sequence: read_u16(data, 4)?,
         source_eui64,
         tx_count,
         rx_count,
         tx_levels: data.get(levels_offset..tx_levels_end)?.to_vec(),
         rx_levels: data.get(tx_levels_end..rx_levels_end)?.to_vec(),
+        trailing_bytes: data.get(rx_levels_end..)?.to_vec(),
     })
 }
 
@@ -341,8 +339,36 @@ pub fn parse_make_model(data: &[u8]) -> Option<MakeModel> {
 
 pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
     validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
-    let capabilities = read_u32(data, CONMON_DANTE_MODEL_CAPABILITIES_OFFSET)?;
-    let monitoring_capabilities = read_u32(data, CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET);
+    let record_protocol_version = read_u16(data, CONMON_DANTE_MODEL_BODY_OFFSET)?;
+    let primary_capabilities = if record_protocol_version >= 0x0200 {
+        read_u32(data, CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET)?
+    } else {
+        0
+    };
+    let read_only_capabilities = if record_protocol_version >= 0x070A {
+        read_u32(data, CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET)?
+    } else {
+        0
+    };
+    let monitoring_capabilities = if record_protocol_version >= 0x0717 {
+        read_u32(data, CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET)?
+    } else {
+        0
+    };
+    let secondary_capabilities = if record_protocol_version >= 0x071E {
+        read_u32(data, CONMON_DANTE_MODEL_SECONDARY_CAPABILITIES_OFFSET)?
+    } else {
+        0
+    };
+    let (domain_capability_values, domain_capability_validity) =
+        if record_protocol_version >= 0x0723 {
+            (
+                read_u32(data, CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALUES_OFFSET)?,
+                read_u32(data, CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALIDITY_OFFSET)?,
+            )
+        } else {
+            (0, 0)
+        };
     Some(DanteModel {
         board_codename: conmon_string(
             data,
@@ -350,22 +376,60 @@ pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
             CONMON_BOARD_CODENAME_END,
         )?,
         board_name: conmon_string(data, CONMON_BOARD_NAME_OFFSET, CONMON_BOARD_NAME_END)?,
-        capabilities,
+        record_protocol_version,
+        primary_capabilities,
+        read_only_capabilities,
         monitoring_capabilities,
-        aes67_supported: Some(capabilities & DANTE_MODEL_AES67_CAPABILITY_MASK != 0),
-        detailed_metering_supported: Some(
-            capabilities & DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK != 0,
-        ),
+        secondary_capabilities,
+        domain_capability_values,
+        domain_capability_validity,
+        identify_supported: primary_capabilities & DANTE_MODEL_IDENTIFY_CAPABILITY_MASK != 0,
+        sample_rate_configuration_supported: primary_capabilities
+            & DANTE_MODEL_SAMPLE_RATE_CAPABILITY_MASK
+            != 0,
+        encoding_configuration_supported: primary_capabilities
+            & DANTE_MODEL_ENCODING_CAPABILITY_MASK
+            != 0,
+        sample_rate_pullup_configuration_supported: primary_capabilities
+            & DANTE_MODEL_SAMPLE_RATE_PULLUP_CAPABILITY_MASK
+            != 0,
+        switch_redundancy_supported: primary_capabilities
+            & DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK
+            != 0,
+        static_ipv4_configuration_supported: primary_capabilities
+            & DANTE_MODEL_STATIC_IPV4_CAPABILITY_MASK
+            != 0,
+        detailed_metering_supported: primary_capabilities
+            & DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK
+            != 0,
+        aes67_configuration_supported: primary_capabilities & DANTE_MODEL_AES67_CAPABILITY_MASK
+            != 0,
+        device_locking_supported: primary_capabilities & DANTE_MODEL_LOCKING_CAPABILITY_MASK != 0,
+        external_word_clock_read_only: read_only_capabilities
+            & DANTE_MODEL_EXTERNAL_WORD_CLOCK_READ_ONLY_MASK
+            != 0,
+        switch_redundancy_read_only: read_only_capabilities
+            & DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK
+            != 0,
+        static_ipv4_configuration_read_only: read_only_capabilities
+            & DANTE_MODEL_STATIC_IPV4_READ_ONLY_MASK
+            != 0,
+        generic_codec_control_supported: secondary_capabilities
+            & DANTE_MODEL_GENERIC_CODEC_CAPABILITY_MASK
+            != 0,
         interface_statistics_supported: monitoring_capabilities
-            .map(|value| value & MONITORING_INTERFACE_STATISTICS_MASK != 0),
-        clock_monitoring_supported: monitoring_capabilities
-            .map(|value| value & MONITORING_CLOCK_MASK != 0),
+            & MONITORING_INTERFACE_STATISTICS_MASK
+            != 0,
+        clock_monitoring_supported: monitoring_capabilities & MONITORING_CLOCK_MASK != 0,
         per_channel_signal_presence_supported: monitoring_capabilities
-            .map(|value| value & MONITORING_PER_CHANNEL_SIGNAL_PRESENCE_MASK != 0),
+            & MONITORING_PER_CHANNEL_SIGNAL_PRESENCE_MASK
+            != 0,
         rx_flow_maximum_latency_monitoring_supported: monitoring_capabilities
-            .map(|value| value & MONITORING_RX_FLOW_MAXIMUM_LATENCY_MASK != 0),
+            & MONITORING_RX_FLOW_MAXIMUM_LATENCY_MASK
+            != 0,
         rx_flow_late_packet_monitoring_supported: monitoring_capabilities
-            .map(|value| value & MONITORING_RX_FLOW_LATE_PACKET_MASK != 0),
+            & MONITORING_RX_FLOW_LATE_PACKET_MASK
+            != 0,
     })
 }
 

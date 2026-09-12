@@ -112,7 +112,7 @@ fn last_error_message_call() -> String {
 
 #[test]
 fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
-    for status in [-1, 36, i32::MAX] {
+    for status in [-1, NetaudioStatus::ALL.len() as i32, i32::MAX] {
         let name = unsafe { CStr::from_ptr(netaudio_status_name(status)) };
         assert_eq!(name.to_str().unwrap(), "unknown");
     }
@@ -493,8 +493,12 @@ fn encoding_status_response_kind_serializes_expected_schema() {
 
     assert_eq!(status, NetaudioStatus::Ok);
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["current_encoding"], 24);
-    assert_eq!(json["supported_encodings"], serde_json::json!([24, 16, 32]));
+    assert_eq!(json["record_protocol_version"], 0x0724);
+    assert_eq!(json["current_value"], 24);
+    assert_eq!(json["requested_value"], 0);
+    assert_eq!(json["update_mode"], 2);
+    assert_eq!(json["available_values"], serde_json::json!([24, 16, 32]));
+    assert_eq!(json["flags"], serde_json::Value::Null);
 }
 
 #[test]
@@ -512,20 +516,12 @@ fn sample_rate_pullup_status_response_kind_serializes_authentic_a32_schema() {
 
     assert_eq!(status, NetaudioStatus::Ok);
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["applied_value"]["raw_value"], 0);
-    assert_eq!(json["requested_value"]["raw_value"], 0);
-    assert_eq!(json["mode_code"], 2);
-    assert_eq!(json["unmapped_word_at_body_offset_20"], 1);
-    assert_eq!(json["supported_values"][1]["raw_value"], 1);
-    assert_eq!(
-        json["supported_values"][1]["meaning"],
-        "positive_four_point_one_six_six_seven_percent"
-    );
-    assert_eq!(json["supported_values"][1]["rate_multiplier_numerator"], 25);
-    assert_eq!(
-        json["supported_values"][1]["rate_multiplier_denominator"],
-        24
-    );
+    assert_eq!(json["record_protocol_version"], 0x0724);
+    assert_eq!(json["current_value"], 0);
+    assert_eq!(json["requested_value"], 0);
+    assert_eq!(json["update_mode"], 2);
+    assert_eq!(json["available_values"], serde_json::json!([0, 1, 2, 3, 4]));
+    assert_eq!(json["flags"], 0);
 }
 
 #[test]

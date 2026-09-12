@@ -575,7 +575,7 @@ async def _render_aes67(application, targets, all_devices: bool) -> None:
         rows = [
             [
                 device.name or server_name,
-                _aes67_support_label(device.aes67_supported),
+                _aes67_support_label(device.aes67_configuration_supported),
                 _aes67_state_label(device.aes67_current),
                 _aes67_state_label(device.aes67_configured),
                 device.aes67_multicast_prefix or "",
@@ -586,7 +586,7 @@ async def _render_aes67(application, targets, all_devices: bool) -> None:
         output_table(headers, rows)
         return
     server_name, device = targets[0]
-    if device.aes67_supported is False:
+    if device.aes67_configuration_supported is False:
         output_single("unsupported")
         return
     if device.aes67_multicast_prefix is None:
@@ -606,7 +606,7 @@ async def _render_aes67(application, targets, all_devices: bool) -> None:
                 "current": current_label,
                 "multicast_prefix": device.aes67_multicast_prefix,
                 "reboot_required": _aes67_reboot_required(device),
-                "supported": device.aes67_supported,
+                "configuration_supported": device.aes67_configuration_supported,
             }
         )
         return
@@ -651,7 +651,7 @@ async def run_aes67(
     supported_targets = []
     capability_failures = 0
     for server_name, device in targets:
-        if device.aes67_supported is False:
+        if device.aes67_configuration_supported is False:
             typer.echo(
                 f"Error: {device.name or server_name} does not support AES67 configuration.",
                 err=True,

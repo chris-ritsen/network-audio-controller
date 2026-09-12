@@ -49,9 +49,17 @@ async def _read_capability_status(application, device, kind: str, supported_fiel
         "sample_rate": application.probe_sample_rate_status,
         "sample_rate_pullup": application.probe_sample_rate_pullup_status,
     }[kind]
-    current_value, supported_values = await probe(device)
-    apply_device_status(device, kind, {kind: current_value, supported_field: supported_values})
-    return current_value, supported_values
+    status = await probe(device)
+    fields = {
+        kind: status["current_value"],
+        f"requested_{kind}": status["requested_value"],
+        f"{kind}_update_mode": status["update_mode"],
+        supported_field: status["available_values"],
+    }
+    if kind == "sample_rate_pullup":
+        fields["sample_rate_pullup_flags"] = status["flags"]
+    apply_device_status(device, kind, fields)
+    return status
 
 
 async def _read_sample_rate_status_result(application, device):
@@ -63,8 +71,8 @@ async def _read_encoding_status_result(application, device):
 
 
 async def _read_encoding_status(application, device):
-    current_encoding, _ = await _read_encoding_status_result(application, device)
-    return current_encoding
+    status = await _read_encoding_status_result(application, device)
+    return status["current_value"]
 
 
 async def _read_sample_rate_pullup_status_result(application, device):
@@ -77,8 +85,8 @@ async def _read_sample_rate_pullup_status_result(application, device):
 
 
 async def _read_sample_rate_pullup_status(application, device):
-    current_raw_value, _ = await _read_sample_rate_pullup_status_result(application, device)
-    return current_raw_value
+    status = await _read_sample_rate_pullup_status_result(application, device)
+    return status["current_value"]
 
 
 async def _collect_target_readings(targets, read_target):
@@ -173,7 +181,7 @@ def _targets_supporting_value(
 def _readback_from_status(status, expected) -> ReadbackResult:
     if status is None:
         return ReadbackResult(matched=False)
-    observed_value, _ = status
+    observed_value = status["current_value"]
     return ReadbackResult(matched=observed_value == expected, observed=observed_value, observed_available=True)
 
 

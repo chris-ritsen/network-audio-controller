@@ -30,6 +30,12 @@ For more information, check out the [gearspace discussion](https://gearspace.com
 - Display active subscriptions, Rx and Tx channels, devices names and
   addresses, subscription status
 - JSON output
+- Bounded monitoring event journal with CLI, JSON export, API, and browser history
+- Lifecycle-managed monitoring issues with current/history CLI, API, SSE, and browser views
+- SAP/SDP external RTP flow discovery and direct receiver subscription
+- ConMon interface statistics with raw records, rates, errors, and freshness
+- Canonical transmit-flow planning, verified create/delete, HTTP API, browser controls, and presets
+- Versioned preset round trips with explicit identity mapping, multi-interface support, and verified apply reports
 - Set device latency, sample rate, encoding
 - Set/reset channel names, device names
 - mDNS device discovery
@@ -111,8 +117,33 @@ The Bonjour record carries the HTTPS port as `tls_port`. Clients trust the
 certificate through their normal trust store, so a certificate signed by a CA
 your devices already trust is the least friction.
 
+##### Managed operation permissions
+
+Writes to an enrolled device fail closed until its saved DDM context explicitly
+permits each operation. Add `operation_permissions` to the context in the
+NetAudio configuration file:
+
+```toml
+[ddm.contexts.studio]
+server = "manager"
+domain_id = "0123456789abcdef0123456789abcdef"
+operation_permissions = ["identify", "sample_rate", "encoding"]
+```
+
+Accepted operation names are `identify`, `sample_rate`, `encoding`,
+`sample_rate_pullup`, `aes67`, `static_ipv4`, `redundancy`, `codec_control`, and
+`locking`. Omitting the setting means permission has not been configured; an
+empty array explicitly permits no operations. Device capability, current
+configuration state, lock state, and transport support can still prevent a
+listed operation. Managed lock and unlock remain unavailable because NetAudio
+has no verified DDM transport for them.
+
 ### Documentation
 
+- [External RTP discovery and interface statistics](docs/external-rtp-and-interface-statistics.md)
+- [Monitoring event journal](docs/monitoring-event-journal.md)
+- [Transmit-flow lifecycle](docs/transmit-flow-lifecycle.md)
+- [Presets and monitoring issues](docs/presets-and-issues.md)
 - [Examples](https://github.com/chris-ritsen/network-audio-controller/wiki/Examples)
 - [Technical details](https://github.com/chris-ritsen/network-audio-controller/wiki/Technical-details)
 - [Testing](https://github.com/chris-ritsen/network-audio-controller/wiki/Testing)

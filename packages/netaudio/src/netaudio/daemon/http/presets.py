@@ -58,6 +58,16 @@ def _configuration_summary(config):
             entries.append({"label": label, "value": f"{config[field]}{suffix}"})
     if "preferred_leader" in config:
         entries.append({"label": "Preferred leader", "value": "On" if config["preferred_leader"] else "Off"})
+    if "device_name" in config:
+        entries.append({"label": "Device name", "value": config["device_name"]})
+    if "sample_rate_pullup" in config:
+        entries.append({"label": "Sample-rate pull-up", "value": str(config["sample_rate_pullup"])})
+    if "clock_source_code" in config:
+        entries.append({"label": "Clock source", "value": f"0x{config['clock_source_code']:04X}"})
+    if "external_word_clock" in config:
+        entries.append({"label": "External word clock", "value": "On" if config["external_word_clock"] else "Off"})
+    if "redundancy_mode" in config:
+        entries.append({"label": "Redundancy", "value": config["redundancy_mode"]})
     if "transmitter_channel_names" in config:
         entries.append({"label": "Transmitter names", "value": f"{len(config['transmitter_channel_names'])} channels"})
     if "rx_subscriptions" in config:
@@ -69,11 +79,34 @@ def _configuration_summary(config):
                 "value": f"{subscribed} subscribed, {len(subscriptions) - subscribed} unsubscribed",
             }
         )
-    if "interface_mode" in config:
-        mode = config["interface_mode"]
-        value = f"Static {config.get('ip_address', '')}" if mode == "static" else mode.upper()
-        entries.append({"label": "Network", "value": value})
+    if "receiver_channel_names" in config:
+        entries.append({"label": "Receiver names", "value": f"{len(config['receiver_channel_names'])} channels"})
+    if "transmit_flows" in config:
+        entries.append({"label": "Transmit flows", "value": str(len(config["transmit_flows"]))})
+    if "codec_gain" in config:
+        entries.append({"label": "Codec gain", "value": f"{len(config['codec_gain'])} channels"})
+    interfaces = config.get("interfaces")
+    if interfaces is None and "interface_mode" in config:
+        interfaces = [{"identity": "primary", "mode": config["interface_mode"]}]
+    for interface in interfaces or []:
+        mode = interface["mode"]
+        value = f"Static {interface.get('ip_address', '')}" if mode == "static" else mode.upper()
+        entries.append({"label": f"Network ({interface['identity']})", "value": value})
     return entries
+
+
+def _config_matches_record(config, identifier, record):
+    identity = config.get("device_identity")
+    if isinstance(identity, dict):
+        comparisons = {
+            "server_name": identifier,
+            "inventory_id": record.get("inventory_id", identifier),
+            "mac_address": record.get("mac_address"),
+        }
+        specified = [(key, value) for key, value in identity.items() if key in comparisons and value]
+        if specified:
+            return all(comparisons[key] == value for key, value in specified)
+    return record.get("name") == config["name"]
 
 
 class DaemonPresetHandlers:
@@ -98,9 +131,11 @@ class DaemonPresetHandlers:
             raise ValueError(f"{expected_name}: fresh device identity did not match. Review the preset again.")
 
     async def _preset_audio_snapshot(self, device):
-        sample_rate, supported_rates = await self.application.probe_sample_rate_status(device)
-        encoding, supported_encodings = await self.application.probe_encoding_status(device)
+        sample_rate_status = await self.application.probe_sample_rate_status(device)
+        encoding_status = await self.application.probe_encoding_status(device)
         settings = await self.application.get_device_settings(device)
+        sample_rate = sample_rate_status["current_value"]
+        encoding = encoding_status["current_value"]
         if (
             not sample_rate
             or not encoding
@@ -110,12 +145,22 @@ class DaemonPresetHandlers:
             raise ValueError(f"{device.name}: audio settings could not be read completely.")
         device.configured_latency = settings["configured_latency_ns"] / 1_000_000
         device.sample_rate = sample_rate
-        device.supported_sample_rates = supported_rates
+        device.requested_sample_rate = sample_rate_status["requested_value"]
+        device.sample_rate_update_mode = sample_rate_status["update_mode"]
+        device.supported_sample_rates = sample_rate_status["available_values"]
         device.encoding = encoding
-        device.supported_encodings = supported_encodings
+        device.requested_encoding = encoding_status["requested_value"]
+        device.encoding_update_mode = encoding_status["update_mode"]
+        device.supported_encodings = encoding_status["available_values"]
         device.preferred_leader = await self.application.probe_preferred_leader_state(device)
         if device.preferred_leader is None:
             raise ValueError(f"{device.name}: preferred-leader state could not be read.")
+        if device.sample_rate_pullup_configuration_supported is True:
+            await self.application.probe_sample_rate_pullup_status(device)
+        if device.generic_codec_control_supported is True:
+            await self.application.probe_gain_adapter(device)
+        if device.clock_monitoring_supported is True:
+            await self.application.probe_clocking_status(device)
 
     async def _handle_save_preset(self, writer, params):
         try:
@@ -155,19 +200,21 @@ class DaemonPresetHandlers:
                             channels = getattr(device, f"{direction}_channels")
                             if count is not None and len(channels) != count:
                                 raise ValueError(f"{device.name}: incomplete {direction.upper()} channel inventory.")
+                        if device.flow_protocol_id is not None or device.transmitter_flows is not None:
+                            await self.application.inspect_transmit_flows(device)
                     if "audio" in sections:
                         await self._preset_audio_snapshot(device)
                     if "network" in sections:
                         interfaces = await self.application.probe_interface_status(device)
                         if not interfaces:
                             raise ValueError(f"{device.name}: network settings could not be read.")
-                        if len(interfaces) != 1:
-                            raise ValueError(
-                                f"{device.name}: multiple-interface network presets are not supported; omit network settings."
-                            )
-                        if interfaces[0].get("mode") not in ("static", "dynamic", "dhcp"):
-                            raise ValueError(f"{device.name}: network mode is unknown; omit network settings.")
+                        for interface in interfaces:
+                            configured = interface.get("configured") or interface
+                            if configured.get("mode") not in ("static", "dynamic", "dhcp"):
+                                raise ValueError(f"{device.name}: network mode is unknown; omit network settings.")
                         device.interfaces = interfaces
+                        if device.switch_redundancy_supported is True:
+                            await self.application.probe_dante_redundancy(device)
                 content = format_devices_xml(selected, preset_name=name, sections=sections)
                 if len(content.encode("utf-8")) > MAX_PRESET_BYTES:
                     raise ValueError("This preset exceeds 4 MiB. Save fewer devices together.")
@@ -203,7 +250,15 @@ class DaemonPresetHandlers:
                 {
                     "name": device_name,
                     "settings": _configuration_summary(config),
-                    "unsupported": ["Additional network interfaces"] if "additional_interfaces" in config else [],
+                    "preserved": [
+                        label
+                        for field, label in (
+                            ("external_word_clock", "External word-clock selection"),
+                            ("ha_bridge", "HA bridge"),
+                            ("unknown_fields", "Unknown extension fields"),
+                        )
+                        if field in config
+                    ],
                     "targets": [
                         {
                             "id": identifier,
@@ -213,7 +268,7 @@ class DaemonPresetHandlers:
                             "online": bool(record.get("online")),
                         }
                         for identifier, record in records.items()
-                        if record.get("name") == device_name
+                        if _config_matches_record(config, identifier, record)
                     ],
                 }
             )
@@ -240,7 +295,7 @@ class DaemonPresetHandlers:
             matched = []
             for device_name, identifier in targets.items():
                 record = records[identifier]
-                if record.get("name") != device_name:
+                if not _config_matches_record(configs[device_name], identifier, record):
                     raise ValueError(f"{device_name}: the selected target no longer matches this preset device.")
                 device = self._preset_device(identifier, record)
                 matched.append(MatchedPresetDevice(configs[device_name], device, device_name, identifier))
@@ -257,14 +312,18 @@ class DaemonPresetHandlers:
                     for entry in matched:
                         await self._preset_identity(entry.device, entry.device_name)
                         if "sample_rate" in entry.config:
-                            _, entry.device.supported_sample_rates = await self.application.probe_sample_rate_status(
-                                entry.device
-                            )
+                            status = await self.application.probe_sample_rate_status(entry.device)
+                            entry.device.sample_rate = status["current_value"]
+                            entry.device.requested_sample_rate = status["requested_value"]
+                            entry.device.sample_rate_update_mode = status["update_mode"]
+                            entry.device.supported_sample_rates = status["available_values"]
                         if "encoding" in entry.config:
-                            _, entry.device.supported_encodings = await self.application.probe_encoding_status(
-                                entry.device
-                            )
-                    plan = await build_preset_plan(matched)
+                            status = await self.application.probe_encoding_status(entry.device)
+                            entry.device.encoding = status["current_value"]
+                            entry.device.requested_encoding = status["requested_value"]
+                            entry.device.encoding_update_mode = status["update_mode"]
+                            entry.device.supported_encodings = status["available_values"]
+                    plan = await build_preset_plan(self.application, matched)
                     if not any(entry.actions for entry in plan.device_actions):
                         raise ValueError("This selection contains no supported preset settings.")
                     return plan

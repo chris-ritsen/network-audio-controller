@@ -28,13 +28,12 @@ pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
 const CONMON_OPCODE_BLUETOOTH_STATUS: u16 = 0x100E;
 
-const METERING_V2_HEADER_SIZE: usize = 28;
+const METERING_V2_HEADER_SIZE: usize = 27;
 const METERING_FAMILY_OFFSET: usize = 24;
 const METERING_V2_TX_COUNT_OFFSET: usize = 25;
 const METERING_V2_RX_COUNT_OFFSET: usize = 26;
 const METERING_V2_LEVELS_OFFSET: usize = 27;
 const METERING_V3_HEADER_SIZE: usize = 30;
-const METERING_V3_RESERVED_OFFSET: usize = 25;
 const METERING_V3_TX_COUNT_OFFSET: usize = 26;
 const METERING_V3_RX_COUNT_OFFSET: usize = 28;
 const METERING_V3_LEVELS_OFFSET: usize = 30;
@@ -104,11 +103,30 @@ const CONMON_BOARD_CODENAME_END: usize = 0x34;
 const CONMON_BOARD_NAME_OFFSET: usize = 0x58;
 const CONMON_BOARD_NAME_END: usize = 0x98;
 const CONMON_DANTE_MODEL_BODY_OFFSET: usize = 0x18;
-const CONMON_DANTE_MODEL_CAPABILITIES_OFFSET: usize = CONMON_DANTE_MODEL_BODY_OFFSET + 0x1C;
+const CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET: usize = CONMON_DANTE_MODEL_BODY_OFFSET + 0x1C;
+const CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET: usize =
+    CONMON_DANTE_MODEL_BODY_OFFSET + 0x3C;
 const CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET: usize =
     CONMON_DANTE_MODEL_BODY_OFFSET + 0xC0;
+const CONMON_DANTE_MODEL_SECONDARY_CAPABILITIES_OFFSET: usize =
+    CONMON_DANTE_MODEL_BODY_OFFSET + 0xC4;
+const CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALUES_OFFSET: usize =
+    CONMON_DANTE_MODEL_BODY_OFFSET + 0xC8;
+const CONMON_DANTE_MODEL_DOMAIN_CAPABILITY_VALIDITY_OFFSET: usize =
+    CONMON_DANTE_MODEL_BODY_OFFSET + 0xCC;
+const DANTE_MODEL_IDENTIFY_CAPABILITY_MASK: u32 = 0x0000_0001;
+const DANTE_MODEL_SAMPLE_RATE_CAPABILITY_MASK: u32 = 0x0000_0008;
+const DANTE_MODEL_ENCODING_CAPABILITY_MASK: u32 = 0x0000_0010;
+const DANTE_MODEL_SAMPLE_RATE_PULLUP_CAPABILITY_MASK: u32 = 0x0000_0200;
+const DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK: u32 = 0x0000_2000;
+const DANTE_MODEL_STATIC_IPV4_CAPABILITY_MASK: u32 = 0x0000_4000;
 const DANTE_MODEL_AES67_CAPABILITY_MASK: u32 = 0x0400_0000;
 const DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK: u32 = 0x0000_8000;
+const DANTE_MODEL_LOCKING_CAPABILITY_MASK: u32 = 0x0800_0000;
+const DANTE_MODEL_EXTERNAL_WORD_CLOCK_READ_ONLY_MASK: u32 = 0x0000_0080;
+const DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK: u32 = 0x0000_2000;
+const DANTE_MODEL_STATIC_IPV4_READ_ONLY_MASK: u32 = 0x0000_4000;
+const DANTE_MODEL_GENERIC_CODEC_CAPABILITY_MASK: u32 = 0x0000_0008;
 const MONITORING_INTERFACE_STATISTICS_MASK: u32 = 0x01;
 const MONITORING_CLOCK_MASK: u32 = 0x02;
 const MONITORING_PER_CHANNEL_SIGNAL_PRESENCE_MASK: u32 = 0x04;
@@ -176,15 +194,31 @@ pub struct MakeModel {
 pub struct DanteModel {
     pub board_codename: String,
     pub board_name: String,
-    pub capabilities: u32,
-    pub monitoring_capabilities: Option<u32>,
-    pub aes67_supported: Option<bool>,
-    pub detailed_metering_supported: Option<bool>,
-    pub interface_statistics_supported: Option<bool>,
-    pub clock_monitoring_supported: Option<bool>,
-    pub per_channel_signal_presence_supported: Option<bool>,
-    pub rx_flow_maximum_latency_monitoring_supported: Option<bool>,
-    pub rx_flow_late_packet_monitoring_supported: Option<bool>,
+    pub record_protocol_version: u16,
+    pub primary_capabilities: u32,
+    pub read_only_capabilities: u32,
+    pub monitoring_capabilities: u32,
+    pub secondary_capabilities: u32,
+    pub domain_capability_values: u32,
+    pub domain_capability_validity: u32,
+    pub identify_supported: bool,
+    pub sample_rate_configuration_supported: bool,
+    pub encoding_configuration_supported: bool,
+    pub sample_rate_pullup_configuration_supported: bool,
+    pub switch_redundancy_supported: bool,
+    pub static_ipv4_configuration_supported: bool,
+    pub detailed_metering_supported: bool,
+    pub aes67_configuration_supported: bool,
+    pub device_locking_supported: bool,
+    pub external_word_clock_read_only: bool,
+    pub switch_redundancy_read_only: bool,
+    pub static_ipv4_configuration_read_only: bool,
+    pub generic_codec_control_supported: bool,
+    pub interface_statistics_supported: bool,
+    pub clock_monitoring_supported: bool,
+    pub per_channel_signal_presence_supported: bool,
+    pub rx_flow_maximum_latency_monitoring_supported: bool,
+    pub rx_flow_late_packet_monitoring_supported: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -201,12 +235,14 @@ pub struct CmcRegistrationResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MeteringFrame {
+    pub message_version: u8,
     pub sequence: u16,
     pub source_eui64: String,
     pub tx_count: u16,
     pub rx_count: u16,
     pub tx_levels: Vec<u8>,
     pub rx_levels: Vec<u8>,
+    pub trailing_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

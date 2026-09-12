@@ -90,12 +90,21 @@ async def _populate_audio_capabilities(application: DanteApplication, device: Da
         probes.append(("supported_encodings", application.probe_encoding_status, "encoding"))
     for query_name, probe, status_kind in probes:
         try:
-            current_value, supported_values = await probe(device, timeout=2.0)
+            status = await probe(device, timeout=2.0)
         except (RuntimeError, OSError) as exception:
             logger.debug(f"{query_name} unavailable for {device.server_name or device.name}: {exception}")
             device.failed_queries.add(query_name)
             continue
-        apply_device_status(device, status_kind, {status_kind: current_value, query_name: supported_values})
+        apply_device_status(
+            device,
+            status_kind,
+            {
+                status_kind: status["current_value"],
+                f"requested_{status_kind}": status["requested_value"],
+                f"{status_kind}_update_mode": status["update_mode"],
+                query_name: status["available_values"],
+            },
+        )
         device.failed_queries.discard(query_name)
 
 
@@ -114,7 +123,7 @@ async def _populate_show_details(application: DanteApplication, device: DanteDev
         except (RuntimeError, OSError) as exception:
             device.failed_queries.add("latency")
             logger.debug(f"Latency unavailable for {device.server_name or device.name}: {exception}")
-    if device.aes67_multicast_prefix is None and device.aes67_supported is not False:
+    if device.aes67_multicast_prefix is None and device.aes67_configuration_supported is not False:
         try:
             await application.get_aes67_configured(device)
             device.failed_queries.discard("aes67")

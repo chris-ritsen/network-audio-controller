@@ -88,8 +88,24 @@ async def test_populate_controls_routes_enrolled_devices_through_the_managed_app
     device.populate_from_core = AsyncMock()
     application = SimpleNamespace(
         _populate_device_controls=AsyncMock(),
-        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000, 96000])),
-        probe_encoding_status=AsyncMock(return_value=(24, [16, 24])),
+        probe_sample_rate_status=AsyncMock(
+            return_value={
+                "current_value": 48000,
+                "requested_value": 48000,
+                "update_mode": 2,
+                "available_values": [48000, 96000],
+                "flags": None,
+            }
+        ),
+        probe_encoding_status=AsyncMock(
+            return_value={
+                "current_value": 24,
+                "requested_value": 24,
+                "update_mode": 2,
+                "available_values": [16, 24],
+                "flags": None,
+            }
+        ),
     )
 
     await common_module._populate_controls({device.server_name: device}, application)
@@ -121,8 +137,24 @@ async def test_populate_controls_routes_unaddressed_managed_devices_by_identity(
     device.populate_from_core = AsyncMock()
     application = SimpleNamespace(
         _populate_device_controls=AsyncMock(),
-        probe_sample_rate_status=AsyncMock(return_value=(48000, [48000])),
-        probe_encoding_status=AsyncMock(return_value=(24, [24])),
+        probe_sample_rate_status=AsyncMock(
+            return_value={
+                "current_value": 48000,
+                "requested_value": 48000,
+                "update_mode": 2,
+                "available_values": [48000],
+                "flags": None,
+            }
+        ),
+        probe_encoding_status=AsyncMock(
+            return_value={
+                "current_value": 24,
+                "requested_value": 24,
+                "update_mode": 2,
+                "available_values": [24],
+                "flags": None,
+            }
+        ),
     )
 
     await common_module._populate_controls({device.server_name: device}, application)

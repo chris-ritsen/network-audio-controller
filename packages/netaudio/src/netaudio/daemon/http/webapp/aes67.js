@@ -1,11 +1,25 @@
-const reportedBoolean = (value) => typeof value === "boolean" ? value : null;
+import {
+  operationReasonText,
+  operationWritable,
+} from "./device/availability.js";
+
+const reportedBoolean = (value) => (typeof value === "boolean" ? value : null);
 
 export function aes67Status(device) {
-  const supported = reportedBoolean(device.aes67_supported);
+  const supported = reportedBoolean(device.aes67_configuration_supported);
   const current = reportedBoolean(device.aes67_current);
   const configured = reportedBoolean(device.aes67_configured);
-  const managed = device.ddm_enrolment_state === "ENROLLED" && Boolean(device.ddm_domain_id);
-  const status = { supported, current, configured, managed, pending: false, canConfigure: !managed && supported === true };
+  const managed =
+    device.ddm_enrolment_state === "ENROLLED" && Boolean(device.ddm_domain_id);
+  const status = {
+    supported,
+    current,
+    configured,
+    managed,
+    pending: false,
+    canConfigure: operationWritable(device, "aes67"),
+    unavailableReason: operationReasonText(device, "aes67"),
+  };
   if (managed) {
     const capabilities = device.ddm_capabilities;
     return {

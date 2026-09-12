@@ -32,8 +32,12 @@ def test_virtual_device_reports_configured_encoding_capabilities():
     )
 
     assert core.parse_response("encoding_status", packet) == {
-        "current_encoding": 20,
-        "supported_encodings": [20, 24, 32],
+        "record_protocol_version": 0x0724,
+        "current_value": 20,
+        "requested_value": 0,
+        "update_mode": 2,
+        "available_values": [20, 24, 32],
+        "flags": None,
     }
     assert device._pcm_capability_property() is None
 
@@ -87,8 +91,12 @@ def test_virtual_device_reports_configured_sample_rate_capabilities():
     )
 
     assert core.parse_response("sample_rate_status", packet) == {
-        "current_sample_rate": 384_000,
-        "supported_sample_rates": [48_000, 96_000, 384_000],
+        "record_protocol_version": 0x0724,
+        "current_value": 384_000,
+        "requested_value": 0,
+        "update_mode": 2,
+        "available_values": [48_000, 96_000, 384_000],
+        "flags": None,
     }
 
 
@@ -123,7 +131,7 @@ def test_same_host_encoding_probe_receives_status_response():
     assert len(recording_transport.sent) == 1
     response, destination = recording_transport.sent[0]
     assert destination == ("224.0.0.231", 8702)
-    assert core.parse_response("encoding_status", response)["supported_encodings"] == [24, 16, 32]
+    assert core.parse_response("encoding_status", response)["available_values"] == [24, 16, 32]
 
 
 def test_virtual_device_heartbeat_round_trips_odd_signal_presence_count():
