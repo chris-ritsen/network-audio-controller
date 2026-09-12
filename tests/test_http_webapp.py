@@ -128,6 +128,15 @@ class TestAssetServing:
         assert b"<title>netaudio</title>" in body
 
     @pytest.mark.asyncio
+    async def test_browser_navigation_to_events_is_not_the_sse_stream(self):
+        writer = FakeWriter()
+        await make_http_server()._route("GET", "/events", None, writer, None, BROWSER_HEADERS)
+        status, headers, body = raw_response(writer)
+        assert status == 200
+        assert headers["content-type"] == "text/html; charset=utf-8"
+        assert b"<title>netaudio</title>" in body
+
+    @pytest.mark.asyncio
     async def test_json_client_still_reads_the_device_endpoint(self):
         status, _ = await get(make_http_server(), "/devices/avio-usb-1")
         assert status == 404

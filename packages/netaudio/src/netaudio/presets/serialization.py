@@ -28,6 +28,27 @@ from netaudio.presets.schema import (
     normalize_device_config,
 )
 
+
+PRESET_VERSION_IDENTITY_FIELDS = (
+    "product_name",
+    "platform_model_name",
+    "platform_model_identifier",
+    "platform_software_version",
+    "platform_hardware_version",
+    "platform_api_version",
+    "rom_boot_version",
+    "product_version",
+    "friendly_product_version",
+    "manufacturer_software_version",
+    "manufacturer_firmware_version",
+    "cmc_server_version",
+    "router_protocol_version",
+    "ddm_product_version",
+    "ddm_product_software_version",
+    "ddm_dante_version",
+    "ddm_dante_hardware_version",
+)
+
 PRESET_SECTIONS = frozenset({"routing", "audio", "network"})
 
 
@@ -86,6 +107,17 @@ def _canonical_transmit_flows(device: DanteDevice) -> list[dict[str, Any]]:
 def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict[str, Any]:
     """Build the canonical preset configuration from one freshly populated device."""
     sections = set(sections)
+    version_identity = {
+        field_name: getattr(device, field_name, None)
+        for field_name in PRESET_VERSION_IDENTITY_FIELDS
+        if getattr(device, field_name, None)
+    }
+    field_sources = getattr(device, "field_sources", None) or {}
+    version_field_sources = {
+        field_name: field_sources[field_name]
+        for field_name in PRESET_VERSION_IDENTITY_FIELDS
+        if field_name in field_sources
+    }
     config: dict[str, Any] = {
         "name": device.name or device.server_name,
         "device_name": device.name or device.server_name,
@@ -95,6 +127,8 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
                 "server_name": device.server_name or None,
                 "mac_address": device.mac_address,
                 "inventory_id": getattr(device, "inventory_id", None),
+                **version_identity,
+                **({"field_sources": version_field_sources} if version_field_sources else {}),
             }.items()
             if value
         },
@@ -245,13 +279,17 @@ def _append_preset_identity(element: ET.Element, config: Mapping[str, Any], devi
         _sub_text(element, "manufacturer_id", _hex_encode(device.manufacturer))
         _sub_text(element, "manufacturer_name", device.manufacturer)
     model_id = (device.model_id or "") if device is not None else ""
-    dante_model = (device.dante_model or model_id) if device is not None else ""
+    model_name = (
+        device.product_name or device.model or device.platform_model_name or device.dante_model or model_id
+        if device is not None
+        else ""
+    )
     if model_id:
         model_id_hex = _hex_encode(model_id)
         _sub_text(element, "model_id", model_id_hex)
-        _sub_text(element, "model_name", dante_model)
-        if device is not None and device.product_version:
-            _sub_text(element, "model_version", device.product_version)
+        _sub_text(element, "model_name", model_name)
+        if device is not None and (device.friendly_product_version or device.product_version):
+            _sub_text(element, "model_version", device.friendly_product_version or device.product_version)
         _sub_text(element, "device_type", model_id_hex)
         _sub_text(element, "device_type_string", model_id)
     _sub_text(element, "friendly_name", name)

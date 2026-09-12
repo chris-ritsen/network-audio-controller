@@ -858,7 +858,7 @@ class TestConmonRetry:
         waiter = asyncio.Event()
 
         async def send_query(target_device, request):
-            target_device.dante_model_id = "DAI2"
+            target_device.platform_versions_record = {"platform_model_identifier": "DAI2"}
             waiter.set()
 
         application._send_conmon_query_for_device = AsyncMock(side_effect=send_query)
@@ -875,7 +875,7 @@ class TestConmonRetry:
     async def test_skips_when_model_already_known(self):
         device = make_device()
         device.mac_address = "001dc1aabbcc"
-        device.dante_model_id = "DAI2"
+        device.platform_versions_record = {"platform_model_identifier": "DAI2"}
         application = make_application({"dev1.local.": device})
         state = DanteStateService(application)
 

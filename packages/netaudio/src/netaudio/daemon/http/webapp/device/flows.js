@@ -27,28 +27,75 @@ export function canonicalFlowRequest({
   channels,
   encoding,
   flowId,
+  flowName = "",
+  framesPerPacket = "",
+  mediaMode = "native_dante",
+  primaryAddress = "",
+  primaryPort = "",
   protocolId,
   sampleRate,
+  secondaryAddress = "",
+  secondaryPort = "",
 }) {
   const channelNumbers = Array.isArray(channels)
     ? channels
     : parseChannels(channels);
   const modernAllocation = Number(protocolId) === 0x2809;
   if (
-    !modernAllocation &&
-    (!Number.isInteger(Number(flowId)) ||
-      Number(flowId) < 1 ||
-      Number(flowId) > 32)
+    !Number.isInteger(Number(flowId)) ||
+    Number(flowId) < 1 ||
+    Number(flowId) > (modernAllocation ? 65535 : 32)
   ) {
     throw new Error(
-      "Legacy creation needs a flow identifier from 1 through 32.",
+      modernAllocation
+        ? "Modern creation needs a media-local flow identifier from 1 through 65535."
+        : "Legacy creation needs a global flow identifier from 1 through 32.",
     );
   }
+  if (!["native_dante", "rtp_aes67"].includes(mediaMode))
+    throw new Error("Select native Dante or RTP/AES67 audio.");
+  if (!modernAllocation && mediaMode !== "native_dante")
+    throw new Error("RTP/AES67 authoring is scoped to ARC 0x2809.");
+  const socket = (address, port, label) => {
+    if (!address && !port) return null;
+    if (
+      !address ||
+      !Number.isInteger(Number(port)) ||
+      Number(port) < 1 ||
+      Number(port) > 65535
+    )
+      throw new Error(
+        `${label} needs an IPv4 address and UDP port from 1 through 65535.`,
+      );
+    return { address, port: Number(port), interface: null };
+  };
+  const primaryDestination = socket(
+    primaryAddress.trim(),
+    primaryPort,
+    "Primary destination",
+  );
+  const secondaryDestination = socket(
+    secondaryAddress.trim(),
+    secondaryPort,
+    "Secondary destination",
+  );
+  if (
+    mediaMode === "native_dante" &&
+    (primaryDestination || secondaryDestination)
+  )
+    throw new Error(
+      "Native Dante authoring does not accept explicit destinations.",
+    );
+  if (mediaMode === "rtp_aes67" && !primaryDestination)
+    throw new Error("RTP/AES67 authoring needs a primary IPv4 destination.");
+  const fpp = framesPerPacket === "" ? null : Number(framesPerPacket);
+  if (fpp !== null && (!Number.isInteger(fpp) || fpp < 1 || fpp > 65535))
+    throw new Error("Frames per packet must be from 1 through 65535.");
   return {
     schema_version: 1,
-    media_mode: "native_dante",
+    media_mode: mediaMode,
     flow_type: "multicast",
-    name: null,
+    name: flowName.trim() || null,
     channel_slots: channelNumbers.map((transmitter_channel, index) => ({
       slot: index + 1,
       transmitter_channel,
@@ -61,14 +108,14 @@ export function canonicalFlowRequest({
       Number.isInteger(Number(encoding)) && Number(encoding) > 0
         ? Number(encoding)
         : null,
-    frames_per_packet: null,
-    primary_destination: null,
-    secondary_destination: null,
+    frames_per_packet: fpp,
+    primary_destination: primaryDestination,
+    secondary_destination: secondaryDestination,
     redundancy: "device_default",
     identity: {
       global_flow_id: modernAllocation ? null : Number(flowId),
-      media_type_code: null,
-      media_local_flow_id: null,
+      media_type_code: 3,
+      media_local_flow_id: modernAllocation ? Number(flowId) : null,
     },
     protocol: {
       protocol_id: Number(protocolId),
@@ -141,16 +188,16 @@ function FlowRow({ entry, onDelete, requestName }) {
     <td>${socketLabel(entry.primary_destination)}</td>
     <td>
       ${
-      flowId == null
-        ? null
-        : html`<${AsyncButton}
-            small
-            variant="danger"
-            description=${`delete transmit flow ${flowId} on ${requestName}`}
-            onRun=${() => onDelete(flowId)}
-            >Delete<//
-          >`
-    }
+        flowId == null
+          ? null
+          : html`<${AsyncButton}
+              small
+              variant="danger"
+              description=${`delete transmit flow ${flowId} on ${requestName}`}
+              onRun=${() => onDelete(flowId)}
+              >Delete<//
+            >`
+      }
     </td>
   </tr>`;
 }
@@ -161,6 +208,13 @@ export function TransmitFlows({ device }) {
   const [error, setError] = useState("");
   const [channels, setChannels] = useState("");
   const [flowId, setFlowId] = useState("1");
+  const [flowName, setFlowName] = useState("");
+  const [framesPerPacket, setFramesPerPacket] = useState("");
+  const [mediaMode, setMediaMode] = useState("native_dante");
+  const [primaryAddress, setPrimaryAddress] = useState("");
+  const [primaryPort, setPrimaryPort] = useState("");
+  const [secondaryAddress, setSecondaryAddress] = useState("");
+  const [secondaryPort, setSecondaryPort] = useState("");
   const [plan, setPlan] = useState(null);
   const [result, setResult] = useState(null);
   const protocolId = inventory?.flow_protocol_id;
@@ -183,8 +237,15 @@ export function TransmitFlows({ device }) {
       channels,
       encoding: device.encoding,
       flowId,
+      flowName,
+      framesPerPacket,
+      mediaMode,
+      primaryAddress,
+      primaryPort,
       protocolId,
-      sampleRate: device.sample_rate_hz,
+      sampleRate: device.sample_rate,
+      secondaryAddress,
+      secondaryPort,
     });
   const preview = async () => {
     setResult(null);
@@ -245,41 +306,136 @@ export function TransmitFlows({ device }) {
     <form
       class="flex flex-col gap-3"
       onSubmit=${(event) => {
-      event.preventDefault();
-      void preview();
-    }}
+        event.preventDefault();
+        void preview();
+      }}
     >
-      <h3 class="font-semibold">Plan native multicast flow</h3>
+      <h3 class="font-semibold">Plan multicast transmit flow</h3>
       <div class="flex flex-wrap gap-3">
         <label
           >Channels<input
             aria-label="Transmit flow channels"
             value=${channels}
             onInput=${(event) => {
-            setChannels(event.target.value);
-            setPlan(null);
-          }}
+              setChannels(event.target.value);
+              setPlan(null);
+            }}
             placeholder="1,2"
+        /></label>
+        <label
+          >${modernAllocation ? "Media-local flow identifier" : "Global flow identifier"}<input
+            type="number"
+            min="1"
+            max=${modernAllocation ? "65535" : "32"}
+            aria-label="Transmit flow identifier"
+            value=${flowId}
+            onInput=${(event) => {
+              setFlowId(event.target.value);
+              setPlan(null);
+            }}
         /></label>
         ${
           modernAllocation
-            ? html`<p class="text-sm self-end">
-                The device assigns the flow identifier.
-              </p>`
-            : html`<label
-                >Flow identifier<input
+            ? html`<label
+                >Mode<select
+                  aria-label="Transmit flow media mode"
+                  value=${mediaMode}
+                  onChange=${(event) => {
+                    setMediaMode(event.target.value);
+                    setPlan(null);
+                  }}
+                >
+                  <option value="native_dante">Native Dante</option>
+                  <option value="rtp_aes67">RTP/AES67</option>
+                </select></label
+              >`
+            : null
+        }
+        ${
+          modernAllocation
+            ? html`<label
+                >Flow name<input
+                  aria-label="Transmit flow name"
+                  value=${flowName}
+                  onInput=${(event) => {
+                    setFlowName(event.target.value);
+                    setPlan(null);
+                  }}
+              /></label>`
+            : null
+        }
+        ${
+          modernAllocation
+            ? html`<label
+                >Frames per packet<input
                   type="number"
                   min="1"
-                  max="32"
-                  aria-label="Transmit flow identifier"
-                  value=${flowId}
+                  max="65535"
+                  aria-label="Transmit flow frames per packet"
+                  value=${framesPerPacket}
                   onInput=${(event) => {
-            setFlowId(event.target.value);
-            setPlan(null);
-          }}
+                    setFramesPerPacket(event.target.value);
+                    setPlan(null);
+                  }}
               /></label>`
+            : null
         }
       </div>
+      ${
+        modernAllocation && mediaMode === "rtp_aes67"
+          ? html`<div class="flex flex-wrap gap-3">
+              <label
+                >Primary IPv4<input
+                  aria-label="Primary RTP destination address"
+                  value=${primaryAddress}
+                  onInput=${(event) => {
+                    setPrimaryAddress(event.target.value);
+                    setPlan(null);
+                  }} /></label
+              ><label
+                >Primary UDP port<input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  aria-label="Primary RTP destination port"
+                  value=${primaryPort}
+                  onInput=${(event) => {
+                    setPrimaryPort(event.target.value);
+                    setPlan(null);
+                  }} /></label
+              ><label
+                >Secondary IPv4<input
+                  aria-label="Secondary RTP destination address"
+                  value=${secondaryAddress}
+                  onInput=${(event) => {
+                    setSecondaryAddress(event.target.value);
+                    setPlan(null);
+                  }} /></label
+              ><label
+                >Secondary UDP port<input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  aria-label="Secondary RTP destination port"
+                  value=${secondaryPort}
+                  onInput=${(event) => {
+                    setSecondaryPort(event.target.value);
+                    setPlan(null);
+                  }}
+              /></label>
+            </div>`
+          : null
+      }
+      ${
+        modernAllocation
+          ? html`<p class="text-sm">
+              The media-local identifier is requested; the device allocates the
+              global flow identifier. Sample rate and encoding are checked as
+              fresh device-state preconditions and are not authored by this
+              request.
+            </p>`
+          : null
+      }
       <div>
         <button
           class="btn btn-sm"
@@ -317,13 +473,13 @@ export function TransmitFlows({ device }) {
               <p>${result.state}: ${result.message}</p>
               <dl>
                 ${flowEvidenceRows(result).map(
-          ([label, value]) => html`
-            <div>
-              <dt class="font-semibold inline">${label}:</dt>
-              <dd class="inline">${value}</dd>
-            </div>
-          `,
-        )}
+                  ([label, value]) => html`
+                    <div>
+                      <dt class="font-semibold inline">${label}:</dt>
+                      <dd class="inline">${value}</dd>
+                    </div>
+                  `,
+                )}
               </dl>
             </div>`
           : null

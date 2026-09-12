@@ -120,6 +120,7 @@ class DanteApplication:
         session_id=None,
         managed_transport=None,
         sap_service=None,
+        operation_recorder=None,
     ):
         from netaudio.common.app_config import settings as app_settings
 
@@ -160,6 +161,29 @@ class DanteApplication:
         self._capability_probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._managed_transport = managed_transport
         self._managed_transports: dict[str, object] = {}
+        self.operation_recorder = operation_recorder
+
+    def set_operation_recorder(self, recorder) -> None:
+        self.operation_recorder = recorder
+
+    async def _run_configuration_operation(
+        self,
+        device,
+        operation_name: str,
+        requested_values,
+        operation: Callable[[], Awaitable],
+        *,
+        result_adapter=None,
+    ):
+        if self.operation_recorder is None:
+            return await operation()
+        return await self.operation_recorder.run_operation(
+            device,
+            operation_name,
+            requested_values,
+            operation,
+            result_adapter=result_adapter,
+        )
 
     def _on_external_flow_change(self, change: SapInventoryChange) -> None:
         self.dispatcher.emit_nowait(
@@ -214,9 +238,11 @@ class DanteApplication:
                 if not device.manufacturer:
                     device.manufacturer = service_properties["mf"]
             if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
-                device.software_version = service_properties["server_vers"]
+                device.cmc_server_version = service_properties["server_vers"]
+                device.field_sources = {**(device.field_sources or {}), "cmc_server_version": "dns_sd"}
             if "router_vers" in service_properties:
-                device.firmware_version = service_properties["router_vers"]
+                device.router_protocol_version = service_properties["router_vers"]
+                device.field_sources = {**(device.field_sources or {}), "router_protocol_version": "dns_sd"}
             if "router_info" in service_properties and service_properties["router_info"] == '"Dante Via"':
                 device.software = "Dante Via"
             if "rate" in service_properties:
@@ -767,8 +793,8 @@ class DanteApplication:
             if remaining <= 0:
                 break
             device_ip = str(device.ipv4)
-            needs_make_model = not device.dante_model
-            needs_dante_model = not device.dante_model_id
+            needs_make_model = device.manufacturer_versions_record is None
+            needs_dante_model = device.platform_versions_record is None
             expected_count = int(needs_make_model) + int(needs_dante_model)
             if expected_count == 0:
                 continue
@@ -783,7 +809,7 @@ class DanteApplication:
                     logger.debug(f"Conmon retry {retry + 1} succeeded for {device.server_name}")
                 except asyncio.TimeoutError:
                     logger.debug(f"Conmon retry {retry + 1} timeout for {device.server_name}")
-                    if not device.dante_model_id:
+                    if device.platform_versions_record is None:
                         still_incomplete.append(device)
             finally:
                 self.notifications.unregister_waiter(waiter)
@@ -1770,15 +1796,48 @@ class DanteApplication:
         from netaudio.dante.flow_lifecycle import create_transmit_flow
         from netaudio.dante.transmit_flow import TransmitFlowSpecification
 
-        if isinstance(specification, dict):
-            specification = TransmitFlowSpecification.from_dict(specification)
-        return await create_transmit_flow(device, specification)
+        requested = specification if isinstance(specification, dict) else specification.to_dict()
+
+        async def create():
+            parsed = (
+                TransmitFlowSpecification.from_dict(specification) if isinstance(specification, dict) else specification
+            )
+            result = await create_transmit_flow(device, parsed)
+            self._apply_transmit_flow_readback(device, result)
+            return result
+
+        return await self._run_configuration_operation(
+            device,
+            "create_transmit_flow",
+            requested,
+            create,
+        )
 
     async def delete_transmit_flow(self, device, flow_id: int):
         """Delete one supported multicast flow and verify fresh absence."""
         from netaudio.dante.flow_lifecycle import delete_transmit_flow
 
-        return await delete_transmit_flow(device, flow_id)
+        async def delete():
+            result = await delete_transmit_flow(device, flow_id)
+            self._apply_transmit_flow_readback(device, result)
+            return result
+
+        return await self._run_configuration_operation(
+            device,
+            "delete_transmit_flow",
+            {"flow_id": flow_id},
+            delete,
+        )
+
+    @staticmethod
+    def _apply_transmit_flow_readback(device, result) -> None:
+        observations = getattr(result, "verification_observations", ())
+        for observation in reversed(observations):
+            inventory = observation.get("inventory") if isinstance(observation, dict) else None
+            flows = inventory.get("flows") if isinstance(inventory, dict) else None
+            if isinstance(flows, list):
+                device.transmitter_flows = flows
+                return
 
     async def reboot(self, device, host_mac=None) -> None:
         if getattr(device, "requires_managed_control", False):
@@ -1821,13 +1880,61 @@ class DanteApplication:
             )
 
     async def remove_subscriptions(self, device, channel_numbers):
-        if getattr(device, "requires_managed_control", False):
-            async with device.topology_mutation_lock:
-                return await self.managed_transport(device).remove_subscriptions(device, channel_numbers)
-        return await self.mutate_and_wait_for_notification(
+        numbers = list(channel_numbers)
+
+        async def remove():
+            if getattr(device, "requires_managed_control", False):
+                async with device.topology_mutation_lock:
+                    return await self.managed_transport(device).remove_subscriptions(device, numbers)
+            return await self.mutate_and_wait_for_notification(
+                device,
+                lambda: self.send_remove_subscriptions(device, numbers),
+                SUBSCRIPTION_NOTIFICATION_IDS,
+            )
+
+        def audit_result(response):
+            from netaudio.ddm.device_transport import ManagedOperationResult
+
+            if isinstance(response, ManagedOperationResult):
+                return {
+                    "state": "request_acknowledged" if response.successful else "rejected",
+                    "request_acknowledgement": {
+                        "accepted": response.successful,
+                        "result_code": getattr(response, "result_code", None),
+                    },
+                    "effective_state_confirmation": None,
+                    "message": "association-removal request completed; fresh subscription readback is pending",
+                }
+            result_code = None
+            if response:
+                from netaudio import core
+
+                try:
+                    result_code = core.parse_response("result_code", response)
+                except core.NetaudioCoreError:
+                    pass
+            accepted = result_code in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED)
+            return {
+                "state": "request_acknowledged"
+                if accepted
+                else "rejected"
+                if result_code is not None
+                else "unverified",
+                "request_acknowledgement": {
+                    "accepted": accepted,
+                    "received": response is not None,
+                    "result_code": result_code,
+                },
+                "effective_state_confirmation": None,
+                "message": "association-removal request completed; fresh subscription readback is pending",
+            }
+
+        return await self._run_configuration_operation(
             device,
-            lambda: self.send_remove_subscriptions(device, channel_numbers),
-            SUBSCRIPTION_NOTIFICATION_IDS,
+            "remove_subscription_associations",
+            {"receiver_channel_ids": numbers},
+            remove,
+            result_adapter=audit_result,
         )
 
     async def subscribe_external_rtp(
@@ -1841,13 +1948,29 @@ class DanteApplication:
     ) -> dict:
         from netaudio.dante.flows import subscribe_external_rtp
 
-        return await subscribe_external_rtp(
-            self,
+        receiver_channel_ids = list(receiver_channel_ids)
+        flow_slot_assignments = list(flow_slot_assignments)
+        requested = {
+            "flow_identity": {
+                "source_ipv4": getattr(flow, "source_ipv4", None),
+                "session_id": getattr(flow, "session_id", None),
+            },
+            "receiver_channel_ids": receiver_channel_ids,
+            "flow_slot_assignments": flow_slot_assignments,
+            "receiver_supports_multiple_interfaces": receiver_supports_multiple_interfaces,
+        }
+        return await self._run_configuration_operation(
             device,
-            flow,
-            receiver_channel_ids,
-            flow_slot_assignments,
-            receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
+            "subscribe_external_rtp",
+            requested,
+            lambda: subscribe_external_rtp(
+                self,
+                device,
+                flow,
+                receiver_channel_ids,
+                flow_slot_assignments,
+                receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
+            ),
         )
 
     async def reset_channel_name(self, device, channel_type: str, channel_number: int):
@@ -2280,27 +2403,52 @@ class DanteApplication:
     async def set_receive_flow_performance(self, device, latency_microseconds: int, frames_per_packet: int):
         from netaudio.dante.performance_configuration import set_receive_flow_performance
 
-        return await set_receive_flow_performance(device, latency_microseconds, frames_per_packet)
+        return await self._run_configuration_operation(
+            device,
+            "set_receive_flow_performance",
+            {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
+            lambda: set_receive_flow_performance(device, latency_microseconds, frames_per_packet),
+        )
 
     async def set_transmit_flow_performance(self, device, latency_microseconds: int, frames_per_packet: int):
         from netaudio.dante.performance_configuration import set_transmit_flow_performance
 
-        return await set_transmit_flow_performance(device, latency_microseconds, frames_per_packet)
+        return await self._run_configuration_operation(
+            device,
+            "set_transmit_flow_performance",
+            {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
+            lambda: set_transmit_flow_performance(device, latency_microseconds, frames_per_packet),
+        )
 
     async def set_unicast_performance(self, device, latency_microseconds: int, frames_per_packet: int):
         from netaudio.dante.performance_configuration import set_unicast_performance
 
-        return await set_unicast_performance(device, latency_microseconds, frames_per_packet)
+        return await self._run_configuration_operation(
+            device,
+            "set_unicast_performance",
+            {"latency_microseconds": latency_microseconds, "frames_per_packet": frames_per_packet},
+            lambda: set_unicast_performance(device, latency_microseconds, frames_per_packet),
+        )
 
     async def set_receive_flow_default_slots(self, device, default_slots: int):
         from netaudio.dante.performance_configuration import set_receive_flow_default_slots
 
-        return await set_receive_flow_default_slots(device, default_slots)
+        return await self._run_configuration_operation(
+            device,
+            "set_receive_flow_default_slots",
+            {"default_slots": default_slots},
+            lambda: set_receive_flow_default_slots(device, default_slots),
+        )
 
     async def store_current_configuration(self, device):
         from netaudio.dante.performance_configuration import store_current_configuration
 
-        return await store_current_configuration(device)
+        return await self._run_configuration_operation(
+            device,
+            "store_current_configuration",
+            {},
+            lambda: store_current_configuration(device),
+        )
 
     async def set_preferred_leader(
         self,

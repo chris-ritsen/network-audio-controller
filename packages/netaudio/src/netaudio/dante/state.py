@@ -54,6 +54,19 @@ CONMON_RETRY_TIMEOUTS = [3, 5, 10]
 ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset(
     {
         "manufacturer",
+        "platform_versions_record",
+        "manufacturer_versions_record",
+        "platform_model_identifier",
+        "platform_model_name",
+        "platform_software_version",
+        "platform_hardware_version",
+        "platform_api_version",
+        "rom_boot_version",
+        "product_name",
+        "product_version",
+        "friendly_product_version",
+        "manufacturer_software_version",
+        "manufacturer_firmware_version",
         "aes67_configuration_supported",
         "dante_model_record_protocol_version",
         "dante_model_primary_capabilities",
@@ -127,7 +140,19 @@ def apply_device_status(device, kind: str, status) -> bool:
             for name, value in status.items()
             if name in ALWAYS_OVERWRITTEN_MODEL_FIELDS or not getattr(device, name, None)
         }
-        return _assign_changed(device, fields)
+        changed = _assign_changed(device, fields)
+        source = "conmon_platform_record" if kind == STATUS_KIND_DANTE_MODEL else "conmon_manufacturer_record"
+        field_sources = dict(getattr(device, "field_sources", None) or {})
+        source_changed = False
+        for name in fields:
+            if name.endswith("_record"):
+                continue
+            if field_sources.get(name) != source:
+                field_sources[name] = source
+                source_changed = True
+        if source_changed:
+            device.field_sources = field_sources
+        return changed or source_changed
     if kind == STATUS_KIND_ROUTING_CAPACITY:
         fields = dict(status)
         if status["routing_ready"] is True and device.tx_count is None:
@@ -737,7 +762,7 @@ class DanteStateService:
             if not device or not device.online:
                 return
 
-            if device.dante_model_id:
+            if device.platform_versions_record is not None:
                 return
 
             if device.requires_managed_control or not device.ipv4 or not device.mac_address:
@@ -759,8 +784,8 @@ class DanteStateService:
             finally:
                 self.application.notifications.unregister_waiter(waiter)
 
-            if device.dante_model_id:
-                logger.debug(f"Conmon dante_model populated for {server_name}: {device.dante_model_id}")
+            if device.platform_versions_record is not None:
+                logger.debug(f"Conmon platform versions populated for {server_name}")
                 return
 
-        logger.debug(f"Conmon dante_model still missing for {server_name} after retries")
+        logger.debug(f"Conmon platform versions still missing for {server_name} after retries")

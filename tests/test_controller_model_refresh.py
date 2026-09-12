@@ -39,31 +39,20 @@ def test_model_query_builders_are_byte_identical_to_shipping_controller():
         assert commands.command_dante_model(device_mac_address) == expected
 
 
-def test_make_model_parser_preserves_all_four_version_octets_and_unmapped_field():
-    assert core.parse_response("make_model", _packet(2)) == {
-        "manufacturer": "Shure Inc.",
-        "manufacturer_field_hexadecimal": _packet(2)[76:204].hex(),
-        "unmapped_field_at_byte_offset_74": 0x0011,
-        "product_name": "AD4D",
-        "product_version": "0.0.0.1",
-        "product_version_components": [0, 0, 0, 1],
+def test_make_model_parser_decodes_packed_versions_and_preserves_raw_record():
+    expected = {
+        2: ("Shure Inc.", "AD4D", "0.0.1", "11.0.0.17"),
+        4: ("Digigram", "LX-DANTE", "1.0.0", None),
+        10: ("Ferrofish GmbH", "A32 Dante AD/DA Converter", "1.0.0", "1.0.2.1"),
     }
-    assert core.parse_response("make_model", _packet(4)) == {
-        "manufacturer": "Digigram",
-        "manufacturer_field_hexadecimal": _packet(4)[76:204].hex(),
-        "unmapped_field_at_byte_offset_74": 0,
-        "product_name": "LX-DANTE",
-        "product_version": "1.0.0.0",
-        "product_version_components": [1, 0, 0, 0],
-    }
-    assert core.parse_response("make_model", _packet(10)) == {
-        "manufacturer": "Ferrofish GmbH",
-        "manufacturer_field_hexadecimal": _packet(10)[76:204].hex(),
-        "unmapped_field_at_byte_offset_74": 1,
-        "product_name": "A32 Dante AD/DA Converter",
-        "product_version": "1.0.0.0",
-        "product_version_components": [1, 0, 0, 0],
-    }
+    for identifier, (manufacturer, product, product_version, manufacturer_firmware) in expected.items():
+        parsed = core.parse_response("make_model", _packet(identifier))
+        assert parsed["manufacturer"] == manufacturer
+        assert parsed["product_name"] == product
+        assert parsed["product_version"] == product_version
+        assert parsed["product_version_components"] == [int(part) for part in product_version.split(".")]
+        assert parsed["manufacturer_firmware_version"] == manufacturer_firmware
+        assert parsed["raw_record_hexadecimal"] == _packet(identifier)[0x18:].hex()
 
 
 def test_board_model_parser_matches_physical_and_authentic_virtual_devices():
@@ -73,8 +62,8 @@ def test_board_model_parser_matches_physical_and_authentic_virtual_devices():
         12: ("Bklyn2", "Brooklyn II", 0x0724, 0x8E78F65A, 0, 0x1B, 1, 3, 3),
     }
     fields = (
-        "board_codename",
-        "board_name",
+        "platform_model_identifier",
+        "platform_model_name",
         "record_protocol_version",
         "primary_capabilities",
         "read_only_capabilities",
@@ -120,10 +109,14 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     receive_packets(application, [_packet(10), _packet(12)], (device_ip_address, 8702))
 
     assert device.manufacturer == "Ferrofish GmbH"
-    assert device.dante_model == "A32 Dante AD/DA Converter"
-    assert device.product_version == "1.0.0.0"
-    assert device.dante_model_id == "Bklyn2"
-    assert device.board_name == "Brooklyn II"
+    assert device.product_name == "A32 Dante AD/DA Converter"
+    assert device.product_version == "1.0.0"
+    assert device.platform_model_identifier == "Bklyn2"
+    assert device.platform_model_name == "Brooklyn II"
+    assert device.platform_software_version == "4.0.8.2"
+    assert device.platform_hardware_version == "4.0.2.7"
+    assert device.platform_api_version == "4.0.3"
+    assert device.rom_boot_version == "1.3.64"
     assert device.dante_model_record_protocol_version == 0x0724
     assert device.dante_model_primary_capabilities == 0x8E78F65A
     assert device.dante_model_read_only_capabilities == 0
@@ -139,10 +132,12 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert serialized["detailed_metering_supported"] is True
     assert serialized["per_channel_signal_presence_supported"] is False
     assert serialized["manufacturer"] == "Ferrofish GmbH"
-    assert serialized["dante_model"] == "A32 Dante AD/DA Converter"
-    assert serialized["product_version"] == "1.0.0.0"
-    assert serialized["dante_model_id"] == "Bklyn2"
-    assert serialized["board_name"] == "Brooklyn II"
+    assert serialized["product_name"] == "A32 Dante AD/DA Converter"
+    assert serialized["product_version"] == "1.0.0"
+    assert serialized["platform_model_identifier"] == "Bklyn2"
+    assert serialized["platform_model_name"] == "Brooklyn II"
+    assert serialized["field_sources"]["platform_software_version"] == "conmon_platform_record"
+    assert serialized["field_sources"]["product_version"] == "conmon_manufacturer_record"
 
 
 def test_later_versions_response_overwrites_aes67_configuration_support_and_primary_capabilities():
@@ -168,6 +163,27 @@ def test_later_versions_response_overwrites_aes67_configuration_support_and_prim
     assert device.aes67_configuration_supported is True
     assert device.detailed_metering_supported is False
     assert device.dante_model_primary_capabilities == 0x8E78F65A & ~0x00008000
+
+
+def test_later_conmon_records_refresh_canonical_versions_without_erasing_other_namespaces():
+    device_ip_address = "10.0.2.15"
+    application, device = application_with_device("virtual-a32.local.", device_ip_address)
+    receive_packets(application, [_packet(10), _packet(12)], (device_ip_address, 8702))
+    device.cmc_server_version = "dns-service"
+    device.ddm_dante_version = "ddm-platform"
+
+    platform = bytearray(_packet(12))
+    platform[0x20:0x24] = (0x0506_0007).to_bytes(4, "big")
+    manufacturer = bytearray(_packet(10))
+    manufacturer[0x14C:0x150] = (0x0203_0004).to_bytes(4, "big")
+    receive_packets(application, [bytes(platform), bytes(manufacturer)], (device_ip_address, 8702))
+
+    assert device.platform_software_version == "5.6.7.2"
+    assert device.product_version == "2.3.4"
+    assert device.cmc_server_version == "dns-service"
+    assert device.ddm_dante_version == "ddm-platform"
+    assert device.field_sources["platform_software_version"] == "conmon_platform_record"
+    assert device.field_sources["product_version"] == "conmon_manufacturer_record"
 
 
 def test_malformed_versions_response_leaves_existing_capability_unchanged():

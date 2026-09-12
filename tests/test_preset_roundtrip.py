@@ -113,6 +113,35 @@ def test_schema_v2_round_trip_preserves_all_categories_and_unknowns():
     assert xml.count("<vendor_setting") == xml_again.count("<vendor_setting") == 1
 
 
+def test_schema_v2_round_trip_preserves_modern_rtp_transmit_flow_fields():
+    flow = _flow()
+    flow.update(
+        {
+            "media_mode": "rtp_aes67",
+            "name": "RTP Program",
+            "frames_per_packet": 48,
+            "primary_destination": {"address": "239.69.1.2", "port": 5004, "interface": None},
+            "secondary_destination": {"address": "239.69.1.3", "port": 5006, "interface": None},
+            "identity": {"global_flow_id": None, "media_type_code": 3, "media_local_flow_id": 7},
+            "protocol": {
+                "protocol_id": 0x2809,
+                "protocol_version": None,
+                "cohort": "modern_2809",
+                "required_capabilities": [],
+            },
+            "raw_fields": {"request_options_word": 0},
+        }
+    )
+    configuration = _configuration()
+    configuration["transmit_flows"] = [flow]
+
+    xml = format_preset_configs({"Desk": configuration}, preset_name="RTP")
+    name, parsed = parse_preset_xml(xml)
+
+    assert name == "RTP"
+    assert parsed["Desk"]["transmit_flows"] == [flow]
+
+
 def test_schema_v2_rejects_conflicting_conventional_projection():
     xml = format_preset_configs({"Desk": _configuration()}, preset_name="Complete")
     xml = xml.replace("<samplerate>48000</samplerate>", "<samplerate>96000</samplerate>")

@@ -137,7 +137,9 @@ test("flow performance controls follow typed backend availability", () => {
       transmit_flow_performance: available(false, [
         "properties_not_advertised",
       ]),
-      unicast_performance: available(false, ["software_version_unknown"]),
+      unicast_performance: available(false, [
+        "platform_software_version_unknown",
+      ]),
       receive_flow_default_slots: available(true),
       store_current_configuration: available(true),
     },

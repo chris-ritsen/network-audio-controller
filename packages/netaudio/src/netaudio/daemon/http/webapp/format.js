@@ -39,8 +39,13 @@ export function timestamp(value) {
     return ABSENT;
   }
   const epochSeconds =
-    typeof value === "number" ? value : /^\d+(\.\d+)?$/.test(String(value).trim()) ? Number(value) : null;
-  const parsed = epochSeconds === null ? new Date(value) : new Date(epochSeconds * 1000);
+    typeof value === "number"
+      ? value
+      : /^\d+(\.\d+)?$/.test(String(value).trim())
+        ? Number(value)
+        : null;
+  const parsed =
+    epochSeconds === null ? new Date(value) : new Date(epochSeconds * 1000);
   if (Number.isNaN(parsed.getTime())) {
     return String(value);
   }
@@ -93,12 +98,14 @@ export function subscriptionStatusText(subscription) {
   if (detail && !/\b0x[\da-f]+\b|\b[\da-f]{16,}\b/i.test(detail)) {
     return detail.replace(/^(Error|Warning):\s*/i, "");
   }
-  return {
-    pending: "Subscription pending",
-    resolving: "Finding source channel",
-    unresolved: "Source channel not found",
-    error: "Subscription failed",
-  }[status.state] || "Subscription status unavailable";
+  return (
+    {
+      pending: "Subscription pending",
+      resolving: "Finding source channel",
+      unresolved: "Source channel not found",
+      error: "Subscription failed",
+    }[status.state] || "Subscription status unavailable"
+  );
 }
 
 export function subscriptionSource(subscription) {
@@ -145,13 +152,20 @@ export function meteringLabel(value) {
 }
 
 export function macAddress(device) {
-  const reported = (device.interfaces || []).map((entry) => entry.mac_address).find(Boolean) || device.mac_address;
-  let mac = typeof reported === "string" ? reported.replace(/[:-]/g, "").toLowerCase() : "";
+  const reported =
+    (device.interfaces || []).map((entry) => entry.mac_address).find(Boolean) ||
+    device.mac_address;
+  let mac =
+    typeof reported === "string"
+      ? reported.replace(/[:-]/g, "").toLowerCase()
+      : "";
   if (/^[0-9a-f]{16}$/.test(mac)) {
     if (mac.slice(6, 10) === "fffe") mac = mac.slice(0, 6) + mac.slice(10);
     else if (mac.endsWith("0000")) mac = mac.slice(0, 12);
   }
-  return /^[0-9a-f]{12}$/.test(mac) ? mac.match(/../g).join(":").toUpperCase() : ABSENT;
+  return /^[0-9a-f]{12}$/.test(mac)
+    ? mac.match(/../g).join(":").toUpperCase()
+    : ABSENT;
 }
 
 export function stateLabel(value) {
@@ -162,15 +176,25 @@ export function stateLabel(value) {
 }
 
 export function clockLeaderName(device, inventory) {
-  const normalize = (value) => typeof value === "string" ? value.replace(/[:-]/g, "").toLowerCase() : "";
+  const normalize = (value) =>
+    typeof value === "string" ? value.replace(/[:-]/g, "").toLowerCase() : "";
   const identity = normalize(device.leader_clock_identity);
   if (!identity) return ABSENT;
   const matches = Object.values(inventory).filter((candidate) => {
-    if ((candidate.ddm_server_profile || "") !== (device.ddm_server_profile || "")) return false;
-    if ((candidate.ddm_domain_id || "") !== (device.ddm_domain_id || "")) return false;
-    return normalize(candidate.clock_identity) === identity || normalize(macAddress(candidate)) === identity;
+    if (
+      (candidate.ddm_server_profile || "") !== (device.ddm_server_profile || "")
+    )
+      return false;
+    if ((candidate.ddm_domain_id || "") !== (device.ddm_domain_id || ""))
+      return false;
+    return (
+      normalize(candidate.clock_identity) === identity ||
+      normalize(macAddress(candidate)) === identity
+    );
   });
-  return matches.length === 1 ? deviceLabel(matches[0]) : text(device.leader_clock_identity);
+  return matches.length === 1
+    ? deviceLabel(matches[0])
+    : text(device.leader_clock_identity);
 }
 
 export function meterFraction(value) {
@@ -182,12 +206,18 @@ export function meterFraction(value) {
   if (decibelsFullScale === null || decibelsFullScale <= METER_FLOOR_DBFS) {
     return 0;
   }
-  return Math.min(1, (decibelsFullScale - METER_FLOOR_DBFS) / -METER_FLOOR_DBFS);
+  return Math.min(
+    1,
+    (decibelsFullScale - METER_FLOOR_DBFS) / -METER_FLOOR_DBFS,
+  );
 }
 
 export function sortedDevices(devices) {
   return Object.values(devices).sort((first, second) =>
-    deviceLabel(first).localeCompare(deviceLabel(second), undefined, { numeric: true, sensitivity: "base" }),
+    deviceLabel(first).localeCompare(deviceLabel(second), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
   );
 }
 
@@ -198,7 +228,13 @@ export function sortedChannelNumbers(channels) {
 }
 
 export function deviceModelName(device) {
-  return device.model || device.dante_model || "";
+  return (
+    device.product_name ||
+    device.model ||
+    device.platform_model_name ||
+    device.dante_model ||
+    ""
+  );
 }
 
 export function deviceHaystack(device) {
@@ -209,7 +245,8 @@ export function deviceHaystack(device) {
     device.mac_address,
     device.model,
     device.dante_model,
-    device.board_name,
+    device.product_name,
+    device.platform_model_name,
     device.manufacturer,
     device.ddm_domain_name,
   ]
@@ -234,10 +271,14 @@ export function deviceSummaryLine(device) {
 
 export function sortedShureDevices(shureDevices) {
   return Object.values(shureDevices).sort((first, second) =>
-    String(first.name || first.mac).localeCompare(String(second.name || second.mac), undefined, {
-      numeric: true,
-      sensitivity: "base",
-    }),
+    String(first.name || first.mac).localeCompare(
+      String(second.name || second.mac),
+      undefined,
+      {
+        numeric: true,
+        sensitivity: "base",
+      },
+    ),
   );
 }
 
@@ -276,7 +317,9 @@ function clockSubdomainBytes(value) {
   if (!Array.isArray(value)) {
     return null;
   }
-  if (value.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 0xff)) {
+  if (
+    value.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 0xff)
+  ) {
     return null;
   }
   return value.slice(0, CLOCK_SUBDOMAIN_SIZE);
@@ -301,14 +344,23 @@ export function clockSubdomain(value) {
 
 export function clockSubdomainInputValue(value) {
   const formatted = clockSubdomain(value);
-  if (formatted === ABSENT || formatted === "unset (default subdomain)" || formatted === "Custom subdomain") {
+  if (
+    formatted === ABSENT ||
+    formatted === "unset (default subdomain)" ||
+    formatted === "Custom subdomain"
+  ) {
     return "";
   }
   return formatted;
 }
 
 export function clockSourceCode(value) {
-  if (value === null || value === undefined || typeof value !== "number" || !Number.isInteger(value)) {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value !== "number" ||
+    !Number.isInteger(value)
+  ) {
     return ABSENT;
   }
   return "Device-defined";

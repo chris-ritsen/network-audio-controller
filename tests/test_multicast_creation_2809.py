@@ -26,6 +26,8 @@ def test_multicast_creation_matches_digest_bound_exchange(exchange):
         {
             "command": "create_multicast_flow_2809",
             "channels": exchange["channels"],
+            "media_local_flow_id": 2,
+            "transport": "native",
             "request_options_word": exchange["request_options_word"],
             "transaction_id": exchange["transaction_id"],
         }
@@ -40,7 +42,7 @@ def test_multicast_creation_matches_digest_bound_exchange(exchange):
     }
 
 
-@pytest.mark.parametrize("offset,value", [(0, 0x27), (6, 0x36), (9, 0), (18, 1), (35, 0), (41, 1), (47, 0)])
+@pytest.mark.parametrize("offset,value", [(0, 0x27), (6, 0x36), (9, 0), (18, 1), (35, 0), (41, 0), (47, 0)])
 def test_multicast_creation_rejects_unverified_response_variants(offset, value):
     response = bytearray.fromhex(EVIDENCE["exchanges"][0]["response"]["hexadecimal"])
     response[offset] = value
@@ -55,6 +57,30 @@ def test_multicast_creation_rejects_every_truncation():
             core.parse_response("multicast_flow_creation_2809", response[:length])
 
 
-def test_multicast_creation_requires_explicit_options():
+def test_multicast_creation_accepts_an_explicit_nonzero_media_local_identity():
+    response = bytearray.fromhex(EVIDENCE["exchanges"][0]["response"]["hexadecimal"])
+    response[40:42] = (7).to_bytes(2, "big")
+
+    result = core.parse_response("multicast_flow_creation_2809", bytes(response))
+
+    assert result["global_flow_id"] == 2
+    assert result["media_local_flow_id"] == 7
+
+
+def test_multicast_creation_requires_explicit_identity_transport_and_options():
     with pytest.raises(core.NetaudioCoreError):
         core.build_command({"command": "create_multicast_flow_2809", "channels": [1]})
+
+
+def test_multicast_creation_rejects_ipv6_destination():
+    with pytest.raises(core.NetaudioCoreError):
+        core.build_command(
+            {
+                "command": "create_multicast_flow_2809",
+                "channels": [1],
+                "destinations": [{"address": "ff15::1", "port": 5004}],
+                "media_local_flow_id": 1,
+                "request_options_word": 0,
+                "transport": "rtp_aes67",
+            }
+        )

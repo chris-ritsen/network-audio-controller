@@ -154,6 +154,11 @@ async def clear_event_journal_on_daemon() -> tuple[int | None, dict | None]:
     return status, data if isinstance(data, dict) else None
 
 
+async def append_operation_event_on_daemon(payload: dict) -> tuple[int | None, dict | None]:
+    status, data = await _daemon_request("POST", "/event-journal/operations", payload)
+    return status, data if isinstance(data, dict) else None
+
+
 async def get_issues_from_daemon(
     *,
     device: str | None = None,

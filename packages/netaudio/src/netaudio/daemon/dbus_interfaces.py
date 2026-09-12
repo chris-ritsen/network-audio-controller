@@ -104,8 +104,8 @@ class DanteDeviceInterface(ServiceInterface):
         return dbus_string(self._device.dante_model)
 
     @dbus_property(access=RO)
-    def BoardName(self) -> "s":
-        return dbus_string(self._device.board_name)
+    def PlatformModelName(self) -> "s":
+        return dbus_string(self._device.platform_model_name)
 
     @dbus_property(access=RO)
     def LinkSpeedMbps(self) -> "u":
@@ -248,12 +248,60 @@ class DanteDeviceInterface(ServiceInterface):
         return dbus_string(self._device.leader_clock_identity)
 
     @dbus_property(access=RO)
-    def SoftwareVersion(self) -> "s":
-        return dbus_string(self._device.software_version)
+    def PlatformSoftwareVersion(self) -> "s":
+        return dbus_string(self._device.platform_software_version)
 
     @dbus_property(access=RO)
-    def FirmwareVersion(self) -> "s":
-        return dbus_string(self._device.firmware_version)
+    def PlatformHardwareVersion(self) -> "s":
+        return dbus_string(self._device.platform_hardware_version)
+
+    @dbus_property(access=RO)
+    def PlatformApiVersion(self) -> "s":
+        return dbus_string(self._device.platform_api_version)
+
+    @dbus_property(access=RO)
+    def RomBootVersion(self) -> "s":
+        return dbus_string(self._device.rom_boot_version)
+
+    @dbus_property(access=RO)
+    def ProductVersion(self) -> "s":
+        return dbus_string(self._device.product_version)
+
+    @dbus_property(access=RO)
+    def FriendlyProductVersion(self) -> "s":
+        return dbus_string(self._device.friendly_product_version)
+
+    @dbus_property(access=RO)
+    def ManufacturerSoftwareVersion(self) -> "s":
+        return dbus_string(self._device.manufacturer_software_version)
+
+    @dbus_property(access=RO)
+    def ManufacturerFirmwareVersion(self) -> "s":
+        return dbus_string(self._device.manufacturer_firmware_version)
+
+    @dbus_property(access=RO)
+    def CmcServerVersion(self) -> "s":
+        return dbus_string(self._device.cmc_server_version)
+
+    @dbus_property(access=RO)
+    def RouterProtocolVersion(self) -> "s":
+        return dbus_string(self._device.router_protocol_version)
+
+    @dbus_property(access=RO)
+    def DdmProductVersion(self) -> "s":
+        return dbus_string(self._device.ddm_product_version)
+
+    @dbus_property(access=RO)
+    def DdmProductSoftwareVersion(self) -> "s":
+        return dbus_string(self._device.ddm_product_software_version)
+
+    @dbus_property(access=RO)
+    def DdmDanteVersion(self) -> "s":
+        return dbus_string(self._device.ddm_dante_version)
+
+    @dbus_property(access=RO)
+    def DdmDanteHardwareVersion(self) -> "s":
+        return dbus_string(self._device.ddm_dante_hardware_version)
 
     @dbus_property(access=RO)
     def Subscriptions(self) -> "a(ssssq)":

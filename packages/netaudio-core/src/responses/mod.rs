@@ -92,17 +92,6 @@ pub const DEVICE_SETTINGS_INFO_ACTIVE_LATENCY_NS: u16 = 0x8301;
 pub const DEVICE_SETTINGS_INFO_MAX_LATENCY_NS: u16 = 0x8302;
 pub const DEVICE_SETTINGS_INFO_MIN_LATENCY_NS: u16 = 0x8306;
 
-const CONMON_MANUFACTURER_OFFSET: usize = 0x4C;
-const CONMON_MANUFACTURER_END: usize = 0xCC;
-const CONMON_UNMAPPED_FIELD_BEFORE_MANUFACTURER_OFFSET: usize = 0x4A;
-const CONMON_PRODUCT_NAME_OFFSET: usize = 0xCC;
-const CONMON_PRODUCT_NAME_END: usize = 0x14C;
-const CONMON_PRODUCT_VERSION_OFFSET: usize = 0x14C;
-const CONMON_PRODUCT_VERSION_END: usize = 0x150;
-const CONMON_BOARD_CODENAME_OFFSET: usize = 0x2C;
-const CONMON_BOARD_CODENAME_END: usize = 0x34;
-const CONMON_BOARD_NAME_OFFSET: usize = 0x58;
-const CONMON_BOARD_NAME_END: usize = 0x98;
 const CONMON_DANTE_MODEL_BODY_OFFSET: usize = 0x18;
 const CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET: usize = CONMON_DANTE_MODEL_BODY_OFFSET + 0x1C;
 const CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET: usize =
@@ -182,26 +171,55 @@ pub struct PropertyDirectory {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct MakeModel {
-    pub manufacturer: String,
-    pub manufacturer_field_hexadecimal: String,
-    pub unmapped_field_at_byte_offset_74: u16,
-    pub product_name: String,
-    pub product_version: String,
-    pub product_version_components: [u8; 4],
+pub struct ManufacturerVersions {
+    pub record_protocol_version: u16,
+    pub manufacturer_identifier: Option<String>,
+    pub manufacturer_identifier_hexadecimal: String,
+    pub product_identifier: Option<String>,
+    pub product_identifier_hexadecimal: String,
+    pub serial_number_identifier: Option<String>,
+    pub serial_number_identifier_hexadecimal: String,
+    pub manufacturer_software_version: Option<String>,
+    pub manufacturer_software_version_components: Option<Vec<u32>>,
+    pub manufacturer_firmware_version: Option<String>,
+    pub manufacturer_firmware_version_components: Option<Vec<u32>>,
+    pub manufacturer_capabilities: Option<u32>,
+    pub manufacturer: Option<String>,
+    pub product_name: Option<String>,
+    pub product_version: Option<String>,
+    pub product_version_components: Option<Vec<u32>>,
+    pub friendly_product_version: Option<String>,
+    pub display_product_version: Option<String>,
+    pub raw_record_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DanteModel {
-    pub board_codename: String,
-    pub board_name: String,
+pub struct PlatformVersions {
     pub record_protocol_version: u16,
+    pub platform_software_version: Option<String>,
+    pub platform_software_version_components: Option<Vec<u32>>,
+    pub platform_hardware_version: Option<String>,
+    pub platform_hardware_version_components: Option<Vec<u32>>,
+    pub platform_api_version: Option<String>,
+    pub platform_api_version_components: Option<Vec<u32>>,
+    pub platform_model_identifier: Option<String>,
+    pub platform_model_identifier_hexadecimal: String,
     pub primary_capabilities: u32,
+    pub preferred_link_speed: Option<u32>,
+    pub device_status_flags: Option<u32>,
+    pub rom_boot_version: Option<String>,
+    pub rom_boot_version_components: Option<Vec<u32>>,
+    pub supported_clock_protocol_flags: u32,
     pub read_only_capabilities: u32,
+    pub platform_model_name: Option<String>,
     pub monitoring_capabilities: u32,
     pub secondary_capabilities: u32,
     pub domain_capability_values: u32,
     pub domain_capability_validity: u32,
+    pub effective_domain_capabilities: u32,
+    pub plugin_identifiers: Vec<Option<String>>,
+    pub plugin_records_hexadecimal: Vec<String>,
+    pub raw_record_hexadecimal: String,
     pub identify_supported: bool,
     pub sample_rate_configuration_supported: bool,
     pub encoding_configuration_supported: bool,

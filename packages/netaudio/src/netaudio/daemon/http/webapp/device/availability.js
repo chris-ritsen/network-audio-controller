@@ -22,8 +22,8 @@ const REASON_TEXT = {
   property_directory_unknown: "The device property directory was not reported.",
   properties_not_advertised:
     "The device does not advertise the required properties.",
-  software_version_unknown:
-    "The device software version was not reported in x.y.z form.",
+  platform_software_version_unknown:
+    "The Dante platform software version was not reported in x.y.z form.",
   compatibility_property_not_advertised:
     "The device does not advertise the compatibility property required by its software version.",
 };

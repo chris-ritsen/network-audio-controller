@@ -14,10 +14,11 @@ from netaudio import DanteDevice
 from netaudio.cli_support.context import _get_state
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.common.app_config import settings
-from netaudio.daemon.client import get_devices_from_daemon
+from netaudio.daemon.client import append_operation_event_on_daemon, get_devices_from_daemon
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.state import apply_device_status
+from netaudio.monitoring import MonitoringEventJournal, MutationAuditRecorder, remote_recorder
 
 __all__ = [
     "CapabilityProbeTimeout",
@@ -67,8 +68,32 @@ def _make_dante_application(packet_store=None, session_id=None) -> DanteApplicat
 async def _discover_with_application(application: DanteApplication) -> dict[str, DanteDevice]:
     devices = await get_devices_from_daemon()
     if devices is not None:
+
+        async def append_event(payload: dict) -> None:
+            status, response = await append_operation_event_on_daemon(payload)
+            if status != 200:
+                detail = response.get("error") if isinstance(response, dict) else "daemon unavailable"
+                raise RuntimeError(f"daemon refused operation journal event: {detail}")
+
+        configure_recorder = getattr(application, "set_operation_recorder", None)
+        if configure_recorder is None:
+            application.operation_recorder = remote_recorder(append_event)
+        else:
+            configure_recorder(remote_recorder(append_event))
         application.attach_devices(devices)
         return devices
+    from netaudio.common.config_loader import default_config_path, load_daemon_config
+
+    journal = MonitoringEventJournal.from_daemon_config(
+        default_config_path().parent / "event-journal.json",
+        load_daemon_config(),
+    )
+    recorder = MutationAuditRecorder.from_journal(journal)
+    configure_recorder = getattr(application, "set_operation_recorder", None)
+    if configure_recorder is None:
+        application.operation_recorder = recorder
+    else:
+        configure_recorder(recorder)
     return await application.discover_and_populate(timeout=settings.mdns_timeout) or {}
 
 

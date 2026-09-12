@@ -142,8 +142,17 @@ class DaemonConfigurationHandlers:
         if not device:
             return
         try:
-            specification = TransmitFlowSpecification.from_dict(params.get("specification"))
-            result = await create_transmit_flow(device, specification)
+            operation = getattr(self.application, "create_transmit_flow", None)
+            if operation is None:
+                specification = TransmitFlowSpecification.from_dict(params.get("specification"))
+                result = await self.operation_recorder.run_operation(
+                    device,
+                    "create_transmit_flow",
+                    specification.to_dict(),
+                    lambda: create_transmit_flow(device, specification),
+                )
+            else:
+                result = await operation(device, params.get("specification"))
         except (TypeError, ValueError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 400)
             return
@@ -161,8 +170,17 @@ class DaemonConfigurationHandlers:
         if not device:
             return
         try:
-            flow_id = flows.validate_flow_slot(params.get("flow_id"))
-            result = await delete_transmit_flow(device, flow_id)
+            operation = getattr(self.application, "delete_transmit_flow", None)
+            if operation is None:
+                flow_id = flows.validate_flow_slot(params.get("flow_id"))
+                result = await self.operation_recorder.run_operation(
+                    device,
+                    "delete_transmit_flow",
+                    {"flow_id": flow_id},
+                    lambda: delete_transmit_flow(device, flow_id),
+                )
+            else:
+                result = await operation(device, params.get("flow_id"))
         except flows.FlowValidationError as exception:
             await self._send_json(writer, {"error": str(exception)}, exception.status)
             return

@@ -133,8 +133,23 @@ def _filter_device(device: dict, level: str) -> dict:
         model = device.get("model", "")
         filtered["dante_model"] = dante_model or model
         filtered["dante_model_id"] = device.get("dante_model_id", "")
-        filtered["firmware_version"] = device.get("firmware_version", "")
-        filtered["software_version"] = device.get("software_version", "")
+        for name in (
+            "platform_software_version",
+            "platform_hardware_version",
+            "platform_api_version",
+            "rom_boot_version",
+            "product_version",
+            "friendly_product_version",
+            "manufacturer_software_version",
+            "manufacturer_firmware_version",
+            "cmc_server_version",
+            "router_protocol_version",
+            "ddm_product_version",
+            "ddm_product_software_version",
+            "ddm_dante_version",
+            "ddm_dante_hardware_version",
+        ):
+            filtered[name] = device.get(name, "")
         filtered["sample_rate_hz"] = device.get("sample_rate_hz", "")
         filtered["encoding"] = device.get("encoding")
         filtered["aes67_current"] = device.get("aes67_current")
@@ -195,8 +210,8 @@ def _format_report(
 
         ip_address = filtered.get("ipv4", "")
         model = filtered.get("dante_model", "")
-        firmware = filtered.get("firmware_version", "")
-        software = filtered.get("software_version", "")
+        platform = filtered.get("platform_software_version", "")
+        hardware = filtered.get("platform_hardware_version", "")
         sample_rate = filtered.get("sample_rate", "")
         link_speed_mbps = filtered.get("link_speed_mbps")
 
@@ -204,7 +219,7 @@ def _format_report(
         if ip_address:
             header += f" ({ip_address})"
         lines.append(header)
-        lines.append(f"  Model: {model} | FW: {firmware} | SW: {software} | Rate: {sample_rate}")
+        lines.append(f"  Model: {model} | Dante: {platform} | Hardware: {hardware} | Rate: {sample_rate}")
         if link_speed_mbps is not None:
             lines.append(f"  Link speed: {link_speed_mbps} Mbps")
 

@@ -30,9 +30,15 @@ DEVICE_LIST_COMPACT_HEADERS = [
 DEVICE_LIST_VERBOSE_HEADERS = [
     "Manufacturer",
     "Product Version",
-    "Board",
-    "Firmware",
-    "Software",
+    "Platform Model",
+    "Dante Software/Firmware",
+    "Hardware Version",
+    "ROM/Boot Version",
+    "API Version",
+    "Manufacturer Software",
+    "Manufacturer Firmware",
+    "CMC Server Version",
+    "Router Protocol Version",
     "Link Speed",
     "Sample Rate",
     "Supported Sample Rates",
@@ -466,7 +472,7 @@ def _device_channel_count_labels(device) -> tuple[str, str]:
 
 
 def _device_identity_rows(device) -> list[list[str]]:
-    model = device.model or device.dante_model or device.model_id
+    model = device.product_name or device.model or device.platform_model_name or device.dante_model or device.model_id
     manufacturer = device.manufacturer or device.manufacturer_mdns
     rows = [
         ["Name", device.name or "unknown"],
@@ -478,10 +484,37 @@ def _device_identity_rows(device) -> list[list[str]]:
         ["MAC Address", format_mac_address(device.mac_address) if device.mac_address else "unknown"],
         ["Link Speed", format_link_speed_megabits_per_second(device.link_speed_mbps)],
     ]
-    if device.firmware_version:
-        rows.append(["Firmware", device.firmware_version])
-    if device.software_version:
-        rows.append(["Software", device.software_version])
+    if device.friendly_product_version:
+        rows.append(["Product Version", device.friendly_product_version])
+        if device.product_version:
+            rows.append(["Numeric Product Version", device.product_version])
+    elif device.product_version:
+        rows.append(["Product Version", device.product_version])
+    if device.manufacturer_software_version:
+        rows.append(["Manufacturer Software Version", device.manufacturer_software_version])
+    if device.manufacturer_firmware_version:
+        rows.append(["Manufacturer Firmware Version", device.manufacturer_firmware_version])
+    if device.platform_software_version:
+        label = "Dante Firmware Version" if device.platform_hardware_version else "Dante Software Version"
+        rows.append([label, device.platform_software_version])
+    if device.platform_hardware_version:
+        rows.append(["Hardware Version", device.platform_hardware_version])
+    if device.rom_boot_version:
+        rows.append(["ROM/Boot Version", device.rom_boot_version])
+    if device.platform_api_version:
+        rows.append(["Dante API Version", device.platform_api_version])
+    if device.cmc_server_version:
+        rows.append(["CMC Server Version (DNS-SD)", device.cmc_server_version])
+    if device.router_protocol_version:
+        rows.append(["Router Protocol Version (DNS-SD)", device.router_protocol_version])
+    for label, value in (
+        ("DDM Product Version", device.ddm_product_version),
+        ("DDM Product Software Version", device.ddm_product_software_version),
+        ("DDM Dante Version", device.ddm_dante_version),
+        ("DDM Dante Hardware Version", device.ddm_dante_hardware_version),
+    ):
+        if value:
+            rows.append([label, value])
     if device.model_id in BLUETOOTH_MODEL_IDS or device.bluetooth_connected is not None:
         rows.append(["Bluetooth", _format_bluetooth(device)])
     rows.extend(_device_management_rows(device))
@@ -669,7 +702,12 @@ def device_list_row(server_name: str, device, verbose: bool) -> list[str]:
         device.kind,
         str(device.ipv4) if device.ipv4 else "",
         format_mac_address(device.mac_address),
-        device.dante_model or device.model_id or "",
+        device.product_name
+        or device.model
+        or device.platform_model_name
+        or device.dante_model
+        or device.model_id
+        or "",
         format_lock_state(device),
         device.ddm_domain_name or "",
         _format_channel_count(device.tx_channels, device.tx_count),
@@ -682,10 +720,16 @@ def device_list_row(server_name: str, device, verbose: bool) -> list[str]:
     row.extend(
         [
             device.manufacturer or "",
-            device.product_version or "",
-            device.board_name or device.dante_model_id or "",
-            device.firmware_version or "",
-            device.software_version or "",
+            device.friendly_product_version or device.product_version or device.ddm_product_version or "",
+            device.platform_model_name or device.platform_model_identifier or device.dante_model_id or "",
+            device.platform_software_version or "",
+            device.platform_hardware_version or "",
+            device.rom_boot_version or "",
+            device.platform_api_version or "",
+            device.manufacturer_software_version or "",
+            device.manufacturer_firmware_version or "",
+            device.cmc_server_version or "",
+            device.router_protocol_version or "",
             format_link_speed_megabits_per_second(device.link_speed_mbps),
             format_sample_rate_hertz(device.sample_rate),
             format_sample_rates_hertz(device.supported_sample_rates)

@@ -302,7 +302,7 @@ class DanteCommands:
         supported_property_ids,
         latency_microseconds: int,
         frames_per_packet: int,
-        device_software_version,
+        platform_software_version,
     ) -> dict:
         return {
             "command": "set_receive_flow_performance",
@@ -310,7 +310,7 @@ class DanteCommands:
             "supported_property_ids": list(supported_property_ids),
             "latency_microseconds": latency_microseconds,
             "frames_per_packet": frames_per_packet,
-            "device_software_version": list(device_software_version),
+            "platform_software_version": list(platform_software_version),
         }
 
     def set_transmit_flow_performance(
@@ -334,7 +334,7 @@ class DanteCommands:
         supported_property_ids,
         latency_microseconds: int,
         frames_per_packet: int,
-        device_software_version,
+        platform_software_version,
     ) -> dict:
         return {
             "command": "set_unicast_performance",
@@ -342,7 +342,7 @@ class DanteCommands:
             "supported_property_ids": list(supported_property_ids),
             "latency_microseconds": latency_microseconds,
             "frames_per_packet": frames_per_packet,
-            "device_software_version": list(device_software_version),
+            "platform_software_version": list(platform_software_version),
         }
 
     def store_current_configuration(self, negotiated_protocol_id: int) -> dict:

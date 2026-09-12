@@ -348,10 +348,12 @@ class DanteBrowser:
                             device.manufacturer = service_properties["mf"]
 
                     if "server_vers" in service_properties and service["type"] == SERVICE_CMC:
-                        device.software_version = service_properties["server_vers"]
+                        device.cmc_server_version = service_properties["server_vers"]
+                        device.field_sources = {**(device.field_sources or {}), "cmc_server_version": "dns_sd"}
 
                     if "router_vers" in service_properties:
-                        device.firmware_version = service_properties["router_vers"]
+                        device.router_protocol_version = service_properties["router_vers"]
+                        device.field_sources = {**(device.field_sources or {}), "router_protocol_version": "dns_sd"}
 
                     if "rate" in service_properties:
                         device.sample_rate = int(service_properties["rate"])

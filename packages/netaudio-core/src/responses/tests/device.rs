@@ -466,25 +466,224 @@ fn aes67_configured_accepts_captured_2801_device_settings_response() {
 }
 
 #[test]
-fn make_model_preserves_unmapped_preceding_field_and_four_part_version() {
+fn make_model_decodes_packed_versions_and_friendly_display_version() {
     let mut data = vec![0u8; 0x170];
     stamp_conmon_response(&mut data, CONMON_OPCODE_MAKE_MODEL_RESPONSE);
-    data[CONMON_UNMAPPED_FIELD_BEFORE_MANUFACTURER_OFFSET
-        ..CONMON_UNMAPPED_FIELD_BEFORE_MANUFACTURER_OFFSET + 2]
-        .copy_from_slice(&1u16.to_be_bytes());
-    data[CONMON_MANUFACTURER_OFFSET..CONMON_MANUFACTURER_OFFSET + 14]
+    data[CONMON_DANTE_MODEL_BODY_OFFSET..CONMON_DANTE_MODEL_BODY_OFFSET + 2]
+        .copy_from_slice(&0x0712u16.to_be_bytes());
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x08..CONMON_DANTE_MODEL_BODY_OFFSET + 0x0e]
+        .copy_from_slice(b"Ferro\0");
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x20..CONMON_DANTE_MODEL_BODY_OFFSET + 0x24]
+        .copy_from_slice(&0x0102_0003u32.to_be_bytes());
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x24..CONMON_DANTE_MODEL_BODY_OFFSET + 0x28]
+        .copy_from_slice(&0x0405_0006u32.to_be_bytes());
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x2c..CONMON_DANTE_MODEL_BODY_OFFSET + 0x30]
+        .copy_from_slice(&7u32.to_be_bytes());
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x34..CONMON_DANTE_MODEL_BODY_OFFSET + 0x34 + 14]
         .copy_from_slice(b"Ferrofish GmbH");
-    data[CONMON_PRODUCT_NAME_OFFSET..CONMON_PRODUCT_NAME_OFFSET + 25]
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0xb4..CONMON_DANTE_MODEL_BODY_OFFSET + 0xb4 + 25]
         .copy_from_slice(b"A32 Dante AD/DA Converter");
-    data[CONMON_PRODUCT_VERSION_OFFSET..CONMON_PRODUCT_VERSION_END].copy_from_slice(&[1, 2, 0, 3]);
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x134..CONMON_DANTE_MODEL_BODY_OFFSET + 0x138]
+        .copy_from_slice(&0x0100_0000u32.to_be_bytes());
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x138..CONMON_DANTE_MODEL_BODY_OFFSET + 0x13d]
+        .copy_from_slice(b"v1.0\0");
 
     let parsed = parse_make_model(&data).unwrap();
-    assert_eq!(parsed.manufacturer, "Ferrofish GmbH");
-    assert_eq!(parsed.manufacturer_field_hexadecimal.len(), 256);
-    assert_eq!(parsed.unmapped_field_at_byte_offset_74, 1);
-    assert_eq!(parsed.product_name, "A32 Dante AD/DA Converter");
-    assert_eq!(parsed.product_version, "1.2.0.3");
-    assert_eq!(parsed.product_version_components, [1, 2, 0, 3]);
+    assert_eq!(parsed.manufacturer.as_deref(), Some("Ferrofish GmbH"));
+    assert_eq!(
+        parsed.product_name.as_deref(),
+        Some("A32 Dante AD/DA Converter")
+    );
+    assert_eq!(
+        parsed.manufacturer_software_version.as_deref(),
+        Some("1.2.3.7")
+    );
+    assert_eq!(
+        parsed.manufacturer_firmware_version.as_deref(),
+        Some("4.5.6")
+    );
+    assert_eq!(parsed.product_version.as_deref(), Some("1.0.0"));
+    assert_eq!(parsed.product_version_components, Some(vec![1, 0, 0]));
+    assert_eq!(parsed.friendly_product_version.as_deref(), Some("v1.0"));
+    assert_eq!(parsed.display_product_version.as_deref(), Some("v1.0"));
+}
+
+#[test]
+fn permitted_platform_and_manufacturer_packets_decode_exact_versions() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/protocol_packets.json"
+    ))
+    .unwrap();
+    let packet = |name: &str| decode_hexadecimal(fixture[name].as_str().unwrap());
+    for (name, software, hardware, api, rom, model) in [
+        (
+            "model_refresh/protocol_FFFF_message_0060_id_12.bin",
+            "4.0.8.2",
+            "4.0.2.7",
+            "4.0.3",
+            "1.3.64",
+            "Brooklyn II",
+        ),
+        (
+            "model_refresh/protocol_FFFF_message_0060_id_6.bin",
+            "4.2.0.28",
+            "4.0.2.11",
+            "4.2.1",
+            "1.3.71",
+            "Brooklyn II",
+        ),
+        (
+            "model_refresh/protocol_FFFF_message_0060_id_8.bin",
+            "4.0.7.2",
+            "4.2.0.6",
+            "4.0.3",
+            "1.3.64",
+            "Dante PCIe IF",
+        ),
+    ] {
+        let parsed = parse_dante_model(&packet(name)).unwrap();
+        assert_eq!(parsed.platform_software_version.as_deref(), Some(software));
+        assert_eq!(parsed.platform_hardware_version.as_deref(), Some(hardware));
+        assert_eq!(parsed.platform_api_version.as_deref(), Some(api));
+        assert_eq!(parsed.rom_boot_version.as_deref(), Some(rom));
+        assert_eq!(parsed.platform_model_name.as_deref(), Some(model));
+    }
+    for (name, product, manufacturer_firmware, manufacturer) in [
+        (
+            "model_refresh/protocol_FFFF_message_00C0_id_10.bin",
+            "1.0.0",
+            Some("1.0.2.1"),
+            "Ferrofish GmbH",
+        ),
+        (
+            "model_refresh/protocol_FFFF_message_00C0_id_2.bin",
+            "0.0.1",
+            Some("11.0.0.17"),
+            "Shure Inc.",
+        ),
+        (
+            "model_refresh/protocol_FFFF_message_00C0_id_4.bin",
+            "1.0.0",
+            None,
+            "Digigram",
+        ),
+    ] {
+        let parsed = parse_make_model(&packet(name)).unwrap();
+        assert_eq!(parsed.product_version.as_deref(), Some(product));
+        assert_eq!(
+            parsed.manufacturer_firmware_version.as_deref(),
+            manufacturer_firmware
+        );
+        assert_eq!(parsed.manufacturer.as_deref(), Some(manufacturer));
+    }
+}
+
+fn manufacturer_versions_response(version: u16) -> Vec<u8> {
+    let mut data = vec![0u8; CONMON_DANTE_MODEL_BODY_OFFSET + 0x140];
+    stamp_conmon_response(&mut data, CONMON_OPCODE_MAKE_MODEL_RESPONSE);
+    let record = CONMON_DANTE_MODEL_BODY_OFFSET;
+    data[record..record + 2].copy_from_slice(&version.to_be_bytes());
+    data[record + 0x08..record + 0x0c].copy_from_slice(b"MFG\0");
+    data[record + 0x10..record + 0x15].copy_from_slice(b"PROD\0");
+    data[record + 0x18..record + 0x1c].copy_from_slice(b"SER\0");
+    data[record + 0x20..record + 0x24].copy_from_slice(&0x0102_0003u32.to_be_bytes());
+    data[record + 0x24..record + 0x28].copy_from_slice(&0x0405_0006u32.to_be_bytes());
+    data[record + 0x28..record + 0x2c].copy_from_slice(&0xA5A5_0001u32.to_be_bytes());
+    data[record + 0x2c..record + 0x30].copy_from_slice(&7u32.to_be_bytes());
+    data[record + 0x30..record + 0x34].copy_from_slice(&8u32.to_be_bytes());
+    data[record + 0x34..record + 0x38].copy_from_slice(b"Acme");
+    data[record + 0xb4..record + 0xbc].copy_from_slice(b"Widget\0\0");
+    data[record + 0x134..record + 0x138].copy_from_slice(&0x0100_0000u32.to_be_bytes());
+    data[record + 0x138..record + 0x13d].copy_from_slice(b"v1.0\0");
+    data
+}
+
+#[test]
+fn manufacturer_versions_apply_every_revision_boundary() {
+    for version in [
+        0x0605, 0x0606, 0x0700, 0x0701, 0x0703, 0x0704, 0x0711, 0x0712,
+    ] {
+        let parsed = parse_make_model(&manufacturer_versions_response(version)).unwrap();
+        assert_eq!(
+            parsed.manufacturer_capabilities,
+            (version >= 0x0606).then_some(0xA5A5_0001)
+        );
+        assert_eq!(
+            parsed.manufacturer_software_version.as_deref(),
+            Some(if version >= 0x0701 {
+                "1.2.3.7"
+            } else {
+                "1.2.3"
+            })
+        );
+        assert_eq!(
+            parsed.manufacturer_firmware_version.as_deref(),
+            Some(if version >= 0x0701 {
+                "4.5.6.8"
+            } else {
+                "4.5.6"
+            })
+        );
+        assert_eq!(
+            parsed.manufacturer.as_deref(),
+            (version >= 0x0701).then_some("Acme")
+        );
+        assert_eq!(
+            parsed.product_name.as_deref(),
+            (version >= 0x0701).then_some("Widget")
+        );
+        assert_eq!(
+            parsed.product_version.as_deref(),
+            (version >= 0x0704).then_some("1.0.0")
+        );
+        assert_eq!(
+            parsed.friendly_product_version.as_deref(),
+            (version >= 0x0712).then_some("v1.0")
+        );
+        assert_eq!(
+            parsed.display_product_version.as_deref(),
+            if version >= 0x0712 {
+                Some("v1.0")
+            } else if version >= 0x0704 {
+                Some("1.0.0")
+            } else {
+                None
+            }
+        );
+    }
+}
+
+#[test]
+fn version_records_keep_zero_and_unterminated_optional_fields_unavailable() {
+    let record = CONMON_DANTE_MODEL_BODY_OFFSET;
+    let mut manufacturer = manufacturer_versions_response(0x0712);
+    manufacturer[record + 0x08..record + 0x10].fill(b'I');
+    manufacturer[record + 0x20..record + 0x28].fill(0);
+    manufacturer[record + 0x2c..record + 0x34].fill(0);
+    manufacturer[record + 0x34..record + 0xb4].fill(b'M');
+    manufacturer[record + 0xb4..record + 0x134].fill(b'P');
+    manufacturer[record + 0x134..record + 0x138].fill(0);
+    manufacturer[record + 0x138..].fill(b'F');
+    let parsed = parse_make_model(&manufacturer).unwrap();
+    assert_eq!(parsed.manufacturer_identifier, None);
+    assert_eq!(parsed.manufacturer_software_version, None);
+    assert_eq!(parsed.manufacturer_firmware_version, None);
+    assert_eq!(parsed.manufacturer, None);
+    assert_eq!(parsed.product_name, None);
+    assert_eq!(parsed.product_version, None);
+    assert_eq!(parsed.friendly_product_version, None);
+    assert_eq!(parsed.display_product_version, None);
+
+    let mut platform = dante_model_response(0x070c, 0, 0, 0, 0, 0, 0);
+    platform[record + 0x14..record + 0x1c].fill(b'I');
+    platform[record + 0x40..record + 0xc0].fill(b'P');
+    let parsed = parse_dante_model(&platform).unwrap();
+    assert_eq!(parsed.platform_software_version, None);
+    assert_eq!(parsed.platform_hardware_version, None);
+    assert_eq!(parsed.platform_api_version, None);
+    assert_eq!(parsed.rom_boot_version, None);
+    assert_eq!(parsed.platform_model_identifier, None);
+    assert_eq!(parsed.platform_model_name, None);
 }
 
 fn dante_model_response(
@@ -500,8 +699,10 @@ fn dante_model_response(
     stamp_conmon_response(&mut data, CONMON_OPCODE_DANTE_MODEL_RESPONSE);
     data[CONMON_DANTE_MODEL_BODY_OFFSET..CONMON_DANTE_MODEL_BODY_OFFSET + 2]
         .copy_from_slice(&version.to_be_bytes());
-    data[CONMON_BOARD_CODENAME_OFFSET..CONMON_BOARD_CODENAME_OFFSET + 6].copy_from_slice(b"Bklyn2");
-    data[CONMON_BOARD_NAME_OFFSET..CONMON_BOARD_NAME_OFFSET + 11].copy_from_slice(b"Brooklyn II");
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x14..CONMON_DANTE_MODEL_BODY_OFFSET + 0x14 + 6]
+        .copy_from_slice(b"Bklyn2");
+    data[CONMON_DANTE_MODEL_BODY_OFFSET + 0x40..CONMON_DANTE_MODEL_BODY_OFFSET + 0x40 + 11]
+        .copy_from_slice(b"Brooklyn II");
     for (offset, value) in [
         (CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET, primary),
         (CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET, read_only),
@@ -522,6 +723,100 @@ fn dante_model_response(
         data[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
     }
     data
+}
+
+#[test]
+fn platform_versions_apply_every_revision_boundary() {
+    let record = CONMON_DANTE_MODEL_BODY_OFFSET;
+    for version in [
+        0x0700, 0x0701, 0x0703, 0x0704, 0x0706, 0x0707, 0x070b, 0x070c,
+    ] {
+        let mut data = dante_model_response(version, 0, 0, 0, 0, 0, 0);
+        data[record + 0x08..record + 0x0c].copy_from_slice(&0x0102_0003u32.to_be_bytes());
+        data[record + 0x0c..record + 0x10].copy_from_slice(&0x0405_0006u32.to_be_bytes());
+        data[record + 0x10..record + 0x14].copy_from_slice(&0x0708_0009u32.to_be_bytes());
+        data[record + 0x24..record + 0x28].copy_from_slice(&0x1111_2222u32.to_be_bytes());
+        data[record + 0x28..record + 0x2c].copy_from_slice(&10u32.to_be_bytes());
+        data[record + 0x2c..record + 0x30].copy_from_slice(&11u32.to_be_bytes());
+        data[record + 0x30..record + 0x34].copy_from_slice(&0x0c0d_000eu32.to_be_bytes());
+        data[record + 0x34..record + 0x38].copy_from_slice(&0xA5A5_0001u32.to_be_bytes());
+        let parsed = parse_dante_model(&data).unwrap();
+        assert_eq!(
+            parsed.platform_software_version.as_deref(),
+            Some(if version >= 0x0701 {
+                "1.2.3.10"
+            } else {
+                "1.2.3"
+            })
+        );
+        assert_eq!(
+            parsed.platform_hardware_version.as_deref(),
+            Some(if version >= 0x0701 {
+                "4.5.6.11"
+            } else {
+                "4.5.6"
+            })
+        );
+        assert_eq!(parsed.platform_api_version.as_deref(), Some("7.8.9"));
+        assert_eq!(
+            parsed.device_status_flags,
+            (version >= 0x0704).then_some(0x1111_2222)
+        );
+        assert_eq!(
+            parsed.rom_boot_version.as_deref(),
+            (version >= 0x0704).then_some("12.13.14")
+        );
+        assert_eq!(
+            parsed.supported_clock_protocol_flags,
+            if version >= 0x0707 { 0xA5A5_0001 } else { 1 }
+        );
+        assert_eq!(
+            parsed.platform_model_name.as_deref(),
+            (version >= 0x070c).then_some("Brooklyn II")
+        );
+    }
+}
+
+#[test]
+fn dante_model_validates_plugin_vector_and_preserves_raw_records() {
+    let record = CONMON_DANTE_MODEL_BODY_OFFSET;
+    let vector_offset = 0x00d4usize;
+    let mut data = vec![0u8; record + vector_offset + 0x18];
+    stamp_conmon_response(&mut data, CONMON_OPCODE_DANTE_MODEL_RESPONSE);
+    data[record..record + 2].copy_from_slice(&0x0731u16.to_be_bytes());
+    data[record + 0xd0..record + 0xd2].copy_from_slice(&1u16.to_be_bytes());
+    data[record + 0xd2..record + 0xd4]
+        .copy_from_slice(&u16::try_from(vector_offset).unwrap().to_be_bytes());
+    data[record + vector_offset..record + vector_offset + 7].copy_from_slice(b"plugin\0");
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.plugin_identifiers, [Some("plugin".to_owned())]);
+    assert_eq!(parsed.plugin_records_hexadecimal.len(), 1);
+    assert_eq!(parsed.plugin_records_hexadecimal[0].len(), 0x30);
+
+    data[record + vector_offset..record + vector_offset + 0x18].fill(b'X');
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.plugin_identifiers, [None]);
+    assert_eq!(parsed.plugin_records_hexadecimal.len(), 1);
+
+    data[record + 0xd0..record + 0xd2].copy_from_slice(&2u16.to_be_bytes());
+    assert_eq!(parse_dante_model(&data), None);
+
+    let mut overlapping = data;
+    overlapping[record + 0xd0..record + 0xd2].copy_from_slice(&1u16.to_be_bytes());
+    overlapping[record + 0xd2..record + 0xd4].copy_from_slice(&0x40u16.to_be_bytes());
+    assert_eq!(parse_dante_model(&overlapping), None);
+}
+
+#[test]
+fn version_records_fail_closed_above_the_supported_revision_scope() {
+    assert_eq!(
+        parse_make_model(&manufacturer_versions_response(0x0732)),
+        None
+    );
+    assert_eq!(
+        parse_dante_model(&dante_model_response(0x0732, 0, 0, 0, 0, 0, 0)),
+        None
+    );
 }
 
 #[test]

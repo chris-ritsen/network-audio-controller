@@ -77,6 +77,17 @@ def test_dante_status_row_shows_offline_and_last_seen():
     assert row["Last Seen"] != ""
 
 
+def test_dante_status_row_prefers_product_model_over_platform_and_dns_identifiers():
+    device = make_status_device()
+    device.product_name = "AD4D Product"
+    device.model = "DNS model"
+    device.platform_model_name = "Brooklyn II"
+
+    row = dict(zip(DANTE_STATUS_HEADERS, _dante_row_from_device(device)))
+
+    assert row["Model"] == "AD4D Product"
+
+
 def test_dante_status_row_tags_emulated_devices():
     device = make_status_device()
     device.mac_address = "5254001234560000"

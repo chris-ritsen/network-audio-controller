@@ -47,6 +47,13 @@ pub(super) struct ExternalRtpDestinationSpec {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MulticastFlowTransportSpec {
+    Native,
+    RtpAes67,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub(super) enum CommandSpec {
@@ -91,7 +98,15 @@ pub(super) enum CommandSpec {
     #[serde(rename = "create_multicast_flow_2809")]
     CreateMulticastFlow2809 {
         channels: Vec<u16>,
+        #[serde(default)]
+        destinations: Vec<ExternalRtpDestinationSpec>,
+        #[serde(default)]
+        flow_name: Option<String>,
+        #[serde(default)]
+        frames_per_packet: u16,
+        media_local_flow_id: u16,
         request_options_word: u16,
+        transport: MulticastFlowTransportSpec,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
@@ -451,7 +466,7 @@ pub(super) enum CommandSpec {
         supported_property_ids: Vec<u16>,
     },
     SetReceiveFlowPerformance {
-        device_software_version: [u16; 3],
+        platform_software_version: [u16; 3],
         frames_per_packet: u16,
         latency_microseconds: u64,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -468,7 +483,7 @@ pub(super) enum CommandSpec {
         supported_property_ids: Vec<u16>,
     },
     SetUnicastPerformance {
-        device_software_version: [u16; 3],
+        platform_software_version: [u16; 3],
         frames_per_packet: u16,
         latency_microseconds: u64,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -904,10 +919,45 @@ pub(super) fn build_command(
         } => commands::build_cmc_register(message_id, parse_mac_required(&host_mac)?)?,
         CommandSpec::CreateMulticastFlow2809 {
             channels,
+            destinations,
+            flow_name,
+            frames_per_packet,
+            media_local_flow_id,
             request_options_word,
+            transport,
             message_id,
         } => {
-            commands::build_create_multicast_flow_2809(&channels, request_options_word, message_id)?
+            let destinations = destinations
+                .into_iter()
+                .map(|value| {
+                    Ok(commands::MulticastFlowDestination {
+                        address: value
+                            .address
+                            .parse::<Ipv4Addr>()
+                            .map_err(|_| SpecError::InvalidIp)?,
+                        port: value.port,
+                    })
+                })
+                .collect::<Result<Vec<_>, SpecError>>()?;
+            commands::build_create_multicast_flow_2809(
+                &commands::MulticastFlow2809 {
+                    channels: &channels,
+                    request_options_word,
+                    media_local_flow_id,
+                    transport: match transport {
+                        MulticastFlowTransportSpec::Native => {
+                            commands::MulticastFlowTransport::Native
+                        }
+                        MulticastFlowTransportSpec::RtpAes67 => {
+                            commands::MulticastFlowTransport::RtpAes67
+                        }
+                    },
+                    flow_name: flow_name.as_deref(),
+                    frames_per_packet,
+                    destinations: &destinations,
+                },
+                message_id,
+            )?
         }
         CommandSpec::CreateTxFlow {
             flow_protocol_id,
@@ -1261,7 +1311,7 @@ pub(super) fn build_command(
             message_id,
         )?,
         CommandSpec::SetReceiveFlowPerformance {
-            device_software_version,
+            platform_software_version,
             frames_per_packet,
             latency_microseconds,
             message_id,
@@ -1272,7 +1322,7 @@ pub(super) fn build_command(
             &supported_property_ids,
             latency_microseconds,
             frames_per_packet,
-            device_software_version,
+            platform_software_version,
             message_id,
         )?,
         CommandSpec::SetTransmitFlowPerformance {
@@ -1289,7 +1339,7 @@ pub(super) fn build_command(
             message_id,
         )?,
         CommandSpec::SetUnicastPerformance {
-            device_software_version,
+            platform_software_version,
             frames_per_packet,
             latency_microseconds,
             message_id,
@@ -1300,7 +1350,7 @@ pub(super) fn build_command(
             &supported_property_ids,
             latency_microseconds,
             frames_per_packet,
-            device_software_version,
+            platform_software_version,
             message_id,
         )?,
         CommandSpec::SetName { name, message_id } => {

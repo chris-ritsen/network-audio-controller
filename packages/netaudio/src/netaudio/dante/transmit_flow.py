@@ -12,6 +12,7 @@ FLOW_SPECIFICATION_SCHEMA_VERSION = 1
 
 
 class MediaMode(str, Enum):
+    UNKNOWN = "unknown"
     NATIVE_DANTE = "native_dante"
     RTP_AES67 = "rtp_aes67"
 
@@ -141,7 +142,7 @@ class FlowIdentity:
     def __post_init__(self) -> None:
         _optional_integer(self.global_flow_id, "global flow identifier", 1, 65535)
         _optional_integer(self.media_type_code, "media type code", 0, 65535)
-        _optional_integer(self.media_local_flow_id, "media-local flow identifier", 0, 65535)
+        _optional_integer(self.media_local_flow_id, "media-local flow identifier", 1, 65535)
         if not isinstance(self.extra_fields, dict):
             raise ValueError("flow identity extra_fields must be an object")
 
@@ -242,7 +243,7 @@ class TransmitFlowSpecification:
                 f"expected {FLOW_SPECIFICATION_SCHEMA_VERSION}"
             )
         if not isinstance(self.media_mode, MediaMode):
-            raise ValueError("media_mode must be native_dante or rtp_aes67")
+            raise ValueError("media_mode must be unknown, native_dante or rtp_aes67")
         if not isinstance(self.flow_type, FlowType):
             raise ValueError("flow_type must be unicast or multicast")
         if not isinstance(self.channel_slots, tuple) or not self.channel_slots:
@@ -256,6 +257,8 @@ class TransmitFlowSpecification:
         if len(channels) != len(set(channels)):
             raise ValueError("transmitter channels must not contain duplicates")
         _optional_text(self.name, "flow name")
+        if self.name is not None and "\0" in self.name:
+            raise ValueError("flow name must not contain NUL")
         _optional_integer(self.sample_rate_hz, "sample rate", 1, 0xFFFFFFFF)
         _optional_integer(self.encoding_bits, "encoding", 1, 0xFFFF)
         _optional_integer(self.frames_per_packet, "frames per packet", 1, 0xFFFF)
@@ -311,7 +314,7 @@ class TransmitFlowSpecification:
         try:
             media_mode = MediaMode(value.get("media_mode"))
         except (TypeError, ValueError) as exception:
-            raise ValueError("media_mode must be native_dante or rtp_aes67") from exception
+            raise ValueError("media_mode must be unknown, native_dante or rtp_aes67") from exception
         try:
             flow_type = FlowType(value.get("flow_type"))
         except (TypeError, ValueError) as exception:
@@ -352,7 +355,7 @@ class TransmitFlowSpecification:
         record: Mapping[str, Any],
         *,
         protocol_id: int,
-        media_mode: MediaMode = MediaMode.NATIVE_DANTE,
+        media_mode: MediaMode | None = None,
     ) -> TransmitFlowSpecification:
         record = _mapping(record, "transmitter flow inventory record")
         channels = record.get("transmitter_channel_ids_by_slot")
@@ -366,9 +369,29 @@ class TransmitFlowSpecification:
         flow_type_value = record.get("flow_type")
         if flow_type_value not in {item.value for item in FlowType}:
             raise ValueError("transmitter flow inventory has an unknown flow type")
-        address = record.get("destination_internet_protocol_version_four_address")
-        port = record.get("destination_user_datagram_port")
-        destination = FlowSocket(str(address), port) if address and port else None
+        media_mode_value = record.get("media_mode")
+        if media_mode_value is None:
+            observed_media_mode = media_mode or (
+                MediaMode.NATIVE_DANTE if protocol_id in (0x2729, 0x2801) else MediaMode.UNKNOWN
+            )
+        else:
+            try:
+                observed_media_mode = MediaMode(media_mode_value)
+            except (TypeError, ValueError) as exception:
+                raise ValueError("transmitter flow inventory has an unknown media mode") from exception
+        primary_value = record.get("primary_destination")
+        secondary_value = record.get("secondary_destination")
+        if primary_value is not None:
+            primary_destination = FlowSocket.from_dict(_mapping(primary_value, "primary destination"))
+        else:
+            address = record.get("destination_internet_protocol_version_four_address")
+            port = record.get("destination_user_datagram_port")
+            primary_destination = FlowSocket(str(address), port) if address and port else None
+        secondary_destination = (
+            FlowSocket.from_dict(_mapping(secondary_value, "secondary destination"))
+            if secondary_value is not None
+            else None
+        )
         global_identifier = record.get("global_flow_id", record.get("flow_number"))
         known_protocol_cohort = {
             0x2729: "legacy_2729",
@@ -376,7 +399,7 @@ class TransmitFlowSpecification:
             0x2809: "modern_2809",
         }.get(protocol_id, "unknown")
         return cls(
-            media_mode=media_mode,
+            media_mode=observed_media_mode,
             flow_type=FlowType(flow_type_value),
             name=record.get("flow_name"),
             channel_slots=tuple(
@@ -385,7 +408,8 @@ class TransmitFlowSpecification:
             sample_rate_hz=record.get("sample_rate"),
             encoding_bits=record.get("encoding"),
             frames_per_packet=record.get("frames_per_packet"),
-            primary_destination=destination,
+            primary_destination=primary_destination,
+            secondary_destination=secondary_destination,
             redundancy=RedundancyConstraint.DEVICE_DEFAULT,
             identity=FlowIdentity(
                 global_flow_id=global_identifier,
@@ -445,9 +469,14 @@ class FlowDifference:
 class FlowComparison:
     matches: bool
     differences: tuple[FlowDifference, ...]
+    unavailable_fields: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {"matches": self.matches, "differences": [item.to_dict() for item in self.differences]}
+        return {
+            "matches": self.matches,
+            "differences": [item.to_dict() for item in self.differences],
+            "unavailable_fields": list(self.unavailable_fields),
+        }
 
 
 def compare_transmit_flows(
@@ -455,35 +484,98 @@ def compare_transmit_flows(
     effective: TransmitFlowSpecification,
 ) -> FlowComparison:
     differences = []
+    unavailable_fields = []
+    raw = effective.raw_fields
+    inventory_evidence = bool(raw)
 
-    def compare(field_name: str, requested_value: Any, effective_value: Any, *, optional: bool = False) -> None:
+    def observed(*field_names: str, inferred: bool = False) -> bool:
+        return not inventory_evidence or inferred or any(field_name in raw for field_name in field_names)
+
+    def compare(
+        field_name: str,
+        requested_value: Any,
+        effective_value: Any,
+        *,
+        optional: bool = False,
+        is_observed: bool = True,
+    ) -> None:
         if optional and requested_value is None:
+            return
+        if not is_observed:
+            unavailable_fields.append(field_name)
             return
         if requested_value != effective_value:
             differences.append(FlowDifference(field_name, requested_value, effective_value))
 
-    compare("media_mode", requested.media_mode.value, effective.media_mode.value)
-    compare("flow_type", requested.flow_type.value, effective.flow_type.value)
-    compare("name", requested.name, effective.name, optional=True)
+    compare(
+        "media_mode",
+        requested.media_mode.value,
+        effective.media_mode.value,
+        is_observed=observed(
+            "media_mode",
+            inferred=(
+                effective.protocol.protocol_id in (0x2729, 0x2801) and effective.media_mode is MediaMode.NATIVE_DANTE
+            ),
+        ),
+    )
+    compare(
+        "flow_type",
+        requested.flow_type.value,
+        effective.flow_type.value,
+        is_observed=observed("flow_type", "flow_type_code"),
+    )
+    compare(
+        "name",
+        requested.name,
+        effective.name,
+        optional=True,
+        is_observed=observed("flow_name"),
+    )
     compare(
         "channel_slots",
         [item.to_dict() for item in requested.channel_slots],
         [item.to_dict() for item in effective.channel_slots],
+        is_observed=observed("transmitter_channel_ids_by_slot", "channels"),
     )
-    compare("sample_rate_hz", requested.sample_rate_hz, effective.sample_rate_hz, optional=True)
-    compare("encoding_bits", requested.encoding_bits, effective.encoding_bits, optional=True)
-    compare("frames_per_packet", requested.frames_per_packet, effective.frames_per_packet, optional=True)
+    compare(
+        "sample_rate_hz",
+        requested.sample_rate_hz,
+        effective.sample_rate_hz,
+        optional=True,
+        is_observed=observed("sample_rate"),
+    )
+    compare(
+        "encoding_bits",
+        requested.encoding_bits,
+        effective.encoding_bits,
+        optional=True,
+        is_observed=observed("encoding"),
+    )
+    compare(
+        "frames_per_packet",
+        requested.frames_per_packet,
+        effective.frames_per_packet,
+        optional=True,
+        is_observed=observed("frames_per_packet"),
+    )
     compare(
         "primary_destination",
         requested.primary_destination.to_dict() if requested.primary_destination else None,
         effective.primary_destination.to_dict() if effective.primary_destination else None,
         optional=True,
+        is_observed=observed(
+            "primary_destination",
+            inferred=(
+                "destination_internet_protocol_version_four_address" in raw and "destination_user_datagram_port" in raw
+            ),
+        ),
     )
     compare(
         "secondary_destination",
         requested.secondary_destination.to_dict() if requested.secondary_destination else None,
         effective.secondary_destination.to_dict() if effective.secondary_destination else None,
         optional=True,
+        is_observed=observed("secondary_destination"),
     )
     if requested.redundancy is not RedundancyConstraint.DEVICE_DEFAULT:
         compare("redundancy", requested.redundancy.value, effective.redundancy.value)
@@ -492,26 +584,34 @@ def compare_transmit_flows(
         requested.identity.global_flow_id,
         effective.identity.global_flow_id,
         optional=True,
+        is_observed=observed("global_flow_id", "flow_number"),
     )
     compare(
         "identity.media_type_code",
         requested.identity.media_type_code,
         effective.identity.media_type_code,
         optional=True,
+        is_observed=observed("media_type_code"),
     )
     compare(
         "identity.media_local_flow_id",
         requested.identity.media_local_flow_id,
         effective.identity.media_local_flow_id,
         optional=True,
+        is_observed=observed("media_local_flow_id"),
     )
     compare(
         "protocol.protocol_id",
         requested.protocol.protocol_id,
         effective.protocol.protocol_id,
         optional=True,
+        is_observed=True,
     )
-    return FlowComparison(matches=not differences, differences=tuple(differences))
+    return FlowComparison(
+        matches=not differences and not unavailable_fields,
+        differences=tuple(differences),
+        unavailable_fields=tuple(unavailable_fields),
+    )
 
 
 @dataclass(frozen=True)
@@ -526,6 +626,8 @@ class FlowOperationPlan:
     specification: TransmitFlowSpecification | None = None
     flow_id: int | None = None
     wire_options: dict[str, Any] = field(default_factory=dict)
+    wire_authored_fields: tuple[str, ...] = ()
+    state_preconditions: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -539,6 +641,8 @@ class FlowOperationPlan:
             "specification": self.specification.to_dict() if self.specification else None,
             "flow_id": self.flow_id,
             "wire_options": copy.deepcopy(self.wire_options),
+            "wire_authored_fields": list(self.wire_authored_fields),
+            "state_preconditions": copy.deepcopy(self.state_preconditions),
         }
 
 

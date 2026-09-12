@@ -293,7 +293,7 @@ pub fn parse_aes67_configured(response: &[u8]) -> Option<Option<bool>> {
 }
 
 fn conmon_string_bytes(raw: &[u8]) -> Option<String> {
-    let null_position = raw.iter().position(|&byte| byte == 0).unwrap_or(raw.len());
+    let null_position = raw.iter().position(|&byte| byte == 0)?;
     let raw = &raw[..null_position];
     let text = std::str::from_utf8(raw).ok()?.trim().to_owned();
     if text
@@ -306,40 +306,137 @@ fn conmon_string_bytes(raw: &[u8]) -> Option<String> {
     }
 }
 
-fn conmon_string(data: &[u8], start: usize, end: usize) -> Option<String> {
-    conmon_string_bytes(data.get(start..end)?)
+fn optional_conmon_string(data: &[u8], start: usize, end: usize) -> Option<String> {
+    data.get(start..end)
+        .and_then(conmon_string_bytes)
+        .filter(|value| !value.is_empty())
 }
 
-pub fn parse_make_model(data: &[u8]) -> Option<MakeModel> {
-    validate_conmon_envelope(data, CONMON_OPCODE_MAKE_MODEL_RESPONSE)?;
-    let manufacturer_field = data.get(CONMON_MANUFACTURER_OFFSET..CONMON_MANUFACTURER_END)?;
-    let manufacturer = conmon_string_bytes(manufacturer_field)?;
-    let manufacturer_field_hexadecimal = bytes_to_hex(manufacturer_field);
-    let unmapped_field_at_byte_offset_74 =
-        read_u16(data, CONMON_UNMAPPED_FIELD_BEFORE_MANUFACTURER_OFFSET)?;
-    let product_name = conmon_string(data, CONMON_PRODUCT_NAME_OFFSET, CONMON_PRODUCT_NAME_END)?;
-    let version = data.get(CONMON_PRODUCT_VERSION_OFFSET..CONMON_PRODUCT_VERSION_END)?;
-    let product_version_components: [u8; 4] = version.try_into().ok()?;
-    let mut product_version = String::new();
-    if version.iter().any(|&byte| byte != 0) {
-        product_version = format!(
-            "{}.{}.{}.{}",
-            version[0], version[1], version[2], version[3]
-        );
+fn version_components(word: u32, fourth: Option<u32>) -> Option<Vec<u32>> {
+    if word == 0 && fourth.unwrap_or(0) == 0 {
+        return None;
     }
-    Some(MakeModel {
-        manufacturer,
-        manufacturer_field_hexadecimal,
-        unmapped_field_at_byte_offset_74,
-        product_name,
-        product_version,
-        product_version_components,
+    let mut components = vec![word >> 24, (word >> 16) & 0xff, word & 0xffff];
+    if let Some(fourth) = fourth.filter(|value| *value != 0) {
+        components.push(fourth);
+    }
+    Some(components)
+}
+
+fn formatted_version(word: u32, fourth: Option<u32>) -> Option<String> {
+    version_components(word, fourth).map(|parts| {
+        parts
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(".")
     })
 }
 
-pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
-    validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
+pub fn parse_make_model(data: &[u8]) -> Option<ManufacturerVersions> {
+    validate_conmon_envelope(data, CONMON_OPCODE_MAKE_MODEL_RESPONSE)?;
     let record_protocol_version = read_u16(data, CONMON_DANTE_MODEL_BODY_OFFSET)?;
+    if record_protocol_version > 0x0731 {
+        return None;
+    }
+    let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
+    let identifier = |offset: usize| data.get(record_start + offset..record_start + offset + 8);
+    let manufacturer_identifier_raw = identifier(0x08)?;
+    let product_identifier_raw = identifier(0x10)?;
+    let serial_identifier_raw = identifier(0x18)?;
+    let manufacturer_software_word = read_u32(data, record_start + 0x20)?;
+    let manufacturer_firmware_word = read_u32(data, record_start + 0x24)?;
+    let manufacturer_capabilities = if record_protocol_version >= 0x0606 {
+        Some(read_u32(data, record_start + 0x28)?)
+    } else {
+        None
+    };
+    let manufacturer_software_fourth = if record_protocol_version >= 0x0701 {
+        Some(read_u32(data, record_start + 0x2c)?)
+    } else {
+        None
+    };
+    let manufacturer_firmware_fourth = if record_protocol_version >= 0x0701 {
+        Some(read_u32(data, record_start + 0x30)?)
+    } else {
+        None
+    };
+    let manufacturer = if record_protocol_version >= 0x0701 {
+        data.get(record_start + 0x34..record_start + 0xb4)?;
+        optional_conmon_string(data, record_start + 0x34, record_start + 0xb4)
+    } else {
+        None
+    };
+    let product_name = if record_protocol_version >= 0x0701 {
+        data.get(record_start + 0xb4..record_start + 0x134)?;
+        optional_conmon_string(data, record_start + 0xb4, record_start + 0x134)
+    } else {
+        None
+    };
+    let product_version_word = if record_protocol_version >= 0x0704 {
+        Some(read_u32(data, record_start + 0x134)?)
+    } else {
+        None
+    };
+    let friendly_product_version = if record_protocol_version >= 0x0712 {
+        optional_conmon_string(data, record_start + 0x138, data.len())
+    } else {
+        None
+    };
+    let product_version = product_version_word.and_then(|word| formatted_version(word, None));
+    let display_product_version = friendly_product_version
+        .clone()
+        .or_else(|| product_version.clone());
+    Some(ManufacturerVersions {
+        record_protocol_version,
+        manufacturer_identifier: conmon_string_bytes(manufacturer_identifier_raw)
+            .filter(|value| !value.is_empty()),
+        manufacturer_identifier_hexadecimal: bytes_to_hex(manufacturer_identifier_raw),
+        product_identifier: conmon_string_bytes(product_identifier_raw)
+            .filter(|value| !value.is_empty()),
+        product_identifier_hexadecimal: bytes_to_hex(product_identifier_raw),
+        serial_number_identifier: conmon_string_bytes(serial_identifier_raw)
+            .filter(|value| !value.is_empty()),
+        serial_number_identifier_hexadecimal: bytes_to_hex(serial_identifier_raw),
+        manufacturer_software_version: formatted_version(
+            manufacturer_software_word,
+            manufacturer_software_fourth,
+        ),
+        manufacturer_software_version_components: version_components(
+            manufacturer_software_word,
+            manufacturer_software_fourth,
+        ),
+        manufacturer_firmware_version: formatted_version(
+            manufacturer_firmware_word,
+            manufacturer_firmware_fourth,
+        ),
+        manufacturer_firmware_version_components: version_components(
+            manufacturer_firmware_word,
+            manufacturer_firmware_fourth,
+        ),
+        manufacturer_capabilities,
+        manufacturer,
+        product_name,
+        product_version: product_version.clone(),
+        product_version_components: product_version_word
+            .and_then(|word| version_components(word, None)),
+        friendly_product_version,
+        display_product_version,
+        raw_record_hexadecimal: bytes_to_hex(data.get(record_start..)?),
+    })
+}
+
+pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
+    validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
+    let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
+    let record_protocol_version = read_u16(data, record_start)?;
+    if record_protocol_version > 0x0731 {
+        return None;
+    }
+    let platform_software_word = read_u32(data, record_start + 0x08)?;
+    let platform_hardware_word = read_u32(data, record_start + 0x0c)?;
+    let platform_api_word = read_u32(data, record_start + 0x10)?;
+    let platform_model_identifier_raw = data.get(record_start + 0x14..record_start + 0x1c)?;
     let primary_capabilities = if record_protocol_version >= 0x0200 {
         read_u32(data, CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET)?
     } else {
@@ -369,20 +466,92 @@ pub fn parse_dante_model(data: &[u8]) -> Option<DanteModel> {
         } else {
             (0, 0)
         };
-    Some(DanteModel {
-        board_codename: conmon_string(
-            data,
-            CONMON_BOARD_CODENAME_OFFSET,
-            CONMON_BOARD_CODENAME_END,
-        )?,
-        board_name: conmon_string(data, CONMON_BOARD_NAME_OFFSET, CONMON_BOARD_NAME_END)?,
+    let software_fourth = if record_protocol_version >= 0x0701 {
+        Some(read_u32(data, record_start + 0x28)?)
+    } else {
+        None
+    };
+    let hardware_fourth = if record_protocol_version >= 0x0701 {
+        Some(read_u32(data, record_start + 0x2c)?)
+    } else {
+        None
+    };
+    let preferred_link_speed = if record_protocol_version >= 0x0200 {
+        Some(read_u32(data, record_start + 0x20)?)
+    } else {
+        None
+    };
+    let device_status_flags = if record_protocol_version >= 0x0704 {
+        Some(read_u32(data, record_start + 0x24)?)
+    } else {
+        None
+    };
+    let rom_boot_word = if record_protocol_version >= 0x0704 {
+        Some(read_u32(data, record_start + 0x30)?)
+    } else {
+        None
+    };
+    let supported_clock_protocol_flags = if record_protocol_version >= 0x0707 {
+        read_u32(data, record_start + 0x34)?
+    } else {
+        1
+    };
+    let platform_model_name = if record_protocol_version >= 0x070c {
+        data.get(record_start + 0x40..record_start + 0xc0)?;
+        optional_conmon_string(data, record_start + 0x40, record_start + 0xc0)
+    } else {
+        None
+    };
+    let mut plugin_identifiers = Vec::new();
+    let mut plugin_records_hexadecimal = Vec::new();
+    if record_protocol_version >= 0x0731 {
+        let count = usize::from(read_u16(data, record_start + 0xd0)?);
+        let vector_offset = usize::from(read_u16(data, record_start + 0xd2)?);
+        if count != 0 && vector_offset < 0xd4 {
+            return None;
+        }
+        let vector_start = record_start.checked_add(vector_offset)?;
+        let vector_size = count.checked_mul(0x18)?;
+        let vector_end = vector_start.checked_add(vector_size)?;
+        let vector = data.get(vector_start..vector_end)?;
+        for record in vector.chunks_exact(0x18) {
+            plugin_identifiers.push(conmon_string_bytes(record).filter(|value| !value.is_empty()));
+            plugin_records_hexadecimal.push(bytes_to_hex(record));
+        }
+    }
+    Some(PlatformVersions {
         record_protocol_version,
+        platform_software_version: formatted_version(platform_software_word, software_fourth),
+        platform_software_version_components: version_components(
+            platform_software_word,
+            software_fourth,
+        ),
+        platform_hardware_version: formatted_version(platform_hardware_word, hardware_fourth),
+        platform_hardware_version_components: version_components(
+            platform_hardware_word,
+            hardware_fourth,
+        ),
+        platform_api_version: formatted_version(platform_api_word, None),
+        platform_api_version_components: version_components(platform_api_word, None),
+        platform_model_identifier: conmon_string_bytes(platform_model_identifier_raw)
+            .filter(|value| !value.is_empty()),
+        platform_model_identifier_hexadecimal: bytes_to_hex(platform_model_identifier_raw),
         primary_capabilities,
+        preferred_link_speed,
+        device_status_flags,
+        rom_boot_version: rom_boot_word.and_then(|word| formatted_version(word, None)),
+        rom_boot_version_components: rom_boot_word.and_then(|word| version_components(word, None)),
+        supported_clock_protocol_flags,
         read_only_capabilities,
+        platform_model_name,
         monitoring_capabilities,
         secondary_capabilities,
         domain_capability_values,
         domain_capability_validity,
+        effective_domain_capabilities: domain_capability_values & domain_capability_validity,
+        plugin_identifiers,
+        plugin_records_hexadecimal,
+        raw_record_hexadecimal: bytes_to_hex(data.get(record_start..)?),
         identify_supported: primary_capabilities & DANTE_MODEL_IDENTIFY_CAPABILITY_MASK != 0,
         sample_rate_configuration_supported: primary_capabilities
             & DANTE_MODEL_SAMPLE_RATE_CAPABILITY_MASK

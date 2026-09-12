@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import pytest
@@ -57,6 +58,47 @@ async def test_http_plan_uses_the_canonical_specification_without_mutation():
     assert status == 200
     assert payload["plan"]["supported"] is True
     assert payload["plan"]["serializer_cohort"] == "legacy_2729_explicit_slot_multicast"
+
+
+@pytest.mark.asyncio
+async def test_http_plan_preserves_modern_rtp_authoring_scope_and_preconditions():
+    instance = server()
+    instance.application.devices["dev1"].flow_protocol_id = 0x2809
+    source = canonical_specification()
+    source.update(
+        {
+            "media_mode": "rtp_aes67",
+            "name": "RTP Program",
+            "frames_per_packet": 48,
+            "primary_destination": {"address": "239.69.1.2", "port": 5004, "interface": None},
+            "secondary_destination": {"address": "239.69.1.3", "port": 5006, "interface": None},
+            "identity": {"global_flow_id": None, "media_type_code": 3, "media_local_flow_id": 7},
+            "protocol": {
+                "protocol_id": 0x2809,
+                "protocol_version": None,
+                "cohort": "modern_2809",
+                "required_capabilities": [],
+            },
+            "raw_fields": {"request_options_word": 0},
+        }
+    )
+    original = deepcopy(source)
+
+    status, payload = await post(
+        instance,
+        "/transmit-flows/plan",
+        {"device": "dev1", "specification": source},
+    )
+
+    assert status == 200
+    assert source == original
+    assert payload["plan"]["supported"] is True
+    assert payload["plan"]["serializer_cohort"] == "modern_2809_static_rtp_aes67"
+    assert payload["plan"]["specification"] == source
+    assert payload["plan"]["state_preconditions"] == {"sample_rate_hz": 48_000, "encoding_bits": 24}
+    assert "identity.media_local_flow_id" in payload["plan"]["wire_authored_fields"]
+    assert "sample_rate_hz" not in payload["plan"]["wire_authored_fields"]
+    assert "encoding_bits" not in payload["plan"]["wire_authored_fields"]
 
 
 @pytest.mark.asyncio

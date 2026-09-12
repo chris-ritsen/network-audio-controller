@@ -36,7 +36,7 @@ pub fn parse_multicast_flow_creation_2809(response: &[u8]) -> Option<MulticastFl
     let media_local_flow_id = field(TRANSMITTER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID)?;
     if !(1..=32).contains(&global_flow_id)
         || media_type_code != MEDIA_TYPE_AUDIO
-        || media_local_flow_id != 2
+        || media_local_flow_id == 0
         || field(TRANSMITTER_FLOW_STATUS_RECORD_FLOW_TYPE)? != FLOW_TYPE_MULTICAST
     {
         return None;

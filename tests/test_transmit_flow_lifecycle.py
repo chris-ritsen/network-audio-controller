@@ -75,6 +75,8 @@ def test_promoted_flow_fixtures_are_digest_bound_and_builders_match_requests():
         {
             "command": "create_multicast_flow_2809",
             "channels": [1, 2],
+            "media_local_flow_id": 2,
+            "transport": "native",
             "request_options_word": 0,
             "transaction_id": 0x3CF2,
         }
@@ -109,6 +111,8 @@ def test_native_builders_reject_channel_overflow_and_invalid_slot_mappings():
             {
                 "command": "create_multicast_flow_2809",
                 "channels": list(range(1, 216)),
+                "media_local_flow_id": 2,
+                "transport": "native",
                 "request_options_word": 0,
             }
         )
@@ -125,6 +129,14 @@ def test_native_builders_reject_channel_overflow_and_invalid_slot_mappings():
 
 
 def device(protocol_id=0x2729, *, managed=False, locked=False):
+    async def probe_sample_rate_status(_device, timeout=2.0):
+        assert timeout == 2.0
+        return {"current_value": 48_000}
+
+    async def probe_encoding_status(_device, timeout=2.0):
+        assert timeout == 2.0
+        return {"current_value": 24}
+
     return SimpleNamespace(
         flow_protocol_id=protocol_id,
         requires_managed_control=managed,
@@ -135,6 +147,10 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         ipv4="192.0.2.10",
         topology_mutation_lock=__import__("asyncio").Lock(),
         _arc_port=lambda: 4440,
+        application=SimpleNamespace(
+            probe_sample_rate_status=probe_sample_rate_status,
+            probe_encoding_status=probe_encoding_status,
+        ),
     )
 
 
@@ -243,6 +259,24 @@ def test_comparison_only_requires_optional_authoring_fields_when_requested():
     assert comparison.differences[0].field == "sample_rate_hz"
 
 
+def test_modern_inventory_keeps_unobserved_media_mode_unknown():
+    parsed = TransmitFlowSpecification.from_inventory_record(
+        {
+            "global_flow_id": 2,
+            "media_type_code": 3,
+            "media_local_flow_id": 7,
+            "flow_name": "Program",
+            "flow_type": "multicast",
+            "transmitter_channel_ids_by_slot": [1, 2],
+            "sample_rate": 48_000,
+            "encoding": 24,
+        },
+        protocol_id=0x2809,
+    )
+
+    assert parsed.media_mode is MediaMode.UNKNOWN
+
+
 def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths():
     direct = flow_lifecycle.plan_create_transmit_flow(device(), specification())
     assert direct.supported and direct.serializer_cohort == "legacy_2729_explicit_slot_multicast"
@@ -254,7 +288,20 @@ def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths
     rtp = specification(media_mode=MediaMode.RTP_AES67)
     unsupported = flow_lifecycle.plan_create_transmit_flow(device(), rtp)
     assert not unsupported.supported
-    assert "RTP/AES67" in "; ".join(unsupported.reasons)
+    assert "only native Dante" in "; ".join(unsupported.reasons)
+
+    modern_rtp = specification(
+        media_mode=MediaMode.RTP_AES67,
+        name="Program",
+        frames_per_packet=48,
+        primary_destination=FlowSocket("239.69.1.2", 5004),
+        secondary_destination=FlowSocket("239.69.1.3", 5004),
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+    )
+    supported = flow_lifecycle.plan_create_transmit_flow(device(protocol_id=0x2809), modern_rtp)
+    assert supported.supported
+    assert supported.serializer_cohort == "modern_2809_static_rtp_aes67"
 
 
 def test_planner_rejects_unsupported_fields_and_unproven_cohorts():
@@ -264,6 +311,26 @@ def test_planner_rejects_unsupported_fields_and_unproven_cohorts():
     unproven = specification(protocol=FlowProtocolRequirements(protocol_id=0x2801))
     plan = flow_lifecycle.plan_create_transmit_flow(device(protocol_id=0x2801), unproven)
     assert not plan.supported and "digest-bound" in "; ".join(plan.reasons)
+
+
+def test_planner_rejects_channel_slots_beyond_advertised_audio_transmit_capacity():
+    target = device(protocol_id=0x2809)
+    target.tx_channels[3] = object()
+    target.routing_capacity_transmit_channel_count = 2
+    requested = specification(
+        channel_slots=(
+            TransmitterChannelSlot(1, 1),
+            TransmitterChannelSlot(2, 2),
+            TransmitterChannelSlot(3, 3),
+        ),
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+    )
+
+    plan = flow_lifecycle.plan_create_transmit_flow(target, requested)
+
+    assert not plan.supported
+    assert "advertised audio transmit capacity of 2" in "; ".join(plan.reasons)
 
 
 @pytest.mark.asyncio
@@ -311,6 +378,247 @@ async def test_legacy_create_preserves_acknowledgement_and_verifies_fresh_readba
             "channels": [1, 2],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_static_modern_native_create_serializes_fields_without_format_mutation(monkeypatch):
+    requested = specification(
+        name="Program",
+        sample_rate_hz=48_000,
+        encoding_bits=24,
+        frames_per_packet=48,
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+        raw_fields={"request_options_word": 1},
+    )
+    after = {
+        "max_flow_slots": 4,
+        "flows": [
+            {
+                "global_flow_id": 2,
+                "media_type_code": 3,
+                "media_local_flow_id": 7,
+                "media_mode": "native_dante",
+                "flow_name": "Program",
+                "flow_type": "multicast",
+                "transmitter_channel_ids_by_slot": [1, 2],
+                "sample_rate": 48_000,
+                "encoding": 24,
+                "frames_per_packet": 48,
+            }
+        ],
+    }
+    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    sent = []
+    acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
+    acknowledgement[40:42] = (7).to_bytes(2, "big")
+
+    async def read_inventory(_device, protocol_id):
+        assert protocol_id == 0x2809
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return bytes(acknowledgement)
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.create_transmit_flow(device(protocol_id=0x2809), requested)
+
+    assert result.state is FlowLifecycleState.CONFIRMED
+    assert result.request_acknowledgement["allocation"]["global_flow_id"] == 2
+    assert result.request_acknowledgement["allocation"]["media_local_flow_id"] == 7
+    assert result.effective_state_confirmation is True
+    assert result.persistence_confirmation is None
+    assert result.media_packet_reception_confirmed is False
+    assert result.clock_lock_confirmed is False
+    assert result.decoded_audio_confirmed is False
+    assert sent == [
+        {
+            "command": "create_multicast_flow_2809",
+            "channels": [1, 2],
+            "media_local_flow_id": 7,
+            "transport": "native",
+            "flow_name": "Program",
+            "frames_per_packet": 48,
+            "destinations": [],
+            "request_options_word": 1,
+        }
+    ]
+    assert "sample_rate_hz" not in sent[0]
+    assert "encoding_bits" not in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_static_rtp_create_correlates_allocated_and_media_local_identities(monkeypatch):
+    primary = FlowSocket("239.69.1.2", 5004)
+    secondary = FlowSocket("239.69.1.3", 5006)
+    requested = specification(
+        media_mode=MediaMode.RTP_AES67,
+        name="RTP Program",
+        sample_rate_hz=48_000,
+        encoding_bits=24,
+        frames_per_packet=48,
+        primary_destination=primary,
+        secondary_destination=secondary,
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+    )
+    after = {
+        "max_flow_slots": 4,
+        "flows": [
+            {
+                "global_flow_id": 2,
+                "media_type_code": 3,
+                "media_local_flow_id": 7,
+                "media_mode": "rtp_aes67",
+                "flow_name": "RTP Program",
+                "flow_type": "multicast",
+                "transmitter_channel_ids_by_slot": [1, 2],
+                "sample_rate": 48_000,
+                "encoding": 24,
+                "frames_per_packet": 48,
+                "primary_destination": primary.to_dict(),
+                "secondary_destination": secondary.to_dict(),
+            }
+        ],
+    }
+    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    sent = []
+    acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
+    acknowledgement[40:42] = (7).to_bytes(2, "big")
+
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return bytes(acknowledgement)
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.create_transmit_flow(device(protocol_id=0x2809), requested)
+
+    assert result.state is FlowLifecycleState.CONFIRMED
+    assert result.effective_state_confirmation is True
+    assert result.request_acknowledgement["allocation"]["global_flow_id"] == 2
+    assert result.effective.identity.media_local_flow_id == 7
+    assert sent == [
+        {
+            "command": "create_multicast_flow_2809",
+            "channels": [1, 2],
+            "media_local_flow_id": 7,
+            "transport": "rtp_aes67",
+            "flow_name": "RTP Program",
+            "frames_per_packet": 48,
+            "destinations": [
+                {"address": "239.69.1.2", "port": 5004},
+                {"address": "239.69.1.3", "port": 5006},
+            ],
+            "request_options_word": 0,
+        }
+    ]
+    assert result.media_packet_reception_confirmed is False
+    assert result.clock_lock_confirmed is False
+    assert result.decoded_audio_confirmed is False
+
+
+@pytest.mark.asyncio
+async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch):
+    requested = specification(
+        media_mode=MediaMode.RTP_AES67,
+        name="RTP Program",
+        sample_rate_hz=48_000,
+        encoding_bits=24,
+        frames_per_packet=48,
+        primary_destination=FlowSocket("239.69.1.2", 5004),
+        secondary_destination=FlowSocket("239.69.1.3", 5006),
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+    )
+    after = {
+        "max_flow_slots": 4,
+        "flows": [
+            {
+                "global_flow_id": 2,
+                "media_type_code": 3,
+                "media_local_flow_id": 7,
+                "flow_name": "RTP Program",
+                "flow_type": "multicast",
+                "transmitter_channel_ids_by_slot": [1, 2],
+                "sample_rate": 48_000,
+                "encoding": 24,
+                "destination_internet_protocol_version_four_address": "239.69.1.2",
+                "destination_user_datagram_port": 5004,
+            }
+        ],
+    }
+    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
+    acknowledgement[40:42] = (7).to_bytes(2, "big")
+    sent = []
+
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return bytes(acknowledgement)
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    monkeypatch.setattr(flow_lifecycle, "VERIFICATION_TIMEOUT_SECONDS", 0)
+
+    result = await flow_lifecycle.create_transmit_flow(device(protocol_id=0x2809), requested)
+
+    assert result.state is FlowLifecycleState.PARTIAL
+    assert result.effective_state_confirmation is None
+    assert result.comparison.differences == ()
+    assert result.comparison.unavailable_fields == (
+        "media_mode",
+        "frames_per_packet",
+        "secondary_destination",
+    )
+    assert result.verification_observations[-1]["outcome"] == "partially_observed"
+    assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_modern_create_requires_fresh_format_preconditions_before_sending(monkeypatch):
+    requested = specification(
+        sample_rate_hz=48_000,
+        encoding_bits=24,
+        identity=FlowIdentity(media_type_code=3, media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
+    )
+    target = device(protocol_id=0x2809)
+
+    async def unavailable_probe(_device, timeout=2.0):
+        raise RuntimeError("readback unavailable")
+
+    target.application.probe_sample_rate_status = unavailable_probe
+
+    async def read_inventory(_device, _protocol_id):
+        return {"max_flow_slots": 4, "flows": []}
+
+    sent = []
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return None
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.create_transmit_flow(target, requested)
+
+    assert result.state is FlowLifecycleState.PENDING
+    assert result.request_acknowledgement is None
+    assert result.verification_observations[-1]["phase"] == "format_precondition"
+    assert result.verification_observations[-1]["outcome"] == "unavailable"
+    assert sent == []
 
 
 @pytest.mark.asyncio

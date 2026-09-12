@@ -232,6 +232,20 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.clock_role = "Leader"
     device.clock_identity = "001dc150692e"
     device.leader_clock_identity = "001dc150692e"
+    device.platform_software_version = "4.2.4.1"
+    device.platform_hardware_version = "4.2.3.4"
+    device.platform_api_version = "4.2.1"
+    device.rom_boot_version = "1.3.71"
+    device.product_version = "1.3.4"
+    device.friendly_product_version = "release-1.3.4"
+    device.manufacturer_software_version = "2.0.0"
+    device.manufacturer_firmware_version = "2.0.1"
+    device.cmc_server_version = "4.0.2"
+    device.router_protocol_version = "4.0.3"
+    device.ddm_product_version = "1.3.4-ddm"
+    device.ddm_product_software_version = "1.3.5-ddm"
+    device.ddm_dante_version = "4.2.4.1-ddm"
+    device.ddm_dante_hardware_version = "4.2.3.4-ddm"
     device.clock_port_records = [
         {
             "record_flags": 0,
@@ -276,6 +290,20 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["clock_role"] == "Leader"
     assert snapshot["clock_identity"] == "001dc150692e"
     assert snapshot["leader_clock_identity"] == "001dc150692e"
+    assert snapshot["platform_software_version"] == "4.2.4.1"
+    assert snapshot["platform_hardware_version"] == "4.2.3.4"
+    assert snapshot["platform_api_version"] == "4.2.1"
+    assert snapshot["rom_boot_version"] == "1.3.71"
+    assert snapshot["product_version"] == "1.3.4"
+    assert snapshot["friendly_product_version"] == "release-1.3.4"
+    assert snapshot["manufacturer_software_version"] == "2.0.0"
+    assert snapshot["manufacturer_firmware_version"] == "2.0.1"
+    assert snapshot["cmc_server_version"] == "4.0.2"
+    assert snapshot["router_protocol_version"] == "4.0.3"
+    assert snapshot["ddm_product_version"] == "1.3.4-ddm"
+    assert snapshot["ddm_product_software_version"] == "1.3.5-ddm"
+    assert snapshot["ddm_dante_version"] == "4.2.4.1-ddm"
+    assert snapshot["ddm_dante_hardware_version"] == "4.2.3.4-ddm"
     assert snapshot["clock_port_records"] == [(0, False, 1, 1, 2, 1, "multicast", 0, 2, 6, 7, "Leader")]
     assert clock_port_rows(device) == snapshot["clock_port_records"]
     assert "aes67_enabled" not in snapshot
@@ -289,6 +317,8 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert DANTE_PROPERTY_NAMES["clock_subdomain"] == "ClockSubdomain"
     assert DANTE_PROPERTY_NAMES["clock_identity"] == "ClockIdentity"
     assert DANTE_PROPERTY_NAMES["leader_clock_identity"] == "LeaderClockIdentity"
+    assert DANTE_PROPERTY_NAMES["ddm_product_version"] == "DdmProductVersion"
+    assert DANTE_PROPERTY_NAMES["ddm_dante_hardware_version"] == "DdmDanteHardwareVersion"
     assert set(snapshot) == set(DANTE_PROPERTY_NAMES)
 
 
@@ -358,6 +388,10 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.clock_role = "Follower"
     device.clock_identity = "001dc1510295"
     device.leader_clock_identity = "001dc150692e"
+    device.ddm_product_version = "1.3.4"
+    device.ddm_product_software_version = "1.3.5"
+    device.ddm_dante_version = "4.2.4.1"
+    device.ddm_dante_hardware_version = "4.2.3.4"
     device.clock_port_records = [
         {
             "record_flags": 1,
@@ -398,6 +432,10 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.ClockPortRecords() == [(1, False, 2, 2, 2, 1, "multicast", 0, 2, 9, 7, "Follower")]
     assert interface.ClockIdentity() == "001dc1510295"
     assert interface.LeaderClockIdentity() == "001dc150692e"
+    assert interface.DdmProductVersion() == "1.3.4"
+    assert interface.DdmProductSoftwareVersion() == "1.3.5"
+    assert interface.DdmDanteVersion() == "4.2.4.1"
+    assert interface.DdmDanteHardwareVersion() == "4.2.3.4"
     assert module.DanteDeviceInterface.Latency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.SupportedSampleRates.__annotations__["return"] == "au"
     assert module.DanteDeviceInterface.SupportedEncodings.__annotations__["return"] == "au"
