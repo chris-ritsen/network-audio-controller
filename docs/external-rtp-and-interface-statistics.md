@@ -39,11 +39,13 @@ netaudio -n receiver flow subscribe-external \
   --yes
 ```
 
-Slot zero leaves that receiver unassigned within the batch. An all-zero batch
-is rejected because unsubscribe behavior has not been established. Receiver
-IDs and positive slot assignments must be unique and strictly ascending. A
-secondary destination is encoded only when the SDP advertises one and the
-caller declares receiver support with `--receiver-multiple-interfaces`.
+Slot zero removes that receiver association within the batch. An all-zero batch
+is therefore a valid receiver-association removal request, but its
+acknowledgement does not establish that the device deleted an unused receiver
+flow. Receiver IDs must be unique; their order is not significant, and multiple
+receivers may select the same external flow slot. A secondary destination is
+encoded only when the SDP advertises one and the caller declares receiver
+support with `--receiver-multiple-interfaces`.
 
 The equivalent daemon operation is `POST /external-flows/subscribe`:
 

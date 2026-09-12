@@ -118,6 +118,11 @@ def preset_load(
         "--confirm-destructive",
         help="Confirm permanent transmitter-flow membership loss caused by sample-rate restoration.",
     ),
+    store_current_configuration: bool = typer.Option(
+        False,
+        "--store-current-configuration",
+        help="Request storage only after each changed device passes all effective-state readbacks.",
+    ),
 ):
     preset_path = resolve_preset_path(input_file, for_write=False)
     if not preset_path.exists():
@@ -135,7 +140,7 @@ def preset_load(
         return
     typer.echo(f"Preset: {preset_name} ({len(preset_devices)} devices)", err=True)
 
-    run_command(run_preset_load, preset_devices, confirm_destructive)
+    run_command(run_preset_load, preset_devices, confirm_destructive, store_current_configuration)
 
 
 @app.command("show", help="Show what a saved preset would apply, without changing anything.")

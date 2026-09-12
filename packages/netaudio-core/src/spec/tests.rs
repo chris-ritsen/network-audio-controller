@@ -375,6 +375,34 @@ fn receiver_flow_query_command_matches_shipping_controller() {
 }
 
 #[test]
+fn typed_performance_and_storage_commands_are_available_through_json() {
+    let receive = build_command_from_json(
+        r#"{"command":"set_receive_flow_performance","negotiated_protocol_id":10255,"supported_property_ids":[33537,784,33540],"latency_microseconds":250,"frames_per_packet":8,"device_software_version":[2,9,9],"transaction_id":258}"#,
+    )
+    .unwrap();
+    assert_eq!(&receive[..10], &[0x28, 0x09, 0, 32, 1, 2, 0x11, 1, 0, 0]);
+
+    let query = build_command_from_json(
+        r#"{"command":"query_performance_settings","negotiated_protocol_id":10255,"property_ids":[33537,784],"transaction_id":32}"#,
+    )
+    .unwrap();
+    assert_eq!(&query[..10], &[0x28, 0x09, 0, 16, 0, 32, 0x11, 0, 0, 0]);
+
+    let store = build_command_from_json(
+        r#"{"command":"store_current_configuration","negotiated_protocol_id":10255,"transaction_id":4660}"#,
+    )
+    .unwrap();
+    assert_eq!(store, [0x28, 0x09, 0, 10, 0x12, 0x34, 0x1f, 1, 0, 0]);
+
+    assert_eq!(
+        route_for(
+            r#"{"command":"set_receive_flow_default_slots","negotiated_protocol_id":10249,"supported_property_ids":[771],"default_slots":4}"#,
+        ),
+        (Target::Arc, IoMode::Request)
+    );
+}
+
+#[test]
 fn receiver_channel_2809_commands_match_shipping_controller() {
     let transmitter_query = build_command_from_json(
         r#"{"command":"query_modern_arc_transmitter_channel_status","transaction_id":10322}"#,

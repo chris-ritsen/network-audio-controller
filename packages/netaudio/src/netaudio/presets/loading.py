@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from netaudio.cli_support.execution import readback_after_notification
 from netaudio.commands.config.readback import MUTATION_ERRORS
 from netaudio.dante.network_configuration import validate_interface_configuration
+from netaudio.dante.performance_configuration import requested_performance_properties
 from netaudio.dante.flow_lifecycle import inspect_transmit_flows, plan_create_transmit_flow
 from netaudio.dante.transmit_flow import TransmitFlowSpecification, compare_transmit_flows
 from netaudio.dante.sample_rate_topology import (
@@ -85,6 +86,7 @@ class PresetOperationResult:
     request_acknowledgement: Any = None
     device_confirmation: bool | None = None
     effective_state_confirmation: bool | None = None
+    persistence_request_acknowledgement: Any = None
     persistence_confirmation: bool | None = None
     verification_observations: list[dict[str, Any]] = field(default_factory=list)
     message: str = ""
@@ -117,6 +119,7 @@ class PresetLoadReport:
         acknowledgement: Any = None,
         device_confirmation: bool | None = None,
         effective_state_confirmation: bool | None = None,
+        persistence_request_acknowledgement: Any = None,
         persistence_confirmation: bool | None = None,
         verification_observations: list[dict[str, Any]] | None = None,
         failed: bool = False,
@@ -132,6 +135,7 @@ class PresetLoadReport:
                 request_acknowledgement=acknowledgement,
                 device_confirmation=device_confirmation,
                 effective_state_confirmation=effective_state_confirmation,
+                persistence_request_acknowledgement=persistence_request_acknowledgement,
                 persistence_confirmation=persistence_confirmation,
                 verification_observations=verification_observations or [],
                 message=message,
@@ -420,6 +424,19 @@ async def _plan_preferred_leader(application, device, requested: bool) -> Preset
     if not isinstance(current, bool):
         return _unavailable("preferred_leader", requested, "fresh preferred-leader state was unavailable")
     return _change_or_unchanged("preferred_leader", requested, current)
+
+
+async def _plan_performance_setting(application, device, kind: str, requested: Any) -> PresetAction:
+    try:
+        expected = requested_performance_properties(device, kind, requested)
+        current = await application.get_performance_settings(device, expected)
+    except READBACK_ERRORS as exception:
+        return _unavailable(kind, requested, f"fresh performance readback failed: {exception}")
+    missing = set(expected) - set(current)
+    if missing:
+        labels = ", ".join(f"0x{property_id:04x}" for property_id in sorted(missing))
+        return _unavailable(kind, requested, f"fresh readback omitted properties {labels}", current=current)
+    return _change_or_unchanged(kind, requested, current, matches=current == expected)
 
 
 async def _plan_clock_source(application, device, requested: int) -> PresetAction:
@@ -793,6 +810,10 @@ def _preserved_actions(config: dict) -> list[PresetAction]:
         "sample_rate",
         "encoding",
         "latency",
+        "receive_flow_performance",
+        "transmit_flow_performance",
+        "unicast_performance",
+        "receive_flow_default_slots",
         "sample_rate_pullup",
         "clock_source_code",
         "redundancy_mode",
@@ -852,6 +873,21 @@ async def _plan_device_actions(application, matched: MatchedPresetDevice) -> Pre
         )
     if "latency" in config:
         actions.append(await _plan_latency(application, matched.device, config["latency"]))
+    for performance_kind in (
+        "receive_flow_performance",
+        "transmit_flow_performance",
+        "unicast_performance",
+        "receive_flow_default_slots",
+    ):
+        if performance_kind in config:
+            actions.append(
+                await _plan_performance_setting(
+                    application,
+                    matched.device,
+                    performance_kind,
+                    config[performance_kind],
+                )
+            )
     if "preferred_leader" in config:
         actions.append(await _plan_preferred_leader(application, matched.device, config["preferred_leader"]))
     if "sample_rate_pullup" in config:
@@ -1408,6 +1444,50 @@ async def _apply_preferred_leader(context: PresetLoadContext, entry: PresetDevic
         )
 
 
+async def _apply_performance_setting(
+    context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction
+) -> None:
+    method = getattr(context.application, f"set_{action.kind}")
+    try:
+        if action.kind == "receive_flow_default_slots":
+            result = await method(entry.device, action.payload)
+        else:
+            result = await method(
+                entry.device,
+                action.payload["latency_microseconds"],
+                action.payload["frames_per_packet"],
+            )
+    except MUTATION_ERRORS as exception:
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"{action.kind.replace('_', ' ')}: FAILED ({exception})",
+            requested=action.payload,
+            failed=True,
+        )
+        return
+    payload = result.to_dict()
+    confirmed = result.state == "confirmed" and result.effective_state_confirmation is True
+    failed = result.state in {"rejected", "contradicted"}
+    context.report.operation(
+        entry.device_name,
+        action.kind,
+        result.state,
+        result.message,
+        requested=payload["requested_properties"],
+        effective=payload["effective_properties"],
+        acknowledgement=payload["request_acknowledgement"],
+        device_confirmation=payload["device_confirmation"],
+        effective_state_confirmation=payload["effective_state_confirmation"],
+        persistence_request_acknowledgement=payload["persistence_request_acknowledgement"],
+        persistence_confirmation=payload["persistence_confirmation"],
+        verification_observations=payload["verification_observations"],
+        failed=failed,
+        verified=confirmed,
+    )
+
+
 async def _apply_interface(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
     if not await _send_request(context, entry, action):
         return
@@ -1452,27 +1532,41 @@ ACTION_HANDLERS: dict[str, ActionHandler] = {
     "interface": _apply_interface,
     "latency": _apply_audio_setting,
     "preferred_leader": _apply_preferred_leader,
+    "receive_flow_default_slots": _apply_performance_setting,
+    "receive_flow_performance": _apply_performance_setting,
     "receiver_channel_names": _apply_receiver_channel_names,
     "receiver_subscriptions": _apply_receiver_subscriptions,
     "redundancy": _apply_redundancy,
     "sample_rate": _apply_sample_rate,
     "sample_rate_pullup": _apply_sample_rate_pullup,
     "transmit_flow": _apply_transmit_flow,
+    "transmit_flow_performance": _apply_performance_setting,
     "transmitter_channel_names": _apply_transmitter_channel_names,
+    "unicast_performance": _apply_performance_setting,
 }
 
 
-async def _apply_plan(context: PresetLoadContext, plan: PresetLoadPlan, *, stop_on_failure: bool = False) -> None:
+async def _apply_plan(
+    context: PresetLoadContext,
+    plan: PresetLoadPlan,
+    *,
+    stop_on_failure: bool = False,
+    store_current_configuration: bool = False,
+) -> None:
     for entry in plan.device_actions:
         if not entry.actions:
             context.report.record(entry.device_name, "no supported changes")
             continue
+        entry_failures = context.report.failures
+        entry_unverified = context.report.unverified
+        changed = False
         for action in entry.actions:
             operation_count = len(context.report.operations)
             result_count = len(context.report.results)
             if action.state is not PresetActionState.CHANGE:
                 await _apply_skipped(context, entry, action)
             else:
+                changed = True
                 await ACTION_HANDLERS[action.kind](context, entry, action)
             if len(context.report.operations) == operation_count:
                 for _, message in context.report.results[result_count:]:
@@ -1491,6 +1585,35 @@ async def _apply_plan(context: PresetLoadContext, plan: PresetLoadPlan, *, stop_
                     "Stopped after an unsuccessful or unverified change; remaining settings were not sent.",
                 )
                 return
+        if (
+            store_current_configuration
+            and changed
+            and context.report.failures == entry_failures
+            and context.report.unverified == entry_unverified
+        ):
+            try:
+                result = await context.application.store_current_configuration(entry.device)
+            except MUTATION_ERRORS as exception:
+                context.report.operation(
+                    entry.device_name,
+                    "store_current_configuration",
+                    "failed",
+                    f"configuration storage: FAILED ({exception})",
+                    failed=True,
+                )
+            else:
+                payload = result.to_dict()
+                acknowledged = bool(payload.get("persistence_request_acknowledgement", {}).get("accepted"))
+                context.report.operation(
+                    entry.device_name,
+                    "store_current_configuration",
+                    result.state,
+                    result.message,
+                    persistence_request_acknowledgement=payload["persistence_request_acknowledgement"],
+                    persistence_confirmation=payload["persistence_confirmation"],
+                    failed=not acknowledged,
+                    verified=acknowledged,
+                )
 
 
 async def apply_preset_plan(
@@ -1500,11 +1623,17 @@ async def apply_preset_plan(
     confirm_destructive: bool = False,
     report: PresetLoadReport | None = None,
     stop_on_failure: bool = False,
+    store_current_configuration: bool = False,
 ) -> PresetLoadReport:
     context = PresetLoadContext(
         application=application,
         confirm_destructive=confirm_destructive,
         report=report if report is not None else PresetLoadReport(),
     )
-    await _apply_plan(context, plan, stop_on_failure=stop_on_failure)
+    await _apply_plan(
+        context,
+        plan,
+        stop_on_failure=stop_on_failure,
+        store_current_configuration=store_current_configuration,
+    )
     return context.report

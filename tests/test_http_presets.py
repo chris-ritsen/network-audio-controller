@@ -94,6 +94,7 @@ async def test_invalid_xml_refused(server, content):
         {"targets": {"Desk": "missing"}},
         {"excluded": ["Desk"]},
         {"confirm_destructive": "yes"},
+        {"store_current_configuration": "yes"},
     ],
 )
 async def test_load_requires_review_and_exact_targets(server, changes):

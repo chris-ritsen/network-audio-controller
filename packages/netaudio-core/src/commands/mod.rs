@@ -17,6 +17,7 @@ pub const OPCODE_DEVICE_INFO: u16 = 0x1003;
 pub const OPCODE_DEVICE_SETTINGS: u16 = 0x1100;
 pub const OPCODE_DEVICE_SETTINGS_SET: u16 = 0x1101;
 pub const OPCODE_PROPERTY_DIRECTORY: u16 = 0x1102;
+pub const OPCODE_STORE_CURRENT_CONFIGURATION: u16 = 0x1f01;
 pub const OPCODE_TX_CHANNEL_NAME_SET: u16 = 0x2013;
 pub const OPCODE_RX_CHANNEL_NAME_SET: u16 = 0x3001;
 pub const OPCODE_SUBSCRIPTION_ADD: u16 = 0x3010;
@@ -152,6 +153,7 @@ mod flows;
 mod metering;
 mod multicast;
 mod network;
+mod performance;
 mod settings;
 mod subscriptions;
 
@@ -161,6 +163,7 @@ pub use flows::*;
 pub use metering::*;
 pub use multicast::*;
 pub use network::*;
+pub use performance::*;
 pub use settings::*;
 pub use subscriptions::*;
 

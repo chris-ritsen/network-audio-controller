@@ -62,6 +62,21 @@ def _configuration_summary(config):
         entries.append({"label": "Device name", "value": config["device_name"]})
     if "sample_rate_pullup" in config:
         entries.append({"label": "Sample-rate pull-up", "value": str(config["sample_rate_pullup"])})
+    for field, label in (
+        ("receive_flow_performance", "Receive-flow performance"),
+        ("transmit_flow_performance", "Transmit-flow performance"),
+        ("unicast_performance", "Unicast performance"),
+    ):
+        if field in config:
+            value = config[field]
+            entries.append(
+                {
+                    "label": label,
+                    "value": (f"{value['latency_microseconds']} µs, {value['frames_per_packet']} frames/packet"),
+                }
+            )
+    if "receive_flow_default_slots" in config:
+        entries.append({"label": "Receive-flow default slots", "value": str(config["receive_flow_default_slots"])})
     if "clock_source_code" in config:
         entries.append({"label": "Clock source", "value": f"0x{config['clock_source_code']:04X}"})
     if "external_word_clock" in config:
@@ -282,6 +297,9 @@ class DaemonPresetHandlers:
             confirm_destructive = params.get("confirm_destructive", False)
             if not isinstance(confirm_destructive, bool):
                 raise ValueError("Destructive-change confirmation must be a boolean.")
+            store_current_configuration = params.get("store_current_configuration", False)
+            if not isinstance(store_current_configuration, bool):
+                raise ValueError("Configuration-storage selection must be a boolean.")
             targets = params.get("targets")
             if not isinstance(targets, dict) or not targets or set(targets) - configs.keys():
                 raise ValueError("Select named preset devices to load.")
@@ -342,6 +360,7 @@ class DaemonPresetHandlers:
                         confirm_destructive=confirm_destructive,
                         report=report,
                         stop_on_failure=True,
+                        store_current_configuration=store_current_configuration,
                     ),
                     PRESET_APPLY_TIMEOUT,
                 )

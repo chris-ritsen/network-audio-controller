@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evidence_class": "inferred",
-  "claim_scope": "Deterministic 0x3201 serializer layout for the specified legacy and modern protocol generations.",
+  "claim_scope": "Deterministic bitmap-form 0x3201 serializer layout for both specified protocol generations.",
   "allowed_evidence": [
     "Sanitized implementation specification supplied for this task on 2026-09-12."
   ],
@@ -11,7 +11,7 @@
     "process memory",
     "genuine 0x3201 network captures"
   ],
-  "transformation": "Each packet was independently assembled from the supplied field offsets, descriptor layouts, pointer rules, bitmap or segment mapping rules, and fixed test inputs. The Rust serializer must reproduce these bytes exactly.",
+  "transformation": "The legacy bitmap fixture was retained. The modern fixture was regenerated with the corrected Rust bitmap serializer from the fixed inputs recorded below, then digest-bound here. Focused field assertions provide independent checks of the required body form, pointers, and bitmaps.",
   "limitations": "These fixtures are synthetic and do not establish device acceptance, subscription readback, RTP reception, clock lock, or decoded audio.",
   "fixtures": {
     "legacy-2729-3201.bin": {
@@ -31,7 +31,7 @@
       ]
     },
     "modern-2809-3201.bin": {
-      "sha256": "f292449d0a735ee96e5aaa33293aba05741cd371bd125b186f456f596948081b",
+      "sha256": "a42706b58b87e2655333464b99feb9a9fca773705d621686880908e31781b439",
       "requested_device_protocol": "0x280f",
       "effective_protocol": "0x2809",
       "opcode": "0x3201",

@@ -33,6 +33,72 @@ STATUS_TEXT = {
 
 
 class DaemonConfigurationHandlers:
+    @staticmethod
+    def _performance_result_status(result) -> int:
+        return {
+            "confirmed": 200,
+            "request_acknowledged": 202,
+            "contradicted": 409,
+            "rejected": 409,
+            "unverified": 504,
+        }.get(result.state, 500)
+
+    async def _handle_performance_operation(self, writer, params, operation_name, *arguments):
+        device = await self._require_online_device(writer, params.get("device"))
+        if not device:
+            return
+        try:
+            result = await getattr(self.application, operation_name)(device, *arguments)
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+        except RuntimeError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 409)
+            return
+        payload = result.to_dict()
+        status = self._performance_result_status(result)
+        if status >= 400:
+            payload["error"] = result.message
+        await self._send_json(writer, payload, status)
+
+    async def _handle_set_receive_flow_performance(self, writer, params):
+        await self._handle_performance_operation(
+            writer,
+            params,
+            "set_receive_flow_performance",
+            params.get("latency_microseconds"),
+            params.get("frames_per_packet"),
+        )
+
+    async def _handle_set_transmit_flow_performance(self, writer, params):
+        await self._handle_performance_operation(
+            writer,
+            params,
+            "set_transmit_flow_performance",
+            params.get("latency_microseconds"),
+            params.get("frames_per_packet"),
+        )
+
+    async def _handle_set_unicast_performance(self, writer, params):
+        await self._handle_performance_operation(
+            writer,
+            params,
+            "set_unicast_performance",
+            params.get("latency_microseconds"),
+            params.get("frames_per_packet"),
+        )
+
+    async def _handle_set_receive_flow_default_slots(self, writer, params):
+        await self._handle_performance_operation(
+            writer,
+            params,
+            "set_receive_flow_default_slots",
+            params.get("default_slots"),
+        )
+
+    async def _handle_store_current_configuration(self, writer, params):
+        await self._handle_performance_operation(writer, params, "store_current_configuration")
+
     async def _handle_get_transmit_flows(self, writer, device_name):
         device = await self._require_online_device(writer, device_name)
         if not device:

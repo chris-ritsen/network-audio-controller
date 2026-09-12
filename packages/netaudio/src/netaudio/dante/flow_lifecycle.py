@@ -286,17 +286,18 @@ def _stable_inventory_projection(
     return sorted(projected, key=lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
-def _unrelated_flow_change(
+def _concurrent_topology_activity(
     before: dict,
     after: dict,
     protocol_id: int,
     *,
     target_flow_id: int | None,
-) -> tuple[bool, dict[str, Any]]:
+) -> dict[str, Any] | None:
     before_projection = _stable_inventory_projection(before, protocol_id, excluded_flow_id=target_flow_id)
     after_projection = _stable_inventory_projection(after, protocol_id, excluded_flow_id=target_flow_id)
-    changed = before_projection != after_projection
-    return changed, {
+    if before_projection == after_projection:
+        return None
+    return {
         "before": before_projection,
         "after": after_projection,
     }
@@ -592,20 +593,18 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
                 else:
                     details = {}
                 target_flow_id = flow_id if flow_id is not None else correlated_flow_id
-                unrelated_changed, stable = _unrelated_flow_change(
+                concurrent_activity = _concurrent_topology_activity(
                     before,
                     after,
                     protocol_id,
                     target_flow_id=target_flow_id,
                 )
-                if unrelated_changed:
-                    details["stable_unrelated_flows"] = stable
+                if concurrent_activity is not None:
+                    details["concurrent_topology_activity"] = concurrent_activity
                 if record is not None:
                     last_effective = TransmitFlowSpecification.from_inventory_record(record, protocol_id=protocol_id)
                     last_comparison = comparison
-                if unrelated_changed:
-                    outcome = "contradiction"
-                elif record is not None and comparison is not None and not comparison.matches:
+                if record is not None and comparison is not None and not comparison.matches:
                     outcome = "contradiction"
                 elif record is not None and comparison is not None and comparison.matches:
                     outcome = "confirmed"
@@ -647,7 +646,7 @@ async def create_transmit_flow(device, specification: TransmitFlowSpecification)
                         requested=specification,
                         effective=last_effective,
                         comparison=last_comparison,
-                        message="fresh readback contradicts the requested flow or shows an unrelated durable flow change",
+                        message="fresh readback of the correlated flow contradicts the request",
                         observations=observations,
                     )
             if not await _wait_for_next_poll(deadline):
@@ -780,6 +779,7 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
         deadline = asyncio.get_running_loop().time() + VERIFICATION_TIMEOUT_SECONDS
         attempt = 0
         last_effective: TransmitFlowSpecification | None = requested
+        last_comparison: FlowComparison | None = None
         while True:
             attempt += 1
             after = await _read_inventory(device, protocol_id)
@@ -794,20 +794,27 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                 )
             else:
                 remaining = _find_record(after, flow_id)
-                unrelated_changed, stable = _unrelated_flow_change(
+                concurrent_activity = _concurrent_topology_activity(
                     before,
                     after,
                     protocol_id,
                     target_flow_id=flow_id,
                 )
-                details = {"stable_unrelated_flows": stable} if unrelated_changed else None
+                details = (
+                    {"concurrent_topology_activity": concurrent_activity} if concurrent_activity is not None else None
+                )
                 if remaining is not None:
                     last_effective = TransmitFlowSpecification.from_inventory_record(remaining, protocol_id=protocol_id)
+                    last_comparison = compare_transmit_flows(requested, last_effective)
                 else:
                     last_effective = None
-                outcome = (
-                    "contradiction" if unrelated_changed else "confirmed" if remaining is None else "not_yet_visible"
-                )
+                    last_comparison = None
+                if remaining is None:
+                    outcome = "confirmed"
+                elif last_comparison is not None and not last_comparison.matches:
+                    outcome = "contradiction"
+                else:
+                    outcome = "not_yet_visible"
                 observations.append(
                     _observation(
                         phase="post_write",
@@ -843,8 +850,8 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
                         effective_confirmation=False,
                         requested=requested,
                         effective=last_effective,
-                        comparison=None,
-                        message="fresh readback shows an unrelated durable flow change during deletion verification",
+                        comparison=last_comparison,
+                        message="fresh readback shows that the correlated flow changed instead of being deleted",
                         observations=observations,
                     )
             if not await _wait_for_next_poll(deadline):
@@ -859,7 +866,7 @@ async def delete_transmit_flow(device, flow_id: int) -> FlowOperationResult:
         effective_confirmation=None,
         requested=requested,
         effective=last_effective,
-        comparison=None,
+        comparison=last_comparison,
         message=(
             "deletion was acknowledged but bounded fresh readback did not confirm absence"
             if accepted

@@ -75,9 +75,8 @@ def test_external_subscription_modern_packet_caps_protocol_and_retains_opcode():
 
     assert packet[:2] == bytes.fromhex("2809")
     assert packet[6:8] == bytes.fromhex("3201")
-    assert packet[8 + 0x12 : 8 + 0x16] == bytes.fromhex("00300038")
-    assert packet[8 + 0x1C : 8 + 0x1E] == bytes.fromhex("0040")
-    assert packet[8 + 0x26 : 8 + 0x28] == bytes.fromhex("005c")
+    assert packet[8:12] == bytes.fromhex("00000202")
+    assert packet[8 + 0x12 : 8 + 0x1E] == bytes.fromhex("00200028004c005000540058")
 
 
 def test_command_frontends_expose_the_same_external_subscription_specification():
@@ -180,9 +179,7 @@ def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_desti
     ("receiver_ids", "assignments", "message"),
     [
         ([1], [], "parallel non-empty"),
-        ([2, 1], [1, 2], "strictly ascending"),
-        ([1, 2], [2, 1], "strictly ascending"),
-        ([1, 2], [0, 0], "all-zero"),
+        ([1, 1], [1, 2], "must be unique"),
         ([1, 2], [1, 3], "advertised slot count"),
         ([1, 3], [1, 2], "receiver channel not found"),
     ],
@@ -197,6 +194,28 @@ def test_high_level_external_mapping_fails_closed(receiver_ids, assignments, mes
             assignments,
             receiver_supports_multiple_interfaces=False,
         )
+
+
+@pytest.mark.parametrize(
+    ("receiver_ids", "assignments"),
+    [
+        ([2, 1], [2, 1]),
+        ([1, 2], [1, 1]),
+        ([1, 2], [0, 0]),
+    ],
+)
+def test_high_level_external_mapping_accepts_bitmap_supported_forms(receiver_ids, assignments):
+    specification = external_receiver_subscription_specification(
+        DanteCommands(),
+        device(),
+        discovered_flow(),
+        receiver_ids,
+        assignments,
+        receiver_supports_multiple_interfaces=False,
+    )
+
+    assert specification["receiver_channel_ids"] == receiver_ids
+    assert specification["flow_slot_assignments"] == assignments
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,15 @@ from typing import Any
 
 from netaudio import DanteDevice
 from netaudio.dante.latency import milliseconds_to_microseconds
+from netaudio.dante.performance_configuration import (
+    PROPERTY_RX_FLOW_DEFAULT_SLOTS,
+    PROPERTY_RX_FLOW_FRAMES_PER_PACKET,
+    PROPERTY_RX_FLOW_LATENCY_NS,
+    PROPERTY_TX_FLOW_FRAMES_PER_PACKET,
+    PROPERTY_TX_FLOW_LATENCY_NS,
+    PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET,
+    PROPERTY_UNICAST_CONFIGURED_LATENCY_NS,
+)
 from netaudio.dante.transmit_flow import MediaMode, TransmitFlowSpecification
 from netaudio.presets.schema import (
     PRESET_EXTENSION_CONTENT_TAG,
@@ -105,6 +114,63 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
             config["sample_rate_pullup"] = pullup
         if getattr(device, "clock_source_code", None) is not None:
             config["clock_source_code"] = device.clock_source_code
+        performance = getattr(device, "performance_settings", None) or {}
+        advertised_performance_ids = {
+            entry.get("property_id")
+            for entry in (getattr(device, "settings_properties", None) or [])
+            if isinstance(entry, Mapping)
+            and isinstance(entry.get("property_id"), int)
+            and not isinstance(entry.get("property_id"), bool)
+        }
+
+        def performance_value(property_id):
+            for key in (property_id, str(property_id), f"0x{property_id:04x}"):
+                value = performance.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    return value
+            return None
+
+        def consistent_performance_value(property_ids):
+            if not property_ids:
+                return None
+            values = [performance_value(property_id) for property_id in property_ids]
+            if any(value is None for value in values) or len(set(values)) != 1:
+                return None
+            value = values[0]
+            return value if isinstance(value, int) else None
+
+        for field_name, latency_ids, frames_ids in (
+            (
+                "receive_flow_performance",
+                (PROPERTY_RX_FLOW_LATENCY_NS,),
+                (PROPERTY_RX_FLOW_FRAMES_PER_PACKET,),
+            ),
+            (
+                "transmit_flow_performance",
+                (PROPERTY_TX_FLOW_LATENCY_NS,),
+                (PROPERTY_TX_FLOW_FRAMES_PER_PACKET,),
+            ),
+            (
+                "unicast_performance",
+                (PROPERTY_UNICAST_CONFIGURED_LATENCY_NS, PROPERTY_RX_FLOW_LATENCY_NS),
+                (
+                    PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET,
+                    PROPERTY_RX_FLOW_FRAMES_PER_PACKET,
+                ),
+            ),
+        ):
+            advertised_latency_ids = advertised_performance_ids.intersection(latency_ids)
+            advertised_frames_ids = advertised_performance_ids.intersection(frames_ids)
+            latency_ns = consistent_performance_value(advertised_latency_ids)
+            frames = consistent_performance_value(advertised_frames_ids)
+            if latency_ns is not None and latency_ns % 1_000 == 0 and frames is not None:
+                config[field_name] = {
+                    "latency_microseconds": latency_ns // 1_000,
+                    "frames_per_packet": frames,
+                }
+        default_slots = performance_value(PROPERTY_RX_FLOW_DEFAULT_SLOTS)
+        if PROPERTY_RX_FLOW_DEFAULT_SLOTS in advertised_performance_ids and default_slots is not None:
+            config["receive_flow_default_slots"] = default_slots
         clock_preferences = getattr(device, "ddm_clock_preferences", None)
         if isinstance(clock_preferences, Mapping) and clock_preferences.get("external_word_clock") is not None:
             config["external_word_clock"] = clock_preferences["external_word_clock"]
@@ -284,7 +350,7 @@ def format_preset_configs(
     root_attributes = copy.deepcopy(getattr(configs, "root_attributes", {}))
     root = ET.Element("preset", {"version": source_version or "2.1.0", **root_attributes})
     _sub_text(root, "name", preset_name)
-    _sub_text(root, "description", "Dante Controller preset with NetAudio schema-v2 extension")
+    _sub_text(root, "description", "Dante Controller preset with NetAudio schema-v3 extension")
     for device_name, raw_config in sorted(configs.items()):
         config = normalize_device_config(raw_config)
         if config["name"] != device_name:
@@ -310,7 +376,7 @@ def format_devices_xml(
         device_by_name[name] = device
     root = ET.Element("preset", version="2.1.0")
     _sub_text(root, "name", preset_name)
-    _sub_text(root, "description", "Dante Controller preset with NetAudio schema-v2 extension")
+    _sub_text(root, "description", "Dante Controller preset with NetAudio schema-v3 extension")
     for name, config in configs.items():
         root.append(_device_to_preset_xml(config, selected_sections, device_by_name[name]))
     ET.indent(root, space="    ")

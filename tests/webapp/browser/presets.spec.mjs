@@ -51,7 +51,7 @@ test("opening previews only; apply requires confirmation and shows verification"
   await page.getByLabel("I have reviewed", { exact: false }).check();
   await apply.click();
   await expect(page.getByText("Preset applied and verified", { exact: true })).toBeVisible();
-  expect(writes[1].body).toEqual({ xml, digest: preview.digest, confirmed: true, confirm_destructive: false, targets: { [device.name]: id }, excluded: [] });
+  expect(writes[1].body).toEqual({ xml, digest: preview.digest, confirmed: true, confirm_destructive: false, store_current_configuration: false, targets: { [device.name]: id }, excluded: [] });
   await expect(apply).toBeDisabled();
   await expect(page.locator("#content")).not.toContainText(preview.digest);
 });

@@ -139,7 +139,7 @@ impl std::fmt::Display for NetaudioError {
             }
             NetaudioError::InvalidPage => "page exceeds the protocol channel range",
             NetaudioError::InvalidReceiverMapping => {
-                "receiver IDs and assigned flow slots must be ordered, unique, and nonempty"
+                "receiver IDs must be valid, unique, and paired with in-range flow slots"
             }
             NetaudioError::InvalidSampleRate => "sample rate must be nonzero",
             NetaudioError::InvalidSequence => {

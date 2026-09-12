@@ -1282,6 +1282,11 @@ class DanteApplication:
         self._apply_device_settings(device, settings)
         return settings
 
+    async def get_performance_settings(self, device, property_ids):
+        from netaudio.dante.performance_configuration import get_performance_settings
+
+        return await get_performance_settings(device, property_ids)
+
     async def identify(self, device) -> None:
         require_writable(device, "identify")
         await self.send_identify(device)
@@ -2271,6 +2276,31 @@ class DanteApplication:
             lambda: device.execute(self.commands.set_latency(latency_milliseconds)),
             (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
         )
+
+    async def set_receive_flow_performance(self, device, latency_microseconds: int, frames_per_packet: int):
+        from netaudio.dante.performance_configuration import set_receive_flow_performance
+
+        return await set_receive_flow_performance(device, latency_microseconds, frames_per_packet)
+
+    async def set_transmit_flow_performance(self, device, latency_microseconds: int, frames_per_packet: int):
+        from netaudio.dante.performance_configuration import set_transmit_flow_performance
+
+        return await set_transmit_flow_performance(device, latency_microseconds, frames_per_packet)
+
+    async def set_unicast_performance(self, device, latency_microseconds: int, frames_per_packet: int):
+        from netaudio.dante.performance_configuration import set_unicast_performance
+
+        return await set_unicast_performance(device, latency_microseconds, frames_per_packet)
+
+    async def set_receive_flow_default_slots(self, device, default_slots: int):
+        from netaudio.dante.performance_configuration import set_receive_flow_default_slots
+
+        return await set_receive_flow_default_slots(device, default_slots)
+
+    async def store_current_configuration(self, device):
+        from netaudio.dante.performance_configuration import store_current_configuration
+
+        return await store_current_configuration(device)
 
     async def set_preferred_leader(
         self,

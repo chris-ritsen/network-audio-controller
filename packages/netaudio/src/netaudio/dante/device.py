@@ -97,6 +97,7 @@ class DanteDevice:
         self.rx_flow_late_packet_monitoring_supported: bool | None = None
         self.aes67_multicast_prefix = None
         self.settings_properties: list[dict] | None = None
+        self.performance_settings: dict[int, int] | None = None
         self.preferred_leader = None
         self.server_name = server_name
         self.services = {}
@@ -686,6 +687,11 @@ class DanteDevice:
             if settings_data.get("sample_rate"):
                 controls["sample_rate"] = settings_data["sample_rate"]
             controls.update(latency_controls_from_settings(settings_data))
+            from netaudio.dante.performance_configuration import performance_settings_from_response
+
+            performance_settings = performance_settings_from_response(settings_data)
+            if performance_settings:
+                controls["performance_settings"] = performance_settings
         channel_audio_metadata = data.get("channel_audio_metadata")
         if channel_audio_metadata:
             current_encoding = channel_audio_metadata.get("current_encoding")
@@ -752,6 +758,8 @@ class DanteDevice:
             self.aes67_configured_property_advertised = data["aes67_configured_property_advertised"]
         if "settings_properties" in data:
             self.settings_properties = data["settings_properties"]
+        if "performance_settings" in data:
+            self.performance_settings = data["performance_settings"]
         if self.supported_encodings is None and "channel_metadata_supported_encodings" in data:
             channel_metadata_encoding = data["channel_metadata_encoding"]
             if self.encoding is None or self.encoding == channel_metadata_encoding:

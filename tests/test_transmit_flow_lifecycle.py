@@ -592,7 +592,7 @@ async def test_unrelated_volatile_fields_do_not_create_false_inconsistency(monke
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["created", "deleted", "durable"])
-async def test_actual_unrelated_flow_change_is_inconsistent(monkeypatch, change):
+async def test_actual_unrelated_flow_change_is_recorded_without_blocking_confirmation(monkeypatch, change):
     other = {
         "flow_number": 1,
         "flow_type": "unicast",
@@ -640,5 +640,126 @@ async def test_actual_unrelated_flow_change_is_inconsistent(monkeypatch, change)
 
     result = await flow_lifecycle.create_transmit_flow(device(), specification())
 
+    assert result.state is FlowLifecycleState.CONFIRMED
+    assert result.effective_state_confirmation is True
+    assert "concurrent_topology_activity" in result.verification_observations[-1]["details"]
+
+
+@pytest.mark.asyncio
+async def test_create_continues_polling_after_concurrent_topology_activity(monkeypatch):
+    other = {
+        "flow_number": 1,
+        "flow_type": "unicast",
+        "channels": [1],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    changed_other = {**other, "encoding": 16}
+    target = {
+        "flow_number": 2,
+        "flow_type": "multicast",
+        "channels": [1, 2],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    inventories = iter(
+        (
+            {"max_flow_slots": 4, "flows": [other]},
+            {"max_flow_slots": 4, "flows": [changed_other]},
+            {"max_flow_slots": 4, "flows": [changed_other, target]},
+        )
+    )
+
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, _command):
+        return bytes.fromhex("2729000a000122010001")
+
+    async def no_delay(_deadline):
+        return True
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    monkeypatch.setattr(flow_lifecycle, "_wait_for_next_poll", no_delay)
+
+    result = await flow_lifecycle.create_transmit_flow(device(), specification())
+
+    assert result.state is FlowLifecycleState.CONFIRMED
+    assert [item["outcome"] for item in result.verification_observations] == [
+        "available",
+        "not_yet_visible",
+        "confirmed",
+    ]
+    assert all("concurrent_topology_activity" in item["details"] for item in result.verification_observations[1:])
+
+
+@pytest.mark.asyncio
+async def test_delete_confirms_absence_despite_concurrent_topology_activity(monkeypatch):
+    target = {
+        "flow_number": 2,
+        "flow_type": "multicast",
+        "channels": [1, 2],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    other = {
+        "flow_number": 1,
+        "flow_type": "unicast",
+        "channels": [1],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    inventories = iter(
+        (
+            {"max_flow_slots": 4, "flows": [other, target]},
+            {"max_flow_slots": 4, "flows": [{**other, "encoding": 16}]},
+        )
+    )
+
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, _command):
+        return bytes.fromhex("2729000a000122020001")
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.delete_transmit_flow(device(), 2)
+
+    assert result.state is FlowLifecycleState.DELETED
+    assert result.effective_state_confirmation is True
+    assert "concurrent_topology_activity" in result.verification_observations[-1]["details"]
+
+
+@pytest.mark.asyncio
+async def test_delete_correlated_target_change_is_inconsistent(monkeypatch):
+    target = {
+        "flow_number": 2,
+        "flow_type": "multicast",
+        "channels": [1, 2],
+        "sample_rate": 48_000,
+        "encoding": 24,
+    }
+    inventories = iter(
+        (
+            {"max_flow_slots": 4, "flows": [target]},
+            {"max_flow_slots": 4, "flows": [{**target, "encoding": 16}]},
+        )
+    )
+
+    async def read_inventory(_device, _protocol_id):
+        return deepcopy(next(inventories))
+
+    async def send_once(_device, _command):
+        return bytes.fromhex("2729000a000122020001")
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.delete_transmit_flow(device(), 2)
+
     assert result.state is FlowLifecycleState.INCONSISTENT
-    assert "stable_unrelated_flows" in result.verification_observations[-1]["details"]
+    assert result.effective_state_confirmation is False
+    assert result.comparison is not None and not result.comparison.matches
