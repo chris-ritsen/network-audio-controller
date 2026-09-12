@@ -26,6 +26,7 @@ from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
+from netaudio.daemon.http.sse_view import SseDeviceView
 from netaudio.daemon.http.tls import TLSConfigurationError, TLSSettings, build_ssl_context
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.server_info import server_info
@@ -103,6 +104,11 @@ class _SseClient:
     pending_meters: dict[str, _MeterUpdate] = field(default_factory=dict)
     closed: asyncio.Event = field(default_factory=asyncio.Event)
     sender_task: asyncio.Task | None = None
+    view: SseDeviceView | None = None
+
+
+def _encode_sse(data) -> bytes:
+    return f"data: {json.dumps(data, default=str)}\n\n".encode()
 
 
 async def _bounded(awaitable, timeout: float):
@@ -460,7 +466,18 @@ class DaemonHTTPServer(
         await self._broadcast_sse(self._snapshot_payload())
 
     async def _broadcast_sse(self, data):
-        payload = f"data: {json.dumps(data, default=str)}\n\n".encode()
+        shared_payload = None
+        for client in tuple(self.sse_clients.values()):
+            if client.view is not None:
+                for event in client.view.events_for(data):
+                    if not self._enqueue_sse(client, event, _encode_sse(event)):
+                        break
+                continue
+            if shared_payload is None:
+                shared_payload = _encode_sse(data)
+            self._enqueue_sse(client, data, shared_payload)
+
+    def _enqueue_sse(self, client: _SseClient, data: dict, payload: bytes) -> bool:
         # Detailed samples contain complete vectors. Partial signal-presence
         # updates and control events must retain their original ordering.
         key = (
@@ -468,19 +485,20 @@ class DaemonHTTPServer(
             if data.get("event") == "meter_values" and data.get("metering_source") == "detailed"
             else None
         )
-        for client in tuple(self.sse_clients.values()):
-            try:
-                if key is None:
-                    client.queue.put_nowait(payload)
-                    client.pending_meters.clear()
-                elif key in client.pending_meters:
-                    client.pending_meters[key].payload = payload
-                else:
-                    update = _MeterUpdate(key, payload)
-                    client.queue.put_nowait(update)
-                    client.pending_meters[key] = update
-            except asyncio.QueueFull:
-                self._drop_sse_client(client, "outbound event queue full")
+        try:
+            if key is None:
+                client.queue.put_nowait(payload)
+                client.pending_meters.clear()
+            elif key in client.pending_meters:
+                client.pending_meters[key].payload = payload
+            else:
+                update = _MeterUpdate(key, payload)
+                client.queue.put_nowait(update)
+                client.pending_meters[key] = update
+        except asyncio.QueueFull:
+            self._drop_sse_client(client, "outbound event queue full")
+            return False
+        return True
 
     async def _sse_sender(self, client: _SseClient):
         try:
@@ -719,8 +737,8 @@ class DaemonHTTPServer(
             logger.warning("Daemon HTTP API connection error", exc_info=True)
 
     async def _route(self, method, path, body, writer, reader, headers=None):
-        if method == "GET" and path == "/events":
-            await self._handle_sse(writer, reader)
+        if method == "GET" and urlsplit(path).path == "/events":
+            await self._handle_sse(writer, reader, parse_qs(urlsplit(path).query))
             return
 
         try:
@@ -905,12 +923,14 @@ class DaemonHTTPServer(
             return
         await self._broadcast_sse({"event": "monitoring_event", "journal_event": event.to_dict()})
 
-    async def _handle_sse(self, writer, reader):
+    async def _handle_sse(self, writer, reader, query=None):
         client = None
         try:
-            initial = f"data: {json.dumps(self._snapshot_payload(), default=str)}\n\n".encode()
+            view = SseDeviceView.from_query(query or {})
+            snapshot = self._snapshot_payload()
+            initial = _encode_sse(view.initial_snapshot(snapshot) if view is not None else snapshot)
 
-            client = _SseClient(writer=writer)
+            client = _SseClient(writer=writer, view=view)
             client.queue.put_nowait(initial)
             self.sse_clients[writer] = client
 
