@@ -338,14 +338,7 @@ class DaemonHTTPServer(
                 self._dismissed_offline_inventory.discard(event.server_name)
             elif event.server_name in self._dismissed_offline_inventory:
                 return
-            device_json = DanteDeviceSerializer.to_json(device)
-            if (
-                self.managed_inventory is not None
-                and self.managed_inventory.enabled
-                and not device.requires_managed_control
-            ):
-                device_json["availability_state"] = "online" if device.online else "offline"
-                device_json["field_sources"] = {"identity": "direct", "audio_configuration": "direct"}
+            device_json = self._serialized_device(event.server_name, device)
         if not device_json:
             return
 
@@ -416,6 +409,13 @@ class DaemonHTTPServer(
                 "value": event.data.get("value"),
             }
         )
+
+    def _serialized_device(self, server_name: str, device) -> dict | None:
+        if self.managed_inventory is None or not self.managed_inventory.enabled:
+            return DanteDeviceSerializer.to_json(device)
+        if self.managed_controls.direct_devices().get(server_name) is not device:
+            return self._serialized_devices().get(server_name)
+        return self.managed_inventory.serialize_devices({server_name: device}).get(server_name)
 
     def _serialized_devices(self, context_name: str | None = None) -> dict[str, dict]:
         if self.managed_inventory is not None and self.managed_inventory.enabled:
