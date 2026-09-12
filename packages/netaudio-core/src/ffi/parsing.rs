@@ -62,6 +62,7 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "device_name" => serialize_optional(kind, responses::parse_device_name(bytes)),
         "device_settings" => serialize_optional(kind, responses::parse_device_settings(bytes)),
         "encoding_status" => serialize_optional(kind, responses::parse_encoding_status(bytes)),
+        "gain_status" => serialize_optional(kind, responses::parse_gain_status(bytes)),
         "codec_status" => serialize_optional(kind, responses::parse_codec_status(bytes)),
         "heartbeat_clock_frequency_offset" => serialize_optional(
             kind,
