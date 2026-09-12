@@ -373,29 +373,31 @@ async def test_unresponsive_metering_device_is_not_repeatedly_started():
 
 
 @pytest.mark.asyncio
-async def test_metering_recovery_requires_packets_to_have_started_then_stopped(monkeypatch):
+async def test_metering_keepalive_holds_streams_open_until_the_device_goes_silent(monkeypatch):
     now = 100.0
     monkeypatch.setattr(metering_module.time, "monotonic", lambda: now)
     manager, application, _ = make_manager()
     manager.add_persistent("avio-bt-1", "client")
     await drain_sends(manager)
-    for _ in range(24):
-        now += 5
-        manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
-        await manager._recover_stale_streams()
-    application.cmc.start_metering.assert_awaited_once()
-    now += 5
-    await manager._recover_stale_streams()
-    assert application.cmc.start_metering.await_count == 2
-    for _ in range(24):
-        now += 5
-        await manager._recover_stale_streams()
-    assert application.cmc.start_metering.await_count == 2
     now += 1
     manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
-    now += 5
     await manager._recover_stale_streams()
-    assert application.cmc.start_metering.await_count == 3
+    application.cmc.start_metering.assert_awaited_once()
+    for expected in range(2, 12):
+        now += metering_module.METERING_KEEPALIVE_SECONDS
+        manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
+        await manager._recover_stale_streams()
+        assert application.cmc.start_metering.await_count == expected
+    now += metering_module.METERING_ABANDON_SECONDS + 1
+    starts = application.cmc.start_metering.await_count
+    for _ in range(10):
+        now += metering_module.METERING_KEEPALIVE_SECONDS
+        await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == starts
+    manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8752))
+    now += metering_module.METERING_KEEPALIVE_SECONDS
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == starts + 1
     await manager.stop()
 
 
