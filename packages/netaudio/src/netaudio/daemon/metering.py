@@ -46,6 +46,7 @@ class MeteringManager:
         self._active_port: int | None = None
         self._port_lock = DeferredAsyncioLock()
         self._dirty_devices: set[str] = set()
+        self._failed_starts: dict[str, float] = {}
         self._started: dict[str, tuple[str, str, float]] = {}
         self._stream_locks: dict[str, asyncio.Lock] = {}
 
@@ -149,20 +150,27 @@ class MeteringManager:
                 or not device.ipv4
                 or getattr(device, "requires_managed_control", False)
             ):
+                self._failed_starts.pop(server_name, None)
                 return
             started = self._started.get(server_name)
             detailed = self._detailed_levels.get(server_name)
+            now = time.monotonic()
+            failed_at = self._failed_starts.get(server_name)
             if recover:
-                now = time.monotonic()
-                if not started or not detailed or now - detailed["timestamp"] > METERING_ABANDON_SECONDS:
+                if failed_at is not None:
+                    if now - failed_at < METERING_KEEPALIVE_SECONDS:
+                        return
+                elif not started or not detailed or now - detailed["timestamp"] > METERING_ABANDON_SECONDS:
                     return
-                if now - started[2] < METERING_KEEPALIVE_SECONDS:
+                elif now - started[2] < METERING_KEEPALIVE_SECONDS:
                     return
             elif started:
                 return
             device_ip = str(device.ipv4)
-            device_name = device.name or device.server_name
-            started_at = time.monotonic()
+            device_name = device.name
+            if not device_name:
+                self._failed_starts[server_name] = now
+                return
             logger.debug(f"Sending metering start to {device_name} ({device_ip})")
             try:
                 await self._application.cmc.start_metering(
@@ -174,13 +182,16 @@ class MeteringManager:
                 )
             except (RuntimeError, OSError) as error:
                 logger.warning(f"Metering start failed for {device_name}: {error}")
-            finally:
-                self._started[server_name] = (device_ip, device_name, started_at)
+                self._failed_starts[server_name] = now
+                return
+            self._failed_starts.pop(server_name, None)
+            self._started[server_name] = (device_ip, device_name, now)
 
     async def _send_stop(self, server_name: str, *, changing_port: bool = False):
         async with self._stream_lock(server_name):
             if self._is_active(server_name) and not changing_port:
                 return
+            self._failed_starts.pop(server_name, None)
             started = self._started.pop(server_name, None)
             if started is None:
                 return
@@ -244,7 +255,7 @@ class MeteringManager:
             await self._recover_stale_streams()
 
     async def _recover_stale_streams(self):
-        for server_name in tuple(self._started):
+        for server_name in tuple(dict.fromkeys((*self._started, *self._failed_starts))):
             await self._send_start(server_name, recover=True)
 
     async def _broadcast_loop(self):
