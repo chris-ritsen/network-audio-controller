@@ -31,11 +31,15 @@ from netaudio.daemon.http.configuration import DaemonConfigurationHandlers
 from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
+from netaudio.daemon.http.mcp import MCP_PATH, DaemonMcpHandlers
+from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.sse_view import SseDeviceView
 from netaudio.daemon.http.tls import TLSConfigurationError, TLSSettings, build_ssl_context
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
+from netaudio.daemon.mcp_access import ensure_mcp_token
+from netaudio.daemon.mcp_oauth import OAuthStore
 from netaudio.daemon.server_info import server_info
 from netaudio.daemon.subscription_readback import SubscriptionReadback
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -140,6 +144,8 @@ class DaemonHTTPServer(
     DaemonConfigurationHandlers,
     DaemonDeviceHandlers,
     DaemonManagedHandlers,
+    DaemonMcpHandlers,
+    DaemonOAuthHandlers,
     DaemonWebHandlers,
 ):
     def __init__(
@@ -156,9 +162,12 @@ class DaemonHTTPServer(
         refresh_discovery=None,
         event_journal=None,
         tls: TLSSettings | None = None,
+        mcp_token: str | None = None,
     ):
         self.application = application
-        self.server_info = server_info()
+        self.mcp_token = mcp_token if mcp_token is not None else ensure_mcp_token()
+        self.oauth_store = OAuthStore()
+        self.server_info = {**server_info(), "mcp": self.mcp_server_info()}
         from netaudio.daemon.managed_controls import ManagedDeviceControls
 
         self.managed_controls = ManagedDeviceControls(application)
@@ -206,6 +215,7 @@ class DaemonHTTPServer(
             "/presets/preview": self._handle_preview_preset,
             "/presets/load": self._handle_load_preset,
             "/subscribe": self._handle_subscribe,
+            "/subscriptions/apply": self._handle_apply_subscriptions,
             "/unsubscribe": self._handle_unsubscribe,
             "/identify": self._handle_identify,
             "/rename-device": self._handle_rename_device,
@@ -706,6 +716,7 @@ class DaemonHTTPServer(
             properties["server_version"] = version
         if revision := self.server_info.get("git_revision"):
             properties["git_revision"] = revision
+        properties["mcp_path"] = MCP_PATH
         if self.tls is not None:
             properties["tls_port"] = str(self.tls.port)
         return ServiceInfo(
@@ -764,7 +775,12 @@ class DaemonHTTPServer(
             return
 
         try:
-            await self._dispatch(method, path, body, writer, headers)
+            if urlsplit(path).path == MCP_PATH:
+                await self._handle_mcp(method, body, writer, headers)
+            elif self.is_oauth_path(urlsplit(path).path):
+                await self._handle_oauth(method, path, body, writer, headers)
+            else:
+                await self._dispatch(method, path, body, writer, headers)
         except TimeoutError:
             await self._send_json(writer, {"error": "device did not respond"}, 504)
         except Exception as exception:
