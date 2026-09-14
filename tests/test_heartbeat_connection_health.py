@@ -302,7 +302,13 @@ async def test_service_reschedules_expiry_for_the_second_stream():
 
     def on_device_updated(updated_device):
         state = updated_device.receiver_flow_connection_health
-        if state is not None and state["fresh"] is False:
+        if (
+            state is not None
+            and state["latency_stream"] is not None
+            and state["late_packet_stream"] is not None
+            and state["latency_stream"]["fresh"] is False
+            and state["late_packet_stream"]["fresh"] is False
+        ):
             fully_expired.set()
 
     service = DanteHeartbeatService(
