@@ -228,7 +228,9 @@ class DaemonPresetHandlers:
                             if configured.get("mode") not in ("static", "dynamic", "dhcp"):
                                 raise ValueError(f"{device.name}: network mode is unknown; omit network settings.")
                         device.interfaces = interfaces
-                        if device.switch_redundancy_supported is True:
+                        from netaudio.dante.network_configuration import advertised_redundancy_support
+
+                        if advertised_redundancy_support(device) is True:
                             await self.application.probe_dante_redundancy(device)
                 content = format_devices_xml(selected, preset_name=name, sections=sections)
                 if len(content.encode("utf-8")) > MAX_PRESET_BYTES:

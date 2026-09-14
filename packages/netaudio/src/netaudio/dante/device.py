@@ -84,10 +84,12 @@ class DanteDevice:
         self.encoding_configuration_supported: bool | None = None
         self.sample_rate_pullup_configuration_supported: bool | None = None
         self.switch_redundancy_supported: bool | None = None
+        self.redundancy_advertised_support_source: dict | None = None
         self.static_ipv4_configuration_supported: bool | None = None
         self.device_locking_supported: bool | None = None
         self.external_word_clock_read_only: bool | None = None
         self.switch_redundancy_read_only: bool | None = None
+        self.redundancy_read_only_source: dict | None = None
         self.static_ipv4_configuration_read_only: bool | None = None
         self.generic_codec_control_supported: bool | None = None
         self.detailed_metering_supported: bool | None = None
@@ -170,6 +172,7 @@ class DanteDevice:
         self.interface_status_protocol: int | None = None
         self.dante_redundancy: dict | None = None
         self.switch_configuration_choices: list[dict] | None = None
+        self.redundancy_probe_outcomes: dict[str, dict] = {}
         self.lock_reset_status: dict | None = None
         self.clear_configuration_status: dict | None = None
         self.diagnostic_log_export_supported: bool | None = None

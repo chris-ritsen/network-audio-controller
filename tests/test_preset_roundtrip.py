@@ -8,12 +8,13 @@ import pytest
 from netaudio.presets.loading import (
     MatchedPresetDevice,
     PresetActionState,
+    _plan_redundancy,
     apply_preset_plan,
     build_preset_plan,
 )
 from netaudio.presets.parsing import parse_preset_xml
 from netaudio.presets.schema import ParsedPresetDevices, normalize_device_config
-from netaudio.presets.serialization import format_preset_configs
+from netaudio.presets.serialization import device_preset_config, format_preset_configs
 
 
 def _flow() -> dict:
@@ -164,6 +165,7 @@ def _planning_device():
     return SimpleNamespace(
         name="Desk",
         server_name="desk.local.",
+        mac_address="00:1D:C1:00:00:01",
         sample_rate=48000,
         supported_sample_rates=[48000],
         sample_rate_configuration_supported=True,
@@ -185,14 +187,98 @@ def _planning_device():
         get_rx_channels=get_channels,
         fetch_device_name=fetch_device_name,
         subscriptions=[],
-        dante_redundancy={"configured": "switched"},
+        dante_redundancy={
+            "current": "switched",
+            "configured": "switched",
+            "state_fresh": True,
+            "available_modes": [
+                {"code": 0, "label": "Switched", "mode": "switched"},
+                {"code": 1, "label": "Redundant", "mode": "redundant"},
+            ],
+            "available_modes_source": "interface_status_flag_cohort",
+            "available_modes_fresh": True,
+        },
         switch_redundancy_supported=True,
+        redundancy_advertised_support_source={"fresh": True, "field_reported": True},
         switch_redundancy_read_only=False,
+        redundancy_read_only_source={"fresh": True, "field_reported": True},
+        interface_status_protocol=0x0724,
+        ipv4="192.0.2.10",
+        control_transports=["direct"],
         generic_codec_control_supported=True,
         static_ipv4_configuration_supported=True,
         static_ipv4_configuration_read_only=False,
         interfaces=[],
     )
+
+
+@pytest.mark.parametrize(
+    ("change", "included"),
+    [
+        (None, True),
+        ("unsupported", False),
+        ("capability_unknown", False),
+        ("state_stale", False),
+        ("modes_stale", False),
+        ("configured_unknown", False),
+    ],
+)
+def test_preset_capture_requires_fresh_advertised_redundancy(change, included):
+    device = _planning_device()
+    if change == "unsupported":
+        device.switch_redundancy_supported = False
+    elif change == "capability_unknown":
+        device.redundancy_advertised_support_source = None
+    elif change == "state_stale":
+        device.dante_redundancy["state_fresh"] = False
+    elif change == "modes_stale":
+        device.dante_redundancy["available_modes_fresh"] = False
+    elif change == "configured_unknown":
+        device.dante_redundancy["configured"] = None
+
+    config = device_preset_config(device, {"network"})
+    assert (config.get("redundancy_mode") == "switched") is included
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("condition", "expected_state", "reason"),
+    [
+        ("unsupported", PresetActionState.UNSUPPORTED, "unsupported"),
+        ("capability_unknown", PresetActionState.UNAVAILABLE, "capability_unknown"),
+        ("state_unavailable", PresetActionState.UNAVAILABLE, "configured redundancy was unavailable"),
+        ("read_only", PresetActionState.UNAVAILABLE, "read_only"),
+        ("locked", PresetActionState.UNAVAILABLE, "device_locked"),
+        ("managed_permission_denied", PresetActionState.UNAVAILABLE, "managed_permission_denied"),
+        ("mode_not_advertised", PresetActionState.UNSUPPORTED, "supported redundancy values"),
+        ("writable", PresetActionState.CHANGE, "fresh readback differs"),
+    ],
+)
+async def test_preset_plan_distinguishes_redundancy_availability(condition, expected_state, reason):
+    from netaudio.dante.network_configuration import redundancy_snapshot
+
+    device = _planning_device()
+    if condition == "unsupported":
+        device.switch_redundancy_supported = False
+    elif condition == "capability_unknown":
+        device.redundancy_advertised_support_source = None
+    elif condition == "state_unavailable":
+        device.dante_redundancy = None
+    elif condition == "read_only":
+        device.switch_redundancy_read_only = True
+    elif condition == "locked":
+        device.is_locked = True
+    elif condition == "managed_permission_denied":
+        device.requires_managed_control = True
+        device.control_transports = ["ddm"]
+        device.managed_operation_permissions = {"redundancy": False}
+    elif condition == "mode_not_advertised":
+        device.dante_redundancy["available_modes"] = [{"code": 0, "label": "Switched", "mode": "switched"}]
+
+    application = SimpleNamespace(probe_dante_redundancy=AsyncMock(return_value=redundancy_snapshot(device)))
+    action = await _plan_redundancy(application, device, "redundant")
+    assert action.state is expected_state
+    assert reason in action.reason
 
 
 @pytest.mark.asyncio
@@ -201,9 +287,14 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
     application = SimpleNamespace(
         probe_dante_redundancy=AsyncMock(
             return_value={
-                "current": "switched",
-                "configured": "switched",
-                "supported": ["switched", "redundant"],
+                "advertised_support": True,
+                "current_mode": "switched",
+                "configured_mode": "switched",
+                "available_modes": [
+                    {"code": 0, "label": "Switched", "mode": "switched"},
+                    {"code": 1, "label": "Redundant", "mode": "redundant"},
+                ],
+                "available_modes_fresh": True,
             }
         ),
         probe_sample_rate_status=AsyncMock(

@@ -220,9 +220,22 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
             config["interfaces"] = [
                 _configured_interface(entry, index) for index, entry in enumerate(device.interfaces)
             ]
-        redundancy = getattr(device, "dante_redundancy", None)
-        if isinstance(redundancy, Mapping) and redundancy.get("configured") is not None:
-            config["redundancy_mode"] = redundancy["configured"]
+        from netaudio.dante.network_configuration import redundancy_snapshot
+
+        redundancy = redundancy_snapshot(device)
+        available_modes = redundancy["available_modes"]
+        known_modes = {
+            choice.get("mode")
+            for choice in available_modes or []
+            if isinstance(choice, Mapping) and choice.get("mode") is not None
+        }
+        if (
+            redundancy["advertised_support"] is True
+            and redundancy["state_fresh"] is True
+            and redundancy["available_modes_fresh"] is True
+            and redundancy["configured_mode"] in known_modes
+        ):
+            config["redundancy_mode"] = redundancy["configured_mode"]
     if "routing" in sections:
         transmitter_names = {
             channel.number: channel.friendly_name or channel.name

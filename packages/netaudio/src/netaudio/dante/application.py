@@ -1355,10 +1355,22 @@ class DanteApplication:
             device.encoding_configuration_supported = None
             device.sample_rate_pullup_configuration_supported = None
             device.switch_redundancy_supported = None
+            if device.redundancy_advertised_support_source is not None:
+                device.redundancy_advertised_support_source = {
+                    **device.redundancy_advertised_support_source,
+                    "fresh": False,
+                }
             device.static_ipv4_configuration_supported = None
             device.device_locking_supported = None
             device.external_word_clock_read_only = None
             device.switch_redundancy_read_only = None
+            if device.redundancy_read_only_source is not None:
+                device.redundancy_read_only_source = {
+                    **device.redundancy_read_only_source,
+                    "fresh": False,
+                }
+            if isinstance(device.dante_redundancy, dict):
+                device.dante_redundancy = {**device.dante_redundancy, "state_fresh": False}
             device.static_ipv4_configuration_read_only = None
             device.generic_codec_control_supported = None
             device.detailed_metering_supported = None

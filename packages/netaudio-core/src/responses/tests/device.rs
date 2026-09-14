@@ -833,8 +833,8 @@ fn dante_model_decodes_all_versioned_capability_groups() {
     ))
     .unwrap();
     assert_eq!(parsed.record_protocol_version, 0x0723);
-    assert_eq!(parsed.primary_capabilities, primary);
-    assert_eq!(parsed.read_only_capabilities, 0x0000_6080);
+    assert_eq!(parsed.primary_capabilities, Some(primary));
+    assert_eq!(parsed.read_only_capabilities, Some(0x0000_6080));
     assert_eq!(parsed.monitoring_capabilities, 0x1F);
     assert_eq!(parsed.secondary_capabilities, 8);
     assert_eq!(parsed.domain_capability_values, 0xA5A5_0001);
@@ -843,13 +843,13 @@ fn dante_model_decodes_all_versioned_capability_groups() {
     assert!(parsed.sample_rate_configuration_supported);
     assert!(parsed.encoding_configuration_supported);
     assert!(parsed.sample_rate_pullup_configuration_supported);
-    assert!(parsed.switch_redundancy_supported);
+    assert_eq!(parsed.switch_redundancy_supported, Some(true));
     assert!(parsed.static_ipv4_configuration_supported);
     assert!(parsed.detailed_metering_supported);
     assert!(parsed.aes67_configuration_supported);
     assert!(parsed.device_locking_supported);
     assert!(parsed.external_word_clock_read_only);
-    assert!(parsed.switch_redundancy_read_only);
+    assert_eq!(parsed.switch_redundancy_read_only, Some(true));
     assert!(parsed.static_ipv4_configuration_read_only);
     assert!(parsed.generic_codec_control_supported);
     assert!(parsed.interface_statistics_supported);
@@ -871,18 +871,78 @@ fn dante_model_ignores_physically_present_fields_before_each_version_threshold()
     ];
     for (version, expected) in cases {
         let parsed = parse_dante_model(&dante_model_response(version, 1, 1, 1, 1, 1, 1)).unwrap();
+        assert_eq!(parsed.primary_capabilities, (expected[0] != 0).then_some(1));
+        assert_eq!(
+            parsed.read_only_capabilities,
+            (expected[1] != 0).then_some(1)
+        );
         assert_eq!(
             [
-                parsed.primary_capabilities,
-                parsed.read_only_capabilities,
                 parsed.monitoring_capabilities,
                 parsed.secondary_capabilities,
                 parsed.domain_capability_values,
                 parsed.domain_capability_validity,
             ],
-            expected
+            expected[2..]
         );
     }
+}
+
+#[test]
+fn redundancy_capability_and_read_only_preserve_version_availability() {
+    let before_capability = parse_dante_model(&dante_model_response(
+        0x01ff,
+        u32::MAX,
+        u32::MAX,
+        0,
+        0,
+        0,
+        0,
+    ))
+    .unwrap();
+    assert_eq!(before_capability.primary_capabilities, None);
+    assert_eq!(before_capability.switch_redundancy_supported, None);
+    assert_eq!(before_capability.read_only_capabilities, None);
+    assert_eq!(before_capability.switch_redundancy_read_only, None);
+
+    let before_read_only = parse_dante_model(&dante_model_response(
+        0x0709,
+        DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK,
+        DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK,
+        0,
+        0,
+        0,
+        0,
+    ))
+    .unwrap();
+    assert_eq!(before_read_only.switch_redundancy_supported, Some(true));
+    assert_eq!(before_read_only.switch_redundancy_read_only, None);
+
+    let explicit = parse_dante_model(&dante_model_response(
+        0x070a,
+        0,
+        DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK,
+        0,
+        0,
+        0,
+        0,
+    ))
+    .unwrap();
+    assert_eq!(explicit.switch_redundancy_supported, Some(false));
+    assert_eq!(explicit.switch_redundancy_read_only, Some(true));
+
+    let explicit_writable = parse_dante_model(&dante_model_response(
+        0x070a,
+        DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ))
+    .unwrap();
+    assert_eq!(explicit_writable.switch_redundancy_supported, Some(true));
+    assert_eq!(explicit_writable.switch_redundancy_read_only, Some(false));
 }
 
 #[test]

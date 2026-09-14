@@ -83,7 +83,7 @@ fn build_command_status(json: &str) -> NetaudioStatus {
 
 fn parse_response_call(kind: &str, data: &[u8]) -> (NetaudioStatus, Vec<u8>) {
     let kind = CString::new(kind).unwrap();
-    let mut output = vec![0u8; 1024];
+    let mut output = vec![0u8; 4096];
     let mut output_length = 0usize;
     let status = unsafe {
         netaudio_parse_response(
@@ -478,6 +478,10 @@ fn interface_status_response_kind_serializes_expected_schema() {
         "192.0.2.244"
     );
     assert_eq!(json["reboot_required"], false);
+    assert!(json["redundancy_flags"].is_number());
+    assert!(json["raw_record_hexadecimal"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
     assert!(json.get("pending_config").is_none());
 }
 

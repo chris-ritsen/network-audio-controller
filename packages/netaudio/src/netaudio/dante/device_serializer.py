@@ -40,10 +40,12 @@ DEVICE_SCALAR_FIELDS = (
     "encoding_configuration_supported",
     "sample_rate_pullup_configuration_supported",
     "switch_redundancy_supported",
+    "redundancy_advertised_support_source",
     "static_ipv4_configuration_supported",
     "device_locking_supported",
     "external_word_clock_read_only",
     "switch_redundancy_read_only",
+    "redundancy_read_only_source",
     "static_ipv4_configuration_read_only",
     "generic_codec_control_supported",
     "ddm_capabilities",
@@ -93,6 +95,7 @@ DEVICE_SCALAR_FIELDS = (
     "interface_statistics_supported",
     "interface_statistics",
     "dante_redundancy",
+    "redundancy_probe_outcomes",
     "interfaces",
     "inventory_id",
     "inventory_sources",
@@ -225,7 +228,7 @@ class DanteDeviceSerializer:
         }
 
         for field_name in DEVICE_SCALAR_FIELDS:
-            field_value = getattr(device, field_name)
+            field_value = getattr(device, field_name, None)
             if field_value is None and field_name != "is_locked":
                 continue
             if isinstance(field_value, (bytes, bytearray)):
@@ -257,6 +260,9 @@ class DanteDeviceSerializer:
         from netaudio.dante.operation_availability import operation_availability_map
 
         as_json["operation_availability"] = operation_availability_map(device)
+        from netaudio.dante.network_configuration import redundancy_snapshot
+
+        as_json["network_redundancy"] = redundancy_snapshot(device)
         from netaudio.dante.performance_configuration import performance_operation_availability
 
         as_json["performance_operation_availability"] = performance_operation_availability(device)

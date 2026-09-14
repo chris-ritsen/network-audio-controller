@@ -13,6 +13,21 @@ const writableNetwork = {
   redundancy: { supported: true, readable: true, writable: true, reasons: [] },
 };
 
+const redundancyState = (current = "switched", configured = "switched") => ({
+  advertised_support: true,
+  current_mode: current,
+  configured_mode: configured,
+  current_mode_evidence: { status: "known", mode: current },
+  configured_mode_evidence: { status: "known", mode: configured },
+  available_modes: [
+    { code: 0, label: "Switched", mode: "switched" },
+    { code: 1, label: "Redundant", mode: "redundant" },
+  ],
+  interface_inventory: { completeness: "complete", reported_count: 2 },
+  licensed_redundancy: { enabled: null, source: null },
+  reboot_required: current !== configured,
+});
+
 test("redundancy selection submits immediately and blocks overlapping writes", async () => {
   const previousVNode = options.vnode;
   const previousSet = api.setRedundancy;
@@ -33,11 +48,7 @@ test("redundancy selection submits immediately and blocks overlapping writes", a
         device: {
           server_name: "test.local.",
           operation_availability: writableNetwork,
-          dante_redundancy: {
-            current: "switched",
-            configured: "switched",
-            supported: ["switched", "redundant"],
-          },
+          network_redundancy: redundancyState(),
         },
       }),
     );
@@ -49,7 +60,7 @@ test("redundancy selection submits immediately and blocks overlapping writes", a
     assert.equal(calls[0].mode, "redundant");
     await change({ currentTarget: { value: "redundant" } });
     assert.equal(calls.length, 1);
-    finish({ redundancy: { configured: "redundant" } });
+    finish({ redundancy: redundancyState("switched", "redundant") });
     await request;
     api.setRedundancy = async () => { throw new Error("Device did not respond"); };
     await assert.doesNotReject(change({ currentTarget: { value: "redundant" } }));
@@ -66,9 +77,7 @@ test("network panel separates primary and secondary active/configured values", (
         configured: { mode: "static", ip_address: "192.0.2.34", netmask: "255.255.255.0" } },
       { interface: "secondary", mode: "dynamic", ip_address: "198.51.100.62", netmask: "255.255.0.0",
         configured: { mode: "static", ip_address: "192.0.2.244", netmask: "255.255.255.0" }, reboot_required: true },
-    ], dante_redundancy: {
-      current: "switched", configured: "redundant", supported: ["switched", "redundant"], reboot_required: true,
-    },
+    ], network_redundancy: redundancyState("switched", "redundant"),
     operation_availability: writableNetwork,
   };
   const markup = render(h(NetworkSection, { device }));
@@ -154,11 +163,7 @@ test("readable network state keeps backend denial reasons and hides writes", () 
       },
     ],
     interface_configuration_modes: { primary: ["dhcp", "static"] },
-    dante_redundancy: {
-      current: "switched",
-      configured: "switched",
-      supported: ["switched", "redundant"],
-    },
+    network_redundancy: redundancyState(),
     operation_availability: {
       static_ipv4: {
         supported: true,
@@ -183,3 +188,37 @@ test("readable network state keeps backend denial reasons and hides writes", () 
     /Save primary settings|aria-label="Dante Redundancy"/,
   );
 });
+
+for (const [name, support, reasons, expected] of [
+  ["unsupported", false, ["unsupported"], /operation is unsupported/],
+  ["capability unknown", null, ["capability_unknown"], /Capability support was not reported/],
+  ["state unavailable", true, ["state_unavailable"], /state is unavailable/],
+  ["read-only", true, ["read_only"], /setting is read-only/],
+  ["locked", true, ["device_locked"], /device is locked/],
+  ["managed permission denied", true, ["managed_permission_denied"], /Permission.*denied/],
+  ["mode not advertised", true, ["requested_mode_not_advertised"], /mode was not advertised/],
+]) {
+  test(`redundancy UI distinguishes ${name}`, () => {
+    const status = {
+      ...redundancyState(),
+      advertised_support: support,
+      ...(reasons.includes("state_unavailable") ? {
+        current_mode: null,
+        configured_mode: null,
+        current_mode_evidence: { status: "unavailable", mode: null },
+        configured_mode_evidence: { status: "unavailable", mode: null },
+      } : {}),
+    };
+    const markup = render(h(NetworkSection, { device: {
+      server_name: `${name}.local.`,
+      network_redundancy: status,
+      operation_availability: {
+        static_ipv4: { supported: false, readable: false, writable: false, reasons: ["unsupported"] },
+        redundancy: { supported: support, readable: true, writable: false, reasons },
+      },
+      interfaces: [],
+    } }));
+    assert.match(markup, expected);
+    assert.doesNotMatch(markup, /aria-label="Dante Redundancy"/);
+  });
+}

@@ -11,8 +11,26 @@ from tests.http_api_test_support import FakeWriter, get, make_device, make_http_
 def assert_writable_network_availability(payload):
     assert payload.pop("operation_availability") == {
         "static_ipv4": {"supported": True, "readable": True, "writable": True, "reasons": []},
-        "redundancy": {"supported": True, "readable": False, "writable": True, "reasons": []},
+        "redundancy": {
+            "supported": True,
+            "readable": False,
+            "writable": False,
+            "reasons": ["state_unavailable", "available_modes_unknown", "protocol_unsupported"],
+        },
     }
+
+
+def assert_unavailable_redundancy_snapshot(snapshot):
+    assert snapshot["advertised_support"] is True
+    assert snapshot["current_mode"] is None
+    assert snapshot["configured_mode"] is None
+    assert snapshot["available_modes"] is None
+    assert snapshot["state_fresh"] is False
+    assert snapshot["operation_availability"]["reasons"] == [
+        "state_unavailable",
+        "available_modes_unknown",
+        "protocol_unsupported",
+    ]
 
 
 class TestRouting:
@@ -823,12 +841,12 @@ class TestMutationVerification:
 
         assert status == 200
         assert_writable_network_availability(response)
+        assert_unavailable_redundancy_snapshot(response.pop("redundancy"))
         assert response == {
             "success": True,
             "reboot_required": False,
             "interfaces": [{"interface": "primary", "mode": "dynamic", "configured": {"mode": "dynamic"}}],
             "interface_configuration_modes": {"primary": ["dhcp", "static"]},
-            "redundancy": None,
             "link_speed_mbps": None,
         }
 
@@ -845,12 +863,12 @@ class TestMutationVerification:
 
         assert status == 200
         assert_writable_network_availability(response)
+        assert_unavailable_redundancy_snapshot(response.pop("redundancy"))
         assert response == {
             "success": True,
             "reboot_required": True,
             "interfaces": [{"interface": "primary", "mode": "static", "configured": {"mode": "dynamic"}}],
             "interface_configuration_modes": {"primary": ["dhcp", "static"]},
-            "redundancy": None,
             "link_speed_mbps": None,
         }
 
@@ -909,13 +927,13 @@ class TestDeviceLookup:
 
         assert status == 200
         assert_writable_network_availability(body)
+        assert_unavailable_redundancy_snapshot(body.pop("redundancy"))
         assert body == {
             "device": "dev1",
             "interfaces": [{"mode": "dynamic", "ip_address": "192.168.1.50"}],
             "interface_configuration_modes": {},
             "link_speed_mbps": 100,
             "reboot_required": False,
-            "redundancy": None,
         }
         http_server.application.probe_interface_status.assert_awaited_once_with(device)
         assert device.interfaces == body["interfaces"]

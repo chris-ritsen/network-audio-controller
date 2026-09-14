@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import struct
+import time
 from dataclasses import dataclass
 
 from netaudio.dante.clock_identity import canonical_clock_identity
@@ -150,6 +151,27 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
     status["dante_model_secondary_capabilities"] = parsed["secondary_capabilities"]
     status["dante_model_domain_capability_values"] = parsed["domain_capability_values"]
     status["dante_model_domain_capability_validity"] = parsed["domain_capability_validity"]
+    observed_at = time.time()
+    source = {
+        "kind": "conmon_dante_model",
+        "opcode": CONMON_OPCODE_DANTE_MODEL_RESPONSE,
+        "record_protocol_version": parsed["record_protocol_version"],
+        "observed_at_unix": observed_at,
+        "fresh": True,
+    }
+    status["redundancy_advertised_support_source"] = {
+        **source,
+        "field_reported": parsed["switch_redundancy_supported"] is not None,
+    }
+    status["redundancy_read_only_source"] = {
+        **source,
+        "field_reported": parsed["switch_redundancy_read_only"] is not None,
+        **(
+            {}
+            if parsed["switch_redundancy_read_only"] is not None
+            else {"unavailable_reason": "record_protocol_version"}
+        ),
+    }
     for field_name in (
         "identify_supported",
         "sample_rate_configuration_supported",
@@ -197,8 +219,11 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
         "interfaces": parsed["interfaces"],
         "link_speed_mbps": parsed["link_speed_mbps"],
     }
-    if not getattr(device, "switch_configuration_choices", None):
-        status["dante_redundancy"] = interface_redundancy_status(parsed, device)
+    redundancy = interface_redundancy_status(parsed, device)
+    if redundancy is not None:
+        status["dante_redundancy"] = redundancy
+    elif isinstance(getattr(device, "dante_redundancy", None), dict):
+        status["dante_redundancy"] = {**device.dante_redundancy, "state_fresh": False}
     return ParsedStatus(STATUS_KIND_INTERFACE, status, status)
 
 

@@ -173,8 +173,8 @@ def _filter_device(device: dict, level: str) -> dict:
         interfaces = device.get("interfaces")
         if interfaces:
             filtered["interfaces"] = interfaces
-        if device.get("dante_redundancy"):
-            filtered["dante_redundancy"] = device["dante_redundancy"]
+        if device.get("network_redundancy"):
+            filtered["network_redundancy"] = device["network_redundancy"]
         return filtered
 
     return dict(device)
