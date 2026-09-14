@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import json
 import logging
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 from netaudio.daemon.mcp_oauth import (
     SCOPE_READ,
@@ -145,7 +147,7 @@ class DaemonOAuthHandlers:
             elif path == AUTHORIZE_PATH and method == "POST":
                 await self._oauth_authorize_decision(writer, headers, _form_body(body, headers))
             elif path == TOKEN_PATH and method == "POST":
-                self._write_oauth(writer, 200, self._oauth_token(_form_body(body, headers)))
+                self._write_oauth(writer, 200, self._oauth_token(_form_body(body, headers), headers))
             elif path == REVOKE_PATH and method == "POST":
                 self.oauth_store.revoke(_form_body(body, headers).get("token"))
                 self._write_oauth(writer, 200, {})
@@ -201,7 +203,9 @@ class DaemonOAuthHandlers:
             scope_write=SCOPE_WRITE,
             write_checked="checked" if request["scope"] == SCOPE_WRITE else "",
         )
-        self._write_oauth(writer, 200, page, content_type="text/html; charset=utf-8")
+        self._write_oauth(
+            writer, 200, page, content_type="text/html; charset=utf-8", form_origin=_origin(request["redirect_uri"])
+        )
 
     async def _oauth_authorize_decision(self, writer, headers, form: dict) -> None:
         request = self._oauth_request({key: [value] for key, value in form.items()})
@@ -223,9 +227,12 @@ class DaemonOAuthHandlers:
         logger.info(f"MCP client {request['client_name']} authorized from {address} with scope {request['scope']}")
         self._oauth_redirect(writer, redirect, {"code": code, "state": request["state"]})
 
-    def _oauth_token(self, form: dict) -> dict:
+    def _oauth_token(self, form: dict, headers: dict) -> dict:
         grant_type = form.get("grant_type")
-        client_id, record = self.oauth_store.authenticate_client(form.get("client_id"), form.get("client_secret"))
+        basic_client_id, basic_secret = _basic_credentials(headers.get("authorization"))
+        client_id, record = self.oauth_store.authenticate_client(
+            form.get("client_id") or basic_client_id, form.get("client_secret") or basic_secret
+        )
         if grant_type == "authorization_code":
             scope = self.oauth_store.redeem_code(
                 form.get("code"), client_id, form.get("redirect_uri"), form.get("code_verifier")
@@ -242,20 +249,46 @@ class DaemonOAuthHandlers:
         head = f"HTTP/1.1 302 Found\r\nLocation: {location}\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n"
         writer.write(head.encode())
 
-    def _write_oauth(self, writer, status: int, payload, content_type: str = "application/json") -> None:
+    def _write_oauth(
+        self,
+        writer,
+        status: int,
+        payload,
+        content_type: str = "application/json",
+        form_origin: str | None = None,
+    ) -> None:
         body = payload.encode() if isinstance(payload, str) else json.dumps(payload, default=str).encode()
+        form_action = f"'self' {form_origin}" if form_origin else "'self'"
         head = (
             f"HTTP/1.1 {status} {STATUS_TEXT.get(status, 'Error')}\r\n"
             f"Content-Type: {content_type}\r\n"
             f"Content-Length: {len(body)}\r\n"
             "Cache-Control: no-store\r\n"
-            "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'\r\n"
+            f"Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action {form_action}; frame-ancestors 'none'\r\n"
             "Referrer-Policy: no-referrer\r\n"
             "X-Content-Type-Options: nosniff\r\n"
         )
         if status == 401:
             head += 'WWW-Authenticate: Bearer realm="netaudio"\r\n'
         writer.write(head.encode() + b"\r\n" + body)
+
+
+def _basic_credentials(header: str | None) -> tuple[str | None, str | None]:
+    if not isinstance(header, str) or not header.lower().startswith("basic "):
+        return None, None
+    try:
+        decoded = base64.b64decode(header[6:].strip(), validate=True).decode()
+    except (binascii.Error, UnicodeDecodeError):
+        raise OAuthError("invalid_client", "malformed basic credentials", 401) from None
+    client_id, separator, secret = decoded.partition(":")
+    if not separator:
+        raise OAuthError("invalid_client", "malformed basic credentials", 401)
+    return unquote(client_id), unquote(secret)
+
+
+def _origin(uri: str) -> str:
+    parts = urlsplit(uri)
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def _json_body(body) -> dict:
