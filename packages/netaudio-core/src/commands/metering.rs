@@ -39,7 +39,7 @@ pub fn build_volume_start(
     body.extend_from_slice(&offset_field_2.to_be_bytes());
     body.extend_from_slice(&0x000Au16.to_be_bytes());
     body.extend_from_slice(&name_bytes);
-    body.extend_from_slice(&0u16.to_be_bytes());
+    body.extend_from_slice(&1u16.to_be_bytes());
     body.extend_from_slice(&1u16.to_be_bytes());
     body.extend_from_slice(&tail_offset.to_be_bytes());
     body.extend_from_slice(&1u16.to_be_bytes());
@@ -48,7 +48,9 @@ pub fn build_volume_start(
     body.extend_from_slice(&0u16.to_be_bytes());
     body.extend_from_slice(&ipv4);
     body.extend_from_slice(&port.to_be_bytes());
-    body.extend(std::iter::repeat_n(0, 10));
+    body.extend(std::iter::repeat_n(0, 6));
+    body.extend_from_slice(&port.to_be_bytes());
+    body.extend(std::iter::repeat_n(0, 2));
 
     ConmonHeader {
         message_id,
@@ -84,6 +86,24 @@ mod tests {
         updated[4..6].copy_from_slice(&stop[4..6]);
         clear_metering_destinations(&mut updated);
         assert_eq!(updated, stop.as_slice());
+    }
+
+    #[test]
+    fn generated_start_matches_captured_controller_request() {
+        let captured = include_bytes!("../../../../tests/fixtures/metering/controller_start.bin");
+        let generated =
+            build_volume_start("ad4d", [192, 0, 2, 10], [2, 0, 0, 0, 0, 1], 8751, 0x25c7).unwrap();
+        assert_eq!(generated.len(), captured.len());
+        let synthetic_client_identifier = 10..18;
+        let controller_name_padding = 0x23;
+        for (offset, (generated_byte, captured_byte)) in
+            generated.iter().zip(captured.iter()).enumerate()
+        {
+            if synthetic_client_identifier.contains(&offset) || offset == controller_name_padding {
+                continue;
+            }
+            assert_eq!(generated_byte, captured_byte, "byte 0x{offset:02x}");
+        }
     }
 
     #[test]

@@ -8,6 +8,16 @@ from netaudio.daemon import server_info as server_info_module
 from tests.http_api_test_support import get, make_http_server
 
 
+BASE = {"hostname": "studio", "product": "netaudio", "started_at": "2026-09-13T12:00:00Z"}
+
+
+@pytest.fixture(autouse=True)
+def fixed_environment(monkeypatch):
+    monkeypatch.setattr(server_info_module, "_built_revision", lambda: None)
+    monkeypatch.setattr(server_info_module, "_started_at", lambda: BASE["started_at"])
+    monkeypatch.setattr(server_info_module.socket, "gethostname", lambda: "studio.local")
+
+
 def install_metadata(monkeypatch, source=None):
     installed = SimpleNamespace(version="1.2.3", read_text=lambda _: source)
     monkeypatch.setattr(server_info_module, "distribution", lambda _: installed)
@@ -15,7 +25,7 @@ def install_metadata(monkeypatch, source=None):
 
 def test_reports_installed_release_without_inventing_revision(monkeypatch):
     install_metadata(monkeypatch)
-    assert server_info_module.server_info() == {"product": "netaudio", "version": "1.2.3"}
+    assert server_info_module.server_info() == {**BASE, "version": "1.2.3"}
 
 
 def test_reports_git_install_commit_without_source_url(monkeypatch):
@@ -24,7 +34,7 @@ def test_reports_git_install_commit_without_source_url(monkeypatch):
         monkeypatch,
         json.dumps({"url": "https://example.invalid/source", "vcs_info": {"vcs": "git", "commit_id": revision}}),
     )
-    assert server_info_module.server_info() == {"product": "netaudio", "version": "1.2.3", "git_revision": revision}
+    assert server_info_module.server_info() == {**BASE, "version": "1.2.3", "git_revision": revision}
 
 
 @pytest.mark.parametrize(
@@ -38,7 +48,14 @@ def test_reports_git_install_commit_without_source_url(monkeypatch):
 )
 def test_unavailable_source_metadata_does_not_invent_revision(monkeypatch, source):
     install_metadata(monkeypatch, source)
-    assert server_info_module.server_info() == {"product": "netaudio", "version": "1.2.3"}
+    assert server_info_module.server_info() == {**BASE, "version": "1.2.3"}
+
+
+def test_reports_the_revision_recorded_at_build_time(monkeypatch):
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    monkeypatch.setattr(server_info_module, "_built_revision", lambda: revision)
+    install_metadata(monkeypatch, '{"dir_info": {}}')
+    assert server_info_module.server_info() == {**BASE, "git_revision": revision, "version": "1.2.3"}
 
 
 def test_missing_distribution_does_not_invent_release(monkeypatch):
@@ -46,7 +63,7 @@ def test_missing_distribution_does_not_invent_release(monkeypatch):
         raise PackageNotFoundError("netaudio")
 
     monkeypatch.setattr(server_info_module, "distribution", missing)
-    assert server_info_module.server_info() == {"product": "netaudio"}
+    assert server_info_module.server_info() == BASE
 
 
 def test_unreadable_source_metadata_keeps_release_available(monkeypatch):
@@ -55,13 +72,13 @@ def test_unreadable_source_metadata_keeps_release_available(monkeypatch):
 
     installed = SimpleNamespace(version="1.2.3", read_text=unreadable)
     monkeypatch.setattr(server_info_module, "distribution", lambda _: installed)
-    assert server_info_module.server_info() == {"product": "netaudio", "version": "1.2.3"}
+    assert server_info_module.server_info() == {**BASE, "version": "1.2.3"}
 
 
 def test_invalid_release_is_not_advertised(monkeypatch):
     installed = SimpleNamespace(version="invalid\nversion", read_text=lambda _: None)
     monkeypatch.setattr(server_info_module, "distribution", lambda _: installed)
-    assert server_info_module.server_info() == {"product": "netaudio"}
+    assert server_info_module.server_info() == BASE
 
 
 @pytest.mark.asyncio
@@ -71,7 +88,7 @@ async def test_http_and_discovery_report_the_same_backend_version(monkeypatch):
     server = make_http_server()
     status, body = await get(server, "/server-info")
     assert status == 200
-    assert body == {"product": "netaudio", "version": "1.2.3", "git_revision": revision}
+    assert body == {**BASE, "version": "1.2.3", "git_revision": revision}
     advertisement = server._build_service_info(("192.0.2.10",))
     assert advertisement.properties[b"version"] == b"1"
     assert advertisement.properties[b"server_version"] == b"1.2.3"

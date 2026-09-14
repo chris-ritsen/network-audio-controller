@@ -452,7 +452,11 @@ async def query_preferred_tx_flow_inventory(
     *,
     device=None,
 ) -> dict | None:
-    status_protocol_id = modern_arc_protocol_identifier_for_device(device) if device is not None else PROTOCOL_ARC_2809
+    status_protocol_id = PROTOCOL_ARC_2809
+    if device is not None:
+        advertised_protocol_id = advertised_arc_protocol_identifier_for_device(device)
+        if advertised_protocol_id is None or advertised_protocol_id in MODERN_ARC_PROTOCOL_IDS:
+            status_protocol_id = modern_arc_protocol_identifier_for_device(device)
     status_inventory = await _query_tx_inventory_with_optional_device(
         device_ip,
         arc_port,
