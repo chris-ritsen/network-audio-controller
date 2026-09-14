@@ -1,4 +1,11 @@
-from netaudio.daemon.http.mcp_views import compact, device_summary, device_view, events_view, issues_view
+from netaudio.daemon.http.mcp_views import (
+    clock_status_view,
+    compact,
+    device_summary,
+    device_view,
+    events_view,
+    issues_view,
+)
 
 CONNECTED = {"severity": "ok", "label": "Subscribed (unicast)", "detail": "Active", "icon": "\x1b[32m●\x1b[0m"}
 UNRESOLVED = {"severity": "error", "label": "Unresolved", "detail": "The transmitting device isn't on the network."}
@@ -65,6 +72,32 @@ def test_managed_device_summary_uses_ddm_clock_and_model_fallbacks():
         "preferred_leader": False,
         "role": "Leader",
     }
+
+
+def test_clock_status_groups_devices_by_domain_and_names_leaders():
+    payload = {
+        "lx-dante.local.": {**DEVICE, "clock_identity": "001dc1081258", "inventory_id": "ddm:lab:unenrolled:1"},
+        "avio-bt-1.local.": {
+            "clock_role": "Follower",
+            "inventory_id": "ddm:lab:unenrolled:2",
+            "leader_clock_identity": "001dc1081258",
+            "name": "avio-bt-1",
+            "online": True,
+        },
+        "ddm:lab:x:y": {
+            "ddm_clocking_state": {"grand_leader": True, "locked": "LOCKED"},
+            "inventory_id": "ddm:lab:x:y",
+            "management_state": "managed",
+            "name": "wing-4e4701",
+            "online": True,
+        },
+    }
+    view = clock_status_view(payload, {})
+    assert list(view["domains"]) == ["ddm:lab", "unmanaged"]
+    assert view["domains"]["ddm:lab"]["leaders"] == ["wing-4e4701"]
+    assert view["domains"]["unmanaged"]["leaders"] == ["lx-dante"]
+    follower = view["domains"]["unmanaged"]["devices"][0]
+    assert follower["name"] == "avio-bt-1" and follower["leader"] == "lx-dante"
 
 
 def test_device_summary_lists_only_problem_routes():
