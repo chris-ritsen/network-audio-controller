@@ -109,7 +109,11 @@ def test_clock_status_groups_devices_by_domain_and_names_leaders():
         "unnamed.local.": {"inventory_id": "ddm:lab:unenrolled:4", "name": None},
     }
     view = clock_status_view(payload, {})
-    assert view["domains"]["unmanaged"]["devices"][-1] == {"name": "unnamed.local.", "leader_evidence": "unknown"}
+    assert view["domains"]["unmanaged"]["devices"][-1] == {
+        "leader": "lx-dante",
+        "leader_evidence": "domain",
+        "name": "unnamed.local.",
+    }
     assert list(view["domains"]) == ["ddm:lab", "unmanaged"]
     assert view["domains"]["ddm:lab"]["leaders"] == ["wing-4e4701"]
     assert view["domains"]["unmanaged"]["leaders"] == ["lx-dante"]
