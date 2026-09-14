@@ -1,6 +1,18 @@
 import { test, expect } from "@playwright/test";
 import { serveWebapp } from "./fixture.mjs";
 
+const redundancyState = (current = "redundant", configured = "redundant", modes = []) => ({
+  advertised_support: true,
+  current_mode: current,
+  configured_mode: configured,
+  current_mode_evidence: { status: "known", mode: current },
+  configured_mode_evidence: { status: "known", mode: configured },
+  available_modes: modes.map(([code, label, mode]) => ({ code, label, mode })),
+  interface_inventory: { completeness: "complete", reported_count: 2 },
+  licensed_redundancy: { enabled: null, source: null },
+  reboot_required: current !== configured,
+});
+
 for (const supported of [true, false]) {
   test(`secondary configuration ${supported ? "saves static and DHCP settings" : "stays unavailable for unsupported devices"}`, async ({
     page,
@@ -33,7 +45,7 @@ for (const supported of [true, false]) {
         { interface: "secondary", mode: "dynamic", configured: { mode: "static", ip_address: "198.51.100.102", netmask: "255.255.255.0", gateway: "203.0.113.2", dns_server: "203.0.113.53" } },
       ],
       interface_configuration_modes: { primary: ["dhcp", "static"], secondary: supported ? ["dhcp", "static"] : [] },
-      redundancy: { current: "redundant", configured: "redundant", supported: [] },
+      redundancy: redundancyState(),
     };
     const primary = structuredClone(snapshot.interfaces[0]);
     const writes = [];
@@ -87,11 +99,10 @@ test("network controls are ready from inventory while a fresh read is pending", 
       primary: ["dhcp", "static"],
       secondary: ["dhcp", "static"],
     },
-    dante_redundancy: {
-      current: "redundant",
-      configured: "redundant",
-      supported: ["switched", "redundant"],
-    },
+    network_redundancy: redundancyState("redundant", "redundant", [
+      [0, "Switched", "switched"],
+      [1, "Redundant", "redundant"],
+    ]),
     operation_availability: {
       static_ipv4: {
         supported: true,
@@ -112,7 +123,7 @@ test("network controls are ready from inventory while a fresh read is pending", 
   const pending = new Promise((resolve) => { releaseRead = resolve; });
   await page.route("**/interfaces/**", async (route) => {
     await pending;
-    await route.fulfill({ json: { ...record, redundancy: record.dante_redundancy } });
+    await route.fulfill({ json: { ...record, redundancy: record.network_redundancy } });
   });
   await page.goto("http://netaudio.test/devices/managed-network/network-config");
   await expect(page.getByRole("combobox", { name: "Primary address mode", exact: true })).toBeEnabled();

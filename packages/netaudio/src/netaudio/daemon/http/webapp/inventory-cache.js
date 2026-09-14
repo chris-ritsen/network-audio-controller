@@ -70,6 +70,7 @@ const FIELDS = [
   "interface_configuration_modes",
   "link_speed_mbps",
   "dante_redundancy",
+  "network_redundancy",
   "interface_reboot_required",
   "ddm_capabilities",
   "ddm_clock_preferences",

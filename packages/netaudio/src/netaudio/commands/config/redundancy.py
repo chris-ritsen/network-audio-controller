@@ -8,6 +8,7 @@ from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.execution import run_command
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, select_device
+from netaudio.dante.network_configuration import NetworkConfigurationUnverified
 
 
 def mode_label(mode):
@@ -18,41 +19,47 @@ async def run_redundancy(application, devices, mode, all_devices):
     rows, data, failures = [], {}, 0
     for server_name, device in select_device(filter_devices(devices), allow_many=all_devices):
         try:
-            status = (
+            result = (
                 await application.probe_dante_redundancy(device)
                 if mode is None
                 else await application.set_dante_redundancy(device, mode)
             )
-            data[server_name] = status
+            status = result if mode is None else result["effective_readback"]
+            data[server_name] = result
+            available_modes = [
+                choice.get("mode")
+                for choice in status.get("available_modes") or []
+                if isinstance(choice, dict) and choice.get("mode") is not None
+            ]
             rows.append(
                 [
                     device.name or server_name,
-                    mode_label(status["current"]),
-                    mode_label(status["configured"]),
-                    ", ".join(mode_label(value) for value in status["supported"]),
+                    {True: "supported", False: "unsupported", None: "unknown"}[status.get("advertised_support")],
+                    mode_label(status.get("current_mode")),
+                    mode_label(status.get("configured_mode")),
+                    ", ".join(mode_label(value) for value in available_modes),
+                    "yes"
+                    if status["operation_availability"]["writable"]
+                    else ", ".join(status["operation_availability"]["reasons"]),
                     "yes" if status["reboot_required"] else "no",
                 ]
             )
             if mode is not None:
                 typer.echo(
-                    f"Configured Dante redundancy on {device.name or server_name} (verified). No reboot sent.", err=True
-                )
-        except (ValueError, RuntimeError, OSError, TimeoutError) as exception:
-            if (
-                mode is None
-                and len(device.interfaces or []) < 2
-                and not device.switch_configuration_choices
-                and getattr(device, "licensed_redundancy_enabled", None) is not True
-            ):
-                data[server_name] = None
-                typer.echo(
-                    f"Dante Redundancy is not available on {device.name or server_name}: one network interface.",
+                    f"Configured Dante redundancy on {device.name or server_name}; fresh configured-state "
+                    "readback matched. Persistence was not checked and no reboot was sent.",
                     err=True,
                 )
-                continue
+        except (ValueError, RuntimeError, OSError, TimeoutError) as exception:
+            if isinstance(exception, NetworkConfigurationUnverified) and exception.evidence is not None:
+                data[server_name] = exception.evidence
             failures += 1
             typer.echo(f"Error: {device.name or server_name}: {exception}", err=True)
-    output_table(["Device", "Active", "Configured", "Supported", "Reboot Required"], rows, json_data=data)
+    output_table(
+        ["Device", "Capability", "Active", "Configured", "Available Modes", "Writable", "Reboot Required"],
+        rows,
+        json_data=data,
+    )
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)
 

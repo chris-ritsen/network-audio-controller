@@ -473,9 +473,13 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": str(exception)}, 400)
             return
         except NetworkConfigurationUnverified as exception:
-            await self._send_json(writer, {"error": str(exception)}, 502)
+            await self._send_json(
+                writer,
+                {"error": str(exception), **({"mutation": exception.evidence} if exception.evidence else {})},
+                502,
+            )
             return
-        except (NetworkConfigurationError, TimeoutError) as exception:
+        except (NetworkConfigurationError, RuntimeError, TimeoutError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
         device.interfaces = result
@@ -487,7 +491,7 @@ class DaemonConfigurationHandlers:
             return
         try:
             status = await self.application.probe_dante_redundancy(device)
-        except (NetworkConfigurationError, TimeoutError) as exception:
+        except (NetworkConfigurationError, RuntimeError, TimeoutError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
         await self._send_json(writer, {"device": device.server_name, "redundancy": status})
@@ -502,12 +506,23 @@ class DaemonConfigurationHandlers:
             await self._send_json(writer, {"error": str(exception)}, 400)
             return
         except NetworkConfigurationUnverified as exception:
-            await self._send_json(writer, {"error": str(exception)}, 502)
+            await self._send_json(
+                writer,
+                {"error": str(exception), **({"mutation": exception.evidence} if exception.evidence else {})},
+                502,
+            )
             return
-        except (NetworkConfigurationError, TimeoutError) as exception:
+        except (NetworkConfigurationError, RuntimeError, TimeoutError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
-        await self._send_json(writer, {"success": True, "redundancy": status})
+        await self._send_json(
+            writer,
+            {
+                "success": status.get("effective_state_confirmation") is True,
+                "redundancy": status.get("effective_readback"),
+                "mutation": status,
+            },
+        )
 
     async def _require_device(self, writer, name, error="device not found"):
         device = self._find_device(name)

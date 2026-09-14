@@ -147,6 +147,23 @@ fn switch_configuration_status_rejects_invalid_pointer_count_label_and_opcode() 
     assert_eq!(parse_switch_configuration_status(&wrong_opcode), None);
 }
 
+#[test]
+fn switch_configuration_unknown_label_keeps_raw_choice_without_guessing_mode() {
+    let mut response = captured_ad4d_switch_configuration_status();
+    response[52..180].fill(0);
+    response[52..63].copy_from_slice(b"Future Mode");
+
+    let parsed = parse_switch_configuration_status(&response).unwrap();
+    assert_eq!(parsed.mode_codes_at_record_offsets_20_and_22, [1, 1]);
+    assert_eq!(parsed.redundancy.current, None);
+    assert_eq!(parsed.redundancy.configured, None);
+    assert_eq!(parsed.choices[0].code, 1);
+    assert_eq!(parsed.choices[0].label, "Future Mode");
+    assert!(parsed.choices[0]
+        .raw_choice_hexadecimal
+        .starts_with("00010000467574757265204d6f646500"));
+}
+
 pub(super) fn captured_sample_rate_status_packet_28101() -> Vec<u8> {
     vec![
         0xFF, 0xFF, 0x00, 0x48, 0x16, 0x31, 0x00, 0x00, 0x00, 0x1D, 0xC1, 0x08, 0x12, 0x58, 0x00,

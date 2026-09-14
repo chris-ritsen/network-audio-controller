@@ -47,6 +47,8 @@ def test_secondary_static_request_matches_the_causal_wing_observation():
     after = core.parse_response("interface_status", packet("after"))
     expected = deepcopy(before)
     expected["interfaces"][1]["configured"]["dns_server"] = "203.0.113.53"
+    assert after["raw_record_hexadecimal"] != before["raw_record_hexadecimal"]
+    expected["raw_record_hexadecimal"] = after["raw_record_hexadecimal"]
     assert after == expected
     assert before["redundancy"] == after["redundancy"]
 

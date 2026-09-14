@@ -9,6 +9,13 @@ const modeLabel = (value) => ({
   dynamic: "DHCP", static: "Static",
 }[value] || "Unavailable");
 
+const rawModeLabel = (evidence) => {
+  if (evidence?.mode) return modeLabel(evidence.mode);
+  if (evidence?.raw_label) return `Unknown (${evidence.raw_label})`;
+  if (Number.isInteger(evidence?.raw_code)) return `Unknown (0x${evidence.raw_code.toString(16).padStart(4, "0")})`;
+  return "Unavailable";
+};
+
 function InterfaceCard({ device, entry, modes, requestName, onReadback, single }) {
   const configured = entry.configured;
   const role = entry.interface;
@@ -78,37 +85,51 @@ function Redundancy({ device, status, requestName, onReadback }) {
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [selection, setSelection] = useState(status?.configured);
+  const [selection, setSelection] = useState(status?.configured_mode);
   const writable = operationWritable(device, "redundancy");
+  const knownModes = (status?.available_modes || []).filter((choice) => choice?.mode);
+  const unknownModes = (status?.available_modes || []).filter((choice) => !choice?.mode);
   const changeMode = async (event) => {
     const mode = event.currentTarget.value;
-    if (pending.current || mode === status.configured) return;
+    if (pending.current || mode === status.configured_mode) return;
     pending.current = true;
     setBusy(true);
     setError(null);
     setSelection(mode);
     try {
       const result = await api.setRedundancy({ device: requestName, mode });
-      setSelection(result.redundancy?.configured ?? status.configured);
+      setSelection(result.redundancy?.configured_mode ?? status.configured_mode);
       onReadback(result);
     } catch (error) {
-      setSelection(status.configured);
+      setSelection(status.configured_mode);
       setError(error.message);
     } finally {
       pending.current = false;
       setBusy(false);
     }
   };
-  if (!status) return html`<p>Dante Redundancy status is unavailable.</p>`;
+  if (!status) return html`<p>Dante Redundancy capability is unknown.</p>`;
+  const capability = status.advertised_support === true
+    ? "Supported"
+    : status.advertised_support === false ? "Unsupported" : "Unknown";
   return html`
     <section class="network-section">
       <h3 class="section-label">Dante Redundancy</h3>
-      <${Fields} entries=${[["Active", modeLabel(status.current)], ["Configured", modeLabel(status.configured)]]} />
+      <${Fields} entries=${[
+        ["Capability", capability],
+        ["Active", rawModeLabel(status.current_mode_evidence)],
+        ["Configured", rawModeLabel(status.configured_mode_evidence)],
+        ["Interface inventory", status.interface_inventory?.completeness || "unknown"],
+        ...(status.licensed_redundancy?.enabled == null
+          ? [] : [["Licensed redundancy diagnostic", status.licensed_redundancy.enabled ? "Enabled" : "Disabled"]]),
+      ]} />
       ${status.reboot_required ? html`<p role="status">Pending redundancy change — reboot required.</p>` : null}
-      ${writable && status.supported?.length ? html`
+      ${unknownModes.length ? html`<p>Unknown advertised choices: ${unknownModes.map((choice) =>
+        `${choice.label || "unlabelled"} (0x${choice.code.toString(16).padStart(4, "0")})`).join(", ")}.</p>` : null}
+      ${writable && knownModes.length ? html`
         <${FieldRow} label="Dante Redundancy">
           <select aria-label="Dante Redundancy" value=${selection} disabled=${busy} onChange=${changeMode}>
-            ${status.supported.map((mode) => html`<option value=${mode}>${modeLabel(mode)}</option>`)}
+            ${knownModes.map((choice) => html`<option value=${choice.mode}>${choice.label}</option>`)}
           </select>
         <//>
         ${busy ? html`<p role="status">Applying redundancy mode…</p>` : null}
@@ -139,7 +160,7 @@ export function NetworkSection({ device }) {
     setLoadError(false);
   };
   const interfaces = probe?.interfaces ?? device.interfaces ?? [];
-  const status = probe?.redundancy ?? device.dante_redundancy;
+  const status = probe?.redundancy ?? device.network_redundancy;
   const speed = probe?.link_speed_mbps ?? device.link_speed_mbps;
   const interfaceModes = probe?.interface_configuration_modes ?? device.interface_configuration_modes ?? {};
   const availabilityDevice = probe?.operation_availability
@@ -153,7 +174,7 @@ export function NetworkSection({ device }) {
       ${interfaces.length ? interfaces.map((entry) => html`
         <${InterfaceCard} key=${requestName + entry.interface + JSON.stringify(entry.configured)} device=${availabilityDevice} entry=${entry} modes=${interfaceModes[entry.interface]} requestName=${requestName} onReadback=${onReadback} single=${interfaces.length < 2 && entry.interface === "primary"} />
       `) : html`<p>Network settings are unavailable.</p>`}
-      ${status || interfaces.length > 1 ? html`<${Redundancy} key=${requestName + status?.configured} device=${availabilityDevice} status=${status} requestName=${requestName} onReadback=${onReadback} />` : null}
+      <${Redundancy} key=${requestName + status?.configured_mode} device=${availabilityDevice} status=${status} requestName=${requestName} onReadback=${onReadback} />
     <//>
     </div>
   `;

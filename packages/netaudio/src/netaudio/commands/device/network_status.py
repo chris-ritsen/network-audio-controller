@@ -12,6 +12,11 @@ from netaudio.cli_support.selection import filter_devices, sort_devices
 from netaudio.commands.config.redundancy import mode_label
 from netaudio.commands.device.display import format_link_speed_megabits_per_second
 from netaudio.ddm.controller import DAPISessionError
+from netaudio.dante.network_configuration import (
+    advertised_redundancy_support,
+    probe_switch_configuration_if_reported,
+    redundancy_snapshot,
+)
 
 NETWORK_STATUS_HEADERS = [
     "Name",
@@ -100,9 +105,13 @@ def network_status_rows(
 ) -> list[list[str]]:
     switch_mode, switch_mode_codes, available_switch_modes = _switch_mode_summary(switch_configuration, dissect)
     if switch_configuration is None and address:
-        if redundancy and redundancy.get("current"):
-            switch_mode = mode_label(redundancy["current"])
-            available_switch_modes = ", ".join(mode_label(value) for value in redundancy.get("supported") or [])
+        if redundancy and redundancy.get("current_mode"):
+            switch_mode = mode_label(redundancy["current_mode"])
+            available_switch_modes = ", ".join(
+                mode_label(choice["mode"])
+                for choice in redundancy.get("available_modes") or []
+                if isinstance(choice, dict) and choice.get("mode") is not None
+            )
         else:
             switch_mode = "not reported" if switch_configuration_applicable else "N/A"
     if interface_statistics is None:
@@ -170,15 +179,7 @@ def network_status_rows(
 
 
 def _should_probe_switch_configuration(device) -> bool:
-    if not getattr(device, "requires_managed_control", False):
-        return True
-    network_count = getattr(device, "num_networks", None)
-    if isinstance(network_count, int):
-        return network_count > 1
-    interfaces = getattr(device, "interfaces", None)
-    if isinstance(interfaces, list):
-        return len(interfaces) > 1
-    return True
+    return advertised_redundancy_support(device) is not False
 
 
 async def run_network_status(application, devices, timeout: float) -> None:
@@ -198,11 +199,17 @@ async def run_network_status(application, devices, timeout: float) -> None:
             except (CapabilityProbeTimeout, DAPISessionError, RuntimeError, OSError):
                 return None
 
+        async def capture_switch_configuration():
+            try:
+                return await probe_switch_configuration_if_reported(application, device, timeout)
+            except (CapabilityProbeTimeout, DAPISessionError, RuntimeError, OSError):
+                return None
+
         switch_configuration_applicable = _should_probe_switch_configuration(device)
         if switch_configuration_applicable:
             interface_statistics, switch_configuration = await asyncio.gather(
                 capture(application.probe_interface_statistics),
-                capture(application.probe_switch_configuration),
+                capture_switch_configuration(),
             )
         else:
             interface_statistics = await capture(application.probe_interface_statistics)
@@ -216,6 +223,7 @@ async def run_network_status(application, devices, timeout: float) -> None:
     for server_name, device, interface_statistics, switch_configuration, switch_configuration_applicable in results:
         device_name = device.name or server_name
         address = str(device.ipv4) if device.ipv4 is not None else None
+        redundancy = redundancy_snapshot(device)
         json_data[server_name] = {
             "available": interface_statistics is not None or switch_configuration is not None,
             "dante_model": device.dante_model,
@@ -229,7 +237,7 @@ async def run_network_status(application, devices, timeout: float) -> None:
             "switch_configuration": switch_configuration,
             "switch_configuration_applicable": switch_configuration_applicable,
             "switch_configuration_available": switch_configuration is not None,
-            "redundancy": getattr(device, "dante_redundancy", None),
+            "redundancy": redundancy,
         }
         rows.extend(
             network_status_rows(
@@ -239,7 +247,7 @@ async def run_network_status(application, devices, timeout: float) -> None:
                 switch_configuration,
                 dissect,
                 switch_configuration_applicable,
-                getattr(device, "dante_redundancy", None),
+                redundancy,
             )
         )
 

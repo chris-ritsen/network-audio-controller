@@ -122,6 +122,13 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert device.dante_model_read_only_capabilities == 0
     assert device.dante_model_monitoring_capabilities == 0x1B
     assert device.aes67_configuration_supported is True
+    assert device.switch_redundancy_supported is True
+    assert device.switch_redundancy_read_only is False
+    assert device.redundancy_advertised_support_source["field_reported"] is True
+    assert device.redundancy_advertised_support_source["fresh"] is True
+    assert device.redundancy_advertised_support_source["record_protocol_version"] == 0x0724
+    assert device.redundancy_read_only_source["field_reported"] is True
+    assert device.redundancy_read_only_source["fresh"] is True
     assert device.detailed_metering_supported is True
     assert device.per_channel_signal_presence_supported is False
     serialized = DanteDeviceSerializer.to_json(device)
@@ -129,6 +136,8 @@ def test_state_service_applies_and_serializes_controller_visible_identity():
     assert serialized["dante_model_record_protocol_version"] == 0x0724
     assert serialized["dante_model_primary_capabilities"] == 0x8E78F65A
     assert serialized["dante_model_monitoring_capabilities"] == 0x1B
+    assert serialized["network_redundancy"]["advertised_support"] is True
+    assert serialized["network_redundancy"]["read_only"] is False
     assert serialized["detailed_metering_supported"] is True
     assert serialized["per_channel_signal_presence_supported"] is False
     assert serialized["manufacturer"] == "Ferrofish GmbH"

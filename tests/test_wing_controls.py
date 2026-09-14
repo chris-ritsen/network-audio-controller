@@ -112,6 +112,7 @@ def test_wing_network_status_decodes_by_structure_and_fails_closed_on_bad_descri
     other_revision[24:26] = b"\x07\xfe"
     expected = core.parse_response("interface_status", original)
     expected["record_protocol_identifier"] = 0x07FE
+    expected["raw_record_hexadecimal"] = bytes(other_revision[24:]).hex()
     assert core.parse_response("interface_status", bytes(other_revision)) == expected
     invalid = bytearray(original)
     invalid[94:96] = b"\x00\x00"

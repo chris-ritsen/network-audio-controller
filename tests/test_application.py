@@ -360,6 +360,11 @@ class TestDanteApplication:
         device.supported_encodings = [16, 24, 32]
         device.aes67_configuration_supported = True
         device.dante_model_primary_capabilities = 0x8E78F65A
+        device.switch_redundancy_supported = True
+        device.redundancy_advertised_support_source = {"fresh": True, "field_reported": True}
+        device.switch_redundancy_read_only = False
+        device.redundancy_read_only_source = {"fresh": True, "field_reported": True}
+        device.dante_redundancy = {"current": "switched", "configured": "switched", "state_fresh": True}
         device.dante_model_monitoring_capabilities = 0x1B
         device.detailed_metering_supported = True
         device.interface_statistics_supported = True
@@ -383,6 +388,11 @@ class TestDanteApplication:
         assert device.supported_encodings is None
         assert device.aes67_configuration_supported is None
         assert device.dante_model_primary_capabilities is None
+        assert device.switch_redundancy_supported is None
+        assert device.redundancy_advertised_support_source["fresh"] is False
+        assert device.switch_redundancy_read_only is None
+        assert device.redundancy_read_only_source["fresh"] is False
+        assert device.dante_redundancy["state_fresh"] is False
         assert device.dante_model_monitoring_capabilities is None
         assert device.detailed_metering_supported is None
         assert device.interface_statistics_supported is None

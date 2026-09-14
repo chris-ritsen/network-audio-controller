@@ -55,14 +55,61 @@ _READ_ONLY_FIELDS = {
 def operation_availability(device, operation: str, requested_value=None) -> OperationAvailability:
     if operation not in _CAPABILITY_FIELDS:
         raise ValueError(f"unknown operation {operation!r}")
-    supported = getattr(device, _CAPABILITY_FIELDS[operation], None)
+    if operation == "redundancy":
+        from netaudio.dante.network_configuration import advertised_redundancy_support
+
+        supported = advertised_redundancy_support(device)
+    else:
+        supported = getattr(device, _CAPABILITY_FIELDS[operation], None)
     reasons = []
     readable = _readable(device, operation)
 
     if supported is not True:
         reasons.append("capability_unknown" if supported is None else "unsupported")
     read_only_field = _READ_ONLY_FIELDS.get(operation)
-    if read_only_field is not None and getattr(device, read_only_field, None) is True:
+    if operation == "redundancy":
+        from netaudio.dante.network_configuration import (
+            redundancy_read_only_applicable,
+            redundancy_serializer_cohort,
+            redundancy_transport_available,
+            reported_redundancy_read_only,
+            switch_configuration_choice,
+        )
+
+        read_only = reported_redundancy_read_only(device)
+        if read_only is True:
+            reasons.append("read_only")
+        elif read_only is None and redundancy_read_only_applicable(device):
+            reasons.append("read_only_unknown")
+
+        state = getattr(device, "dante_redundancy", None)
+        if not isinstance(state, dict) or state.get("current") is None or state.get("configured") is None:
+            reasons.append("state_unavailable")
+        elif state.get("state_fresh") is not True:
+            reasons.append("state_stale")
+        choices = state.get("available_modes") if isinstance(state, dict) else None
+        if not isinstance(choices, list):
+            reasons.append("available_modes_unknown")
+        elif state.get("available_modes_fresh") is not True:
+            reasons.append("available_modes_stale")
+        else:
+            known_modes = [choice.get("mode") for choice in choices if isinstance(choice, dict)]
+            if not known_modes:
+                reasons.append("available_modes_empty")
+            if requested_value is not None and requested_value not in known_modes:
+                reasons.append("requested_mode_not_advertised")
+        serializer_cohort = redundancy_serializer_cohort(device)
+        if serializer_cohort is None:
+            reasons.append("protocol_unsupported")
+        elif (
+            requested_value is not None
+            and serializer_cohort == "switch_configuration_choice_table"
+            and switch_configuration_choice(device, requested_value) is None
+        ):
+            reasons.append("serializer_unavailable")
+        if not redundancy_transport_available(device):
+            reasons.append("transport_unavailable")
+    elif read_only_field is not None and getattr(device, read_only_field, None) is True:
         reasons.append("read_only")
 
     component = _COMPONENT_FIELDS.get(operation)
@@ -120,7 +167,9 @@ def probe_supported(device, operation: str) -> bool:
 
 def require_writable(device, operation: str, requested_value=None) -> None:
     availability = operation_availability(device, operation, requested_value)
-    if all(reason in UNVERIFIED_REASONS for reason in availability.reasons):
+    if availability.writable:
+        return
+    if operation != "redundancy" and all(reason in UNVERIFIED_REASONS for reason in availability.reasons):
         return
     details = ", ".join(availability.reasons)
     raise RuntimeError(f"{operation.replace('_', ' ')} is not writable: {details}")

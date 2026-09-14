@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from netaudio.cli_support.execution import readback_after_notification
 from netaudio.commands.config.readback import MUTATION_ERRORS
-from netaudio.dante.network_configuration import validate_interface_configuration
+from netaudio.dante.network_configuration import NetworkConfigurationUnverified, validate_interface_configuration
 from netaudio.dante.performance_configuration import requested_performance_properties
 from netaudio.dante.flow_lifecycle import inspect_transmit_flows, plan_create_transmit_flow
 from netaudio.dante.transmit_flow import TransmitFlowSpecification, compare_transmit_flows
@@ -289,17 +289,28 @@ async def _plan_redundancy(application, device, requested: str) -> PresetAction:
         status = await application.probe_dante_redundancy(device, timeout=2.0)
     except READBACK_ERRORS as exception:
         return _unavailable("redundancy", requested, f"fresh redundancy readback failed: {exception}")
-    if not isinstance(status, dict) or status.get("configured") is None:
+    if isinstance(status, dict) and status.get("advertised_support") is False:
+        return _unsupported("redundancy", requested, "device explicitly reports redundancy configuration unsupported")
+    if not isinstance(status, dict) or status.get("advertised_support") is not True:
+        return _unavailable(
+            "redundancy",
+            requested,
+            "redundancy capability support is unknown (capability_unknown)",
+        )
+    if status.get("configured_mode") is None:
         return _unavailable("redundancy", requested, "fresh configured redundancy was unavailable")
-    current = status["configured"]
-    supported = status.get("supported")
-    if not isinstance(supported, list):
+    current = status["configured_mode"]
+    available_modes = status.get("available_modes")
+    if not isinstance(available_modes, list) or status.get("available_modes_fresh") is not True:
         return _unavailable(
             "redundancy",
             requested,
             "redundancy capability values were unavailable",
             current=current,
         )
+    supported = [
+        choice.get("mode") for choice in available_modes if isinstance(choice, dict) and choice.get("mode") is not None
+    ]
     if requested not in supported:
         return _unsupported(
             "redundancy",
@@ -1160,24 +1171,37 @@ async def _apply_redundancy(context: PresetLoadContext, entry: PresetDeviceActio
     try:
         observed = await context.application.set_dante_redundancy(entry.device, action.payload)
     except MUTATION_ERRORS as exception:
+        evidence = exception.evidence if isinstance(exception, NetworkConfigurationUnverified) else None
+        readback = evidence.get("effective_readback") if isinstance(evidence, dict) else None
         context.report.operation(
             entry.device_name,
             action.kind,
             "failed",
             f"redundancy {action.payload}: FAILED ({exception})",
             requested=action.payload,
+            effective=(readback.get("configured_mode") if isinstance(readback, dict) else None),
+            acknowledgement=(evidence.get("request_acknowledgement") if isinstance(evidence, dict) else None),
+            device_confirmation=(evidence.get("device_side_confirmation") if isinstance(evidence, dict) else None),
+            effective_state_confirmation=(
+                evidence.get("effective_state_confirmation") if isinstance(evidence, dict) else None
+            ),
+            persistence_confirmation=(evidence.get("persistence_confirmation") if isinstance(evidence, dict) else None),
             failed=True,
         )
         return
-    effective = observed.get("configured") if isinstance(observed, dict) else None
+    readback = observed.get("effective_readback") if isinstance(observed, dict) else None
+    effective = readback.get("configured_mode") if isinstance(readback, dict) else None
     matched = effective == action.payload
     context.report.operation(
         entry.device_name,
         action.kind,
         "confirmed" if matched else "failed",
-        f"redundancy {action.payload} ({'verified' if matched else f'FAILED; device reports {effective!r}'})",
+        f"redundancy {action.payload} "
+        f"({'fresh configured-state readback matched; persistence not checked' if matched else f'FAILED; device reports {effective!r}'})",
         requested=action.payload,
         effective=effective,
+        acknowledgement=(observed.get("request_acknowledgement") if isinstance(observed, dict) else None),
+        persistence_confirmation=(observed.get("persistence_confirmation") if isinstance(observed, dict) else None),
         failed=not matched,
     )
 

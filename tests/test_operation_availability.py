@@ -39,7 +39,22 @@ def device_for(operation: str) -> DanteDevice:
         device.interfaces = [{"interface": "primary", "mode": "dynamic"}]
         device.static_ipv4_configuration_read_only = False
     elif operation == "redundancy":
-        device.dante_redundancy = {"mode": "switched"}
+        device.ipv4 = "192.0.2.10"
+        device.control_transports = ["direct"]
+        device.interface_status_protocol = 0x0724
+        device.redundancy_advertised_support_source = {"fresh": True, "field_reported": True}
+        device.redundancy_read_only_source = {"fresh": True, "field_reported": True}
+        device.dante_redundancy = {
+            "current": "switched",
+            "configured": "switched",
+            "state_fresh": True,
+            "available_modes": [
+                {"code": 0, "label": "Switched", "mode": "switched"},
+                {"code": 1, "label": "Redundant", "mode": "redundant"},
+            ],
+            "available_modes_source": "interface_status_flag_cohort",
+            "available_modes_fresh": True,
+        }
         device.switch_redundancy_read_only = False
     elif operation == "codec_control":
         device.codec_parameters = [{"parameter_type": 1, "mode": 2, "values": [5]}]

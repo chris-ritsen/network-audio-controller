@@ -12,6 +12,8 @@ pub struct InterfaceStatus {
     pub interfaces: Vec<InterfaceStatusEntry>,
     pub reboot_required: bool,
     pub redundancy: Option<DanteRedundancyStatus>,
+    pub redundancy_flags: Option<u16>,
+    pub raw_record_hexadecimal: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -174,6 +176,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
     }
 
     let mut redundancy = None;
+    let mut redundancy_flags = None;
     if fixed_records && data.len() > offset {
         let descriptor = offset.checked_sub(4)?;
         let size = usize::from(read_u16(data, descriptor)?);
@@ -182,6 +185,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
             return None;
         }
         let flags = read_u16(data, offset)?;
+        redundancy_flags = Some(flags);
         if flags & !3 == 0 {
             let mode = |mask| {
                 if flags & mask == 0 {
@@ -217,6 +221,8 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
         reboot_required: interfaces.iter().any(|v| v.reboot_required)
             || redundancy.as_ref().is_some_and(|v| v.reboot_required),
         redundancy,
+        redundancy_flags,
+        raw_record_hexadecimal: bytes_to_hex(data.get(CONMON_RECORD_BASE..)?),
         interfaces,
     })
 }

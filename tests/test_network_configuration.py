@@ -45,6 +45,8 @@ def switch_choices(*entries):
 
 def network_device(protocol=0x0724):
     return SimpleNamespace(
+        ipv4="192.0.2.10",
+        control_transports=["direct"],
         interface_status_protocol=protocol,
         dante_redundancy=None,
         interfaces=[],
@@ -57,16 +59,35 @@ def network_device(protocol=0x0724):
         static_ipv4_configuration_supported=True,
         static_ipv4_configuration_read_only=False,
         switch_redundancy_supported=True,
+        redundancy_advertised_support_source={"fresh": True, "field_reported": True},
         switch_redundancy_read_only=False,
+        redundancy_read_only_source={"fresh": True, "field_reported": True},
+        redundancy_probe_outcomes={},
         topology_mutation_lock=DeferredAsyncioLock(),
     )
 
 
 def redundancy_status(current="switched", configured="switched", supported=None):
+    supported = ["switched", "redundant"] if supported is None else supported
     return {
         "current": current,
         "configured": configured,
-        "supported": ["switched", "redundant"] if supported is None else supported,
+        "supported": supported,
+        "current_mode_evidence": {"status": "known", "mode": current, "raw_flags": 0},
+        "configured_mode_evidence": {"status": "known", "mode": configured, "raw_flags": 0},
+        "available_modes": [
+            {"code": code, "label": label, "mode": value}
+            for code, label, value in (
+                (0, "Switched", "switched"),
+                (1, "Redundant", "redundant"),
+                (2, "Split/Redundant", "split_redundant"),
+            )
+            if value in supported
+        ],
+        "available_modes_source": "interface_status_flag_cohort",
+        "available_modes_fresh": True,
+        "state_source": {"kind": "interface_status", "cohort": "flag_bits_0_and_1"},
+        "state_fresh": True,
         "reboot_required": current != configured,
     }
 
@@ -76,6 +97,10 @@ def redundancy_application(device, observations):
         observation = next(observations)
         if isinstance(observation, Exception):
             raise observation
+        if isinstance(observation, dict) and device.switch_configuration_choices:
+            observation = deepcopy(observation)
+            observation["available_modes"] = deepcopy(device.switch_configuration_choices)
+            observation["available_modes_source"] = "switch_configuration_choice_table"
         device.dante_redundancy = deepcopy(observation)
         return []
 
@@ -93,7 +118,9 @@ async def test_redundancy_verifies_configured_not_active_without_reboot():
     device = network_device()
     application = redundancy_application(device, iter([redundancy_status(), redundancy_status(configured="redundant")]))
     result = await set_redundancy(application, device, "redundant")
-    assert result == redundancy_status(configured="redundant")
+    assert result["state"] == "effective_state_confirmed"
+    assert result["effective_readback"]["configured_mode"] == "redundant"
+    assert result["persistence_confirmation"] is None
     application.commands.set_dante_redundancy.assert_called_once_with(0x0724, "redundant", None)
     application._send_settings.assert_awaited_once()
     assert application.probe_interface_status.await_count == 2
@@ -116,7 +143,7 @@ async def test_redundancy_unverified_write_is_never_retried(after):
 async def test_redundancy_preflight_failure_sends_nothing():
     device = network_device()
     application = redundancy_application(device, iter([TimeoutError()]))
-    with pytest.raises(TimeoutError):
+    with pytest.raises(RuntimeError, match="state_unavailable"):
         await set_redundancy(application, device, "redundant")
     application._send_settings.assert_not_awaited()
 
@@ -125,7 +152,8 @@ async def test_redundancy_preflight_failure_sends_nothing():
 async def test_redundancy_noop_requires_fresh_observation():
     device = network_device()
     application = redundancy_application(device, iter([redundancy_status(configured="redundant")]))
-    await set_redundancy(application, device, "redundant")
+    result = await set_redundancy(application, device, "redundant")
+    assert result["mutation_sent"] is False
     application.probe_interface_status.assert_awaited_once()
     application._send_settings.assert_not_awaited()
 
@@ -145,18 +173,18 @@ async def test_invalid_redundancy_never_queries_or_writes(mode):
 async def test_unsupported_choice_fails_closed():
     device = network_device()
     application = redundancy_application(device, iter([redundancy_status(supported=[])]))
-    with pytest.raises(NetworkConfigurationError):
+    with pytest.raises(RuntimeError, match="requested_mode_not_advertised"):
         await set_redundancy(application, device, "redundant")
     application._send_settings.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_unobserved_revision_with_reported_support_is_written_and_verified():
+async def test_unobserved_revision_with_reported_support_fails_closed():
     device = network_device(0x0777)
     application = redundancy_application(device, iter([redundancy_status(), redundancy_status(configured="redundant")]))
-    assert await set_redundancy(application, device, "redundant") == redundancy_status(configured="redundant")
-    application.commands.set_dante_redundancy.assert_called_once_with(0x0777, "redundant", None)
-    application._send_settings.assert_awaited_once()
+    with pytest.raises(RuntimeError, match="protocol_unsupported"):
+        await set_redundancy(application, device, "redundant")
+    application._send_settings.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -188,16 +216,16 @@ async def test_ad4d_uses_fresh_choice_status():
         device.dante_redundancy = expected
 
     application.probe_switch_configuration.side_effect = choices
-    assert await probe_redundancy(application, device) == expected
+    result = await probe_redundancy(application, device)
+    assert result["configured_mode"] == "split_redundant"
     application.probe_switch_configuration.assert_awaited_once_with(device, timeout=2.0)
 
 
-def test_single_port_zero_flags_do_not_report_a_network_mode():
-    parsed = {"interfaces": [{}], "redundancy": redundancy_status()}
-    assert interface_redundancy_status(parsed, network_device()) is None
-    assert parsed["redundancy"]["supported"] == ["switched", "redundant"]
+def test_single_reported_interface_keeps_structurally_valid_redundancy_state():
+    parsed = {"interfaces": [{}], "redundancy_flags": 0, "redundancy": redundancy_status()}
+    assert interface_redundancy_status(parsed, network_device())["current"] == "switched"
     parsed["interfaces"] = [{}, {}]
-    assert interface_redundancy_status(parsed, network_device()) == redundancy_status()
+    assert interface_redundancy_status(parsed, network_device())["configured"] == "switched"
 
 
 def interface_state(role, configured):
@@ -402,12 +430,18 @@ async def test_redundancy_http_get_and_set_use_verified_application_methods():
     device = make_device()
     server = make_http_server({"dev1": device})
     value = redundancy_status(configured="redundant")
+    mutation = {
+        "effective_state_confirmation": True,
+        "effective_readback": value,
+        "request_acknowledgement": None,
+        "persistence_confirmation": None,
+    }
     server.application.probe_dante_redundancy = AsyncMock(return_value=value)
-    server.application.set_dante_redundancy = AsyncMock(return_value=value)
+    server.application.set_dante_redundancy = AsyncMock(return_value=mutation)
     status, result = await get(server, "/redundancy/dev1")
     assert status == 200 and result["redundancy"] == value
     status, result = await post(server, "/redundancy", {"device": "dev1", "mode": "redundant"})
-    assert status == 200 and result == {"success": True, "redundancy": value}
+    assert status == 200 and result == {"success": True, "redundancy": value, "mutation": mutation}
     server.application.set_dante_redundancy.assert_awaited_once_with(device, "redundant")
 
 
@@ -417,6 +451,7 @@ async def test_redundancy_http_get_and_set_use_verified_application_methods():
     [
         (ValueError("invalid"), 400),
         (NetworkConfigurationError("unsupported"), 409),
+        (RuntimeError("redundancy is not writable: read_only"), 409),
         (NetworkConfigurationUnverified("unknown outcome"), 502),
     ],
 )
@@ -432,6 +467,7 @@ async def test_redundancy_http_reports_failure(error, status):
 async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
     device = network_device(0x073D)
     device.requires_managed_control = True
+    device.control_transports = ["ddm"]
     device.switch_configuration_choices = switch_choices(("Switched", 1), ("Redundant", 2))
     application = redundancy_application(
         device,
@@ -443,31 +479,42 @@ async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
         ),
     )
     result = await set_redundancy(application, device, "redundant")
-    assert result["configured"] == result["current"] == "redundant"
-    assert result["reboot_required"] is False
+    readback = result["effective_readback"]
+    assert readback["configured_mode"] == readback["current_mode"] == "redundant"
+    assert readback["reboot_required"] is False
     application._send_settings.assert_awaited_once()
     assert application.probe_switch_configuration.await_count == 2
     application.reboot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["interfaces", "current"])
-async def test_redundancy_detects_unrelated_network_changes(change):
-    device = network_device(0x073D)
+async def test_redundancy_detects_unrelated_interface_changes():
+    device = network_device()
     after = redundancy_status(configured="redundant")
-    if change == "current":
-        after["current"] = "redundant"
     application = redundancy_application(device, iter([redundancy_status(), after]))
 
     async def send(*_args):
-        if change == "interfaces":
-            device.interfaces = [{"interface": "primary", "configured": {"mode": "static"}}]
+        device.interfaces = [{"interface": "primary", "configured": {"mode": "static"}}]
 
     application._send_settings.side_effect = send
     with pytest.raises(NetworkConfigurationUnverified, match="other network state changed"):
         await set_redundancy(application, device, "redundant")
     application._send_settings.assert_awaited_once()
     application.reboot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_redundancy_accepts_immediate_active_transition_to_requested_mode():
+    device = network_device()
+    application = redundancy_application(
+        device,
+        iter([redundancy_status(), redundancy_status(current="redundant", configured="redundant")]),
+    )
+
+    result = await set_redundancy(application, device, "redundant")
+    assert result["effective_state_confirmation"] is True
+    assert result["effective_readback"]["current_mode"] == "redundant"
+    application._send_settings.assert_awaited_once()
 
 
 @pytest.mark.parametrize(

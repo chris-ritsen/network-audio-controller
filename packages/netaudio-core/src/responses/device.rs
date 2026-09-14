@@ -438,14 +438,20 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
     let platform_api_word = read_u32(data, record_start + 0x10)?;
     let platform_model_identifier_raw = data.get(record_start + 0x14..record_start + 0x1c)?;
     let primary_capabilities = if record_protocol_version >= 0x0200 {
-        read_u32(data, CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET)?
+        Some(read_u32(
+            data,
+            CONMON_DANTE_MODEL_PRIMARY_CAPABILITIES_OFFSET,
+        )?)
     } else {
-        0
+        None
     };
     let read_only_capabilities = if record_protocol_version >= 0x070A {
-        read_u32(data, CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET)?
+        Some(read_u32(
+            data,
+            CONMON_DANTE_MODEL_READ_ONLY_CAPABILITIES_OFFSET,
+        )?)
     } else {
-        0
+        None
     };
     let monitoring_capabilities = if record_protocol_version >= 0x0717 {
         read_u32(data, CONMON_DANTE_MODEL_MONITORING_CAPABILITIES_OFFSET)?
@@ -552,35 +558,38 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
         plugin_identifiers,
         plugin_records_hexadecimal,
         raw_record_hexadecimal: bytes_to_hex(data.get(record_start..)?),
-        identify_supported: primary_capabilities & DANTE_MODEL_IDENTIFY_CAPABILITY_MASK != 0,
-        sample_rate_configuration_supported: primary_capabilities
+        identify_supported: primary_capabilities.unwrap_or(0)
+            & DANTE_MODEL_IDENTIFY_CAPABILITY_MASK
+            != 0,
+        sample_rate_configuration_supported: primary_capabilities.unwrap_or(0)
             & DANTE_MODEL_SAMPLE_RATE_CAPABILITY_MASK
             != 0,
-        encoding_configuration_supported: primary_capabilities
+        encoding_configuration_supported: primary_capabilities.unwrap_or(0)
             & DANTE_MODEL_ENCODING_CAPABILITY_MASK
             != 0,
-        sample_rate_pullup_configuration_supported: primary_capabilities
+        sample_rate_pullup_configuration_supported: primary_capabilities.unwrap_or(0)
             & DANTE_MODEL_SAMPLE_RATE_PULLUP_CAPABILITY_MASK
             != 0,
         switch_redundancy_supported: primary_capabilities
-            & DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK
-            != 0,
-        static_ipv4_configuration_supported: primary_capabilities
+            .map(|capabilities| capabilities & DANTE_MODEL_SWITCH_REDUNDANCY_CAPABILITY_MASK != 0),
+        static_ipv4_configuration_supported: primary_capabilities.unwrap_or(0)
             & DANTE_MODEL_STATIC_IPV4_CAPABILITY_MASK
             != 0,
-        detailed_metering_supported: primary_capabilities
+        detailed_metering_supported: primary_capabilities.unwrap_or(0)
             & DANTE_MODEL_DETAILED_METERING_CAPABILITY_MASK
             != 0,
-        aes67_configuration_supported: primary_capabilities & DANTE_MODEL_AES67_CAPABILITY_MASK
+        aes67_configuration_supported: primary_capabilities.unwrap_or(0)
+            & DANTE_MODEL_AES67_CAPABILITY_MASK
             != 0,
-        device_locking_supported: primary_capabilities & DANTE_MODEL_LOCKING_CAPABILITY_MASK != 0,
-        external_word_clock_read_only: read_only_capabilities
+        device_locking_supported: primary_capabilities.unwrap_or(0)
+            & DANTE_MODEL_LOCKING_CAPABILITY_MASK
+            != 0,
+        external_word_clock_read_only: read_only_capabilities.unwrap_or(0)
             & DANTE_MODEL_EXTERNAL_WORD_CLOCK_READ_ONLY_MASK
             != 0,
         switch_redundancy_read_only: read_only_capabilities
-            & DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK
-            != 0,
-        static_ipv4_configuration_read_only: read_only_capabilities
+            .map(|capabilities| capabilities & DANTE_MODEL_SWITCH_REDUNDANCY_READ_ONLY_MASK != 0),
+        static_ipv4_configuration_read_only: read_only_capabilities.unwrap_or(0)
             & DANTE_MODEL_STATIC_IPV4_READ_ONLY_MASK
             != 0,
         generic_codec_control_supported: secondary_capabilities

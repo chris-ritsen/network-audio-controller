@@ -108,23 +108,23 @@ def test_network_status_rows_report_rates_errors_speed_and_switch_mode():
     ]
 
 
-def test_managed_single_interface_device_skips_unavailable_switch_probe():
+def test_managed_single_interface_with_unknown_capability_keeps_observational_probe():
     device = type(
         "Device",
         (),
         {"requires_managed_control": True, "num_networks": None, "interfaces": [{"address": "192.0.2.1"}]},
     )()
 
-    assert _should_probe_switch_configuration(device) is False
+    assert _should_probe_switch_configuration(device) is True
     rows = network_status_rows(
         "managed-device",
         "192.0.2.1",
         observation("avio-0040.bin", "192.0.2.1"),
         None,
         dissect=False,
-        switch_configuration_applicable=False,
+        switch_configuration_applicable=True,
     )
-    assert rows[0][9] == "N/A"
+    assert rows[0][9] == "not reported"
 
 
 def test_managed_multi_interface_device_keeps_switch_probe():
@@ -141,8 +141,29 @@ def test_managed_multi_interface_device_keeps_switch_probe():
     assert _should_probe_switch_configuration(device) is True
 
 
+def test_two_interfaces_do_not_override_explicit_unsupported_capability():
+    device = type(
+        "Device",
+        (),
+        {
+            "switch_redundancy_supported": False,
+            "redundancy_advertised_support_source": {"fresh": True, "field_reported": True},
+            "interfaces": [{"address": "192.0.2.1"}, {"address": "192.0.2.2"}],
+        },
+    )()
+
+    assert _should_probe_switch_configuration(device) is False
+
+
 def test_network_status_uses_flag_based_redundancy_without_a_choice_table():
-    redundancy = {"current": "switched", "configured": "switched", "supported": ["switched", "redundant"]}
+    redundancy = {
+        "current_mode": "switched",
+        "configured_mode": "switched",
+        "available_modes": [
+            {"mode": "switched", "label": "Switched"},
+            {"mode": "redundant", "label": "Redundant"},
+        ],
+    }
     rows = network_status_rows("a32", "192.168.1.34", None, None, False, True, redundancy)
     assert rows[0][9] == "Switched"
     assert rows[0][10] == "Switched, Redundant"

@@ -40,6 +40,7 @@ fn managed_network_status_preserves_active_and_pending_dns() {
         assert_eq!(primary.reboot_required, pending);
         assert_eq!(status.reboot_required, pending);
         let redundancy = status.redundancy.unwrap();
+        assert_eq!(status.redundancy_flags, Some(0));
         assert_eq!(redundancy.current, redundancy.configured);
         assert!(!redundancy.reboot_required);
     }
@@ -92,6 +93,7 @@ fn captured_redundancy_treatment_distinguishes_current_from_configured() {
     ] {
         let parsed = parse_interface_status(&captured(name)).unwrap();
         let redundancy = parsed.redundancy.unwrap();
+        assert!(parsed.redundancy_flags.is_some(), "{name}");
         assert_eq!(redundancy.current, Some(current), "{name}");
         assert_eq!(redundancy.configured, Some(configured), "{name}");
         assert_eq!(redundancy.reboot_required, reboot, "{name}");
@@ -231,7 +233,9 @@ fn duplicate_interface_mac_addresses_are_rejected() {
 fn redundancy_flags_decode_by_structure_for_any_revision() {
     let mut data = captured("a32_switched_switched");
     set_word(&mut data, 68, 8);
-    assert!(parse_interface_status(&data).unwrap().redundancy.is_none());
+    let unknown = parse_interface_status(&data).unwrap();
+    assert_eq!(unknown.redundancy_flags, Some(8));
+    assert!(unknown.redundancy.is_none());
     set_word(&mut data, 68, 0);
     set_word(&mut data, 24, 0x07fe);
     let status = parse_interface_status(&data).unwrap();
