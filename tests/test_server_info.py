@@ -88,7 +88,7 @@ async def test_http_and_discovery_report_the_same_backend_version(monkeypatch):
     server = make_http_server()
     status, body = await get(server, "/server-info")
     assert status == 200
-    assert body == {**BASE, "version": "1.2.3", "git_revision": revision}
+    assert body == {**BASE, "version": "1.2.3", "git_revision": revision, "mcp": server.mcp_server_info()}
     advertisement = server._build_service_info(("192.0.2.10",))
     assert advertisement.properties[b"version"] == b"1"
     assert advertisement.properties[b"server_version"] == b"1.2.3"
@@ -103,4 +103,4 @@ def test_discovery_omits_unavailable_release_and_revision(monkeypatch):
     monkeypatch.setattr(server_info_module, "distribution", missing)
     server = make_http_server()
     advertisement = server._build_service_info(("192.0.2.10",))
-    assert advertisement.properties == {b"version": b"1"}
+    assert advertisement.properties == {b"version": b"1", b"mcp_path": b"/mcp"}
