@@ -32,12 +32,14 @@ from netaudio.daemon.http.connections import DaemonConnectionHandlers
 from netaudio.daemon.http.devices import DaemonDeviceHandlers
 from netaudio.daemon.http.managed import DaemonManagedHandlers
 from netaudio.daemon.http.mcp import MCP_PATH, DaemonMcpHandlers
+from netaudio.daemon.http.oauth import DaemonOAuthHandlers
 from netaudio.daemon.http.presets import DaemonPresetHandlers
 from netaudio.daemon.http.settings import DaemonSettingsHandlers
 from netaudio.daemon.http.sse_view import SseDeviceView
 from netaudio.daemon.http.tls import TLSConfigurationError, TLSSettings, build_ssl_context
 from netaudio.daemon.http.web import DaemonWebHandlers, is_application_route, prefers_web_page
 from netaudio.daemon.mcp_access import ensure_mcp_token
+from netaudio.daemon.mcp_oauth import OAuthStore
 from netaudio.daemon.server_info import server_info
 from netaudio.daemon.subscription_readback import SubscriptionReadback
 from netaudio.dante.device_serializer import DanteDeviceSerializer
@@ -143,6 +145,7 @@ class DaemonHTTPServer(
     DaemonDeviceHandlers,
     DaemonManagedHandlers,
     DaemonMcpHandlers,
+    DaemonOAuthHandlers,
     DaemonWebHandlers,
 ):
     def __init__(
@@ -163,6 +166,7 @@ class DaemonHTTPServer(
     ):
         self.application = application
         self.mcp_token = mcp_token if mcp_token is not None else ensure_mcp_token()
+        self.oauth_store = OAuthStore()
         self.server_info = {**server_info(), "mcp": self.mcp_server_info()}
         from netaudio.daemon.managed_controls import ManagedDeviceControls
 
@@ -772,6 +776,8 @@ class DaemonHTTPServer(
         try:
             if urlsplit(path).path == MCP_PATH:
                 await self._handle_mcp(method, body, writer, headers)
+            elif self.is_oauth_path(urlsplit(path).path):
+                await self._handle_oauth(method, path, body, writer, headers)
             else:
                 await self._dispatch(method, path, body, writer, headers)
         except TimeoutError:
