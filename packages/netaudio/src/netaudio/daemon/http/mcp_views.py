@@ -50,7 +50,7 @@ PROBLEM_SEVERITIES = {"error", "warning"}
 
 def compact(value: Any) -> Any:
     if isinstance(value, dict):
-        return {key: compact(item) for key, item in value.items() if key != "icon" and item is not None}
+        return {key: compact(item) for key, item in value.items() if key != "icon" and item is not None and item != ""}
     if isinstance(value, list):
         return [compact(item) for item in value]
     return value
@@ -95,9 +95,36 @@ def device_summary(device: Any) -> Any:
     if not isinstance(device, dict):
         return device
     summary = {key: device.get(key) for key in DEVICE_SUMMARY_FIELDS}
+    summary["model"] = device.get("model") or device.get("dante_model") or device.get("model_id")
+    if device.get("server_name") != summary.get("inventory_id"):
+        summary["server_name"] = device.get("server_name")
     summary["subscription_count"] = len(_subscription_list(device))
     summary["subscription_problems"] = _subscription_problems(device)
     return compact(summary)
+
+
+def clock_view(device: dict) -> dict:
+    clocking = device.get("ddm_clocking_state") if isinstance(device.get("ddm_clocking_state"), dict) else {}
+    preferences = device.get("ddm_clock_preferences") if isinstance(device.get("ddm_clock_preferences"), dict) else {}
+    role = device.get("clock_role")
+    if role is None and "grand_leader" in clocking:
+        role = "Leader" if clocking.get("grand_leader") else "Follower"
+    preferred = device.get("preferred_leader")
+    if preferred is None:
+        preferred = preferences.get("leader")
+    offset = device.get("clock_frequency_offset_parts_per_billion")
+    if offset is None:
+        offset = clocking.get("frequency_offset")
+    return compact(
+        {
+            "frequency_offset_parts_per_billion": offset,
+            "leader_clock_identity": device.get("leader_clock_identity"),
+            "locked": clocking.get("locked"),
+            "mute_status": clocking.get("mute_status"),
+            "preferred_leader": preferred,
+            "role": role,
+        }
+    )
 
 
 def _channel_names(channels: Any) -> dict:
@@ -132,15 +159,7 @@ def device_view(device: Any, sections: list[str]) -> Any:
     view: dict[str, Any] = {}
     if "summary" in sections:
         view.update(device_summary(device))
-        view["clock"] = compact(
-            {
-                "frequency_offset_parts_per_billion": device.get("clock_frequency_offset_parts_per_billion"),
-                "leader_clock_identity": device.get("leader_clock_identity"),
-                "preferred_leader": device.get("preferred_leader"),
-                "role": device.get("clock_role"),
-            }
-        )
-        view["server_name"] = device.get("server_name")
+        view["clock"] = clock_view(device)
     if "channels" in sections:
         channels = device.get("channels") if isinstance(device.get("channels"), dict) else {}
         view["channels"] = {

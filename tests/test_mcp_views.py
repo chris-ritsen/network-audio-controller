@@ -36,8 +36,35 @@ DEVICE = {
 }
 
 
-def test_compact_drops_nulls_and_icons():
-    assert compact({"a": None, "b": {"icon": "x", "c": [None, {"d": None, "e": 1}]}}) == {"b": {"c": [None, {"e": 1}]}}
+def test_compact_drops_nulls_empty_strings_and_icons():
+    assert compact({"a": None, "b": {"icon": "x", "c": [None, {"d": "", "e": 1}]}}) == {"b": {"c": [None, {"e": 1}]}}
+
+
+def test_managed_device_summary_uses_ddm_clock_and_model_fallbacks():
+    managed = {
+        "ddm_clock_preferences": {"leader": False},
+        "ddm_clocking_state": {
+            "grand_leader": True,
+            "locked": "LOCKED",
+            "frequency_offset": 0,
+            "mute_status": "NOT_MUTED",
+        },
+        "inventory_id": "ddm:lab:abc",
+        "model": "",
+        "model_id": "DIOBT",
+        "name": "avio-bt-1",
+        "server_name": "ddm:lab:abc",
+    }
+    view = device_view(managed, ["summary"])
+    assert view["model"] == "DIOBT"
+    assert "server_name" not in view
+    assert view["clock"] == {
+        "frequency_offset_parts_per_billion": 0,
+        "locked": "LOCKED",
+        "mute_status": "NOT_MUTED",
+        "preferred_leader": False,
+        "role": "Leader",
+    }
 
 
 def test_device_summary_lists_only_problem_routes():
@@ -53,6 +80,7 @@ def test_device_summary_lists_only_problem_routes():
 def test_device_view_sections():
     view = device_view(DEVICE, ["summary", "channels", "subscriptions", "network", "availability"])
     assert view["clock"] == {"preferred_leader": True, "role": "Leader"}
+    assert view["server_name"] == "lx-dante.local."
     assert view["channels"] == {
         "rx": {"1": "wireless-mic:1", "2": "wireless-mic:2", "10": "adat:left"},
         "tx": {"1": "01"},
