@@ -113,7 +113,8 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         description=(
             "Details for one device. Pick sections to keep the answer small: summary (identity, address, rate, "
             "latency, clock, subscription problems), channels (rx and tx channel names by number), subscriptions "
-            "(every route with its status), network (interfaces and redundancy), availability (which operations are "
+            "(only receive channels that have a route, with its status; a receive channel absent here is "
+            "unsubscribed), network (interfaces and redundancy), availability (which operations are "
             "writable and why not), flows (transmit and receive flows), or full for the raw record."
         ),
         input_schema=_schema(

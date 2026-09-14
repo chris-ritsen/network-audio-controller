@@ -37,6 +37,12 @@ DEVICE = {
     "subscriptions": [
         {"rx_channel": "wireless-mic:1", "tx_channel": "01", "tx_device": "ad4d", "status": UNRESOLVED},
         {"rx_channel": "adat:left", "tx_channel": "adat-1", "tx_device": "a32", "status": CONNECTED},
+        {
+            "rx_channel": "wireless-mic:2",
+            "tx_channel": "wireless-mic:2",
+            "tx_device": None,
+            "status": {"state": "none", "severity": "none", "label": "Not subscribed"},
+        },
     ],
     "tx_count": 128,
     "unused": None,
@@ -146,6 +152,7 @@ def test_device_view_sections():
     }
     assert view["subscriptions"][0]["problem"] == UNRESOLVED["detail"]
     assert "problem" not in view["subscriptions"][1]
+    assert len(view["subscriptions"]) == 2 and view["subscription_count"] == 2
     assert view["network"]["interfaces"] == [{"interface": "primary", "ip_address": "192.168.1.108"}]
     assert view["operation_availability"] == {"identify": "writable", "sample_rate": "read-only: capability_unknown"}
     assert device_view(DEVICE, ["full"])["channels"]["receivers"]["1"] == {"name": "wireless-mic:1"}
