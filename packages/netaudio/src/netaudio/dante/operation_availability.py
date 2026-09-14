@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 
 from netaudio.common.managed_api import MANAGED_PERMISSION_OPERATIONS
 
+UNVERIFIED_REASONS = frozenset({"capability_unknown", "lock_state_unknown", "update_mode_unknown"})
 WRITABLE_UPDATE_MODES = frozenset({1, 2})
 PULLUP_HOST_DISABLED_MASK = 0x0000_0001
 
@@ -119,7 +120,7 @@ def probe_supported(device, operation: str) -> bool:
 
 def require_writable(device, operation: str, requested_value=None) -> None:
     availability = operation_availability(device, operation, requested_value)
-    if availability.writable:
+    if all(reason in UNVERIFIED_REASONS for reason in availability.reasons):
         return
     details = ", ".join(availability.reasons)
     raise RuntimeError(f"{operation.replace('_', ' ')} is not writable: {details}")

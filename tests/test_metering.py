@@ -373,6 +373,42 @@ async def test_unresponsive_metering_device_is_not_repeatedly_started():
 
 
 @pytest.mark.asyncio
+async def test_rejected_metering_start_is_retried_on_the_keepalive_interval(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr(metering_module.time, "monotonic", lambda: now)
+    manager, application, _ = make_manager()
+    application.cmc.start_metering.side_effect = [RuntimeError("name contains unsupported characters"), None]
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 1
+    now += metering_module.METERING_KEEPALIVE_SECONDS
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 2
+    now += metering_module.METERING_KEEPALIVE_SECONDS
+    await manager._recover_stale_streams()
+    assert application.cmc.start_metering.await_count == 2
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_metering_start_waits_for_the_device_name(monkeypatch):
+    now = 100.0
+    monkeypatch.setattr(metering_module.time, "monotonic", lambda: now)
+    manager, application, device = make_manager()
+    device.name = None
+    manager.add_persistent("avio-bt-1", "client")
+    await drain_sends(manager)
+    application.cmc.start_metering.assert_not_awaited()
+    device.name = "avio-bt-1"
+    now += metering_module.METERING_KEEPALIVE_SECONDS
+    await manager._recover_stale_streams()
+    application.cmc.start_metering.assert_awaited_once()
+    assert application.cmc.start_metering.await_args.args[1] == "avio-bt-1"
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_metering_keepalive_holds_streams_open_until_the_device_goes_silent(monkeypatch):
     now = 100.0
     monkeypatch.setattr(metering_module.time, "monotonic", lambda: now)

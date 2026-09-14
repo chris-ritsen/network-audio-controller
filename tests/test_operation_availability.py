@@ -152,6 +152,14 @@ def test_codec_control_requires_an_established_device_adapter():
     assert operation_availability(device, "codec_control").reasons == ("no_device_adapter",)
 
 
+def test_require_writable_attempts_operations_whose_capability_is_unverified():
+    device = device_for("identify")
+    device.identify_supported = None
+
+    assert operation_availability(device, "identify").reasons == ("capability_unknown",)
+    require_writable(device, "identify")
+
+
 def test_require_writable_reports_all_decision_reasons_and_serializer_exposes_map():
     device = device_for("encoding")
     device.encoding_configuration_supported = False

@@ -19,3 +19,5 @@ CLAUDE.md
 
 # Research notes and lab results stay outside the repository
 research/
+
+packages/netaudio/src/netaudio/_build_info.json

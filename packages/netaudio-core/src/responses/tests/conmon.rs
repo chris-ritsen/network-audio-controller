@@ -326,6 +326,31 @@ fn codec_status_preserves_generic_parameter_type_mode_and_raw_values() {
 }
 
 #[test]
+fn gain_status_reads_avio_input_levels_from_codec_status() {
+    assert_eq!(
+        parse_gain_status(&captured_avio_input_codec_status_packet_1528()),
+        Some(GainStatus {
+            channel_levels: vec![5, 1],
+            device_type: "input".to_owned(),
+            supported_levels: vec![1, 2, 3, 4, 5],
+        })
+    );
+
+    let mut output = captured_avio_input_codec_status_packet_1528();
+    output[40] = 2;
+    output[41] = 1;
+    assert_eq!(parse_gain_status(&output).unwrap().device_type, "output");
+
+    let mut unknown = captured_avio_input_codec_status_packet_1528();
+    unknown[40] = 0xA5;
+    assert_eq!(parse_gain_status(&unknown), None);
+
+    let mut out_of_range = captured_avio_input_codec_status_packet_1528();
+    out_of_range[51] = 9;
+    assert_eq!(parse_gain_status(&out_of_range), None);
+}
+
+#[test]
 fn codec_status_rejects_invalid_descriptor_geometry_but_accepts_empty_values() {
     let mut empty = captured_avio_input_codec_status_packet_1528();
     empty[42..44].copy_from_slice(&0u16.to_be_bytes());
