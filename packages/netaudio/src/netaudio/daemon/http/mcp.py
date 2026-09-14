@@ -4,11 +4,13 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from netaudio.daemon.mcp_access import authorization_matches
 from netaudio.daemon.mcp_oauth import SCOPE_WRITE, Grant, OAuthStore
 
-logger = logging.getLogger("netaudio")
+logger = logging.getLogger("netaudio.mcp")
+logger.setLevel(logging.INFO)
 
 MCP_PATH = "/mcp"
 MCP_PROTOCOL_VERSION = "2025-06-18"
@@ -17,7 +19,7 @@ JSON_RPC_METHOD_NOT_FOUND = -32601
 JSON_RPC_INVALID_PARAMS = -32602
 JSON_RPC_PARSE_ERROR = -32700
 
-DEVICE_DESCRIPTION = "Device name or server name as listed in the devices resource."
+DEVICE_DESCRIPTION = "Device name or server name as returned by list_devices."
 CONFIRMATION_DESCRIPTION = "Must be true to perform this change. Ask the user before setting it."
 
 
@@ -36,6 +38,7 @@ class McpTool:
     description: str
     input_schema: dict
     destructive: bool = False
+    method: str = "POST"
     requires_confirmation: bool = False
     read_only: bool = False
     defaults: dict = field(default_factory=dict)
@@ -61,12 +64,31 @@ class McpResource:
     path: str
     name: str
     description: str
+    tool_name: str
 
     def to_dict(self) -> dict:
         return {"uri": self.uri, "name": self.name, "description": self.description, "mimeType": "application/json"}
 
+    def to_tool(self) -> McpTool:
+        return McpTool(
+            name=self.tool_name,
+            path=self.path,
+            description=self.description,
+            input_schema=_schema({}, []),
+            method="GET",
+            read_only=True,
+        )
 
-TOOLS: tuple[McpTool, ...] = (
+
+ACTION_TOOLS: tuple[McpTool, ...] = (
+    McpTool(
+        name="get_device",
+        path="/devices/{device}",
+        description="One device by name, with the same fields as list_devices.",
+        input_schema=_schema({"device": _device_property()}, ["device"]),
+        method="GET",
+        read_only=True,
+    ),
     McpTool(
         name="apply_preset",
         path="/presets/load",
@@ -359,6 +381,7 @@ RESOURCES: tuple[McpResource, ...] = (
         path="/ddm/status",
         name="Dante Domain Manager status",
         description="Connection state of configured Dante Domain Manager servers and their domains.",
+        tool_name="get_ddm_status",
     ),
     McpResource(
         uri="netaudio://devices",
@@ -369,37 +392,47 @@ RESOURCES: tuple[McpResource, ...] = (
             "sample rate, latency, encoding, clock role, network interfaces, redundancy, and operation_availability "
             "which says which settings can currently be changed and why not."
         ),
+        tool_name="list_devices",
     ),
     McpResource(
         uri="netaudio://event-journal",
         path="/event-journal",
         name="Event journal",
         description="Recent monitoring events: latency, late packets, issue lifecycle and configuration changes.",
+        tool_name="get_event_journal",
     ),
     McpResource(
         uri="netaudio://external-flows",
         path="/external-flows",
         name="External AES67 streams",
         description="AES67 and RTP streams announced on the network by SAP.",
+        tool_name="get_external_flows",
     ),
     McpResource(
         uri="netaudio://issues",
         path="/issues",
         name="Issues",
         description="Open and recently resolved problems detected on the network, with suggested remediation.",
+        tool_name="get_issues",
     ),
     McpResource(
         uri="netaudio://metering",
         path="/metering/cache",
         name="Signal levels",
         description="Latest signal level per channel for devices that are being metered.",
+        tool_name="get_signal_levels",
     ),
     McpResource(
         uri="netaudio://server",
         path="/server-info",
         name="Server",
         description="This netaudio server's host, version and start time.",
+        tool_name="get_server_info",
     ),
+)
+
+TOOLS: tuple[McpTool, ...] = tuple(
+    sorted((*ACTION_TOOLS, *(resource.to_tool() for resource in RESOURCES)), key=lambda tool: tool.name)
 )
 
 DEVICE_RESOURCE_TEMPLATE = {
@@ -541,8 +574,9 @@ class DaemonMcpHandlers:
                 },
                 "serverInfo": {"name": "netaudio", "version": str(self.server_info.get("version", "unknown"))},
                 "instructions": (
-                    "netaudio controls Dante audio devices. Read the netaudio://devices resource first: it lists every "
-                    "device with its channels, routes and operation_availability. Route audio with subscribe using the "
+                    "netaudio controls Dante audio devices. Call list_devices first (or read the netaudio://devices "
+                    "resource): it lists every device with its channels, routes and operation_availability. Route "
+                    "audio with subscribe using the "
                     "receiving device's channel number and the transmitting device's channel name. Tools that carry a "
                     "confirmed flag change network state or interrupt audio; ask the user before setting it."
                 ),
@@ -598,9 +632,12 @@ class DaemonMcpHandlers:
             f"{json.dumps({key: value for key, value in arguments.items() if key not in {'pin', 'xml'}}, default=str)}"
         )
         captured = CapturedResponse(writer.get_extra_info("peername"))
-        handler = self.post_handlers[tool.path]
         try:
-            await handler(captured, request)
+            if tool.method == "GET":
+                path = tool.path.format(**{key: quote(str(value), safe="") for key, value in request.items()})
+                await self._dispatch("GET", path, None, captured, {"accept": "application/json"})
+            else:
+                await self.post_handlers[tool.path](captured, request)
         except TimeoutError:
             return _tool_result({"error": "device did not respond"}, is_error=True)
         except Exception as exception:

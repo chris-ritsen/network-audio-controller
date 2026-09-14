@@ -19,7 +19,7 @@ from netaudio.daemon.mcp_oauth import (
     verify_login_secret,
 )
 
-logger = logging.getLogger("netaudio")
+logger = logging.getLogger("netaudio.mcp")
 
 AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server"
 AUTHORIZE_PATH = "/oauth/authorize"

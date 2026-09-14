@@ -165,6 +165,16 @@ async def test_resources_read_the_get_routes():
     status, body = await rpc(server, "resources/read", {"uri": "netaudio://nothing"})
     assert body["error"]["code"] == -32602
 
+    status, body = await rpc(server, "tools/call", {"name": "list_devices", "arguments": {}})
+    assert body["result"]["isError"] is False
+    assert "lx-dante.local." in body["result"]["structuredContent"]
+
+    status, body = await rpc(server, "tools/call", {"name": "get_device", "arguments": {"device": "lx-dante"}})
+    assert body["result"]["structuredContent"]["name"] == "lx-dante"
+
+    status, body = await rpc(server, "tools/call", {"name": "get_device", "arguments": {"device": "missing"}})
+    assert body["result"]["isError"] is True
+
 
 @pytest.mark.asyncio
 async def test_batches_and_unsupported_http_methods():
