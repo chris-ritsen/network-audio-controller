@@ -567,3 +567,55 @@ def mcp_token(
     typer.echo("Send it as the Authorization: Bearer header.")
     if rotate:
         typer.echo(f"{icon('warning')}The daemon reads the token at start; run 'netaudio daemon restart' to apply.")
+
+
+@app.command("mcp-login-secret")
+def mcp_login_secret(
+    secret: Optional[str] = typer.Option(
+        None, "--secret", help="The secret; prompted for when omitted.", hide_input=True
+    ),
+):
+    """Set the secret you type when approving an AI assistant's access through OAuth."""
+    from netaudio.daemon.mcp_oauth import set_login_secret
+
+    value = secret if secret is not None else typer.prompt("Login secret", hide_input=True, confirmation_prompt=True)
+    try:
+        set_login_secret(value)
+    except ValueError as exception:
+        typer.echo(f"Error: {exception}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Login secret saved. It is checked on the next approval; no restart is needed.")
+
+
+@app.command("mcp-public-url")
+def mcp_public_url(
+    url: Optional[str] = typer.Argument(None, help="Public base URL, for example https://netaudio.app"),
+    clear: bool = typer.Option(False, "--clear", help="Forget the public URL and derive it from each request."),
+):
+    """Show or set the public base URL advertised to OAuth clients."""
+    from netaudio.common.preferences import save_preference
+    from netaudio.daemon.mcp_oauth import PUBLIC_URL_PREFERENCE, read_public_url, save_public_url
+
+    if clear:
+        save_preference(PUBLIC_URL_PREFERENCE, None)
+        typer.echo("Public URL cleared.")
+        return
+    if url is None:
+        current = read_public_url()
+        typer.echo(current or "No public URL is set; it is derived from each request's Host header.")
+        return
+    try:
+        saved = save_public_url(url)
+    except ValueError as exception:
+        typer.echo(f"Error: {exception}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Public URL set to {saved}. MCP clients use {saved}/mcp.")
+
+
+@app.command("mcp-revoke")
+def mcp_revoke():
+    """Revoke every OAuth token and registered client; assistants must connect again."""
+    from netaudio.daemon.mcp_oauth import OAuthStore
+
+    count = OAuthStore().revoke_all()
+    typer.echo(f"Revoked {count} token(s) and forgot every registered client.")

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from netaudio.daemon.mcp_access import authorization_matches
+from netaudio.daemon.mcp_oauth import SCOPE_WRITE, Grant, OAuthStore
 
 logger = logging.getLogger("netaudio")
 
@@ -459,11 +460,35 @@ class DaemonMcpHandlers:
     def mcp_server_info(self) -> dict:
         return {"path": MCP_PATH, "protocol_version": MCP_PROTOCOL_VERSION, "transport": "streamable-http"}
 
+    def mcp_grant(self, headers) -> Grant | None:
+        header = (headers or {}).get("authorization")
+        if authorization_matches(header, self.mcp_token):
+            return Grant(
+                client_id="local-token",
+                client_name="netaudio daemon mcp-token",
+                scope=SCOPE_WRITE,
+                expires_at=float("inf"),
+            )
+        if not isinstance(header, str):
+            return None
+        scheme, _, token = header.strip().partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            return None
+        store: OAuthStore | None = getattr(self, "oauth_store", None)
+        return store.grant_for(token.strip()) if store else None
+
     async def _handle_mcp(self, method: str, body, writer, headers) -> None:
         headers = headers or {}
-        if not authorization_matches(headers.get("authorization"), self.mcp_token):
-            self._write_mcp_raw(writer, 401, {"error": "a bearer token is required; run `netaudio daemon mcp-token`"})
+        grant = self.mcp_grant(headers)
+        if grant is None:
+            self._write_mcp_raw(
+                writer,
+                401,
+                {"error": "a bearer token is required; connect through OAuth or run `netaudio daemon mcp-token`"},
+                resource_metadata=self.oauth_base_url(headers) + "/.well-known/oauth-protected-resource",
+            )
             return
+        self._mcp_current_grant = grant
         if method == "DELETE":
             self._write_mcp_raw(writer, 204, None)
             return
@@ -552,6 +577,14 @@ class DaemonMcpHandlers:
         missing = [key for key in tool.input_schema["required"] if key not in arguments]
         if missing:
             raise McpError(JSON_RPC_INVALID_PARAMS, f"missing arguments: {', '.join(missing)}")
+        grant: Grant | None = getattr(self, "_mcp_current_grant", None)
+        if grant is not None and not grant.can_write and not tool.read_only:
+            return _tool_result(
+                {
+                    "error": f"{grant.client_name} was granted read-only access; {tool.name} needs the {SCOPE_WRITE} scope."
+                },
+                is_error=True,
+            )
         if tool.requires_confirmation and arguments.get("confirmed") is not True:
             return _tool_result(
                 {
@@ -560,6 +593,10 @@ class DaemonMcpHandlers:
                 is_error=True,
             )
         request = {**tool.defaults, **arguments}
+        logger.info(
+            f"MCP {grant.client_name if grant else 'unknown client'} called {tool.name} "
+            f"{json.dumps({key: value for key, value in arguments.items() if key not in {'pin', 'xml'}}, default=str)}"
+        )
         captured = CapturedResponse(writer.get_extra_info("peername"))
         handler = self.post_handlers[tool.path]
         try:
@@ -599,7 +636,7 @@ class DaemonMcpHandlers:
             raise McpError(JSON_RPC_INVALID_PARAMS, message or f"resource returned HTTP {status}")
         return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(payload, default=str)}]}
 
-    def _write_mcp_raw(self, writer, status: int, payload) -> None:
+    def _write_mcp_raw(self, writer, status: int, payload, resource_metadata: str | None = None) -> None:
         body = b"" if payload is None else json.dumps(payload, default=str).encode()
         status_text = {
             200: "OK",
@@ -610,7 +647,10 @@ class DaemonMcpHandlers:
         }.get(status, "Error")
         head = f"HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nCache-Control: no-store\r\n"
         if status == 401:
-            head += 'WWW-Authenticate: Bearer realm="netaudio"\r\n'
+            challenge = 'Bearer realm="netaudio"'
+            if resource_metadata:
+                challenge += f', resource_metadata="{resource_metadata}"'
+            head += f"WWW-Authenticate: {challenge}\r\n"
         writer.write(head.encode() + b"\r\n" + body)
 
 
