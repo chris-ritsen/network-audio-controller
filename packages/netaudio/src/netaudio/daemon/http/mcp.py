@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
+from netaudio.daemon.http.mcp_views import (
+    DEVICE_SECTIONS,
+    compact,
+    device_summary,
+    device_view,
+    events_view,
+    issues_view,
+    signal_levels_view,
+)
 from netaudio.daemon.mcp_access import authorization_matches
 from netaudio.daemon.mcp_oauth import SCOPE_WRITE, Grant, OAuthStore
 
@@ -65,6 +74,8 @@ class McpResource:
     name: str
     description: str
     tool_name: str
+    tool_description: str | None = None
+    tool_properties: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {"uri": self.uri, "name": self.name, "description": self.description, "mimeType": "application/json"}
@@ -73,21 +84,39 @@ class McpResource:
         return McpTool(
             name=self.tool_name,
             path=self.path,
-            description=self.description,
-            input_schema=_schema({}, []),
+            description=self.tool_description or self.description,
+            input_schema=_schema(self.tool_properties, []),
             method="GET",
             read_only=True,
         )
 
 
+LIMIT_PROPERTY = {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}
+
 ACTION_TOOLS: tuple[McpTool, ...] = (
     McpTool(
         name="get_device",
         path="/devices/{device}",
-        description="One device by name, with the same fields as list_devices.",
-        input_schema=_schema({"device": _device_property()}, ["device"]),
+        description=(
+            "Details for one device. Pick sections to keep the answer small: summary (identity, address, rate, "
+            "latency, clock, subscription problems), channels (rx and tx channel names by number), subscriptions "
+            "(every route with its status), network (interfaces and redundancy), availability (which operations are "
+            "writable and why not), flows (transmit and receive flows), or full for the raw record."
+        ),
+        input_schema=_schema(
+            {
+                "device": _device_property(),
+                "sections": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(DEVICE_SECTIONS)},
+                    "default": ["summary"],
+                },
+            },
+            ["device"],
+        ),
         method="GET",
         read_only=True,
+        defaults={"sections": ["summary"]},
     ),
     McpTool(
         name="apply_preset",
@@ -390,11 +419,14 @@ RESOURCES: tuple[McpResource, ...] = (
         description=(
             "Every known Dante device keyed by server name: online state, channels, subscriptions with their status, "
             "sample rate, latency, encoding, clock role, network interfaces, redundancy, and operation_availability "
-            "which says which settings can currently be changed and why not. The list_devices tool returns a compact "
-            "summary of each device with its subscription count and any failing subscriptions; use get_device for "
-            "channels, routes and operation_availability."
+            "which says which settings can currently be changed and why not."
         ),
         tool_name="list_devices",
+        tool_description=(
+            "Every known device as a compact summary keyed by server name: name, model, address, online state, "
+            "management state, sample rate, latency, channel counts, subscription count and any failing "
+            "subscriptions. Use get_device for channels, routes, network and operation availability."
+        ),
     ),
     McpResource(
         uri="netaudio://event-journal",
@@ -402,6 +434,18 @@ RESOURCES: tuple[McpResource, ...] = (
         name="Event journal",
         description="Recent monitoring events: latency, late packets, issue lifecycle and configuration changes.",
         tool_name="get_event_journal",
+        tool_description=(
+            "Recent monitoring events, newest first: latency, late packets, issue lifecycle and configuration "
+            "changes. Filter by device or kind and page with limit."
+        ),
+        tool_properties={
+            "device": _device_property(),
+            "kind": {
+                "type": "string",
+                "description": "Only events of this kind, for example receiver_flow_latency_high.",
+            },
+            "limit": LIMIT_PROPERTY,
+        },
     ),
     McpResource(
         uri="netaudio://external-flows",
@@ -416,6 +460,15 @@ RESOURCES: tuple[McpResource, ...] = (
         name="Issues",
         description="Open and recently resolved problems detected on the network, with suggested remediation.",
         tool_name="get_issues",
+        tool_description=(
+            "Problems detected on the network, most recently seen first. Defaults to open issues; set state to "
+            "resolved or all for history. Filter by device and page with limit."
+        ),
+        tool_properties={
+            "device": _device_property(),
+            "limit": LIMIT_PROPERTY,
+            "state": {"type": "string", "enum": ["all", "open", "resolved"], "default": "open"},
+        },
     ),
     McpResource(
         uri="netaudio://metering",
@@ -423,6 +476,8 @@ RESOURCES: tuple[McpResource, ...] = (
         name="Signal levels",
         description="Latest signal level per channel for devices that are being metered.",
         tool_name="get_signal_levels",
+        tool_description="Latest signal level per tx and rx channel for devices that are being metered, optionally for one device.",
+        tool_properties={"device": _device_property()},
     ),
     McpResource(
         uri="netaudio://server",
@@ -444,6 +499,13 @@ DEVICE_RESOURCE_TEMPLATE = {
     "mimeType": "application/json",
 }
 
+TOOL_VIEWS = {
+    "get_device": lambda payload, arguments: device_view(payload, arguments["sections"]),
+    "get_event_journal": events_view,
+    "get_issues": issues_view,
+    "get_signal_levels": signal_levels_view,
+    "list_devices": lambda payload, arguments: {key: device_summary(value) for key, value in payload.items()},
+}
 TOOLS_BY_NAME = {tool.name: tool for tool in TOOLS}
 RESOURCES_BY_URI = {resource.uri: resource for resource in RESOURCES}
 
@@ -648,9 +710,9 @@ class DaemonMcpHandlers:
         status, payload = captured.result()
         if payload is None:
             payload = {"status": status}
-        elif tool.name == "list_devices" and status < 400 and isinstance(payload, dict):
-            payload = {key: _summarize_device(value) for key, value in payload.items()}
-        return _tool_result(payload, is_error=status >= 400)
+        elif status < 400 and tool.name in TOOL_VIEWS and isinstance(payload, dict):
+            payload = TOOL_VIEWS[tool.name](payload, request)
+        return _tool_result(compact(payload), is_error=status >= 400)
 
     async def _mcp_resource_read(self, params: dict, writer) -> dict:
         uri = params.get("uri")
@@ -693,49 +755,6 @@ class DaemonMcpHandlers:
                 challenge += f', resource_metadata="{resource_metadata}"'
             head += f"WWW-Authenticate: {challenge}\r\n"
         writer.write(head.encode() + b"\r\n" + body)
-
-
-DEVICE_SUMMARY_FIELDS = (
-    "encoding",
-    "inventory_id",
-    "ipv4",
-    "is_locked",
-    "kind",
-    "latency_ms",
-    "management_state",
-    "manufacturer",
-    "model",
-    "name",
-    "online",
-    "rx_count",
-    "sample_rate_hz",
-    "server_name",
-    "tx_count",
-)
-
-
-def _summarize_device(device) -> Any:
-    if not isinstance(device, dict):
-        return device
-    summary = {key: device.get(key) for key in DEVICE_SUMMARY_FIELDS}
-    subscriptions = device.get("subscriptions") or []
-    if isinstance(subscriptions, dict):
-        subscriptions = list(subscriptions.values())
-    summary["subscription_count"] = len(subscriptions)
-    summary["subscription_problems"] = [
-        {
-            "detail": subscription["status"].get("detail"),
-            "label": subscription["status"].get("label"),
-            "rx_channel": subscription.get("rx_channel"),
-            "tx_channel": subscription.get("tx_channel"),
-            "tx_device": subscription.get("tx_device"),
-        }
-        for subscription in subscriptions
-        if isinstance(subscription, dict)
-        and isinstance(subscription.get("status"), dict)
-        and subscription["status"].get("severity") in {"error", "warning"}
-    ]
-    return summary
 
 
 def _error_response(request_id, code: int, message: str) -> dict:
