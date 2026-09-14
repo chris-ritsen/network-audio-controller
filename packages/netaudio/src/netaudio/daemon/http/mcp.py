@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from netaudio.daemon.http.mcp_views import (
     DEVICE_SECTIONS,
+    clock_status_view,
     compact,
     device_summary,
     device_view,
@@ -94,6 +95,18 @@ class McpResource:
 LIMIT_PROPERTY = {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}
 
 ACTION_TOOLS: tuple[McpTool, ...] = (
+    McpTool(
+        name="get_clock_status",
+        path="/devices",
+        description=(
+            "Clock synchronisation across the whole network in one call: every device's role, leader, lock state, "
+            "preferred-leader flag and frequency offset, grouped by clock domain (each Dante Domain Manager domain "
+            "and the unmanaged devices form separate domains with their own leader)."
+        ),
+        input_schema=_schema({}, []),
+        method="GET",
+        read_only=True,
+    ),
     McpTool(
         name="get_device",
         path="/devices/{device}",
@@ -500,6 +513,7 @@ DEVICE_RESOURCE_TEMPLATE = {
 }
 
 TOOL_VIEWS = {
+    "get_clock_status": clock_status_view,
     "get_device": lambda payload, arguments: device_view(payload, arguments["sections"]),
     "get_event_journal": events_view,
     "get_issues": issues_view,

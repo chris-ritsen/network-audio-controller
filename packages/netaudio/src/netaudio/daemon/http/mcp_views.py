@@ -127,6 +127,40 @@ def clock_view(device: dict) -> dict:
     )
 
 
+def _clock_domain(device: dict) -> str:
+    inventory_id = str(device.get("inventory_id") or "")
+    parts = inventory_id.split(":")
+    if (
+        parts[0] == "ddm"
+        and len(parts) > 2
+        and parts[2] != "unenrolled"
+        and device.get("management_state") == "managed"
+    ):
+        return f"ddm:{parts[1]}"
+    return "unmanaged"
+
+
+def clock_status_view(payload: Any, arguments: dict) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    devices = [device for device in payload.values() if isinstance(device, dict)]
+    identities = {
+        device.get("clock_identity"): device.get("name") for device in devices if device.get("clock_identity")
+    }
+    domains: dict[str, dict] = {}
+    for device in sorted(devices, key=lambda device: str(device.get("name"))):
+        clock = clock_view(device)
+        leader_identity = clock.get("leader_clock_identity")
+        if leader_identity in identities:
+            clock["leader"] = identities[leader_identity]
+        entry = compact({"name": device.get("name"), "online": device.get("online"), **clock})
+        domain = domains.setdefault(_clock_domain(device), {"devices": [], "leaders": []})
+        domain["devices"].append(entry)
+        if clock.get("role") == "Leader":
+            domain["leaders"].append(device.get("name"))
+    return {"domains": dict(sorted(domains.items()))}
+
+
 def _channel_names(channels: Any) -> dict:
     if not isinstance(channels, dict):
         return {}
