@@ -30,6 +30,15 @@ def _write_qr_code(lock_key: str, output: Optional[Path], open_qr_code: bool) ->
     return qr_code_path
 
 
+def _output_qr_code(lock_key: str, output: Optional[Path], open_qr_code: bool) -> Path | None:
+    if output is None and not open_qr_code:
+        from netaudio.common.lock_key_qr import render_lock_key_qr
+
+        typer.echo(render_lock_key_qr(lock_key), nl=False, color=True)
+        return None
+    return _write_qr_code(lock_key, output, open_qr_code)
+
+
 @app.command("get")
 def key_get():
     """Show the current device lock key."""
@@ -64,10 +73,19 @@ def key_set(
     set_config_value("device_lock_key", normalized_value)
 
 
-@app.command("qr", help="Create a QR code that imports the configured lock key into the netaudio iOS app.")
+@app.command("qr", help="Show a QR code that imports the configured lock key into the netaudio iOS app.")
 def key_qr(
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output PNG or SVG path."),
-    open_qr_code: bool = typer.Option(False, "--open", help="Open the generated QR code."),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write a PNG or SVG instead of rendering in the terminal.",
+    ),
+    open_qr_code: bool = typer.Option(
+        False,
+        "--open",
+        help="Open the generated QR code; creates a temporary PNG unless --output is given.",
+    ),
 ):
     from netaudio.common.config_loader import get_config_value
 
@@ -75,8 +93,9 @@ def key_qr(
     if not value:
         typer.echo(f"No device_lock_key in {config_path}", err=True)
         raise typer.Exit(code=1)
-    qr_code_path = _write_qr_code(value, output, open_qr_code)
-    typer.echo(qr_code_path)
+    qr_code_path = _output_qr_code(value, output, open_qr_code)
+    if qr_code_path is not None:
+        typer.echo(qr_code_path)
 
 
 @app.command("clear")
@@ -104,18 +123,18 @@ def key_extract(
     qr_code: bool = typer.Option(
         False,
         "--qr",
-        help="Create an iOS lock-key import QR code.",
+        help="Render an iOS lock-key import QR code in the terminal.",
     ),
     output: Optional[Path] = typer.Option(
         None,
         "--output",
         "-o",
-        help="Output PNG or SVG path; implies --qr.",
+        help="Write the QR code to a PNG or SVG instead of the terminal; implies --qr.",
     ),
     open_qr_code: bool = typer.Option(
         False,
         "--open",
-        help="Open the generated QR code; implies --qr.",
+        help="Open the generated QR code; implies --qr and creates a file.",
     ),
 ):
     """Extract the device lock key from a Dante Controller installation."""
@@ -144,5 +163,6 @@ def key_extract(
         typer.echo(f"Saved to {config_path}", err=True)
 
     if qr_code or output is not None or open_qr_code:
-        qr_code_path = _write_qr_code(key_string, output, open_qr_code)
-        typer.echo(f"QR code: {qr_code_path}", err=True)
+        qr_code_path = _output_qr_code(key_string, output, open_qr_code)
+        if qr_code_path is not None:
+            typer.echo(f"QR code: {qr_code_path}", err=True)

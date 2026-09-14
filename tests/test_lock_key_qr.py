@@ -9,7 +9,7 @@ import netaudio.common.key_extract as key_extract_module
 import netaudio.common.lock_key_qr as lock_key_qr_module
 from netaudio.commands.key import app
 from netaudio.common.config_loader import get_config_value
-from netaudio.common.lock_key_qr import lock_key_import_uri, normalize_lock_key, write_lock_key_qr
+from netaudio.common.lock_key_qr import lock_key_import_uri, normalize_lock_key, render_lock_key_qr, write_lock_key_qr
 
 VALID_LOCK_KEY = "0123456789ABCDEF0123456789ABCDEF"
 NORMALIZED_LOCK_KEY = VALID_LOCK_KEY.lower()
@@ -80,6 +80,20 @@ def test_write_lock_key_qr_rejects_misleading_extension(tmp_path):
         write_lock_key_qr(VALID_LOCK_KEY, tmp_path / "lock-key.jpg")
 
 
+def test_render_lock_key_qr_forces_black_and_white_with_small_border():
+    output = render_lock_key_qr(VALID_LOCK_KEY)
+
+    assert "▀" in output
+    assert "\x1b[38;2;0;0;0m" in output
+    assert "\x1b[38;2;255;255;255m" in output
+    assert "\x1b[48;2;0;0;0m" in output
+    assert "\x1b[48;2;255;255;255m" in output
+    assert "\x1b[49m" in output.splitlines()[0]
+    assert "\x1b[38;2;0;0;0m" in output.splitlines()[-1]
+    assert all(line.endswith("\x1b[0m") for line in output.splitlines())
+    assert len(output.splitlines()) == 20
+
+
 @pytest.mark.parametrize(
     ("platform", "executable"),
     [("darwin", "open"), ("linux", "xdg-open"), ("win32", "explorer")],
@@ -110,6 +124,18 @@ def test_qr_command_uses_configured_key(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert result.stdout == f"{output_path}\n"
     assert output_path.exists()
+
+
+def test_qr_command_renders_in_terminal_by_default(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'device_lock_key = "{NORMALIZED_LOCK_KEY}"\n')
+    monkeypatch.setenv("NETAUDIO_CONFIG", str(config_path))
+
+    result = CliRunner().invoke(app, ["qr"])
+
+    assert result.exit_code == 0
+    assert result.stdout == render_lock_key_qr(NORMALIZED_LOCK_KEY)
+    assert "▀" in result.stdout
 
 
 def test_qr_command_requires_configured_key(monkeypatch, tmp_path):
