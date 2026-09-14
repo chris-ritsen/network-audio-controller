@@ -158,7 +158,8 @@ async def test_authorization_page_requires_a_login_secret_and_pkce():
     status, body, headers = await request(server, "GET", f"/oauth/authorize?{query}")
     assert status == 200
     assert headers["content-type"].startswith("text/html")
-    assert "Claude" in body and 'name="secret"' in body and "form-action 'self'" in headers["content-security-policy"]
+    assert "Claude" in body and 'name="secret"' in body
+    assert "form-action 'self' https://claude.ai;" in headers["content-security-policy"]
 
     query = urlencode({"client_id": client_id, "redirect_uri": REDIRECT, "response_type": "code", "state": "s"})
     status, body, _ = await request(server, "GET", f"/oauth/authorize?{query}")
@@ -332,6 +333,35 @@ async def test_read_only_scope_blocks_writes_but_allows_resources():
         server, "POST", "/mcp", {"jsonrpc": "2.0", "id": 2, "method": "resources/list"}, headers=mcp_headers
     )
     assert status == 200 and body["result"]["resources"]
+
+
+@pytest.mark.asyncio
+async def test_confidential_client_can_authenticate_with_http_basic():
+    server = make_server()
+    set_login_secret(SECRET)
+    status, registration, _ = await request(
+        server,
+        "POST",
+        "/oauth/register",
+        {"client_name": "Claude", "redirect_uris": [REDIRECT], "token_endpoint_auth_method": "client_secret_basic"},
+        headers={**PUBLIC_HEADERS, "content-type": "application/json"},
+    )
+    assert status == 201 and registration["client_secret"]
+    client_id = registration["client_id"]
+    verifier, challenge = pkce()
+    _, _, headers = await authorize(server, client_id, challenge)
+    code = parse_qs(urlsplit(headers["location"]).query)["code"][0]
+    form = {"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "code_verifier": verifier}
+
+    status, body, _ = await request(server, "POST", "/oauth/token", {**form, "client_id": client_id})
+    assert status == 401 and body["error"] == "invalid_client"
+
+    credentials = base64.b64encode(f"{client_id}:{registration['client_secret']}".encode()).decode()
+    status, tokens, _ = await request(
+        server, "POST", "/oauth/token", form, headers={**PUBLIC_HEADERS, "authorization": f"Basic {credentials}"}
+    )
+    assert status == 200, tokens
+    assert tokens["scope"] == SCOPE_WRITE
 
 
 @pytest.mark.asyncio
