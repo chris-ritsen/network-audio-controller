@@ -167,7 +167,10 @@ async def test_resources_read_the_get_routes():
 
     status, body = await rpc(server, "tools/call", {"name": "list_devices", "arguments": {}})
     assert body["result"]["isError"] is False
-    assert "lx-dante.local." in body["result"]["structuredContent"]
+    summary = body["result"]["structuredContent"]["lx-dante.local."]
+    assert summary["name"] == "lx-dante"
+    assert summary["subscription_count"] == 0 and summary["subscription_problems"] == []
+    assert "channels" not in summary
 
     status, body = await rpc(server, "tools/call", {"name": "get_device", "arguments": {"device": "lx-dante"}})
     assert body["result"]["structuredContent"]["name"] == "lx-dante"

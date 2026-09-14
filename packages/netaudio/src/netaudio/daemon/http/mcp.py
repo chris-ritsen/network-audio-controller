@@ -390,7 +390,9 @@ RESOURCES: tuple[McpResource, ...] = (
         description=(
             "Every known Dante device keyed by server name: online state, channels, subscriptions with their status, "
             "sample rate, latency, encoding, clock role, network interfaces, redundancy, and operation_availability "
-            "which says which settings can currently be changed and why not."
+            "which says which settings can currently be changed and why not. The list_devices tool returns a compact "
+            "summary of each device with its subscription count and any failing subscriptions; use get_device for "
+            "channels, routes and operation_availability."
         ),
         tool_name="list_devices",
     ),
@@ -646,6 +648,8 @@ class DaemonMcpHandlers:
         status, payload = captured.result()
         if payload is None:
             payload = {"status": status}
+        elif tool.name == "list_devices" and status < 400 and isinstance(payload, dict):
+            payload = {key: _summarize_device(value) for key, value in payload.items()}
         return _tool_result(payload, is_error=status >= 400)
 
     async def _mcp_resource_read(self, params: dict, writer) -> dict:
@@ -689,6 +693,49 @@ class DaemonMcpHandlers:
                 challenge += f', resource_metadata="{resource_metadata}"'
             head += f"WWW-Authenticate: {challenge}\r\n"
         writer.write(head.encode() + b"\r\n" + body)
+
+
+DEVICE_SUMMARY_FIELDS = (
+    "encoding",
+    "inventory_id",
+    "ipv4",
+    "is_locked",
+    "kind",
+    "latency_ms",
+    "management_state",
+    "manufacturer",
+    "model",
+    "name",
+    "online",
+    "rx_count",
+    "sample_rate_hz",
+    "server_name",
+    "tx_count",
+)
+
+
+def _summarize_device(device) -> Any:
+    if not isinstance(device, dict):
+        return device
+    summary = {key: device.get(key) for key in DEVICE_SUMMARY_FIELDS}
+    subscriptions = device.get("subscriptions") or []
+    if isinstance(subscriptions, dict):
+        subscriptions = list(subscriptions.values())
+    summary["subscription_count"] = len(subscriptions)
+    summary["subscription_problems"] = [
+        {
+            "detail": subscription["status"].get("detail"),
+            "label": subscription["status"].get("label"),
+            "rx_channel": subscription.get("rx_channel"),
+            "tx_channel": subscription.get("tx_channel"),
+            "tx_device": subscription.get("tx_device"),
+        }
+        for subscription in subscriptions
+        if isinstance(subscription, dict)
+        and isinstance(subscription.get("status"), dict)
+        and subscription["status"].get("severity") in {"error", "warning"}
+    ]
+    return summary
 
 
 def _error_response(request_id, code: int, message: str) -> dict:
