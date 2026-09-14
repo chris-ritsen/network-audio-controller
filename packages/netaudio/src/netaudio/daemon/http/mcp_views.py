@@ -112,9 +112,10 @@ def clock_view(device: dict) -> dict:
     preferred = device.get("preferred_leader")
     if preferred is None:
         preferred = preferences.get("leader")
+    managed = device.get("management_state") == "managed"
     return compact(
         {
-            "ddm_frequency_offset": clocking.get("frequency_offset"),
+            "ddm_frequency_offset": clocking.get("frequency_offset") if managed else None,
             "frequency_offset_parts_per_billion": device.get("clock_frequency_offset_parts_per_billion"),
             "leader_clock_identity": device.get("leader_clock_identity"),
             "leader_evidence": "reported" if device.get("leader_clock_identity") else None,
@@ -170,10 +171,12 @@ def clock_status_view(payload: Any, arguments: dict) -> Any:
     return {
         "domains": dict(sorted(domains.items())),
         "notes": [
-            "frequency_offset_parts_per_billion comes from the device's own clock status; ddm_frequency_offset is "
-            "Dante Domain Manager's figure for enrolled devices and is not the same quantity.",
+            "frequency_offset_parts_per_billion comes from the device's own clock status. ddm_frequency_offset is "
+            "Dante Domain Manager's figure, reported only for devices it manages, and has not been shown to be the "
+            "same quantity; do not compare the two.",
             "leader_evidence reported means the device named its leader; domain means it was inferred from the only "
             "leader in its domain; unknown means the device did not say.",
+            "role_source says where the role came from and nothing else; other fields may come from the other path.",
         ],
     }
 

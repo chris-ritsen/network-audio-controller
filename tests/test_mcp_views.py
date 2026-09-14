@@ -57,6 +57,7 @@ def test_managed_device_summary_uses_ddm_clock_and_model_fallbacks():
             "mute_status": "NOT_MUTED",
         },
         "inventory_id": "ddm:lab:abc",
+        "management_state": "managed",
         "model": "",
         "model_id": "DIOBT",
         "name": "avio-bt-1",
@@ -86,7 +87,7 @@ def test_clock_status_groups_devices_by_domain_and_names_leaders():
             "online": True,
         },
         "Windows-PC.local.": {
-            "ddm_clocking_state": {"grand_leader": False, "locked": "LOCKED"},
+            "ddm_clocking_state": {"grand_leader": False, "locked": "LOCKED", "frequency_offset": 0},
             "inventory_id": "ddm:lab:unenrolled:3",
             "name": "Windows-PC",
             "online": True,
@@ -111,6 +112,7 @@ def test_clock_status_groups_devices_by_domain_and_names_leaders():
     assert view["domains"]["ddm:lab"]["leaders"] == ["wing-4e4701"]
     assert view["domains"]["unmanaged"]["leaders"] == ["lx-dante"]
     unmanaged = {entry["name"]: entry for entry in view["domains"]["unmanaged"]["devices"]}
+    assert "ddm_frequency_offset" not in unmanaged["Windows-PC"]
     assert unmanaged["avio-bt-1"]["leader"] == "lx-dante" and unmanaged["avio-bt-1"]["leader_evidence"] == "reported"
     assert unmanaged["Windows-PC"]["leader"] == "lx-dante" and unmanaged["Windows-PC"]["leader_evidence"] == "domain"
     managed = {entry["name"]: entry for entry in view["domains"]["ddm:lab"]["devices"]}
