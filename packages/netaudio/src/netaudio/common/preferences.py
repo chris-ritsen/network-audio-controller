@@ -19,10 +19,14 @@ def read_preferences():
 def save_monitoring_port(port: int):
     if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
         raise ValueError("Monitoring port must be an integer between 1024 and 65535")
+    save_preference("monitoring_port", port)
+
+
+def save_preference(key: str, value):
     path = default_config_path().parent / "preferences.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     preferences = read_preferences()
-    preferences["monitoring_port"] = port
+    preferences[key] = value
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".preferences-")
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
