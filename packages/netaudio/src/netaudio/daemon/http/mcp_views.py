@@ -144,21 +144,21 @@ def _clock_domain(device: dict) -> str:
 def clock_status_view(payload: Any, arguments: dict) -> Any:
     if not isinstance(payload, dict):
         return payload
-    devices = [device for device in payload.values() if isinstance(device, dict)]
-    identities = {
-        device.get("clock_identity"): device.get("name") for device in devices if device.get("clock_identity")
-    }
+    devices = [
+        {**device, "name": device.get("name") or key} for key, device in payload.items() if isinstance(device, dict)
+    ]
+    identities = {device["clock_identity"]: device["name"] for device in devices if device.get("clock_identity")}
     domains: dict[str, dict] = {}
-    for device in sorted(devices, key=lambda device: str(device.get("name"))):
+    for device in sorted(devices, key=lambda device: device["name"]):
         clock = clock_view(device)
         leader_identity = clock.get("leader_clock_identity")
         if leader_identity in identities:
             clock["leader"] = identities[leader_identity]
-        entry = compact({"name": device.get("name"), "online": device.get("online"), **clock})
+        entry = compact({"name": device["name"], "online": device.get("online"), **clock})
         domain = domains.setdefault(_clock_domain(device), {"devices": [], "leaders": []})
         domain["devices"].append(entry)
         if clock.get("role") == "Leader":
-            domain["leaders"].append(device.get("name"))
+            domain["leaders"].append(device["name"])
     for domain in domains.values():
         for entry in domain["devices"]:
             if entry.get("role") == "Leader" or "leader" in entry:
