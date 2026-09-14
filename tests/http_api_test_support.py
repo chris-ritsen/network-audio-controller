@@ -207,7 +207,9 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
         refresh_device=AsyncMock(),
         refresh_all_devices=AsyncMock(),
     )
-    http_server = DaemonHTTPServer(application, state, metering=metering, on_shutdown=on_shutdown, tls=tls)
+    http_server = DaemonHTTPServer(
+        application, state, metering=metering, on_shutdown=on_shutdown, tls=tls, mcp_token="test-token"
+    )
     http_server.audio_capability_verification_timeout = 0.05
     return http_server
 

@@ -544,3 +544,26 @@ def tls():
     typer.echo(f"Certificate: {settings_value.certificate}")
     typer.echo(f"Key: {settings_value.key}")
     typer.echo(f"Certificate SHA-256: {fingerprint}")
+
+
+@app.command("mcp-token")
+def mcp_token(
+    rotate: bool = typer.Option(False, "--rotate", help="Replace the token; existing MCP clients must be updated."),
+    daemon_port: Optional[int] = typer.Option(
+        None, "--port", help="Daemon HTTP API port.", envvar="NETAUDIO_DAEMON_PORT"
+    ),
+):
+    """Show or rotate the bearer token that MCP clients use to reach this daemon."""
+    from netaudio.daemon.mcp_access import ensure_mcp_token, rotate_mcp_token
+
+    token = rotate_mcp_token() if rotate else ensure_mcp_token()
+    effective_port = _effective_daemon_port(daemon_port)
+    url = f"http://{socket.gethostname().removesuffix('.local')}.local:{effective_port}/mcp"
+    if structured_output_selected():
+        output_single({"token": token, "url": url, "rotated": rotate})
+        return
+    typer.echo(f"MCP URL:   {url}")
+    typer.echo(f"Token:     {token}")
+    typer.echo("Send it as the Authorization: Bearer header.")
+    if rotate:
+        typer.echo(f"{icon('warning')}The daemon reads the token at start; run 'netaudio daemon restart' to apply.")
