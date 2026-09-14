@@ -56,11 +56,20 @@ def compact(value: Any) -> Any:
     return value
 
 
+def _is_route(subscription: dict) -> bool:
+    if not subscription.get("tx_device"):
+        return False
+    status = subscription.get("status")
+    return not (isinstance(status, dict) and status.get("state") == "none")
+
+
 def _subscription_list(device: dict) -> list[dict]:
     subscriptions = device.get("subscriptions") or []
     if isinstance(subscriptions, dict):
         subscriptions = list(subscriptions.values())
-    return [subscription for subscription in subscriptions if isinstance(subscription, dict)]
+    return [
+        subscription for subscription in subscriptions if isinstance(subscription, dict) and _is_route(subscription)
+    ]
 
 
 def _subscription_line(subscription: dict) -> str:
@@ -98,7 +107,8 @@ def device_summary(device: Any) -> Any:
     summary["model"] = device.get("model") or device.get("dante_model") or device.get("model_id")
     if device.get("server_name") != summary.get("inventory_id"):
         summary["server_name"] = device.get("server_name")
-    summary["subscription_count"] = len(_subscription_list(device))
+    routes = _subscription_list(device)
+    summary["subscription_count"] = len(routes)
     summary["subscription_problems"] = _subscription_problems(device)
     return compact(summary)
 
