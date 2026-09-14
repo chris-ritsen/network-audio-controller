@@ -170,14 +170,14 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-ios,aarch64-apple-ios-macabi,aarch64-apple-ios-sim
       - uses: taiki-e/install-action@v2
         with:
           tool: cbindgen@0.29.4
       - run: ./scripts/build_xcframework.sh
       - run: |
           listing="$(unzip -l dist/netaudio_core.xcframework.zip)"
-          for path in Info.plist ios-arm64/libnetaudio_core.a ios-arm64-simulator/libnetaudio_core.a ios-arm64/Headers/netaudio_core.h ios-arm64-simulator/Headers/netaudio_core.h; do
+          for path in Info.plist ios-arm64/libnetaudio_core.a ios-arm64-maccatalyst/libnetaudio_core.a ios-arm64-simulator/libnetaudio_core.a ios-arm64/Headers/netaudio_core.h ios-arm64-maccatalyst/Headers/netaudio_core.h ios-arm64-simulator/Headers/netaudio_core.h; do
             if ! grep -q "$path" <<< "$listing"; then
               echo "xcframework zip is missing $path" >&2
               echo "$listing" >&2
