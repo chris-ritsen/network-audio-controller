@@ -66,11 +66,12 @@ def test_managed_device_summary_uses_ddm_clock_and_model_fallbacks():
     assert view["model"] == "DIOBT"
     assert "server_name" not in view
     assert view["clock"] == {
-        "frequency_offset_parts_per_billion": 0,
+        "ddm_frequency_offset": 0,
         "locked": "LOCKED",
         "mute_status": "NOT_MUTED",
         "preferred_leader": False,
         "role": "Leader",
+        "role_source": "ddm",
     }
 
 
@@ -84,6 +85,12 @@ def test_clock_status_groups_devices_by_domain_and_names_leaders():
             "name": "avio-bt-1",
             "online": True,
         },
+        "Windows-PC.local.": {
+            "ddm_clocking_state": {"grand_leader": False, "locked": "LOCKED"},
+            "inventory_id": "ddm:lab:unenrolled:3",
+            "name": "Windows-PC",
+            "online": True,
+        },
         "ddm:lab:x:y": {
             "ddm_clocking_state": {"grand_leader": True, "locked": "LOCKED"},
             "inventory_id": "ddm:lab:x:y",
@@ -91,13 +98,24 @@ def test_clock_status_groups_devices_by_domain_and_names_leaders():
             "name": "wing-4e4701",
             "online": True,
         },
+        "ddm:lab:x:z": {
+            "ddm_clocking_state": {"grand_leader": False, "locked": "LOCKED"},
+            "inventory_id": "ddm:lab:x:z",
+            "management_state": "managed",
+            "name": "avio-input-2",
+            "online": True,
+        },
     }
     view = clock_status_view(payload, {})
     assert list(view["domains"]) == ["ddm:lab", "unmanaged"]
     assert view["domains"]["ddm:lab"]["leaders"] == ["wing-4e4701"]
     assert view["domains"]["unmanaged"]["leaders"] == ["lx-dante"]
-    follower = view["domains"]["unmanaged"]["devices"][0]
-    assert follower["name"] == "avio-bt-1" and follower["leader"] == "lx-dante"
+    unmanaged = {entry["name"]: entry for entry in view["domains"]["unmanaged"]["devices"]}
+    assert unmanaged["avio-bt-1"]["leader"] == "lx-dante" and unmanaged["avio-bt-1"]["leader_evidence"] == "reported"
+    assert unmanaged["Windows-PC"]["leader"] == "lx-dante" and unmanaged["Windows-PC"]["leader_evidence"] == "domain"
+    managed = {entry["name"]: entry for entry in view["domains"]["ddm:lab"]["devices"]}
+    assert managed["avio-input-2"]["leader"] == "wing-4e4701" and managed["avio-input-2"]["leader_evidence"] == "domain"
+    assert "leader" not in managed["wing-4e4701"]
 
 
 def test_device_summary_lists_only_problem_routes():
@@ -112,7 +130,7 @@ def test_device_summary_lists_only_problem_routes():
 
 def test_device_view_sections():
     view = device_view(DEVICE, ["summary", "channels", "subscriptions", "network", "availability"])
-    assert view["clock"] == {"preferred_leader": True, "role": "Leader"}
+    assert view["clock"] == {"preferred_leader": True, "role": "Leader", "role_source": "direct"}
     assert view["server_name"] == "lx-dante.local."
     assert view["channels"] == {
         "rx": {"1": "wireless-mic:1", "2": "wireless-mic:2", "10": "adat:left"},
