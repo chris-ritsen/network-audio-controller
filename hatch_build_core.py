@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import json
 import os
 import platform
 import shutil
@@ -11,6 +14,48 @@ from packaging.tags import platform_tags
 
 def package_library_destination(root: Path, library_name: str) -> Path:
     return Path(root) / "packages" / "netaudio" / "src" / "netaudio" / "core" / library_name
+
+
+def git_directory(root: Path) -> Path | None:
+    marker = Path(root) / ".git"
+    if marker.is_dir():
+        return marker
+    if marker.is_file():
+        content = marker.read_text().strip()
+        if content.startswith("gitdir:"):
+            return (Path(root) / content.removeprefix("gitdir:").strip()).resolve()
+    return None
+
+
+def git_revision(root: Path) -> str | None:
+    directory = git_directory(root)
+    if directory is None:
+        return None
+    head = (directory / "HEAD").read_text().strip()
+    if not head.startswith("ref:"):
+        return head
+    reference = head.removeprefix("ref:").strip()
+    common = directory
+    common_marker = directory / "commondir"
+    if common_marker.is_file():
+        common = (directory / common_marker.read_text().strip()).resolve()
+    for base in (directory, common):
+        loose = base / reference
+        if loose.is_file():
+            return loose.read_text().strip()
+    packed = common / "packed-refs"
+    if packed.is_file():
+        for line in packed.read_text().splitlines():
+            if line.endswith(f" {reference}"):
+                return line.split(" ", 1)[0]
+    return None
+
+
+def write_build_information(root: Path) -> Path:
+    destination = Path(root) / "packages" / "netaudio" / "src" / "netaudio" / "_build_info.json"
+    information = {"git_revision": git_revision(Path(root))}
+    destination.write_text(json.dumps({key: value for key, value in information.items() if value}) + "\n")
+    return destination
 
 
 def install_built_library(root: Path, built_library: Path) -> Path:
@@ -40,6 +85,7 @@ class CoreLibraryBuildHook(BuildHookInterface):
             )
         installed_library = install_built_library(self.root, library_path)
         build_data["force_include"][str(installed_library)] = f"netaudio/core/{installed_library.name}"
+        build_data["force_include"][str(write_build_information(self.root))] = "netaudio/_build_info.json"
         build_data["pure_python"] = False
         build_data["tag"] = f"py3-none-{self._platform_tag()}"
 

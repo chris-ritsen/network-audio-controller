@@ -87,7 +87,12 @@ def test_build_hook_rebuilds_before_including_the_library(monkeypatch, tmp_path)
     installed_library = tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "core" / library_path.name
     assert calls == [crate_dir]
     assert installed_library.is_file()
-    assert build_data["force_include"] == {str(installed_library): f"netaudio/core/{library_path.name}"}
+    build_information = tmp_path / "packages" / "netaudio" / "src" / "netaudio" / "_build_info.json"
+    assert build_data["force_include"] == {
+        str(installed_library): f"netaudio/core/{library_path.name}",
+        str(build_information): "netaudio/_build_info.json",
+    }
+    assert build_information.read_text() == "{}\n"
     assert build_data["pure_python"] is False
     assert build_data["tag"] == "py3-none-test_platform"
 
@@ -249,3 +254,29 @@ def test_aur_git_package_builds_native_core_and_declares_linux_runtime_dependenc
     assert "'rust'" in build_dependencies
     assert "'python-redis'" in dependencies
     assert "'python-dbus-fast'" in dependencies
+
+
+def test_build_hook_reads_branch_and_worktree_revisions(monkeypatch, tmp_path):
+    hook = _load_build_hook(monkeypatch)
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    repository = tmp_path / "repository"
+    (repository / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repository / ".git" / "HEAD").write_text("ref: refs/heads/master\n")
+    (repository / ".git" / "refs" / "heads" / "master").write_text(revision + "\n")
+    assert hook.git_revision(repository) == revision
+
+    worktree = tmp_path / "worktree"
+    worktree_git = repository / ".git" / "worktrees" / "worktree"
+    worktree_git.mkdir(parents=True)
+    (worktree_git / "HEAD").write_text("ref: refs/heads/master\n")
+    (worktree_git / "commondir").write_text("../..\n")
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {worktree_git}\n")
+    assert hook.git_revision(worktree) == revision
+
+    packed = tmp_path / "packed"
+    (packed / ".git").mkdir(parents=True)
+    (packed / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (packed / ".git" / "packed-refs").write_text(f"# pack-refs\n{revision} refs/heads/main\n")
+    assert hook.git_revision(packed) == revision
+    assert hook.git_revision(tmp_path / "missing") is None
