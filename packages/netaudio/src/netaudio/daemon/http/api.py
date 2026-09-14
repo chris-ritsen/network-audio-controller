@@ -215,6 +215,7 @@ class DaemonHTTPServer(
             "/presets/preview": self._handle_preview_preset,
             "/presets/load": self._handle_load_preset,
             "/subscribe": self._handle_subscribe,
+            "/subscriptions/apply": self._handle_apply_subscriptions,
             "/unsubscribe": self._handle_unsubscribe,
             "/identify": self._handle_identify,
             "/rename-device": self._handle_rename_device,

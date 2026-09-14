@@ -383,6 +383,38 @@ ACTION_TOOLS: tuple[McpTool, ...] = (
         destructive=True,
     ),
     McpTool(
+        name="set_subscriptions",
+        path="/subscriptions/apply",
+        description=(
+            "Set or clear any number of routes across any number of devices in one call. The server groups routes by "
+            "receiving device and sends them in the largest batches each device accepts (16 per request for direct "
+            "Dante control, 32 for newer firmware and managed devices), running devices in parallel. Give tx_device "
+            "and tx_channel to route audio, or omit both to clear the receive channel. Prefer this over subscribe and "
+            "unsubscribe for more than one route. The reply lists every route with ok true or an error."
+        ),
+        input_schema=_schema(
+            {
+                "routes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rx_channel": {"type": "integer", "minimum": 1},
+                            "rx_device": {"type": "string"},
+                            "tx_channel": {"type": "string"},
+                            "tx_device": {"type": "string"},
+                        },
+                        "required": ["rx_channel", "rx_device"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            ["routes"],
+        ),
+        destructive=True,
+    ),
+    McpTool(
         name="subscribe",
         path="/subscribe",
         description="Route a transmit channel from one device to a receive channel on another. Channels are named as shown in the devices resource.",

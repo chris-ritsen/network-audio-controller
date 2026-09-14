@@ -24,6 +24,13 @@ from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyReadbackError,
 )
 from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
+from netaudio.daemon.subscription_batching import (
+    DIRECT_BATCH_LIMIT,
+    MANAGED_BATCH_LIMIT,
+    MODERN_ARC_BATCH_LIMIT,
+    parse_routes,
+    plan_batches,
+)
 
 logger = logging.getLogger("netaudio")
 
@@ -376,6 +383,79 @@ class DaemonDeviceHandlers:
         self.subscription_readback.request(device, [(rx_channel.number, "", "")])
         await self._send_json(writer, {"success": True})
 
+    async def _handle_apply_subscriptions(self, writer, params):
+        try:
+            routes = parse_routes(params.get("routes"))
+        except ValueError as exception:
+            await self._send_json(writer, {"error": str(exception)}, 400)
+            return
+
+        devices = {route.rx_device: self._find_device(route.rx_device) for route in routes}
+        results = {(route.rx_device, route.rx_channel): {**route.to_dict(), "ok": False} for route in routes}
+        for route in routes:
+            if devices[route.rx_device] is None:
+                results[(route.rx_device, route.rx_channel)]["error"] = "rx device not found"
+        plan = plan_batches(
+            [route for route in routes if devices[route.rx_device] is not None],
+            lambda name: self._subscription_batch_limit(devices[name]),
+        )
+
+        async def apply_device(rx_device, batches):
+            device = devices[rx_device]
+            for batch in batches:
+                for route in batch.routes:
+                    await self._broadcast_sse(
+                        {
+                            "event": "subscription_pending",
+                            "action": "remove" if batch.action == "clear" else "add",
+                            "rx_device": rx_device,
+                            "rx_channel": route.rx_channel,
+                            "tx_channel": route.tx_channel or "",
+                            "tx_device": route.tx_device or "",
+                        }
+                    )
+                records = [(route.rx_channel, route.tx_channel or "", route.tx_device or "") for route in batch.routes]
+                try:
+                    if batch.action == "clear":
+                        response = await self.application.remove_subscriptions(device, [r[0] for r in records])
+                    else:
+                        response = await self.application.add_subscriptions(device, records)
+                except (NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError) as exception:
+                    failure = str(exception)
+                else:
+                    failure = self._arc_write_failure(response, f"subscription {batch.action}")
+                for route in batch.routes:
+                    result = results[(rx_device, route.rx_channel)]
+                    if failure:
+                        result["error"] = failure
+                    else:
+                        result["ok"] = True
+                if not failure:
+                    self.subscription_readback.request(device, records)
+
+        await asyncio.gather(*(apply_device(rx_device, batches) for rx_device, batches in plan.items()))
+        ordered = [results[(route.rx_device, route.rx_channel)] for route in routes]
+        applied = sum(1 for result in ordered if result["ok"])
+        await self._send_json(
+            writer,
+            {
+                "success": applied == len(ordered),
+                "applied": applied,
+                "failed": len(ordered) - applied,
+                "batches": {rx_device: len(batches) for rx_device, batches in plan.items()},
+                "routes": ordered,
+            },
+            200 if applied else 409,
+        )
+
+    def _subscription_batch_limit(self, device) -> int:
+        if getattr(device, "requires_managed_control", False):
+            return MANAGED_BATCH_LIMIT
+        modern = getattr(self.application, "_uses_modern_arc_280f", None)
+        if callable(modern) and modern(device) is True:
+            return MODERN_ARC_BATCH_LIMIT
+        return DIRECT_BATCH_LIMIT
+
     async def _handle_identify(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
@@ -426,6 +506,28 @@ class DaemonDeviceHandlers:
         if not await self._require_arc_write_success(writer, response, "channel name change"):
             return
         await self._send_json(writer, {"success": True})
+
+    @staticmethod
+    def _arc_write_failure(response, operation) -> str | None:
+        from netaudio.ddm.device_transport import ManagedOperationResult
+
+        if isinstance(response, ManagedOperationResult):
+            if response.successful:
+                return None
+            return getattr(response, "message", None) or f"device rejected {operation}"
+        if not response:
+            return "device did not respond"
+        try:
+            from netaudio import core
+
+            result_code = core.parse_response("result_code", response)
+        except NetaudioCoreError as exception:
+            return f"invalid device response: {exception}"
+        if not isinstance(result_code, int):
+            return "invalid device response: missing result code"
+        if result_code != RESULT_CODE_SUCCESS:
+            return f"device rejected {operation} (result code 0x{result_code:04x})"
+        return None
 
     async def _require_arc_write_success(self, writer, response, operation):
         from netaudio.ddm.device_transport import ManagedOperationResult
