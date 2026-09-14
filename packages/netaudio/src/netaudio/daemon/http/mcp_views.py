@@ -112,17 +112,17 @@ def clock_view(device: dict) -> dict:
     preferred = device.get("preferred_leader")
     if preferred is None:
         preferred = preferences.get("leader")
-    offset = device.get("clock_frequency_offset_parts_per_billion")
-    if offset is None:
-        offset = clocking.get("frequency_offset")
     return compact(
         {
-            "frequency_offset_parts_per_billion": offset,
+            "ddm_frequency_offset": clocking.get("frequency_offset"),
+            "frequency_offset_parts_per_billion": device.get("clock_frequency_offset_parts_per_billion"),
             "leader_clock_identity": device.get("leader_clock_identity"),
+            "leader_evidence": "reported" if device.get("leader_clock_identity") else None,
             "locked": clocking.get("locked"),
             "mute_status": clocking.get("mute_status"),
             "preferred_leader": preferred,
             "role": role,
+            "role_source": "ddm" if device.get("clock_role") is None and role else ("direct" if role else None),
         }
     )
 
@@ -158,7 +158,24 @@ def clock_status_view(payload: Any, arguments: dict) -> Any:
         domain["devices"].append(entry)
         if clock.get("role") == "Leader":
             domain["leaders"].append(device.get("name"))
-    return {"domains": dict(sorted(domains.items()))}
+    for domain in domains.values():
+        for entry in domain["devices"]:
+            if entry.get("role") == "Leader" or "leader" in entry:
+                continue
+            if len(domain["leaders"]) == 1:
+                entry["leader"] = domain["leaders"][0]
+                entry["leader_evidence"] = "domain"
+            else:
+                entry["leader_evidence"] = "unknown"
+    return {
+        "domains": dict(sorted(domains.items())),
+        "notes": [
+            "frequency_offset_parts_per_billion comes from the device's own clock status; ddm_frequency_offset is "
+            "Dante Domain Manager's figure for enrolled devices and is not the same quantity.",
+            "leader_evidence reported means the device named its leader; domain means it was inferred from the only "
+            "leader in its domain; unknown means the device did not say.",
+        ],
+    }
 
 
 def _channel_names(channels: Any) -> dict:
