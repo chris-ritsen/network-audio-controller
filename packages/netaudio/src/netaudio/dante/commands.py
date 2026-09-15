@@ -116,8 +116,11 @@ class DanteCommands:
     def enable_aes67(self, is_enabled: bool, host_mac=None) -> dict:
         return self._sequenced({"command": "enable_aes67", "enabled": bool(is_enabled)}, host_mac)
 
-    def factory_reset(self, host_mac: bytes) -> dict:
-        return {"command": "factory_reset", "host_mac": host_mac.hex()}
+    def factory_reset(self, host_mac: bytes | None = None) -> dict:
+        specification = {"command": "factory_reset"}
+        if host_mac is not None:
+            specification["host_mac"] = host_mac.hex()
+        return specification
 
     def identify(self) -> dict:
         return self._sequenced({"command": "identify"})
@@ -188,14 +191,21 @@ class DanteCommands:
             "property_ids": list(property_ids),
         }
 
-    def query_modern_arc_receiver_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
-        return {"command": "query_modern_arc_receiver_flow_status", "protocol_id": protocol_id}
+    def query_modern_arc_receiver_flow_status(self, protocol_id=PROTOCOL_ARC_2809, starting_flow: int = 1) -> dict:
+        return {
+            "command": "query_modern_arc_receiver_flow_status",
+            "protocol_id": protocol_id,
+            "starting_flow": starting_flow,
+        }
 
     def query_modern_arc_transmitter_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
         return {"command": "query_tx_flows", "flow_protocol_id": protocol_id, "starting_flow": 1}
 
-    def reboot(self, host_mac: bytes) -> dict:
-        return {"command": "reboot", "host_mac": host_mac.hex()}
+    def reboot(self, host_mac: bytes | None = None) -> dict:
+        specification = {"command": "reboot"}
+        if host_mac is not None:
+            specification["host_mac"] = host_mac.hex()
+        return specification
 
     def refresh_clock_status(self, host_mac=None, sequence: int = 0x0021) -> dict:
         return self._with_host_mac({"command": "refresh_clock_status", "sequence": sequence}, host_mac)

@@ -33,6 +33,8 @@ def _channel_count_response(tx_count=260, rx_count=520):
 
 def test_channel_count_preserves_u16_counts():
     assert core.parse_response("channel_count", bytes(_channel_count_response())) == {
+        "transmit_flow_authoring_capability_word": 0,
+        "uses_modern_transmit_flow_authoring": False,
         "tx_count": 260,
         "rx_count": 520,
         "locked": None,

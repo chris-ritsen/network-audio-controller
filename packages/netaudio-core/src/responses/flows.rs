@@ -473,9 +473,8 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
         }
         let record_offset = usize::from(record_pointer).checked_sub(RESPONSE_HEADER_SIZE)?;
         if record_offset < records_start
-            || record_offsets
-                .last()
-                .is_some_and(|previous_offset| record_offset <= *previous_offset)
+            || record_offset >= body.len()
+            || record_offsets.contains(&record_offset)
         {
             return None;
         }
@@ -487,14 +486,20 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
 
     let mut flows = Vec::with_capacity(active_count);
     let mut flow_numbers = HashSet::with_capacity(active_count);
-    for (index, record_offset) in record_offsets.iter().copied().enumerate() {
-        let record_end = record_offsets.get(index + 1).copied().unwrap_or(body.len());
+    for record_offset in record_offsets.iter().copied() {
+        let record_end = record_offsets
+            .iter()
+            .copied()
+            .filter(|candidate| *candidate > record_offset)
+            .min()
+            .unwrap_or(body.len());
         let flow = parse_receiver_flow_record(body, record_offset, record_end)?;
         if !(1..=32).contains(&flow.flow_number) || !flow_numbers.insert(flow.flow_number) {
             return None;
         }
         flows.push(flow);
     }
+    flows.sort_unstable_by_key(|flow| flow.flow_number);
 
     Some(ReceiverFlowPage {
         result_code: envelope.result_code,
@@ -504,6 +509,7 @@ pub fn parse_receiver_flow_page(response: &[u8]) -> Option<ReceiverFlowPage> {
             ModernArcPageDisposition::MorePages
         },
         maximum_flow_slots: u8::try_from(maximum_records).ok()?,
+        reported_flow_count: u8::try_from(active_count).ok()?,
         flows,
     })
 }
@@ -556,14 +562,29 @@ pub fn parse_transmit_channel_capabilities(response: &[u8]) -> Option<TransmitCh
         )],
         &[RESULT_CODE_SUCCESS],
     )?;
-    if envelope.body.len() != 8 {
+    let reserved = *envelope.body.first()?;
+    let record_count = *envelope.body.get(1)?;
+    let expected_length = 2usize.checked_add(usize::from(record_count).checked_mul(6)?)?;
+    if reserved != 0 || envelope.body.len() != expected_length {
         return None;
     }
+    let mut ranges = Vec::with_capacity(usize::from(record_count));
+    for index in 0..usize::from(record_count) {
+        let offset = 2usize.checked_add(index.checked_mul(6)?)?;
+        let first_transmit_channel = read_u16(envelope.body, offset)?;
+        let last_transmit_channel = read_u16(envelope.body, offset.checked_add(2)?)?;
+        if first_transmit_channel == 0 || last_transmit_channel < first_transmit_channel {
+            return None;
+        }
+        ranges.push(TransmitChannelCapabilityRange {
+            first_transmit_channel,
+            last_transmit_channel,
+            unknown_value: read_u16(envelope.body, offset.checked_add(4)?)?,
+        });
+    }
     Some(TransmitChannelCapabilities {
-        format_identifier: read_u16(envelope.body, 0)?,
-        starting_channel_identifier: read_u16(envelope.body, 2)?,
-        channel_count: read_u16(envelope.body, 4)?,
-        capability_flags: read_u16(envelope.body, 6)?,
+        record_count,
+        ranges,
     })
 }
 
@@ -572,45 +593,137 @@ fn parse_receiver_flow_record(
     record_offset: usize,
     record_end: usize,
 ) -> Option<ReceiverFlow> {
-    let channel_count = read_u16(body, record_offset.checked_add(14)?)?;
-    if channel_count == 0 {
+    let flags = read_u16(body, record_offset.checked_add(2)?)?;
+    if flags & 0x4000 != 0 {
         return None;
     }
-    let channel_pointer_bytes = usize::from(channel_count).checked_mul(2)?;
-    let status_pointer_position = record_offset
-        .checked_add(20)?
-        .checked_add(channel_pointer_bytes)?;
-    let record_data_start = status_pointer_position.checked_add(2)?;
+    let interface_count = read_u16(body, record_offset.checked_add(12)?)?;
+    let flow_channel_slot_count = read_u16(body, record_offset.checked_add(14)?)?;
+    let receiver_bitmap_word_count = read_u16(body, record_offset.checked_add(16)?)?;
+    if interface_count == 0 || flow_channel_slot_count == 0 || receiver_bitmap_word_count == 0 {
+        return None;
+    }
+    let pointer_count = usize::from(interface_count)
+        .checked_add(usize::from(flow_channel_slot_count))?
+        .checked_add(1)?;
+    let pointer_table_start = record_offset.checked_add(18)?;
+    let record_data_start = pointer_table_start.checked_add(pointer_count.checked_mul(2)?)?;
     if record_data_start > record_end {
         return None;
     }
+    let absolute_pointer = |position: usize| -> Option<(u16, usize)> {
+        let pointer = read_u16(body, position)?;
+        let offset = usize::from(pointer).checked_sub(RESPONSE_HEADER_SIZE)?;
+        (offset >= record_data_start && offset < record_end).then_some((pointer, offset))
+    };
 
-    let endpoint_descriptor_size = read_u16(body, record_offset.checked_add(16)?)?;
-    if endpoint_descriptor_size < 4 {
+    let mut occupied_ranges = Vec::with_capacity(pointer_count + 1);
+    let mut interface_endpoints = Vec::with_capacity(usize::from(interface_count));
+    for index in 0..usize::from(interface_count) {
+        let pointer_position = pointer_table_start.checked_add(index.checked_mul(2)?)?;
+        let (pointer, descriptor_offset) = absolute_pointer(pointer_position)?;
+        let descriptor_length_bytes = *body.get(descriptor_offset)?;
+        if !matches!(descriptor_length_bytes, 4 | 8) {
+            return None;
+        }
+        let descriptor_end = descriptor_offset.checked_add(usize::from(descriptor_length_bytes))?;
+        let descriptor = body.get(descriptor_offset..descriptor_end)?;
+        if descriptor_end > record_end || *descriptor.get(1)? != 2 {
+            return None;
+        }
+        occupied_ranges.push((descriptor_offset, descriptor_end));
+        interface_endpoints.push(ReceiverFlowInterfaceEndpoint {
+            pointer,
+            descriptor_length_bytes,
+            kind: 2,
+            udp_port: read_u16(descriptor, 2)?,
+            ipv4_address: if descriptor_length_bytes == 8 {
+                Some(ipv4_at(descriptor, 4)?)
+            } else {
+                None
+            },
+            raw_descriptor_hexadecimal: bytes_to_hex(descriptor),
+        });
+    }
+
+    let bitmap_size = usize::from(receiver_bitmap_word_count).checked_mul(2)?;
+    let mut receiver_bitmaps_hexadecimal = Vec::with_capacity(usize::from(flow_channel_slot_count));
+    let mut receiver_channel_numbers_by_flow_channel =
+        Vec::with_capacity(usize::from(flow_channel_slot_count));
+    for index in 0..usize::from(flow_channel_slot_count) {
+        let table_index = usize::from(interface_count).checked_add(index)?;
+        let pointer_position = pointer_table_start.checked_add(table_index.checked_mul(2)?)?;
+        let (_, bitmap_offset) = absolute_pointer(pointer_position)?;
+        let bitmap_end = bitmap_offset.checked_add(bitmap_size)?;
+        let bitmap = body.get(bitmap_offset..bitmap_end)?;
+        if bitmap_end > record_end {
+            return None;
+        }
+        occupied_ranges.push((bitmap_offset, bitmap_end));
+        receiver_bitmaps_hexadecimal.push(bytes_to_hex(bitmap));
+        receiver_channel_numbers_by_flow_channel.push(receiver_channel_numbers(bitmap)?);
+    }
+
+    let status_pointer_position = pointer_table_start.checked_add(
+        usize::from(interface_count)
+            .checked_add(usize::from(flow_channel_slot_count))?
+            .checked_mul(2)?,
+    )?;
+    let (_, status_offset) = absolute_pointer(status_pointer_position)?;
+    let status_end = status_offset.checked_add(16)?;
+    let status_descriptor = body.get(status_offset..status_end)?;
+    if status_end > record_end {
         return None;
     }
-    let endpoint_descriptor_offset = usize::from(read_u16(body, record_offset.checked_add(18)?)?)
-        .checked_sub(RESPONSE_HEADER_SIZE)?;
-    let endpoint_descriptor_end =
-        endpoint_descriptor_offset.checked_add(usize::from(endpoint_descriptor_size))?;
-
-    let mut channel_descriptor_ranges = Vec::with_capacity(usize::from(channel_count));
-    for index in 0..usize::from(channel_count) {
-        let pointer_position = record_offset
-            .checked_add(20)?
-            .checked_add(index.checked_mul(2)?)?;
-        let descriptor_offset =
-            usize::from(read_u16(body, pointer_position)?).checked_sub(RESPONSE_HEADER_SIZE)?;
-        let descriptor_end = descriptor_offset.checked_add(16)?;
-        channel_descriptor_ranges.push((descriptor_offset, descriptor_end));
-    }
-
-    let status_offset =
-        usize::from(read_u16(body, status_pointer_position)?).checked_sub(RESPONSE_HEADER_SIZE)?;
-    let status_end = status_offset.checked_add(16)?;
-    let mut occupied_ranges = channel_descriptor_ranges.clone();
-    occupied_ranges.push((endpoint_descriptor_offset, endpoint_descriptor_end));
     occupied_ranges.push((status_offset, status_end));
+
+    let transport = read_u16(status_descriptor, 12)?;
+    let external_identity_pointer = read_u16(status_descriptor, 14)?;
+    let external_identity = if transport == 3 {
+        let identity_offset =
+            usize::from(external_identity_pointer).checked_sub(RESPONSE_HEADER_SIZE)?;
+        if identity_offset < record_data_start || identity_offset >= record_end {
+            return None;
+        }
+        let length_words = *body.get(identity_offset)?;
+        let identity_length = usize::from(length_words).checked_mul(2)?;
+        if identity_length != 28 {
+            return None;
+        }
+        let identity_end = identity_offset.checked_add(identity_length)?;
+        let descriptor = body.get(identity_offset..identity_end)?;
+        if identity_end > record_end {
+            return None;
+        }
+        occupied_ranges.push((identity_offset, identity_end));
+        let presence_mask = read_u16(descriptor, 2)?;
+        Some(ExternalRtpFlowIdentity {
+            pointer: external_identity_pointer,
+            length_words,
+            reserved: *descriptor.get(1)?,
+            presence_mask,
+            source_ipv4: if presence_mask & 0x0001 != 0 {
+                Some(ipv4_at(descriptor, 4)?)
+            } else {
+                None
+            },
+            session_id: if presence_mask & 0x0002 != 0 {
+                Some(read_u64(descriptor, 8)?)
+            } else {
+                None
+            },
+            unknown_optional_field_raw: read_u64(descriptor, 16)?,
+            clock_offset: if presence_mask & 0x0008 != 0 {
+                Some(read_u32(descriptor, 24)?)
+            } else {
+                None
+            },
+            raw_descriptor_hexadecimal: bytes_to_hex(descriptor),
+        })
+    } else {
+        None
+    };
+
     occupied_ranges.sort_unstable();
     if occupied_ranges
         .iter()
@@ -622,61 +735,68 @@ fn parse_receiver_flow_record(
         return None;
     }
 
-    let endpoint_descriptor = body.get(endpoint_descriptor_offset..endpoint_descriptor_end)?;
-    let destination_address_offset = endpoint_descriptor_end.checked_sub(4)?;
-    let destination_address = body.get(destination_address_offset..endpoint_descriptor_end)?;
-    let endpoint_has_version_four_user_datagram_layout =
-        endpoint_descriptor.len() == 8 && endpoint_descriptor.get(0..2) == Some(&[0x08, 0x02]);
-    let destination_user_datagram_port = if endpoint_has_version_four_user_datagram_layout {
-        read_u16(endpoint_descriptor, 2)
-    } else {
-        None
-    };
-    let flow_type = endpoint_has_version_four_user_datagram_layout.then(|| {
-        if (224..=239).contains(&destination_address[0]) {
-            "multicast".to_owned()
-        } else {
-            "unicast".to_owned()
+    let flow_type = interface_endpoints
+        .iter()
+        .find_map(|endpoint| endpoint.ipv4_address.as_deref())
+        .and_then(|address| address.split('.').next())
+        .and_then(|octet| octet.parse::<u8>().ok())
+        .map(|first_octet| {
+            if (224..=239).contains(&first_octet) {
+                "multicast".to_owned()
+            } else {
+                "unicast".to_owned()
+            }
+        });
+    let mut effective_subscription_identities = Vec::new();
+    if let Some(identity) = &external_identity {
+        if let (Some(source), Some(session_id)) =
+            (identity.source_ipv4.as_ref(), identity.session_id)
+        {
+            for (slot_index, receiver_channels) in
+                receiver_channel_numbers_by_flow_channel.iter().enumerate()
+            {
+                let flow_slot = u16::try_from(slot_index).ok()?.checked_add(1)?;
+                for receiver_channel_number in receiver_channels {
+                    effective_subscription_identities.push(ReceiverFlowSubscriptionIdentity {
+                        receiver_channel: *receiver_channel_number,
+                        flow_slot,
+                        source_ipv4: source.clone(),
+                        session_id,
+                        interface_endpoints: interface_endpoints.clone(),
+                    });
+                }
+            }
         }
-    });
-    let mut channel_descriptors_hexadecimal = Vec::with_capacity(usize::from(channel_count));
-    let mut receiver_channel_numbers_by_flow_channel =
-        Vec::with_capacity(usize::from(channel_count));
-    for (descriptor_offset, descriptor_end) in channel_descriptor_ranges {
-        let descriptor = body.get(descriptor_offset..descriptor_end)?;
-        channel_descriptors_hexadecimal.push(bytes_to_hex(descriptor));
-        receiver_channel_numbers_by_flow_channel.push(receiver_channel_numbers(descriptor)?);
     }
 
     Some(ReceiverFlow {
         flow_number: read_u16(body, record_offset)?,
-        flow_state_code: read_u16(body, record_offset.checked_add(2)?)?,
+        flags,
         flow_type,
         sample_rate: read_u32(body, record_offset.checked_add(4)?)?,
-        encoding: u16::try_from(read_u32(body, record_offset.checked_add(8)?)?).ok()?,
-        frames_per_packet: read_u16(body, record_offset.checked_add(12)?)?,
-        channel_count,
-        endpoint_descriptor_size,
-        endpoint_descriptor_hexadecimal: bytes_to_hex(endpoint_descriptor),
-        destination_user_datagram_port,
-        destination_internet_protocol_version_four_address: ipv4_at(
-            body,
-            destination_address_offset,
-        )?,
-        channel_descriptors_hexadecimal,
+        encoding: read_u32(body, record_offset.checked_add(8)?)?,
+        interface_count,
+        flow_channel_slot_count,
+        receiver_bitmap_word_count,
+        interface_endpoints,
+        receiver_bitmaps_hexadecimal,
         receiver_channel_numbers_by_flow_channel,
-        subscription_status_code: read_u16(body, status_offset)?,
-        status_field_at_byte_offset_two: read_u16(body, status_offset.checked_add(2)?)?,
-        status_field_at_byte_offset_four: read_u16(body, status_offset.checked_add(4)?)?,
-        status_field_at_byte_offset_six: read_u16(body, status_offset.checked_add(6)?)?,
-        latency_nanoseconds: read_u32(body, status_offset.checked_add(8)?)?,
-        status_field_at_byte_offset_twelve: read_u32(body, status_offset.checked_add(12)?)?,
+        subscription_status_code: read_u16(status_descriptor, 0)?,
+        interface_state_bitmap: read_u16(status_descriptor, 2)?,
+        status_flags: read_u16(status_descriptor, 4)?,
+        status_unknown: read_u16(status_descriptor, 6)?,
+        latency_nanoseconds: read_u32(status_descriptor, 8)?,
+        transport,
+        external_identity_pointer,
+        external_identity,
+        effective_subscription_identities,
+        status_descriptor_hexadecimal: bytes_to_hex(status_descriptor),
         raw_record_hexadecimal: bytes_to_hex(body.get(record_offset..record_end)?),
     })
 }
 
 pub(super) fn receiver_channel_numbers(descriptor: &[u8]) -> Option<Vec<u16>> {
-    if descriptor.len() != 16 {
+    if descriptor.is_empty() || descriptor.len() % 2 != 0 {
         return None;
     }
     let mut receiver_channel_numbers = Vec::new();

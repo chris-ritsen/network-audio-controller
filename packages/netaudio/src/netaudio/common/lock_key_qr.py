@@ -49,8 +49,8 @@ def render_lock_key_qr(lock_key: str) -> str:
         output.append(f"{ANSI_RESET}\n")
         rows = rows[1:]
 
-    for upper_row, lower_row in zip(rows[::2], rows[1::2], strict=True):
-        for upper_dark, lower_dark in zip(upper_row, lower_row, strict=True):
+    for upper_row, lower_row in zip(rows[::2], rows[1::2]):
+        for upper_dark, lower_dark in zip(upper_row, lower_row):
             output.append(ANSI_BLACK_FOREGROUND if upper_dark else ANSI_WHITE_FOREGROUND)
             output.append(ANSI_BLACK_BACKGROUND if lower_dark else ANSI_WHITE_BACKGROUND)
             output.append("▀")

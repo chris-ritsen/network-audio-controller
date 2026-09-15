@@ -305,6 +305,10 @@ fn parse_modern_arc_receiver_channel_status_record(
     record_pointer: u16,
     minimum_pointer: usize,
 ) -> Option<ModernArcReceiverChannelStatus> {
+    const RECEIVER_CAPABILITY_FLAGS_OFFSET: usize = 0x0c;
+    const CAN_SUBSCRIBE_SELF_MASK: u32 = 0x0000_0008;
+    const RENAME_PROHIBITED_MASK: u32 = 0x0000_0400;
+
     let record_type_code = read_u16(response, usize::from(record_pointer))?;
     let (
         record_size,
@@ -333,6 +337,7 @@ fn parse_modern_arc_receiver_channel_status_record(
     let source_device_name =
         optional_status_string_at_pointer(response, source_device_name_pointer, minimum_pointer)?;
 
+    let receiver_capability_flags = read_u32(record, RECEIVER_CAPABILITY_FLAGS_OFFSET)?;
     Some(ModernArcReceiverChannelStatus {
         record_pointer,
         record_length_bytes: u16::try_from(record_size).ok()?,
@@ -355,6 +360,9 @@ fn parse_modern_arc_receiver_channel_status_record(
         source_device_name,
         subscription_status_code: read_u16(record, subscription_status_offset)?,
         receiver_status_code: read_u16(record, receiver_status_offset)?,
+        receiver_capability_flags,
+        can_subscribe_self: receiver_capability_flags & CAN_SUBSCRIBE_SELF_MASK != 0,
+        can_rename: receiver_capability_flags & RENAME_PROHIBITED_MASK == 0,
         status_flags: match status_flags_offset {
             Some(offset) => Some(read_u16(record, offset)?),
             None => None,
@@ -394,11 +402,6 @@ pub fn parse_modern_arc_receiver_flow_status_page(
         &modern_arc_protocol_opcodes(OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809),
         &[RESULT_CODE_SUCCESS, crate::protocol::RESULT_CODE_MORE_PAGES],
     )?;
-    if envelope.result_code == crate::protocol::RESULT_CODE_MORE_PAGES
-        && envelope.protocol_id != PROTOCOL_ARC_2809
-    {
-        return None;
-    }
     let body = envelope.body;
     if body.len() < 8 {
         return None;

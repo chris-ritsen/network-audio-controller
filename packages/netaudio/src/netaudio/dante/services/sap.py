@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import ipaddress
 import logging
 import socket
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 
-import ifaddr
-
+from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.sap import (
     SAP_MULTICAST_ADDRESS,
     SAP_PORT,
@@ -17,10 +15,12 @@ from netaudio.dante.sap import (
     SapInventoryChange,
     SapParseError,
 )
+from netaudio.network_changes import NetworkChangeMonitor, network_change_monitor
+from netaudio.network_path import active_ipv4_interfaces
 
 logger = logging.getLogger("netaudio")
 
-SAP_INTERFACE_REFRESH_SECONDS = 30.0
+SAP_EXPIRY_CHECK_SECONDS = 30.0
 
 
 @dataclass(frozen=True, order=True)
@@ -30,21 +30,11 @@ class SapInterface:
 
 
 def active_sap_interfaces(selected_interface: str | None = None) -> tuple[SapInterface, ...]:
-    interfaces = set()
-    for adapter in ifaddr.get_adapters():
-        if selected_interface and adapter.nice_name != selected_interface:
-            continue
-        for adapter_ip in adapter.ips:
-            if not isinstance(adapter_ip.ip, str):
-                continue
-            try:
-                address = ipaddress.IPv4Address(adapter_ip.ip)
-            except ipaddress.AddressValueError:
-                continue
-            if address.is_unspecified or address.is_loopback or address.is_multicast:
-                continue
-            interfaces.add(SapInterface(adapter.nice_name, str(address)))
-    return tuple(sorted(interfaces))
+    return tuple(
+        sorted(
+            SapInterface(interface.name, interface.address) for interface in active_ipv4_interfaces(selected_interface)
+        )
+    )
 
 
 class _SapDatagramProtocol(asyncio.DatagramProtocol):
@@ -70,18 +60,24 @@ class SapDiscoveryService:
         endpoint_factory: Callable[..., Awaitable[tuple[asyncio.DatagramTransport, asyncio.DatagramProtocol]]]
         | None = None,
         on_change: Callable[[SapInventoryChange], object] | None = None,
-        refresh_seconds: float = SAP_INTERFACE_REFRESH_SECONDS,
+        expiry_check_seconds: float = SAP_EXPIRY_CHECK_SECONDS,
+        network_changes: NetworkChangeMonitor = network_change_monitor,
     ) -> None:
-        if refresh_seconds <= 0:
-            raise ValueError("SAP interface refresh interval must be positive")
+        if expiry_check_seconds <= 0:
+            raise ValueError("SAP expiry check interval must be positive")
         self.inventory = inventory or SapFlowInventory()
         self._interface_provider = interface_provider or (lambda: active_sap_interfaces(interface_name))
         self._socket_factory = socket_factory
         self._endpoint_factory = endpoint_factory
         self._on_change = on_change
-        self._refresh_seconds = refresh_seconds
+        self._expiry_check_seconds = expiry_check_seconds
+        self._network_changes = network_changes
         self._transports: dict[SapInterface, asyncio.DatagramTransport] = {}
-        self._maintenance_task: asyncio.Task | None = None
+        self._refresh_lock = DeferredAsyncioLock()
+        self._refresh_requested = False
+        self._refresh_task: asyncio.Task | None = None
+        self._unsubscribe_network_changes: Callable[[], None] | None = None
+        self._expiry_task: asyncio.Task | None = None
         self._callback_tasks: set[asyncio.Task] = set()
         self._started = False
 
@@ -118,17 +114,18 @@ class SapDiscoveryService:
             raise
 
     async def refresh_interfaces(self) -> None:
-        desired = set(self._interface_provider())
-        for interface in tuple(self._transports):
-            if interface not in desired:
-                self._transports.pop(interface).close()
-        for interface in sorted(desired - self._transports.keys()):
-            try:
-                transport, _ = await self._create_endpoint(interface)
-            except OSError as exception:
-                logger.warning(f"Could not listen for SAP on {interface.name} ({interface.address}): {exception}")
-                continue
-            self._transports[interface] = transport
+        async with self._refresh_lock:
+            desired = set(self._interface_provider())
+            for interface in tuple(self._transports):
+                if interface not in desired:
+                    self._transports.pop(interface).close()
+            for interface in sorted(desired - self._transports.keys()):
+                try:
+                    transport, _ = await self._create_endpoint(interface)
+                except OSError as exception:
+                    logger.warning(f"Could not listen for SAP on {interface.name} ({interface.address}): {exception}")
+                    continue
+                self._transports[interface] = transport
 
     def _emit(self, change: SapInventoryChange) -> None:
         if self._on_change is None:
@@ -167,10 +164,29 @@ class SapDiscoveryService:
         if change is not None:
             self._emit(change)
 
-    async def _maintenance_loop(self) -> None:
+    def _interfaces_changed(self) -> None:
+        if not self._started:
+            return
+        self._refresh_requested = True
+        if self._refresh_task is None:
+            self._refresh_task = asyncio.create_task(self._refresh_after_changes(), name="netaudio-sap-refresh")
+
+    async def _refresh_after_changes(self) -> None:
+        try:
+            while self._refresh_requested:
+                self._refresh_requested = False
+                try:
+                    await self.refresh_interfaces()
+                except Exception:
+                    logger.exception("Could not refresh SAP multicast interfaces")
+        finally:
+            self._refresh_task = None
+            if self._refresh_requested and self._started:
+                self._interfaces_changed()
+
+    async def _expiry_loop(self) -> None:
         while True:
-            await asyncio.sleep(self._refresh_seconds)
-            await self.refresh_interfaces()
+            await asyncio.sleep(self._expiry_check_seconds)
             for change in self.inventory.expire():
                 self._emit(change)
 
@@ -179,18 +195,30 @@ class SapDiscoveryService:
             return
         self._started = True
         try:
+            self._unsubscribe_network_changes = self._network_changes.subscribe(self._interfaces_changed)
             await self.refresh_interfaces()
-            self._maintenance_task = asyncio.create_task(self._maintenance_loop(), name="netaudio-sap-maintenance")
+            self._expiry_task = asyncio.create_task(self._expiry_loop(), name="netaudio-sap-expiry")
         except BaseException:
             await self.stop()
             raise
 
     async def stop(self) -> None:
-        maintenance_task = self._maintenance_task
-        self._maintenance_task = None
-        if maintenance_task is not None:
-            maintenance_task.cancel()
-            await asyncio.gather(maintenance_task, return_exceptions=True)
+        self._started = False
+        unsubscribe = self._unsubscribe_network_changes
+        self._unsubscribe_network_changes = None
+        if unsubscribe is not None:
+            unsubscribe()
+        refresh_task = self._refresh_task
+        self._refresh_task = None
+        self._refresh_requested = False
+        if refresh_task is not None:
+            refresh_task.cancel()
+            await asyncio.gather(refresh_task, return_exceptions=True)
+        expiry_task = self._expiry_task
+        self._expiry_task = None
+        if expiry_task is not None:
+            expiry_task.cancel()
+            await asyncio.gather(expiry_task, return_exceptions=True)
         for transport in self._transports.values():
             transport.close()
         self._transports.clear()
@@ -200,7 +228,6 @@ class SapDiscoveryService:
         if callback_tasks:
             await asyncio.gather(*callback_tasks, return_exceptions=True)
         self._callback_tasks.clear()
-        self._started = False
 
 
-__all__ = ["SAP_INTERFACE_REFRESH_SECONDS", "SapDiscoveryService", "SapInterface", "active_sap_interfaces"]
+__all__ = ["SAP_EXPIRY_CHECK_SECONDS", "SapDiscoveryService", "SapInterface", "active_sap_interfaces"]

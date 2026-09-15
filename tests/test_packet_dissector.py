@@ -100,7 +100,10 @@ def test_rx_channels_response_renders_core_records():
         "starting_channel": 1,
         "records": [
             {
+                "can_rename": True,
+                "can_subscribe_self": False,
                 "number": 1,
+                "receiver_flags": 0,
                 "rx_channel_name": "rx1",
                 "rx_status_code": 0,
                 "subscription_status_code": 4,

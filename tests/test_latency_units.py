@@ -30,7 +30,7 @@ def test_core_device_settings_are_normalized_to_milliseconds():
     controls = DanteDevice().controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None),
+            "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
                 "sample_rate": 48_000,
@@ -57,7 +57,7 @@ def test_configured_latency_is_effective_when_active_is_unavailable():
     controls = DanteDevice().controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None),
+            "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
                 "configured_latency_ns": 250_000,
@@ -199,7 +199,7 @@ def test_explicit_unavailable_latency_fields_clear_stale_device_state():
     controls = device.controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None),
+            "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
                 "configured_latency_ns": None,

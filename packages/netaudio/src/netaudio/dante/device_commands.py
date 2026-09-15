@@ -165,11 +165,14 @@ class DanteDeviceCommands:
             }
         )
 
-    def command_query_modern_arc_receiver_flow_status(self, transaction_id=0, protocol_id=PROTOCOL_ARC_2809):
+    def command_query_modern_arc_receiver_flow_status(
+        self, transaction_id=0, protocol_id=PROTOCOL_ARC_2809, starting_flow=1
+    ):
         return self._arc(
             {
                 "command": "query_modern_arc_receiver_flow_status",
                 "protocol_id": protocol_id,
+                "starting_flow": starting_flow,
                 "transaction_id": transaction_id,
             }
         )

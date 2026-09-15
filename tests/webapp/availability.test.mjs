@@ -127,6 +127,29 @@ test("codec and lock controls appear only when their operations are writable", (
   assert.doesNotMatch(lockMarkup, /Device PIN|>Lock</);
 });
 
+test("direct receiver rename controls fail closed when capability is prohibited or unavailable", () => {
+  const markup = render(
+    h(ReceiveSection, {
+      device: {
+        name: "Receiver",
+        server_name: "receiver.local.",
+        channels: {
+          receivers: {
+            1: { name: "Prohibited", can_rename: false },
+            2: { name: "Unavailable" },
+          },
+        },
+        subscriptions: [],
+      },
+    }),
+  );
+
+  assert.match(markup, /This receiver reports that renaming is prohibited/);
+  assert.match(markup, /Receiver rename capability is unavailable/);
+  assert.doesNotMatch(markup, /contenteditable="true"/);
+  assert.doesNotMatch(markup, /role="button"[^>]+aria-label="Edit receive channel/);
+});
+
 test("flow performance controls follow typed backend availability", () => {
   const device = {
     name: "Adapter",

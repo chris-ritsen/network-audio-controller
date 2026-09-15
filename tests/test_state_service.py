@@ -318,7 +318,7 @@ class TestRoutingNotifications:
         await state._on_receiver_flow_changed(event)
 
         device.get_rx_channels.assert_awaited_once()
-        query.assert_awaited_once_with(device, require_complete=False)
+        query.assert_awaited_once_with(device)
         assert device.rx_flow_count == 1
         assert device.receiver_flow_latency_nanoseconds == 1000000
         assert device.receiver_flows == [
@@ -987,7 +987,7 @@ async def test_unavailable_flow_inventory_backs_off_without_losing_channel_updat
     event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name=device.server_name)
     for _ in range(10):
         await state._on_receiver_flow_changed(event)
-    query.assert_awaited_once_with(device, require_complete=False)
+    query.assert_awaited_once_with(device)
     assert device.get_rx_channels.await_count == 10
 
 
@@ -1031,5 +1031,5 @@ async def test_partial_receiver_flow_notification_keeps_last_complete_state(monk
     assert device.receiver_flow_completeness == "partial"
     assert device.rx_flow_count == 16
     assert device.receiver_flows == complete["flows"]
-    assert device.receiver_flow_status_page["result_code"] == 0x8112
-    assert len(device.receiver_flow_status_page["flows"]) == 15
+    assert device.receiver_flow_status_page["result_code"] == 1
+    assert len(device.receiver_flow_status_page["flows"]) == 16

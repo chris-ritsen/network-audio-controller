@@ -12,7 +12,10 @@ from netaudio.daemon import server
 
 
 def adapter(name, *addresses):
-    return SimpleNamespace(nice_name=name, ips=[SimpleNamespace(ip=address) for address in addresses])
+    return SimpleNamespace(
+        nice_name=name,
+        ips=[SimpleNamespace(ip=address, network_prefix=24) for address in addresses],
+    )
 
 
 @pytest.fixture
@@ -76,14 +79,17 @@ async def test_control_cache_separates_source_addresses_and_rejects_missing_inte
     second = transport.client("192.0.2.10")
     assert second is not first
     assert constructor.call_args.kwargs["local_ip"] == "192.0.2.63"
+    first.close.assert_called_once_with()
     adapters.clear()
     with pytest.raises(RuntimeError, match="was not found"):
         await transport.call("192.0.2.10", lambda client: client.get_device_name())
     assert constructor.call_count == 2
+    second.close.assert_called_once_with()
     settings.interface = None
+    adapters[:] = [adapter("automatic", "192.0.2.64")]
     third = transport.client("192.0.2.10")
     assert third is not first and third is not second
-    assert constructor.call_args.kwargs["local_ip"] is None
+    assert constructor.call_args.kwargs["local_ip"] == "192.0.2.64"
     transport.close()
     for client in (first, second, third):
         client.close.assert_called_once_with()
@@ -136,6 +142,22 @@ def test_python_source_address_validation_precedes_native_constructor(monkeypatc
     with pytest.raises(ValueError):
         core.CoreClient("127.0.0.1", local_ip=address)
     loader.assert_not_called()
+
+
+def test_route_specific_host_mac_binding_validates_and_returns_the_native_value(monkeypatch):
+    library = Mock()
+
+    def read_mac(address, output):
+        assert address == b"192.0.2.62"
+        output[:] = b"\x00\x1d\xc1\x50\x23\x68"
+        return binding.STATUS_OK
+
+    library.netaudio_host_mac_for_ipv4.side_effect = read_mac
+    monkeypatch.setattr(binding, "_load", lambda: library)
+
+    assert binding.host_mac_for_ipv4("192.0.2.62") == b"\x00\x1d\xc1\x50\x23\x68"
+    with pytest.raises(ValueError):
+        binding.host_mac_for_ipv4("not-an-address")
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from netaudio.common.managed_api import (
     ManagedAPIConfiguration,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.self_connection import receiver_self_connection_support
 from netaudio.dante.subscription import managed_subscription_status
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
@@ -139,7 +140,7 @@ def _managed_name(device: Device) -> str:
     return _first_value((device.identity.actual_name, device.identity.default_name)) or device.id
 
 
-def _managed_channel_json(channel, *, receive: bool) -> dict:
+def _managed_channel_json(channel, *, receive: bool, fresh: bool) -> dict:
     signal = asdict(channel.signal_presence) if channel.signal_presence is not None else None
     result = {
         "name": channel.name,
@@ -155,20 +156,27 @@ def _managed_channel_json(channel, *, receive: bool) -> dict:
                 "ddm_status_message": channel.status_message,
                 "ddm_summary": channel.summary,
                 "ddm_encryption_scheme": channel.encryption_scheme,
-                "ddm_can_subscribe_self": channel.can_subscribe_self,
+                "can_subscribe_self": channel.can_subscribe_self if fresh else None,
+                "receiver_flags": None,
+                "receiver_capability_flags": None,
+                "managed_can_subscribe_self": channel.can_subscribe_self,
+                "managed_can_subscribe_self_fresh": fresh,
             }
         )
     else:
         result["ddm_encryption_policy"] = channel.encryption_policy
-    return {key: value for key, value in result.items() if value is not None}
+    required = {"can_subscribe_self", "receiver_flags", "receiver_capability_flags"} if receive else set()
+    return {key: value for key, value in result.items() if value is not None or key in required}
 
 
-def _managed_channels(device: Device) -> dict:
+def _managed_channels(device: Device, *, fresh: bool = True) -> dict:
     receivers = {
-        str(channel.index): _managed_channel_json(channel, receive=True) for channel in device.rx_channels or ()
+        str(channel.index): _managed_channel_json(channel, receive=True, fresh=fresh)
+        for channel in device.rx_channels or ()
     }
     transmitters = {
-        str(channel.index): _managed_channel_json(channel, receive=False) for channel in device.tx_channels or ()
+        str(channel.index): _managed_channel_json(channel, receive=False, fresh=fresh)
+        for channel in device.tx_channels or ()
     }
     return {"receivers": receivers, "transmitters": transmitters}
 
@@ -190,6 +198,7 @@ def _managed_subscriptions(device: Device) -> list[dict]:
                 "rx_device": _managed_name(device),
                 "tx_channel": channel.subscribed_channel,
                 "tx_device": _managed_name(device) if channel.subscribed_device == "." else channel.subscribed_device,
+                **({"self_connection": True} if channel.subscribed_device == "." else {}),
                 "status": managed_subscription_status(channel.status, channel.status_message, channel.summary),
                 "ddm_status": channel.status,
                 "ddm_status_message": channel.status_message,
@@ -251,14 +260,16 @@ def _managed_device_json(observation: ManagedDeviceObservation, synced_at: float
     else:
         availability_state = "online" if ready else "offline"
     metadata = _managed_metadata(observation, synced_at)
+    channels = _managed_channels(device, fresh=fresh)
     record = {
-        "channels": _managed_channels(device),
+        "channels": channels,
         "ipv4": address or "None",
         "name": _managed_name(device),
         "online": ready,
         "availability_state": availability_state,
         "server_name": _ddm_key(observation),
         "services": {},
+        "self_connection_support": receiver_self_connection_support(channels["receivers"].values()),
         "subscriptions": _managed_subscriptions(device),
         "mac_address": mac_address,
         "manufacturer": device.manufacturer.name if device.manufacturer else "",
@@ -304,8 +315,20 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
                 direct_channel = direct_direction.get(int(number)) if number.isdigit() else None
             if isinstance(direct_channel, dict):
                 for key, value in managed_channel.items():
-                    if key.startswith("ddm_"):
+                    if key.startswith("ddm_") or key.startswith("managed_"):
                         direct_channel[key] = copy.deepcopy(value)
+                if direction != "receivers":
+                    continue
+                direct_value = direct_channel.get("can_subscribe_self")
+                managed_value = managed_channel.get("can_subscribe_self")
+                if isinstance(direct_value, bool) and isinstance(managed_value, bool):
+                    if direct_value != managed_value:
+                        direct_channel["can_subscribe_self"] = None
+                        direct_channel["can_subscribe_self_conflict"] = True
+                    else:
+                        direct_channel.pop("can_subscribe_self_conflict", None)
+                elif not isinstance(direct_value, bool):
+                    direct_channel["can_subscribe_self"] = managed_value if isinstance(managed_value, bool) else None
 
 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
@@ -337,6 +360,9 @@ def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
     )
     merged["field_sources"] = field_sources
     _overlay_channel_metadata(merged.setdefault("channels", {}), managed_record.get("channels") or {})
+    merged["self_connection_support"] = receiver_self_connection_support(
+        (merged.get("channels") or {}).get("receivers", {}).values()
+    )
     if not merged.get("subscriptions"):
         merged["subscriptions"] = copy.deepcopy(managed_record.get("subscriptions") or [])
     return merged

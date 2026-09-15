@@ -3,9 +3,11 @@ import { test } from "node:test";
 
 import { WEBAPP } from "./setup.mjs";
 
-const { canonicalFlowRequest, flowEvidenceRows } = await import(
+const { canonicalFlowRequest, flowEvidenceRows, ReceiverFlows } = await import(
   `${WEBAPP}device/flows.js`
 );
+const { h } = await import("preact");
+const { render } = await import("preact-render-to-string");
 
 test("browser creates the canonical legacy flow schema", () => {
   const result = canonicalFlowRequest({
@@ -125,4 +127,39 @@ test("browser keeps acknowledgement, device, effective-state, and persistence ev
       ["Persistence", "Not verified"],
     ],
   );
+});
+
+test("receiver flow inventory renders endpoints, identity, correlation, and completeness", () => {
+  const markup = render(
+    h(ReceiverFlows, {
+      device: {
+        receiver_flow_completeness: "complete",
+        receiver_flows: [
+          {
+            flow_number: 3,
+            flow_type: "multicast",
+            transport: 3,
+            subscription_status_code: 9,
+            receiver_channel_numbers_by_flow_channel: [[7], []],
+            interface_endpoints: [
+              { ipv4_address: "239.69.1.10", udp_port: 5004 },
+              { ipv4_address: "239.69.1.11", udp_port: 5006 },
+            ],
+            external_identity: {
+              source_ipv4: "192.0.2.44",
+              session_id: 42,
+            },
+            sdp_correlation: { matched: false },
+          },
+        ],
+      },
+    }),
+  );
+
+  assert.match(markup, /Inventory: complete/);
+  assert.match(markup, /1:7; 2:none/);
+  assert.match(markup, /239\.69\.1\.10:5004/);
+  assert.match(markup, /239\.69\.1\.11:5006/);
+  assert.match(markup, /192\.0\.2\.44\/42/);
+  assert.match(markup, /Not matched/);
 });

@@ -206,14 +206,14 @@ class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService
         dispatcher: DanteEventDispatcher,
         device_lookup=None,
         packet_store=None,
-        interface_ip: str | None = None,
+        interface_name: str | None = None,
         dissect: bool = False,
     ):
         super().__init__(
             multicast_group=MULTICAST_GROUP_CONTROL_MONITORING,
             multicast_port=DEVICE_INFO_PORT,
             packet_store=packet_store,
-            interface_ip=interface_ip,
+            interface_name=interface_name,
             dissect=dissect,
         )
         self._conmon_expected_count: dict[str, int] = {}

@@ -185,7 +185,12 @@ def _fetch_instrumented(client, arc_port, include_channels=True):
     name = fetch_device_name(client, arc_port)
     counts = _query(client, {"command": "channel_count"}, arc_port, "channel_count")
     if counts is None:
-        counts = {"tx_count": 0, "rx_count": 0, "locked": None}
+        counts = {
+            "tx_count": 0,
+            "rx_count": 0,
+            "locked": None,
+            "transmit_flow_authoring_capability_word": None,
+        }
 
     rx = fetch_rx_records(client, arc_port) if include_channels else []
     tx = fetch_tx_records(client, arc_port, counts["tx_count"]) if include_channels else []
@@ -203,7 +208,12 @@ def _fetch_instrumented(client, arc_port, include_channels=True):
 
     return {
         "name": name,
-        "counts": (counts["tx_count"], counts["rx_count"], counts["locked"]),
+        "counts": (
+            counts["tx_count"],
+            counts["rx_count"],
+            counts["locked"],
+            counts["transmit_flow_authoring_capability_word"],
+        ),
         "rx": rx,
         "tx": tx,
         "channel_audio_metadata": channel_audio_metadata,
@@ -215,9 +225,12 @@ def _fetch_instrumented(client, arc_port, include_channels=True):
 
 async def populate_instrumented(device, observer):
     from netaudio.common.app_config import settings as app_settings
+    from netaudio.network_path import source_address_for
 
     arc_port = device._arc_port()
-    client = core.CoreClient(str(device.ipv4), arc_port=arc_port, local_ip=app_settings.interface_ip)
+    device_ip = str(device.ipv4)
+    local_ip = source_address_for(device_ip, app_settings.interface)
+    client = core.CoreClient(device_ip, arc_port=arc_port, local_ip=local_ip)
     client.observer = observer
     try:
         data = await asyncio.to_thread(_fetch_instrumented, client, arc_port)

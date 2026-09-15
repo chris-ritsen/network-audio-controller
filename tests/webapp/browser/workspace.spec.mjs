@@ -63,6 +63,49 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   await expect(selector).toBeHidden();
 });
 
+test("source picker darkens same-device sources per receiver capability", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const receiver = { name: "A Receiver", server_name: "receiver.local.", online: true,
+    channels: { receivers: {
+      1: { name: "Blocked input", can_subscribe_self: false },
+      2: { name: "Allowed input", can_subscribe_self: true },
+    }, transmitters: { 1: { name: "Own output" } } }, subscriptions: [] };
+  const remote = { name: "B Source", server_name: "source.local.", online: true,
+    channels: { receivers: {}, transmitters: { 1: { name: "Remote output" } } }, subscriptions: [] };
+  await serveWebapp(page, { devices: { receiver, remote } });
+  await page.goto("http://netaudio.test/routing");
+  const rows = page.getByRole("region", { name: "Route receiver channels" }).locator(".routing-channel-row");
+  await rows.nth(0).click();
+  let picker = page.getByRole("dialog", { name: "Choose source" });
+  const ownBlocked = picker.getByRole("button", { name: /Own output/ });
+  await expect(ownBlocked).toBeDisabled();
+  await expect(ownBlocked).toHaveClass(/self-unsupported/);
+  await expect(ownBlocked).toHaveCSS("background-color", "rgb(23, 25, 27)");
+  await expect(picker.getByRole("button", { name: /Remote output/ })).toBeEnabled();
+  await picker.getByRole("button", { name: "Done", exact: true }).click();
+  await rows.nth(1).click();
+  picker = page.getByRole("dialog", { name: "Choose source" });
+  await expect(picker.getByRole("button", { name: /Own output/ })).toBeEnabled();
+  await picker.getByRole("button", { name: "Done", exact: true }).click();
+
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.reload();
+  const viewport = page.locator(".matrix-viewport");
+  await expect(viewport).toBeVisible();
+  await expect.poll(async () => page.locator(".matrix-canvas").evaluate((canvas) => {
+    const grid = document.querySelector(".matrix-viewport");
+    const ratio = window.devicePixelRatio || 1;
+    const gutter = Number(grid.dataset.gutterWidth), header = Number(grid.dataset.headerHeight);
+    const sample = (column, row) => Array.from(canvas.getContext("2d").getImageData(
+      Math.round((gutter + column * 30 + 15) * ratio),
+      Math.round((header + row * 30 + 15) * ratio), 1, 1,
+    ).data.slice(0, 3));
+    const blocked = sample(1, 1), allowed = sample(2, 1);
+    return blocked.reduce((sum, value) => sum + value, 0)
+      < allowed.reduce((sum, value) => sum + value, 0);
+  })).toBe(true);
+});
+
 test("collapsed intersections expand channels without routing and names do not show tooltips", async ({ page }) => {
   await serveWebapp(page);
   const writes = [];

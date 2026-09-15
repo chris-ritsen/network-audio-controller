@@ -26,6 +26,16 @@ fn lock_token_call(nonce: &[u8], key: &[u8]) -> (NetaudioStatus, Vec<u8>) {
     lock_token_call_with_pin("1234", nonce, key)
 }
 
+#[test]
+fn route_specific_host_mac_rejects_a_non_ipv4_source() {
+    let source = CString::new("not-an-address").unwrap();
+    let mut output = [0xFF; 6];
+    let status = unsafe { netaudio_host_mac_for_ipv4(source.as_ptr(), output.as_mut_ptr()) };
+
+    assert_eq!(status, NetaudioStatus::InvalidAddress);
+    assert_eq!(output, [0; 6]);
+}
+
 fn client_lock_call(key: &[u8], locking: bool) -> NetaudioStatus {
     let inner = Client::new(
         "127.0.0.1".parse().unwrap(),
@@ -355,18 +365,21 @@ fn ffi_errors_clear_buffer_and_scalar_outputs() {
 
     let mut tx_count = u16::MAX;
     let mut rx_count = u16::MAX;
+    let mut transmit_flow_authoring_capability_word = u16::MAX;
     let mut locked = i32::MAX;
     let status = unsafe {
         netaudio_client_get_channel_count(
             ptr::null_mut(),
             &mut tx_count,
             &mut rx_count,
+            &mut transmit_flow_authoring_capability_word,
             &mut locked,
         )
     };
     assert_eq!(status, NetaudioStatus::NullPointer);
     assert_eq!(tx_count, 0);
     assert_eq!(rx_count, 0);
+    assert_eq!(transmit_flow_authoring_capability_word, 0);
     assert_eq!(locked, -1);
 
     let mut aes67_state = i32::MAX;

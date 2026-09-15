@@ -410,7 +410,7 @@ class DanteStateService:
             try:
                 flow_inventory = None
                 if self._readback_allowed(device, "receiver flows"):
-                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
+                    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
                     if flow_inventory is None:
                         self._readback_failed(device, "receiver flows")
                         logger.warning(f"Receiver flow inventory unavailable for {server_name}")

@@ -40,7 +40,7 @@ def test_correlated_unicast_receiver_flows_use_the_first_reported_port_range():
     unicast_ports = []
     multicast_ports = []
     for receiver_flow in flow_page["flows"]:
-        port = receiver_flow["destination_user_datagram_port"]
+        port = receiver_flow["interface_endpoints"][0]["udp_port"]
         assert port is not None
         (multicast_ports if receiver_flow["flow_type"] == "multicast" else unicast_ports).append(port)
 

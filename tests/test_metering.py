@@ -39,7 +39,11 @@ def make_manager():
     )
     application = SimpleNamespace(
         devices={"avio-bt-1": device},
-        cmc=SimpleNamespace(start_metering=AsyncMock(), stop_metering=AsyncMock()),
+        cmc=SimpleNamespace(
+            controller_identity=MagicMock(return_value=("192.168.1.2", b"\x02\x00\x00\x00\x00\x01")),
+            start_metering=AsyncMock(),
+            stop_metering=AsyncMock(),
+        ),
         dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
     )
     return MeteringManager(application), application, device
@@ -130,20 +134,17 @@ def test_metering_manager_logs_and_ignores_malformed_frame(caplog):
 
 
 @pytest.mark.asyncio
-async def test_metering_manager_start_uses_public_cmc_host_address(monkeypatch):
+async def test_metering_manager_start_does_not_resolve_a_global_host_identity(monkeypatch):
     class ProbeReached(Exception):
         pass
 
-    host_address = b"\x00\x1d\xc1\x50\x23\x68"
     application = SimpleNamespace(
         devices={},
-        cmc=SimpleNamespace(host_media_access_control_address=host_address),
+        cmc=SimpleNamespace(),
     )
     manager = MeteringManager(application)
-    monkeypatch.setattr(metering_module, "_get_local_ip", lambda: "192.0.2.1")
 
     def stop_before_socket_bind(_port):
-        assert manager._host_mac == host_address
         raise ProbeReached
 
     monkeypatch.setattr(manager, "_probe_port", stop_before_socket_bind)

@@ -291,6 +291,10 @@ def _flow_device():
         ipv4="192.0.2.30",
         mac_address="00:1d:c1:00:00:30",
         flow_protocol_id=0x2729,
+        transmit_flow_authoring_capability_word=0,
+        transmit_flow_authoring_opcode=0x2201,
+        transmit_flow_authoring_protocol_id=0x2729,
+        receiver_flow_inventory_opcode=0x3200,
         is_locked=False,
         sample_rate=48000,
         encoding=24,
@@ -514,10 +518,8 @@ def test_transmit_channel_capabilities_preserve_structured_output(monkeypatch):
 
     application, devices, _ = _flow_context()
     capabilities = {
-        "format_identifier": 1,
-        "starting_channel_identifier": 1,
-        "channel_count": 128,
-        "capability_flags": 0x7FFF,
+        "record_count": 1,
+        "ranges": [{"first_transmit_channel": 1, "last_transmit_channel": 128, "unknown_value": 0x7FFF}],
     }
 
     async def query(*_args):
@@ -565,9 +567,14 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
     monkeypatch.setattr(flows, "query_tx_flow_inventory", query)
     device = devices["flow.local."]
 
+    async def execute(specification):
+        assert specification["command"] == "channel_count"
+        return bytes.fromhex("27290010000010000001000000020002")
+
     async def call_core(*_args, **_kwargs):
         await delete()
 
+    device.execute = execute
     device.call_core = call_core
 
     result = invoke(flow_commands.run_flow_delete, application, devices, 17)

@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import pytest
 
 from netaudio import core
+from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_parser import DanteDeviceParser
 
@@ -138,6 +139,7 @@ def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTe
     rx_channels, subscriptions = device._build_rx_from_records(records)
 
     assert len(rx_channels) == test_case.rx_count
+    expected_flags = 0x000F if test_case.device_id == "lx-dante" else 0x0006
 
     for expected in test_case.expected_channels:
         ch = rx_channels[expected["number"]]
@@ -147,6 +149,9 @@ def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTe
         assert ch.number == expected["number"]
         assert ch.channel_type == "rx"
         assert ch.status_code == expected["status_code"]
+        assert ch.receiver_flags == expected_flags
+        assert ch.receiver_capability_flags is None
+        assert ch.can_subscribe_self is (test_case.device_id == "lx-dante")
         assert ch.device is device
 
     sub_by_rx = {s.rx_channel_name: s for s in subscriptions}
@@ -178,6 +183,27 @@ def test_build_rx_self_subscription_resolves_dot():
     _, subscriptions = device._build_rx_from_records(records)
 
     assert subscriptions[0].tx_device_name == "self-device"
+
+
+def test_fixed_receiver_refresh_retains_conflicting_managed_capability(load_fixture):
+    device = make_device("lx-dante")
+    previous = DanteChannel()
+    previous.number = 1
+    previous.managed_can_subscribe_self = False
+    previous.managed_can_subscribe_self_fresh = True
+    device.rx_channels[1] = previous
+    records = core.parse_page(
+        "rx",
+        load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin"),
+        1,
+    )
+
+    channels, _subscriptions = device._build_rx_from_records(records)
+
+    assert channels[1].receiver_flags == 0x000F
+    assert channels[1].managed_can_subscribe_self is False
+    assert channels[1].can_subscribe_self is None
+    assert channels[1].can_subscribe_self_conflict is True
 
 
 def _merged_tx_records(raw_response, friendly_response):

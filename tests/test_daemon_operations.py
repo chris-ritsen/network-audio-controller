@@ -4,6 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from netaudio.dante.events import DanteEvent, EventType
+from netaudio.dante.self_connection import (
+    SelfConnectionCapabilityUnavailableError,
+    SelfConnectionUnsupportedError,
+)
 from tests.http_api_test_support import FakeWriter, make_device, make_http_server, post
 
 
@@ -128,6 +132,39 @@ class TestSubscribe:
         )
         assert status == 404
         assert body == {"error": "rx device not found"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error", "status", "capability"),
+        [
+            (SelfConnectionUnsupportedError("receiver channel 1 is unsupported"), 409, "unsupported"),
+            (SelfConnectionCapabilityUnavailableError("receiver channel 1 is unavailable"), 503, "unavailable"),
+        ],
+    )
+    async def test_self_connection_preflight_failure_reports_no_mutation(self, error, status, capability):
+        device = make_device()
+        http_server = make_http_server({"dev1": device})
+        http_server.application.add_subscriptions.side_effect = error
+        http_server.subscription_readback.request = MagicMock(wraps=http_server.subscription_readback.request)
+
+        observed_status, body = await post(
+            http_server,
+            "/subscribe",
+            {
+                "rx_device": "dev1",
+                "rx_channel": 1,
+                "tx_channel": "Output",
+                "tx_device": "Device1",
+            },
+        )
+
+        assert observed_status == status
+        assert body == {
+            "error": str(error),
+            "self_connection_capability": capability,
+            "mutation_sent": False,
+        }
+        http_server.subscription_readback.request.assert_not_called()
 
 
 class TestUnsubscribe:

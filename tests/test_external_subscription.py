@@ -14,6 +14,7 @@ from netaudio.commands import flow as flow_commands
 from netaudio.dante.commands import DanteCommands
 from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.device_commands import DanteDeviceCommands
+from netaudio.dante import flows
 from netaudio.dante.flows import (
     FlowValidationError,
     external_receiver_subscription_specification,
@@ -219,10 +220,44 @@ def test_high_level_external_mapping_accepts_bitmap_supported_forms(receiver_ids
 
 
 @pytest.mark.asyncio
-async def test_external_subscription_reports_acknowledgement_separately_from_readback_and_media():
+async def test_external_subscription_reports_arc_sdp_and_media_evidence_separately(monkeypatch):
     target = device()
     target.execute.return_value = bytes.fromhex("280900144a263410000100000000000001000000")
-    application = SimpleNamespace(commands=DanteCommands())
+    application = SimpleNamespace(commands=DanteCommands(), external_flows=populated_inventory())
+    target.application = application
+    expected_identity = {
+        "receiver_channel": 1,
+        "flow_slot": 1,
+        "source_ipv4": "192.0.2.44",
+        "session_id": 123456789012,
+        "interface_endpoints": [
+            {"ipv4_address": "239.69.1.10", "udp_port": 5004},
+            {"ipv4_address": "239.69.1.11", "udp_port": 5004},
+        ],
+    }
+    after = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "maximum_flow_slots": 4,
+        "reported_flow_count": 1,
+        "flows": [
+            {
+                "external_identity": {"source_ipv4": "192.0.2.44", "session_id": 123456789012},
+                "effective_subscription_identities": [
+                    expected_identity,
+                    {**expected_identity, "receiver_channel": 2, "flow_slot": 2},
+                ],
+                "sdp_correlation": {"matched": True},
+            }
+        ],
+    }
+    inventories = iter(
+        (
+            {**after, "reported_flow_count": 0, "flows": []},
+            after,
+        )
+    )
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", AsyncMock(side_effect=inventories))
 
     result = await subscribe_external_rtp(
         application,
@@ -235,11 +270,35 @@ async def test_external_subscription_reports_acknowledgement_separately_from_rea
 
     assert result["request_acknowledged"] is True
     assert result["result_code"] == 1
-    assert result["subscription_readback_confirmed"] is False
-    assert result["rtp_packet_reception_confirmed"] is False
-    assert result["clock_lock_confirmed"] is False
-    assert result["decoded_audio_confirmed"] is False
+    assert result["arc_effective_state_confirmed"] is True
+    assert result["sdp_correlation_confirmed"] is True
+    assert result["rtp_packet_reception_confirmed"] is None
+    assert result["clock_lock_confirmed"] is None
+    assert result["persistence_confirmed"] is None
+    assert result["decoded_audio_confirmed"] is None
     target.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_external_subscription_does_not_send_without_complete_fresh_baseline(monkeypatch):
+    target = device()
+    application = SimpleNamespace(commands=DanteCommands(), external_flows=populated_inventory())
+    target.application = application
+    monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", AsyncMock(return_value=None))
+
+    result = await subscribe_external_rtp(
+        application,
+        target,
+        discovered_flow(),
+        [1, 2],
+        [1, 2],
+        receiver_supports_multiple_interfaces=True,
+    )
+
+    assert result["mutation_sent"] is False
+    assert result["request_acknowledged"] is False
+    assert result["arc_effective_state_confirmed"] is None
+    target.execute.assert_not_awaited()
 
 
 def test_managed_only_device_is_rejected_before_build_or_send():
@@ -284,10 +343,14 @@ def acknowledged_result() -> dict:
     return {
         "result_code": 1,
         "request_acknowledged": True,
-        "subscription_readback_confirmed": False,
-        "rtp_packet_reception_confirmed": False,
-        "clock_lock_confirmed": False,
-        "decoded_audio_confirmed": False,
+        "arc_effective_state_confirmed": None,
+        "sdp_correlation_confirmed": None,
+        "rtp_packet_reception_confirmed": None,
+        "clock_lock_confirmed": None,
+        "persistence_confirmed": None,
+        "decoded_audio_confirmed": None,
+        "mutation_sent": True,
+        "message": "request acknowledged but complete fresh ARC readback was unavailable",
         "flow_identity": {"source_ipv4": "192.0.2.44", "session_id": 123456789012},
         "receiver_channel_ids": [1, 2],
         "flow_slot_assignments": [1, 2],
@@ -327,7 +390,7 @@ def test_cli_external_subscribe_reports_acknowledgement_without_claiming_media()
     assert result.exit_code == 0
     assert result.exception is None
     assert "acknowledged" in result.output
-    assert result.output.count("not confirmed") == 2
+    assert result.output.count("not confirmed") == 6
     application.subscribe_external_rtp.assert_awaited_once()
 
 
@@ -354,11 +417,13 @@ async def test_http_external_flow_inventory_and_subscription_preserve_verificati
 
     assert get_status == 200
     assert inventory["192.0.2.44/123456789012"]["flow_name"] == "Studio Feed"
-    assert post_status == 200
+    assert post_status == 202
     assert result["success"] is True
     assert result["request_acknowledged"] is True
-    assert result["subscription_readback_confirmed"] is False
-    assert result["rtp_packet_reception_confirmed"] is False
-    assert result["clock_lock_confirmed"] is False
-    assert result["decoded_audio_confirmed"] is False
+    assert result["arc_effective_state_confirmed"] is None
+    assert result["sdp_correlation_confirmed"] is None
+    assert result["rtp_packet_reception_confirmed"] is None
+    assert result["clock_lock_confirmed"] is None
+    assert result["persistence_confirmed"] is None
+    assert result["decoded_audio_confirmed"] is None
     server.application.subscribe_external_rtp.assert_awaited_once()

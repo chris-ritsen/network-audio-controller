@@ -11,6 +11,15 @@ pub fn local_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
+pub fn source_ipv4_for(destination: Ipv4Addr) -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((destination, 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(address) if !address.is_unspecified() => Some(address),
+        _ => None,
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
 pub fn discover_host_mac() -> Option<[u8; 6]> {
     host_mac_for_ipv4(local_ipv4()?)

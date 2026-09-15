@@ -1,13 +1,19 @@
-.PHONY: core header example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header prune-core example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
 
 CORE_PACKAGE_DIR := packages/netaudio/src/netaudio/core
-CORE_RELEASE_DIR := packages/netaudio-core/target/release
+CORE_DIR := packages/netaudio-core
+CORE_RELEASE_DIR := $(CORE_DIR)/target/release
+
+prune-core:
+	@cargo sweep --version >/dev/null 2>&1 || cargo install --locked cargo-sweep
+	cargo sweep --toolchains "$$(rustup show active-toolchain | cut -d' ' -f1)" $(CORE_DIR)
 
 core: header
-	cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
+	cargo build --release --manifest-path $(CORE_DIR)/Cargo.toml
+	@$(MAKE) --no-print-directory prune-core
 	@if [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.so ]; then \
 		cp -f $(CORE_RELEASE_DIR)/libnetaudio_core.so $(CORE_PACKAGE_DIR)/libnetaudio_core.so; \
 	elif [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.dylib ]; then \
@@ -55,6 +61,7 @@ quality:
 	cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
 	cargo test --manifest-path packages/netaudio-core/Cargo.toml
+	@$(MAKE) --no-print-directory prune-core
 
 wheel-smoke:
 	@tmp=$$(mktemp -d) || exit 1; \

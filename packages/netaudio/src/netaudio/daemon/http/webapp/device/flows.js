@@ -174,6 +174,84 @@ function channelLabel(specification) {
     .join(", ");
 }
 
+function receiverFlowEndpoints(flow) {
+  const endpoints = Array.isArray(flow.interface_endpoints)
+    ? flow.interface_endpoints
+    : flow.destination_user_datagram_port != null
+      ? [
+          {
+            ipv4_address:
+              flow.destination_internet_protocol_version_four_address,
+            udp_port: flow.destination_user_datagram_port,
+          },
+        ]
+      : [];
+  return endpoints
+    .map(
+      (endpoint) =>
+        `${endpoint.ipv4_address || "address unavailable"}:${endpoint.udp_port ?? "port unavailable"}`,
+    )
+    .join(", ");
+}
+
+function receiverFlowChannels(flow) {
+  const slots = flow.receiver_channel_numbers_by_flow_channel;
+  if (Array.isArray(slots)) {
+    return slots
+      .map((channels, index) => `${index + 1}:${channels.join(",") || "none"}`)
+      .join("; ");
+  }
+  return flow.receiver_mapping_descriptor_hexadecimal || "Not reported";
+}
+
+function externalIdentityLabel(flow) {
+  const identity = flow.external_identity;
+  if (!identity) return "Native Dante";
+  return `${identity.source_ipv4 || "source unavailable"}/${identity.session_id ?? "session unavailable"}`;
+}
+
+export function ReceiverFlows({ device }) {
+  const flows = Array.isArray(device.receiver_flows)
+    ? device.receiver_flows
+    : [];
+  return html`<${Panel} title=${`Receiver flows (${flows.length})`}>
+    <p class="text-sm">
+      Inventory: ${device.receiver_flow_completeness || "unknown"}. ARC effective
+      state, SDP correlation, RTP reception, clock lock, persistence, and decoded
+      audio are separate observations.
+    </p>
+    ${device.receiver_flow_completeness !== "complete"
+      ? html`<${Notice}>Complete fresh receiver-flow inventory is unavailable.<//>`
+      : null}
+    ${flows.length
+      ? html`<div class="table-wrapper">
+          <table class="data">
+            <thead><tr>
+              <th>Flow</th><th>Type / transport</th><th>Status</th>
+              <th>Slot:receiver channels</th><th>Interface destinations</th>
+              <th>External identity</th><th>SDP</th>
+            </tr></thead>
+            <tbody>${flows.map(
+              (flow) => html`<tr key=${flow.flow_number ?? flow.global_flow_id}>
+                <td>${flow.flow_number ?? flow.global_flow_id ?? "unknown"}</td>
+                <td>${flow.flow_type || "unknown"} / ${flow.transport ?? "unknown"}</td>
+                <td>${flow.subscription_status_code ?? flow.status_code ?? "unknown"}</td>
+                <td>${receiverFlowChannels(flow)}</td>
+                <td>${receiverFlowEndpoints(flow) || "Not reported"}</td>
+                <td>${externalIdentityLabel(flow)}</td>
+                <td>${flow.sdp_correlation?.matched === true
+                  ? "Matched"
+                  : flow.external_identity
+                    ? "Not matched"
+                    : "Not applicable"}</td>
+              </tr>`,
+            )}</tbody>
+          </table>
+        </div>`
+      : html`<${Notice}>No active receiver flows in the complete inventory.<//>`}
+  <//>`;
+}
+
 function FlowRow({ entry, onDelete, requestName }) {
   const flowId = entry.identity?.global_flow_id;
   return html`<tr>

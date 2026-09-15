@@ -38,7 +38,9 @@ def server_with_inventory(*records):
     inventory = {record["server_name"]: record for record in records}
     registry = SimpleNamespace(enabled=True, serialize_devices=lambda _: copy.deepcopy(inventory))
     application = DanteApplication()
-    return DaemonHTTPServer(application, application.state, managed_inventory=registry, mcp_token="test-token"), inventory
+    return DaemonHTTPServer(
+        application, application.state, managed_inventory=registry, mcp_token="test-token"
+    ), inventory
 
 
 def test_managed_controls_survive_polls_without_creating_a_direct_inventory_source():

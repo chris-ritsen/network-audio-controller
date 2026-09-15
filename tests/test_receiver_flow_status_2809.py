@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -16,8 +16,7 @@ def _packet(opcode: int, packet_identifier: int) -> bytes:
     )
 
 
-def test_query_builder_and_command_factory_are_byte_identical_to_shipping_controller():
-    expected = _packet(0x3600, 11)
+def test_query_builder_and_command_factory_encode_open_ended_pagination_range():
     built = core.build_command(
         {
             "command": "query_modern_arc_receiver_flow_status",
@@ -26,11 +25,9 @@ def test_query_builder_and_command_factory_are_byte_identical_to_shipping_contro
     )
     command, service = DanteDeviceCommands().command_query_modern_arc_receiver_flow_status(0x2856)
 
-    assert built == expected
-    assert command == expected
+    assert built == command
     assert service is not None
-    assert expected == _packet(0x3600, 13)
-    assert expected.hex() == "28090022285636000000000000000000000100010001000000000000830283060310"
+    assert built.hex() == "28090022285636000000000000000000000100010000000000000000830283060310"
 
 
 def test_parser_exposes_flow_format_latency_endpoint_and_receiver_mapping():
@@ -113,7 +110,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
 
     assert page["flows"][0]["destination_internet_protocol_version_four_address"] == "192.168.1.61"
     successful_device.execute.assert_awaited_once_with(
-        {"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809}
+        {"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809, "starting_flow": 1}
     )
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 14)), services=services)
@@ -145,17 +142,23 @@ def test_issue_59_partial_receiver_flow_records_and_result_survive_ffi():
 
 
 @pytest.mark.asyncio
-async def test_partial_flow_query_does_not_guess_a_continuation_request():
+async def test_partial_flow_query_requests_maximum_returned_identifier_plus_one():
     from tests.issue_59_fixtures import packet
 
+    terminal = bytearray(_packet(0x3600, 4))
+    terminal[16] = 16
+    terminal[34:36] = (16).to_bytes(2, "big")
     device = SimpleNamespace(
-        execute=AsyncMock(return_value=packet("receiver_flow_partial.bin")),
+        execute=AsyncMock(side_effect=[packet("receiver_flow_partial.bin"), bytes(terminal)]),
         services={"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}},
     )
     page = await DanteApplication().query_modern_arc_receiver_flow_status(device)
-    assert page["page_disposition"] == "more_pages"
-    assert len(page["flows"]) == 15
-    device.execute.assert_awaited_once_with({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809})
+    assert page["page_disposition"] == "complete"
+    assert len(page["flows"]) == 16
+    assert device.execute.await_args_list == [
+        call({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809, "starting_flow": 1}),
+        call({"command": "query_modern_arc_receiver_flow_status", "protocol_id": 0x2809, "starting_flow": 16}),
+    ]
 
 
 @pytest.mark.asyncio
@@ -171,7 +174,7 @@ async def test_partial_flow_readback_is_unavailable_for_effective_state_decision
     monkeypatch.setattr(flows, "query_receiver_flow_inventory", fallback)
     assert await flows.query_preferred_receiver_flow_inventory(device) is None
     assert device.receiver_flow_completeness == "partial"
-    assert device.receiver_flow_status_page == page
+    assert device.receiver_flow_status_page is None
     diagnostic = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
     assert len(diagnostic["flows"]) == 15
     assert diagnostic["page_disposition"] == "more_pages"

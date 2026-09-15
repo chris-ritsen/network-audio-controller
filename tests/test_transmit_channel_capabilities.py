@@ -22,18 +22,14 @@ def test_transmit_channel_capability_command_matches_shipping_controller():
     )
 
 
-def test_transmit_channel_capability_parser_preserves_capacity_and_flags():
+def test_transmit_channel_capability_parser_preserves_reported_ranges():
     assert core.parse_response("transmit_channel_capabilities", PHYSICAL_A32_RESPONSE) == {
-        "format_identifier": 1,
-        "starting_channel_identifier": 1,
-        "channel_count": 128,
-        "capability_flags": 0x7FFF,
+        "record_count": 1,
+        "ranges": [{"first_transmit_channel": 1, "last_transmit_channel": 128, "unknown_value": 0x7FFF}],
     }
     assert core.parse_response("transmit_channel_capabilities", VIRTUAL_A32_RESPONSE) == {
-        "format_identifier": 1,
-        "starting_channel_identifier": 1,
-        "channel_count": 32,
-        "capability_flags": 0x7FFF,
+        "record_count": 1,
+        "ranges": [{"first_transmit_channel": 1, "last_transmit_channel": 32, "unknown_value": 0x7FFF}],
     }
 
 
@@ -61,10 +57,8 @@ async def test_product_query_uses_the_proven_controller_request(monkeypatch):
         starting_channel_identifier=1,
         maximum_channel_count=32,
     ) == {
-        "format_identifier": 1,
-        "starting_channel_identifier": 1,
-        "channel_count": 32,
-        "capability_flags": 0x7FFF,
+        "record_count": 1,
+        "ranges": [{"first_transmit_channel": 1, "last_transmit_channel": 32, "unknown_value": 0x7FFF}],
     }
     assert command_specifications == [
         {
@@ -82,18 +76,15 @@ async def test_product_query_uses_the_proven_controller_request(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_product_query_treats_short_success_as_missing_capabilities(monkeypatch):
+async def test_product_query_treats_empty_range_inventory_as_valid(monkeypatch):
     async def request(device_ip, arc_port, command_specification, timeout_ms, attempts):
         return AVIO_SHORT_SUCCESS_RESPONSE
 
     monkeypatch.setattr(flows, "_request", request)
 
-    assert (
-        await flows.query_transmit_channel_capabilities(
-            "192.0.2.10",
-            4440,
-            starting_channel_identifier=1,
-            maximum_channel_count=0,
-        )
-        is None
-    )
+    assert await flows.query_transmit_channel_capabilities(
+        "192.0.2.10",
+        4440,
+        starting_channel_identifier=1,
+        maximum_channel_count=0,
+    ) == {"record_count": 0, "ranges": []}

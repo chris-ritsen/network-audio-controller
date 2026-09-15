@@ -1,8 +1,9 @@
 use super::*;
 
 #[no_mangle]
-/// Create an IPv4 control client. A null local_ip uses the OS-selected source;
-/// a non-null local_ip must identify a specific local unicast IPv4 address.
+/// Create an IPv4 control client. A null local_ip resolves and pins the source
+/// selected by the OS for device_ip; a non-null local_ip must identify a
+/// specific local unicast IPv4 address.
 pub unsafe extern "C" fn netaudio_client_new(
     device_ip: *const c_char,
     local_ip: *const c_char,
@@ -68,6 +69,7 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
     client: *mut NetaudioClient,
     out_tx_count: *mut u16,
     out_rx_count: *mut u16,
+    out_transmit_flow_authoring_capability_word: *mut u16,
     out_locked: *mut i32,
 ) -> NetaudioStatus {
     guard(|| {
@@ -81,6 +83,11 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
                 *out_rx_count = 0;
             }
         }
+        if !out_transmit_flow_authoring_capability_word.is_null() {
+            unsafe {
+                *out_transmit_flow_authoring_capability_word = 0;
+            }
+        }
         if !out_locked.is_null() {
             unsafe {
                 *out_locked = -1;
@@ -89,6 +96,7 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
         if client.is_null()
             || out_tx_count.is_null()
             || out_rx_count.is_null()
+            || out_transmit_flow_authoring_capability_word.is_null()
             || out_locked.is_null()
         {
             return Err(NetaudioStatus::NullPointer.into());
@@ -99,6 +107,8 @@ pub unsafe extern "C" fn netaudio_client_get_channel_count(
         unsafe {
             *out_tx_count = count.tx_count;
             *out_rx_count = count.rx_count;
+            *out_transmit_flow_authoring_capability_word =
+                count.transmit_flow_authoring_capability_word;
             *out_locked = match count.locked {
                 Some(true) => 1,
                 Some(false) => 0,

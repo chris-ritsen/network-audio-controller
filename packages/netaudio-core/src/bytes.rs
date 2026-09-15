@@ -12,6 +12,14 @@ pub fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
         .map(|slice| u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
+pub fn read_u64(data: &[u8], offset: usize) -> Option<u64> {
+    data.get(offset..offset + 8).map(|slice| {
+        u64::from_be_bytes([
+            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+        ])
+    })
+}
+
 pub fn null_terminated_slice(data: &[u8], offset: usize) -> &[u8] {
     if offset >= data.len() {
         return &[];

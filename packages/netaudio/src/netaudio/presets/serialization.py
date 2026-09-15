@@ -251,6 +251,34 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
             config["receiver_channel_names"] = receiver_names
         if receiver_names:
             subscriptions: dict[int, dict[str, Any] | None] = {number: None for number in receiver_names}
+            from netaudio.dante.flows import effective_external_subscription_index
+
+            external_by_channel = effective_external_subscription_index(
+                {"flows": getattr(device, "receiver_flows", None) or []}
+            )
+            for number, identities in external_by_channel.items():
+                if number not in subscriptions:
+                    continue
+                if len(identities) != 1:
+                    raise ValueError(f"{device.name}: receiver channel {number} has multiple external RTP identities")
+                identity = identities[0]
+                subscriptions[number] = {
+                    "kind": "external_rtp",
+                    "flow_identity": {
+                        "source_ipv4": identity["source_ipv4"],
+                        "session_id": identity["session_id"],
+                    },
+                    "flow_slot": identity["flow_slot"],
+                    "interface_endpoints": [
+                        {
+                            "ipv4_address": endpoint.get("ipv4_address"),
+                            "udp_port": endpoint.get("udp_port"),
+                        }
+                        for endpoint in identity.get("interface_endpoints") or ()
+                        if isinstance(endpoint, Mapping)
+                    ],
+                    "receiver_supports_multiple_interfaces": len(identity.get("interface_endpoints") or ()) > 1,
+                }
             channels_by_name = {
                 name: number
                 for channel in device.rx_channels.values()
@@ -265,6 +293,10 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
                 if number not in subscriptions:
                     continue
                 if subscription.tx_channel_name and subscription.tx_device_name:
+                    if subscriptions[number] is not None:
+                        raise ValueError(
+                            f"{device.name}: receiver channel {number} reports both native and external subscriptions"
+                        )
                     subscriptions[number] = {
                         "kind": "native_dante",
                         "tx_channel": subscription.tx_channel_name,

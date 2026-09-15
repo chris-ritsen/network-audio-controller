@@ -39,7 +39,9 @@ class SseDeviceView:
         return [data]
 
     def initial_snapshot(self, snapshot: dict) -> dict:
-        devices = {server_name: self._visible(record) for server_name, record in (snapshot.get("devices") or {}).items()}
+        devices = {
+            server_name: self._visible(record) for server_name, record in (snapshot.get("devices") or {}).items()
+        }
         self.devices = dict(devices)
         self.managed = snapshot.get("managed")
         return {**snapshot, "devices": devices}

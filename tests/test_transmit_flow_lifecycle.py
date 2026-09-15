@@ -137,19 +137,59 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
         assert timeout == 2.0
         return {"current_value": 24}
 
+    async def query_modern_arc_receiver_flow_status(_device):
+        return {
+            "result_code": 1,
+            "page_disposition": "complete",
+            "maximum_flow_slots": 4,
+            "reported_flow_count": 0,
+            "flows": [],
+        }
+
+    class MutationLock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    modern_authoring = protocol_id == 0x2809
+    capability_word = 0x1000 if modern_authoring else 0
+
+    async def execute(specification):
+        if specification["command"] == "query_receiver_flows":
+            return bytes.fromhex("2729000e00003200000101000000")
+        assert specification["command"] == "channel_count"
+        response = bytearray(16)
+        response[0:2] = protocol_id.to_bytes(2, "big")
+        response[2:4] = len(response).to_bytes(2, "big")
+        response[6:8] = (0x1000).to_bytes(2, "big")
+        response[8:10] = (1).to_bytes(2, "big")
+        response[10:12] = capability_word.to_bytes(2, "big")
+        response[12:14] = (2).to_bytes(2, "big")
+        response[14:16] = (2).to_bytes(2, "big")
+        return bytes(response)
+
     return SimpleNamespace(
         flow_protocol_id=protocol_id,
+        transmit_flow_authoring_capability_word=capability_word,
+        transmit_flow_authoring_opcode=0x2601 if modern_authoring else 0x2201,
+        transmit_flow_authoring_protocol_id=0x2809 if modern_authoring else 0x2729,
+        receiver_flow_inventory_opcode=0x3600 if modern_authoring else 0x3200,
         requires_managed_control=managed,
         is_locked=locked,
         tx_channels={1: object(), 2: object()},
         sample_rate=48_000,
         encoding=24,
         ipv4="192.0.2.10",
-        topology_mutation_lock=__import__("asyncio").Lock(),
+        topology_mutation_lock=MutationLock(),
+        execute=execute,
         _arc_port=lambda: 4440,
         application=SimpleNamespace(
             probe_sample_rate_status=probe_sample_rate_status,
             probe_encoding_status=probe_encoding_status,
+            query_modern_arc_receiver_flow_status=query_modern_arc_receiver_flow_status,
+            external_flows=None,
         ),
     )
 
@@ -331,6 +371,33 @@ def test_planner_rejects_channel_slots_beyond_advertised_audio_transmit_capacity
 
     assert not plan.supported
     assert "advertised audio transmit capacity of 2" in "; ".join(plan.reasons)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fresh_capability_word", [None, 0x1000])
+async def test_create_fails_closed_before_mutation_when_fresh_authoring_family_is_unavailable_or_changes(
+    monkeypatch, fresh_capability_word
+):
+    target = device()
+    sent = []
+
+    async def fresh_authoring(_device):
+        if fresh_capability_word is None:
+            return None
+        return fresh_capability_word, 0x2809
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return None
+
+    monkeypatch.setattr(flow_lifecycle, "_fresh_authoring_protocol", fresh_authoring)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+
+    result = await flow_lifecycle.create_transmit_flow(target, specification())
+
+    assert result.state is FlowLifecycleState.PENDING
+    assert result.verification_observations[0]["phase"] == "authoring_capability"
+    assert sent == []
 
 
 @pytest.mark.asyncio
@@ -784,6 +851,7 @@ async def test_create_polls_until_change_is_visible_and_sends_only_once(monkeypa
     assert result.state is FlowLifecycleState.CONFIRMED
     assert [item["outcome"] for item in result.verification_observations] == [
         "available",
+        "available",
         "not_yet_visible",
         "confirmed",
     ]
@@ -996,10 +1064,11 @@ async def test_create_continues_polling_after_concurrent_topology_activity(monke
     assert result.state is FlowLifecycleState.CONFIRMED
     assert [item["outcome"] for item in result.verification_observations] == [
         "available",
+        "available",
         "not_yet_visible",
         "confirmed",
     ]
-    assert all("concurrent_topology_activity" in item["details"] for item in result.verification_observations[1:])
+    assert all("concurrent_topology_activity" in item["details"] for item in result.verification_observations[2:])
 
 
 @pytest.mark.asyncio

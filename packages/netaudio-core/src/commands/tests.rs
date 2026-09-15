@@ -606,8 +606,12 @@ fn transmitter_channel_status_2809_query_matches_shipping_controller_request() {
 #[test]
 fn receiver_flow_status_2809_query_matches_shipping_controller_request() {
     assert_eq!(
-        build_query_receiver_flow_status(PROTOCOL_ARC_2809, 0x2856).unwrap(),
-        decode_hexadecimal("28090022285636000000000000000000000100010001000000000000830283060310")
+        build_query_receiver_flow_status(PROTOCOL_ARC_2809, 1, 0x2856).unwrap(),
+        decode_hexadecimal("28090022285636000000000000000000000100010000000000000000830283060310")
+    );
+    assert_eq!(
+        build_query_receiver_flow_status(PROTOCOL_ARC_2809, 16, 0x2857).unwrap(),
+        decode_hexadecimal("28090022285736000000000000000000000100100000000000000000830283060310")
     );
 }
 
@@ -923,8 +927,8 @@ fn modern_arc_280f_queries_and_video_subscription_pages_match_controller_packets
         decode_hexadecimal("280f002205e926000000000000000000000100010001000000000000000000000000")
     );
     assert_eq!(
-        build_query_receiver_flow_status(PROTOCOL_ARC_280F, 0x05EA).unwrap(),
-        decode_hexadecimal("280f002205ea36000000000000000000000100010001000000000000000000000000")
+        build_query_receiver_flow_status(PROTOCOL_ARC_280F, 1, 0x05EA).unwrap(),
+        decode_hexadecimal("280f002205ea36000000000000000000000100010000000000000000000000000000")
     );
 
     let set = [SubscriptionPageRecord::Set {

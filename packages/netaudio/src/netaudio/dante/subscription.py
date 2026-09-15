@@ -35,6 +35,7 @@ class DanteSubscription:
         self._tx_channel_name = None
         self._tx_device = None
         self._tx_device_name = None
+        self._is_self_connection: bool | None = None
         self.ddm_status = None
         self.ddm_status_message = None
         self.ddm_summary = None
@@ -42,6 +43,14 @@ class DanteSubscription:
     @property
     def has_configured_source(self) -> bool:
         return bool(self.tx_device_name)
+
+    @property
+    def is_self_connection(self) -> bool:
+        if self.rx_device is not None and self.tx_device is not None:
+            from netaudio.dante.self_connection import same_canonical_device
+
+            return same_canonical_device(self.rx_device, self.tx_device)
+        return self._is_self_connection is True
 
     def __str__(self):
         return self.format(verbose=True)
@@ -136,6 +145,8 @@ class DanteSubscription:
 
     @property
     def tx_device_name(self):
+        if self.tx_device is not None:
+            return getattr(self.tx_device, "name", None) or self._tx_device_name
         return self._tx_device_name
 
     @tx_device_name.setter

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -161,11 +161,17 @@ impl Client {
         timeout: Duration,
         attempts: u32,
     ) -> Result<Client, ClientError> {
-        if !device_ip.is_ipv4() {
-            return Err(ClientError::InvalidAddress);
-        }
+        let device_ip = match device_ip {
+            IpAddr::V4(address) if !address.is_unspecified() && !address.is_multicast() => address,
+            _ => return Err(ClientError::InvalidAddress),
+        };
         let local_ip = match local_ip {
-            None => None,
+            None => Some(crate::netif::source_ipv4_for(device_ip).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NetworkUnreachable,
+                    format!("no IPv4 network path is available for {device_ip}"),
+                )
+            })?),
             Some(IpAddr::V4(address))
                 if !address.is_unspecified()
                     && !address.is_multicast()
@@ -175,10 +181,10 @@ impl Client {
             }
             _ => return Err(ClientError::InvalidAddress),
         };
-        let socket = UdpSocket::bind((local_ip.unwrap_or(Ipv4Addr::UNSPECIFIED), 0))?;
+        let socket = UdpSocket::bind((local_ip.expect("local IPv4 source was resolved"), 0))?;
         Ok(Client {
             socket,
-            device_address: SocketAddr::new(device_ip, arc_port),
+            device_address: SocketAddr::new(IpAddr::V4(device_ip), arc_port),
             message_counter: 0,
             timeout,
             attempts: attempts.max(1),
@@ -661,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn construction_binds_the_explicit_source_address() {
+    fn construction_binds_the_resolved_source_address() {
         let client = Client::new(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
@@ -679,7 +685,7 @@ mod tests {
         );
         assert_eq!(
             test_client(4440).socket.local_addr().unwrap().ip(),
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+            IpAddr::V4(Ipv4Addr::LOCALHOST)
         );
     }
 

@@ -424,8 +424,13 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
         "ddm_status_message": "Subscription active",
         "ddm_summary": "CONNECTED",
         "ddm_encryption_scheme": "NONE",
-        "ddm_can_subscribe_self": False,
+        "can_subscribe_self": False,
+        "receiver_flags": None,
+        "receiver_capability_flags": None,
+        "managed_can_subscribe_self": False,
+        "managed_can_subscribe_self_fresh": True,
     }
+    assert record["self_connection_support"] == "unsupported"
     assert record["subscriptions"] == [
         {
             "rx_channel": "managed-rx",
@@ -446,6 +451,52 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
             "ddm_summary": "CONNECTED",
         }
     ]
+
+
+def test_managed_capability_unknown_and_stale_do_not_manufacture_false():
+    unknown = _managed_device()
+    unknown = replace(unknown, rx_channels=(replace(unknown.rx_channels[0], can_subscribe_self=None),))
+    unknown_record = merge_device_inventory({}, (_observation(unknown),), synced_at=1234.0, fresh=True)[
+        "ddm:default:domain-1:managed-1"
+    ]
+    assert unknown_record["channels"]["receivers"]["1"]["can_subscribe_self"] is None
+    assert unknown_record["self_connection_support"] == "unknown"
+
+    stale_record = merge_device_inventory({}, (_observation(_managed_device()),), synced_at=1234.0, fresh=False)[
+        "ddm:default:domain-1:managed-1"
+    ]
+    stale_channel = stale_record["channels"]["receivers"]["1"]
+    assert stale_channel["managed_can_subscribe_self"] is False
+    assert stale_channel["managed_can_subscribe_self_fresh"] is False
+    assert stale_channel["can_subscribe_self"] is None
+    assert stale_record["self_connection_support"] == "unknown"
+
+
+def test_direct_and_managed_capabilities_share_canonical_field_and_retain_conflict():
+    direct = _direct_device("direct.local.")
+    direct_receiver = DanteChannel()
+    direct_receiver.channel_type = "rx"
+    direct_receiver.device = direct
+    direct_receiver.number = 1
+    direct_receiver.name = "managed-rx"
+    direct_receiver.receiver_flags = 0x000F
+    direct_receiver.can_subscribe_self = True
+    direct.rx_channels[1] = direct_receiver
+    managed = _managed_device()
+
+    merged = merge_device_inventory(
+        {direct.server_name: direct},
+        (_observation(managed),),
+        synced_at=1234.0,
+        fresh=True,
+    )["direct.local."]
+    channel = merged["channels"]["receivers"][1]
+    assert channel["receiver_flags"] == 0x000F
+    assert channel["managed_can_subscribe_self"] is False
+    assert channel["managed_can_subscribe_self_fresh"] is True
+    assert channel["can_subscribe_self"] is None
+    assert channel["can_subscribe_self_conflict"] is True
+    assert merged["self_connection_support"] == "unknown"
 
 
 @pytest.mark.parametrize("status", [None, "NONE", "none", "NoNe"])
