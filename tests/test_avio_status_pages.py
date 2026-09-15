@@ -216,16 +216,16 @@ def test_partial_receiver_flow_page_preserves_last_complete_inventory_and_surviv
     assert device.receiver_flows == complete["flows"]
     assert device.receiver_flow_latency_nanoseconds == 1000000
     assert device.receiver_flow_completeness == "partial"
-    assert device.receiver_flow_status_page == partial
+    assert device.receiver_flow_status_page == complete
     saved = tmp_path / "device.json"
     saved.write_text(json.dumps(DanteDeviceSerializer.to_json(device)))
     snapshot = json.loads(saved.read_text())
     reloaded = DanteDeviceSerializer.device_from_json(snapshot)
-    assert reloaded.receiver_flow_completeness == "partial"
+    assert reloaded.receiver_flow_completeness == "complete"
     assert reloaded.receiver_flows == complete["flows"]
-    assert reloaded.receiver_flow_status_page == partial
-    assert reloaded.receiver_flow_status_page["result_code"] == 0x8112
-    assert len(reloaded.receiver_flow_status_page["flows"]) == 15
+    assert reloaded.receiver_flow_status_page == complete
+    assert reloaded.receiver_flow_status_page["result_code"] == 1
+    assert len(reloaded.receiver_flow_status_page["flows"]) == 16
 
 
 def test_receiver_flow_state_without_completeness_cannot_clear_inventory():

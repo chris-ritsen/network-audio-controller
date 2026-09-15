@@ -156,7 +156,10 @@ def _global_options(
         envvar="NETAUDIO_LOCK_STATE_TIMEOUT",
     ),
     interface: Optional[str] = typer.Option(
-        None, "--interface", help="Network interface to use.", envvar="NETAUDIO_INTERFACE"
+        None,
+        "--interface",
+        help="Use only this network interface for discovery and device control.",
+        envvar="NETAUDIO_INTERFACE",
     ),
     ddm_context: Optional[str] = typer.Option(
         None,

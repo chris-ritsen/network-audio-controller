@@ -9,6 +9,7 @@ from netaudio.presets.loading import (
     MatchedPresetDevice,
     PresetActionState,
     _plan_redundancy,
+    _plan_receiver_subscriptions,
     apply_preset_plan,
     build_preset_plan,
 )
@@ -180,6 +181,10 @@ def _planning_device():
         is_locked=False,
         requires_managed_control=False,
         flow_protocol_id=0x2729,
+        transmit_flow_authoring_capability_word=0,
+        transmit_flow_authoring_opcode=0x2201,
+        transmit_flow_authoring_protocol_id=0x2729,
+        receiver_flow_inventory_opcode=0x3200,
         transmitter_flows=[],
         tx_channels=channels,
         rx_channels=channels,
@@ -395,6 +400,53 @@ async def test_unchanged_fresh_value_is_not_scheduled_or_written():
     report = await apply_preset_plan(application, plan)
     application.set_sample_rate.assert_not_awaited()
     assert report.operations[0].state == "unchanged"
+
+
+@pytest.mark.asyncio
+async def test_external_subscription_is_unchanged_from_arc_identity_without_sdp(monkeypatch):
+    from netaudio.dante import flows
+
+    device = _planning_device()
+    device.application = SimpleNamespace(external_flows=None)
+    desired = {
+        "rx_subscriptions": {
+            2: {
+                "kind": "external_rtp",
+                "flow_identity": {"source_ipv4": "198.51.100.10", "session_id": 42},
+                "flow_slot": 1,
+                "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+            }
+        }
+    }
+    receiver_inventory = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "flows": [
+            {
+                "external_identity": {"source_ipv4": "198.51.100.10", "session_id": 42},
+                "sdp_correlation": {"matched": False},
+                "effective_subscription_identities": [
+                    {
+                        "receiver_channel": 2,
+                        "flow_slot": 1,
+                        "source_ipv4": "198.51.100.10",
+                        "session_id": 42,
+                        "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+                    }
+                ],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        flows,
+        "query_preferred_receiver_flow_inventory",
+        AsyncMock(return_value=receiver_inventory),
+    )
+
+    [action] = await _plan_receiver_subscriptions(device, "Desk", desired)
+
+    assert action.kind == "external_receiver_subscriptions"
+    assert action.state is PresetActionState.UNCHANGED
 
 
 @pytest.mark.asyncio

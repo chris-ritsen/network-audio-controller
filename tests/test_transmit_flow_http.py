@@ -39,6 +39,10 @@ def server():
     device.online = True
     device.is_locked = False
     device.flow_protocol_id = 0x2729
+    device.transmit_flow_authoring_capability_word = 0
+    device.transmit_flow_authoring_opcode = 0x2201
+    device.transmit_flow_authoring_protocol_id = 0x2729
+    device.receiver_flow_inventory_opcode = 0x3200
     device.tx_channels = {1: object()}
     device.sample_rate = 48_000
     device.encoding = 24
@@ -63,7 +67,12 @@ async def test_http_plan_uses_the_canonical_specification_without_mutation():
 @pytest.mark.asyncio
 async def test_http_plan_preserves_modern_rtp_authoring_scope_and_preconditions():
     instance = server()
-    instance.application.devices["dev1"].flow_protocol_id = 0x2809
+    device = instance.application.devices["dev1"]
+    device.flow_protocol_id = 0x2809
+    device.transmit_flow_authoring_capability_word = 0x1000
+    device.transmit_flow_authoring_opcode = 0x2601
+    device.transmit_flow_authoring_protocol_id = 0x2809
+    device.receiver_flow_inventory_opcode = 0x3600
     source = canonical_specification()
     source.update(
         {

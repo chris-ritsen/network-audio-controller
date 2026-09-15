@@ -655,20 +655,82 @@ async def _plan_receiver_subscriptions(device, device_name: str, config: dict) -
             actions.append(_change_or_unchanged("receiver_subscriptions", desired_sources, native_current))
     if external:
         external_missing = sorted({number for number, _ in external} & set(missing))
-        reason = (
-            f"fresh inventory did not report receiver channel(s) {', '.join(map(str, external_missing))}"
-            if external_missing
-            else "receiver readback does not expose the external source and session identity needed for comparison"
-        )
-        actions.append(
-            _unavailable(
-                "external_receiver_subscriptions",
-                external,
-                reason,
-                current={number: current.get(number) for number, _ in external},
+        if external_missing:
+            actions.append(
+                _unavailable(
+                    "external_receiver_subscriptions",
+                    external,
+                    f"fresh inventory did not report receiver channel(s) {', '.join(map(str, external_missing))}",
+                    current={number: current.get(number) for number, _ in external},
+                )
             )
-        )
+        else:
+            from netaudio.dante import flows
+
+            try:
+                receiver_inventory = await flows.query_preferred_receiver_flow_inventory(device)
+            except (*READBACK_ERRORS, AttributeError):
+                receiver_inventory = None
+            if receiver_inventory is None:
+                actions.append(
+                    _unavailable(
+                        "external_receiver_subscriptions",
+                        external,
+                        "complete fresh receiver-flow inventory was unavailable",
+                    )
+                )
+            else:
+                effective = flows.effective_external_subscription_index(receiver_inventory)
+                requested = {
+                    number: _preset_external_identity(number, subscription) for number, subscription in external
+                }
+                observed = {number: effective.get(number, []) for number, _ in external}
+                matches = all(
+                    any(
+                        _preset_external_identity_projection(candidate)
+                        == _preset_external_identity_projection(expected)
+                        for candidate in observed[number]
+                    )
+                    for number, expected in requested.items()
+                )
+                actions.append(
+                    _change_or_unchanged(
+                        "external_receiver_subscriptions",
+                        external,
+                        observed,
+                        matches=matches,
+                    )
+                )
     return actions
+
+
+def _preset_external_identity(receiver_channel: int, subscription: dict) -> dict:
+    identity = subscription["flow_identity"]
+    return {
+        "receiver_channel": receiver_channel,
+        "flow_slot": subscription["flow_slot"],
+        "source_ipv4": identity["source_ipv4"],
+        "session_id": identity["session_id"],
+        "interface_endpoints": subscription.get("interface_endpoints"),
+    }
+
+
+def _preset_external_identity_projection(identity: dict) -> tuple:
+    endpoints = identity.get("interface_endpoints")
+    endpoint_projection = None
+    if endpoints is not None:
+        endpoint_projection = tuple(
+            (endpoint.get("ipv4_address"), endpoint.get("udp_port"))
+            for endpoint in endpoints
+            if isinstance(endpoint, dict)
+        )
+    return (
+        identity.get("receiver_channel"),
+        identity.get("flow_slot"),
+        identity.get("source_ipv4"),
+        identity.get("session_id"),
+        endpoint_projection,
+    )
 
 
 async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> list[PresetAction]:
@@ -1356,19 +1418,26 @@ async def _apply_external_receiver_subscriptions(
             )
             continue
         acknowledged = bool(result.get("request_acknowledged"))
+        arc_effective_state = result.get("arc_effective_state_confirmed")
+        confirmed = arc_effective_state is True
+        contradicted = arc_effective_state is False
         context.report.operation(
             entry.device_name,
             action.kind,
-            "acknowledged" if acknowledged else "failed",
+            "confirmed" if confirmed else "failed" if contradicted or not acknowledged else "acknowledged",
             (
-                f"external RTP {source}/{session_id}: request acknowledged; receiver readback remains unconfirmed"
+                f"external RTP {source}/{session_id}: ARC effective state confirmed"
+                if confirmed
+                else f"external RTP {source}/{session_id}: FAILED; complete fresh ARC readback contradicts the request"
+                if contradicted
+                else f"external RTP {source}/{session_id}: request acknowledged; ARC readback unconfirmed"
                 if acknowledged
                 else f"external RTP {source}/{session_id}: request rejected"
             ),
             requested=dict(mappings),
             acknowledgement=result,
-            failed=not acknowledged,
-            verified=False,
+            failed=contradicted or not acknowledged,
+            verified=confirmed,
         )
 
 

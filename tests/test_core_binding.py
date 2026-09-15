@@ -78,7 +78,7 @@ class ConcurrentChannelCountLibrary:
         self.active_calls = 0
         self.maximum_active_calls = 0
 
-    def netaudio_client_get_channel_count(self, _handle, tx, rx, locked):
+    def netaudio_client_get_channel_count(self, _handle, tx, rx, capability_word, locked):
         with self._state_lock:
             self.active_calls += 1
             self.maximum_active_calls = max(self.maximum_active_calls, self.active_calls)
@@ -86,6 +86,7 @@ class ConcurrentChannelCountLibrary:
             time.sleep(0.01)
             tx._obj.value = 260
             rx._obj.value = 520
+            capability_word._obj.value = 0x1030
             locked._obj.value = 1
             return 0
         finally:
@@ -109,7 +110,7 @@ def test_client_serializes_concurrent_native_calls_per_instance():
     finally:
         client.close()
 
-    assert results == [(260, 520, True)] * 32
+    assert results == [(260, 520, True, 0x1030)] * 32
     assert library.maximum_active_calls == 1
 
 

@@ -23,6 +23,10 @@ from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyMutationOutcomeUnknownError,
     SampleRateTopologyReadbackError,
 )
+from netaudio.dante.self_connection import (
+    SelfConnectionCapabilityUnavailableError,
+    SelfConnectionUnsupportedError,
+)
 from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
 from netaudio.daemon.subscription_batching import (
     DIRECT_BATCH_LIMIT,
@@ -38,6 +42,18 @@ FORGET_SELECTIONS = frozenset({"emulated", "offline"})
 
 
 class DaemonDeviceHandlers:
+    async def _send_self_connection_capability_error(self, writer, error):
+        unavailable = isinstance(error, SelfConnectionCapabilityUnavailableError)
+        await self._send_json(
+            writer,
+            {
+                "error": str(error),
+                "self_connection_capability": "unavailable" if unavailable else "unsupported",
+                "mutation_sent": False,
+            },
+            503 if unavailable else 409,
+        )
+
     async def _handle_get_shure_devices(self, writer):
         if not self.shure:
             await self._send_json(writer, {})
@@ -266,6 +282,13 @@ class DaemonDeviceHandlers:
                 await self._send_json(writer, {"error": "subscriptions list is empty"}, 400)
                 return
 
+            try:
+                response = await self.application.add_subscriptions(device, records)
+            except (SelfConnectionCapabilityUnavailableError, SelfConnectionUnsupportedError) as error:
+                await self._send_self_connection_capability_error(writer, error)
+                return
+            if not await self._require_arc_write_success(writer, response, "subscription change"):
+                return
             for rx_channel_number, tx_channel_name, tx_device_name in records:
                 await self._broadcast_sse(
                     {
@@ -277,10 +300,6 @@ class DaemonDeviceHandlers:
                         "tx_device": tx_device_name,
                     }
                 )
-
-            response = await self.application.add_subscriptions(device, records)
-            if not await self._require_arc_write_success(writer, response, "subscription change"):
-                return
             self.subscription_readback.request(device, records)
             await self._send_json(writer, {"success": True, "count": len(records)})
             return
@@ -292,6 +311,16 @@ class DaemonDeviceHandlers:
             await self._send_json(writer, {"error": "rx_channel, tx_channel, tx_device required"}, 400)
             return
 
+        try:
+            response = await self.application.add_subscriptions(
+                device,
+                [(rx_channel_number, tx_channel_name, tx_device_name)],
+            )
+        except (SelfConnectionCapabilityUnavailableError, SelfConnectionUnsupportedError) as error:
+            await self._send_self_connection_capability_error(writer, error)
+            return
+        if not await self._require_arc_write_success(writer, response, "subscription change"):
+            return
         await self._broadcast_sse(
             {
                 "event": "subscription_pending",
@@ -302,13 +331,6 @@ class DaemonDeviceHandlers:
                 "tx_device": tx_device_name,
             }
         )
-
-        response = await self.application.add_subscriptions(
-            device,
-            [(rx_channel_number, tx_channel_name, tx_device_name)],
-        )
-        if not await self._require_arc_write_success(writer, response, "subscription change"):
-            return
         self.subscription_readback.request(device, [(rx_channel_number, tx_channel_name, tx_device_name)])
         await self._send_json(writer, {"success": True})
 
@@ -341,11 +363,18 @@ class DaemonDeviceHandlers:
         except (NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError) as exception:
             await self._send_json(writer, {"error": str(exception)}, 502)
             return
+        if not result.get("mutation_sent", True):
+            await self._send_json(writer, {"error": result["message"], **result}, 504)
+            return
         if not result["request_acknowledged"]:
             status = 504 if result["result_code"] is None else 409
             await self._send_json(writer, {"error": "external subscription was not acknowledged", **result}, status)
             return
-        await self._send_json(writer, {"success": True, **result})
+        if result.get("arc_effective_state_confirmed") is False:
+            await self._send_json(writer, {"error": result["message"], **result}, 502)
+            return
+        status = 200 if result.get("arc_effective_state_confirmed") is True else 202
+        await self._send_json(writer, {"success": True, **result}, status)
 
     async def _handle_unsubscribe(self, writer, params):
         device = await self._require_device(writer, params.get("rx_device"), "rx device not found")
@@ -499,6 +528,17 @@ class DaemonDeviceHandlers:
             return
         channel_type = params.get("channel_type")
         channel_number = params.get("channel_number")
+        if channel_type == "rx" and not getattr(device, "requires_managed_control", False):
+            channel = device.rx_channels.get(channel_number) if isinstance(device.rx_channels, dict) else None
+            capability = getattr(channel, "can_rename", None) if channel is not None else None
+            if capability is not True:
+                reason = "prohibited" if capability is False else "unavailable"
+                await self._send_json(
+                    writer,
+                    {"error": f"receiver channel rename capability is {reason}", "mutation_sent": False},
+                    409 if capability is False else 503,
+                )
+                return
         if name.strip():
             response = await self.application.set_channel_name(device, channel_type, channel_number, name)
         else:

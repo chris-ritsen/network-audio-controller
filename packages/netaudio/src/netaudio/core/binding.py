@@ -13,7 +13,7 @@ logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
-ABI_VERSION = 6
+ABI_VERSION = 8
 
 LOCK_NONCE_LENGTH = 24
 LOCK_KEY_LENGTH = 32
@@ -310,10 +310,13 @@ def _configure(lib):
     lib.netaudio_client_unlock.restype = ctypes.c_int
     lib.netaudio_host_mac.argtypes = [u8p]
     lib.netaudio_host_mac.restype = ctypes.c_int
+    lib.netaudio_host_mac_for_ipv4.argtypes = [ctypes.c_char_p, u8p]
+    lib.netaudio_host_mac_for_ipv4.restype = ctypes.c_int
     lib.netaudio_client_execute.argtypes = [ctypes.c_void_p, ctypes.c_char_p, *buffer_out]
     lib.netaudio_client_execute.restype = ctypes.c_int
     lib.netaudio_client_get_channel_count.argtypes = [
         ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_uint16),
         ctypes.POINTER(ctypes.c_uint16),
         ctypes.POINTER(ctypes.c_uint16),
         ctypes.POINTER(ctypes.c_int32),
@@ -456,6 +459,17 @@ def host_mac() -> bytes | None:
         return None
     out = (ctypes.c_uint8 * 6)()
     if lib.netaudio_host_mac(out) == STATUS_OK:
+        return bytes(out)
+    return None
+
+
+def host_mac_for_ipv4(local_ip: str) -> bytes | None:
+    address = str(ipaddress.IPv4Address(local_ip))
+    lib = _load()
+    if lib is None:
+        return None
+    out = (ctypes.c_uint8 * 6)()
+    if lib.netaudio_host_mac_for_ipv4(address.encode("ascii"), out) == STATUS_OK:
         return bytes(out)
     return None
 
@@ -735,16 +749,21 @@ class CoreClient:
     def get_channel_count(self):
         tx = ctypes.c_uint16(0)
         rx = ctypes.c_uint16(0)
+        transmit_flow_authoring_capability_word = ctypes.c_uint16(0)
         locked = ctypes.c_int32(-2)
         library = self._require_library()
         with self._native_lock:
             status = library.netaudio_client_get_channel_count(
-                self._handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked)
+                self._handle,
+                ctypes.byref(tx),
+                ctypes.byref(rx),
+                ctypes.byref(transmit_flow_authoring_capability_word),
+                ctypes.byref(locked),
             )
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "get_channel_count")
         lock_state = None if locked.value < 0 else bool(locked.value)
-        return tx.value, rx.value, lock_state
+        return tx.value, rx.value, lock_state, transmit_flow_authoring_capability_word.value
 
     def get_aes67_configured(self):
         state = ctypes.c_int32(-2)

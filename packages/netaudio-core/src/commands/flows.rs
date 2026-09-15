@@ -183,13 +183,15 @@ pub fn build_query_receiver_channel_status(
 
 pub fn build_query_receiver_flow_status(
     protocol_id: u16,
+    starting_flow: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if !crate::protocol::is_modern_arc_protocol(protocol_id) {
+    if !crate::protocol::is_modern_arc_protocol(protocol_id) || starting_flow == 0 {
         return Err(NetaudioError::InvalidFlowProtocol);
     }
     let mut body = [0u8; 24];
-    body[6..12].copy_from_slice(&[0x00, 0x01, 0x00, 0x01, 0x00, 0x01]);
+    body[6..8].copy_from_slice(&1u16.to_be_bytes());
+    body[8..10].copy_from_slice(&starting_flow.to_be_bytes());
     if protocol_id == PROTOCOL_ARC_2809 {
         body[18..24].copy_from_slice(&[0x83, 0x02, 0x83, 0x06, 0x03, 0x10]);
     }

@@ -49,6 +49,11 @@ from netaudio.dante.lock import _validate_lock_key, core_lock_device, core_unloc
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.operation_availability import probe_supported, require_writable
 from netaudio.dante.sap import SapFlowInventory, SapInventoryChange
+from netaudio.dante.self_connection import (
+    SelfConnectionCapabilityUnavailableError,
+    SelfConnectionUnsupportedError,
+    is_self_connection_request,
+)
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
     NOTIFICATION_LATENCY_CHANGE,
@@ -135,12 +140,12 @@ class DanteApplication:
         self._capture_writer_task: asyncio.Task | None = None
         self.transport = CoreTransport(observer=self._observe_wire if (packet_store is not None or dissect) else None)
         self.commands = DanteCommands()
-        self.cmc = DanteCMCService(self.transport, interface_name=app_settings.interface)
+        self.cmc = DanteCMCService(self.transport)
         self.notifications = DanteNotificationService(
             dispatcher=self.dispatcher,
             device_lookup=self._device_by_control_key,
             packet_store=packet_store,
-            interface_ip=app_settings.interface_ip,
+            interface_name=app_settings.interface,
             dissect=dissect,
         )
         self.notifications.session_id = session_id
@@ -870,10 +875,6 @@ class DanteApplication:
     async def _send_registered_system_reset(self, device, build_specification, host_mac) -> None:
         if getattr(device, "requires_managed_control", False):
             raise RuntimeError("system reset has no verified DDM completion path and was not sent")
-        if host_mac is None:
-            from netaudio.dante.services.cmc import _get_host_mac
-
-            host_mac = _get_host_mac()
         await self.cmc.require_registration(device._require_address(), host_mac)
         await device.execute(build_specification(host_mac))
 
@@ -933,14 +934,87 @@ class DanteApplication:
         return await self.transport.execute(address, specification)
 
     async def add_subscriptions(self, device, records):
-        if getattr(device, "requires_managed_control", False):
-            async with device.topology_mutation_lock:
+        records = list(records)
+        async with device.topology_mutation_lock:
+            await self._preflight_self_connections(device, records)
+            if getattr(device, "requires_managed_control", False):
                 return await self.managed_transport(device).set_subscriptions(device, records)
-        return await self.mutate_and_wait_for_notification(
-            device,
-            lambda: self.send_add_subscriptions(device, records),
-            SUBSCRIPTION_NOTIFICATION_IDS,
-        )
+            return await self.mutate_and_wait_for_notification(
+                device,
+                lambda: self._send_add_subscriptions_locked(device, records),
+                SUBSCRIPTION_NOTIFICATION_IDS,
+            )
+
+    async def _preflight_self_connections(self, device, records: list[tuple]) -> None:
+        devices = [device, *(candidate for candidate in self.devices.values() if candidate is not device)]
+        target_channels = {
+            int(rx_channel)
+            for rx_channel, _tx_channel, tx_device in records
+            if is_self_connection_request(device, tx_device, devices)
+        }
+        if not target_channels:
+            return
+
+        try:
+            if getattr(device, "requires_managed_control", False):
+                fresh = await self.managed_transport(device).fetch_device(device)
+                managed_channels = fresh.rx_channels
+                if managed_channels is None:
+                    raise SelfConnectionCapabilityUnavailableError(
+                        "managed receiver capability inventory is unavailable"
+                    )
+                by_number = {}
+                for managed_channel in managed_channels:
+                    if managed_channel.index in by_number:
+                        raise SelfConnectionCapabilityUnavailableError(
+                            f"managed receiver channel {managed_channel.index} is ambiguous"
+                        )
+                    by_number[managed_channel.index] = managed_channel
+                for number in target_channels:
+                    managed_channel = by_number.get(number)
+                    channel = device.rx_channels.get(number)
+                    if managed_channel is None or channel is None:
+                        raise SelfConnectionCapabilityUnavailableError(
+                            f"self-connection capability is unavailable for receiver channel {number}"
+                        )
+                    managed_value = managed_channel.can_subscribe_self
+                    channel.managed_can_subscribe_self = managed_value
+                    channel.managed_can_subscribe_self_fresh = True
+                    direct_value = None
+                    if isinstance(channel.receiver_flags, int):
+                        direct_value = bool(channel.receiver_flags & 0x0008)
+                    elif isinstance(channel.receiver_capability_flags, int):
+                        direct_value = bool(channel.receiver_capability_flags & 0x0000_0008)
+                    if (
+                        isinstance(managed_value, bool)
+                        and isinstance(direct_value, bool)
+                        and managed_value != direct_value
+                    ):
+                        channel.can_subscribe_self = None
+                        channel.can_subscribe_self_conflict = True
+                    else:
+                        channel.can_subscribe_self = managed_value if isinstance(managed_value, bool) else None
+                        channel.can_subscribe_self_conflict = None
+            else:
+                await device.get_rx_channels()
+        except SelfConnectionCapabilityUnavailableError:
+            raise
+        except (OSError, RuntimeError, TimeoutError) as error:
+            raise SelfConnectionCapabilityUnavailableError(
+                f"fresh self-connection capability is unavailable: {error}"
+            ) from error
+
+        for number in sorted(target_channels):
+            channel = device.rx_channels.get(number)
+            capability = getattr(channel, "can_subscribe_self", None)
+            if capability is False:
+                raise SelfConnectionUnsupportedError(
+                    f"receiver channel {number} does not advertise self-connection support"
+                )
+            if capability is not True:
+                raise SelfConnectionCapabilityUnavailableError(
+                    f"self-connection capability is unavailable for receiver channel {number}"
+                )
 
     async def apply_modern_arc_status_pages(self, device) -> None:
         pages = (
@@ -1774,13 +1848,61 @@ class DanteApplication:
 
     async def query_modern_arc_receiver_flow_status(self, device):
         protocol_id = modern_arc_protocol_identifier_for_device(device)
-        return await self._query_modern_arc_status_page(
-            device,
-            self.commands.query_modern_arc_receiver_flow_status(protocol_id),
-            "receiver flow status query",
-            "modern_arc_receiver_flow_status_page",
-            allow_partial=True,
-        )
+        starting_flow = 1
+        maximum_flow_slots = None
+        seen_flow_ids = set()
+        aggregate_flows = []
+        pages = []
+        while True:
+            page = await self._query_modern_arc_status_page(
+                device,
+                self.commands.query_modern_arc_receiver_flow_status(protocol_id, starting_flow),
+                "receiver flow status query",
+                "modern_arc_receiver_flow_status_page",
+                allow_partial=True,
+            )
+            page_maximum = page.get("maximum_flow_slots")
+            page_flows = page.get("flows")
+            if (
+                isinstance(page_maximum, bool)
+                or not isinstance(page_maximum, int)
+                or not 1 <= page_maximum <= 32
+                or not isinstance(page_flows, list)
+                or page.get("reported_flow_count") != len(page_flows)
+            ):
+                raise RuntimeError("receiver flow status query returned a malformed page")
+            if maximum_flow_slots is None:
+                maximum_flow_slots = page_maximum
+            elif page_maximum != maximum_flow_slots:
+                raise RuntimeError("receiver flow status query changed capacity between pages")
+            page_flow_ids = []
+            for flow in page_flows:
+                flow_id = flow.get("global_flow_id") if isinstance(flow, dict) else None
+                if (
+                    isinstance(flow_id, bool)
+                    or not isinstance(flow_id, int)
+                    or not starting_flow <= flow_id <= maximum_flow_slots
+                    or flow_id in seen_flow_ids
+                ):
+                    raise RuntimeError("receiver flow status query returned invalid pagination")
+                seen_flow_ids.add(flow_id)
+                page_flow_ids.append(flow_id)
+                aggregate_flows.append(flow)
+            pages.append(page)
+            if page.get("result_code") == RESULT_CODE_SUCCESS and page.get("page_disposition") == "complete":
+                aggregate = dict(page)
+                aggregate["reported_flow_count"] = len(aggregate_flows)
+                aggregate["flows"] = aggregate_flows
+                aggregate["pages"] = pages
+                return aggregate
+            if page.get("result_code") != RESULT_CODE_SUCCESS_EXTENDED or page.get("page_disposition") != "more_pages":
+                raise RuntimeError("receiver flow status query did not terminate successfully")
+            if not page_flow_ids:
+                raise RuntimeError("receiver flow status query returned an empty continuation page")
+            next_starting_flow = max(page_flow_ids) + 1
+            if next_starting_flow <= starting_flow or next_starting_flow > maximum_flow_slots:
+                raise RuntimeError("receiver flow status query returned invalid continuation state")
+            starting_flow = next_starting_flow
 
     async def query_modern_arc_transmitter_channel_status(self, device):
         return await self._query_channel_status_pages(device, "tx")
@@ -1992,7 +2114,22 @@ class DanteApplication:
         )
 
     async def reset_channel_name(self, device, channel_type: str, channel_number: int):
+        self._require_receiver_channel_rename_supported(device, channel_type, channel_number)
         return await device.execute(self.commands.reset_channel_name(channel_type, channel_number))
+
+    @staticmethod
+    def _require_receiver_channel_rename_supported(device, channel_type: str, channel_number: int) -> None:
+        if channel_type != "rx" or getattr(device, "requires_managed_control", False):
+            return
+        channels = getattr(device, "rx_channels", None)
+        channel = channels.get(channel_number) if isinstance(channels, dict) else None
+        if channel is None:
+            raise ValueError(f"receiver channel {channel_number} is unavailable")
+        capability = getattr(channel, "can_rename", None)
+        if capability is False:
+            raise ValueError(f"receiver channel {channel_number} prohibits renaming")
+        if capability is not True:
+            raise ValueError(f"receiver channel {channel_number} rename capability is unavailable")
 
     async def reset_device_name(self, device):
         if getattr(device, "requires_managed_control", False):
@@ -2023,20 +2160,25 @@ class DanteApplication:
 
     async def send_add_subscriptions(self, device, records):
         async with device.topology_mutation_lock:
-            if self._uses_modern_arc_280f(device):
-                return await self._send_modern_arc_subscription_records(
-                    device,
-                    [
-                        {
-                            "action": "set",
-                            "rx_channel": rx_channel,
-                            "tx_channel": tx_channel,
-                            "tx_device": tx_device,
-                        }
-                        for rx_channel, tx_channel, tx_device in records
-                    ],
-                )
-            return await device.execute(self.commands.add_subscriptions(records))
+            records = list(records)
+            await self._preflight_self_connections(device, records)
+            return await self._send_add_subscriptions_locked(device, records)
+
+    async def _send_add_subscriptions_locked(self, device, records):
+        if self._uses_modern_arc_280f(device):
+            return await self._send_modern_arc_subscription_records(
+                device,
+                [
+                    {
+                        "action": "set",
+                        "rx_channel": rx_channel,
+                        "tx_channel": tx_channel,
+                        "tx_device": tx_device,
+                    }
+                    for rx_channel, tx_channel, tx_device in records
+                ],
+            )
+        return await device.execute(self.commands.add_subscriptions(records))
 
     @staticmethod
     def _uses_modern_arc_280f(device) -> bool:
@@ -2276,6 +2418,7 @@ class DanteApplication:
         return device.aes67_multicast_prefix
 
     async def set_channel_name(self, device, channel_type: str, channel_number: int, name: str):
+        self._require_receiver_channel_rename_supported(device, channel_type, channel_number)
         return await self.mutate_and_wait_for_notification(
             device,
             lambda: self.send_set_channel_name(device, channel_type, channel_number, name),

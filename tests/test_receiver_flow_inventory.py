@@ -37,13 +37,13 @@ def test_receiver_flow_parser_preserves_controller_visible_flow_state():
         2_000_000,
         1_000_000,
     ]
-    assert [flow["destination_internet_protocol_version_four_address"] for flow in page["flows"]] == [
+    assert [flow["interface_endpoints"][0]["ipv4_address"] for flow in page["flows"]] == [
         "192.168.1.108",
         "192.168.1.108",
         "192.168.1.108",
         "239.255.255.56",
     ]
-    assert [flow["destination_user_datagram_port"] for flow in page["flows"]] == [
+    assert [flow["interface_endpoints"][0]["udp_port"] for flow in page["flows"]] == [
         0x3813,
         0x3803,
         0x3829,
@@ -57,7 +57,7 @@ def test_receiver_flow_parser_preserves_controller_visible_flow_state():
     ]
     assert all(flow["sample_rate"] == 48_000 for flow in page["flows"])
     assert all(flow["encoding"] == 24 for flow in page["flows"])
-    assert all(flow["channel_count"] == 2 for flow in page["flows"])
+    assert all(flow["flow_channel_slot_count"] == 2 for flow in page["flows"])
     assert all(len(flow["raw_record_hexadecimal"]) == 168 for flow in page["flows"])
     assert [flow["receiver_channel_numbers_by_flow_channel"] for flow in page["flows"]] == [
         [[21], [22]],
@@ -145,7 +145,8 @@ async def test_receiver_flow_inventory_uses_the_controller_query(monkeypatch):
 
     inventory = await flows.query_receiver_flow_inventory("192.0.2.10", 4440)
 
-    assert inventory == core.parse_response("receiver_flow_page", _packet(0x3200, 8172))
+    expected = core.parse_response("receiver_flow_page", _packet(0x3200, 8172))
+    assert inventory == {**expected, "pages": [expected]}
     assert command_specifications == [
         {
             "device_ip": "192.0.2.10",

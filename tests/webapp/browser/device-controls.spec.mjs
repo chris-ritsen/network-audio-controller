@@ -1,14 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { deviceFixture, serveWebapp } from "./fixture.mjs";
 
-test("flow pages, device controls and diagnostic fields are absent", async ({ page }) => {
+test("standalone flow pages, device controls and diagnostic fields are absent", async ({ page }) => {
   await serveWebapp(page);
   const requests = [];
   page.on("request", (request) => requests.push(new URL(request.url()).pathname));
   for (const path of ["/devices", "/devices/avio-bt-1/receive", "/devices/avio-bt-1/status", "/devices/avio-bt-1/network-config"]) {
     await page.goto(`http://netaudio.test${path}`);
     await expect(page.getByRole("link", { name: /flows/i })).toHaveCount(0);
-    await expect(page.locator("#content")).not.toContainText(/\bflows?\b/i);
   }
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText("Flows", { exact: true })).toHaveCount(0);

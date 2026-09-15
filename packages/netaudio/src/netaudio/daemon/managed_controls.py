@@ -118,7 +118,11 @@ class ManagedDeviceControls:
 
 
 async def refresh_managed_subscriptions(application, device):
-    from netaudio.daemon.managed_inventory import _managed_channels, _managed_subscriptions
+    from netaudio.daemon.managed_inventory import (
+        _managed_channels,
+        _managed_subscriptions,
+        _overlay_channel_metadata,
+    )
 
     fresh = await application.managed_transport(device).fetch_device(device)
     if fresh.rx_channels is None:
@@ -127,7 +131,15 @@ async def refresh_managed_subscriptions(application, device):
     for number, channel in receivers.items():
         existing = device.rx_channels.get(int(number))
         if existing is not None:
-            receivers[number] = {**DanteDeviceSerializer.channel_to_json(existing), **channel}
+            merged_channels = {
+                "receivers": {number: DanteDeviceSerializer.channel_to_json(existing)},
+                "transmitters": {},
+            }
+            _overlay_channel_metadata(
+                merged_channels,
+                {"receivers": {number: channel}, "transmitters": {}},
+            )
+            receivers[number] = merged_channels["receivers"][number]
     readback = DanteDeviceSerializer.device_from_json(
         {
             "name": device.name,

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import socket
-import struct
 import sys
 import time
 import uuid
@@ -22,6 +20,7 @@ from netaudio.commands.meter.tui import MeterViewOptions
 from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon import client as daemon_client
 from netaudio.dante.const import MULTICAST_GROUP_CONTROL_MONITORING
+from netaudio.dante.service import DanteMulticastService
 from netaudio.icons import icon
 
 meter_app = typer.Typer(
@@ -262,30 +261,6 @@ def stop():
     run_command(run_meter_stop)
 
 
-def _open_metering_listener(metering_port: int) -> socket.socket:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind(("", metering_port))
-    membership_request = struct.pack(
-        "4s4s",
-        socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
-        socket.inet_aton("0.0.0.0"),
-    )
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership_request)
-    return sock
-
-
-def _local_host_ip() -> str:
-    host_ip_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        host_ip_sock.connect(("224.0.0.231", 1))
-        return host_ip_sock.getsockname()[0]
-    finally:
-        host_ip_sock.close()
-
-
 def _report_metering_timing(timestamps_by_ip: dict[str, list[float]], device_names: dict[str, str], start_time: float):
     typer.echo("")
     for source_ip, timestamps in sorted(timestamps_by_ip.items()):
@@ -316,28 +291,27 @@ def _report_metering_timing(timestamps_by_ip: dict[str, list[float]], device_nam
 async def run_measure_timeout(application, devices, gap: float, max_wait: float) -> None:
     filtered = dict(select_device(filter_devices(devices), allow_many=True))
     metering_port = app_settings.metering_port
-    sock = _open_metering_listener(metering_port)
-
-    loop = asyncio.get_running_loop()
     timestamps_by_ip: dict[str, list[float]] = {}
     device_names: dict[str, str] = {}
 
-    class TimingProtocol(asyncio.DatagramProtocol):
-        def datagram_received(self, data, addr):
-            timestamps_by_ip.setdefault(addr[0], []).append(time.monotonic())
-
-    transport, _ = await loop.create_datagram_endpoint(TimingProtocol, sock=sock)
+    listener = DanteMulticastService(
+        MULTICAST_GROUP_CONTROL_MONITORING,
+        metering_port,
+        interface_name=app_settings.interface,
+        on_packet=lambda _data, address: timestamps_by_ip.setdefault(address[0], []).append(time.monotonic()),
+    )
+    await listener.start()
+    started = []
 
     try:
-        host_ip = _local_host_ip()
-        host_mac = application.cmc.host_media_access_control_address
-
         for server_name, device in filtered.items():
             device_ip = str(device.ipv4)
             device_name = device.name or server_name
             device_names[device_ip] = device_name
+            host_ip, host_mac = application.cmc.controller_identity(device_ip)
             typer.echo(f"Sending single metering start to {device_name} ({device_ip})")
             await application.cmc.start_metering(device_ip, device_name, host_ip, host_mac, metering_port)
+            started.append((device_ip, device_name, host_ip, host_mac))
 
         start_time = time.monotonic()
         last_any_packet = start_time
@@ -370,12 +344,15 @@ async def run_measure_timeout(application, devices, gap: float, max_wait: float)
 
         _report_metering_timing(timestamps_by_ip, device_names, start_time)
 
-        for server_name, device in filtered.items():
-            device_ip = str(device.ipv4)
-            device_name = device.name or server_name
-            await application.cmc.stop_metering(device_ip, device_name, host_ip, host_mac, metering_port)
     finally:
-        transport.close()
+        await asyncio.gather(
+            *(
+                application.cmc.stop_metering(device_ip, device_name, host_ip, host_mac, metering_port)
+                for device_ip, device_name, host_ip, host_mac in started
+            ),
+            return_exceptions=True,
+        )
+        await listener.stop()
 
 
 @meter_app.command(name="measure-timeout")

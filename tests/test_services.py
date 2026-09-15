@@ -219,6 +219,43 @@ class TestDanteCMCService:
 
         assert service.host_media_access_control_address == host_address
 
+    def test_controller_identity_uses_the_target_path(self, monkeypatch):
+        from netaudio import core
+
+        transport = SimpleNamespace(
+            path=MagicMock(return_value=SimpleNamespace(source_address="198.51.100.2")),
+        )
+        lookup = MagicMock(return_value=b"\x00\x1d\xc1\x50\x23\x68")
+        monkeypatch.setattr(core, "host_mac_for_ipv4", lookup)
+        service = DanteCMCService(transport)
+
+        assert service.controller_identity("198.51.100.40") == (
+            "198.51.100.2",
+            b"\x00\x1d\xc1\x50\x23\x68",
+        )
+        transport.path.assert_called_once_with("198.51.100.40")
+        lookup.assert_called_once_with("198.51.100.2")
+
+    def test_global_host_identity_is_unavailable_without_an_explicit_override(self):
+        service = DanteCMCService(_recording_transport())
+
+        with pytest.raises(RuntimeError, match="depends on the target network path"):
+            _ = service.host_media_access_control_address
+
+    @pytest.mark.asyncio
+    async def test_default_registration_uses_the_client_path_mac_without_eager_global_lookup(self, monkeypatch):
+        from netaudio.dante.services import cmc
+
+        transport = _recording_transport()
+        lookup = MagicMock(side_effect=AssertionError("global host MAC lookup must stay lazy"))
+        monkeypatch.setattr(cmc, "_get_host_mac", lookup)
+        service = DanteCMCService(transport)
+
+        await service.register_device("192.168.1.61")
+
+        lookup.assert_not_called()
+        assert _executed(transport) == [("192.168.1.61", {"command": "cmc_register", "sequence": 0})]
+
     @pytest.mark.asyncio
     async def test_registration_executes_typed_specification(self):
         transport = _recording_transport()

@@ -102,22 +102,28 @@ class DanteCMCService:
     def __init__(
         self,
         transport: CoreTransport,
-        interface_name: str | None = None,
         host_media_access_control_address: bytes | None = None,
     ):
         self._transport = transport
         self._sequence_counter = 0
         self._registered_devices: set[str] = set()
         self._heartbeat_task: asyncio.Task | None = None
-        self._host_media_access_control_address = (
-            host_media_access_control_address
-            if host_media_access_control_address is not None
-            else _get_host_mac(interface_name)
-        )
+        self._host_media_access_control_address = host_media_access_control_address
 
     @property
     def host_media_access_control_address(self) -> bytes:
+        if self._host_media_access_control_address is None:
+            raise RuntimeError("Host MAC depends on the target network path")
         return self._host_media_access_control_address
+
+    def controller_identity(self, device_ip: str) -> tuple[str, bytes]:
+        from netaudio import core
+
+        source_address = self._transport.path(device_ip).source_address
+        host_mac = self._host_media_access_control_address or core.host_mac_for_ipv4(source_address)
+        if host_mac is None:
+            raise RuntimeError(f"Could not derive a host MAC for source address {source_address}")
+        return source_address, host_mac
 
     @property
     def registered_devices(self) -> frozenset[str]:
@@ -145,10 +151,13 @@ class DanteCMCService:
         sequence = self._sequence_counter
         self._sequence_counter = (self._sequence_counter + 1) & 0xFFFF
         host_mac = host_media_access_control_address or self._host_media_access_control_address
+        specification = {"command": "cmc_register", "sequence": sequence}
+        if host_mac is not None:
+            specification["host_mac"] = host_mac.hex()
         try:
             response = await self._transport.execute(
                 str(device_ip),
-                {"command": "cmc_register", "host_mac": host_mac.hex(), "sequence": sequence},
+                specification,
             )
         except core.NetaudioCoreError as exception:
             logger.debug(f"CMC registration request failed for {device_ip}: {exception}")

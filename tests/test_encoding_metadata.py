@@ -11,7 +11,7 @@ from netaudio.dante.device_serializer import DanteDeviceSerializer
 def controls_input(channel_audio_metadata):
     return {
         "name": None,
-        "counts": (1, 1, None),
+        "counts": (1, 1, None, 0),
         "aes67": None,
         "settings": None,
         "channel_audio_metadata": channel_audio_metadata,
@@ -74,7 +74,7 @@ async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_c
     device = DanteDevice()
     core_client = MagicMock()
     core_client.observer = None
-    core_client.get_channel_count.return_value = (2, 2, False)
+    core_client.get_channel_count.return_value = (2, 2, False, 0)
     core_client.get_rx_inventory.return_value = {
         "channels": [],
         "channel_audio_metadata": {

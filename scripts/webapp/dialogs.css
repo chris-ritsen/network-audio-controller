@@ -44,6 +44,13 @@
     opacity: 0.5;
     cursor: default;
   }
+  .source-picker-entry.self-unsupported,
+  .source-picker-entry.self-unavailable {
+    background: var(--black);
+    color: var(--muted);
+    opacity: 1;
+    cursor: not-allowed;
+  }
   @media (max-width: 900px) {
     .source-picker .source-picker-box {
       width: calc(100vw - 16px);

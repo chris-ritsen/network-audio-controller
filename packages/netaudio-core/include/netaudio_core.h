@@ -106,11 +106,14 @@ NetaudioStatus netaudio_client_set_host_mac(NetaudioClient *client, const uint8_
 
 NetaudioStatus netaudio_host_mac(uint8_t *out_mac);
 
+NetaudioStatus netaudio_host_mac_for_ipv4(const char *local_ip, uint8_t *out_mac);
+
 void netaudio_client_free(NetaudioClient *client);
 
 /**
- * Create an IPv4 control client. A null local_ip uses the OS-selected source;
- * a non-null local_ip must identify a specific local unicast IPv4 address.
+ * Create an IPv4 control client. A null local_ip resolves and pins the source
+ * selected by the OS for device_ip; a non-null local_ip must identify a
+ * specific local unicast IPv4 address.
  */
 NetaudioStatus netaudio_client_new(const char *device_ip,
                                    const char *local_ip,
@@ -124,6 +127,7 @@ NetaudioStatus netaudio_client_set_device_name(NetaudioClient *client, const cha
 NetaudioStatus netaudio_client_get_channel_count(NetaudioClient *client,
                                                  uint16_t *out_tx_count,
                                                  uint16_t *out_rx_count,
+                                                 uint16_t *out_transmit_flow_authoring_capability_word,
                                                  int32_t *out_locked);
 
 NetaudioStatus netaudio_client_get_rx_channels_json(NetaudioClient *client,

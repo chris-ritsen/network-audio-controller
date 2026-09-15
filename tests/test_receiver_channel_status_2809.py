@@ -124,6 +124,9 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         "source_device_name": "lx-dante",
         "subscription_status_code": 0x0010,
         "receiver_status_code": 0x0000,
+        "receiver_capability_flags": 0x00000006,
+        "can_subscribe_self": False,
+        "can_rename": True,
         "status_flags": 0x0202,
         "raw_record_hexadecimal": _packet(0x2809, 0x3400, 28729)[68:124].hex(),
     }
@@ -144,6 +147,8 @@ def test_parser_exposes_causal_local_name_readback_and_separate_status_fields():
         "source_device_name",
         "subscription_status_code",
         "receiver_status_code",
+        "receiver_capability_flags",
+        "can_subscribe_self",
         "status_flags",
     ):
         assert second_record[field] == first_record[field]
@@ -262,3 +267,24 @@ async def test_receiver_rename_does_not_guess_after_an_indeterminate_frontend_pr
 
     assert device.execute.await_count == 1
     assert device.receiver_channel_name_protocol_identifier is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capability", "message"),
+    [(False, "prohibits renaming"), (None, "rename capability is unavailable")],
+)
+async def test_receiver_rename_and_reset_fail_closed_before_mutation(capability, message):
+    device = SimpleNamespace(
+        requires_managed_control=False,
+        rx_channels={1: SimpleNamespace(can_rename=capability)},
+        execute=AsyncMock(),
+    )
+    operation = DanteApplication()
+
+    with pytest.raises(ValueError, match=message):
+        await operation.set_channel_name(device, "rx", 1, "Input-1")
+    with pytest.raises(ValueError, match=message):
+        await operation.reset_channel_name(device, "rx", 1)
+
+    device.execute.assert_not_awaited()

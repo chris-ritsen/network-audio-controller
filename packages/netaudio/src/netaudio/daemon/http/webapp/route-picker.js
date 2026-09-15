@@ -5,6 +5,7 @@ import * as format from "./format.js";
 import { html, useLayoutEffect, useMemo, useRef, useState } from "./lib/preact.js";
 import { deviceRequestName, scopedDevices as devices } from "./store.js";
 import { runAction } from "./actions.js";
+import { selfConnectionTargetState } from "./self-connection.js";
 
 function transmitterEntries(sourceDevices) {
   const entries = [];
@@ -18,6 +19,7 @@ function transmitterEntries(sourceDevices) {
       entries.push({
         channelName: channel.name,
         channelNumber: number,
+        device,
         deviceLabel: format.deviceLabel(device),
         online: device.online,
       });
@@ -51,9 +53,11 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
   }, []);
 
   const requestName = deviceRequestName(receiver);
+  const receiveChannel = receiver.channels?.receivers?.[receiveChannelNumber];
 
   const apply = async (entry) => {
-    if (busy || !entry.online || !receiver.online) return;
+    const target = selfConnectionTargetState(receiver, receiveChannel, entry.device);
+    if (busy || !entry.online || !receiver.online || !target.allowed) return;
     setError("");
     setBusy(true);
     const result = await runAction(
@@ -143,19 +147,24 @@ export function RoutePicker({ onClose, receiver, receiveChannelNumber, receiveCh
         ${results.length === 0
           ? html`<div class="palette-empty">No transmit channel matches this filter.</div>`
           : results.map((entry, index) => {
+              const target = selfConnectionTargetState(receiver, receiveChannel, entry.device);
               const active =
                 subscription &&
                 subscription.tx_channel === entry.channelName &&
                 subscription.tx_device === entry.deviceLabel;
               return html`
-                <button type="button" disabled=${busy || !entry.online || !receiver.online}
+                <button type="button" disabled=${busy || !entry.online || !receiver.online || !target.allowed}
                   key=${`${entry.deviceLabel}/${entry.channelName}`}
-                  class=${`source-picker-entry${active ? " current" : ""}`}
+                  class=${`source-picker-entry${active ? " current" : ""}${target.allowed ? "" : ` self-${target.state}`}`}
+                  title=${target.allowed ? undefined : target.reason}
                   onPointerEnter=${() => setHighlighted(index)}
                   onClick=${() => apply(entry)}
                 >
                   <span class="flex-1 min-w-0 break-words"><strong class="block">${entry.channelName}</strong><span class="block font-normal">${entry.deviceLabel}</span></span>
-                  ${active ? html`<span class="badge badge-success badge-outline">Current</span>` : !entry.online ? html`<span class="badge">Offline</span>` : null}
+                  ${active ? html`<span class="badge badge-success badge-outline">Current</span>`
+                    : !entry.online ? html`<span class="badge">Offline</span>`
+                    : !target.allowed ? html`<span class="badge">${target.state === "unsupported" ? "Self blocked" : "Self unavailable"}</span>`
+                    : null}
                 </button>
               `;
             })}

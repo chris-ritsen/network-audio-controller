@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
-import ipaddress
 import logging
 import socket
-import struct
 import time
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
@@ -16,6 +14,7 @@ from netaudio.dante.const import (
 )
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.metering import classify_signal_presence, parse_metering_levels
+from netaudio.dante.service import DanteMulticastService
 
 logger = logging.getLogger("netaudio")
 
@@ -38,16 +37,14 @@ class MeteringManager:
         self._latest_levels: dict[str, dict] = {}
         self._history: dict[str, collections.deque] = {}
         self._events: dict[str, asyncio.Event] = {}
-        self._transport = None
-        self._host_ip = None
-        self._host_mac = None
+        self._listener: DanteMulticastService | None = None
         self._recovery_task = None
         self._broadcast_task = None
         self._active_port: int | None = None
         self._port_lock = DeferredAsyncioLock()
         self._dirty_devices: set[str] = set()
         self._failed_starts: dict[str, float] = {}
-        self._started: dict[str, tuple[str, str, float]] = {}
+        self._started: dict[str, tuple[str, str, str, bytes, float]] = {}
         self._stream_locks: dict[str, asyncio.Lock] = {}
 
     @staticmethod
@@ -162,7 +159,7 @@ class MeteringManager:
                         return
                 elif not started or not detailed or now - detailed["timestamp"] > METERING_ABANDON_SECONDS:
                     return
-                elif now - started[2] < METERING_KEEPALIVE_SECONDS:
+                elif now - started[4] < METERING_KEEPALIVE_SECONDS:
                     return
             elif started:
                 return
@@ -173,11 +170,12 @@ class MeteringManager:
                 return
             logger.debug(f"Sending metering start to {device_name} ({device_ip})")
             try:
+                host_ip, host_mac = self._application.cmc.controller_identity(device_ip)
                 await self._application.cmc.start_metering(
                     device_ip,
                     device_name,
-                    self._host_ip,
-                    self._host_mac,
+                    host_ip,
+                    host_mac,
                     self._active_port,
                 )
             except (RuntimeError, OSError) as error:
@@ -185,7 +183,7 @@ class MeteringManager:
                 self._failed_starts[server_name] = now
                 return
             self._failed_starts.pop(server_name, None)
-            self._started[server_name] = (device_ip, device_name, now)
+            self._started[server_name] = (device_ip, device_name, host_ip, host_mac, now)
 
     async def _send_stop(self, server_name: str, *, changing_port: bool = False):
         async with self._stream_lock(server_name):
@@ -195,23 +193,20 @@ class MeteringManager:
             started = self._started.pop(server_name, None)
             if started is None:
                 return
-            device_ip, device_name, _ = started
+            device_ip, device_name, host_ip, host_mac, _ = started
             logger.debug(f"Sending metering stop to {device_name} ({device_ip})")
             try:
                 await self._application.cmc.stop_metering(
                     device_ip,
                     device_name,
-                    self._host_ip,
-                    self._host_mac,
+                    host_ip,
+                    host_mac,
                     self._active_port,
                 )
             except (RuntimeError, OSError) as error:
                 logger.warning(f"Metering stop failed for {device_name}: {error}")
 
     async def start(self):
-        self._host_ip = _get_local_ip()
-        self._host_mac = self._application.cmc.host_media_access_control_address
-
         configured = read_preferences().get("monitoring_port")
         preferred_port = (
             configured
@@ -229,21 +224,13 @@ class MeteringManager:
         else:
             raise OSError(f"Configured monitoring port {preferred_port} is already in use")
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        sock.bind(("", self._active_port))
-
-        mreq = struct.pack(
-            "4s4s",
-            socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING),
-            socket.inet_aton("0.0.0.0"),
+        self._listener = DanteMulticastService(
+            MULTICAST_GROUP_CONTROL_MONITORING,
+            self._active_port,
+            interface_name=app_settings.interface,
+            on_packet=self._on_metering_packet,
         )
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-        loop = asyncio.get_running_loop()
-        self._transport, _ = await loop.create_datagram_endpoint(
-            lambda: _MeteringProtocol(self._on_metering_packet),
-            sock=sock,
-        )
+        await self._listener.start()
         logger.info("MeteringManager: UDP listener started on port %d", self._active_port)
 
         self._recovery_task = asyncio.create_task(self._recovery_loop())
@@ -303,9 +290,9 @@ class MeteringManager:
         self._history.clear()
         self._events.clear()
 
-        if self._transport:
-            self._transport.close()
-            self._transport = None
+        if self._listener:
+            await self._listener.stop()
+            self._listener = None
 
         logger.info("MeteringManager: stopped")
 
@@ -350,38 +337,29 @@ class MeteringManager:
             if port == self._active_port:
                 await asyncio.to_thread(save_monitoring_port, port)
                 return self.port_settings()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            replacement = None
+            replacement = DanteMulticastService(
+                MULTICAST_GROUP_CONTROL_MONITORING,
+                port,
+                interface_name=app_settings.interface,
+                on_packet=self._on_metering_packet,
+            )
             try:
-                sock.bind(("", port))
-                sock.setsockopt(
-                    socket.IPPROTO_IP,
-                    socket.IP_ADD_MEMBERSHIP,
-                    struct.pack(
-                        "4s4s", socket.inet_aton(MULTICAST_GROUP_CONTROL_MONITORING), socket.inet_aton("0.0.0.0")
-                    ),
-                )
-                replacement, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-                    lambda: _MeteringProtocol(self._on_metering_packet), sock=sock
-                )
+                await replacement.start()
                 await asyncio.to_thread(save_monitoring_port, port)
             except BaseException:
-                if replacement is not None:
-                    replacement.close()
-                else:
-                    sock.close()
+                await replacement.stop()
                 raise
-            old = self._transport
+            old = self._listener
             active = set(self._persistent_refs) | {name for name, count in self._snapshot_count.items() if count}
             stopped = await asyncio.gather(
                 *(self._send_stop(name, changing_port=True) for name in active), return_exceptions=True
             )
             if any(isinstance(result, Exception) for result in stopped):
                 logger.warning("Some devices did not acknowledge the old monitoring destination")
-            self._transport = replacement
+            self._listener = replacement
             self._active_port = port
             if old is not None:
-                old.close()
+                await old.stop()
             for name in active:
                 self._schedule(self._send_start(name))
             return self.port_settings()
@@ -563,22 +541,3 @@ class MeteringManager:
         event = self._events.get(server_name)
         if event:
             event.set()
-
-
-class _MeteringProtocol(asyncio.DatagramProtocol):
-    def __init__(self, callback):
-        self._callback = callback
-
-    def datagram_received(self, data, addr):
-        source_address = addr
-        self._callback(data, source_address)
-
-
-def _get_local_ip() -> ipaddress.IPv4Address:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("224.0.0.231", 1))
-        local_ip = sock.getsockname()[0]
-    finally:
-        sock.close()
-    return ipaddress.IPv4Address(local_ip)

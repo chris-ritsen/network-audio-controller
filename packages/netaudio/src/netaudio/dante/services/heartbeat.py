@@ -85,7 +85,7 @@ class DanteHeartbeatService(DanteMulticastService):
         device_by_ip=None,
         get_devices=None,
         mark_offline=None,
-        interface_ip=None,
+        interface_name=None,
         on_signal_presence=None,
         on_device_updated=None,
         monotonic_clock=None,
@@ -95,7 +95,7 @@ class DanteHeartbeatService(DanteMulticastService):
         super().__init__(
             multicast_group=MULTICAST_GROUP_HEARTBEAT,
             multicast_port=DEVICE_HEARTBEAT_PORT,
-            interface_ip=interface_ip,
+            interface_name=interface_name,
         )
         self._device_by_ip = device_by_ip
         self._get_devices = get_devices

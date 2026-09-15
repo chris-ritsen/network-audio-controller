@@ -7,7 +7,7 @@ import { deviceRequestName } from "../store.js";
 import { ConfigurableTable } from "../table.js";
 import { operationReasonText, operationWritable } from "./availability.js";
 import { SubscriptionStatus } from "./receiver-status.js";
-import { TransmitFlows } from "./flows.js";
+import { ReceiverFlows, TransmitFlows } from "./flows.js";
 
 function gainChannelType(device) {
   if (device.gain_device_type === "input") {
@@ -19,7 +19,7 @@ function gainChannelType(device) {
   return null;
 }
 
-function NameCell({ channel, channelNumber, channelType, requestName }) {
+function NameCell({ channel, channelNumber, channelType, requestName, managed }) {
   const input = useRef(null);
   const editor = useRef(null);
   const [editing, setEditing] = useState(false);
@@ -29,6 +29,10 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
   // Leave the editable text node under browser control so rerenders do not move the caret.
   const draft = useRef("");
   const label = `${channelType === "rx" ? "Receive" : "Transmit"} channel ${channelNumber} name`;
+  const renameAllowed = channelType !== "rx" || managed || channel.can_rename === true;
+  const renameReason = channel.can_rename === false
+    ? "This receiver reports that renaming is prohibited."
+    : "Receiver rename capability is unavailable.";
   useEffect(() => setName(channel.name || ""), [channel.name]);
   useLayoutEffect(() => {
     if (editing) {
@@ -84,7 +88,7 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
     }
   };
   const open = () => {
-    if (editing) return;
+    if (editing || !renameAllowed) return;
     const box = input.current.getBoundingClientRect();
     input.current.style.width = `${box.width}px`;
     input.current.textContent = name;
@@ -98,15 +102,15 @@ function NameCell({ channel, channelNumber, channelType, requestName }) {
       <span
         ref=${input}
         class=${`channel-name-value${editing ? " channel-name-input" : ""}`}
-        role=${editing ? "textbox" : "button"}
-        tabIndex="0"
+        role=${editing ? "textbox" : renameAllowed ? "button" : null}
+        tabIndex=${renameAllowed ? "0" : null}
         contentEditable=${editing && !pending ? "plaintext-only" : "false"}
         spellCheck="false"
         aria-multiline=${editing ? "false" : null}
         aria-label=${editing ? label : `Edit ${label.toLowerCase()}`}
         aria-placeholder="Default channel name"
-        aria-disabled=${pending}
-        title=${editing ? null : "Click to edit"}
+        aria-disabled=${pending || !renameAllowed}
+        title=${editing ? null : renameAllowed ? "Click to edit" : renameReason}
         onClick=${open}
         onKeyDown=${(event) => {
           if (event.isComposing || pending) return;
@@ -179,7 +183,7 @@ function receiveColumns(device, requestName, onRoute) {
     { align: "right", cell: (row) => row.number, id: "number", label: "#" },
     {
       cell: (row) =>
-        html`<${NameCell} key=${`${requestName}:rx:${row.number}`} channel=${row.channel} channelNumber=${row.number} channelType="rx" requestName=${requestName} />`,
+        html`<${NameCell} key=${`${requestName}:rx:${row.number}`} channel=${row.channel} channelNumber=${row.number} channelType="rx" requestName=${requestName} managed=${device.requires_managed_control === true} />`,
       id: "name",
       label: "Name",
     },
@@ -320,6 +324,7 @@ export function ReceiveSection({ device }) {
               rowKey=${(row) => row.number}
             />`}
       <//>
+      <${ReceiverFlows} device=${device} />
     </div>
   `;
 }

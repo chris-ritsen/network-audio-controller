@@ -99,6 +99,7 @@ def core():
         ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_uint16),
         ctypes.POINTER(ctypes.c_uint16),
+        ctypes.POINTER(ctypes.c_uint16),
         ctypes.POINTER(ctypes.c_int32),
     ]
     library.netaudio_client_get_channel_count.restype = ctypes.c_int
@@ -391,9 +392,14 @@ class TestChannelCountBuilderAndParse:
             client = client_factory(device.port)
             tx = ctypes.c_uint16(0)
             rx = ctypes.c_uint16(0)
+            transmit_flow_authoring_capability_word = ctypes.c_uint16(0)
             locked = ctypes.c_int32(-2)
             status = core.netaudio_client_get_channel_count(
-                client, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked)
+                client,
+                ctypes.byref(tx),
+                ctypes.byref(rx),
+                ctypes.byref(transmit_flow_authoring_capability_word),
+                ctypes.byref(locked),
             )
 
         assert status == NETAUDIO_OK
@@ -401,6 +407,7 @@ class TestChannelCountBuilderAndParse:
         assert device.requests == [expected_request]
         assert tx.value == int.from_bytes(count_fixture[12:14], "big")
         assert rx.value == int.from_bytes(count_fixture[14:16], "big")
+        assert transmit_flow_authoring_capability_word.value == int.from_bytes(count_fixture[10:12], "big")
         assert locked.value == -1
 
 

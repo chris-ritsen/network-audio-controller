@@ -91,7 +91,8 @@ pub(super) enum CommandSpec {
         message_id: u16,
     },
     CmcRegister {
-        host_mac: String,
+        #[serde(default)]
+        host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
     },
@@ -287,6 +288,8 @@ pub(super) enum CommandSpec {
         message_id: u16,
         #[serde(default = "default_modern_arc_protocol")]
         protocol_id: u16,
+        #[serde(default = "default_flow_start")]
+        starting_flow: u16,
     },
     QueryReceiverFlows {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -916,7 +919,7 @@ pub(super) fn build_command(
         CommandSpec::CmcRegister {
             message_id,
             host_mac,
-        } => commands::build_cmc_register(message_id, parse_mac_required(&host_mac)?)?,
+        } => commands::build_cmc_register(message_id, parse_mac(&host_mac, default_host_mac)?)?,
         CommandSpec::CreateMulticastFlow2809 {
             channels,
             destinations,
@@ -1105,7 +1108,8 @@ pub(super) fn build_command(
         CommandSpec::QueryModernArcReceiverFlowStatus {
             message_id,
             protocol_id,
-        } => commands::build_query_receiver_flow_status(protocol_id, message_id)?,
+            starting_flow,
+        } => commands::build_query_receiver_flow_status(protocol_id, starting_flow, message_id)?,
         CommandSpec::QueryReceiverFlows {
             starting_flow,
             message_id,

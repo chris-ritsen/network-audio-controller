@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.3.12"
+version = "0.3.13"
 description = "CLI for managing network audio devices"
 readme = "README.md"
 license = "Unlicense"

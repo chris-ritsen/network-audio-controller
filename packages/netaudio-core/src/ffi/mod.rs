@@ -312,7 +312,7 @@ impl NetaudioClient {
     }
 }
 
-pub const NETAUDIO_ABI_VERSION: u32 = 6;
+pub const NETAUDIO_ABI_VERSION: u32 = 8;
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {

@@ -1025,6 +1025,25 @@ class TestRenameReset:
         http_server.application.set_channel_name.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(("capability", "expected_status"), [(False, 409), (None, 503)])
+    async def test_direct_receiver_rename_fails_closed_without_capability(self, capability, expected_status):
+        device = make_device()
+        device.rx_channels = {1: SimpleNamespace(can_rename=capability)}
+        http_server = make_http_server({"dev1": device})
+
+        status, body = await post(
+            http_server,
+            "/rename-channel",
+            {"device": "dev1", "channel_type": "rx", "channel_number": 1, "name": "Input-1"},
+        )
+
+        assert status == expected_status
+        assert body["mutation_sent"] is False
+        assert "rename capability" in body["error"]
+        http_server.application.set_channel_name.assert_not_awaited()
+        http_server.application.reset_channel_name.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_locked_name_reset_reports_device_rejection(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
@@ -1138,7 +1157,7 @@ async def test_device_update_does_not_serialize_the_whole_inventory(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_partial_receiver_inventory_metadata_reaches_http_and_sse():
+async def test_partial_receiver_inventory_does_not_replace_complete_cached_records():
     from netaudio import core
     from netaudio.dante.device import DanteDevice
     from netaudio.daemon.http.sse_view import SseDeviceView
@@ -1157,11 +1176,11 @@ async def test_partial_receiver_inventory_metadata_reaches_http_and_sse():
     record = payload[device.server_name]
     assert record["receiver_flow_completeness"] == "partial"
     assert record["rx_flow_count"] == len(record["receiver_flows"]) == 16
-    assert record["receiver_flow_status_page"]["result_code"] == 0x8112
-    assert len(record["receiver_flow_status_page"]["flows"]) == 15
+    assert record["receiver_flow_status_page"]["result_code"] == 1
+    assert len(record["receiver_flow_status_page"]["flows"]) == 16
     view = SseDeviceView(patches=True, telemetry=False)
     view.initial_snapshot({"event": "snapshot", "devices": {device.server_name: {"name": "Receiver"}}})
     [patch] = view.events_for({"event": "device_updated", "server_name": device.server_name, "device": record})
     assert patch["changed"]["receiver_flow_completeness"] == "partial"
-    assert patch["changed"]["receiver_flow_status_page"]["result_code"] == 0x8112
+    assert patch["changed"]["receiver_flow_status_page"]["result_code"] == 1
     assert len(patch["changed"]["receiver_flows"]) == 16

@@ -140,6 +140,22 @@ def _subscriptions(value: Any) -> dict[int, dict[str, Any] | None]:
                 _positive_integer(identity.get("session_id"), "external RTP session_id", maximum=0xFFFFFFFFFFFFFFFF)
                 if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 0xFFFF:
                     raise ValueError("external RTP subscriptions require a positive 16-bit flow_slot")
+                endpoints = entry.get("interface_endpoints")
+                if endpoints is not None:
+                    if not isinstance(endpoints, list) or not 1 <= len(endpoints) <= 2:
+                        raise ValueError("external RTP interface_endpoints must contain one or two destinations")
+                    for endpoint in endpoints:
+                        if not isinstance(endpoint, Mapping):
+                            raise ValueError("external RTP interface endpoints must be objects")
+                        address = endpoint.get("ipv4_address")
+                        if address is not None:
+                            if not isinstance(address, str):
+                                raise ValueError("external RTP endpoint IPv4 address must be a string or null")
+                            IPv4Address(address)
+                        _positive_integer(endpoint.get("udp_port"), "external RTP endpoint UDP port")
+                multiple_interfaces = entry.get("receiver_supports_multiple_interfaces")
+                if multiple_interfaces is not None and not isinstance(multiple_interfaces, bool):
+                    raise ValueError("receiver_supports_multiple_interfaces must be Boolean")
             result[channel] = entry
         else:
             raise ValueError("receiver subscriptions must be objects or null")

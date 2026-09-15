@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import socket
@@ -260,12 +261,30 @@ class FakeTransport:
         self.closed = True
 
 
+class FakeNetworkChanges:
+    def __init__(self) -> None:
+        self.callback = None
+
+    def subscribe(self, callback):
+        self.callback = callback
+
+        def unsubscribe():
+            self.callback = None
+
+        return unsubscribe
+
+    def emit(self) -> None:
+        assert self.callback is not None
+        self.callback()
+
+
 @pytest.mark.asyncio
 async def test_service_joins_sap_group_separately_on_every_active_ipv4_interface():
     interfaces = [SapInterface("eth0", "192.0.2.10"), SapInterface("eth1", "198.51.100.20")]
     sockets = []
     endpoints = []
     changes = []
+    network_changes = FakeNetworkChanges()
 
     def socket_factory(*arguments):
         value = FakeSocket(*arguments)
@@ -283,7 +302,8 @@ async def test_service_joins_sap_group_separately_on_every_active_ipv4_interface
         socket_factory=socket_factory,
         endpoint_factory=endpoint_factory,
         on_change=changes.append,
-        refresh_seconds=60,
+        expiry_check_seconds=60,
+        network_changes=network_changes,
     )
     await service.start()
     try:
@@ -301,7 +321,9 @@ async def test_service_joins_sap_group_separately_on_every_active_ipv4_interface
 
         removed_transport = endpoints[0][0]
         interfaces.pop(0)
-        await service.refresh_interfaces()
+        network_changes.emit()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
         assert removed_transport.closed is True
         assert service.listening_interfaces == (SapInterface("eth1", "198.51.100.20"),)
     finally:

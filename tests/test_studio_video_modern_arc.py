@@ -70,6 +70,8 @@ def test_video_channels_and_flows_parse_without_audio_labels():
         assert record["encoding"] is None
     assert receiver_channel["source_device_name"] == "studio-media-b"
     assert receiver_channel["subscription_status_code"] == 9
+    assert receiver_channel["receiver_capability_flags"] == 6
+    assert receiver_channel["can_subscribe_self"] is False
     assert receiver_flow["global_flow_id"] == 1
     assert receiver_flow["latency_nanoseconds"] is None
 
@@ -90,6 +92,9 @@ def test_status_pages_create_video_inventory_even_when_scalar_counts_are_zero():
     assert device.media_types == ["video"]
     assert device.tx_channels[1].media_type == "video"
     assert device.rx_channels[1].format_descriptor_hexadecimal == "02080000060000000000008200000000"
+    assert device.rx_channels[1].receiver_capability_flags == 6
+    assert device.rx_channels[1].receiver_status_flags is None
+    assert device.rx_channels[1].can_subscribe_self is False
     assert len(device.subscriptions) == 1
     assert device.subscriptions[0].tx_device_name == "studio-media-b"
 
@@ -149,7 +154,9 @@ async def test_normal_subscription_path_selects_the_captured_280f_video_shape():
     channel = DanteChannel()
     channel.number = 1
     channel.media_type_code = 4
+    channel.can_subscribe_self = True
     device.rx_channels = {1: channel}
+    device.get_rx_channels = AsyncMock()
     device.execute = AsyncMock(return_value=b"ack")
 
     assert await application.send_add_subscriptions(device, [(1, "01", "studio-media-b")]) == b"ack"
@@ -169,6 +176,7 @@ async def test_normal_subscription_path_selects_the_captured_280f_video_shape():
         ],
     }
     assert core.build_command({**specification, "transaction_id": 0x05D9}) == _packet("subscription_set_request")
+    device.get_rx_channels.assert_awaited_once_with()
 
     device.execute.reset_mock()
     assert await application.send_remove_subscriptions(device, [1]) == b"ack"

@@ -334,6 +334,30 @@ def test_inventory_decodes_documented_channels_presence_and_parameters():
     assert parameter.options == ("+24 dBu", "0 dBV")
 
 
+@pytest.mark.parametrize(("field", "expected"), [(True, True), (False, False), (None, None), ("absent", None)])
+def test_inventory_preserves_nullable_self_connection_capability(field, expected):
+    payload = _inventory_payload()
+    channel = payload["data"]["domains"][0]["devices"][0]["rxChannels"][0]
+    if field == "absent":
+        channel.pop("canSubscribeSelf")
+    else:
+        channel["canSubscribeSelf"] = field
+    client, _ = _client(_response(payload))
+
+    observed = client.inventory().data.domains[0].devices[0].rx_channels[0]
+
+    assert observed.can_subscribe_self is expected
+
+
+def test_malformed_self_connection_capability_makes_the_observation_unavailable():
+    payload = _inventory_payload()
+    payload["data"]["domains"][0]["devices"][0]["rxChannels"][0]["canSubscribeSelf"] = "false"
+    client, _ = _client(_response(payload))
+
+    with pytest.raises(ResponseShapeError, match="canSubscribeSelf"):
+        client.inventory()
+
+
 def test_unenrolled_records_keep_unavailable_detail_distinct_from_empty_detail():
     client, _ = _client(_response(_inventory_payload()))
 

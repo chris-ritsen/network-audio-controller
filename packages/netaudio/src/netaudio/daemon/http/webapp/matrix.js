@@ -6,6 +6,7 @@ import { html, signal, useLayoutEffect, useMemo, useRef, useState } from "./lib/
 import { deviceRequestName, pendingKey } from "./store.js";
 import { MatrixTooltip } from "./matrix-tooltip.js";
 import { runAction as performAction } from "./actions.js";
+import { selfConnectionTargetState } from "./self-connection.js";
 
 const CELL = 30;
 const GUTTER_PADDING = 12;
@@ -83,6 +84,7 @@ export function setAllExpanded(side, deviceLabels, value) {
 function channelEntries(device, direction) {
   const channels = device.channels ? device.channels[direction] || {} : {};
   return format.sortedChannelNumbers(channels).map((number) => ({
+    channel: channels[number],
     name: channels[number].name || `channel ${number}`,
     number,
   }));
@@ -129,6 +131,7 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
     if (isExpanded) {
       const appendChannel = (channel, grouped = false) => {
         entries.push({
+          channel: channel.channel,
           channels,
           device,
           kind: "channel",
@@ -243,6 +246,8 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
     }
     const subscription = row.subscription;
     if (!subscription || subscription.tx_device !== column.label || subscription.tx_channel !== column.name) {
+      const target = selfConnectionTargetState(row.device, row.channel, column.device);
+      if (!target.allowed) return { kind: `self-${target.state}`, reason: target.reason };
       return { kind: "empty" };
     }
     return { kind: subscriptionSeverity(subscription), subscription };
@@ -486,11 +491,15 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     }
     const state = cellState(row, column, subscriptionIndex, pending);
     if (state.kind === "pending") return;
+    if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
+      setError(state.reason);
+      return;
+    }
     const requestName = deviceRequestName(row.device);
     busy.current.add(key);
     try {
       if (row.kind === "channel" && column.kind === "channel") {
-        const subscribed = state.kind !== "empty" && state.kind !== "pending";
+        const subscribed = Boolean(state.subscription);
         await runAction(
           subscribed
             ? `unsubscribe ${row.label} ${row.name}`
@@ -518,9 +527,13 @@ export function RoutingMatrix({ columns: transmitters, onOpenDevice, rows: recei
     && rows[hover.rowIndex]?.kind === "channel" && columns[hover.columnIndex]?.kind === "channel";
   const hoverText = hover && (cellHover || statusHover)
     ? describeHover(hover, rows, columns, subscriptionIndex, pending, flipped) : "";
-  const cursor = !hover || (hover.inGutter && hover.inHeader) ? "default"
+  let cursor = !hover || (hover.inGutter && hover.inHeader) ? "default"
     : hover.inGutter || hover.inHeader ? "pointer"
     : rows[hover.rowIndex]?.kind !== "channel" || columns[hover.columnIndex]?.kind !== "channel" ? "pointer" : "crosshair";
+  if (cellHover) {
+    const state = cellState(rows[hover.rowIndex], columns[hover.columnIndex], subscriptionIndex, pending, flipped);
+    if (state.kind === "self-unsupported" || state.kind === "self-unavailable") cursor = "not-allowed";
+  }
 
   return html`
     <div class="matrix-shell">
@@ -600,6 +613,9 @@ export function describeHover(hover, rows, columns, subscriptionIndex, pending, 
   }
   if (state.kind === "partial") {
     return `${receiver} ← ${state.subscription.tx_channel}@${state.subscription.tx_device}\n${format.subscriptionStatusText(state.subscription)}`;
+  }
+  if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
+    return `${receiver} ← ${transmitter}\n${state.reason}`;
   }
   if (state.kind !== "empty") {
     return `${receiver} ← ${transmitter}\n${format.subscriptionStatusText(state.subscription)}`;
@@ -694,11 +710,16 @@ function draw(context, { columns, flipped, hover, layout, pending, rows, scroll,
         continue;
       }
       const state = cellState(row, column, subscriptionIndex, pending, flipped);
+      const x = columnX(columnIndex);
+      const y = rowY(rowIndex);
+      if (state.kind === "self-unsupported" || state.kind === "self-unavailable") {
+        context.fillStyle = theme.panel;
+        context.fillRect(x, y, CELL, CELL);
+        continue;
+      }
       if (state.kind === "empty") {
         continue;
       }
-      const x = columnX(columnIndex);
-      const y = rowY(rowIndex);
       if (state.kind === "pending") {
         drawStatusIcon(context, x + CELL / 2, y + CELL / 2, "pending", theme);
         continue;

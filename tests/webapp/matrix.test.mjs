@@ -126,6 +126,30 @@ test("unrelated device pair is empty", () => {
   assert.equal(matrix.cellState(receiver, transmitter, subscriptionIndex, {}).kind, "empty");
 });
 
+test("same-device crosspoints follow each receiver channel capability", () => {
+  const device = {
+    name: "Renamed Device", server_name: "stable-device.local.", online: true,
+    channels: { receivers: {
+      1: { name: "Unsupported", can_subscribe_self: false },
+      2: { name: "Supported", can_subscribe_self: true },
+      3: { name: "Unknown", can_subscribe_self: null },
+    }, transmitters: { 1: { name: "Output" } } }, subscriptions: [],
+  };
+  const { columns, rows, subscriptionIndex } = matrix.buildMatrixModel({
+    devices: { device }, expandedReceivers: new Set([device.name]), expandedTransmitters: new Set([device.name]),
+    receiverFilter: "", transmitterFilter: "",
+  });
+  const transmitter = columns.find((entry) => entry.kind === "channel");
+  const receiver = (name) => rows.find((entry) => entry.kind === "channel" && entry.name === name);
+  assert.equal(matrix.cellState(receiver("Unsupported"), transmitter, subscriptionIndex, {}).kind, "self-unsupported");
+  assert.equal(matrix.cellState(receiver("Supported"), transmitter, subscriptionIndex, {}).kind, "empty");
+  assert.equal(matrix.cellState(receiver("Unknown"), transmitter, subscriptionIndex, {}).kind, "self-unavailable");
+  assert.deepEqual(matrix.cellState(transmitter, receiver("Unsupported"), subscriptionIndex, {}, true),
+    matrix.cellState(receiver("Unsupported"), transmitter, subscriptionIndex, {}));
+  assert.match(matrix.describeHover({ rowIndex: rows.indexOf(receiver("Unsupported")), columnIndex: columns.indexOf(transmitter) },
+    rows, columns, subscriptionIndex, {}, false), /does not support self-subscriptions/);
+});
+
 test("channel cell reports subscription severity", () => {
   const { columns, rows, subscriptionIndex } = model({
     expandedReceivers: new Set(["Windows-PC"]),

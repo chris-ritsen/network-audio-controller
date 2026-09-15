@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use serde::Serialize;
 
-use crate::bytes::{read_u16, read_u32, string_at_pointer, u16_at};
+use crate::bytes::{read_u16, read_u32, read_u64, string_at_pointer, u16_at};
 use crate::commands::{
     FLOW_TYPE_MULTICAST, OPCODE_CREATE_TX_FLOW, OPCODE_CREATE_TX_FLOW_2809, OPCODE_DELETE_TX_FLOW,
     OPCODE_DELETE_TX_FLOW_2809, OPCODE_DEVICE_INFO, OPCODE_DEVICE_NAME, OPCODE_DEVICE_SETTINGS,
@@ -399,6 +399,9 @@ pub struct ModernArcReceiverChannelStatus {
     pub source_device_name: Option<String>,
     pub subscription_status_code: u16,
     pub receiver_status_code: u16,
+    pub receiver_capability_flags: u32,
+    pub can_subscribe_self: bool,
+    pub can_rename: bool,
     pub status_flags: Option<u16>,
     pub raw_record_hexadecimal: String,
 }
@@ -459,25 +462,59 @@ pub struct ModernArcReceiverFlowStatusPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReceiverFlow {
     pub flow_number: u16,
-    pub flow_state_code: u16,
+    pub flags: u16,
     pub flow_type: Option<String>,
     pub sample_rate: u32,
-    pub encoding: u16,
-    pub frames_per_packet: u16,
-    pub channel_count: u16,
-    pub endpoint_descriptor_size: u16,
-    pub endpoint_descriptor_hexadecimal: String,
-    pub destination_user_datagram_port: Option<u16>,
-    pub destination_internet_protocol_version_four_address: String,
-    pub channel_descriptors_hexadecimal: Vec<String>,
+    pub encoding: u32,
+    pub interface_count: u16,
+    pub flow_channel_slot_count: u16,
+    pub receiver_bitmap_word_count: u16,
+    pub interface_endpoints: Vec<ReceiverFlowInterfaceEndpoint>,
+    pub receiver_bitmaps_hexadecimal: Vec<String>,
     pub receiver_channel_numbers_by_flow_channel: Vec<Vec<u16>>,
     pub subscription_status_code: u16,
-    pub status_field_at_byte_offset_two: u16,
-    pub status_field_at_byte_offset_four: u16,
-    pub status_field_at_byte_offset_six: u16,
+    pub interface_state_bitmap: u16,
+    pub status_flags: u16,
+    pub status_unknown: u16,
     pub latency_nanoseconds: u32,
-    pub status_field_at_byte_offset_twelve: u32,
+    pub transport: u16,
+    pub external_identity_pointer: u16,
+    pub external_identity: Option<ExternalRtpFlowIdentity>,
+    pub effective_subscription_identities: Vec<ReceiverFlowSubscriptionIdentity>,
+    pub status_descriptor_hexadecimal: String,
     pub raw_record_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReceiverFlowInterfaceEndpoint {
+    pub pointer: u16,
+    pub descriptor_length_bytes: u8,
+    pub kind: u8,
+    pub udp_port: u16,
+    pub ipv4_address: Option<String>,
+    pub raw_descriptor_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExternalRtpFlowIdentity {
+    pub pointer: u16,
+    pub length_words: u8,
+    pub reserved: u8,
+    pub presence_mask: u16,
+    pub source_ipv4: Option<String>,
+    pub session_id: Option<u64>,
+    pub unknown_optional_field_raw: u64,
+    pub clock_offset: Option<u32>,
+    pub raw_descriptor_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReceiverFlowSubscriptionIdentity {
+    pub receiver_channel: u16,
+    pub flow_slot: u16,
+    pub source_ipv4: String,
+    pub session_id: u64,
+    pub interface_endpoints: Vec<ReceiverFlowInterfaceEndpoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -485,6 +522,7 @@ pub struct ReceiverFlowPage {
     pub result_code: u16,
     pub page_disposition: ModernArcPageDisposition,
     pub maximum_flow_slots: u8,
+    pub reported_flow_count: u8,
     pub flows: Vec<ReceiverFlow>,
 }
 
@@ -499,10 +537,15 @@ pub struct ReceiverPortRanges {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransmitChannelCapabilities {
-    pub format_identifier: u16,
-    pub starting_channel_identifier: u16,
-    pub channel_count: u16,
-    pub capability_flags: u16,
+    pub record_count: u8,
+    pub ranges: Vec<TransmitChannelCapabilityRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TransmitChannelCapabilityRange {
+    pub first_transmit_channel: u16,
+    pub last_transmit_channel: u16,
+    pub unknown_value: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -20,7 +20,14 @@ class DanteChannel:
         self.sample_rate = None
         self.encoding = None
         self.media_service = None
-        self.ddm_can_subscribe_self = None
+        self.can_subscribe_self: bool | None = None
+        self.can_rename: bool | None = None
+        self.receiver_flags: int | None = None
+        self.receiver_capability_flags: int | None = None
+        self.receiver_status_flags: int | None = None
+        self.managed_can_subscribe_self: bool | None = None
+        self.managed_can_subscribe_self_fresh: bool | None = None
+        self.can_subscribe_self_conflict: bool | None = None
         self.ddm_channel_id = None
         self.ddm_enabled = None
         self.ddm_encryption_policy = None

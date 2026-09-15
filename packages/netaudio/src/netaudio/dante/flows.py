@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
+from collections.abc import Awaitable, Callable
+from typing import cast
 
 from netaudio.common.app_config import settings as app_settings
+from netaudio.network_path import source_address_for
 from netaudio.dante.channel_status_paging import (
     advertised_arc_protocol_identifier_for_device,
     modern_arc_protocol_identifier_for_device,
@@ -19,6 +23,8 @@ from netaudio.dante.const import (
 )
 
 logger = logging.getLogger("netaudio")
+
+EXTERNAL_RTP_DEFAULT_PORT = 4321
 
 
 class FlowValidationError(ValueError):
@@ -125,21 +131,136 @@ async def subscribe_external_rtp(
         flow_slot_assignments,
         receiver_supports_multiple_interfaces=receiver_supports_multiple_interfaces,
     )
+    expected_endpoints = [
+        {
+            "ipv4_address": destination["address"],
+            "udp_port": destination["port"] or EXTERNAL_RTP_DEFAULT_PORT,
+        }
+        for destination in (
+            specification["primary_destination"],
+            specification.get("secondary_destination"),
+        )
+        if destination is not None
+    ]
+    expected_identities = [
+        {
+            "receiver_channel": receiver_channel,
+            "flow_slot": flow_slot,
+            "source_ipv4": flow.source_ipv4,
+            "session_id": flow.session_id,
+            "interface_endpoints": expected_endpoints,
+        }
+        for receiver_channel, flow_slot in zip(receiver_channel_ids, flow_slot_assignments)
+        if flow_slot != 0
+    ]
     async with device.topology_mutation_lock:
+        before = await query_preferred_receiver_flow_inventory(device)
+        if before is None:
+            return {
+                "result_code": None,
+                "request_acknowledged": False,
+                "arc_effective_state_confirmed": None,
+                "sdp_correlation_confirmed": None,
+                "rtp_packet_reception_confirmed": None,
+                "clock_lock_confirmed": None,
+                "persistence_confirmed": None,
+                "decoded_audio_confirmed": None,
+                "mutation_sent": False,
+                "message": "complete fresh receiver-flow baseline was unavailable; no request was sent",
+                "requested_effective_identities": expected_identities,
+                "receiver_flow_before": None,
+                "receiver_flow_after": None,
+            }
         response = await device.execute(specification)
-    result_code = _parsed_response("result_code", response) if response else None
-    acknowledged = result_code in {RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED}
+        result_code = _parsed_response("result_code", response) if response else None
+        acknowledged = result_code in {RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED}
+        after = await query_preferred_receiver_flow_inventory(device) if acknowledged else None
+    observed_index = effective_external_subscription_index(after or {})
+    observed_identities = [
+        identity
+        for receiver_channel in receiver_channel_ids
+        for identity in observed_index.get(receiver_channel, ())
+        if identity.get("source_ipv4") == flow.source_ipv4 and identity.get("session_id") == flow.session_id
+    ]
+    expected_projection = sorted(
+        (_effective_identity_projection(identity) for identity in expected_identities),
+        key=repr,
+    )
+    observed_projection = sorted(
+        (_effective_identity_projection(identity) for identity in observed_identities),
+        key=repr,
+    )
+    arc_confirmed = expected_projection == observed_projection if after is not None else None
+    sdp_confirmed = (
+        all(_identity_has_sdp_correlation(after, identity) for identity in observed_identities)
+        if arc_confirmed is True and after is not None and observed_identities
+        else None
+    )
+    if after is not None:
+        apply_page = getattr(device, "apply_receiver_flow_status_page", None)
+        if apply_page is not None:
+            apply_page(after)
     return {
         "result_code": result_code,
         "request_acknowledged": acknowledged,
-        "subscription_readback_confirmed": False,
-        "rtp_packet_reception_confirmed": False,
-        "clock_lock_confirmed": False,
-        "decoded_audio_confirmed": False,
+        "arc_effective_state_confirmed": arc_confirmed,
+        "sdp_correlation_confirmed": sdp_confirmed,
+        "rtp_packet_reception_confirmed": None,
+        "clock_lock_confirmed": None,
+        "persistence_confirmed": None,
+        "decoded_audio_confirmed": None,
+        "mutation_sent": True,
+        "message": (
+            "external receiver subscription confirmed by complete fresh ARC readback"
+            if arc_confirmed is True
+            else (
+                "request acknowledged but complete fresh ARC readback was unavailable"
+                if acknowledged and after is None
+                else (
+                    "request acknowledged but fresh ARC readback contradicted the requested identity"
+                    if acknowledged
+                    else "external receiver subscription was not acknowledged"
+                )
+            )
+        ),
         "flow_identity": {"source_ipv4": flow.source_ipv4, "session_id": flow.session_id},
         "receiver_channel_ids": list(receiver_channel_ids),
         "flow_slot_assignments": list(flow_slot_assignments),
+        "requested_effective_identities": expected_identities,
+        "observed_effective_identities": observed_identities,
+        "receiver_flow_before": before,
+        "receiver_flow_after": after,
     }
+
+
+def _effective_identity_projection(identity: dict) -> tuple:
+    endpoints = tuple(
+        (endpoint.get("ipv4_address"), endpoint.get("udp_port"))
+        for endpoint in identity.get("interface_endpoints") or ()
+        if isinstance(endpoint, dict)
+    )
+    return (
+        identity.get("receiver_channel"),
+        identity.get("flow_slot"),
+        identity.get("source_ipv4"),
+        identity.get("session_id"),
+        endpoints,
+    )
+
+
+def _identity_has_sdp_correlation(inventory: dict, identity: dict) -> bool:
+    for flow in inventory.get("flows") or ():
+        if not isinstance(flow, dict):
+            continue
+        external = flow.get("external_identity")
+        if not isinstance(external, dict):
+            continue
+        if external.get("source_ipv4") == identity.get("source_ipv4") and external.get("session_id") == identity.get(
+            "session_id"
+        ):
+            correlation = flow.get("sdp_correlation")
+            return isinstance(correlation, dict) and correlation.get("matched") is True
+    return False
 
 
 def validate_flow_slot(flow_slot) -> int:
@@ -239,8 +360,9 @@ async def _request(
     from netaudio import core
 
     def _send():
+        local_ip = source_address_for(device_ip, app_settings.interface)
         client = core.CoreClient(
-            device_ip, arc_port=arc_port, timeout_ms=timeout_ms, attempts=attempts, local_ip=app_settings.interface_ip
+            device_ip, arc_port=arc_port, timeout_ms=timeout_ms, attempts=attempts, local_ip=local_ip
         )
         try:
             packet = core.build_command(command_specification)
@@ -483,41 +605,79 @@ def inventory_from_receiver_flow_status_page(page: dict) -> dict:
         if flow_type is None:
             flow_type_code = flow.get("flow_type_code")
             flow_type = f"0x{flow_type_code:04X}" if isinstance(flow_type_code, int) else None
-        receiver_flows.append(
+        normalized = copy.deepcopy(flow)
+        normalized.update(
             {
-                "flow_number": flow.get("global_flow_id"),
-                "media_type_code": flow.get("media_type_code"),
-                "media_local_flow_id": flow.get("media_local_flow_id"),
+                "flow_number": flow.get("flow_number", flow.get("global_flow_id")),
                 "flow_type": flow_type,
                 "local_receiver_channel_count": local_receiver_channel_count,
-                "receiver_mapping_descriptor_hexadecimal": flow.get("receiver_mapping_descriptor_hexadecimal"),
-                "status_code": flow.get("status_code"),
                 "destination_internet_protocol_version_four_address": flow.get(
                     "destination_internet_protocol_version_four_address"
                 )
                 or "",
-                "destination_user_datagram_port": flow.get("destination_user_datagram_port"),
-                "sample_rate": flow.get("sample_rate"),
-                "encoding": flow.get("encoding"),
-                "frames_per_packet": flow.get("frames_per_packet"),
-                "latency_nanoseconds": flow.get("latency_nanoseconds"),
             }
         )
-    return {
-        "maximum_flow_slots": page.get("maximum_flow_slots"),
-        "page_disposition": page.get("page_disposition", "unknown"),
-        "result_code": page.get("result_code"),
-        "status_page": page,
-        "flows": receiver_flows,
-    }
+        receiver_flows.append(normalized)
+    inventory = copy.deepcopy(page)
+    inventory["page_disposition"] = page.get("page_disposition", "unknown")
+    inventory["status_page"] = copy.deepcopy(page)
+    inventory["flows"] = receiver_flows
+    return inventory
+
+
+def correlate_receiver_flow_inventory(inventory: dict, sap_inventory) -> dict:
+    correlated = copy.deepcopy(inventory)
+    for flow in correlated.get("flows") or []:
+        if not isinstance(flow, dict):
+            continue
+        identity = flow.get("external_identity")
+        source_ipv4 = identity.get("source_ipv4") if isinstance(identity, dict) else None
+        session_id = identity.get("session_id") if isinstance(identity, dict) else None
+        if not isinstance(source_ipv4, str) or isinstance(session_id, bool) or not isinstance(session_id, int):
+            continue
+        advertised = None
+        if sap_inventory is not None:
+            try:
+                advertised = sap_inventory.get(source_ipv4, session_id)
+            except ValueError:
+                advertised = None
+        flow["sdp_correlation"] = {
+            "matched": advertised is not None,
+            "source_ipv4": source_ipv4,
+            "session_id": session_id,
+            "advertisement": advertised.to_dict() if advertised is not None else None,
+        }
+        for effective_identity in flow.get("effective_subscription_identities") or ():
+            if isinstance(effective_identity, dict):
+                effective_identity["sdp_correlation_confirmed"] = advertised is not None
+    return correlated
+
+
+def effective_external_subscription_index(inventory: dict) -> dict[int, list[dict]]:
+    index: dict[int, list[dict]] = {}
+    for flow in inventory.get("flows") or []:
+        if not isinstance(flow, dict):
+            continue
+        for identity in flow.get("effective_subscription_identities") or []:
+            receiver_channel = identity.get("receiver_channel") if isinstance(identity, dict) else None
+            if isinstance(receiver_channel, int) and not isinstance(receiver_channel, bool):
+                index.setdefault(receiver_channel, []).append(copy.deepcopy(identity))
+    return index
 
 
 async def query_preferred_receiver_flow_inventory(device, *, require_complete: bool = True) -> dict | None:
     application = device.application
     status_page = None
-    if application is not None:
+    inventory_opcode = getattr(device, "receiver_flow_inventory_opcode", None)
+    modern_query = (
+        getattr(application, "query_modern_arc_receiver_flow_status", None) if application is not None else None
+    )
+    if inventory_opcode == 0x3600 or (inventory_opcode is None and callable(modern_query)):
+        if not callable(modern_query):
+            return None
         try:
-            status_page = await application.query_modern_arc_receiver_flow_status(device)
+            query = cast("Callable[[object], Awaitable[dict | None]]", modern_query)
+            status_page = await query(device)
         except RuntimeError:
             status_page = None
     if status_page is not None:
@@ -526,51 +686,88 @@ async def query_preferred_receiver_flow_inventory(device, *, require_complete: b
             apply_page(status_page)
         if require_complete and status_page.get("page_disposition") != "complete":
             return None
-        return inventory_from_receiver_flow_status_page(status_page)
+        return correlate_receiver_flow_inventory(
+            inventory_from_receiver_flow_status_page(status_page),
+            getattr(application, "external_flows", None),
+        )
+    if inventory_opcode == 0x3600:
+        return None
     if getattr(device, "requires_managed_control", False):
         return None
     from netaudio.cli_support.execution import _get_arc_port
 
-    return await query_receiver_flow_inventory(str(device.ipv4), _get_arc_port(device))
+    arc_port = device._arc_port() if callable(getattr(device, "_arc_port", None)) else _get_arc_port(device)
+    inventory = await query_receiver_flow_inventory(str(device.ipv4), arc_port, device=device)
+    if inventory is None:
+        return None
+    return correlate_receiver_flow_inventory(inventory, getattr(application, "external_flows", None))
 
 
-async def query_receiver_flow_inventory(device_ip: str, arc_port: int) -> dict | None:
-    response = await _request(
-        device_ip,
-        arc_port,
-        {"command": "query_receiver_flows", "starting_flow": 1},
-        timeout_ms=1000,
-        attempts=2,
-    )
-    if not response or _parsed_response("result_code", response) != RESULT_CODE_SUCCESS:
-        return None
-    flow_page = _parsed_response("receiver_flow_page", response)
-    if not isinstance(flow_page, dict):
-        return None
-    maximum_flow_slots = flow_page.get("maximum_flow_slots")
-    if (
-        isinstance(maximum_flow_slots, bool)
-        or not isinstance(maximum_flow_slots, int)
-        or not 1 <= maximum_flow_slots <= 32
-    ):
-        return None
-    receiver_flows = flow_page.get("flows")
-    if not isinstance(receiver_flows, list) or len(receiver_flows) > maximum_flow_slots:
-        return None
+async def query_receiver_flow_inventory(device_ip: str, arc_port: int, *, device=None) -> dict | None:
+    starting_flow = 1
+    maximum_flow_slots = None
     flow_numbers = set()
-    for receiver_flow in receiver_flows:
-        if not isinstance(receiver_flow, dict):
+    receiver_flows = []
+    pages = []
+    while True:
+        response = await _request_with_optional_device(
+            device_ip,
+            arc_port,
+            {"command": "query_receiver_flows", "starting_flow": starting_flow},
+            timeout_ms=1000,
+            attempts=2,
+            device=device,
+        )
+        if not response:
             return None
-        flow_number = receiver_flow.get("flow_number")
+        result_code = _parsed_response("result_code", response)
+        if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
+            return None
+        flow_page = _parsed_response("receiver_flow_page", response)
+        if not isinstance(flow_page, dict):
+            return None
+        page_maximum = flow_page.get("maximum_flow_slots")
+        page_flows = flow_page.get("flows")
         if (
-            isinstance(flow_number, bool)
-            or not isinstance(flow_number, int)
-            or not 1 <= flow_number <= maximum_flow_slots
-            or flow_number in flow_numbers
+            isinstance(page_maximum, bool)
+            or not isinstance(page_maximum, int)
+            or not 1 <= page_maximum <= 32
+            or not isinstance(page_flows, list)
+            or flow_page.get("reported_flow_count") != len(page_flows)
         ):
             return None
-        flow_numbers.add(flow_number)
-    return flow_page
+        if maximum_flow_slots is None:
+            maximum_flow_slots = page_maximum
+        elif page_maximum != maximum_flow_slots:
+            return None
+        page_flow_numbers = []
+        for receiver_flow in page_flows:
+            flow_number = receiver_flow.get("flow_number") if isinstance(receiver_flow, dict) else None
+            if (
+                isinstance(flow_number, bool)
+                or not isinstance(flow_number, int)
+                or not starting_flow <= flow_number <= maximum_flow_slots
+                or flow_number in flow_numbers
+            ):
+                return None
+            flow_numbers.add(flow_number)
+            page_flow_numbers.append(flow_number)
+            receiver_flows.append(receiver_flow)
+        pages.append(flow_page)
+        if result_code == RESULT_CODE_SUCCESS and flow_page.get("page_disposition") == "complete":
+            aggregate = dict(flow_page)
+            aggregate["reported_flow_count"] = len(receiver_flows)
+            aggregate["flows"] = receiver_flows
+            aggregate["pages"] = pages
+            return aggregate
+        if result_code != RESULT_CODE_SUCCESS_EXTENDED or flow_page.get("page_disposition") != "more_pages":
+            return None
+        if not page_flow_numbers:
+            return None
+        next_starting_flow = max(page_flow_numbers) + 1
+        if next_starting_flow <= starting_flow or next_starting_flow > maximum_flow_slots:
+            return None
+        starting_flow = next_starting_flow
 
 
 async def query_receiver_port_ranges(device_ip: str, arc_port: int, *, device=None) -> dict | None:

@@ -235,6 +235,38 @@ pub unsafe extern "C" fn netaudio_host_mac(out_mac: *mut u8) -> NetaudioStatus {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn netaudio_host_mac_for_ipv4(
+    local_ip: *const c_char,
+    out_mac: *mut u8,
+) -> NetaudioStatus {
+    guard(|| {
+        if local_ip.is_null() || out_mac.is_null() {
+            return Err(NetaudioStatus::NullPointer.into());
+        }
+        unsafe {
+            ptr::write_bytes(out_mac, 0, 6);
+        }
+        let local_ip = unsafe { c_string(local_ip)? };
+        let address = local_ip.parse::<std::net::Ipv4Addr>().map_err(|_| {
+            FfiError::new(
+                NetaudioStatus::InvalidAddress,
+                format!("local address {local_ip:?} is not an IPv4 address"),
+            )
+        })?;
+        let mac = crate::netif::host_mac_for_ipv4(address).ok_or_else(|| {
+            FfiError::new(
+                NetaudioStatus::IoError,
+                format!("no non-zero MAC address was found for local address {address}"),
+            )
+        })?;
+        unsafe {
+            ptr::copy_nonoverlapping(mac.as_ptr(), out_mac, 6);
+        }
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn netaudio_client_free(client: *mut NetaudioClient) {
     if client.is_null() {
         return;

@@ -5,7 +5,8 @@
     "channels": {
       "receivers": {
         "1": {
-          "ddm_can_subscribe_self": false,
+          "can_rename": true,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:1",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -15,7 +16,7 @@
           "name": "01"
         },
         "10": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:10",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -25,7 +26,7 @@
           "name": "10"
         },
         "11": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:11",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -35,7 +36,7 @@
           "name": "11"
         },
         "12": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:12",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -45,7 +46,7 @@
           "name": "12"
         },
         "13": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:13",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -55,7 +56,7 @@
           "name": "13"
         },
         "14": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:14",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -65,7 +66,7 @@
           "name": "14"
         },
         "15": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:15",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -75,7 +76,7 @@
           "name": "15"
         },
         "16": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:16",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -85,7 +86,7 @@
           "name": "16"
         },
         "17": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:17",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -95,7 +96,7 @@
           "name": "17"
         },
         "18": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:18",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -105,7 +106,7 @@
           "name": "18"
         },
         "19": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:19",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -115,7 +116,7 @@
           "name": "19"
         },
         "2": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:2",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -125,7 +126,7 @@
           "name": "02"
         },
         "20": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:20",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -135,7 +136,7 @@
           "name": "20"
         },
         "21": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:21",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -145,7 +146,7 @@
           "name": "21"
         },
         "22": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:22",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -155,7 +156,7 @@
           "name": "22"
         },
         "23": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:23",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -165,7 +166,7 @@
           "name": "23"
         },
         "24": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:24",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -175,7 +176,7 @@
           "name": "24"
         },
         "25": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:25",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -185,7 +186,7 @@
           "name": "25"
         },
         "26": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:26",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -195,7 +196,7 @@
           "name": "26"
         },
         "27": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:27",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -205,7 +206,7 @@
           "name": "27"
         },
         "28": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:28",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -215,7 +216,7 @@
           "name": "28"
         },
         "29": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:29",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -225,7 +226,7 @@
           "name": "29"
         },
         "3": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:3",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -235,7 +236,7 @@
           "name": "03"
         },
         "30": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:30",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -245,7 +246,7 @@
           "name": "30"
         },
         "31": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:31",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -255,7 +256,7 @@
           "name": "31"
         },
         "32": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:32",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -265,7 +266,7 @@
           "name": "32"
         },
         "33": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:33",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -275,7 +276,7 @@
           "name": "33"
         },
         "34": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:34",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -285,7 +286,7 @@
           "name": "34"
         },
         "35": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:35",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -295,7 +296,7 @@
           "name": "35"
         },
         "36": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:36",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -305,7 +306,7 @@
           "name": "36"
         },
         "37": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:37",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -315,7 +316,7 @@
           "name": "37"
         },
         "38": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:38",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -325,7 +326,7 @@
           "name": "38"
         },
         "39": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:39",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -335,7 +336,7 @@
           "name": "39"
         },
         "4": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:4",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -346,7 +347,7 @@
           "name": "04"
         },
         "40": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:40",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -356,7 +357,7 @@
           "name": "40"
         },
         "41": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:41",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -366,7 +367,7 @@
           "name": "41"
         },
         "42": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:42",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -376,7 +377,7 @@
           "name": "42"
         },
         "43": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:43",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -386,7 +387,7 @@
           "name": "43"
         },
         "44": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:44",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -396,7 +397,7 @@
           "name": "44"
         },
         "45": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:45",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -406,7 +407,7 @@
           "name": "45"
         },
         "46": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:46",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -416,7 +417,7 @@
           "name": "46"
         },
         "47": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:47",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -426,7 +427,7 @@
           "name": "47"
         },
         "48": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:48",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -436,7 +437,7 @@
           "name": "48"
         },
         "49": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:49",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -446,7 +447,7 @@
           "name": "49"
         },
         "5": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:5",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -456,7 +457,7 @@
           "name": "05"
         },
         "50": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:50",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -466,7 +467,7 @@
           "name": "50"
         },
         "51": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:51",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -476,7 +477,7 @@
           "name": "51"
         },
         "52": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:52",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -486,7 +487,7 @@
           "name": "52"
         },
         "53": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:53",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -496,7 +497,7 @@
           "name": "53"
         },
         "54": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:54",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -506,7 +507,7 @@
           "name": "54"
         },
         "55": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:55",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -516,7 +517,7 @@
           "name": "55"
         },
         "56": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:56",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -526,7 +527,7 @@
           "name": "56"
         },
         "57": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:57",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -536,7 +537,7 @@
           "name": "57"
         },
         "58": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:58",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -546,7 +547,7 @@
           "name": "58"
         },
         "59": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:59",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -556,7 +557,7 @@
           "name": "59"
         },
         "6": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:6",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -567,7 +568,7 @@
           "name": "06"
         },
         "60": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:60",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -577,7 +578,7 @@
           "name": "60"
         },
         "61": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:61",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -587,7 +588,7 @@
           "name": "61"
         },
         "62": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:62",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -597,7 +598,7 @@
           "name": "62"
         },
         "63": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:63",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -607,7 +608,7 @@
           "name": "63"
         },
         "64": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:64",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -617,7 +618,7 @@
           "name": "64"
         },
         "7": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:7",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -627,7 +628,7 @@
           "name": "07"
         },
         "8": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:8",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -637,7 +638,7 @@
           "name": "08"
         },
         "9": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "9169ebd59e69496fb197b8d823c41d88:rxChannel:9",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -3906,7 +3907,7 @@
     "channels": {
       "receivers": {
         "1": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "001dc1fffe50368b:0:rxChannel:1",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -3917,7 +3918,7 @@
           "name": "mic-mix-1"
         },
         "2": {
-          "ddm_can_subscribe_self": false,
+          "can_subscribe_self": false,
           "ddm_channel_id": "001dc1fffe50368b:0:rxChannel:2",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -4572,7 +4573,7 @@
     "channels": {
       "receivers": {
         "1": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:1",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4582,7 +4583,7 @@
           "name": "wireless-mic:1"
         },
         "10": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:10",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4592,7 +4593,7 @@
           "name": "dinet:right"
         },
         "100": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:100",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4602,7 +4603,7 @@
           "name": "100"
         },
         "101": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:101",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4612,7 +4613,7 @@
           "name": "101"
         },
         "102": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:102",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4622,7 +4623,7 @@
           "name": "102"
         },
         "103": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:103",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4632,7 +4633,7 @@
           "name": "103"
         },
         "104": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:104",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4642,7 +4643,7 @@
           "name": "104"
         },
         "105": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:105",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4652,7 +4653,7 @@
           "name": "105"
         },
         "106": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:106",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4662,7 +4663,7 @@
           "name": "106"
         },
         "107": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:107",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4672,7 +4673,7 @@
           "name": "107"
         },
         "108": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:108",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4682,7 +4683,7 @@
           "name": "108"
         },
         "109": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:109",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4692,7 +4693,7 @@
           "name": "109"
         },
         "11": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:11",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -4703,7 +4704,7 @@
           "name": "macbook-personal-1:left"
         },
         "110": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:110",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4713,7 +4714,7 @@
           "name": "110"
         },
         "111": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:111",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4723,7 +4724,7 @@
           "name": "111"
         },
         "112": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:112",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4733,7 +4734,7 @@
           "name": "112"
         },
         "113": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:113",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4743,7 +4744,7 @@
           "name": "113"
         },
         "114": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:114",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4753,7 +4754,7 @@
           "name": "114"
         },
         "115": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:115",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4763,7 +4764,7 @@
           "name": "115"
         },
         "116": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:116",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -4774,7 +4775,7 @@
           "name": "116"
         },
         "117": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:117",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4784,7 +4785,7 @@
           "name": "117"
         },
         "118": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:118",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4794,7 +4795,7 @@
           "name": "118"
         },
         "119": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:119",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4804,7 +4805,7 @@
           "name": "119"
         },
         "12": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:12",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -4815,7 +4816,7 @@
           "name": "macbook-personal-1:right"
         },
         "120": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:120",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4825,7 +4826,7 @@
           "name": "120"
         },
         "121": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:121",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4835,7 +4836,7 @@
           "name": "121"
         },
         "122": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:122",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4845,7 +4846,7 @@
           "name": "122"
         },
         "123": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:123",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4855,7 +4856,7 @@
           "name": "123"
         },
         "124": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:124",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4865,7 +4866,7 @@
           "name": "124"
         },
         "125": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:125",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4875,7 +4876,7 @@
           "name": "125"
         },
         "126": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:126",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4885,7 +4886,7 @@
           "name": "126"
         },
         "127": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:127",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4895,7 +4896,7 @@
           "name": "127"
         },
         "128": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:128",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4905,7 +4906,7 @@
           "name": "128"
         },
         "13": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:13",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4915,7 +4916,7 @@
           "name": "13"
         },
         "14": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:14",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4925,7 +4926,7 @@
           "name": "14"
         },
         "15": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:15",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4935,7 +4936,7 @@
           "name": "vrroom:left"
         },
         "16": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:16",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4945,7 +4946,7 @@
           "name": "vrroom:right"
         },
         "17": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:17",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4955,7 +4956,7 @@
           "name": "macbook-work-1:left"
         },
         "18": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:18",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4965,7 +4966,7 @@
           "name": "macbook-work-1:right"
         },
         "19": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:19",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4975,7 +4976,7 @@
           "name": "adat:left"
         },
         "2": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:2",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4985,7 +4986,7 @@
           "name": "wireless-mic:2"
         },
         "20": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:20",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -4995,7 +4996,7 @@
           "name": "adat:right"
         },
         "21": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:21",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5006,7 +5007,7 @@
           "name": "bluetooth:left"
         },
         "22": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:22",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5017,7 +5018,7 @@
           "name": "bluetooth:right"
         },
         "23": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:23",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5027,7 +5028,7 @@
           "name": "tv:left"
         },
         "24": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:24",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5037,7 +5038,7 @@
           "name": "tv:right"
         },
         "25": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:25",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5048,7 +5049,7 @@
           "name": "windows-workstation:left"
         },
         "26": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:26",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5059,7 +5060,7 @@
           "name": "windows-workstation:right"
         },
         "27": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:27",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5069,7 +5070,7 @@
           "name": "27"
         },
         "28": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:28",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5079,7 +5080,7 @@
           "name": "28"
         },
         "29": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:29",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5089,7 +5090,7 @@
           "name": "29"
         },
         "3": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:3",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5099,7 +5100,7 @@
           "name": "shelford-channel:minus-6db"
         },
         "30": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:30",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5109,7 +5110,7 @@
           "name": "30"
         },
         "31": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:31",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5119,7 +5120,7 @@
           "name": "31"
         },
         "32": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:32",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5129,7 +5130,7 @@
           "name": "32"
         },
         "33": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:33",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5139,7 +5140,7 @@
           "name": "33"
         },
         "34": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:34",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5149,7 +5150,7 @@
           "name": "34"
         },
         "35": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:35",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5159,7 +5160,7 @@
           "name": "35"
         },
         "36": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:36",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5169,7 +5170,7 @@
           "name": "36"
         },
         "37": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:37",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5179,7 +5180,7 @@
           "name": "37"
         },
         "38": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:38",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5189,7 +5190,7 @@
           "name": "38"
         },
         "39": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:39",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5199,7 +5200,7 @@
           "name": "39"
         },
         "4": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:4",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5209,7 +5210,7 @@
           "name": "shelford-channel:0dB"
         },
         "40": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:40",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5219,7 +5220,7 @@
           "name": "40"
         },
         "41": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:41",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5229,7 +5230,7 @@
           "name": "41"
         },
         "42": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:42",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5239,7 +5240,7 @@
           "name": "42"
         },
         "43": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:43",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5249,7 +5250,7 @@
           "name": "43"
         },
         "44": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:44",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5259,7 +5260,7 @@
           "name": "44"
         },
         "45": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:45",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5269,7 +5270,7 @@
           "name": "45"
         },
         "46": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:46",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5279,7 +5280,7 @@
           "name": "46"
         },
         "47": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:47",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5289,7 +5290,7 @@
           "name": "47"
         },
         "48": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:48",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5299,7 +5300,7 @@
           "name": "48"
         },
         "49": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:49",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5309,7 +5310,7 @@
           "name": "49"
         },
         "5": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:5",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5319,7 +5320,7 @@
           "name": "di-box:left"
         },
         "50": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:50",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5329,7 +5330,7 @@
           "name": "50"
         },
         "51": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:51",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5339,7 +5340,7 @@
           "name": "51"
         },
         "52": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:52",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5349,7 +5350,7 @@
           "name": "52"
         },
         "53": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:53",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5359,7 +5360,7 @@
           "name": "53"
         },
         "54": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:54",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5369,7 +5370,7 @@
           "name": "54"
         },
         "55": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:55",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5379,7 +5380,7 @@
           "name": "55"
         },
         "56": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:56",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5389,7 +5390,7 @@
           "name": "56"
         },
         "57": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:57",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5399,7 +5400,7 @@
           "name": "57"
         },
         "58": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:58",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5409,7 +5410,7 @@
           "name": "58"
         },
         "59": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:59",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5419,7 +5420,7 @@
           "name": "59"
         },
         "6": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:6",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5429,7 +5430,7 @@
           "name": "di-box:right"
         },
         "60": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:60",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5439,7 +5440,7 @@
           "name": "60"
         },
         "61": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:61",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5449,7 +5450,7 @@
           "name": "61"
         },
         "62": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:62",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5459,7 +5460,7 @@
           "name": "62"
         },
         "63": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:63",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5469,7 +5470,7 @@
           "name": "63"
         },
         "64": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:64",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5479,7 +5480,7 @@
           "name": "64"
         },
         "65": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:65",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5489,7 +5490,7 @@
           "name": "65"
         },
         "66": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:66",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5499,7 +5500,7 @@
           "name": "66"
         },
         "67": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:67",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5509,7 +5510,7 @@
           "name": "67"
         },
         "68": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:68",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5519,7 +5520,7 @@
           "name": "68"
         },
         "69": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:69",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5529,7 +5530,7 @@
           "name": "69"
         },
         "7": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:7",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5540,7 +5541,7 @@
           "name": "windows-gaming:left"
         },
         "70": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:70",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5550,7 +5551,7 @@
           "name": "70"
         },
         "71": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:71",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5560,7 +5561,7 @@
           "name": "71"
         },
         "72": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:72",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5570,7 +5571,7 @@
           "name": "72"
         },
         "73": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:73",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5580,7 +5581,7 @@
           "name": "73"
         },
         "74": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:74",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5590,7 +5591,7 @@
           "name": "74"
         },
         "75": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:75",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5600,7 +5601,7 @@
           "name": "75"
         },
         "76": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:76",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5610,7 +5611,7 @@
           "name": "76"
         },
         "77": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:77",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5620,7 +5621,7 @@
           "name": "77"
         },
         "78": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:78",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5630,7 +5631,7 @@
           "name": "78"
         },
         "79": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:79",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5640,7 +5641,7 @@
           "name": "79"
         },
         "8": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:8",
           "ddm_enabled": true,
           "ddm_encryption_scheme": "NONE",
@@ -5651,7 +5652,7 @@
           "name": "windows-gaming:right"
         },
         "80": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:80",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5661,7 +5662,7 @@
           "name": "80"
         },
         "81": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:81",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5671,7 +5672,7 @@
           "name": "81"
         },
         "82": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:82",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5681,7 +5682,7 @@
           "name": "82"
         },
         "83": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:83",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5691,7 +5692,7 @@
           "name": "83"
         },
         "84": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:84",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5701,7 +5702,7 @@
           "name": "84"
         },
         "85": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:85",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5711,7 +5712,7 @@
           "name": "85"
         },
         "86": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:86",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5721,7 +5722,7 @@
           "name": "86"
         },
         "87": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:87",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5731,7 +5732,7 @@
           "name": "87"
         },
         "88": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:88",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5741,7 +5742,7 @@
           "name": "88"
         },
         "89": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:89",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5751,7 +5752,7 @@
           "name": "89"
         },
         "9": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:9",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5761,7 +5762,7 @@
           "name": "dinet:left"
         },
         "90": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:90",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5771,7 +5772,7 @@
           "name": "90"
         },
         "91": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:91",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5781,7 +5782,7 @@
           "name": "91"
         },
         "92": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:92",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5791,7 +5792,7 @@
           "name": "92"
         },
         "93": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:93",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5801,7 +5802,7 @@
           "name": "93"
         },
         "94": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:94",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5811,7 +5812,7 @@
           "name": "94"
         },
         "95": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:95",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5821,7 +5822,7 @@
           "name": "95"
         },
         "96": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:96",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5831,7 +5832,7 @@
           "name": "96"
         },
         "97": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:97",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5841,7 +5842,7 @@
           "name": "97"
         },
         "98": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:98",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",
@@ -5851,7 +5852,7 @@
           "name": "98"
         },
         "99": {
-          "ddm_can_subscribe_self": true,
+          "can_subscribe_self": true,
           "ddm_channel_id": "001dc10812580000:0:rxChannel:99",
           "ddm_enabled": true,
           "ddm_media_type": "AUDIO",

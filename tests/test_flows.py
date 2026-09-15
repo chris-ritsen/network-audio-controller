@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -100,6 +101,110 @@ async def test_flow_query_rejects_invalid_pagination(monkeypatch, flow_pages):
     monkeypatch.setattr(core, "parse_response", parse_response)
 
     assert await flows.query_tx_flow_inventory("192.0.2.10", 4440, 0x2729) is None
+
+
+@pytest.mark.asyncio
+async def test_receiver_flow_query_aggregates_continuation_pages_from_maximum_returned_identifier(monkeypatch):
+    responses = iter((b"first-page", b"terminal-page"))
+    commands = []
+
+    async def request(device_ip, arc_port, command_specification, timeout_ms, attempts):
+        commands.append(command_specification)
+        return next(responses)
+
+    result_codes = {b"first-page": RESULT_CODE_SUCCESS_EXTENDED, b"terminal-page": RESULT_CODE_SUCCESS}
+    pages = {
+        b"first-page": {
+            "result_code": RESULT_CODE_SUCCESS_EXTENDED,
+            "page_disposition": "more_pages",
+            "maximum_flow_slots": 16,
+            "reported_flow_count": 2,
+            "flows": [{"flow_number": 1}, {"flow_number": 7}],
+        },
+        b"terminal-page": {
+            "result_code": RESULT_CODE_SUCCESS,
+            "page_disposition": "complete",
+            "maximum_flow_slots": 16,
+            "reported_flow_count": 1,
+            "flows": [{"flow_number": 8}],
+        },
+    }
+
+    def parse_response(kind, response):
+        return result_codes[response] if kind == "result_code" else pages[response]
+
+    monkeypatch.setattr(flows, "_request", request)
+    monkeypatch.setattr(core, "parse_response", parse_response)
+
+    inventory = await flows.query_receiver_flow_inventory("192.0.2.10", 4440)
+
+    assert [entry["flow_number"] for entry in inventory["flows"]] == [1, 7, 8]
+    assert inventory["page_disposition"] == "complete"
+    assert inventory["reported_flow_count"] == 3
+    assert [command["starting_flow"] for command in commands] == [1, 8]
+
+
+def test_external_identity_correlation_retains_arc_readback_without_sdp():
+    inventory = {
+        "flows": [
+            {
+                "external_identity": {"source_ipv4": "192.0.2.44", "session_id": 42},
+                "effective_subscription_identities": [
+                    {
+                        "receiver_channel": 3,
+                        "flow_slot": 2,
+                        "source_ipv4": "192.0.2.44",
+                        "session_id": 42,
+                        "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    correlated = flows.correlate_receiver_flow_inventory(inventory, None)
+
+    assert correlated["flows"][0]["external_identity"] == inventory["flows"][0]["external_identity"]
+    assert correlated["flows"][0]["sdp_correlation"]["matched"] is False
+    assert flows.effective_external_subscription_index(correlated)[3][0]["flow_slot"] == 2
+
+
+@pytest.mark.asyncio
+async def test_receiver_inventory_family_follows_channel_count_capability_selection():
+    legacy_commands = []
+
+    async def legacy_execute(specification):
+        legacy_commands.append(specification)
+        return bytes.fromhex("2729000e00003200000101000000")
+
+    modern_page = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "maximum_flow_slots": 2,
+        "reported_flow_count": 0,
+        "flows": [],
+    }
+    modern_query = AsyncMock(return_value=modern_page)
+    legacy = SimpleNamespace(
+        application=SimpleNamespace(query_modern_arc_receiver_flow_status=modern_query, external_flows=None),
+        receiver_flow_inventory_opcode=0x3200,
+        requires_managed_control=False,
+        ipv4="192.0.2.10",
+        _arc_port=lambda: 4440,
+        execute=legacy_execute,
+    )
+    modern = SimpleNamespace(
+        application=SimpleNamespace(query_modern_arc_receiver_flow_status=modern_query, external_flows=None),
+        receiver_flow_inventory_opcode=0x3600,
+        requires_managed_control=False,
+    )
+
+    assert (await flows.query_preferred_receiver_flow_inventory(legacy))["page_disposition"] == "complete"
+    modern_inventory = await flows.query_preferred_receiver_flow_inventory(modern)
+
+    assert legacy_commands == [{"command": "query_receiver_flows", "starting_flow": 1}]
+    assert modern_query.await_count == 1
+    assert modern_inventory["status_page"] == modern_page
 
 
 @pytest.mark.asyncio
@@ -211,6 +316,43 @@ def test_receiver_flow_status_page_conversion_preserves_raw_unresolved_fields():
     assert flow["status_code"] == 0x0009
     assert flow["local_receiver_channel_count"] == 2
     assert flow["flow_type"] == "0x0002"
+
+
+def test_status_page_inventory_preserves_structured_receiver_flow_evidence():
+    page = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "maximum_flow_slots": 4,
+        "reported_flow_count": 1,
+        "flows": [
+            {
+                "global_flow_id": 3,
+                "transport": 3,
+                "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+                "external_identity": {"source_ipv4": "192.0.2.44", "session_id": 42},
+                "effective_subscription_identities": [
+                    {
+                        "receiver_channel": 7,
+                        "flow_slot": 2,
+                        "source_ipv4": "192.0.2.44",
+                        "session_id": 42,
+                        "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+                    }
+                ],
+            }
+        ],
+    }
+
+    inventory = flows.inventory_from_receiver_flow_status_page(page)
+
+    assert inventory["reported_flow_count"] == 1
+    assert inventory["flows"][0]["flow_number"] == 3
+    assert inventory["flows"][0]["interface_endpoints"] == page["flows"][0]["interface_endpoints"]
+    assert inventory["flows"][0]["external_identity"] == page["flows"][0]["external_identity"]
+    assert (
+        inventory["flows"][0]["effective_subscription_identities"]
+        == page["flows"][0]["effective_subscription_identities"]
+    )
 
 
 def _run_without_context(run, *arguments, **options):

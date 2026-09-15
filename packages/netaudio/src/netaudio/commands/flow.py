@@ -217,8 +217,10 @@ async def run_receiver_flow_list(application, devices) -> None:
         "Type",
         "Receiver Channels",
         "Status",
-        "Destination",
-        "Port",
+        "Interface Destinations",
+        "Transport",
+        "External Identity",
+        "SDP",
         "Sample Rate",
         "Encoding",
         "Frames/Packet",
@@ -249,18 +251,51 @@ async def run_receiver_flow_list(application, devices) -> None:
         flow_type = receiver_flow["flow_type"]
         if not flow_type or flow_type.startswith("0x"):
             flow_type = "unknown"
+        endpoints = receiver_flow.get("interface_endpoints")
+        if not isinstance(endpoints, list):
+            port = receiver_flow.get("destination_user_datagram_port")
+            endpoints = (
+                [
+                    {
+                        "ipv4_address": receiver_flow.get("destination_internet_protocol_version_four_address"),
+                        "udp_port": port,
+                    }
+                ]
+                if port is not None
+                else []
+            )
+        endpoint_display = (
+            ", ".join(
+                f"{endpoint.get('ipv4_address') or 'address unavailable'}:{endpoint.get('udp_port', 'port unavailable')}"
+                for endpoint in endpoints
+            )
+            or "unknown"
+        )
+        external_identity = receiver_flow.get("external_identity")
+        external_display = (
+            f"{external_identity.get('source_ipv4') or 'source unavailable'}/"
+            f"{external_identity.get('session_id', 'session unavailable')}"
+            if isinstance(external_identity, dict)
+            else "native"
+        )
+        correlation = receiver_flow.get("sdp_correlation")
+        sdp_display = (
+            "matched"
+            if isinstance(correlation, dict) and correlation.get("matched") is True
+            else "not matched"
+            if isinstance(external_identity, dict)
+            else "not applicable"
+        )
         rows.append(
             [
                 str(receiver_flow["flow_number"]),
                 flow_type,
                 receiver_channel_mapping,
                 status_display,
-                receiver_flow["destination_internet_protocol_version_four_address"],
-                (
-                    str(receiver_flow["destination_user_datagram_port"])
-                    if receiver_flow["destination_user_datagram_port"] is not None
-                    else "unknown"
-                ),
+                endpoint_display,
+                str(receiver_flow.get("transport", "unknown")),
+                external_display,
+                sdp_display,
                 (
                     format_sample_rate_hertz(receiver_flow["sample_rate"])
                     if receiver_flow.get("sample_rate") is not None
@@ -437,8 +472,24 @@ async def run_external_flow_subscribe(
         detail = f"result 0x{result['result_code']:04X}" if result["result_code"] is not None else "no device response"
         typer.echo(f"Error: external subscription was not acknowledged ({detail}).", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
+
+    def confirmation(value, false_label="not confirmed"):
+        return "confirmed" if value is True else false_label if value is False else "not confirmed"
+
     output_table(
-        ["Device", "External Flow", "Receiver Channels", "Flow Slots", "Request", "Readback", "Media"],
+        [
+            "Device",
+            "External Flow",
+            "Receiver Channels",
+            "Flow Slots",
+            "Request",
+            "ARC effective state",
+            "SDP correlation",
+            "RTP reception",
+            "Clock lock",
+            "Persistence",
+            "Decoded audio",
+        ],
         [
             [
                 device.name or device.server_name,
@@ -446,8 +497,12 @@ async def run_external_flow_subscribe(
                 ", ".join(map(str, receiver_channel_ids)),
                 ", ".join(map(str, flow_slot_assignments)),
                 "acknowledged",
-                "not confirmed",
-                "not confirmed",
+                confirmation(result.get("arc_effective_state_confirmed"), "contradicted"),
+                confirmation(result.get("sdp_correlation_confirmed"), "not matched"),
+                confirmation(result.get("rtp_packet_reception_confirmed")),
+                confirmation(result.get("clock_lock_confirmed")),
+                confirmation(result.get("persistence_confirmed")),
+                confirmation(result.get("decoded_audio_confirmed")),
             ]
         ],
         json_data=result,
@@ -510,12 +565,20 @@ async def run_transmit_channel_capabilities(
         )
         raise typer.Exit(code=ExitCode.ERROR)
     rows = [
-        ["Format identifier", str(capabilities["format_identifier"])],
-        ["Starting channel", str(capabilities["starting_channel_identifier"])],
-        ["Channel count", str(capabilities["channel_count"])],
-        ["Capability flags", f"0x{capabilities['capability_flags']:04X}"],
+        [
+            str(index),
+            str(channel_range["first_transmit_channel"]),
+            str(channel_range["last_transmit_channel"]),
+            f"0x{channel_range['unknown_value']:04X}",
+        ]
+        for index, channel_range in enumerate(capabilities["ranges"], start=1)
     ]
-    output_table(["Field", "Value"], rows, json_data=capabilities)
+    output_table(
+        ["Range", "First TX channel", "Last TX channel", "Unknown value"],
+        rows,
+        json_data=capabilities,
+        empty_message="The device reports no transmitter channel capability ranges.",
+    )
 
 
 @app.command("transmit-channel-capabilities")
@@ -535,7 +598,7 @@ def transmit_channel_capabilities(
         help="Maximum channels to return; zero requests all available channels.",
     ),
 ):
-    """Show the transmitter channel capacity and raw capability flags reported by a device."""
+    """Show the transmitter channel capability ranges reported by a device."""
     run_command(run_transmit_channel_capabilities, starting_channel_identifier, maximum_channel_count)
 
 

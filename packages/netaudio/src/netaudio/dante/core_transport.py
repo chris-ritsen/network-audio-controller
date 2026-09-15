@@ -11,6 +11,7 @@ from typing import Optional
 from netaudio import core
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante.const import DEVICE_ARC_PORT
+from netaudio.network_path import NetworkPath, NetworkPathError, NetworkPathManager, path_manager
 
 logger = logging.getLogger("netaudio")
 
@@ -18,7 +19,7 @@ DEFAULT_REQUEST_ATTEMPTS = 3
 DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 1000
 
 WireObserver = Callable[[bytes, str, int, str], None]
-ClientKey = tuple[str, int, int, int, Optional[str]]
+ClientKey = tuple[str, int, int, int, Optional[str], Optional[str], int]
 
 
 def _wire_capture_functions(library):
@@ -60,10 +61,17 @@ def take_wire_captures(client) -> list[dict]:
 
 
 class CoreTransport:
-    def __init__(self, observer: WireObserver | None = None):
+    def __init__(
+        self,
+        observer: WireObserver | None = None,
+        *,
+        network_paths: NetworkPathManager = path_manager,
+    ):
         self._clients: dict[ClientKey, core.CoreClient] = {}
         self._client_locks: dict[ClientKey, threading.Lock] = {}
+        self._cache_lock = threading.Lock()
         self._observer = observer
+        self._network_paths = network_paths
 
     @property
     def observer(self) -> WireObserver | None:
@@ -80,22 +88,67 @@ class CoreTransport:
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
     ) -> core.CoreClient:
-        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts, app_settings.interface_ip)
+        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts)
         return self._client_for_key(key)
 
+    def path(self, device_ip_address) -> NetworkPath:
+        return self._network_paths.resolve(str(device_ip_address), app_settings.interface)
+
+    def _client_key(
+        self,
+        device_ip_address,
+        arc_port: int,
+        timeout_milliseconds: int,
+        attempts: int,
+    ) -> ClientKey:
+        destination = str(device_ip_address)
+        try:
+            path = self.path(destination)
+        except NetworkPathError:
+            self._retire_clients(lambda existing: existing[0] == destination)
+            raise
+        return (
+            destination,
+            arc_port,
+            timeout_milliseconds,
+            attempts,
+            path.interface.name,
+            path.source_address,
+            path.generation,
+        )
+
     def _client_for_key(self, key: ClientKey) -> core.CoreClient:
-        client = self._clients.get(key)
-        if client is None:
-            client = core.CoreClient(
-                key[0],
-                arc_port=key[1],
-                timeout_ms=key[2],
-                attempts=key[3],
-                local_ip=key[4],
-            )
-            self._clients[key] = client
-            self._client_locks[key] = threading.Lock()
-        return client
+        self._retire_clients(lambda existing: existing[:4] == key[:4] and existing != key)
+        with self._cache_lock:
+            client = self._clients.get(key)
+            if client is None:
+                client = core.CoreClient(
+                    key[0],
+                    arc_port=key[1],
+                    timeout_ms=key[2],
+                    attempts=key[3],
+                    local_ip=key[5],
+                )
+                self._clients[key] = client
+                self._client_locks[key] = threading.Lock()
+            return client
+
+    def _retire_clients(self, matches: Callable[[ClientKey], bool]) -> None:
+        retired = []
+        with self._cache_lock:
+            for key in tuple(self._clients):
+                if not matches(key):
+                    continue
+                client_lock = self._client_locks[key]
+                if not client_lock.acquire(blocking=False):
+                    continue
+                retired.append((self._clients.pop(key), client_lock))
+                self._client_locks.pop(key)
+        for client, client_lock in retired:
+            try:
+                client.close()
+            finally:
+                client_lock.release()
 
     async def call(
         self,
@@ -106,7 +159,7 @@ class CoreTransport:
         timeout_milliseconds: int = DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
         attempts: int = DEFAULT_REQUEST_ATTEMPTS,
     ):
-        key = (str(device_ip_address), arc_port, timeout_milliseconds, attempts, app_settings.interface_ip)
+        key = self._client_key(device_ip_address, arc_port, timeout_milliseconds, attempts)
         client = self._client_for_key(key)
         return await asyncio.to_thread(self._call_and_observe, client, self._client_locks[key], operation)
 
@@ -146,8 +199,9 @@ class CoreTransport:
                     )
 
     def close(self) -> None:
-        clients = list(self._clients.values())
-        self._clients.clear()
-        self._client_locks.clear()
+        with self._cache_lock:
+            clients = list(self._clients.values())
+            self._clients.clear()
+            self._client_locks.clear()
         for client in clients:
             client.close()

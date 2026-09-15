@@ -16,6 +16,7 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent, DeferredAsyncioLock
 from netaudio.common.app_config import settings as app_settings
+from netaudio.network_path import source_address_for
 from netaudio.daemon.correlation import dante_device_correlation_view
 from netaudio.daemon.discovery import DanteDiscoveryMixin
 from netaudio.monitoring import MonitoringEventJournal
@@ -73,9 +74,8 @@ def _probe_device(device_ip: str, arc_port: int) -> bool:
     from netaudio import core
 
     try:
-        with core.CoreClient(
-            device_ip, arc_port=arc_port, timeout_ms=1000, attempts=2, local_ip=app_settings.interface_ip
-        ) as client:
+        local_ip = source_address_for(device_ip, app_settings.interface)
+        with core.CoreClient(device_ip, arc_port=arc_port, timeout_ms=1000, attempts=2, local_ip=local_ip) as client:
             client.get_device_name()
         return True
     except core.NetaudioCoreError:
@@ -572,7 +572,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             device_by_ip=self.application._device_by_ip,
             get_devices=lambda: self.application.devices,
             mark_offline=self.mark_device_offline,
-            interface_ip=app_settings.interface_ip,
+            interface_name=app_settings.interface,
             on_signal_presence=self.metering.record_signal_presence,
             on_device_updated=self._emit_heartbeat_device_updated,
         )

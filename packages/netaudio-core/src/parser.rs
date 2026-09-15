@@ -20,11 +20,14 @@ pub const TX_CHANNELS_PER_PAGE: u16 = 32;
 const CHANNEL_COUNT_TX_OFFSET: usize = 12;
 const CHANNEL_COUNT_RX_OFFSET: usize = 14;
 const RX_RECORD_CHANNEL_NUMBER: usize = 0;
+const RX_RECORD_FLAGS: usize = 2;
 const RX_RECORD_TX_CHANNEL_POINTER: usize = 6;
 const RX_RECORD_TX_DEVICE_POINTER: usize = 8;
 const RX_RECORD_RX_CHANNEL_POINTER: usize = 10;
 const RX_RECORD_RX_STATUS: usize = 12;
 const RX_RECORD_SUBSCRIPTION_STATUS: usize = 14;
+const RX_RECORD_CAN_SUBSCRIBE_SELF_MASK: u16 = 0x0008;
+const RX_RECORD_RENAME_PROHIBITED_MASK: u16 = 0x0400;
 
 const TX_RECORD_CHANNEL_NUMBER: usize = 0;
 const TX_RECORD_CHANNEL_GROUP: usize = 4;
@@ -45,6 +48,8 @@ const KNOWN_PCM_CAPABILITY_BITS: u16 =
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChannelCount {
+    pub transmit_flow_authoring_capability_word: u16,
+    pub uses_modern_transmit_flow_authoring: bool,
     pub tx_count: u16,
     pub rx_count: u16,
     pub locked: Option<bool>,
@@ -53,6 +58,9 @@ pub struct ChannelCount {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RxChannel {
     pub number: u16,
+    pub receiver_flags: u16,
+    pub can_subscribe_self: bool,
+    pub can_rename: bool,
     pub rx_channel_name: Option<String>,
     pub tx_channel_name: Option<String>,
     pub tx_device_name: Option<String>,
@@ -157,7 +165,10 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
     if response.len() < 16 {
         return None;
     }
+    let transmit_flow_authoring_capability_word = read_u16(response, RESPONSE_HEADER_SIZE)?;
     Some(ChannelCount {
+        transmit_flow_authoring_capability_word,
+        uses_modern_transmit_flow_authoring: transmit_flow_authoring_capability_word & 0x1000 != 0,
         tx_count: read_u16(response, CHANNEL_COUNT_TX_OFFSET)?,
         rx_count: read_u16(response, CHANNEL_COUNT_RX_OFFSET)?,
         locked: None,
@@ -297,8 +308,12 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
             rx_channel_name.clone()
         };
 
+        let receiver_flags = u16_at(record, RX_RECORD_FLAGS);
         channels.push(RxChannel {
             number: channel_number,
+            receiver_flags,
+            can_subscribe_self: receiver_flags & RX_RECORD_CAN_SUBSCRIBE_SELF_MASK != 0,
+            can_rename: receiver_flags & RX_RECORD_RENAME_PROHIBITED_MASK == 0,
             rx_channel_name,
             tx_channel_name,
             tx_device_name,
@@ -636,11 +651,14 @@ mod tests {
     #[test]
     fn channel_count_parser_does_not_infer_lock_state() {
         let mut response = channel_count_response(36);
+        response[10..12].copy_from_slice(&0x1030u16.to_be_bytes());
         response[12..14].copy_from_slice(&260u16.to_be_bytes());
         response[14..16].copy_from_slice(&520u16.to_be_bytes());
         response[34] = 0x01;
         response[35] = 0x00;
         let parsed = parse_channel_count(&response).unwrap();
+        assert_eq!(parsed.transmit_flow_authoring_capability_word, 0x1030);
+        assert!(parsed.uses_modern_transmit_flow_authoring);
         assert_eq!(parsed.tx_count, 260);
         assert_eq!(parsed.rx_count, 520);
         assert_eq!(parsed.locked, None);
@@ -649,9 +667,12 @@ mod tests {
     #[test]
     fn channel_count_parser_omits_lock_on_short_response() {
         let mut response = channel_count_response(16);
+        response[10..12].copy_from_slice(&0x0030u16.to_be_bytes());
         response[12..14].copy_from_slice(&2u16.to_be_bytes());
         response[14..16].copy_from_slice(&2u16.to_be_bytes());
         let parsed = parse_channel_count(&response).unwrap();
+        assert_eq!(parsed.transmit_flow_authoring_capability_word, 0x0030);
+        assert!(!parsed.uses_modern_transmit_flow_authoring);
         assert_eq!(parsed.locked, None);
     }
 
@@ -684,6 +705,7 @@ mod tests {
 
         let record = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE;
         response[record..record + 2].copy_from_slice(&1u16.to_be_bytes());
+        response[record + 2..record + 4].copy_from_slice(&0x000fu16.to_be_bytes());
         let tx_channel_pointer = strings_base + 5;
         let tx_device_pointer = strings_base + 12;
         let rx_channel_pointer = strings_base;
@@ -699,11 +721,26 @@ mod tests {
         assert_eq!(channels.len(), 1);
         let channel = &channels[0];
         assert_eq!(channel.number, 1);
+        assert_eq!(channel.receiver_flags, 0x000f);
+        assert!(channel.can_subscribe_self);
+        assert!(channel.can_rename);
         assert_eq!(channel.rx_channel_name.as_deref(), Some("rx-1"));
         assert_eq!(channel.tx_channel_name.as_deref(), Some("mix-hi"));
         assert_eq!(channel.tx_device_name.as_deref(), Some("mixer"));
         assert_eq!(channel.rx_status_code, 257);
         assert_eq!(channel.subscription_status_code, 9);
+
+        response[record + 2..record + 4].copy_from_slice(&0xfff7u16.to_be_bytes());
+        let channel = &parse_rx_page(&response, 1).unwrap()[0];
+        assert_eq!(channel.receiver_flags, 0xfff7);
+        assert!(!channel.can_subscribe_self);
+        assert!(!channel.can_rename);
+
+        response[record + 2..record + 4].copy_from_slice(&0xffffu16.to_be_bytes());
+        let channel = &parse_rx_page(&response, 1).unwrap()[0];
+        assert_eq!(channel.receiver_flags, 0xffff);
+        assert!(channel.can_subscribe_self);
+        assert!(!channel.can_rename);
     }
 
     #[test]
@@ -714,6 +751,7 @@ mod tests {
 
         let record = RESPONSE_HEADER_SIZE + BODY_HEADER_SIZE;
         response[record..record + 2].copy_from_slice(&1u16.to_be_bytes());
+        response[record + 2..record + 4].copy_from_slice(&0x0006u16.to_be_bytes());
         response[record + 6..record + 8].copy_from_slice(&0u16.to_be_bytes());
         response[record + 8..record + 10].copy_from_slice(&0u16.to_be_bytes());
         response[record + 10..record + 12].copy_from_slice(&strings_base.to_be_bytes());
@@ -723,6 +761,8 @@ mod tests {
         stamp_response(&mut response, OPCODE_RX_CHANNELS, RESULT_CODE_SUCCESS);
 
         let channels = parse_rx_page(&response, 1).unwrap();
+        assert_eq!(channels[0].receiver_flags, 0x0006);
+        assert!(!channels[0].can_subscribe_self);
         assert_eq!(channels[0].tx_channel_name.as_deref(), Some("unused-1"));
         assert_eq!(channels[0].tx_device_name, None);
     }

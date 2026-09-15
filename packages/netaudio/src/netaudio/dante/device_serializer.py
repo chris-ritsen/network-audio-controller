@@ -130,6 +130,7 @@ DEVICE_SCALAR_FIELDS = (
     "receiver_flow_latency_nanoseconds",
     "receiver_flow_status_page",
     "receiver_flows",
+    "receiver_flow_inventory_opcode",
     "requested_sample_rate_pullup_raw_value",
     "routing_capacity_receive_channel_count",
     "routing_capacity_transmit_channel_count",
@@ -153,6 +154,9 @@ DEVICE_SCALAR_FIELDS = (
     "supported_sample_rate_pullup_raw_values",
     "supported_sample_rates",
     "transmitter_flows",
+    "transmit_flow_authoring_capability_word",
+    "transmit_flow_authoring_opcode",
+    "transmit_flow_authoring_protocol_id",
     "tx_count",
     "tx_count_raw",
     "tx_flow_count",
@@ -160,7 +164,9 @@ DEVICE_SCALAR_FIELDS = (
 
 CHANNEL_OPTIONAL_FIELDS = (
     "bit_depth",
-    "ddm_can_subscribe_self",
+    "can_subscribe_self",
+    "can_subscribe_self_conflict",
+    "can_rename",
     "ddm_channel_id",
     "ddm_enabled",
     "ddm_encryption_policy",
@@ -177,7 +183,12 @@ CHANNEL_OPTIONAL_FIELDS = (
     "media_type",
     "media_type_code",
     "media_service",
+    "managed_can_subscribe_self",
+    "managed_can_subscribe_self_fresh",
     "muted",
+    "receiver_capability_flags",
+    "receiver_flags",
+    "receiver_status_flags",
     "encoding",
     "sample_rate",
     "samples_per_frame",
@@ -207,6 +218,8 @@ def device_json_field_name(field_name: str) -> str:
 class DanteDeviceSerializer:
     @staticmethod
     def to_json(device):
+        from netaudio.dante.self_connection import receiver_self_connection_support
+
         rx_channels = {
             k: DanteDeviceSerializer.channel_to_json(v)
             for k, v in sorted(device.rx_channels.items(), key=lambda x: x[1].number)
@@ -224,6 +237,7 @@ class DanteDeviceSerializer:
             "online": device.online,
             "server_name": device.server_name,
             "services": device.services,
+            "self_connection_support": receiver_self_connection_support(device.rx_channels.values()),
             "subscriptions": [DanteDeviceSerializer.subscription_to_json(s) for s in device.subscriptions],
         }
 
@@ -308,7 +322,10 @@ class DanteDeviceSerializer:
             ]
             if len(channels) == 1:
                 subscription.rx_channel = channels[0]
+                subscription.rx_device = device
                 subscription._netaudio_rx_channel_number = channels[0].number
+            if subscription.is_self_connection:
+                subscription.tx_device = device
 
         return device
 
@@ -337,6 +354,7 @@ class DanteDeviceSerializer:
         subscription.rx_device_name = entry.get("rx_device")
         subscription.tx_channel_name = entry.get("tx_channel")
         subscription.tx_device_name = entry.get("tx_device")
+        subscription._is_self_connection = entry.get("self_connection") is True
         for field_name in SUBSCRIPTION_MANAGED_FIELDS:
             setattr(subscription, field_name, entry.get(field_name))
         status = entry.get("status")
@@ -352,14 +370,28 @@ class DanteDeviceSerializer:
     def channel_to_json(channel):
         as_json = {"name": channel.name}
 
+        if channel.channel_type == "rx":
+            as_json.update(
+                {
+                    "can_subscribe_self": channel.can_subscribe_self,
+                    "receiver_flags": channel.receiver_flags,
+                    "receiver_capability_flags": channel.receiver_capability_flags,
+                }
+            )
+
         gain_level = None
         gain_level_label = None
         if channel.device is not None:
             gain_level = channel.device.gain_level_for_channel(channel.number, channel.channel_type)
             gain_level_label = channel.device.gain_level_label_for_channel(channel.number, channel.channel_type)
 
+        required_receiver_fields = {"can_subscribe_self", "receiver_flags", "receiver_capability_flags"}
         optional_fields = [
-            *((field_name, getattr(channel, field_name)) for field_name in CHANNEL_OPTIONAL_FIELDS),
+            *(
+                (field_name, getattr(channel, field_name))
+                for field_name in CHANNEL_OPTIONAL_FIELDS
+                if field_name not in required_receiver_fields
+            ),
             ("gain_level", gain_level),
             ("gain_level_label", gain_level_label),
         ]
@@ -416,6 +448,8 @@ class DanteDeviceSerializer:
             "tx_channel": subscription.tx_channel_name,
             "tx_device": subscription.tx_device_name,
         }
+        if subscription.is_self_connection:
+            as_json["self_connection"] = True
         for field_name in SUBSCRIPTION_MANAGED_FIELDS:
             field_value = getattr(subscription, field_name)
             if field_value is not None:

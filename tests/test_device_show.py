@@ -532,7 +532,7 @@ def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
     controls = device.controls_data_from_core(
         {
             "name": None,
-            "counts": (0, 0, None),
+            "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": None,
             "rx": [],
@@ -543,6 +543,10 @@ def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
     device.apply_controls(controls)
 
     assert device.tx_count == device.rx_count == 0
+    assert device.transmit_flow_authoring_capability_word == 0
+    assert device.transmit_flow_authoring_opcode == 0x2201
+    assert device.transmit_flow_authoring_protocol_id == 0x2729
+    assert device.receiver_flow_inventory_opcode == 0x3200
     assert device.tx_channels == {}
     assert device.rx_channels == {}
     assert device.subscriptions == []
@@ -587,7 +591,12 @@ def test_instrumented_summary_fetch_skips_channel_pages(monkeypatch):
 
     def query_response(client, specification, port, parse_kind=None, starting_channel=None):
         if specification["command"] == "channel_count":
-            return {"tx_count": 128, "rx_count": 128, "locked": False}
+            return {
+                "tx_count": 128,
+                "rx_count": 128,
+                "locked": False,
+                "transmit_flow_authoring_capability_word": 0,
+            }
         if specification["command"] == "device_settings":
             return {"sample_rate": 48_000}
         if specification["command"] == "query_latency_config":
@@ -604,13 +613,36 @@ def test_instrumented_summary_fetch_skips_channel_pages(monkeypatch):
     controls = capture_module._fetch_instrumented(MagicMock(), 4440, include_channels=False)
 
     assert controls["name"] == "lx-dante"
-    assert controls["counts"] == (128, 128, False)
+    assert controls["counts"] == (128, 128, False, 0)
     assert controls["aes67"] is False
     assert controls["aes67_multicast_prefix"] == "239.69.0.0"
     assert controls["rx"] == []
     assert controls["tx"] == []
     fetch_rx_records.assert_not_called()
     fetch_tx_records.assert_not_called()
+
+
+def test_instrumented_fetch_keeps_missing_authoring_capability_unavailable(monkeypatch):
+    monkeypatch.setattr(capture_module, "fetch_device_name", lambda client, port: "unavailable")
+    monkeypatch.setattr(capture_module, "fetch_rx_records", MagicMock(return_value=[]))
+    monkeypatch.setattr(capture_module, "fetch_tx_records", MagicMock(return_value=[]))
+    monkeypatch.setattr(capture_module, "_query", lambda *_args, **_kwargs: None)
+    client = MagicMock()
+    client.get_channel_audio_metadata.return_value = None
+
+    controls = capture_module._fetch_instrumented(client, 4440)
+    device = make_show_device()
+    device.transmit_flow_authoring_capability_word = 0x1000
+    device.transmit_flow_authoring_opcode = 0x2601
+    device.transmit_flow_authoring_protocol_id = 0x2809
+    device.receiver_flow_inventory_opcode = 0x3600
+    device.apply_controls(device.controls_data_from_core(controls))
+
+    assert controls["counts"] == (0, 0, None, None)
+    assert device.transmit_flow_authoring_capability_word is None
+    assert device.transmit_flow_authoring_opcode is None
+    assert device.transmit_flow_authoring_protocol_id is None
+    assert device.receiver_flow_inventory_opcode is None
 
 
 @pytest.mark.asyncio
@@ -848,7 +880,7 @@ async def test_summary_control_fetch_skips_channel_pages(monkeypatch):
     core_client = MagicMock()
     core_client.observer = None
     core_client.get_device_name.return_value = "lx-dante"
-    core_client.get_channel_count.return_value = (128, 128, False)
+    core_client.get_channel_count.return_value = (128, 128, False, 0)
     core_client.get_device_settings.return_value = {"sample_rate": 48_000}
     core_client.get_property_directory.return_value = None
     core_client.get_aes67_configured.return_value = False

@@ -63,7 +63,14 @@ def main():
     tx = ctypes.c_uint16(0)
     rx = ctypes.c_uint16(0)
     locked = ctypes.c_int32(-2)
-    library.netaudio_client_get_channel_count(handle, ctypes.byref(tx), ctypes.byref(rx), ctypes.byref(locked))
+    capability_word = ctypes.c_uint16()
+    library.netaudio_client_get_channel_count(
+        handle,
+        ctypes.byref(tx),
+        ctypes.byref(rx),
+        ctypes.byref(capability_word),
+        ctypes.byref(locked),
+    )
 
     result = {
         "device_ip": device_ip,
