@@ -63,7 +63,7 @@ test("mobile views use one selector and a reachable source picker", async ({ pag
   await expect(selector).toBeHidden();
 });
 
-test("source picker darkens same-device sources per receiver capability", async ({ page }) => {
+test("source picker and matrix reflect same-device source capability", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const receiver = { name: "A Receiver", server_name: "receiver.local.", online: true,
     channels: { receivers: {
@@ -92,18 +92,21 @@ test("source picker darkens same-device sources per receiver capability", async 
   await page.reload();
   const viewport = page.locator(".matrix-viewport");
   await expect(viewport).toBeVisible();
-  await expect.poll(async () => page.locator(".matrix-canvas").evaluate((canvas) => {
-    const grid = document.querySelector(".matrix-viewport");
-    const ratio = window.devicePixelRatio || 1;
-    const gutter = Number(grid.dataset.gutterWidth), header = Number(grid.dataset.headerHeight);
-    const sample = (column, row) => Array.from(canvas.getContext("2d").getImageData(
-      Math.round((gutter + column * 30 + 15) * ratio),
-      Math.round((header + row * 30 + 15) * ratio), 1, 1,
-    ).data.slice(0, 3));
-    const blocked = sample(1, 1), allowed = sample(2, 1);
-    return blocked.reduce((sum, value) => sum + value, 0)
-      < allowed.reduce((sum, value) => sum + value, 0);
-  })).toBe(true);
+  const geometry = await viewport.evaluate((node) => ({
+    cell: Number(node.dataset.cellSize),
+    gutter: Number(node.dataset.gutterWidth),
+    header: Number(node.dataset.headerHeight),
+  }));
+  const cell = (column, row) => ({
+    x: geometry.gutter + column * geometry.cell + geometry.cell / 2,
+    y: geometry.header + row * geometry.cell + geometry.cell / 2,
+  });
+  await viewport.hover({ position: cell(1, 1) });
+  await expect(viewport).toHaveCSS("cursor", "not-allowed");
+  await expect(page.getByRole("tooltip")).toContainText("does not support self-subscriptions");
+  await viewport.hover({ position: cell(2, 1) });
+  await expect(viewport).toHaveCSS("cursor", "crosshair");
+  await expect(page.getByRole("tooltip")).not.toContainText("does not support self-subscriptions");
 });
 
 test("collapsed intersections expand channels without routing and names do not show tooltips", async ({ page }) => {
