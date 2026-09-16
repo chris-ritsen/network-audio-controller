@@ -1,6 +1,6 @@
 [project]
 name = "netaudio"
-version = "0.3.13"
+version = "0.3.14"
 description = "Cross-platform control, automation, and monitoring for Dante network audio devices"
 readme = "README.md"
 license = "Unlicense"
