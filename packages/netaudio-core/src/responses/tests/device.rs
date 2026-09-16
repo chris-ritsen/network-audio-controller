@@ -810,13 +810,93 @@ fn dante_model_validates_plugin_vector_and_preserves_raw_records() {
 #[test]
 fn version_records_fail_closed_above_the_supported_revision_scope() {
     assert_eq!(
-        parse_make_model(&manufacturer_versions_response(0x0732)),
-        None
+        parse_make_model(&manufacturer_versions_response(0x0738))
+            .map(|v| v.record_protocol_version),
+        Some(0x0738)
     );
     assert_eq!(
-        parse_dante_model(&dante_model_response(0x0732, 0, 0, 0, 0, 0, 0)),
+        parse_make_model(&manufacturer_versions_response(0x0739)),
         None
     );
+    let with_plugin_header = |version: u16| {
+        let mut data = dante_model_response(version, 0, 0, 0, 0, 0, 0);
+        data.resize(CONMON_DANTE_MODEL_BODY_OFFSET + 0xd4, 0);
+        let length = u16::try_from(data.len()).unwrap();
+        data[2..4].copy_from_slice(&length.to_be_bytes());
+        data
+    };
+    assert_eq!(
+        parse_dante_model(&with_plugin_header(0x0738)).map(|v| v.record_protocol_version),
+        Some(0x0738)
+    );
+    assert_eq!(parse_dante_model(&with_plugin_header(0x0739)), None);
+}
+
+#[test]
+fn dante_model_decodes_captured_avio_revision_0738_record() {
+    let data = decode_hexadecimal(
+        "ffff011835e50000001dc1fffe53ef37417564696e617465073800600000000004020003040200030100000044494f41455333000d5050db000000640000000000000005000000040100000000000001000003000000000044494f41455333000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f000000250000000300000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    );
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0738);
+    assert_eq!(parsed.platform_software_version.as_deref(), Some("4.2.3.5"));
+    assert_eq!(parsed.platform_hardware_version.as_deref(), Some("4.2.3.4"));
+    assert_eq!(parsed.platform_api_version.as_deref(), Some("1.0.0"));
+    assert_eq!(parsed.platform_model_identifier.as_deref(), Some("DIOAES3"));
+    assert_eq!(parsed.platform_model_name.as_deref(), Some("DIOAES3"));
+    assert_eq!(parsed.primary_capabilities, Some(0x0d50_50db));
+    assert_eq!(parsed.preferred_link_speed, Some(100));
+    assert_eq!(parsed.rom_boot_version.as_deref(), Some("1.0.0"));
+    assert_eq!(parsed.supported_clock_protocol_flags, 1);
+    assert_eq!(parsed.monitoring_capabilities, 0x1f);
+    assert_eq!(parsed.secondary_capabilities, 0x25);
+    assert_eq!(parsed.domain_capability_values, 3);
+    assert_eq!(parsed.domain_capability_validity, 3);
+    assert!(parsed.plugin_identifiers.is_empty());
+    assert!(parsed.plugin_records_hexadecimal.is_empty());
+}
+
+#[test]
+fn dante_model_accepts_captured_plugin_record_that_ends_with_the_packet() {
+    let data = decode_hexadecimal(
+        "ffff012ebecb0000001dc1fffe5279b6417564696e617465073800600000000004020003040200030100000044494f42540000000d5050db000000640000000000000005000000040100000000000001000003000000000044494f42540000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f000001250000000300000003000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000343137353634363936453631373436352d3030303300",
+    );
+    let parsed = parse_dante_model(&data).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0738);
+    assert_eq!(parsed.platform_model_identifier.as_deref(), Some("DIOBT"));
+    assert_eq!(parsed.secondary_capabilities, 0x125);
+    assert_eq!(
+        parsed.plugin_identifiers,
+        [Some("417564696E617465-0003".to_owned())]
+    );
+    assert_eq!(parsed.plugin_records_hexadecimal.len(), 1);
+    assert_eq!(parsed.plugin_records_hexadecimal[0].len(), 44);
+
+    let mut truncated = data.clone();
+    truncated.truncate(CONMON_DANTE_MODEL_BODY_OFFSET + 0x100);
+    let length = u16::try_from(truncated.len()).unwrap();
+    truncated[2..4].copy_from_slice(&length.to_be_bytes());
+    assert_eq!(parse_dante_model(&truncated), None);
+}
+
+#[test]
+fn make_model_decodes_captured_avio_revision_0738_record() {
+    let data = decode_hexadecimal(
+        "ffff01703a1c0000001dc1fffe53ef37417564696e617465073800c000000000417564696e61746544494f414553330000000000000000000000000000000000000000000000000000000000417564696e6174650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004156494f2d414553330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010200030000000000000000000000000000000000000000000000000000000000000000",
+    );
+    let parsed = parse_make_model(&data).unwrap();
+    assert_eq!(parsed.record_protocol_version, 0x0738);
+    assert_eq!(parsed.manufacturer_identifier, None);
+    assert_eq!(
+        parsed.manufacturer_identifier_hexadecimal,
+        "417564696e617465"
+    );
+    assert_eq!(parsed.product_identifier.as_deref(), Some("DIOAES3"));
+    assert_eq!(parsed.manufacturer.as_deref(), Some("Audinate"));
+    assert_eq!(parsed.product_name.as_deref(), Some("AVIO-AES3"));
+    assert_eq!(parsed.product_version.as_deref(), Some("1.2.3"));
+    assert_eq!(parsed.friendly_product_version, None);
+    assert_eq!(parsed.display_product_version.as_deref(), Some("1.2.3"));
 }
 
 #[test]
