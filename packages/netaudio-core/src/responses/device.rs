@@ -336,7 +336,7 @@ fn formatted_version(word: u32, fourth: Option<u32>) -> Option<String> {
 pub fn parse_make_model(data: &[u8]) -> Option<ManufacturerVersions> {
     validate_conmon_envelope(data, CONMON_OPCODE_MAKE_MODEL_RESPONSE)?;
     let record_protocol_version = read_u16(data, CONMON_DANTE_MODEL_BODY_OFFSET)?;
-    if record_protocol_version > 0x0731 {
+    if record_protocol_version > 0x0738 {
         return None;
     }
     let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
@@ -430,7 +430,7 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
     validate_conmon_envelope(data, CONMON_OPCODE_DANTE_MODEL_RESPONSE)?;
     let record_start = CONMON_DANTE_MODEL_BODY_OFFSET;
     let record_protocol_version = read_u16(data, record_start)?;
-    if record_protocol_version > 0x0731 {
+    if record_protocol_version > 0x0738 {
         return None;
     }
     let platform_software_word = read_u32(data, record_start + 0x08)?;
@@ -519,8 +519,12 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
         let vector_start = record_start.checked_add(vector_offset)?;
         let vector_size = count.checked_mul(0x18)?;
         let vector_end = vector_start.checked_add(vector_size)?;
-        let vector = data.get(vector_start..vector_end)?;
-        for record in vector.chunks_exact(0x18) {
+        let minimum_end = vector_start.checked_add(count.saturating_sub(1).checked_mul(0x18)?)?;
+        if count != 0 && data.len() <= minimum_end {
+            return None;
+        }
+        let vector = data.get(vector_start..vector_end.min(data.len()))?;
+        for record in vector.chunks(0x18) {
             plugin_identifiers.push(conmon_string_bytes(record).filter(|value| !value.is_empty()));
             plugin_records_hexadecimal.push(bytes_to_hex(record));
         }
