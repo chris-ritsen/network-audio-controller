@@ -1,15 +1,38 @@
 
 ### Description
 
-This is a python program for controlling Dante network audio devices (and
-possibly others in the future).  It's early, so expect things to break or
-switches to change.  Use this at your own risk; it's not ready for anything
-other than a test environment and could make the devices behave unexpectedly.
-The first goal is to do everything that Dante Controller can do that would be
-useful for control of the devices from a command-line interface or within
-scripts.
+NetAudio is an open-source, cross-platform implementation for discovering,
+monitoring, configuring, and routing Dante network audio devices.
 
-For more information, check out the [gearspace discussion](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
+A NetAudio iOS client is in development:
+[Dante control for iPhone and iPad](https://netaudio.app/#ios-app), available
+now as a [TestFlight beta](https://testflight.apple.com/join/GcuDerST).
+
+It provides a command-line interface, browser interface, HTTP API, and
+background daemon, making Dante networks accessible from Linux, macOS, Windows,
+scripts, automation systems, and other software. NetAudio communicates directly
+with Dante devices and supports both unmanaged networks and devices enrolled in
+Dante Domain Manager (DDM).
+
+Current functionality includes device and channel discovery, subscription
+routing, device and channel naming, sample rate, encoding and latency
+configuration, analog gain control, device locking, network configuration,
+multicast transmit-flow management, presets, AES67 and external RTP flows,
+interface statistics, monitoring and issue history, and DDM-managed device
+control.
+
+NetAudio is designed both as a standalone Dante control application and as an
+interoperability layer for software that needs programmatic access to Dante
+networks. Commands support structured JSON output, and the daemon exposes the
+same network state and control capabilities through an HTTP API for
+integration with other applications and automation systems.
+
+NetAudio is an independent interoperability project and is not affiliated with
+or endorsed by Audinate.
+
+The project grew out of packet capture replay and modification experiments
+first written up in a
+[gearspace thread](https://gearspace.com/board/music-computers/1221989-dante-routing-without-dante-controller-possible.html).
 
 ### Features
 
@@ -54,7 +77,7 @@ Or with pip/pipx:
 pip install netaudio
 ```
 
-To install from a clone (requires Python 3.9+ and a Rust toolchain):
+To run from a clone (needs `uv` and `cargo`):
 
 ```bash
 uv sync
