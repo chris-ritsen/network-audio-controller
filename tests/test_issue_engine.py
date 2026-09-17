@@ -210,38 +210,39 @@ def test_cross_device_address_and_pullup_conflicts_reconcile_for_each_device():
     assert len(engine.list_issues(state="resolved")) == 4
 
 
-def test_journal_persists_issues_and_emits_issue_transition_events(tmp_path):
-    path = tmp_path / "journal.json"
-    journal = MonitoringEventJournal(path)
-    normal = snapshot()
-    journal.observe_snapshot(normal, timestamp="2026-09-12T12:00:00Z")
-    events = journal.observe_snapshot(failed_subscription(), timestamp="2026-09-12T12:00:01Z")
+def test_journal_retains_issues_and_emits_transitions_in_memory():
+    journal = MonitoringEventJournal()
+    journal.observe_snapshot(snapshot(), timestamp="2026-09-12T12:00:00Z")
+    failed = failed_subscription()
+    events = journal.observe_snapshot(failed, timestamp="2026-09-12T12:00:01Z")
     opened = next(event for event in events if event.kind is MonitoringEventKind.ISSUE_OPENED)
     assert opened.raw["evidence_class"] == "direct_observation"
     assert opened.channel_identity == "rx:1"
-
-    restored = MonitoringEventJournal(path)
-    [issue] = restored.issue_engine.list_issues(state="open")
+    [issue] = journal.issue_engine.list_issues(state="open")
     assert issue.issue_id == opened.raw["issue_id"]
     assert issue.occurrence_count == 1
 
+    assert journal.observe_snapshot(failed, timestamp="2026-09-12T12:00:02Z") == []
+    [issue] = journal.issue_engine.list_issues(state="open")
+    assert issue.occurrence_count == 2
+    assert issue.last_seen == "2026-09-12T12:00:02Z"
+    assert MonitoringEventJournal().issue_engine.list_issues() == []
 
-def test_journal_persists_silent_issue_refresh_and_reloads_it(tmp_path):
-    path = tmp_path / "journal.json"
-    journal = MonitoringEventJournal(path)
+
+def test_journal_keeps_unobservable_issues_without_an_event():
+    journal = MonitoringEventJournal()
     failed = failed_subscription()
     journal.observe_snapshot(failed, timestamp="2026-09-12T12:00:00Z")
-
+    failed["subscriptions"][0].pop("status")
     assert journal.observe_snapshot(failed, timestamp="2026-09-12T12:00:01Z") == []
-    restored = MonitoringEventJournal(path)
-    [issue] = restored.issue_engine.list_issues(state="open")
-    assert issue.occurrence_count == 2
-    assert issue.last_seen == "2026-09-12T12:00:01Z"
+    [issue] = journal.issue_engine.list_issues(state="open")
+    assert issue.observation_state.value == "unobservable"
+    assert issue.occurrence_count == 1
 
 
 @pytest.mark.asyncio
 async def test_http_exposes_current_and_historical_issue_filters():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     journal.observe_snapshot(failed_subscription(), timestamp="2026-09-12T12:00:00Z")
     server = make_http_server()
     server.event_journal = journal

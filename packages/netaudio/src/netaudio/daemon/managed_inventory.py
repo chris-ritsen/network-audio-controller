@@ -445,6 +445,7 @@ class ManagedInventoryService:
         self.last_attempt: float | None = None
         self.last_success: float | None = None
         self.last_error: str | None = None
+        self._refresh_failed = False
         self.graphql_errors: tuple[dict, ...] = ()
         self._authoritative = False
         self._domains_current = False
@@ -506,9 +507,14 @@ class ManagedInventoryService:
                 self._unenrolled_current = False
                 self.graphql_errors = ()
                 self.last_error = str(error)
-                logger.warning("Managed API inventory refresh failed: %s", error)
                 changed = False
                 accepted = False
+            if not accepted:
+                log = logger.debug if self._refresh_failed else logger.warning
+                log("Managed API inventory unavailable: %s", self.last_error or "no inventory returned")
+            elif self._refresh_failed:
+                logger.info("Managed API inventory refresh recovered")
+            self._refresh_failed = not accepted
             state_changed = previous_state != self._state_signature()
         if changed or state_changed:
             await self._notify()

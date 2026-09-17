@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import weakref
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -47,6 +48,26 @@ def make_manager():
         dispatcher=SimpleNamespace(emit_nowait=MagicMock()),
     )
     return MeteringManager(application), application, device
+
+
+def test_new_meter_sample_releases_previous_channel_vectors(monkeypatch):
+    class ChannelLevels(dict):
+        pass
+
+    vectors = []
+
+    def parsed_levels(_data):
+        levels = {"tx": ChannelLevels({1: 0xFE}), "rx": ChannelLevels({1: 0x6D})}
+        vectors.extend(weakref.ref(value) for value in levels.values())
+        return levels
+
+    monkeypatch.setattr(metering_module, "parse_metering_levels", parsed_levels)
+    manager, _, _ = make_manager()
+    manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8700))
+    manager._on_metering_packet(METERING_FRAME, ("192.168.1.61", 8700))
+
+    assert all(reference() is None for reference in vectors[:2])
+    assert manager.get_cached_levels("avio-bt-1")["rx"] == {1: 0x6D}
 
 
 def test_metering_levels_use_embedded_channel_counts():
@@ -126,11 +147,12 @@ def test_metering_manager_logs_and_ignores_malformed_frame(caplog):
     application = SimpleNamespace(devices={"a32": device})
     manager = MeteringManager(application)
 
-    with caplog.at_level(logging.WARNING, logger="netaudio"):
+    with caplog.at_level(logging.DEBUG, logger="netaudio"):
         manager._on_metering_packet(METERING_FRAME[:-1], ("192.168.1.34", 8752))
 
     assert manager._latest_levels == {}
     assert "Ignoring malformed metering packet from 192.168.1.34" in caplog.text
+    assert all(record.levelno < logging.WARNING for record in caplog.records)
 
 
 @pytest.mark.asyncio

@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import json
-import logging
-import os
-import tempfile
 from collections import deque
 from collections.abc import Callable, Mapping
-from copy import deepcopy
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from netaudio.monitoring.model import (
@@ -43,15 +37,12 @@ from netaudio.monitoring.signals import (
     snapshot_from_device,
 )
 
-logger = logging.getLogger("netaudio")
-
 
 class MonitoringEventJournal:
-    """Daemon-owned, bounded history derived from already-observed device state."""
+    """Bounded in-memory history for monitoring views and explicit exports."""
 
     def __init__(
         self,
-        path: Path | None,
         *,
         max_events: int = DEFAULT_EVENT_HISTORY_LIMIT,
         thresholds: EventJournalThresholds | None = None,
@@ -59,7 +50,6 @@ class MonitoringEventJournal:
     ):
         if isinstance(max_events, bool) or not isinstance(max_events, int) or max_events <= 0:
             raise ValueError("max_events must be a positive integer")
-        self.path = path
         self.max_events = max_events
         self.thresholds = thresholds or EventJournalThresholds()
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
@@ -68,12 +58,10 @@ class MonitoringEventJournal:
         self._conditions: dict[tuple[str, str, str], bool] = {}
         self._next_sequence = 1
         self.issue_engine = IssueEngine(history_limit=max_events)
-        self._load()
 
     @classmethod
     def from_daemon_config(
         cls,
-        path: Path | None,
         daemon_config: Mapping[str, Any],
         *,
         wall_clock: Callable[[], datetime] | None = None,
@@ -82,31 +70,37 @@ class MonitoringEventJournal:
         if isinstance(raw_limit, bool) or not isinstance(raw_limit, int) or raw_limit <= 0:
             raise ValueError("daemon.event_history_limit must be a positive integer")
         return cls(
-            path,
             max_events=raw_limit,
             thresholds=EventJournalThresholds.from_daemon_config(daemon_config),
             wall_clock=wall_clock,
         )
 
+    def forget_device(self, identity: str) -> None:
+        self._snapshots.pop(identity, None)
+        self._conditions = {key: value for key, value in self._conditions.items() if key[0] != identity}
+        self.issue_engine.forget_device(identity)
+
     def observe_device(self, device, *, timestamp: str | None = None) -> list[MonitoringEvent]:
-        return self.observe_snapshot(snapshot_from_device(device), timestamp=timestamp)
+        return self._observe_normalized_snapshot(snapshot_from_device(device), timestamp=timestamp)
 
     def observe_snapshot(self, snapshot: Mapping[str, Any], *, timestamp: str | None = None) -> list[MonitoringEvent]:
-        current = _json_safe(dict(snapshot))
+        return self._observe_normalized_snapshot(_json_safe(dict(snapshot)), timestamp=timestamp)
+
+    def _observe_normalized_snapshot(
+        self, current: dict[str, Any], *, timestamp: str | None = None
+    ) -> list[MonitoringEvent]:
         identity = _device_identity(current)
         current["device_identity"] = identity
         previous = self._snapshots.get(identity)
-        self._snapshots[identity] = deepcopy(current)
+        self._snapshots[identity] = current
         observed_at = timestamp or self._timestamp()
-        issue_revision = self.issue_engine.revision
-        issue_transitions = self.issue_engine.observe_snapshot(
+        issue_transitions = self.issue_engine._observe_normalized_snapshot(
             current,
             timestamp=observed_at,
             emit_transitions=previous is not None,
         )
         if previous is None:
             self._prime_conditions(current)
-            self._persist()
             return []
 
         generated: list[MonitoringEvent] = []
@@ -118,8 +112,6 @@ class MonitoringEventJournal:
         self._observe_connection_health(previous, current, observed_at, generated)
         self._observe_interface_traffic(previous, current, observed_at, generated)
         self._append_issue_transitions(issue_transitions, generated)
-        if generated or self.issue_engine.revision != issue_revision:
-            self._persist()
         return generated
 
     def observe_disappearance(self, device_or_snapshot, *, timestamp: str | None = None) -> list[MonitoringEvent]:
@@ -133,8 +125,8 @@ class MonitoringEventJournal:
         if previous is not None and previous.get("online") is False:
             return []
         current["online"] = False
-        self._snapshots[identity] = deepcopy(current)
-        issue_transitions = self.issue_engine.observe_snapshot(
+        self._snapshots[identity] = current
+        issue_transitions = self.issue_engine._observe_normalized_snapshot(
             current,
             timestamp=timestamp or self._timestamp(),
             emit_transitions=previous is not None,
@@ -155,7 +147,6 @@ class MonitoringEventJournal:
         )
         generated = [event]
         self._append_issue_transitions(issue_transitions, generated)
-        self._persist()
         return generated
 
     def export_issues(self, **filters) -> dict[str, Any]:
@@ -215,7 +206,6 @@ class MonitoringEventJournal:
         if count == 0:
             return 0
         self._events.clear()
-        self._persist()
         return count
 
     def record_operation_transition(
@@ -309,7 +299,6 @@ class MonitoringEventJournal:
             persistence_request_acknowledgement=persistence_request_acknowledgement,
             persistence_confirmation=persistence_confirmation,
         )
-        self._persist()
         return event
 
     def _timestamp(self) -> str:
@@ -776,59 +765,3 @@ class MonitoringEventJournal:
                 self._conditions[(str(snapshot["device_identity"]), "interface_utilization", identity)] = (
                     utilization >= self.thresholds.interface_utilization_warning_percent
                 )
-
-    def _load(self) -> None:
-        if self.path is None:
-            return
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return
-        if not isinstance(payload, dict) or payload.get("schema_version") != EVENT_JOURNAL_SCHEMA_VERSION:
-            return
-        self.issue_engine.load_payload(payload.get("issues"))
-        raw_events = payload.get("events")
-        if not isinstance(raw_events, list):
-            return
-        loaded = []
-        for raw_event in raw_events:
-            if not isinstance(raw_event, dict):
-                continue
-            try:
-                loaded.append(MonitoringEvent.from_dict(raw_event))
-            except (KeyError, TypeError, ValueError):
-                continue
-        loaded.sort(key=lambda event: event.sequence)
-        self._events.extend(loaded[-self.max_events :])
-        highest_sequence = max((event.sequence for event in self._events), default=0)
-        raw_next_sequence = payload.get("next_sequence")
-        if isinstance(raw_next_sequence, int) and not isinstance(raw_next_sequence, bool):
-            self._next_sequence = max(highest_sequence + 1, raw_next_sequence, 1)
-        else:
-            self._next_sequence = highest_sequence + 1
-
-    def _persist(self) -> None:
-        if self.path is None:
-            return
-        payload = {
-            "schema_version": EVENT_JOURNAL_SCHEMA_VERSION,
-            "retention_limit": self.max_events,
-            "next_sequence": self._next_sequence,
-            "events": [event.to_dict() for event in self._events],
-            "issues": self.issue_engine.persistence_payload(),
-        }
-        temporary = None
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".event-journal-")
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(payload, stream, ensure_ascii=False, indent=2, sort_keys=True)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
-        except OSError as exception:
-            logger.warning("Could not save event journal: %s", exception)
-        finally:
-            if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)

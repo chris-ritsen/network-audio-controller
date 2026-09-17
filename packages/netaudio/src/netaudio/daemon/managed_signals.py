@@ -17,6 +17,7 @@ class ManagedSignalReceiver:
         self.metering = metering
         self.tasks = {}
         self.targets = {}
+        self._failed_targets = set()
 
     def reconcile(self):
         targets = {}
@@ -30,6 +31,7 @@ class ManagedSignalReceiver:
                 continue
             targets.setdefault(key, {})[identifier] = device.server_name
         self.targets = targets
+        self._failed_targets.intersection_update(targets)
         for key in self.tasks.keys() - targets.keys():
             self.tasks.pop(key).cancel()
         for key, devices in targets.items():
@@ -87,11 +89,16 @@ class ManagedSignalReceiver:
                 frame = await self._frame(reader, writer)
                 publication = DAPISession._parse("dapi_signal_presence_publication", frame)
                 if publication is not None:
+                    if key in self._failed_targets:
+                        logger.info("Managed signal updates recovered for %s", key)
+                        self._failed_targets.discard(key)
                     self.accept(key, publication, writer.get_extra_info("peername")[:2])
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError, RuntimeError, asyncio.IncompleteReadError, TimeoutError) as error:
-            logger.warning("Managed signal updates disconnected: %s", error)
+            log = logger.debug if key in self._failed_targets else logger.warning
+            log("Managed signal updates disconnected for %s: %s", key, error)
+            self._failed_targets.add(key)
         finally:
             if notification is not None:
                 notification.close()

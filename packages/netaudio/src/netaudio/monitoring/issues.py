@@ -296,12 +296,6 @@ class IssueEngine:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._active: dict[str, MonitoringIssue] = {}
         self._history: list[MonitoringIssue] = []
-        self._revision = 0
-
-    @property
-    def revision(self) -> int:
-        """Monotonic in-memory revision for durable issue-record mutations."""
-        return self._revision
 
     def observe_snapshot(
         self,
@@ -311,6 +305,16 @@ class IssueEngine:
         emit_transitions: bool = True,
     ) -> list[IssueTransition]:
         current = _json_safe(dict(snapshot))
+        return self._observe_normalized_snapshot(current, timestamp=timestamp, emit_transitions=emit_transitions)
+
+    def _observe_normalized_snapshot(
+        self,
+        current: dict[str, Any],
+        *,
+        timestamp: str,
+        emit_transitions: bool = True,
+    ) -> list[IssueTransition]:
+        """Retain an owned JSON-safe snapshot that the caller will no longer mutate."""
         identity = current.get("device_identity") or _device_identity(current)
         current["device_identity"] = identity
         identity = str(identity)
@@ -349,6 +353,11 @@ class IssueEngine:
             )
         )
         return transitions
+
+    def forget_device(self, identity: str) -> None:
+        self._snapshots.pop(identity, None)
+        for issue_id in self._issues_depending_on(identity):
+            self._active.pop(issue_id, None)
 
     def remove_snapshot(self, identity: str, *, timestamp: str, emit_transitions: bool = True) -> list[IssueTransition]:
         del timestamp, emit_transitions
@@ -403,37 +412,6 @@ class IssueEngine:
             "issues": issues,
         }
 
-    def persistence_payload(self) -> dict[str, Any]:
-        return {
-            "schema_version": ISSUE_SCHEMA_VERSION,
-            "history_limit": self.history_limit,
-            "active": [issue.to_dict() for issue in self._active.values()],
-            "history": [issue.to_dict() for issue in self._history],
-        }
-
-    def load_payload(self, value: Any) -> None:
-        if not isinstance(value, dict) or value.get("schema_version") != ISSUE_SCHEMA_VERSION:
-            return
-        active = self._load_records(value.get("active"), IssueLifecycleState.OPEN)
-        history = self._load_records(value.get("history"), IssueLifecycleState.RESOLVED)
-        self._active = {issue.issue_id: issue for issue in active}
-        self._history = history[-self.history_limit :]
-        self._revision = 0
-
-    @staticmethod
-    def _load_records(value: Any, state: IssueLifecycleState) -> list[MonitoringIssue]:
-        result = []
-        for raw in value if isinstance(value, list) else []:
-            if not isinstance(raw, dict):
-                continue
-            try:
-                issue = MonitoringIssue.from_dict(raw)
-            except (KeyError, TypeError, ValueError):
-                continue
-            if issue.state is state:
-                result.append(issue)
-        return result
-
     def _reconcile_subset(
         self,
         candidates: dict[str, MonitoringIssue],
@@ -448,7 +426,6 @@ class IssueEngine:
             previous = self._active.get(issue_id)
             if previous is None:
                 self._active[issue_id] = candidate
-                self._revision += 1
                 if emit_transitions:
                     transitions.append(IssueTransition(IssueTransitionKind.OPENED, None, candidate))
                 continue
@@ -460,7 +437,6 @@ class IssueEngine:
                 observation_state=IssueObservationState.OBSERVED,
             )
             self._active[issue_id] = current
-            self._revision += 1
             if emit_transitions and previous.material_signature() != current.material_signature():
                 transitions.append(IssueTransition(IssueTransitionKind.UPDATED, previous, current))
         for issue_id in sorted(relevant_issue_ids - set(candidates)):
@@ -479,7 +455,6 @@ class IssueEngine:
             )
             self._history.append(resolved)
             self._history = self._history[-self.history_limit :]
-            self._revision += 1
             if emit_transitions:
                 transitions.append(IssueTransition(IssueTransitionKind.RESOLVED, previous, resolved))
         return transitions
@@ -490,7 +465,6 @@ class IssueEngine:
             if previous is None or previous.observation_state is IssueObservationState.UNOBSERVABLE:
                 continue
             self._active[issue_id] = replace(previous, observation_state=IssueObservationState.UNOBSERVABLE)
-            self._revision += 1
 
     def _issues_depending_on(self, identity: str) -> set[str]:
         return {

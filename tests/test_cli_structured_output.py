@@ -268,3 +268,29 @@ def test_identify_json_lists_the_devices():
     result = _invoke_with_device(["device", "identify"], _daemon_device(), identify=identify)
     assert _json(result) == {"identified": ["avio"]}
     identify.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "environment", "expected"),
+    [
+        ([], {}, 30),
+        (["--log-level", "info"], {}, 20),
+        ([], {"NETAUDIO_LOG_LEVEL": "ERROR"}, 40),
+        (["--log-level", "INFO"], {"NETAUDIO_LOG_LEVEL": "ERROR"}, 20),
+        (["--debug"], {"NETAUDIO_LOG_LEVEL": "ERROR"}, 10),
+    ],
+)
+def test_cli_log_level_configuration(arguments, environment, expected, monkeypatch):
+    monkeypatch.setattr("netaudio.cli.settings.debug", False)
+    with patch("netaudio.cli.logging.basicConfig") as configure:
+        result = runner.invoke(app, [*arguments, "config", "path"], env=environment)
+    assert result.exit_code == 0, result.output
+    assert configure.call_args.kwargs["level"] == expected
+    assert "\x1b" not in configure.call_args.kwargs["format"]
+
+
+@pytest.mark.parametrize("level", ["garbage", "basicConfig", "getLogger"])
+def test_cli_rejects_invalid_log_levels(level):
+    result = runner.invoke(app, ["--log-level", level, "config", "path"])
+    assert result.exit_code == 2
+    assert "Invalid log level" in result.output

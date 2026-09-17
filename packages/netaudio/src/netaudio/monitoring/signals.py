@@ -10,17 +10,13 @@ from netaudio.monitoring.model import _json_safe
 
 def snapshot_from_device(device) -> dict[str, Any]:
     serialized = DanteDeviceSerializer.to_json(device)
-    subscriptions = []
-    for subscription in getattr(device, "subscriptions", ()) or ():
-        entry = DanteDeviceSerializer.subscription_to_json(subscription)
+    for subscription, entry in zip(device.subscriptions, serialized["subscriptions"]):
         rx_channel = getattr(subscription, "rx_channel", None)
         channel_number = getattr(rx_channel, "number", None)
         if not _unsigned_integer(channel_number):
             channel_number = getattr(subscription, "_netaudio_rx_channel_number", None)
         if _unsigned_integer(channel_number):
             entry["rx_channel_number"] = channel_number
-        subscriptions.append(entry)
-    serialized["subscriptions"] = subscriptions
     error = getattr(device, "error", None)
     serialized["error"] = None if error is None else str(error)
     serialized["failed_queries"] = sorted(str(item) for item in (getattr(device, "failed_queries", None) or ()))

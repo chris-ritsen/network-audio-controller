@@ -92,7 +92,7 @@ def observe(journal: MonitoringEventJournal, value: dict, second: int) -> list:
 
 
 def test_transition_produces_one_event_and_unchanged_samples_do_not_duplicate():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = snapshot()
     assert observe(journal, initial, 0) == []
 
@@ -107,7 +107,7 @@ def test_transition_produces_one_event_and_unchanged_samples_do_not_duplicate():
 
 
 def test_subscription_failure_and_recovery_are_distinct_observed_events():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = snapshot()
     observe(journal, initial, 0)
 
@@ -140,7 +140,7 @@ def test_subscription_failure_and_recovery_are_distinct_observed_events():
 
 
 def test_late_packet_counter_increase_and_reset_are_not_conflated():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = snapshot()
     observe(journal, initial, 0)
 
@@ -159,7 +159,7 @@ def test_late_packet_counter_increase_and_reset_are_not_conflated():
 
 
 def test_interface_error_counter_increase_and_reset_preserve_raw_measurements():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = snapshot()
     observe(journal, initial, 0)
 
@@ -182,7 +182,6 @@ def test_interface_error_counter_increase_and_reset_preserve_raw_measurements():
 
 def test_threshold_hysteresis_prevents_latency_event_storms():
     journal = MonitoringEventJournal(
-        path=None,
         thresholds=EventJournalThresholds(flow_latency_warning_ratio=0.8, flow_latency_recovery_ratio=0.6),
     )
     value = snapshot()
@@ -207,7 +206,7 @@ def test_threshold_hysteresis_prevents_latency_event_storms():
 
 
 def test_interface_utilization_hysteresis_uses_reported_rates_and_link_speed():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     value = snapshot()
     observe(journal, value, 0)
 
@@ -226,7 +225,7 @@ def test_interface_utilization_hysteresis_uses_reported_rates_and_link_speed():
 
 
 def test_unknown_or_missing_data_does_not_create_recovery_or_change_events():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     failed = snapshot()
     failed["subscriptions"][0]["status"] = {"state": "error", "severity": "error", "status": "NO_CONNECTION"}
     observe(journal, failed, 0)
@@ -249,9 +248,8 @@ def test_unknown_or_missing_data_does_not_create_recovery_or_change_events():
     assert resolved.raw["issue_kind"] == "subscription_failure"
 
 
-def test_bounded_eviction_is_deterministic_and_survives_reload(tmp_path):
-    path = tmp_path / "event-journal.json"
-    journal = MonitoringEventJournal(path, max_events=2)
+def test_bounded_history_is_evicted_and_starts_empty_after_restart():
+    journal = MonitoringEventJournal(max_events=2)
     value = snapshot()
     observe(journal, value, 0)
     for second, role in enumerate(("Leader", "Follower", "Leader"), start=1):
@@ -260,15 +258,11 @@ def test_bounded_eviction_is_deterministic_and_survives_reload(tmp_path):
         observe(journal, value, second)
 
     assert [event.sequence for event in journal.list_events()] == [3, 2]
-    persisted = json.loads(path.read_text())
-    assert [event["sequence"] for event in persisted["events"]] == [2, 3]
-
-    restored = MonitoringEventJournal(path, max_events=2)
-    assert [event.sequence for event in restored.list_events()] == [3, 2]
+    assert MonitoringEventJournal(max_events=2).list_events() == []
 
 
 def test_filtering_and_json_export_are_stable_and_preserve_raw_evidence():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     first = snapshot("first.local.")
     second = snapshot("second.local.")
     second["name"] = "Second"
@@ -298,7 +292,7 @@ def test_filtering_and_json_export_are_stable_and_preserve_raw_evidence():
 
 
 def test_local_clear_retains_transition_baseline_and_has_no_device_side_effect(tmp_path):
-    journal = MonitoringEventJournal(tmp_path / "events.json")
+    journal = MonitoringEventJournal()
     value = snapshot()
     observe(journal, value, 0)
     changed = deepcopy(value)
@@ -312,20 +306,30 @@ def test_local_clear_retains_transition_baseline_and_has_no_device_side_effect(t
     assert observe(journal, changed, 2) == []
 
 
-def test_unchanged_observation_and_empty_clear_do_not_rewrite_journal(tmp_path, monkeypatch):
-    journal = MonitoringEventJournal(tmp_path / "events.json")
+def test_repeated_observations_and_empty_clear_keep_history_empty():
+    journal = MonitoringEventJournal()
     value = snapshot()
-    observe(journal, value, 0)
-    writes = []
-    monkeypatch.setattr(journal, "_persist", lambda: writes.append(True))
-
+    assert observe(journal, value, 0) == []
     assert observe(journal, value, 1) == []
     assert journal.clear() == 0
-    assert writes == []
+    assert journal.list_events() == []
+
+
+def test_mutating_input_does_not_change_the_retained_observation():
+    journal = MonitoringEventJournal()
+    value = snapshot()
+    assert observe(journal, value, 0) == []
+
+    value["channels"]["receivers"]["1"]["muted"] = True
+    events = observe(journal, value, 1)
+
+    mute = next(event for event in events if event.kind is MonitoringEventKind.MUTE_STATE_CHANGED)
+    assert mute.previous_value is False
+    assert mute.current_value is True
 
 
 def test_device_disappearance_and_reappearance_are_deduplicated():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     value = snapshot()
     observe(journal, value, 0)
 
@@ -340,7 +344,7 @@ def test_device_disappearance_and_reappearance_are_deduplicated():
 
 
 def test_mute_leader_and_ptp_port_transitions_keep_subject_identity():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = snapshot()
     observe(journal, initial, 0)
     changed = deepcopy(initial)
@@ -375,7 +379,7 @@ def test_device_adapter_uses_serializer_state_and_keeps_observation_errors():
     device.error = RuntimeError("partial readback")
     device.failed_queries.add("clock status")
     device.ddm_status = {"errors": [{"message": "partial managed response"}]}
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     assert journal.observe_device(device, timestamp="2026-09-11T12:00:00Z") == []
 
     device.clock_role = "Leader"
@@ -388,7 +392,7 @@ def test_device_adapter_uses_serializer_state_and_keeps_observation_errors():
 
 
 def test_partial_receiver_inventory_cannot_report_latency_recovery(tmp_path):
-    journal = MonitoringEventJournal(tmp_path / "events.json")
+    journal = MonitoringEventJournal()
     value = snapshot()
     value["receiver_flow_completeness"] = "complete"
     observe(journal, value, 0)
@@ -401,3 +405,23 @@ def test_partial_receiver_inventory_cannot_report_latency_recovery(tmp_path):
     generated = observe(journal, partial, 2)
     assert all(event.kind is not MonitoringEventKind.RECEIVER_FLOW_LATENCY_RECOVERED for event in generated)
     assert partial["receiver_flow_status_page"]["result_code"] == 0x8112
+
+
+def test_forgetting_releases_baselines_and_current_issues_but_keeps_bounded_events():
+    journal = MonitoringEventJournal(max_events=2)
+    current = snapshot()
+    journal.observe_snapshot(current)
+    current["channels"]["receivers"]["1"]["muted"] = True
+    current["subscriptions"][0]["status"] = {"state": "error", "severity": "error", "code": 15}
+    journal.observe_snapshot(current)
+    events = journal.list_events()
+    assert events
+    assert journal.issue_engine.list_issues(state="open")
+    identity = current["server_name"]
+    journal.forget_device(identity)
+    assert identity not in journal._snapshots
+    assert identity not in journal.issue_engine._snapshots
+    assert not any(key[0] == identity for key in journal._conditions)
+    assert journal.issue_engine.list_issues(state="open") == []
+    assert journal.list_events() == events
+    assert journal.observe_snapshot(current) == []

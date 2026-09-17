@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -75,3 +76,18 @@ async def test_signal_tasks_are_cancelled_when_context_disappears_and_on_stop():
     await service.stop()
     assert not service.tasks
     assert not service.targets
+
+
+@pytest.mark.asyncio
+async def test_repeated_signal_failures_warn_once_per_retained_target(caplog):
+    service, device, key = receiver()
+    service.application.managed_transport = Mock(side_effect=OSError("unreachable"))
+    with caplog.at_level(logging.DEBUG, logger="netaudio"):
+        await service._run(key, device)
+        await service._run(key, device)
+        device.online = False
+        service.reconcile()
+        assert not service._failed_targets
+        await service._run(key, device)
+    records = [record for record in caplog.records if "Managed signal updates disconnected" in record.message]
+    assert [record.levelno for record in records] == [logging.WARNING, logging.DEBUG, logging.WARNING]

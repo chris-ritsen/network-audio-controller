@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import collections
 import logging
 import socket
 import time
@@ -19,7 +18,6 @@ from netaudio.dante.service import DanteMulticastService
 logger = logging.getLogger("netaudio")
 
 CACHE_MAX_AGE = 2.0
-HISTORY_MAX_SAMPLES = 3600
 BROADCAST_INTERVAL = 0.05
 METERING_ABANDON_SECONDS = 60.0
 METERING_KEEPALIVE_SECONDS = 3.0
@@ -35,7 +33,6 @@ class MeteringManager:
         self._detailed_levels: dict[str, dict] = {}
         self._signal_presence_levels: dict[str, dict] = {}
         self._latest_levels: dict[str, dict] = {}
-        self._history: dict[str, collections.deque] = {}
         self._events: dict[str, asyncio.Event] = {}
         self._listener: DanteMulticastService | None = None
         self._recovery_task = None
@@ -110,11 +107,6 @@ class MeteringManager:
         if self._is_fresh(passive, now):
             return passive
         return None
-
-    def _append_history(self, server_name: str, sample: dict) -> None:
-        if server_name not in self._history:
-            self._history[server_name] = collections.deque(maxlen=HISTORY_MAX_SAMPLES)
-        self._history[server_name].append(sample)
 
     def _server_name_for_ip(self, ip: str) -> str | None:
         fallback = None
@@ -287,7 +279,6 @@ class MeteringManager:
         self._detailed_levels.clear()
         self._signal_presence_levels.clear()
         self._latest_levels.clear()
-        self._history.clear()
         self._events.clear()
 
         if self._listener:
@@ -457,7 +448,7 @@ class MeteringManager:
         try:
             levels = parse_metering_levels(data)
         except core.NetaudioCoreError as error:
-            logger.warning(f"Ignoring malformed metering packet from {source_ip}: {error}")
+            logger.debug("Ignoring malformed metering packet from %s: %s", source_ip, error)
             return
         now = time.monotonic()
         sample = {
@@ -471,7 +462,6 @@ class MeteringManager:
         }
         self._detailed_levels[server_name] = sample
         self._latest_levels[server_name] = sample
-        self._append_history(server_name, sample)
 
         if self._persistent_refs.get(server_name):
             self._dirty_devices.add(server_name)
@@ -534,7 +524,6 @@ class MeteringManager:
             return
 
         self._latest_levels[server_name] = sample
-        self._append_history(server_name, sample)
 
         self._dirty_devices.add(server_name)
 

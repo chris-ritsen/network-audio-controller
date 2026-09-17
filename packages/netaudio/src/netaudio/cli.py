@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -168,7 +169,7 @@ def _global_options(
         envvar="NETAUDIO_CONTEXT",
     ),
     log_level: str = typer.Option(
-        "WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR).", envvar="NETAUDIO_LOG_LEVEL"
+        "WARNING", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).", envvar="NETAUDIO_LOG_LEVEL"
     ),
     debug: bool = typer.Option(False, "--debug", help="Shorthand for --log-level DEBUG.", envvar="NETAUDIO_DEBUG"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show all device fields.", envvar="NETAUDIO_VERBOSE"),
@@ -227,13 +228,13 @@ def _global_options(
 
     effective_level = "DEBUG" if debug else log_level.upper()
     numeric_level = getattr(logging, effective_level, None)
-    if numeric_level is None:
+    if not isinstance(numeric_level, int):
         raise typer.BadParameter(f"Invalid log level: {log_level}")
 
     if dissect and numeric_level > logging.INFO:
         numeric_level = logging.INFO
 
-    if no_color:
+    if no_color or not sys.stderr.isatty():
         logging.basicConfig(level=numeric_level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     else:
         handler = logging.StreamHandler()
