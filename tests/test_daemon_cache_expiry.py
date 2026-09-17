@@ -7,6 +7,7 @@ import pytest
 from netaudio.common.app_config import settings as app_settings
 from netaudio.daemon.server import NetaudioDaemon, _probe_device, _stale_device_minutes_from_config
 from netaudio.dante.device import DanteDevice
+from netaudio.monitoring import MonitoringEventJournal
 
 
 def _daemon(devices):
@@ -22,6 +23,7 @@ def _daemon(devices):
     daemon._background_tasks = set()
     daemon._last_status_field_refresh_monotonic = time.monotonic()
     daemon.running = True
+    daemon.event_journal = MonitoringEventJournal()
     daemon.state = SimpleNamespace()
     return daemon
 

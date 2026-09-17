@@ -1,34 +1,27 @@
 from __future__ import annotations
 
-import json
-import logging
-import os
-import tempfile
+from collections import OrderedDict
 from copy import deepcopy
-from pathlib import Path
-
-logger = logging.getLogger("netaudio")
 
 
 class NetworkStatusCache:
     """Last-known interface observations, scoped to a discovered control endpoint."""
 
-    def __init__(self, path: Path):
-        self.path = path
-        try:
-            records = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            records = {}
-        self.records = records if isinstance(records, dict) else {}
+    def __init__(self, *, max_devices: int = 256):
+        if isinstance(max_devices, bool) or not isinstance(max_devices, int) or max_devices <= 0:
+            raise ValueError("network cache max_devices must be a positive integer")
+        self.max_devices = max_devices
+        self.records: OrderedDict[tuple, dict] = OrderedDict()
 
     @staticmethod
     def _key(device):
-        return json.dumps([device.server_name, str(device.ipv4), device._arc_port()])
+        return device.server_name, str(device.ipv4), device._arc_port()
 
     def restore(self, device):
         record = self.records.get(self._key(device))
         if not isinstance(record, dict):
             return False
+        self.records.move_to_end(self._key(device))
         speed = record.get("link_speed_mbps")
         interfaces = record.get("interfaces")
         if isinstance(speed, bool) or not isinstance(speed, int) or speed < 0:
@@ -48,23 +41,12 @@ class NetworkStatusCache:
         speed = device.link_speed_mbps
         if isinstance(speed, bool) or not isinstance(speed, int) or speed < 0 or device.interfaces is None:
             return
-        record = {"link_speed_mbps": speed, "interfaces": deepcopy(device.interfaces)}
+        record = {"link_speed_mbps": speed, "interfaces": device.interfaces}
         key = self._key(device)
         if self.records.get(key) == record:
+            self.records.move_to_end(key)
             return
-        records = {**self.records, key: record}
-        temporary = None
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".network-status-")
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                json.dump(records, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
-            self.records = records
-        except OSError as exception:
-            logger.warning("Could not save network status cache: %s", exception)
-        finally:
-            if temporary is not None and os.path.exists(temporary):
-                os.unlink(temporary)
+        self.records[key] = deepcopy(record)
+        self.records.move_to_end(key)
+        while len(self.records) > self.max_devices:
+            self.records.popitem(last=False)

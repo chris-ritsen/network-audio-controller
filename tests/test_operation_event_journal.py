@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -34,7 +33,7 @@ def operation_events(journal: MonitoringEventJournal):
 
 @pytest.mark.asyncio
 async def test_acknowledgement_without_readback_is_partial_and_never_confirmed():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     handle = await recorder.begin_operation(target, "subscribe_external_rtp", {"receiver_channel_ids": [1]})
@@ -60,7 +59,7 @@ async def test_acknowledgement_without_readback_is_partial_and_never_confirmed()
 
 @pytest.mark.asyncio
 async def test_operation_evidence_is_redacted_and_bounded_before_persistence():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     handle = await recorder.begin_operation(
@@ -97,7 +96,7 @@ async def test_operation_evidence_is_redacted_and_bounded_before_persistence():
 
 @pytest.mark.asyncio
 async def test_storage_acknowledgement_does_not_claim_persistence_confirmation():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     handle = await recorder.begin_operation(target, "store_current_configuration", {})
@@ -120,7 +119,7 @@ async def test_storage_acknowledgement_does_not_claim_persistence_confirmation()
 
 @pytest.mark.asyncio
 async def test_unrelated_topology_evidence_does_not_make_a_confirmed_operation_inconsistent():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     target.clock_role = "Follower"
@@ -149,7 +148,7 @@ async def test_unrelated_topology_evidence_does_not_make_a_confirmed_operation_i
 
 @pytest.mark.asyncio
 async def test_rejected_and_unobservable_results_have_distinct_terminal_phases():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     rejected = await recorder.begin_operation(target, "set_unicast_performance", {"frames": 4})
@@ -179,7 +178,7 @@ async def test_rejected_and_unobservable_results_have_distinct_terminal_phases()
 
 @pytest.mark.asyncio
 async def test_preset_children_share_parent_correlation_and_unchanged_actions_are_summary_only():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     application = SimpleNamespace(
@@ -218,7 +217,7 @@ async def test_preset_children_share_parent_correlation_and_unchanged_actions_ar
 
 @pytest.mark.asyncio
 async def test_preset_summary_counts_actions_instead_of_grouped_transport_requests():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     recorder = MutationAuditRecorder.from_journal(journal)
     target = device()
     advertised = {
@@ -281,9 +280,8 @@ async def test_preset_summary_counts_actions_instead_of_grouped_transport_reques
 
 
 @pytest.mark.asyncio
-async def test_persisted_transitions_are_published_once_and_reload_after_restart(tmp_path):
-    path = tmp_path / "event-journal.json"
-    journal = MonitoringEventJournal(path)
+async def test_retained_transitions_are_published_once_and_restart_empty():
+    journal = MonitoringEventJournal()
     publish = AsyncMock()
     recorder = MutationAuditRecorder.from_journal(journal, publish=publish)
     target = device()
@@ -301,39 +299,8 @@ async def test_persisted_transitions_are_published_once_and_reload_after_restart
     published = [call.args[0] for call in publish.await_args_list]
     assert [event.sequence for event in published] == [event.sequence for event in persisted]
     assert len({event.sequence for event in published}) == len(persisted)
-    restored = MonitoringEventJournal(path)
-    assert [event.to_dict() for event in operation_events(restored)] == [event.to_dict() for event in persisted]
-
-
-def test_schema_v1_events_without_operation_fields_still_load(tmp_path):
-    path = tmp_path / "event-journal.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "events": [
-                    {
-                        "sequence": 1,
-                        "timestamp": "2026-09-12T12:00:00Z",
-                        "kind": "clock_role_changed",
-                        "severity": "info",
-                        "device_identity": "receiver.local.",
-                        "device_name": "Receiver",
-                        "server_name": "receiver.local.",
-                        "previous_value": "Follower",
-                        "current_value": "Leader",
-                        "raw": {},
-                        "observation_source": "device_clock_status",
-                        "derivation_status": "observed",
-                    }
-                ],
-            }
-        )
-    )
-
-    [event] = MonitoringEventJournal(path).list_events()
-    assert event.operation_id is None
-    assert event.kind is MonitoringEventKind.CLOCK_ROLE_CHANGED
+    restored = MonitoringEventJournal()
+    assert operation_events(restored) == []
 
 
 @pytest.mark.asyncio
@@ -450,7 +417,7 @@ async def test_application_configuration_surfaces_delegate_to_one_recorder(monke
 
 @pytest.mark.asyncio
 async def test_application_validation_failure_is_a_terminal_journal_transition():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     application = DanteApplication.__new__(DanteApplication)
     application.operation_recorder = MutationAuditRecorder.from_journal(journal)
     target = device()

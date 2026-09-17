@@ -30,7 +30,7 @@ def journal_snapshot(role: str = "Follower") -> dict:
 
 @pytest.mark.asyncio
 async def test_http_event_journal_filters_and_clear_is_local_only():
-    journal = MonitoringEventJournal(path=None)
+    journal = MonitoringEventJournal()
     initial = journal_snapshot()
     journal.observe_snapshot(initial, timestamp="2026-09-11T12:00:00Z")
     changed = deepcopy(initial)

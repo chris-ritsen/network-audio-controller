@@ -1,3 +1,4 @@
+import logging
 from collections import deque
 from dataclasses import replace
 
@@ -911,3 +912,18 @@ def test_managed_self_subscription_resolves_to_its_own_transmitter():
     assert subscription["tx_device"] == record["name"]
     assert subscription["tx_channel"] == record["channels"]["transmitters"]["1"]["name"]
     assert subscription["status"]["state"] == "connected"
+
+
+@pytest.mark.asyncio
+async def test_inventory_outage_warns_once_and_rearms_after_recovery(caplog):
+    failed = InventoryResult(data=None, errors=(), raw_data=None)
+    service = _service(FakeClient(failed, failed, _result(domains=()), failed), FakeClock())
+    with caplog.at_level(logging.DEBUG, logger="netaudio"):
+        assert await service.refresh() is False
+        assert await service.refresh() is False
+        assert await service.refresh() is True
+        assert await service.refresh() is False
+    records = [record for record in caplog.records if "Managed API inventory" in record.message]
+    assert [record.levelno for record in records] == [
+        logging.WARNING, logging.DEBUG, logging.INFO, logging.WARNING,
+    ]

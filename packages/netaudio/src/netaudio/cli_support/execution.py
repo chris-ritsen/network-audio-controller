@@ -82,10 +82,9 @@ async def _discover_with_application(application: DanteApplication) -> dict[str,
             configure_recorder(remote_recorder(append_event))
         application.attach_devices(devices)
         return devices
-    from netaudio.common.config_loader import default_config_path, load_daemon_config
+    from netaudio.common.config_loader import load_daemon_config
 
     journal = MonitoringEventJournal.from_daemon_config(
-        default_config_path().parent / "event-journal.json",
         load_daemon_config(),
     )
     recorder = MutationAuditRecorder.from_journal(journal)

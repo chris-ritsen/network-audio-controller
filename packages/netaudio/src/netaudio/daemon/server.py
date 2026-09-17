@@ -140,9 +140,8 @@ class NetaudioDaemon(DanteDiscoveryMixin):
             session_id=self._session_id,
         )
         self.state = self.application.state
-        self.network_status_cache = NetworkStatusCache(default_config_path().parent / "network-status.json")
+        self.network_status_cache = NetworkStatusCache()
         self.event_journal = MonitoringEventJournal.from_daemon_config(
-            default_config_path().parent / "event-journal.json",
             daemon_config,
         )
         self.zeroconf: AsyncZeroconf | None = None
@@ -717,6 +716,7 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
     def forget_device(self, server_name: str) -> None:
         device = self.devices.get(server_name)
+        self.event_journal.forget_device(server_name)
         self._unreachable_devices_reported.discard(server_name)
         self.clear_offline_candidate(server_name)
         self.application.unregister_device(server_name)

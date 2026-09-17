@@ -173,7 +173,7 @@ class DaemonHTTPServer(
         self.managed_controls = ManagedDeviceControls(application)
         self.managed_inventory = managed_inventory
         self.refresh_discovery = refresh_discovery
-        self.event_journal = event_journal or MonitoringEventJournal(path=None)
+        self.event_journal = event_journal or MonitoringEventJournal()
         self.operation_recorder = MutationAuditRecorder.from_journal(
             self.event_journal,
             publish=self.publish_journal_event,
@@ -548,7 +548,7 @@ class DaemonHTTPServer(
         except asyncio.CancelledError:
             raise
         except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.warning(f"SSE client writer stopped: {exception}")
+            logger.debug(f"SSE client writer stopped: {exception}")
         finally:
             self._drop_sse_client(client, "writer stopped", cancel_sender=False)
 
@@ -567,7 +567,7 @@ class DaemonHTTPServer(
         try:
             client.writer.close()
         except (OSError, RuntimeError) as exception:
-            logger.warning(f"SSE client close error: {exception}", exc_info=True)
+            logger.debug(f"SSE client close error: {exception}", exc_info=True)
 
     async def _close_sse_client(self, client: _SseClient, reason: str):
         self._drop_sse_client(client, reason)
@@ -582,7 +582,7 @@ class DaemonHTTPServer(
                 SSE_CLOSE_TIMEOUT_SECONDS,
             )
         except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-            logger.warning(f"SSE client shutdown ended with {exception}")
+            logger.debug(f"SSE client shutdown ended with {exception}")
 
     async def _bonjour_monitor_loop(self):
         self._last_bonjour_probe_wall_time = time.time()
@@ -765,7 +765,7 @@ class DaemonHTTPServer(
             await self._route(method, path, body, writer, reader, headers)
 
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError) as exception:
-            logger.warning(f"Daemon HTTP API peer disconnected: {exception}")
+            logger.debug(f"Daemon HTTP API peer disconnected: {exception}")
         except Exception:
             logger.warning("Daemon HTTP API connection error", exc_info=True)
 
@@ -1055,7 +1055,7 @@ class DaemonHTTPServer(
                 if closed_task in done or not read_task.result():
                     break
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as exception:
-            logger.warning(f"SSE connection ended with {exception}")
+            logger.debug(f"SSE connection ended with {exception}")
         finally:
             if client is not None:
                 await self._close_sse_client(client, "peer disconnected")
@@ -1064,4 +1064,4 @@ class DaemonHTTPServer(
                     writer.close()
                     await _bounded(writer.wait_closed(), SSE_CLOSE_TIMEOUT_SECONDS)
                 except (asyncio.TimeoutError, BrokenPipeError, ConnectionResetError, OSError) as exception:
-                    logger.warning(f"SSE writer close ended with {exception}")
+                    logger.debug(f"SSE writer close ended with {exception}")
