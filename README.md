@@ -3,21 +3,21 @@
 NetAudio is an unofficial Dante Controller alternative for discovering,
 routing, configuring, and monitoring Dante network audio devices. The project
 provides open-source command-line tools, a web interface, a persistent daemon,
-and a protocol library for Linux, macOS, and Windows, alongside a native
-**iPhone and iPad app for iOS and iPadOS**.
+and a protocol library for Linux, macOS, and Windows.
 
-**NetAudio is a native Dante Controller alternative for iOS and iPadOS,
+NetAudio is a native Dante Controller alternative for iOS and iPadOS,
 available now for iPhone and iPad through
-[TestFlight](https://testflight.apple.com/join/GcuDerST).** The app communicates
-directly with Dante devices for live discovery, audio subscription routing, device and channel configuration, live device metering, clock and
-status monitoring, and diagnostics. Local direct-device control runs on the
+[TestFlight](https://testflight.apple.com/join/GcuDerST). The app communicates
+directly with Dante devices for live discovery, audio subscription routing,
+device and channel configuration, live device metering, clock and status
+monitoring, and diagnostics. Local direct-device control runs on the
 phone or tablet without a separate computer, remote desktop session, or NetAudio
 daemon. The app also supports Dante Domain Manager (DDM) networks and connections
 to a NetAudio daemon.
 
 [Website and iOS app](https://netaudio.app/) ·
 [Install the CLI and web interface](#installation) ·
-[Documentation](#documentation)
+[Quick start](#quick-start)
 
 ## Interfaces and architecture
 
@@ -58,8 +58,7 @@ three platforms, including native libraries and installed Python packages.
   scripts and other control systems.
 
 Device capabilities and the selected control transport determine which
-operations are available. The linked documentation describes specific support,
-including multicast flow authoring and managed-device operations.
+operations are available.
 
 ## Installation
 
@@ -115,20 +114,60 @@ netaudio -n avio-usb-1 device show
 netaudio --json -n avio-usb-1 device show
 ```
 
-Use your device's name in place of `avio-usb-1`. See the
-[CLI guide](packages/netaudio/README.md#selecting-devices-and-channels) for
-selection syntax, channel references, subscriptions, and presets. Generate the
-command reference with `make man` from a source checkout.
+Use your device's name in place of `avio-usb-1`. Put device filters before the
+command: `-n` matches names (including quoted patterns such as `'avio-*'`),
+`-s` matches server names, `-m` matches MAC addresses, and `--host` selects an
+IP address.
 
-## Documentation
+### Channels and routing
 
-- [Daemon, HTTPS, and DDM operation permissions](docs/daemon.md)
-- [CLI device selection and command examples](packages/netaudio/README.md)
-- [External RTP discovery and interface statistics](docs/external-rtp-and-interface-statistics.md)
-- [Monitoring event journal](docs/monitoring-event-journal.md)
-- [Transmit-flow lifecycle and supported operations](docs/transmit-flow-lifecycle.md)
-- [Flow performance and configuration storage](docs/performance-configuration.md)
-- [Presets and monitoring issues](docs/presets-and-issues.md)
+Channels use `tx:NUMBER` or `rx:NUMBER`; a channel name can replace the number.
+For example, rename input 1 and connect output 1 of `stagebox` to it:
+
+```bash
+netaudio -n avio-usb-1 channel name rx:1 vocal-in
+netaudio subscription add --tx tx:1@stagebox --rx rx:1@avio-usb-1
+```
+
+Remove that subscription with:
+
+```bash
+netaudio subscription remove --rx rx:1@avio-usb-1
+```
+
+### Presets
+
+Save selected devices, then preview the saved settings before applying them:
+
+```bash
+netaudio -n 'avio-*' preset save stage
+netaudio preset show stage
+netaudio preset load stage
+```
+
+`preset show` reads current device state but makes no changes. Presets are XML
+files in `presets/` beside the configuration file; use `preset list` to see them,
+or supply an explicit `.xml` path. Saving over an existing file requires
+`--force`.
+
+### Configuration and troubleshooting
+
+`netaudio config path` shows which configuration file is used. For a DDM
+network, `netaudio ddm login --default` guides you through connecting to a
+server and choosing a domain.
+
+Use `netaudio daemon status` to check the daemon and `netaudio daemon logs -f`
+to follow its logs. Logs default to warnings and errors. To run in the
+foreground with detailed logging, stop the background daemon first:
+
+```bash
+netaudio daemon stop
+netaudio --log-level DEBUG daemon run
+```
+
+The browser's Events page keeps recent events and issues in memory. Restarting
+the daemon clears them. Use `netaudio events export --file events.json` to save
+the current event history before restarting.
 
 ## Development
 
