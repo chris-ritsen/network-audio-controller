@@ -418,7 +418,7 @@ async def run_external_flow_list(application, devices, listen_seconds: float) ->
         ],
         rows,
         json_data=application.external_flows.to_dict(),
-        empty_message="No SAP/SDP external audio flows discovered.",
+        empty_message="No advertised AES67 audio streams found.",
     )
 
 
@@ -429,10 +429,10 @@ def external_flow_list(
         "--listen-seconds",
         min=0.0,
         max=60.0,
-        help="Time to listen for SAP announcements before printing the inventory.",
+        help="Seconds to wait for stream announcements before showing the results.",
     ),
 ):
-    """Listen for SAP/SDP announcements and list external audio flows."""
+    """Discover advertised AES67 audio streams."""
     run_command(run_external_flow_list, listen_seconds, discover_devices=False)
 
 
