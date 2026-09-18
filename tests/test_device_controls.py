@@ -1,6 +1,5 @@
 """Synthetic observations based on the specification; no device effects claimed."""
 
-import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
@@ -9,7 +8,7 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.panel_plan import plan_panel
-from netaudio.dante.panel_state import observe_panel, panel_family, panel_snapshot
+from netaudio.dante.panel_state import observation_time, observe_panel, panel_family, panel_snapshot
 from netaudio.presets.device_controls import capture_device_controls, validate_device_controls
 from netaudio.monitoring import IssueEngine, IssueKind
 from tests.status_test_support import application_with_device
@@ -31,7 +30,7 @@ def observation(d, category, value, age=0):
     observe_panel(
         d,
         {
-            "observed_at_unix": time.time() - age,
+            "observed_at_unix": observation_time() - age,
             "record_revision": 0x738,
             "requester": 0,
             "sequence": 5,
@@ -89,7 +88,7 @@ def synthetic_peer(app, d, values, *, delayed=0, wrong=False, revoke=False):
                 "requester": 99 if wrong else spec["requester"],
                 "sequence": spec["sequence"],
                 "record_revision": 0x738,
-                "observed_at_unix": time.time(),
+                "observed_at_unix": observation_time(),
                 "observations": [{"category": category, "value": deepcopy(values[category])}],
             }
             if delayed and reads <= delayed and category == "bluetooth_discovery":
@@ -289,7 +288,9 @@ def test_malformed_observation_retains_raw_and_marks_existing_state_unavailable(
 def test_video_issue_missing_observation_does_not_resolve():
     _, d = device("dante_av")
     observation(d, "video_channel", {"status_code": 52, "direction": 0, "observed_hdcp_version": None})
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.fromtimestamp(
+        d.device_controls["observations"]["video_channel"]["observed_at_unix"], timezone.utc
+    ).isoformat()
     snap = {"device_identity": "test", "server_name": "test", "online": True, "device_controls": panel_snapshot(d)}
     engine = IssueEngine()
     transitions = engine.observe_snapshot(snap, timestamp=now)
@@ -374,7 +375,7 @@ def test_journal_does_not_copy_bluetooth_peer_identity():
     obs = {
         "fresh": True,
         "available": True,
-        "observed_at_unix": time.time(),
+        "observed_at_unix": observation_time(),
         "value": {"state": 1, "peer_name": "private"},
     }
     before["device_controls"] = {"observations": {"bluetooth_connection": obs}}
@@ -413,3 +414,23 @@ def test_exact_advertised_model_selects_default_panel_but_never_overrides_panel_
     assert panel_family(d) == "dante_av"
     d.platform_versions_record["plugin_identifiers"] = ["unsupported"]
     assert panel_family(d) is None
+
+
+def test_panel_observation_uses_journal_clock_resolution(monkeypatch, load_fixture):
+    from netaudio.dante import panel_state
+    from netaudio.dante.services.notification_packet_handlers import _parse_panel_status
+
+    when = datetime(2026, 9, 18, 12, 30, 1, 123456, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return when
+
+    monkeypatch.setattr(panel_state, "datetime", FixedDateTime)
+    _, d = device()
+    parsed = _parse_panel_status(load_fixture("avio-bt-1_bluetooth_status_connected.bin"), str(d.ipv4), d)
+    assert parsed.status["observed_at_unix"] == when.timestamp()
+    observe_panel(d, parsed.status)
+    assert panel_snapshot(d)["observations"]["bluetooth_connection"]["fresh"]
+    assert datetime.fromisoformat(when.isoformat()).timestamp() - parsed.status["observed_at_unix"] == 0
