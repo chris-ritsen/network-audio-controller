@@ -233,7 +233,7 @@ pub fn build_set_gain_level(
     gain_level: u8,
     is_input: bool,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if channel_number == 0 {
+    if !(1..=2).contains(&channel_number) {
         return Err(NetaudioError::InvalidChannel);
     }
     if !(MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL).contains(&gain_level) {
@@ -252,8 +252,8 @@ pub fn build_set_gain_level(
     body.extend_from_slice(&12u16.to_be_bytes());
     body.extend_from_slice(&16u16.to_be_bytes());
     body.extend_from_slice(&direction.to_be_bytes());
-    body.extend_from_slice(&0u32.to_be_bytes());
-    body.extend_from_slice(&channel_number.to_be_bytes());
+    body.extend_from_slice(&0u16.to_be_bytes());
+    body.extend_from_slice(&(1u32 << (channel_number - 1)).to_be_bytes());
     body.extend_from_slice(&u32::from(gain_level).to_be_bytes());
     settings_packet(message_id, host_mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &body)
 }
@@ -367,14 +367,6 @@ pub fn build_capability_partition_export(
         CAPABILITY_PARTITION_EXPORT_TAG,
         CAPABILITY_PARTITION_EXPORT_SELECTOR,
     )
-}
-
-pub fn build_bluetooth_status(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
-    let tail = [
-        0x10, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x0c, 0x0a, 0x0a, 0x10, 0x09, 0x1a,
-        0x06, 0x0a, 0x04, 0x0a, 0x02, 0x08, 0x01,
-    ];
-    settings_packet(0x0000, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
 }
 
 pub fn build_make_model(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {

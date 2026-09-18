@@ -3,9 +3,20 @@ use super::*;
 fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
     use crate::responses;
     match kind {
+        "panel_status" => serialize_optional(
+            kind,
+            crate::device_controls::parse_panel_status(bytes, None),
+        ),
+        "panel_bluetooth_status" => serialize_optional(
+            kind,
+            crate::device_controls::parse_panel_status(bytes, Some("bluetooth")),
+        ),
+        "panel_video_status" => serialize_optional(
+            kind,
+            crate::device_controls::parse_panel_status(bytes, Some("dante_av")),
+        ),
         "aes67_configured" => serialize_optional(kind, responses::parse_aes67_configured(bytes)),
         "aes67_status" => serialize_optional(kind, responses::parse_aes67_status(bytes)),
-        "bluetooth_status" => serialize_optional(kind, responses::parse_bluetooth_status(bytes)),
         "channel_audio_metadata" => {
             serialize_optional(kind, crate::parser::parse_channel_audio_metadata(bytes))
         }

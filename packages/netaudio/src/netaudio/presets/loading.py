@@ -758,6 +758,7 @@ async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> 
             actions.append(
                 _unsupported(
                     "codec_gain",
+                    "device_controls",
                     gain,
                     f"device reports a {device_type} gain adapter",
                     current=current,
@@ -992,6 +993,23 @@ async def _plan_device_actions(application, matched: MatchedPresetDevice) -> Pre
     }
     if "preferred_leader" in config and not getattr(matched.device, "requires_managed_control", False):
         clock_changes["preferred_leader"] = config["preferred_leader"]
+    for category, requested in config.get("device_controls", {}).get("settings", {}).items():
+        if "pair" in category.lower():
+            actions.append(_unsupported("device_control", requested, "Pairing clearing is excluded from presets."))
+            continue
+        try:
+            plan = await application.plan_device_control(matched.device, category, requested)
+            actions.append(
+                PresetAction(
+                    "device_control",
+                    {"category": category, "requested": requested},
+                    PresetActionState(plan["action"]),
+                    current=plan.get("before"),
+                    reason=plan.get("reason"),
+                )
+            )
+        except READBACK_ERRORS as exc:
+            actions.append(_unavailable("device_control", {"category": category, "requested": requested}, str(exc)))
     if clock_changes:
         actions.append(await _plan_clock_configuration(application, matched.device, clock_changes))
     if "transmitter_channel_names" in config:
@@ -1299,6 +1317,19 @@ async def _apply_sample_rate_pullup(
             f"sample rate pull-up {action.payload}: FAILED (device reports {effective!r})",
             failed=True,
         )
+
+
+async def _apply_device_control(context, entry, action):
+    try:
+        result = await context.application.apply_device_control(entry.device, **action.payload)
+        confirmed = result["effective_state_confirmed"]
+        context.report.record(
+            entry.device_name,
+            f"{action.payload['category']}: {'verified' if confirmed else 'not confirmed'}",
+            failed=not confirmed,
+        )
+    except MUTATION_ERRORS as exc:
+        context.report.record(entry.device_name, f"device control: FAILED ({exc})", failed=True)
 
 
 async def _apply_clock_configuration(
@@ -1636,6 +1667,7 @@ async def _apply_interface(context: PresetLoadContext, entry: PresetDeviceAction
 
 
 ACTION_HANDLERS: dict[str, ActionHandler] = {
+    "device_control": _apply_device_control,
     "clock_configuration": _apply_clock_configuration,
     "codec_gain": _apply_codec_gain,
     "device_name": _apply_device_name,

@@ -41,7 +41,6 @@ from netaudio.dante.conmon_export import (
     ConmonExportUnavailableError,
 )
 from netaudio.dante.events import DanteEventDispatcher
-from netaudio.dante.gain import gain_adapter_from_codec_status
 from netaudio.dante.interface_statistics import InterfaceStatisticsErrorBaselines
 from netaudio.dante.service import DanteMulticastService
 from netaudio.dante.services.notification_packet_handlers import NotificationPacketHandlers
@@ -76,7 +75,6 @@ __all__ = [
     "mutate_and_wait_for_capability_value",
     "mutate_and_wait_for_clear_configuration_status",
     "request_and_wait_for_conmon_export",
-    "send_and_wait_for_gain_adapter",
 ]
 
 logger = logging.getLogger("netaudio")
@@ -135,69 +133,6 @@ class ConmonExportWaiter(Waiter):
         if self.result is not None:
             self.latest_result = self.result
             self.event.set()
-
-
-def _gain_adapter_accepts(
-    device,
-    expected_device_type: str | None,
-    channel_number: int | None,
-    expected_level: int | None,
-) -> Callable[[dict], bool]:
-    def accept(result: dict) -> bool:
-        adapter = gain_adapter_from_codec_status(device, result)
-        if adapter is None:
-            return False
-        if expected_device_type is not None and adapter["device_type"] != expected_device_type:
-            return False
-        if channel_number is None or expected_level is None:
-            return True
-        channel_index = channel_number - 1
-        levels = adapter["channel_levels"]
-        return 0 <= channel_index < len(levels) and levels[channel_index] == expected_level
-
-    return accept
-
-
-async def send_and_wait_for_gain_adapter(
-    notifications: DanteNotificationService,
-    device,
-    device_ip_address: str,
-    send_operation: Callable[[], Awaitable[None]],
-    timeout: float,
-    expected_device_type: str | None = None,
-    channel_number: int | None = None,
-    expected_level: int | None = None,
-) -> tuple[str, list[int]] | None:
-    waiter = notifications.register_waiter(
-        "codec",
-        device_ip_address,
-        accept=_gain_adapter_accepts(device, expected_device_type, channel_number, expected_level),
-    )
-    try:
-        event_loop = asyncio.get_running_loop()
-        deadline = event_loop.time() + timeout
-        attempt_count = 3
-        for attempt_number in range(attempt_count):
-            await send_operation()
-            remaining_time = max(0.0, deadline - event_loop.time())
-            if remaining_time == 0:
-                break
-            if attempt_number == attempt_count - 1:
-                attempt_timeout = remaining_time
-            else:
-                attempt_timeout = min(remaining_time, timeout / 4)
-            try:
-                await asyncio.wait_for(waiter.wait(), timeout=attempt_timeout)
-            except asyncio.TimeoutError:
-                continue
-        if waiter.latest_result is None:
-            return None
-        adapter = gain_adapter_from_codec_status(device, waiter.latest_result)
-        if adapter is None:
-            return None
-        return adapter["device_type"], adapter["channel_levels"]
-    finally:
-        notifications.unregister_waiter(waiter)
 
 
 class DanteNotificationService(NotificationPacketHandlers, DanteMulticastService):

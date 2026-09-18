@@ -118,3 +118,21 @@ def test_clock_observations_and_nullable_port_flags_reach_patch_clients():
     )
     assert events[0]["changed"]["clock_status"] == clock
     assert events[0]["changed"]["clock_observed_at"] == "2026-09-18T00:00:00Z"
+
+
+def test_device_controls_preserve_raw_values_and_freshness_in_sse_patches():
+    view = patch_view()
+    controls = {
+        "family": "dante_av",
+        "observations": {
+            "video_channel": {
+                "value": {"direction": 0, "status_code": 999, "observed_hdcp_version": None},
+                "fresh": False,
+                "raw_record": [0, 255],
+            }
+        },
+    }
+    events = view.events_for(
+        {"event": "device_updated", "server_name": "lx-dante.local.", "device": device(device_controls=controls)}
+    )
+    assert events[0]["changed"]["device_controls"] == controls

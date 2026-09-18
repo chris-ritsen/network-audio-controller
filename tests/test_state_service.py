@@ -48,7 +48,7 @@ def make_application(devices):
         probe_lock_status=AsyncMock(return_value=None),
         probe_preferred_leader_state=AsyncMock(return_value=None),
         probe_sample_rate_status=AsyncMock(return_value=None),
-        send_bluetooth_status_request=AsyncMock(),
+        inspect_device_controls=AsyncMock(),
         send_dante_model_request=AsyncMock(),
         send_make_model_request=AsyncMock(),
     )

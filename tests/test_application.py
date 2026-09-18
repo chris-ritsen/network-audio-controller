@@ -647,151 +647,43 @@ class TestDanteApplication:
         assert not application.notifications.is_waiting("codec", "192.168.1.108")
 
     @pytest.mark.asyncio
-    async def test_set_gain_level_state_requires_matching_multicast_readback(self):
+    async def test_set_gain_level_requires_fresh_matching_readback_and_sends_once(self):
         application = DanteApplication()
-        device = DanteDevice(server_name="avio-input.local.")
-        device.ipv4 = "192.168.1.108"
-        device.model_id = "avio-dai2"
+        device = DanteDevice(server_name="analog.local.")
+        device.ipv4 = "192.0.2.1"
         device.generic_codec_control_supported = True
         device.is_locked = False
-        device.gain_adapter = {"device_type": "input"}
-        device.gain_device_type = "input"
-        device.gain_levels = [5, 1]
-        device.supported_gain_levels = [1, 2, 3, 4, 5]
-
-        def respond_to_write(target, channel_number, gain_level, device_type):
-            assert channel_number == 1
-            assert gain_level == 3
-            assert device_type == "input"
-            application.notifications.notify_waiters(
-                "codec", application._control_key(target), codec_status(1, 2, [3, 1])
-            )
-
-        application.send_set_gain_level = AsyncMock(side_effect=respond_to_write)
-
-        result = await application.set_gain_level(device, 1, 3, "input", timeout=0.1)
-
-        assert result == ("input", [3, 1])
-        assert device.gain_levels == [3, 1]
-        assert not application.notifications.is_waiting("codec", "192.168.1.108")
-
-    @pytest.mark.asyncio
-    async def test_set_gain_level_state_retries_and_returns_nonmatching_readback_without_success(self, monkeypatch):
-        from netaudio.dante.services import notification
-
-        elapsed = 0.0
-        waits = []
-
-        async def expire_wait(coroutine, *, timeout):
-            nonlocal elapsed
-            coroutine.close()
-            waits.append(timeout)
-            elapsed += timeout
-            raise TimeoutError
-
-        monkeypatch.setattr(
-            notification,
-            "asyncio",
-            SimpleNamespace(
-                get_running_loop=lambda: SimpleNamespace(time=lambda: elapsed),
-                wait_for=expire_wait,
-                TimeoutError=TimeoutError,
-            ),
-        )
-        application = DanteApplication()
-        device = DanteDevice(server_name="avio-input.local.")
-        device.ipv4 = "192.168.1.108"
-        device.model_id = "avio-dai2"
-        device.generic_codec_control_supported = True
-        device.is_locked = False
-        device.gain_adapter = {"device_type": "input"}
-        device.gain_device_type = "input"
-        device.gain_levels = [5, 1]
-        device.supported_gain_levels = [1, 2, 3, 4, 5]
-
-        def respond_with_unchanged_status(target, channel_number, gain_level, device_type):
-            application.notifications.notify_waiters(
-                "codec", application._control_key(target), codec_status(1, 2, [5, 1])
-            )
-
-        application.send_set_gain_level = AsyncMock(side_effect=respond_with_unchanged_status)
-
-        result = await application.set_gain_level(device, 1, 3, "input", timeout=0.04)
-
-        assert result == ("input", [5, 1])
-        assert device.gain_levels == [5, 1]
-        assert application.send_set_gain_level.call_count == 3
-        assert waits == pytest.approx([0.01, 0.01, 0.02])
-        assert not application.notifications.is_waiting("codec", "192.168.1.108")
-
-    @pytest.mark.asyncio
-    async def test_set_gain_level_state_rejects_direction_before_sending(self):
-        application = DanteApplication()
         application.send_set_gain_level = AsyncMock()
-        device = DanteDevice(server_name="avio-input.local.")
-        device.ipv4 = "192.168.1.108"
+        application.probe_codec_status = AsyncMock(side_effect=[codec_status(1, 2, [5, 1]), codec_status(1, 2, [3, 1])])
+        assert await application.set_gain_level(device, 1, 3, "input", timeout=0.1) == ("input", [3, 1])
+        application.send_set_gain_level.assert_awaited_once_with(device, 1, 3, "input")
+
+    @pytest.mark.asyncio
+    async def test_set_gain_level_does_not_retry_mutation_on_nonmatching_readback(self):
+        application = DanteApplication()
+        device = DanteDevice(server_name="analog.local.")
+        device.ipv4 = "192.0.2.1"
         device.generic_codec_control_supported = True
         device.is_locked = False
-        device.gain_adapter = {"device_type": "input"}
-        device.gain_device_type = "input"
+        application.send_set_gain_level = AsyncMock()
+        application.probe_codec_status = AsyncMock(return_value=codec_status(1, 2, [5, 1]))
+        with pytest.raises(RuntimeError, match="did not confirm"):
+            await application.set_gain_level(device, 1, 3, "input", timeout=0.01)
+        application.send_set_gain_level.assert_awaited_once()
+        assert application.probe_codec_status.await_count >= 2
 
-        with pytest.raises(ValueError, match="input gain controls"):
-            await application.set_gain_level(device, 1, 3, "output", timeout=0.1)
-
-        application.send_set_gain_level.assert_not_called()
-
-    def test_get_arc_port(self):
+    @pytest.mark.asyncio
+    async def test_set_gain_level_rejects_direction_from_fresh_status(self):
         application = DanteApplication()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            device = DanteDevice(server_name="test.local.")
-
-        device.services = {
-            "test._netaudio-arc._udp.local.": {
-                "type": "_netaudio-arc._udp.local.",
-                "port": 4440,
-                "ipv4": "192.168.1.100",
-            }
-        }
-
-        assert application.get_arc_port(device) == 4440
-
-    def test_get_arc_port_no_services(self):
-        application = DanteApplication()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            device = DanteDevice(server_name="test.local.")
-        assert application.get_arc_port(device) is None
-
-    def test_get_arc_port_no_arc_service(self):
-        application = DanteApplication()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            device = DanteDevice(server_name="test.local.")
-
-        device.services = {
-            "test._netaudio-cmc._udp.local.": {
-                "type": "_netaudio-cmc._udp.local.",
-                "port": 8800,
-            }
-        }
-
-        assert application.get_arc_port(device) is None
-
-    def test_device_by_ip(self):
-        application = DanteApplication()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            device = DanteDevice(server_name="test.local.")
-        device.ipv4 = "192.168.1.100"
-
-        application.register_device("test.local.", device)
-
-        found = application._device_by_ip("192.168.1.100")
-        assert found is device
-
-        not_found = application._device_by_ip("10.0.0.1")
-        assert not_found is None
+        device = DanteDevice(server_name="analog.local.")
+        device.ipv4 = "192.0.2.1"
+        device.generic_codec_control_supported = True
+        device.is_locked = False
+        application.send_set_gain_level = AsyncMock()
+        application.probe_codec_status = AsyncMock(return_value=codec_status(1, 2, [5, 1]))
+        with pytest.raises(RuntimeError, match="direction"):
+            await application.set_gain_level(device, 1, 3, "output", timeout=0.01)
+        application.send_set_gain_level.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_state_service_routes_notifications_by_identifier(self):
@@ -1139,7 +1031,6 @@ async def test_successful_control_readback_clears_previous_failure():
 
 @pytest.mark.asyncio
 async def test_discovery_retrieves_completed_errors_and_awaits_canceled_reads(monkeypatch, caplog):
-    from types import SimpleNamespace
 
     application = DanteApplication()
     devices = {

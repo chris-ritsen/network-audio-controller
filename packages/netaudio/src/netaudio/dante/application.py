@@ -23,7 +23,6 @@ from netaudio.dante.channel_status_paging import (
 from netaudio.dante.commands import DanteCommands, channel_status_query_specification, validate_dante_name
 from netaudio.dante.conmon_export import ConmonExport, ConmonExportError, ConmonExportUnavailableError
 from netaudio.dante.const import (
-    BLUETOOTH_MODEL_IDS,
     DEVICE_ARC_PORT,
     OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
     OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
@@ -42,6 +41,8 @@ from netaudio.dante.diagnostic_logs import (
     parse_device_log_export,
 )
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
+from netaudio.dante.panel_state import panel_family
+from netaudio.dante.panel_transport import audit_control_result
 from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, codec_status_fields, gain_adapter_from_codec_status
 from netaudio.dante.latency import latency_controls_from_settings, nanoseconds_to_milliseconds
 from netaudio.dante.interface_statistics import InterfaceStatisticsObservation
@@ -68,11 +69,9 @@ from netaudio.dante.services.notification import (
     mutate_and_wait_for_capability_value,
     mutate_and_wait_for_clear_configuration_status,
     request_and_wait_for_conmon_export,
-    send_and_wait_for_gain_adapter,
 )
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
-    STATUS_KIND_BLUETOOTH,
     STATUS_KIND_CLOCK,
     STATUS_KIND_ENCODING,
     STATUS_KIND_CODEC,
@@ -126,6 +125,9 @@ class DanteApplication:
         self.devices: dict = {}
         self.media_services: dict[str, dict] = {}
         self.dispatcher = DanteEventDispatcher()
+        from netaudio.dante.panel_transport import PanelTransport
+
+        self.panels = PanelTransport(self)
         self._packet_store = packet_store
         self._dissect = dissect
         self.capture_session_id: int | None = session_id
@@ -818,9 +820,9 @@ class DanteApplication:
     async def _query_settings_fields(self, devices: dict | None = None) -> None:
         target_devices = self.devices if devices is None else devices
         tasks = [
-            self.probe_bluetooth_status(device)
+            self.inspect_device_controls(device)
             for device in target_devices.values()
-            if (device.requires_managed_control or device.ipv4) and device.model_id in BLUETOOTH_MODEL_IDS
+            if (device.requires_managed_control or device.ipv4) and panel_family(device) is not None
         ]
         if not tasks:
             return
@@ -1643,16 +1645,44 @@ class DanteApplication:
                 {"aes67_current": status[0], "aes67_configured": status[1]},
             )
 
-    async def probe_bluetooth_status(self, device, timeout: float = 2.0) -> dict:
-        status = await self._probe_once(
-            "bluetooth_status",
+    async def inspect_device_controls(self, device, timeout: float = 1.0) -> dict:
+        from netaudio.dante.analog_control import permission
+        from netaudio.dante.panel_state import panel_snapshot
+
+        if device.generic_codec_control_supported is True and permission(device, write=False) is None:
+            status = await self.probe_codec_status(device, timeout=timeout)
+            self._apply_codec_status(device, status)
+        result = await self.panels.inspect(device, timeout=timeout) if panel_family(device) else panel_snapshot(device)
+        result["analog"] = {
+            "status": device.codec_status,
+            "levels": device.gain_levels,
+            "direction": device.gain_device_type,
+            "choices": device.gain_level_choices,
+            "observed_at_unix": device.codec_observed_at,
+        }
+        return result
+
+    async def plan_device_control(self, device, category, requested, *, confirm_clear=False, timeout=1.0):
+        if category == "analog_level":
+            from netaudio.dante.analog_control import plan_analog
+
+            return await plan_analog(self, device, **requested, timeout=timeout)
+        return await self.panels.plan(device, category, requested, confirm_clear=confirm_clear, timeout=timeout)
+
+    async def apply_device_control(self, device, category, requested, *, confirm_clear=False, timeout=2.0):
+        if category == "analog_level":
+            from netaudio.dante.analog_control import apply_analog
+
+            return await self._run_configuration_operation(
+                device, "analog_level", requested, lambda: apply_analog(self, device, **requested, timeout=timeout)
+            )
+        return await self._run_configuration_operation(
             device,
-            self.send_bluetooth_status_request,
-            timeout,
-            "bluetooth status",
+            "device_control",
+            {"category": category, "requested": requested},
+            lambda: self.panels.apply(device, category, requested, confirm_clear=confirm_clear, timeout=timeout),
+            result_adapter=audit_control_result,
         )
-        apply_device_status(device, STATUS_KIND_BLUETOOTH, status)
-        return status
 
     async def probe_clear_configuration_status(
         self,
@@ -2212,9 +2242,6 @@ class DanteApplication:
                 )
         return response
 
-    async def send_bluetooth_status_request(self, device_ip_address, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.bluetooth_status(host_mac))
-
     async def send_capability_partition_export_request(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.capability_partition_export(host_mac))
 
@@ -2526,41 +2553,18 @@ class DanteApplication:
         device_type: str,
         timeout: float = 4.0,
     ) -> tuple[str, list[int]] | None:
-        require_writable(device, "codec_control", gain_level)
-        if device_type not in ("input", "output"):
-            raise ValueError("device_type must be 'input' or 'output'")
-        if isinstance(channel_number, bool) or not isinstance(channel_number, int) or not 1 <= channel_number <= 0xFFFF:
-            raise ValueError("channel_number must be an integer from 1 through 65535")
-        if isinstance(gain_level, bool) or not isinstance(gain_level, int) or gain_level not in SUPPORTED_GAIN_LEVELS:
-            raise ValueError("gain_level must be an integer from 1 through 5")
-        if device.gain_device_type is not None and device.gain_device_type != device_type:
-            raise ValueError(f"device reports {device.gain_device_type} gain controls, not {device_type}")
-        if device.supported_gain_levels is not None and gain_level not in device.supported_gain_levels:
-            raise ValueError(
-                f"requested gain level {gain_level} is not supported; device reports {device.supported_gain_levels}"
-            )
+        from netaudio.dante.analog_control import apply_analog
 
-        key = self._control_key(device)
-        async with self._capability_probe_lock("gain", key):
-            result = await send_and_wait_for_gain_adapter(
-                self.notifications,
-                device,
-                key,
-                lambda: self.send_set_gain_level(
-                    device,
-                    channel_number,
-                    gain_level,
-                    device_type,
-                ),
-                timeout,
-                expected_device_type=device_type,
-                channel_number=channel_number,
-                expected_level=gain_level,
-            )
-            if result is not None:
-                observed_device_type, channel_levels = result
-                self._apply_gain_adapter(device, observed_device_type, channel_levels)
-            return result
+        result = await self._run_configuration_operation(
+            device,
+            "analog_level",
+            {"channel": channel_number, "level": gain_level, "direction": device_type},
+            lambda: apply_analog(self, device, channel_number, gain_level, device_type, timeout),
+            result_adapter=audit_control_result,
+        )
+        if not result["effective_state_confirmed"]:
+            raise RuntimeError(result.get("reason") or "Analog setting was sent but fresh readback did not confirm it.")
+        return device.gain_device_type, device.gain_levels
 
     async def set_interface(
         self, device, mode: str, static_configuration: dict | None = None, *, interface="primary", timeout=2.0

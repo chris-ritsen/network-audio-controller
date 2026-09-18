@@ -23,6 +23,11 @@ pub fn gain_status_from_codec_status(status: &CodecStatus) -> Option<GainStatus>
     });
     let (device_type, parameter) = matches.next()?;
     if matches.next().is_some()
+        || status
+            .parameters
+            .iter()
+            .any(|p| matches!(p.parameter_type, 1 | 2) && gain_device_type(p).is_none())
+        || parameter.values.len() > 2
         || parameter.values.is_empty()
         || parameter
             .values

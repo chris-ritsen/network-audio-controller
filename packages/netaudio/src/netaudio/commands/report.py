@@ -188,6 +188,8 @@ def _filter_device(device: dict, level: str) -> dict:
 
     if level == "network":
         filtered = _filter_device(device, "minimal")
+        if device.get("device_controls"):
+            filtered["device_controls"] = device["device_controls"]
         if device.get("clock_status"):
             filtered["clock_status"] = device["clock_status"]
         filtered["ipv4"] = device.get("ipv4", "")

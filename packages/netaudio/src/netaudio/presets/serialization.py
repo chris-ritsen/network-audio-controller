@@ -49,7 +49,7 @@ PRESET_VERSION_IDENTITY_FIELDS = (
     "ddm_dante_hardware_version",
 )
 
-PRESET_SECTIONS = frozenset({"routing", "audio", "network"})
+PRESET_SECTIONS = frozenset({"routing", "audio", "network", "device_controls"})
 
 
 def _hex_encode(text: str, pad_to: int = 16) -> str:
@@ -133,6 +133,10 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
             if value
         },
     }
+    if "device_controls" in sections and getattr(device, "device_controls", None):
+        from netaudio.presets.device_controls import capture_device_controls
+
+        config["device_controls"] = capture_device_controls(device)
     if "audio" in sections:
         for field_name in ("preferred_leader", "sample_rate", "encoding"):
             value = getattr(device, field_name, None)
@@ -422,7 +426,7 @@ def _device_to_preset_xml(
 def _validated_sections(sections: Collection[str] | None) -> set[str]:
     result = set(PRESET_SECTIONS if sections is None else sections)
     if not result or result - PRESET_SECTIONS:
-        raise ValueError("preset sections must be routing, audio, or network")
+        raise ValueError("preset sections must be routing, audio, network, or device_controls")
     return result
 
 

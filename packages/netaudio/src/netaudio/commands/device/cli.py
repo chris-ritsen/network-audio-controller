@@ -45,6 +45,10 @@ class ClearConfigurationMode(str, Enum):
 
 app.command("list")(status_command)
 
+from netaudio.commands.device.controls import app as controls_app
+
+app.add_typer(controls_app, name="controls")
+
 
 async def run_show(application, devices) -> None:
     from netaudio.cli import OutputFormat, state

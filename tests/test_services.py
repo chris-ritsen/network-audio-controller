@@ -16,7 +16,7 @@ from netaudio.dante.services.notification import (
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher, EventType
-from netaudio.dante.services.notification import _gain_adapter_accepts
+from netaudio.dante.gain import gain_adapter_from_codec_status
 from tests.status_test_support import (
     application_with_device,
     count_events,
@@ -80,6 +80,19 @@ def _recording_transport():
 
 def _executed(transport):
     return [(call.args[0], call.args[1]) for call in transport.execute.await_args_list]
+
+
+def _gain_adapter_accepts(device, direction, channel, level):
+    def accept(status):
+        adapter = gain_adapter_from_codec_status(device, status)
+        return bool(
+            adapter
+            and (direction is None or direction == adapter["device_type"])
+            and channel <= len(adapter["channel_levels"])
+            and adapter["channel_levels"][channel - 1] == level
+        )
+
+    return accept
 
 
 class TestApplicationSettingsCommands:
@@ -715,10 +728,18 @@ class TestDanteNotificationService:
 
         assert core.parse_response("codec_status", LIVE_AVIO_INPUT_GAIN_STATUS_PACKET) == {
             "record_protocol_version": 0x0738,
+            "raw_header_word": 0,
+            "descriptor_stride": 8,
+            "descriptor_offset": 16,
+            "raw_record": list(LIVE_AVIO_INPUT_GAIN_STATUS_PACKET[24:]),
             "parameters": [{"parameter_type": 1, "mode": 2, "values": [4, 4]}],
         }
         assert core.parse_response("codec_status", LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET) == {
             "record_protocol_version": 0x0738,
+            "raw_header_word": 0,
+            "descriptor_stride": 8,
+            "descriptor_offset": 16,
+            "raw_record": list(LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET[24:]),
             "parameters": [{"parameter_type": 2, "mode": 1, "values": [4, 4]}],
         }
 

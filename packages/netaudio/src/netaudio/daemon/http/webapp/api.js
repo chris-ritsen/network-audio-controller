@@ -78,6 +78,20 @@ function destroy(path) {
 }
 
 export const api = {
+  deviceControls: (
+    device,
+    action,
+    category,
+    requested,
+    confirm_clear = false,
+  ) =>
+    post("/device-controls", {
+      device,
+      action,
+      category,
+      requested,
+      confirm_clear,
+    }),
   savePreset: (body) => post("/presets/save", body),
   previewPreset: (body) => post("/presets/preview", body),
   loadPreset: (body) => post("/presets/load", body),

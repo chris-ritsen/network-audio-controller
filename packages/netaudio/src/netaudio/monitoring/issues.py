@@ -22,6 +22,8 @@ class IssueKind(str, Enum):
     SUBNET_CONFLICT = "subnet_conflict"
     CLOCK_SYNCHRONIZATION = "clock_synchronization"
     CLOCK_MUTED = "clock_muted"
+    BLUETOOTH_LINK_LOST = "bluetooth_link_lost"
+    VIDEO_SIGNAL_FAILURE = "video_signal_failure"
     PULLUP_MISMATCH = "pullup_mismatch"
     SUBSCRIPTION_FAILURE = "subscription_failure"
     RECEIVER_HEALTH_DEGRADED = "receiver_health_degraded"
@@ -519,6 +521,17 @@ class IssueEngine:
             return False
         if snapshot.get("online") is False:
             return False
+        if issue.kind in {IssueKind.BLUETOOTH_LINK_LOST, IssueKind.VIDEO_SIGNAL_FAILURE}:
+            category = "bluetooth_connection" if issue.kind is IssueKind.BLUETOOTH_LINK_LOST else "video_channel"
+            observation = (snapshot.get("device_controls") or {}).get("observations", {}).get(category, {})
+            if observation.get("fresh") is not True or observation.get("available") is not True:
+                return False
+            value = observation.get("value") or {}
+            return (
+                value.get("state") in (1, 2)
+                if category == "bluetooth_connection"
+                else value.get("status_code") in (16, 17)
+            )
         if issue.kind is IssueKind.SUBSCRIPTION_FAILURE:
             subscription = _subscription_map(snapshot.get("subscriptions")).get(issue.scope.channel_identity or "")
             return subscription is not None and _subscription_failure_state(subscription) is False
@@ -576,10 +589,52 @@ class IssueEngine:
         result = []
         result.extend(self._detect_network(snapshot, timestamp))
         result.extend(self._detect_clock(snapshot, timestamp))
+        result.extend(self._detect_panel(snapshot, timestamp))
         result.extend(self._detect_subscriptions(snapshot, timestamp))
         result.extend(self._detect_device_states(snapshot, timestamp))
         result.extend(self._detect_telemetry(snapshot, timestamp))
         result.extend(self._detect_divergence(snapshot, timestamp))
+        return result
+
+    def _detect_panel(self, snapshot, timestamp):
+        if snapshot.get("online") is False:
+            return []
+        result = []
+        for category, kind, title, key, bad in (
+            ("bluetooth_connection", IssueKind.BLUETOOTH_LINK_LOST, "Bluetooth link lost", "state", {3}),
+            (
+                "video_channel",
+                IssueKind.VIDEO_SIGNAL_FAILURE,
+                "Video signal unavailable",
+                "status_code",
+                {32, 33, 34, 36, 48, 49, 50, 51, 52, 53, 54},
+            ),
+        ):
+            observation = (snapshot.get("device_controls") or {}).get("observations", {}).get(category, {})
+            stamp = observation.get("observed_at_unix")
+            now = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+            if (
+                not isinstance(stamp, (int, float))
+                or not 0 <= now - stamp <= 10
+                or observation.get("available") is not True
+            ):
+                continue
+            value = (observation.get("value") or {}).get(key)
+            if value in bad:
+                result.append(
+                    _candidate(
+                        snapshot,
+                        timestamp,
+                        kind,
+                        EventSeverity.WARNING,
+                        title,
+                        f"Device reports {key.replace('_', ' ')} {value}.",
+                        {"category": category, key: value},
+                        "device_control_status",
+                        IssueEvidenceClass.DIRECT_OBSERVATION,
+                        "Check the connected peer or video source and its device settings.",
+                    )
+                )
         return result
 
     def _detect_network(self, snapshot: Mapping[str, Any], timestamp: str) -> list[MonitoringIssue]:

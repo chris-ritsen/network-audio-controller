@@ -6,7 +6,6 @@ import pytest
 from netaudio import core
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_parser import DanteDeviceParser
 
 
 TX_RAW_4CH_48K = bytes.fromhex(
@@ -252,33 +251,18 @@ def test_build_tx_channels_without_friendly_names():
     assert tx_channels[1].friendly_name is None
 
 
-class TestParseBluetoothStatus:
-    def test_connected_extracts_device_name(self, load_fixture):
-        response = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
-        result = DanteDeviceParser.parse_bluetooth_status(response)
-        assert result == "s00pcan-iphone-17"
+class TestParsePanelStatus:
+    def test_connected_name_and_numeric_state(self, load_fixture):
+        parsed = core.parse_response("panel_bluetooth_status", load_fixture("avio-bt-1_bluetooth_status_connected.bin"))
+        assert parsed["observations"][0]["value"] == {"state": 1, "peer_name": "s00pcan-iphone-17"}
 
-    def test_disconnected_returns_none(self, load_fixture):
-        response = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
-        result = DanteDeviceParser.parse_bluetooth_status(response)
-        assert result is None
-
-    def test_connected_state_preserves_connection_and_device_name(self, load_fixture):
-        response = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
-        result = DanteDeviceParser.parse_bluetooth_status_state(response)
-        assert result == {"connected": True, "device_name": "s00pcan-iphone-17"}
-
-    def test_disconnected_state_is_distinct_from_invalid_input(self, load_fixture):
-        response = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
-        result = DanteDeviceParser.parse_bluetooth_status_state(response)
-        assert result == {"connected": False, "device_name": None}
-        assert DanteDeviceParser.parse_bluetooth_status_state(b"not a status publication") is False
-
-    def test_returns_none_for_none(self):
-        assert DanteDeviceParser.parse_bluetooth_status(None) is None
-
-    def test_returns_none_for_empty(self):
-        assert DanteDeviceParser.parse_bluetooth_status(b"") is None
+    def test_disconnected_is_distinct_from_invalid_input(self, load_fixture):
+        parsed = core.parse_response(
+            "panel_bluetooth_status", load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
+        )
+        assert parsed["observations"][0]["value"] == {"state": 2, "peer_name": ""}
+        with pytest.raises(core.NetaudioCoreError):
+            core.parse_response("panel_bluetooth_status", b"invalid")
 
 
 def test_receiver_status_readback_resolves_self_subscription():
