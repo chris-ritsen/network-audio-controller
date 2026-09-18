@@ -45,8 +45,8 @@ three platforms, including native libraries and installed Python packages.
   latency, analog gain, device locking, preferred clock leader, AES67 settings,
   and primary/secondary network configuration on supported devices.
 - **Audio flows:** inspect receive and transmit flows, plan and manage supported
-  native Dante multicast transmit flows, discover external RTP flows through
-  SAP/SDP, and subscribe compatible receivers to them.
+  native Dante multicast transmit flows, discover advertised AES67 audio
+  streams, and subscribe compatible receivers to them.
 - **Device metering and monitoring:** live signal levels, clock status, interface
   statistics and errors, device diagnostics, monitoring issues, and event
   history through the CLI, API, and browser.

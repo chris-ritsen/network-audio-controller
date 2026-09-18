@@ -925,5 +925,8 @@ async def test_inventory_outage_warns_once_and_rearms_after_recovery(caplog):
         assert await service.refresh() is False
     records = [record for record in caplog.records if "Managed API inventory" in record.message]
     assert [record.levelno for record in records] == [
-        logging.WARNING, logging.DEBUG, logging.INFO, logging.WARNING,
+        logging.WARNING,
+        logging.DEBUG,
+        logging.INFO,
+        logging.WARNING,
     ]
