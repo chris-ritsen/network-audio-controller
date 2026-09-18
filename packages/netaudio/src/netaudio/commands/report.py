@@ -159,6 +159,28 @@ def _filter_device(device: dict, level: str) -> dict:
         filtered["requested_sample_rate_pullup_raw_value"] = device.get("requested_sample_rate_pullup_raw_value")
         filtered["supported_sample_rate_pullup_raw_values"] = device.get("supported_sample_rate_pullup_raw_values")
         filtered["preferred_leader"] = device.get("preferred_leader")
+        status = device.get("clock_status") or {}
+        filtered["clock_status"] = {
+            key: status[key]
+            for key in (
+                "record_revision",
+                "status_supported",
+                "synchronization",
+                "clock_state_code",
+                "servo_state_code",
+                "mute_flags",
+                "mute_reasons",
+                "clock_source_code",
+                "clock_capabilities",
+                "extension_flags",
+                "ptpv2_domain",
+                "base_ports",
+                "clock_port_records",
+                "word_clock_state_code",
+            )
+            if key in status
+        }
+        filtered["clock_observed_at"] = device.get("clock_observed_at")
         filtered["clock_source_code"] = device.get("clock_source_code")
         filtered["clock_subdomain"] = device.get("clock_subdomain")
         filtered["is_locked"] = device.get("is_locked")
@@ -166,6 +188,8 @@ def _filter_device(device: dict, level: str) -> dict:
 
     if level == "network":
         filtered = _filter_device(device, "minimal")
+        if device.get("clock_status"):
+            filtered["clock_status"] = device["clock_status"]
         filtered["ipv4"] = device.get("ipv4", "")
         filtered["mac_address"] = device.get("mac_address", "")
         filtered["manufacturer"] = device.get("manufacturer", "")

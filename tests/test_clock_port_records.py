@@ -19,7 +19,7 @@ def test_clock_status_parser_preserves_every_port_record():
 
     assert parsed["clock_port_state_code"] == 9
     assert parsed["clock_role"] == "Follower"
-    assert parsed["clock_port_records"] == [
+    expected = [
         {
             "record_flags": 0,
             "link_down": False,
@@ -92,6 +92,16 @@ def test_clock_status_parser_preserves_every_port_record():
         },
     ]
 
+    for record in expected:
+        record["unknown_word"] = record["network_interface_index"]
+        record["network_interface_index"] = None
+        record["user_disabled"] = bool(record["record_flags"] & 1)
+        record["unicast_delay_requests"] = False if record["status_flags"] & 4 else None
+        record["interface_flags"] = None
+        record["interface_record"] = None
+        record["state"] = {3: "disabled", 6: "master", 9: "follower"}[record["state_code"]]
+    assert parsed["clock_port_records"] == expected
+
 
 def test_notification_and_device_serialization_preserve_every_clock_port_record():
     expected = core.parse_response("ptp_clock_status", CLOCK_STATUS_PACKET)["clock_port_records"]
@@ -114,3 +124,5 @@ def test_avio_capture_updates_device_clock_ports():
         (2, "unicast", 3),
         (2, "multicast", 3),
     ]
+
+    assert all(port["network_interface_index"] == 0 for port in ports)

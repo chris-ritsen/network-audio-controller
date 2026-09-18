@@ -3502,7 +3502,7 @@
       }
     },
     "clock_frequency_offset_parts_per_billion": -25351,
-    "clock_identity": "001dc15279b6",
+    "ptpv1_device_uuid": "001dc15279b6",
     "clock_port_records": [
       {
         "link_down": false,
@@ -3602,7 +3602,7 @@
     "kind": "hardware",
     "last_seen": 1788610154.553407,
     "latency_ms": 1.0,
-    "leader_clock_identity": "001dc1081258",
+    "ptpv1_master_uuid": "001dc1081258",
     "link_speed_mbps": 100,
     "lock_reset_status": {
       "is_locked": false,
@@ -3987,7 +3987,7 @@
       }
     },
     "clock_frequency_offset_parts_per_billion": -21740,
-    "clock_identity": "001dc150368b",
+    "ptpv1_device_uuid": "001dc150368b",
     "clock_port_records": [
       {
         "link_down": false,
@@ -4143,7 +4143,7 @@
     "kind": "hardware",
     "last_seen": 1788610154.041472,
     "latency_ms": 1.0,
-    "leader_clock_identity": "001dc1081258",
+    "ptpv1_master_uuid": "001dc1081258",
     "link_speed_mbps": 100,
     "lock_reset_status": {
       "is_locked": false,
@@ -6578,7 +6578,7 @@
       }
     },
     "clock_frequency_offset_parts_per_billion": -7,
-    "clock_identity": "001dc1081258",
+    "ptpv1_device_uuid": "001dc1081258",
     "clock_port_records": [
       {
         "link_down": false,
@@ -6754,7 +6754,7 @@
     "kind": "hardware",
     "last_seen": 1788610154.577367,
     "latency_ms": 1.0,
-    "leader_clock_identity": "001dc1081258",
+    "ptpv1_master_uuid": "001dc1081258",
     "link_speed_mbps": 1000,
     "lock_reset_status": {
       "is_locked": false,

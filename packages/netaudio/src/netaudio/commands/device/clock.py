@@ -2,19 +2,19 @@ import typer
 
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import sort_devices
-from netaudio.dante.clock_identity import canonical_clock_identity
+from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 
 
 def _matching_leader_name(entries, follower):
-    leader_clock_identity = canonical_clock_identity(follower.get("leader_clock_identity"))
-    if leader_clock_identity is None:
+    ptpv1_master_uuid = canonical_ptpv1_uuid(follower.get("ptpv1_master_uuid"))
+    if ptpv1_master_uuid in (None, "000000000000"):
         return None
     candidates = [
         entry
         for entry in entries
         if (entry.get("clock_role") or "").lower() == "leader"
-        and canonical_clock_identity(entry.get("clock_identity")) == leader_clock_identity
+        and canonical_ptpv1_uuid(entry.get("ptpv1_device_uuid")) == ptpv1_master_uuid
     ]
     if len(candidates) != 1:
         return None
@@ -34,7 +34,7 @@ async def run_clock(application, devices) -> None:
         typer.echo("No device found.", err=True)
         raise typer.Exit(code=1)
 
-    headers = ["Name", "Role", "Preferred Leader", "Sync to Leader", "Server Name"]
+    headers = ["Name", "Role", "Preferred Leader", "Current master", "Synchronization", "Mute", "Server Name"]
     rows = []
     json_data = {}
 
@@ -48,14 +48,27 @@ async def run_clock(application, devices) -> None:
         else:
             preferred = ""
         matched_leader = _matching_leader_name(entries, entry) if role.lower() == "follower" else None
-        rows.append([name, role, preferred, matched_leader or "", entry.get("server_name") or ""])
+        status = entry.get("clock_status") or {}
+        rows.append(
+            [
+                name,
+                role,
+                preferred,
+                matched_leader or "",
+                status.get("synchronization", "unknown"),
+                "; ".join(status.get("mute_reasons") or []),
+                entry.get("server_name") or "",
+            ]
+        )
         json_data[entry.get("server_name") or name] = {
             "name": name,
             "role": role,
             "preferred_leader": entry.get("preferred_leader"),
-            "clock_identity": entry.get("clock_identity"),
-            "leader_clock_identity": entry.get("leader_clock_identity"),
+            "ptpv1_device_uuid": entry.get("ptpv1_device_uuid"),
+            "ptpv1_master_uuid": entry.get("ptpv1_master_uuid"),
             "leader": matched_leader,
+            "clock_status": status,
+            "ptpv1_grandmaster_uuid": entry.get("ptpv1_grandmaster_uuid"),
         }
 
     output_table(headers, rows, json_data=json_data)

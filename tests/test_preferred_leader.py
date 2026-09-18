@@ -18,85 +18,27 @@ from netaudio.dante.services.notification import (
 )
 
 
-class TestPreferredLeaderSetPacket:
-    def test_packet_length(self):
+class TestClockControlPacket:
+    @pytest.mark.parametrize("preferred", [True, False])
+    def test_preferred_has_only_selected_fields(self, preferred):
         commands = DanteDeviceCommands()
-        packet, _, port = commands.command_set_preferred_leader(True)
+        packet, _, port = commands.command_clock_control(
+            {"record_revision": 0x073A, "clock_capabilities": 0, "extension_flags": 0, "preferred_leader": preferred}
+        )
         assert len(packet) == 92
         assert port == DEVICE_SETTINGS_PORT
+        assert packet[24:28] == bytes.fromhex("073a0021")
+        assert packet[32:40] == bytes([0, 2, 0, 0, int(preferred), 0, 0, 0])
+        assert all(byte == 0 for byte in packet[40:])
 
-    def test_packet_message_type(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True)
-        message_type = struct.unpack(">H", packet[0x1A:0x1C])[0]
-        assert message_type == 0x0021
+    def test_query_selects_no_fields(self):
+        packet, _, _ = DanteDeviceCommands().command_refresh_clock_status(0x0738)
+        assert packet[24:28] == bytes.fromhex("07380021")
+        assert packet[32:] == bytes(60)
 
-    def test_presence_bitmask_set_on_write(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True)
-        presence = struct.unpack(">H", packet[0x20:0x22])[0]
-        assert presence == 0x0002
-
-    def test_preferred_leader_on(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True)
-        assert packet[0x24] == 0x01
-
-    def test_preferred_leader_off(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(False)
-        assert packet[0x24] == 0x00
-
-    def test_clock_source_passed_through(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True, clock_source=0xDED4)
-        clock_source = struct.unpack(">H", packet[0x22:0x24])[0]
-        assert clock_source == 0xDED4
-
-    def test_set_clock_source_uses_mask_bit_zero(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_clock_source(0xDED4)
-        assert struct.unpack(">H", packet[0x20:0x22])[0] == 0x0001
-        assert struct.unpack(">H", packet[0x22:0x24])[0] == 0xDED4
-        assert packet[0x24] == 0x00
-
-    def test_nonzero_sequence(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True)
-        sequence = struct.unpack(">H", packet[4:6])[0]
-        assert sequence != 0
-
-    def test_conmon_header_structure(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_set_preferred_leader(True)
-        assert struct.unpack(">H", packet[0:2])[0] == 0xFFFF
-        magic_offset = packet.find(b"Audinate")
-        assert magic_offset == 0x10
-
-
-class TestPreferredLeaderProbePacket:
-    def test_probe_packet_length(self):
-        commands = DanteDeviceCommands()
-        packet, _, port = commands.command_probe_preferred_leader()
-        assert len(packet) == 92
-        assert port == DEVICE_SETTINGS_PORT
-
-    def test_probe_presence_zero(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_preferred_leader()
-        presence = struct.unpack(">H", packet[0x20:0x22])[0]
-        assert presence == 0x0000
-
-    def test_probe_preferred_leader_zero(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_preferred_leader()
-        assert packet[0x24] == 0x00
-
-    def test_probe_message_type(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_preferred_leader()
-        message_type = struct.unpack(">H", packet[0x1A:0x1C])[0]
-        assert message_type == 0x0021
+    def test_missing_revision_fails(self):
+        with pytest.raises(core.NetaudioCoreError):
+            core.build_command({"command": "refresh_clock_status", "host_mac": "020000000001"})
 
 
 class TestPreferredLeaderFromConmon0x0020:
@@ -146,7 +88,7 @@ class TestPreferredLeaderFromConmon0x0020:
         ).read_bytes()
         calls = []
 
-        async def refresh(target, host_mac=None, sequence=0x0021):
+        async def refresh(target, host_mac=None, sequence=0x0021, record_revision=None):
             calls.append((target, sequence))
             application.notifications._on_packet(packet, (str(target.ipv4), 8702))
             await deliver_status_events(application)
@@ -161,8 +103,8 @@ class TestPreferredLeaderFromConmon0x0020:
         assert parsed["preferred_leader"] == expected["preferred_leader"]
         assert parsed["clock_role"] == expected["clock_role"]
         assert device.clock_source_code == expected["clock_source_code"]
-        assert device.clock_identity == "001dc1510295"
-        assert device.leader_clock_identity == "001dc150692e"
+        assert device.ptpv1_device_uuid == "001dc1510295"
+        assert device.ptpv1_master_uuid == "001dc150692e"
 
     @pytest.mark.asyncio
     async def test_probe_clocking_status_times_out_without_any_publication(self):
@@ -172,7 +114,7 @@ class TestPreferredLeaderFromConmon0x0020:
         with pytest.raises(CapabilityProbeTimeout, match="clock status probe timed out"):
             await application.probe_clocking_status(device, timeout=0.01)
 
-        application.send_refresh_clock_status.assert_awaited_once_with(device)
+        application.send_refresh_clock_status.assert_awaited_once_with(device, record_revision=None)
         assert not application.notifications.is_waiting("clock_status", "192.168.1.61")
 
     def test_live_avio_bluetooth_clock_publication_parses_raw_source(self):

@@ -596,6 +596,9 @@ class NetaudioDaemon(DanteDiscoveryMixin):
 
         logger.info("mDNS browser started, watching for devices...")
 
+        from netaudio.daemon.clock_monitor import ClockStatusMonitor
+
+        self._spawn_background(ClockStatusMonitor(self.application).run(), name="clock-status-monitor")
         self._revalidate_task = asyncio.create_task(self._revalidate_devices_loop())
         self._spawn_background(
             self._recover_known_devices(delay=3, offline_only=True),

@@ -608,14 +608,14 @@ def test_encoding_is_verified_from_reported_status():
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_encoding", (24,))]
 
 
-def test_preferred_leader_write_is_requested_but_not_verified():
+def test_preferred_leader_write_reports_confirmed_state():
     device = FakeDevice("AVIO")
     application = FakeApplication({"avio.local.": device})
 
     result = invoke(config_commands.run_preferred_leader, application, application.devices, "on", False)
 
     assert result.exit_code == 0
-    assert "Preferred leader change requested for AVIO: on; not verified" in result.output
+    assert "Preferred leader on confirmed for AVIO." in result.output
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_preferred_leader", (True,))]
 
 

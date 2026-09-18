@@ -1,4 +1,5 @@
 import math
+import json
 
 from netaudio.dante.clock_config import format_clock_subdomain
 
@@ -44,8 +45,10 @@ DANTE_PROPERTY_NAMES = {
     "clock_subdomain": "ClockSubdomain",
     "clock_role": "ClockRole",
     "clock_port_records": "ClockPortRecords",
-    "clock_identity": "ClockIdentity",
-    "leader_clock_identity": "LeaderClockIdentity",
+    "clock_status": "ClockStatus",
+    "ptpv1_grandmaster_uuid": "Ptpv1GrandmasterUuid",
+    "ptpv1_device_uuid": "Ptpv1DeviceUuid",
+    "ptpv1_master_uuid": "Ptpv1MasterUuid",
     "platform_software_version": "PlatformSoftwareVersion",
     "platform_hardware_version": "PlatformHardwareVersion",
     "platform_api_version": "PlatformApiVersion",
@@ -164,24 +167,8 @@ def transmitter_flow_rows(device) -> list[tuple[int, int, str, int, int, str, in
     return rows
 
 
-def clock_port_rows(device) -> list[tuple[int, bool, int, int, int, int, str, int, int, int, int, str]]:
-    return [
-        (
-            dbus_uint(record.get("record_flags"), bits=16),
-            bool(record.get("link_down")),
-            dbus_uint(record.get("record_number"), bits=16),
-            dbus_uint(record.get("ptp_version"), bits=8),
-            dbus_uint(record.get("record_format_code"), bits=8),
-            dbus_uint(record.get("transport_path_code"), bits=8),
-            dbus_string(record.get("transport_path")),
-            dbus_uint(record.get("reserved_byte"), bits=8),
-            dbus_uint(record.get("network_interface_index")),
-            dbus_uint(record.get("state_code"), bits=16),
-            dbus_uint(record.get("status_flags"), bits=16),
-            dbus_string(record.get("role")),
-        )
-        for record in device.clock_port_records or []
-    ]
+def clock_port_rows(device) -> str:
+    return json.dumps(device.clock_port_records, separators=(",", ":"))
 
 
 def snapshot_dante_device(device):
@@ -228,8 +215,10 @@ def snapshot_dante_device(device):
         ),
         "clock_role": dbus_string(device.clock_role),
         "clock_port_records": clock_port_rows(device),
-        "clock_identity": dbus_string(device.clock_identity),
-        "leader_clock_identity": dbus_string(device.leader_clock_identity),
+        "clock_status": json.dumps(device.clock_status, separators=(",", ":")),
+        "ptpv1_grandmaster_uuid": dbus_string(device.ptpv1_grandmaster_uuid),
+        "ptpv1_device_uuid": dbus_string(device.ptpv1_device_uuid),
+        "ptpv1_master_uuid": dbus_string(device.ptpv1_master_uuid),
         "platform_software_version": dbus_string(device.platform_software_version),
         "platform_hardware_version": dbus_string(device.platform_hardware_version),
         "platform_api_version": dbus_string(device.platform_api_version),

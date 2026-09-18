@@ -199,6 +199,8 @@ export const api = {
     post("/set-clock-source", { device, clock_source: clockSource }),
   setClockSubdomain: (device, subdomain) =>
     post("/set-clock-subdomain", { device, subdomain }),
+  setClockConfiguration: (device, changes) =>
+    post("/set-clock-configuration", { device, changes }),
   refreshClock: (device) => post("/refresh-clock", { device }),
   reboot: (device) => post("/reboot", { device }),
   setInterface: (body) => post("/interface", body),

@@ -152,9 +152,6 @@ class DanteCommands:
     def probe_lock_reset_status(self, host_mac=None, request_value: int = 100) -> dict:
         return self._sequenced({"command": "probe_lock_reset_status", "request_value": request_value}, host_mac)
 
-    def probe_preferred_leader(self, clock_source: int = 0, host_mac=None) -> dict:
-        return self._sequenced({"clock_source": clock_source, "command": "probe_preferred_leader"}, host_mac)
-
     def probe_sample_rate(self, host_mac=None) -> dict:
         return self._with_host_mac({"command": "probe_sample_rate"}, host_mac)
 
@@ -207,8 +204,13 @@ class DanteCommands:
             specification["host_mac"] = host_mac.hex()
         return specification
 
-    def refresh_clock_status(self, host_mac=None, sequence: int = 0x0021) -> dict:
-        return self._with_host_mac({"command": "refresh_clock_status", "sequence": sequence}, host_mac)
+    def clock_control(self, control: dict, host_mac=None) -> dict:
+        return self._sequenced({"command": "clock_control", "control": control}, host_mac)
+
+    def refresh_clock_status(self, record_revision: int, host_mac=None, sequence: int = 0x0021) -> dict:
+        return self._with_host_mac(
+            {"command": "refresh_clock_status", "record_revision": record_revision, "sequence": sequence}, host_mac
+        )
 
     def remove_subscriptions(self, channel_numbers) -> dict:
         return {"command": "remove_subscriptions", "rx_channels": list(channel_numbers)}
@@ -232,18 +234,6 @@ class DanteCommands:
         if protocol_id is not None:
             specification["protocol_id"] = protocol_id
         return specification
-
-    def set_clock_source(self, clock_source: int, host_mac=None) -> dict:
-        return self._sequenced({"clock_source": clock_source, "command": "set_clock_source"}, host_mac)
-
-    def set_clock_subdomain(self, subdomain, host_mac=None) -> dict:
-        subdomain_bytes = subdomain.encode("ascii") if isinstance(subdomain, str) else bytes(subdomain)
-        if len(subdomain_bytes) > 16:
-            raise ValueError("clock subdomain is longer than 16 bytes")
-        return self._sequenced(
-            {"command": "set_clock_subdomain", "subdomain": list(subdomain_bytes.ljust(16, b"\x00"))},
-            host_mac,
-        )
 
     def set_encoding(self, encoding: int) -> dict:
         return self._sequenced({"command": "set_encoding", "encoding": encoding})
@@ -363,12 +353,6 @@ class DanteCommands:
 
     def set_name(self, name: str) -> dict:
         return {"command": "set_name", "name": name}
-
-    def set_preferred_leader(self, is_preferred: bool, clock_source: int = 0, host_mac=None) -> dict:
-        return self._sequenced(
-            {"clock_source": clock_source, "command": "set_preferred_leader", "preferred": bool(is_preferred)},
-            host_mac,
-        )
 
     def set_sample_rate(self, sample_rate: int) -> dict:
         return self._sequenced({"command": "set_sample_rate", "sample_rate": sample_rate})

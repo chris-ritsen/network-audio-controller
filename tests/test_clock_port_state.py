@@ -11,7 +11,7 @@ class TestClockPortStateFromConmon0x0020:
         preferred_leader_byte=0x00,
         clock_frequency_offset_parts_per_billion=-25_473,
     ):
-        packet = bytearray(74)
+        packet = bytearray(76)
         struct.pack_into(">H", packet, 0, 0xFFFF)
         struct.pack_into(">H", packet, 2, len(packet))
         packet[0x10:0x18] = b"Audinate"
@@ -24,6 +24,7 @@ class TestClockPortStateFromConmon0x0020:
             0x28,
             clock_frequency_offset_parts_per_billion,
         )
+        struct.pack_into(">H", packet, 0x44, 1)
         struct.pack_into(">H", packet, 0x48, state_code)
         return bytes(packet)
 

@@ -178,8 +178,8 @@ export function stateLabel(value) {
 export function clockLeaderName(device, inventory) {
   const normalize = (value) =>
     typeof value === "string" ? value.replace(/[:-]/g, "").toLowerCase() : "";
-  const identity = normalize(device.leader_clock_identity);
-  if (!identity) return ABSENT;
+  const identity = normalize(device.ptpv1_master_uuid);
+  if (!identity || identity === "000000000000") return ABSENT;
   const matches = Object.values(inventory).filter((candidate) => {
     if (
       (candidate.ddm_server_profile || "") !== (device.ddm_server_profile || "")
@@ -187,14 +187,11 @@ export function clockLeaderName(device, inventory) {
       return false;
     if ((candidate.ddm_domain_id || "") !== (device.ddm_domain_id || ""))
       return false;
-    return (
-      normalize(candidate.clock_identity) === identity ||
-      normalize(macAddress(candidate)) === identity
-    );
+    return normalize(candidate.ptpv1_device_uuid) === identity;
   });
   return matches.length === 1
     ? deviceLabel(matches[0])
-    : text(device.leader_clock_identity);
+    : text(device.ptpv1_master_uuid);
 }
 
 export function meterFraction(value) {
@@ -371,4 +368,14 @@ export function preferredLeader(value) {
     return ABSENT;
   }
   return value ? "enabled" : "disabled";
+}
+
+export function clockStatusFresh(device, now = Date.now()) {
+  const age = now - Date.parse(device.clock_observed_at);
+  return (
+    device.online !== false &&
+    device.clock_status?.status_supported === true &&
+    age >= 0 &&
+    age <= 10000
+  );
 }

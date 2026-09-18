@@ -591,6 +591,7 @@ fn bytes_to_hex(data: &[u8]) -> String {
 }
 
 mod channel_status;
+mod clock;
 mod conmon;
 mod conmon_common;
 mod conmon_detail;
@@ -602,6 +603,7 @@ mod network;
 mod pointer_table;
 
 pub use channel_status::*;
+pub use clock::*;
 pub use conmon::*;
 pub use conmon_common::*;
 pub use conmon_detail::*;

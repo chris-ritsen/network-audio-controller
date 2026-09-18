@@ -232,14 +232,12 @@ def ptp_port_state_name(state_code: int | None) -> str:
 
 
 def clock_port_name(record: dict, records: list[dict]) -> str:
-    interfaces = sorted({entry["network_interface_index"] for entry in records})
-    position = interfaces.index(record["network_interface_index"])
-    interface = (
-        "Primary"
-        if position == 0
-        else "Secondary"
-        if position == 1
-        else f"Interface {record['network_interface_index']}"
+    index = record.get("network_interface_index")
+    interface = {0: "Primary", 1: "Secondary"}.get(
+        index,
+        f"Interface {index}"
+        if index is not None
+        else f"Port {record.get('record_number', '?')} (interface unavailable)",
     )
     version = {1: "v1", 2: "v2"}.get(record["ptp_version"], "")
     transport = {"multicast": "Multicast", "unicast": "Unicast"}.get(record.get("transport_path") or "", "")
@@ -649,12 +647,39 @@ def _device_control_rows(device) -> list[list[str]]:
 
 def _device_clock_rows(device) -> list[list[str]]:
     rows = []
+    from netaudio.dante.clock_control import clock_status_fresh
+
+    status = device.clock_status or {}
+    fresh = clock_status_fresh(
+        {"clock_status": status, "clock_observed_at": device.clock_observed_at, "online": device.online}
+    )
+    if status:
+        rows.append(["Clock Synchronization", status.get("synchronization", "unknown") if fresh else "unavailable"])
+        if status.get("mute_flags") is not None:
+            rows.append(
+                [
+                    "Clock Mute",
+                    ("; ".join(status.get("mute_reasons") or []) or "none") + f" (0x{status['mute_flags']:04x})"
+                    if fresh
+                    else "unavailable",
+                ]
+            )
+        for label, field in (
+            ("Clock State", "clock_state"),
+            ("Servo State", "servo_state"),
+            ("Word Clock", "word_clock_state"),
+            ("PTPv2 Domain", "ptpv2_domain"),
+        ):
+            if status.get(field) is not None:
+                rows.append([label, str(status[field])])
+    if device.ptpv1_grandmaster_uuid:
+        rows.append(["PTPv1 Grandmaster UUID", device.ptpv1_grandmaster_uuid])
     if device.clock_role:
         rows.append(["Clock Role", device.clock_role])
-    if device.clock_identity:
-        rows.append(["Clock Identity", device.clock_identity])
-    if device.leader_clock_identity:
-        rows.append(["Leader Clock Identity", device.leader_clock_identity])
+    if device.ptpv1_device_uuid:
+        rows.append(["PTPv1 Device UUID", device.ptpv1_device_uuid])
+    if device.ptpv1_master_uuid:
+        rows.append(["PTPv1 Current Master UUID", device.ptpv1_master_uuid])
     if device.clock_frequency_offset_parts_per_billion is not None:
         rows.append(
             [
@@ -663,11 +688,18 @@ def _device_clock_rows(device) -> list[list[str]]:
             ]
         )
     records = list(device.clock_port_records or [])
-    if device.clock_port_state_code is not None and not records:
+    if not records and status.get("base_ports"):
+        for index, port in enumerate(status["base_ports"], 1):
+            rows.append([f"Clock Port {index}", ptp_port_state_name(port["state_code"])])
+    elif device.clock_port_state_code is not None and not records:
         rows.append(["Clock Port State", ptp_port_state_name(device.clock_port_state_code)])
     for record in sorted(
         records,
-        key=lambda entry: (entry["network_interface_index"], entry["ptp_version"], entry["transport_path_code"]),
+        key=lambda entry: (
+            entry["network_interface_index"] if entry.get("network_interface_index") is not None else -1,
+            entry["ptp_version"],
+            entry["transport_path_code"],
+        ),
     ):
         rows.append([clock_port_name(record, records), _format_clock_port_record(record)])
     return rows

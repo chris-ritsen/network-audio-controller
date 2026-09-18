@@ -369,65 +369,6 @@ pub fn build_capability_partition_export(
     )
 }
 
-pub fn build_set_preferred_leader(
-    is_preferred: bool,
-    clock_source: u16,
-    mac: [u8; 6],
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    let mut tail = vec![0x00, 0x21, 0x00, 0x00, 0x00, 0x64];
-    tail.extend_from_slice(&0x0002u16.to_be_bytes());
-    tail.extend_from_slice(&clock_source.to_be_bytes());
-    tail.push(if is_preferred { 0x01 } else { 0x00 });
-    tail.extend(std::iter::repeat_n(0, 55));
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_set_clock_source(
-    clock_source: u16,
-    mac: [u8; 6],
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    let mut tail = vec![0x00, 0x21, 0x00, 0x00, 0x00, 0x64];
-    tail.extend_from_slice(&0x0001u16.to_be_bytes());
-    tail.extend_from_slice(&clock_source.to_be_bytes());
-    tail.push(0x00);
-    tail.extend(std::iter::repeat_n(0, 55));
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_set_clock_subdomain(
-    subdomain: [u8; 16],
-    mac: [u8; 6],
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    let mut tail = vec![0x00, 0x21, 0x00, 0x00, 0x00, 0x64];
-    tail.extend_from_slice(&0x0008u16.to_be_bytes());
-    tail.extend_from_slice(&0x0000u16.to_be_bytes());
-    tail.push(0x00);
-    tail.extend(std::iter::repeat_n(0, 3));
-    tail.extend_from_slice(&subdomain);
-    tail.extend(std::iter::repeat_n(0, 36));
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_probe_preferred_leader(
-    clock_source: u16,
-    mac: [u8; 6],
-    message_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
-    let mut tail = vec![0x00, 0x21, 0x00, 0x00, 0x00, 0x64];
-    tail.extend_from_slice(&0x0000u16.to_be_bytes());
-    tail.extend_from_slice(&clock_source.to_be_bytes());
-    tail.push(0x00);
-    tail.extend(std::iter::repeat_n(0, 55));
-    settings_packet(message_id, mac, SETTINGS_SUFFIX_SYSTEM_CONFIG, &tail)
-}
-
-pub fn build_refresh_clock_status(mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_probe_preferred_leader(0, mac, message_id)
-}
-
 pub fn build_bluetooth_status(mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
     let tail = [
         0x10, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x0c, 0x0a, 0x0a, 0x10, 0x09, 0x1a,

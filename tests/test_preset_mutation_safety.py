@@ -14,6 +14,18 @@ runner = CliRunner()
 
 
 class PresetApplication(FakeApplication):
+    async def preview_clock_configuration(self, device, changes):
+        current = await self.probe_preferred_leader_state(device, timeout=2.0)
+        return {
+            "before": {"preferred_leader": current},
+            "changes": changes if current != changes["preferred_leader"] else {},
+        }
+
+    async def set_clock_configuration(self, device, changes):
+        self._record("clock_configuration", device, changes)
+        current = await self.probe_preferred_leader_state(device, timeout=2.0)
+        return {"effective_state_confirmed": current == changes["preferred_leader"]}
+
     async def probe_preferred_leader_state(self, device_ip_address, timeout=2.0):
         raise RuntimeError("synthetic readback service unavailable")
 
@@ -712,7 +724,7 @@ def test_preset_unavailable_planning_readback_sends_no_requests(monkeypatch, tmp
 
     assert result.exit_code == 0
     assert application.sent == []
-    assert "preferred leader: unavailable" in result.output
+    assert "clock configuration: unavailable" in result.output
     assert "interface: unavailable" in result.output
 
 
@@ -759,7 +771,7 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 0
-    assert "preferred leader on (verified)" in result.output
+    assert "clock settings verified; persistence unknown" in result.output
     assert "interface dynamic (verified)" in result.output
     assert "requested; not verified" not in result.output
     assert ("Reboot required: Device" in result.output) is expects_reboot
@@ -798,8 +810,8 @@ def test_preset_summary_reports_partial_failure_and_continues(
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
     assert result.exit_code == 1
-    assert _sent_operations(application) == ["set_preferred_leader"]
+    assert _sent_operations(application) == ["clock_configuration"]
     assert "Preset load summary:" in result.output
     assert "sample rate: MUTATION OUTCOME UNKNOWN" in result.output
     assert "synthetic send failure" in result.output
-    assert "preferred leader on (verified)" in result.output
+    assert "clock settings verified; persistence unknown" in result.output

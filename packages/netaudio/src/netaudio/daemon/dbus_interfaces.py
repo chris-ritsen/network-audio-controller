@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Optional, Union
 
 from dbus_fast import PropertyAccess
@@ -236,16 +237,24 @@ class DanteDeviceInterface(ServiceInterface):
         return dbus_string(self._device.clock_role)
 
     @dbus_property(access=RO)
-    def ClockPortRecords(self) -> "a(qbqyyysyuqqs)":
+    def ClockPortRecords(self) -> "s":
         return clock_port_rows(self._device)
 
     @dbus_property(access=RO)
-    def ClockIdentity(self) -> "s":
-        return dbus_string(self._device.clock_identity)
+    def ClockStatus(self) -> "s":
+        return json.dumps(self._device.clock_status, separators=(",", ":"))
 
     @dbus_property(access=RO)
-    def LeaderClockIdentity(self) -> "s":
-        return dbus_string(self._device.leader_clock_identity)
+    def Ptpv1GrandmasterUuid(self) -> "s":
+        return dbus_string(self._device.ptpv1_grandmaster_uuid)
+
+    @dbus_property(access=RO)
+    def Ptpv1DeviceUuid(self) -> "s":
+        return dbus_string(self._device.ptpv1_device_uuid)
+
+    @dbus_property(access=RO)
+    def Ptpv1MasterUuid(self) -> "s":
+        return dbus_string(self._device.ptpv1_master_uuid)
 
     @dbus_property(access=RO)
     def PlatformSoftwareVersion(self) -> "s":

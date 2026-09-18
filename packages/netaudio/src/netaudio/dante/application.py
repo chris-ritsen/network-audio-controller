@@ -105,15 +105,9 @@ class CapabilityProbeTimeout(RuntimeError):
 
 def _clock_status_snapshot(device) -> dict:
     return {
-        "clock_frequency_offset_parts_per_billion": device.clock_frequency_offset_parts_per_billion,
-        "clock_identity": device.clock_identity,
-        "clock_port_records": device.clock_port_records,
-        "clock_port_state_code": device.clock_port_state_code,
-        "clock_role": device.clock_role,
-        "clock_source_code": device.clock_source_code,
+        **(getattr(device, "clock_status", None) or {}),
+        "clock_observed_at": getattr(device, "clock_observed_at", None),
         "clock_subdomain": device.clock_subdomain,
-        "leader_clock_identity": device.leader_clock_identity,
-        "preferred_leader": device.preferred_leader,
     }
 
 
@@ -1673,24 +1667,31 @@ class DanteApplication:
             "clear-configuration status",
         )
 
-    async def probe_clocking_status(self, device, timeout: float = 3.0) -> dict:
+    async def probe_clocking_status(self, device, timeout: float = 3.0, record_revision=None) -> dict:
         key = self._control_key(device)
         async with self._capability_probe_lock("clock_status", key):
             waiter = self.notifications.register_waiter(STATUS_KIND_CLOCK, key)
             try:
-                await self.send_refresh_clock_status(device)
+                await self.send_refresh_clock_status(device, record_revision=record_revision)
                 try:
                     await asyncio.wait_for(waiter.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     logger.debug(f"Clock status probe timed out for {key}")
                     if waiter.latest_result is None:
+                        if device.clock_observed_at is not None:
+                            device.clock_observed_at = None
+                            self.state._emit_device_updated(device)
                         raise CapabilityProbeTimeout(f"clock status probe timed out for {key}") from None
             finally:
                 self.notifications.unregister_waiter(waiter)
         if waiter.latest_result is None:
             raise RuntimeError(f"clock status readback was unavailable for {key}")
-        apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result)
-        return _clock_status_snapshot(device)
+        if apply_device_status(device, STATUS_KIND_CLOCK, waiter.latest_result):
+            self.state._emit_device_updated(device)
+        status = _clock_status_snapshot(device)
+        if status.get("status_supported") is not True:
+            raise RuntimeError("Clock status is malformed or unsupported.")
+        return status
 
     async def probe_encoding_status(self, target, timeout: float = 2.0) -> dict:
         self._require_probe_supported(target, "encoding")
@@ -1781,13 +1782,8 @@ class DanteApplication:
                 raise RuntimeError(f"preferred leader readback was unavailable for {self._control_key(resolved)}")
             resolved.preferred_leader = fresh.clock_preferences.leader
             return fresh.clock_preferences.leader
-        return await self._probe_once(
-            "preferred_leader",
-            resolved,
-            self.send_probe_preferred_leader,
-            timeout,
-            "preferred leader",
-        )
+        status = await self.probe_clocking_status(resolved, timeout=timeout)
+        return status.get("preferred_leader")
 
     async def probe_sample_rate_pullup_status(
         self,
@@ -2280,9 +2276,6 @@ class DanteApplication:
     async def send_probe_lock_reset_status(self, device_ip_address, host_mac=None, request_value: int = 100) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_lock_reset_status(host_mac, request_value))
 
-    async def send_probe_preferred_leader(self, device_ip_address, clock_source: int = 0, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.probe_preferred_leader(clock_source, host_mac))
-
     async def send_probe_sample_rate(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_sample_rate(host_mac))
 
@@ -2292,8 +2285,14 @@ class DanteApplication:
     async def send_probe_switch_configuration(self, device_ip_address, host_mac=None) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_switch_configuration(host_mac))
 
-    async def send_refresh_clock_status(self, device_ip_address, host_mac=None, sequence: int = 0x0021) -> None:
-        await self._send_settings(device_ip_address, self.commands.refresh_clock_status(host_mac, sequence))
+    async def send_refresh_clock_status(
+        self, target, host_mac=None, sequence: int = 0x0021, record_revision=None
+    ) -> None:
+        from netaudio.dante.clock_control import clock_record_revision
+
+        device = self._control_target(target)
+        revision = clock_record_revision(device, record_revision)
+        await self._send_settings(device, self.commands.refresh_clock_status(revision, host_mac, sequence))
 
     async def send_remove_subscriptions(self, device, channel_numbers):
         async with device.topology_mutation_lock:
@@ -2308,12 +2307,6 @@ class DanteApplication:
         if protocol_id is None:
             protocol_id = await self.resolve_channel_name_protocol_identifier(device, channel_type)
         return await device.execute(self.commands.set_channel_name(channel_type, channel_number, name, protocol_id))
-
-    async def send_set_clock_source(self, device_ip_address, clock_source: int, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.set_clock_source(clock_source, host_mac))
-
-    async def send_set_clock_subdomain(self, device_ip_address, subdomain, host_mac=None) -> None:
-        await self._send_settings(device_ip_address, self.commands.set_clock_subdomain(subdomain, host_mac))
 
     async def send_set_encoding(self, device, encoding: int) -> None:
         supported_encodings = device.supported_encodings
@@ -2369,18 +2362,6 @@ class DanteApplication:
             ),
         )
 
-    async def send_set_preferred_leader(
-        self,
-        device_ip_address,
-        is_preferred: bool,
-        clock_source: int = 0,
-        host_mac=None,
-    ) -> None:
-        await self._send_settings(
-            device_ip_address,
-            self.commands.set_preferred_leader(is_preferred, clock_source, host_mac),
-        )
-
     async def send_set_sample_rate(self, device_ip_address, sample_rate: int) -> None:
         await self._send_settings(device_ip_address, self.commands.set_sample_rate(sample_rate))
 
@@ -2425,23 +2406,82 @@ class DanteApplication:
             CHANNEL_NAME_NOTIFICATION_IDS[channel_type],
         )
 
+    async def preview_clock_configuration(
+        self, device, changes: dict, timeout: float = 3.0, record_revision=None
+    ) -> dict:
+        from netaudio.dante.clock_control import preview_clock_configuration
+
+        if getattr(device, "requires_managed_control", False):
+            raise RuntimeError("Direct clock configuration is unavailable for managed devices.")
+        status = await self.probe_clocking_status(device, timeout=timeout, record_revision=record_revision)
+        return preview_clock_configuration(device, status, changes, record_revision)
+
+    async def set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, record_revision=None) -> dict:
+        def audit_result(result):
+            return {
+                "state": "confirmed" if result["effective_state_confirmed"] else "unverified",
+                "requested_values": result["requested"],
+                "effective_values": result["status"],
+                "effective_state_confirmation": True if result["effective_state_confirmed"] else None,
+                "persistence_confirmation": None,
+                "request_sent": result["request_sent"],
+            }
+
+        return await self._run_configuration_operation(
+            device,
+            "clock_configuration",
+            changes,
+            lambda: self._set_clock_configuration(device, changes, timeout, record_revision),
+            result_adapter=audit_result,
+        )
+
+    async def _set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, record_revision=None) -> dict:
+        from netaudio.dante.clock_control import clock_configuration_matches
+
+        async with self._capability_probe_lock("clock_configuration", self._control_key(device)):
+            preview = await self.preview_clock_configuration(
+                device, changes, timeout=timeout, record_revision=record_revision
+            )
+            sent = bool(preview["changes"])
+            result = {
+                "request_sent": sent,
+                "request_acknowledged": None,
+                "effective_state_confirmed": not sent,
+                "persistence": "unknown",
+                "requested": preview["requested"],
+                "status": _clock_status_snapshot(device),
+            }
+            if not sent:
+                return result
+            await self._send_settings(device, self.commands.clock_control(preview["control"]))
+            deadline = asyncio.get_running_loop().time() + timeout
+            while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
+                try:
+                    status = await self.probe_clocking_status(
+                        device, timeout=min(1.0, remaining), record_revision=record_revision
+                    )
+                except (CapabilityProbeTimeout, RuntimeError, OSError):
+                    status = None
+                if status is not None:
+                    result["status"] = status
+                    if clock_configuration_matches(status, preview["requested"]):
+                        result["effective_state_confirmed"] = True
+                        break
+                await asyncio.sleep(min(0.2, max(0, deadline - asyncio.get_running_loop().time())))
+            return result
+
     async def set_clock_source(self, device, clock_source: int, timeout: float = 4.0) -> int | None:
-        if isinstance(clock_source, bool) or not isinstance(clock_source, int) or not 0 <= clock_source <= 0xFFFF:
-            raise ValueError("clock_source must be an integer from 0 through 65535")
-        await self.send_set_clock_source(device, clock_source)
-        parsed = await self.probe_clocking_status(device, timeout=timeout)
-        return parsed["clock_source_code"]
+        result = await self.set_clock_configuration(device, {"clock_source": clock_source}, timeout=timeout)
+        if not result["effective_state_confirmed"]:
+            raise RuntimeError("Clock source was sent but fresh readback has not confirmed it.")
+        return result["status"].get("clock_source_code")
 
     async def set_clock_subdomain(self, device, subdomain, timeout: float = 4.0) -> bytes | None:
-        from netaudio.dante.clock_config import clock_subdomain_bytes
-
-        normalized = clock_subdomain_bytes(subdomain)
-        if normalized is None:
-            raise ValueError("clock subdomain must be at most 16 bytes")
-        await self.send_set_clock_subdomain(device, normalized)
-        parsed = await self.probe_clocking_status(device, timeout=timeout)
-        clock_subdomain = parsed.get("clock_subdomain")
-        return bytes(clock_subdomain) if clock_subdomain is not None else None
+        result = await self.set_clock_configuration(device, {"subdomain": subdomain}, timeout=timeout)
+        if not result["effective_state_confirmed"]:
+            raise RuntimeError("Clock subdomain was sent but fresh readback has not confirmed it.")
+        raw = result["status"].get("clock_subdomain")
+        return bytes(raw) if raw is not None else None
 
     async def set_device_name(self, device, name: str):
         error = validate_dante_name(name)
@@ -2620,13 +2660,10 @@ class DanteApplication:
         if getattr(device, "requires_managed_control", False):
             await self.managed_transport(device).set_preferred_leader(device, is_preferred)
             return await self.probe_preferred_leader_state(device, timeout=timeout)
-        device_ip_address = device._require_address()
-
-        async def mutate() -> None:
-            await self.send_set_preferred_leader(device_ip_address, is_preferred)
-            await self.send_probe_preferred_leader(device_ip_address)
-
-        return await self._mutate_and_take_result("preferred_leader", device_ip_address, mutate, timeout)
+        result = await self.set_clock_configuration(device, {"preferred_leader": is_preferred}, timeout=timeout)
+        if not result["effective_state_confirmed"]:
+            raise RuntimeError("Preferred leader was sent but fresh readback has not confirmed it.")
+        return result["status"].get("preferred_leader")
 
     async def set_sample_rate(
         self,

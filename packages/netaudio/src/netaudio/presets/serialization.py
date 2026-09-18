@@ -148,6 +148,10 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
             config["sample_rate_pullup"] = pullup
         if getattr(device, "clock_source_code", None) is not None:
             config["clock_source_code"] = device.clock_source_code
+        clock_status = getattr(device, "clock_status", None) or {}
+        for field in ("clock_subdomain", "global_unicast_delay_requests", "aggregate_ptpv1_unicast_delay_requests"):
+            if clock_status.get(field) is not None:
+                config[field] = clock_status[field]
         performance = getattr(device, "performance_settings", None) or {}
         advertised_performance_ids = {
             entry.get("property_id")

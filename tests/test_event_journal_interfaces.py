@@ -24,7 +24,7 @@ def journal_snapshot(role: str = "Follower") -> dict:
         "name": "Receiver",
         "online": True,
         "clock_role": role,
-        "leader_clock_identity": "001dc1000001",
+        "ptpv1_master_uuid": "001dc1000001",
     }
 
 

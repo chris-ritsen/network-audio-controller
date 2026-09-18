@@ -125,10 +125,14 @@ def clock_view(device: dict) -> dict:
     managed = device.get("management_state") == "managed"
     return compact(
         {
+            "clock_status": device.get("clock_status"),
+            "clock_observed_at": device.get("clock_observed_at"),
+            "ptpv1_device_uuid": device.get("ptpv1_device_uuid"),
+            "ptpv1_grandmaster_uuid": device.get("ptpv1_grandmaster_uuid"),
             "ddm_frequency_offset": clocking.get("frequency_offset") if managed else None,
             "frequency_offset_parts_per_billion": device.get("clock_frequency_offset_parts_per_billion"),
-            "leader_clock_identity": device.get("leader_clock_identity"),
-            "leader_evidence": "reported" if device.get("leader_clock_identity") else None,
+            "ptpv1_master_uuid": device.get("ptpv1_master_uuid"),
+            "leader_evidence": "reported" if device.get("ptpv1_master_uuid") else None,
             "locked": clocking.get("locked"),
             "mute_status": clocking.get("mute_status"),
             "preferred_leader": preferred,
@@ -157,11 +161,11 @@ def clock_status_view(payload: Any, arguments: dict) -> Any:
     devices = [
         {**device, "name": device.get("name") or key} for key, device in payload.items() if isinstance(device, dict)
     ]
-    identities = {device["clock_identity"]: device["name"] for device in devices if device.get("clock_identity")}
+    identities = {device["ptpv1_device_uuid"]: device["name"] for device in devices if device.get("ptpv1_device_uuid")}
     domains: dict[str, dict] = {}
     for device in sorted(devices, key=lambda device: device["name"]):
         clock = clock_view(device)
-        leader_identity = clock.get("leader_clock_identity")
+        leader_identity = clock.get("ptpv1_master_uuid")
         if leader_identity in identities:
             clock["leader"] = identities[leader_identity]
         entry = compact({"name": device["name"], "online": device.get("online"), **clock})

@@ -79,6 +79,16 @@ def _configuration_summary(config):
         entries.append({"label": "Receive-flow default slots", "value": str(config["receive_flow_default_slots"])})
     if "clock_source_code" in config:
         entries.append({"label": "Clock source", "value": f"0x{config['clock_source_code']:04X}"})
+    if "clock_subdomain" in config:
+        from netaudio.dante.clock_config import format_clock_subdomain
+
+        entries.append({"label": "Clock subdomain", "value": format_clock_subdomain(config["clock_subdomain"])})
+    for field, label in (
+        ("global_unicast_delay_requests", "Global unicast delay requests"),
+        ("aggregate_ptpv1_unicast_delay_requests", "PTPv1 unicast delay requests"),
+    ):
+        if field in config:
+            entries.append({"label": label, "value": "On" if config[field] else "Off"})
     if "external_word_clock" in config:
         entries.append({"label": "External word clock", "value": "On" if config["external_word_clock"] else "Off"})
     if "redundancy_mode" in config:

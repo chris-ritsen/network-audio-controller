@@ -452,15 +452,12 @@ async def _plan_performance_setting(application, device, kind: str, requested: A
     return _change_or_unchanged(kind, requested, current, matches=current == expected)
 
 
-async def _plan_clock_source(application, device, requested: int) -> PresetAction:
+async def _plan_clock_configuration(application, device, changes: dict) -> PresetAction:
     try:
-        status = await application.probe_clocking_status(device, timeout=3.0)
+        preview = await application.preview_clock_configuration(device, changes)
     except READBACK_ERRORS as exception:
-        return _unavailable("clock_source_code", requested, f"fresh clock-source readback failed: {exception}")
-    current = status.get("clock_source_code") if isinstance(status, dict) else None
-    if isinstance(current, bool) or not isinstance(current, int):
-        return _unavailable("clock_source_code", requested, "fresh clock-source code was unavailable")
-    return _change_or_unchanged("clock_source_code", requested, current)
+        return _unavailable("clock_configuration", changes, str(exception))
+    return _change_or_unchanged("clock_configuration", changes, preview["before"], matches=not preview["changes"])
 
 
 async def _plan_channel_names(application, device, config: dict, channel_type: str) -> PresetAction:
@@ -896,6 +893,9 @@ def _preserved_actions(config: dict) -> list[PresetAction]:
         "receive_flow_default_slots",
         "sample_rate_pullup",
         "clock_source_code",
+        "clock_subdomain",
+        "global_unicast_delay_requests",
+        "aggregate_ptpv1_unicast_delay_requests",
         "redundancy_mode",
         "interfaces",
         "interface_mode",
@@ -968,7 +968,7 @@ async def _plan_device_actions(application, matched: MatchedPresetDevice) -> Pre
                     config[performance_kind],
                 )
             )
-    if "preferred_leader" in config:
+    if "preferred_leader" in config and getattr(matched.device, "requires_managed_control", False):
         actions.append(await _plan_preferred_leader(application, matched.device, config["preferred_leader"]))
     if "sample_rate_pullup" in config:
         actions.append(
@@ -980,8 +980,20 @@ async def _plan_device_actions(application, matched: MatchedPresetDevice) -> Pre
                 probe_name="probe_sample_rate_pullup_status",
             )
         )
-    if "clock_source_code" in config:
-        actions.append(await _plan_clock_source(application, matched.device, config["clock_source_code"]))
+    clock_changes = {
+        target: config[source]
+        for source, target in (
+            ("clock_source_code", "clock_source"),
+            ("clock_subdomain", "subdomain"),
+            ("global_unicast_delay_requests", "global_unicast_delay_requests"),
+            ("aggregate_ptpv1_unicast_delay_requests", "aggregate_ptpv1_unicast_delay_requests"),
+        )
+        if source in config
+    }
+    if "preferred_leader" in config and not getattr(matched.device, "requires_managed_control", False):
+        clock_changes["preferred_leader"] = config["preferred_leader"]
+    if clock_changes:
+        actions.append(await _plan_clock_configuration(application, matched.device, clock_changes))
     if "transmitter_channel_names" in config:
         actions.append(await _plan_channel_names(application, matched.device, config, "tx"))
     if "receiver_channel_names" in config:
@@ -1289,18 +1301,18 @@ async def _apply_sample_rate_pullup(
         )
 
 
-async def _apply_clock_source(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
+async def _apply_clock_configuration(
+    context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction
+) -> None:
     try:
-        effective = await context.application.set_clock_source(entry.device, action.payload)
+        result = await context.application.set_clock_configuration(entry.device, action.payload)
     except MUTATION_ERRORS as exception:
-        context.report.record(entry.device_name, f"clock source: FAILED ({exception})", failed=True)
+        context.report.record(entry.device_name, f"clock settings: FAILED ({exception})", failed=True)
         return
-    if effective == action.payload:
-        context.report.record(entry.device_name, f"clock source {action.payload} (verified)")
+    if result["effective_state_confirmed"]:
+        context.report.record(entry.device_name, "clock settings verified; persistence unknown")
     else:
-        context.report.record(
-            entry.device_name, f"clock source {action.payload}: FAILED (device reports {effective!r})", failed=True
-        )
+        context.report.record(entry.device_name, "clock settings sent but not confirmed", failed=True)
 
 
 async def _apply_codec_gain(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
@@ -1624,7 +1636,7 @@ async def _apply_interface(context: PresetLoadContext, entry: PresetDeviceAction
 
 
 ACTION_HANDLERS: dict[str, ActionHandler] = {
-    "clock_source_code": _apply_clock_source,
+    "clock_configuration": _apply_clock_configuration,
     "codec_gain": _apply_codec_gain,
     "device_name": _apply_device_name,
     "encoding": _apply_audio_setting,

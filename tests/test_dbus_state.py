@@ -1,3 +1,4 @@
+import json
 import importlib
 import sys
 import types
@@ -230,8 +231,8 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     device.clock_subdomain = b"_DFLT" + bytes(11)
     device.clock_port_state_code = 0x0006
     device.clock_role = "Leader"
-    device.clock_identity = "001dc150692e"
-    device.leader_clock_identity = "001dc150692e"
+    device.ptpv1_device_uuid = "001dc150692e"
+    device.ptpv1_master_uuid = "001dc150692e"
     device.platform_software_version = "4.2.4.1"
     device.platform_hardware_version = "4.2.3.4"
     device.platform_api_version = "4.2.1"
@@ -288,8 +289,8 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["clock_source_code"] == 57044
     assert snapshot["clock_subdomain"] == "_DFLT"
     assert snapshot["clock_role"] == "Leader"
-    assert snapshot["clock_identity"] == "001dc150692e"
-    assert snapshot["leader_clock_identity"] == "001dc150692e"
+    assert snapshot["ptpv1_device_uuid"] == "001dc150692e"
+    assert snapshot["ptpv1_master_uuid"] == "001dc150692e"
     assert snapshot["platform_software_version"] == "4.2.4.1"
     assert snapshot["platform_hardware_version"] == "4.2.3.4"
     assert snapshot["platform_api_version"] == "4.2.1"
@@ -304,7 +305,7 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert snapshot["ddm_product_software_version"] == "1.3.5-ddm"
     assert snapshot["ddm_dante_version"] == "4.2.4.1-ddm"
     assert snapshot["ddm_dante_hardware_version"] == "4.2.3.4-ddm"
-    assert snapshot["clock_port_records"] == [(0, False, 1, 1, 2, 1, "multicast", 0, 2, 6, 7, "Leader")]
+    assert json.loads(snapshot["clock_port_records"]) == device.clock_port_records
     assert clock_port_rows(device) == snapshot["clock_port_records"]
     assert "aes67_enabled" not in snapshot
     assert DANTE_PROPERTY_NAMES["min_latency"] == "MinLatency"
@@ -315,8 +316,8 @@ def test_snapshot_preserves_all_latency_values_and_applied_aes67_state():
     assert DANTE_PROPERTY_NAMES["transmitter_flows"] == "TransmitterFlows"
     assert DANTE_PROPERTY_NAMES["clock_source_code"] == "ClockSourceCode"
     assert DANTE_PROPERTY_NAMES["clock_subdomain"] == "ClockSubdomain"
-    assert DANTE_PROPERTY_NAMES["clock_identity"] == "ClockIdentity"
-    assert DANTE_PROPERTY_NAMES["leader_clock_identity"] == "LeaderClockIdentity"
+    assert DANTE_PROPERTY_NAMES["ptpv1_device_uuid"] == "Ptpv1DeviceUuid"
+    assert DANTE_PROPERTY_NAMES["ptpv1_master_uuid"] == "Ptpv1MasterUuid"
     assert DANTE_PROPERTY_NAMES["ddm_product_version"] == "DdmProductVersion"
     assert DANTE_PROPERTY_NAMES["ddm_dante_hardware_version"] == "DdmDanteHardwareVersion"
     assert set(snapshot) == set(DANTE_PROPERTY_NAMES)
@@ -386,8 +387,8 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     device.clock_frequency_offset_parts_per_billion = -1_601
     device.clock_port_state_code = 0x0009
     device.clock_role = "Follower"
-    device.clock_identity = "001dc1510295"
-    device.leader_clock_identity = "001dc150692e"
+    device.ptpv1_device_uuid = "001dc1510295"
+    device.ptpv1_master_uuid = "001dc150692e"
     device.ddm_product_version = "1.3.4"
     device.ddm_product_software_version = "1.3.5"
     device.ddm_dante_version = "4.2.4.1"
@@ -429,9 +430,9 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert interface.LockStateKnown() is False
     assert interface.ClockFrequencyOffsetPartsPerBillion() == -1_601
     assert interface.ClockRole() == "Follower"
-    assert interface.ClockPortRecords() == [(1, False, 2, 2, 2, 1, "multicast", 0, 2, 9, 7, "Follower")]
-    assert interface.ClockIdentity() == "001dc1510295"
-    assert interface.LeaderClockIdentity() == "001dc150692e"
+    assert json.loads(interface.ClockPortRecords()) == device.clock_port_records
+    assert interface.Ptpv1DeviceUuid() == "001dc1510295"
+    assert interface.Ptpv1MasterUuid() == "001dc150692e"
     assert interface.DdmProductVersion() == "1.3.4"
     assert interface.DdmProductSoftwareVersion() == "1.3.5"
     assert interface.DdmDanteVersion() == "4.2.4.1"
@@ -443,7 +444,7 @@ def test_interface_uses_double_latency_properties_and_applied_aes67(
     assert module.DanteDeviceInterface.MinLatency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.MaxLatency.__annotations__["return"] == "d"
     assert module.DanteDeviceInterface.ClockFrequencyOffsetPartsPerBillion.__annotations__["return"] == "i"
-    assert module.DanteDeviceInterface.ClockPortRecords.__annotations__["return"] == "a(qbqyyysyuqqs)"
+    assert module.DanteDeviceInterface.ClockPortRecords.__annotations__["return"] == "s"
     assert module.DanteDeviceInterface.ClockSourceCode.__annotations__["return"] == "q"
     assert module.DanteDeviceInterface.ClockSubdomain.__annotations__["return"] == "s"
     assert module.DanteDeviceInterface.Aes67MulticastPrefix.__annotations__["return"] == "s"

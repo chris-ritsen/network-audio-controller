@@ -305,30 +305,30 @@ class DaemonConfigurationHandlers:
             {"success": True, "subdomain": format_clock_subdomain(observed)},
         )
 
+    async def _handle_set_clock_configuration(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        changes = params.get("changes")
+        if not isinstance(changes, dict):
+            await self._send_json(writer, {"error": "changes must be an object"}, 400)
+            return
+        from netaudio.monitoring.model import _json_safe
+
+        result = await self.application.set_clock_configuration(
+            device, changes, record_revision=params.get("record_revision")
+        )
+        result["success"] = result["effective_state_confirmed"]
+        await self._send_json(writer, _json_safe(result), 200 if result["success"] else 409)
+
     async def _handle_refresh_clock(self, writer, params):
-        from netaudio.dante.clock_config import format_clock_subdomain
+        from netaudio.monitoring.model import _json_safe
 
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        parsed = await self.application.probe_clocking_status(device)
-        if parsed is None:
-            await self._send_json(writer, {"error": "clock status readback was unavailable"}, 504)
-            return
-        clock_subdomain = parsed.get("clock_subdomain")
-        await self._send_json(
-            writer,
-            {
-                "success": True,
-                "clock_source_code": parsed["clock_source_code"],
-                "clock_subdomain": list(clock_subdomain) if clock_subdomain is not None else None,
-                "clock_subdomain_label": format_clock_subdomain(clock_subdomain),
-                "preferred_leader": parsed.get("preferred_leader"),
-                "clock_role": parsed.get("clock_role"),
-                "clock_identity": parsed.get("clock_identity"),
-                "leader_clock_identity": parsed.get("leader_clock_identity"),
-            },
-        )
+        parsed = await self.application.probe_clocking_status(device, record_revision=params.get("record_revision"))
+        await self._send_json(writer, {"success": True, **_json_safe(parsed)})
 
     async def _handle_set_aes67(self, writer, params):
         device = await self._require_device(writer, params.get("device"))

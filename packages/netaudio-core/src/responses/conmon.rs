@@ -325,14 +325,6 @@ pub fn parse_sample_rate_status(data: &[u8]) -> Option<ConfigurableU32Status> {
     parse_configurable_u32_status(data, CONMON_OPCODE_SAMPLE_RATE_STATUS, true, false)
 }
 
-const CONMON_0022_BODY_OFFSET: usize = 28;
-const CONMON_0022_MINIMUM_SIZE: usize = 64;
-const CONMON_0022_COUNT_OFFSET: usize = 32;
-const CONMON_0022_CODES_OFFSET: usize = 36;
-const CONMON_0024_BODY_OFFSET: usize = 28;
-const CONMON_0024_MINIMUM_SIZE: usize = 48;
-const CONMON_0026_MINIMUM_SIZE: usize = 76;
-const CONMON_0026_NAME_POINTER_OFFSET: usize = 40;
 const INTERFACE_STATISTICS_BODY_OFFSET: usize = 0x18;
 const INTERFACE_STATISTICS_GROUP_COUNT_BODY_OFFSET: usize = 0x08;
 const INTERFACE_STATISTICS_GROUP_POINTERS_BODY_OFFSET: usize = 0x0A;
@@ -437,85 +429,121 @@ pub fn parse_unmapped_0102_status(data: &[u8]) -> Option<Unmapped0102Status> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Unmapped0024Status {
-    pub unmapped_word_at_body_offset_0: u32,
-    pub unmapped_word_at_body_offset_4: u32,
-    pub unmapped_word_at_body_offset_8: u32,
-    pub unmapped_word_at_body_offset_12: u32,
-    pub unmapped_word_at_body_offset_16: u32,
+pub struct ClockUnicastStatus {
+    pub record_revision: u16,
+    pub raw_record: Vec<u8>,
+    pub raw_words: [u32; 4],
 }
 
-pub fn parse_unmapped_0024_status(data: &[u8]) -> Option<Unmapped0024Status> {
-    validate_conmon_envelope(data, CONMON_OPCODE_UNMAPPED_0024_STATUS)?;
-    if data.len() < CONMON_0024_MINIMUM_SIZE {
-        return None;
-    }
-    Some(Unmapped0024Status {
-        unmapped_word_at_body_offset_0: read_u32(data, CONMON_0024_BODY_OFFSET)?,
-        unmapped_word_at_body_offset_4: read_u32(data, CONMON_0024_BODY_OFFSET + 4)?,
-        unmapped_word_at_body_offset_8: read_u32(data, CONMON_0024_BODY_OFFSET + 8)?,
-        unmapped_word_at_body_offset_12: read_u32(data, CONMON_0024_BODY_OFFSET + 12)?,
-        unmapped_word_at_body_offset_16: read_u32(data, CONMON_0024_BODY_OFFSET + 16)?,
+pub fn parse_clock_unicast_status(data: &[u8]) -> Option<ClockUnicastStatus> {
+    validate_conmon_envelope(data, 0x0024)?;
+    let r = data.get(24..)?;
+    Some(ClockUnicastStatus {
+        record_revision: read_u16(r, 0)?,
+        raw_record: r.to_vec(),
+        raw_words: [
+            read_u32(r, 8)?,
+            read_u32(r, 12)?,
+            read_u32(r, 16)?,
+            read_u32(r, 20)?,
+        ],
     })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Unmapped0022Status {
-    pub unmapped_prefix_word: u32,
+pub struct ClockMasterStatus {
+    pub record_revision: u16,
+    pub raw_record: Vec<u8>,
     pub record_count: u16,
-    pub unmapped_word_at_body_offset_6: u16,
-    pub unmapped_codes: Vec<u16>,
+    pub block_length: u16,
+    pub status_codes: Vec<u16>,
+    pub block_padding: Vec<u8>,
 }
 
-pub fn parse_unmapped_0022_status(data: &[u8]) -> Option<Unmapped0022Status> {
-    validate_conmon_envelope(data, CONMON_OPCODE_UNMAPPED_0022_STATUS)?;
-    if data.len() < CONMON_0022_MINIMUM_SIZE {
+pub fn parse_clock_master_status(data: &[u8]) -> Option<ClockMasterStatus> {
+    validate_conmon_envelope(data, 0x0022)?;
+    let r = data.get(24..)?;
+    let count = read_u16(r, 8)?;
+    let length = read_u16(r, 10)?;
+    let block_end = 8usize.checked_add(usize::from(length))?;
+    let codes_end = 12usize.checked_add(usize::from(count).checked_mul(2)?)?;
+    if codes_end > block_end {
         return None;
     }
-    let record_count = read_u16(data, CONMON_0022_COUNT_OFFSET)?;
-    let codes_end =
-        CONMON_0022_CODES_OFFSET.checked_add((record_count as usize).checked_mul(2)?)?;
-    if codes_end > data.len() {
-        return None;
-    }
-    let mut unmapped_codes = Vec::with_capacity(record_count as usize);
-    for code_index in 0..record_count as usize {
-        unmapped_codes.push(read_u16(
-            data,
-            CONMON_0022_CODES_OFFSET.checked_add(code_index.checked_mul(2)?)?,
-        )?);
-    }
-    Some(Unmapped0022Status {
-        unmapped_prefix_word: read_u32(data, CONMON_0022_BODY_OFFSET)?,
-        record_count,
-        unmapped_word_at_body_offset_6: read_u16(data, CONMON_0022_COUNT_OFFSET + 2)?,
-        unmapped_codes,
+    r.get(..block_end)?;
+    let codes = (0..usize::from(count))
+        .map(|i| read_u16(r, 12 + i * 2))
+        .collect::<Option<Vec<_>>>()?;
+    Some(ClockMasterStatus {
+        record_revision: read_u16(r, 0)?,
+        raw_record: r.to_vec(),
+        record_count: count,
+        block_length: length,
+        status_codes: codes,
+        block_padding: r[codes_end..block_end].to_vec(),
     })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Unmapped0026Status {
+pub struct ClockIdentifierStatus {
+    pub record_revision: u16,
+    pub raw_record: Vec<u8>,
+    pub region_size: u16,
+    pub item_count: u16,
+    pub maximum_name_width: u16,
+    pub name_length: u16,
     pub name_pointer: u16,
     pub device_name: String,
-    pub trailing_bytes: Vec<u8>,
+    pub name_bytes: Vec<u8>,
+    pub first_identifier: [u8; 6],
+    pub second_identifier: [u8; 6],
 }
 
-pub fn parse_unmapped_0026_status(data: &[u8]) -> Option<Unmapped0026Status> {
-    validate_conmon_envelope(data, CONMON_OPCODE_UNMAPPED_0026_STATUS)?;
-    if data.len() < CONMON_0026_MINIMUM_SIZE {
+pub fn parse_clock_identifier_status(data: &[u8]) -> Option<ClockIdentifierStatus> {
+    validate_conmon_envelope(data, 0x0026)?;
+    let r = data.get(24..)?;
+    let region_size = read_u16(r, 8)?;
+    let bounded = r.get(..usize::from(region_size))?;
+    let width = read_u16(r, 12)?;
+    let length = read_u16(r, 14)?;
+    let name = read_u16(r, 16)?;
+    let first = usize::from(read_u16(r, 20)?);
+    let second = usize::from(read_u16(r, 24)?);
+    let start = usize::from(name);
+    let end = start.checked_add(usize::from(length))?;
+    if length >= width || start < 26 || first < 26 || second < 26 || *bounded.get(end)? != 0 {
         return None;
     }
-    let name_pointer = read_u16(data, CONMON_0026_NAME_POINTER_OFFSET)?;
-    let name_offset = CONMON_CLOCK_RECORD_PAYLOAD_OFFSET.checked_add(usize::from(name_pointer))?;
-    let name_bytes = data.get(name_offset..)?;
-    let name_end = name_bytes.iter().position(|byte| *byte == 0)?;
-    let device_name = std::str::from_utf8(&name_bytes[..name_end])
-        .ok()?
-        .to_owned();
-    Some(Unmapped0026Status {
-        name_pointer,
-        device_name,
-        trailing_bytes: name_bytes[name_end + 1..].to_vec(),
+    let ranges = [
+        start..end.checked_add(1)?,
+        first..first.checked_add(6)?,
+        second..second.checked_add(6)?,
+    ];
+    for (i, a) in ranges.iter().enumerate() {
+        bounded.get(a.clone())?;
+        if ranges[i + 1..]
+            .iter()
+            .any(|b| a.start < b.end && b.start < a.end)
+        {
+            return None;
+        }
+    }
+    let name_bytes = bounded.get(start..end)?;
+    if name_bytes.contains(&0) {
+        return None;
+    }
+    Some(ClockIdentifierStatus {
+        record_revision: read_u16(r, 0)?,
+        raw_record: r.to_vec(),
+        region_size,
+        item_count: read_u16(r, 10)?,
+        maximum_name_width: width,
+        name_length: length,
+        name_pointer: name,
+        device_name: String::from_utf8_lossy(name_bytes).into_owned(),
+        name_bytes: name_bytes.to_vec(),
+        first_identifier: bounded[first..first + 6].try_into().ok()?,
+        second_identifier: bounded[second..second + 6].try_into().ok()?,
     })
 }
 

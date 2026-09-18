@@ -473,13 +473,9 @@ fn authentic_0024_status_packet() -> Vec<u8> {
 }
 
 #[test]
-fn unmapped_0024_status_parses_authentic_a32_publication() {
-    let parsed = parse_unmapped_0024_status(&authentic_0024_status_packet()).unwrap();
-    assert_eq!(parsed.unmapped_word_at_body_offset_0, 0);
-    assert_eq!(parsed.unmapped_word_at_body_offset_4, 0x0001_0008);
-    assert_eq!(parsed.unmapped_word_at_body_offset_8, 0x0010_0000);
-    assert_eq!(parsed.unmapped_word_at_body_offset_12, 0);
-    assert_eq!(parsed.unmapped_word_at_body_offset_16, 0x0003_0000);
+fn clock_unicast_status_parses_authentic_a32_publication() {
+    let parsed = parse_clock_unicast_status(&authentic_0024_status_packet()).unwrap();
+    assert_eq!(parsed.raw_words, [0x0001_0008, 0x0010_0000, 0, 0x0003_0000]);
 }
 
 fn authentic_0022_status_packet() -> Vec<u8> {
@@ -489,12 +485,11 @@ fn authentic_0022_status_packet() -> Vec<u8> {
 }
 
 #[test]
-fn unmapped_0022_status_parses_authentic_a32_publication() {
-    let parsed = parse_unmapped_0022_status(&authentic_0022_status_packet()).unwrap();
-    assert_eq!(parsed.unmapped_prefix_word, 0);
+fn clock_master_status_parses_authentic_a32_publication() {
+    let parsed = parse_clock_master_status(&authentic_0022_status_packet()).unwrap();
     assert_eq!(parsed.record_count, 3);
-    assert_eq!(parsed.unmapped_word_at_body_offset_6, 0x0014);
-    assert_eq!(parsed.unmapped_codes, vec![0x0006, 0x0003, 0x0003]);
+    assert_eq!(parsed.block_length, 0x0014);
+    assert_eq!(parsed.status_codes, vec![0x0006, 0x0003, 0x0003]);
 }
 
 fn authentic_0026_status_packet() -> Vec<u8> {
@@ -504,14 +499,12 @@ fn authentic_0026_status_packet() -> Vec<u8> {
 }
 
 #[test]
-fn unmapped_0026_status_parses_authentic_a32_device_name() {
-    let parsed = parse_unmapped_0026_status(&authentic_0026_status_packet()).unwrap();
+fn clock_identifier_status_parses_authentic_a32_device_name() {
+    let parsed = parse_clock_identifier_status(&authentic_0026_status_packet()).unwrap();
     assert_eq!(parsed.name_pointer, 0x001A);
     assert_eq!(parsed.device_name, "A32-000001");
-    assert_eq!(
-        parsed.trailing_bytes,
-        decode_hexadecimal("000200000000010000020000000001")
-    );
+    assert_eq!(parsed.first_identifier, [2, 0, 0, 0, 0, 1]);
+    assert_eq!(parsed.second_identifier, [2, 0, 0, 0, 0, 1]);
 }
 
 fn authentic_0040_status_packet() -> Vec<u8> {

@@ -154,9 +154,11 @@ class TestSettingsCommandPacketFormat:
             ("command_probe_sample_rate", ()),
             ("command_probe_encoding", ()),
             ("command_probe_sample_rate_pullup", ()),
-            ("command_set_preferred_leader", (True,)),
-            ("command_probe_preferred_leader", ()),
-            ("command_refresh_clock_status", ()),
+            (
+                "command_clock_control",
+                ({"record_revision": 0x073A, "clock_capabilities": 0, "extension_flags": 0, "preferred_leader": True},),
+            ),
+            ("command_refresh_clock_status", (0x073A,)),
             ("command_bluetooth_status", ()),
         ],
     )
