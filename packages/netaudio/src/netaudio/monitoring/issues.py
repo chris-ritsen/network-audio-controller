@@ -6,6 +6,9 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum
+from datetime import datetime
+
+from netaudio.dante.clock_control import clock_status_fresh, CLOCK_STATUS_MAX_AGE_SECONDS
 from typing import Any
 
 from netaudio.monitoring.model import EventSeverity, _json_safe
@@ -18,6 +21,7 @@ class IssueKind(str, Enum):
     ADDRESS_CONFLICT = "address_conflict"
     SUBNET_CONFLICT = "subnet_conflict"
     CLOCK_SYNCHRONIZATION = "clock_synchronization"
+    CLOCK_MUTED = "clock_muted"
     PULLUP_MISMATCH = "pullup_mismatch"
     SUBSCRIPTION_FAILURE = "subscription_failure"
     RECEIVER_HEALTH_DEGRADED = "receiver_health_degraded"
@@ -296,6 +300,8 @@ class IssueEngine:
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._active: dict[str, MonitoringIssue] = {}
         self._history: list[MonitoringIssue] = []
+        self._clock_recovery: dict[tuple[str, IssueKind], tuple[datetime, datetime]] = {}
+        self._clock_recovered: set[tuple[str, IssueKind]] = set()
 
     def observe_snapshot(
         self,
@@ -320,6 +326,7 @@ class IssueEngine:
         identity = str(identity)
         self._snapshots[identity] = current
         if current.get("online") is False:
+            self._reset_clock_recovery(identity)
             self._mark_unobservable(self._issues_depending_on(identity))
             return []
 
@@ -355,12 +362,14 @@ class IssueEngine:
         return transitions
 
     def forget_device(self, identity: str) -> None:
+        self._reset_clock_recovery(identity)
         self._snapshots.pop(identity, None)
         for issue_id in self._issues_depending_on(identity):
             self._active.pop(issue_id, None)
 
     def remove_snapshot(self, identity: str, *, timestamp: str, emit_transitions: bool = True) -> list[IssueTransition]:
         del timestamp, emit_transitions
+        self._reset_clock_recovery(identity)
         affected = self._issues_depending_on(identity)
         self._snapshots.pop(identity, None)
         self._mark_unobservable(affected)
@@ -515,10 +524,10 @@ class IssueEngine:
             return subscription is not None and _subscription_failure_state(subscription) is False
         if issue.kind is IssueKind.RECEIVER_HEALTH_DEGRADED:
             return issue.scope.flow_identity in _flow_map(snapshot.get("receiver_flow_connection_health"))
-        if issue.kind is IssueKind.CLOCK_SYNCHRONIZATION:
-            managed = snapshot.get("ddm_clocking_state")
-            ports = snapshot.get("clock_port_records")
-            return isinstance(managed, dict) or isinstance(ports, list)
+        if issue.kind in {IssueKind.CLOCK_SYNCHRONIZATION, IssueKind.CLOCK_MUTED}:
+            if issue.evidence_source == "device_clock_status":
+                return (issue.scope.device_identity, issue.kind) in self._clock_recovered
+            return isinstance(snapshot.get("ddm_clocking_state"), dict)
         if issue.kind is IssueKind.TELEMETRY_MISSING:
             return isinstance(snapshot.get("failed_queries"), list)
         if issue.kind is IssueKind.TELEMETRY_STALE:
@@ -625,7 +634,86 @@ class IssueEngine:
                 )
         return result
 
+    def _reset_clock_recovery(self, identity: str) -> None:
+        for key in [key for key in self._clock_recovery if key[0] == identity]:
+            self._clock_recovery.pop(key, None)
+        self._clock_recovered = {key for key in self._clock_recovered if key[0] != identity}
+
+    def _detect_direct_clock(self, snapshot: Mapping[str, Any], timestamp: str) -> list[MonitoringIssue]:
+        identity = str(snapshot["device_identity"])
+        now = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if not clock_status_fresh(snapshot, now):
+            self._reset_clock_recovery(identity)
+            return []
+        status = snapshot["clock_status"]
+        observed = datetime.fromisoformat(snapshot["clock_observed_at"].replace("Z", "+00:00"))
+        result = []
+        for kind, bad, good, title in (
+            (
+                IssueKind.CLOCK_SYNCHRONIZATION,
+                status.get("synchronization") == "lost",
+                status.get("servo_state_code") == 3,
+                "Clock synchronization lost",
+            ),
+            (
+                IssueKind.CLOCK_MUTED,
+                status.get("mute_flags") not in (None, 0),
+                status.get("mute_flags") == 0,
+                "Audio muted by clock state",
+            ),
+        ):
+            key = (identity, kind)
+            self._clock_recovered.discard(key)
+            previous = next(
+                (
+                    issue
+                    for issue in self._active.values()
+                    if issue.scope.device_identity == identity and issue.kind is kind
+                ),
+                None,
+            )
+            if bad:
+                self._clock_recovery.pop(key, None)
+                result.append(
+                    _candidate(
+                        snapshot,
+                        timestamp,
+                        kind,
+                        EventSeverity.ERROR,
+                        title,
+                        "; ".join(status.get("mute_reasons") or [])
+                        if kind is IssueKind.CLOCK_MUTED
+                        else "The device reports synchronization loss.",
+                        {"clock_status": status},
+                        "device_clock_status",
+                        IssueEvidenceClass.DERIVED_STATE
+                        if kind is IssueKind.CLOCK_SYNCHRONIZATION
+                        else IssueEvidenceClass.DIRECT_OBSERVATION,
+                        "Check the clock source and network connections.",
+                    )
+                )
+            elif good:
+                start, last = self._clock_recovery.get(key, (observed, observed))
+                if (observed - last).total_seconds() > CLOCK_STATUS_MAX_AGE_SECONDS or observed < last:
+                    start = observed
+                self._clock_recovery[key] = (start, observed)
+                if (observed - start).total_seconds() >= 5:
+                    self._clock_recovered.add(key)
+                elif previous is not None:
+                    result.append(
+                        replace(
+                            previous,
+                            summary="Recovering; waiting for five seconds of continuous healthy clock status.",
+                            raw_source_fields={"clock_status": status},
+                        )
+                    )
+            else:
+                self._clock_recovery.pop(key, None)
+        return result
+
     def _detect_clock(self, snapshot: Mapping[str, Any], timestamp: str) -> list[MonitoringIssue]:
+        if not isinstance(snapshot.get("ddm_clocking_state"), dict):
+            return self._detect_direct_clock(snapshot, timestamp)
         evidence = {}
         managed = snapshot.get("ddm_clocking_state")
         if isinstance(managed, dict):
@@ -661,26 +749,6 @@ class IssueEngine:
                         "Restore a reachable leader and inspect the clock domain configuration.",
                     )
                 ]
-        down = [
-            record
-            for record in snapshot.get("clock_port_records") or []
-            if isinstance(record, dict) and record.get("link_down") is True
-        ]
-        if down:
-            return [
-                _candidate(
-                    snapshot,
-                    timestamp,
-                    IssueKind.CLOCK_SYNCHRONIZATION,
-                    EventSeverity.WARNING,
-                    "Clock transport port is down",
-                    f"{len(down)} clock port record(s) report link_down",
-                    {"clock_port_records": down},
-                    "device_clock_status",
-                    IssueEvidenceClass.DIRECT_OBSERVATION,
-                    "Inspect the affected interface and upstream clock transport.",
-                )
-            ]
         return []
 
     def _detect_subscriptions(self, snapshot: Mapping[str, Any], timestamp: str) -> list[MonitoringIssue]:

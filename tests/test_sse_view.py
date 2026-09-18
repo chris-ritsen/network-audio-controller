@@ -100,3 +100,21 @@ def test_unchanged_snapshot_sends_nothing():
     )
 
     assert events == []
+
+
+def test_clock_observations_and_nullable_port_flags_reach_patch_clients():
+    view = patch_view()
+    clock = {
+        "synchronization": "lost",
+        "mute_flags": 3,
+        "clock_port_records": [{"network_interface_index": None, "link_down": None, "user_disabled": None}],
+    }
+    events = view.events_for(
+        {
+            "event": "device_updated",
+            "server_name": "lx-dante.local.",
+            "device": device(clock_status=clock, clock_observed_at="2026-09-18T00:00:00Z"),
+        }
+    )
+    assert events[0]["changed"]["clock_status"] == clock
+    assert events[0]["changed"]["clock_observed_at"] == "2026-09-18T00:00:00Z"

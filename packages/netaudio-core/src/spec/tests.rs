@@ -85,12 +85,14 @@ fn representative_commands_keep_their_routes() {
         )
     );
     assert_eq!(
-        route_for(r#"{"command":"set_clock_source","clock_source":1}"#),
+        route_for(
+            r#"{"command":"clock_control","control":{"record_revision":1850,"clock_source":0}}"#
+        ),
         (
             Target::Settings,
             IoMode::Fire {
-                repeat: 3,
-                interval_ms: 500
+                repeat: 1,
+                interval_ms: 0
             }
         )
     );
@@ -234,13 +236,13 @@ fn probe_encoding_keeps_its_message_type_independent_of_the_message_id() {
 fn refresh_clock_status_preserves_the_requested_sequence_and_mac() {
     let host_mac = [0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D];
     let routed = routed_with_assigned_id(
-        r#"{"command":"refresh_clock_status","sequence":33}"#,
+        r#"{"command":"refresh_clock_status","record_revision":1850,"sequence":33}"#,
         host_mac,
         1,
     );
     assert_eq!(
         routed.packet,
-        commands::build_refresh_clock_status(host_mac, 33).unwrap()
+        commands::build_refresh_clock_status(0x073a, host_mac, 33).unwrap()
     );
     assert_eq!(&routed.packet[4..6], &33u16.to_be_bytes());
     assert_eq!(&routed.packet[8..14], &host_mac);

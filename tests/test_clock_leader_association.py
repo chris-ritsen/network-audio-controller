@@ -8,7 +8,7 @@ from netaudio import core
 from netaudio.cli import OutputFormat, state
 from netaudio.commands.device.clock import _matching_leader_name, clock
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.clock_identity import canonical_clock_identity
+from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.dante.device import DanteDevice
 from typer.testing import CliRunner
 
@@ -20,13 +20,13 @@ clock_app.command("clock")(clock)
 FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "clock_leader_association"
 
 
-def clock_device(server_name, name, role, clock_identity=None, leader_clock_identity=None):
+def clock_device(server_name, name, role, ptpv1_device_uuid=None, ptpv1_master_uuid=None):
     device = DanteDevice(server_name=server_name)
     device.name = name
     device.ipv4 = "192.168.1.10"
     device.clock_role = role
-    device.clock_identity = clock_identity
-    device.leader_clock_identity = leader_clock_identity
+    device.ptpv1_device_uuid = ptpv1_device_uuid
+    device.ptpv1_master_uuid = ptpv1_master_uuid
     return device
 
 
@@ -37,7 +37,6 @@ def clock_device(server_name, name, role, clock_identity=None, leader_clock_iden
         "",
         "001dc150692",
         "not-hexadecimal",
-        bytes(6),
         bytes(5),
         6,
         [0, 29, 193, 80, 105, 256],
@@ -46,7 +45,7 @@ def clock_device(server_name, name, role, clock_identity=None, leader_clock_iden
     ],
 )
 def test_invalid_clock_identities_fail_closed(value):
-    assert canonical_clock_identity(value) is None
+    assert canonical_ptpv1_uuid(value) is None
 
 
 def test_identity_association_distinguishes_two_simultaneous_leaders(monkeypatch):
@@ -73,14 +72,14 @@ def test_identity_association_distinguishes_two_simultaneous_leaders(monkeypatch
     payload = json.loads(result.output)
     assert payload["follower-a.local."]["leader"] == "leader-a"
     assert payload["follower-b.local."]["leader"] == "leader-b"
-    assert payload["follower-a.local."]["leader_clock_identity"] == "001dc150692e"
+    assert payload["follower-a.local."]["ptpv1_master_uuid"] == "001dc150692e"
     assert payload["leader-a.local."]["leader"] is None
 
 
 def test_missing_identity_never_selects_the_only_leader():
     entries = [
-        {"name": "leader", "clock_role": "Leader", "clock_identity": "001dc150692e"},
-        {"name": "follower", "clock_role": "Follower", "leader_clock_identity": None},
+        {"name": "leader", "clock_role": "Leader", "ptpv1_device_uuid": "001dc150692e"},
+        {"name": "follower", "clock_role": "Follower", "ptpv1_master_uuid": None},
     ]
 
     assert _matching_leader_name(entries, entries[1]) is None
@@ -91,13 +90,13 @@ def test_unknown_identity_does_not_fall_back_to_role_or_subdomain():
         {
             "name": "leader",
             "clock_role": "Leader",
-            "clock_identity": "001dc150692e",
+            "ptpv1_device_uuid": "001dc150692e",
             "clock_subdomain": [65, 0],
         },
         {
             "name": "follower",
             "clock_role": "Follower",
-            "leader_clock_identity": "001dc1507b8d",
+            "ptpv1_master_uuid": "001dc1507b8d",
             "clock_subdomain": [65, 0],
         },
     ]
@@ -107,9 +106,9 @@ def test_unknown_identity_does_not_fall_back_to_role_or_subdomain():
 
 def test_duplicate_identity_is_ambiguous():
     entries = [
-        {"name": "leader-a", "clock_role": "Leader", "clock_identity": "001dc150692e"},
-        {"name": "leader-b", "clock_role": "Leader", "clock_identity": "001dc150692e"},
-        {"name": "follower", "clock_role": "Follower", "leader_clock_identity": "001dc150692e"},
+        {"name": "leader-a", "clock_role": "Leader", "ptpv1_device_uuid": "001dc150692e"},
+        {"name": "leader-b", "clock_role": "Leader", "ptpv1_device_uuid": "001dc150692e"},
+        {"name": "follower", "clock_role": "Follower", "ptpv1_master_uuid": "001dc150692e"},
     ]
 
     assert _matching_leader_name(entries, entries[2]) is None
@@ -122,9 +121,9 @@ def test_physical_follower_publications_track_selected_leader_identity():
     domain_a = core.parse_response("ptp_clock_status", domain_a_packet)
     domain_b = core.parse_response("ptp_clock_status", domain_b_packet)
 
-    assert domain_a["clock_identity"] == domain_b["clock_identity"] == [0, 29, 193, 81, 2, 149]
-    assert domain_a["leader_clock_identity"] == [0, 29, 193, 80, 105, 46]
-    assert domain_b["leader_clock_identity"] == [0, 29, 193, 80, 123, 141]
+    assert domain_a["ptpv1_device_uuid"] == domain_b["ptpv1_device_uuid"] == [0, 29, 193, 81, 2, 149]
+    assert domain_a["ptpv1_master_uuid"] == [0, 29, 193, 80, 105, 46]
+    assert domain_b["ptpv1_master_uuid"] == [0, 29, 193, 80, 123, 141]
     assert bytes(domain_a["clock_subdomain"]).rstrip(b"\0") == b"NA-CLOCK-A"
     assert bytes(domain_b["clock_subdomain"]).rstrip(b"\0") == b"NA-CLOCK-B"
 
@@ -140,13 +139,17 @@ def test_notification_state_tracks_the_physical_follower_transition():
         [(FIXTURE_DIRECTORY / "follower-domain-a-0020.bin").read_bytes()],
         ("192.168.1.94", 8700),
     )
-    assert device.clock_identity == "001dc1510295"
-    assert device.leader_clock_identity == "001dc150692e"
+    assert device.ptpv1_device_uuid == "001dc1510295"
+    assert device.ptpv1_master_uuid == "001dc150692e"
 
     receive_packets(
         application,
         [(FIXTURE_DIRECTORY / "follower-domain-b-0020.bin").read_bytes()],
         ("192.168.1.94", 8700),
     )
-    assert device.clock_identity == "001dc1510295"
-    assert device.leader_clock_identity == "001dc1507b8d"
+    assert device.ptpv1_device_uuid == "001dc1510295"
+    assert device.ptpv1_master_uuid == "001dc1507b8d"
+
+
+def test_zero_uuid_is_preserved_as_reported():
+    assert canonical_ptpv1_uuid(bytes(6)) == "000000000000"

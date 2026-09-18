@@ -311,7 +311,12 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
         probe_sample_rate_pullup_status=AsyncMock(
             return_value={"current_value": 0, "available_values": [0, 1], "update_mode": 2}
         ),
-        probe_clocking_status=AsyncMock(return_value={"clock_source_code": 0}),
+        preview_clock_configuration=AsyncMock(
+            return_value={
+                "before": {"clock_source": 0, "preferred_leader": False},
+                "changes": {"clock_source": 2, "preferred_leader": True},
+            }
+        ),
         resolve_channel_name_protocol_identifier=AsyncMock(return_value=0x2809),
         probe_gain_adapter=AsyncMock(return_value=("input", [3, 3])),
         probe_interface_status=AsyncMock(
@@ -360,9 +365,9 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
     assert by_kind["sample_rate"].state is PresetActionState.UNCHANGED
     assert by_kind["encoding"].state is PresetActionState.UNCHANGED
     assert by_kind["latency"].current == 1.0
-    assert by_kind["preferred_leader"].current is False
+    assert by_kind["clock_configuration"].current["preferred_leader"] is False
     assert by_kind["sample_rate_pullup"].current == 0
-    assert by_kind["clock_source_code"].current == 0
+    assert by_kind["clock_configuration"].current["clock_source"] == 0
     assert by_kind["transmitter_channel_names"].current == {1: "One", 2: "Two"}
     assert by_kind["receiver_channel_names"].current == {1: "One", 2: "Two"}
     assert by_kind["receiver_subscriptions"].current == {1: None}

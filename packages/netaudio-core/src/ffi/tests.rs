@@ -562,7 +562,7 @@ fn unmapped_0086_status_response_kind_serializes_authentic_a32_words() {
 }
 
 #[test]
-fn unmapped_0024_status_response_kind_serializes_authentic_a32_words() {
+fn clock_unicast_status_response_kind_serializes_authentic_a32_words() {
     let encoded = b"ffff0030001a00000200000000010000417564696e617465072400240000000000010008001000000000000000030000";
     let data = encoded
         .chunks_exact(2)
@@ -572,14 +572,13 @@ fn unmapped_0024_status_response_kind_serializes_authentic_a32_words() {
             ((high << 4) | low) as u8
         })
         .collect::<Vec<_>>();
-    let (status, output) = parse_response_call("unmapped_0024_status", &data);
+    let (status, output) = parse_response_call("clock_unicast_status", &data);
     assert_eq!(status, NetaudioStatus::Ok);
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(json["unmapped_word_at_body_offset_0"], 0);
-    assert_eq!(json["unmapped_word_at_body_offset_4"], 0x0001_0008u32);
-    assert_eq!(json["unmapped_word_at_body_offset_8"], 0x0010_0000u32);
-    assert_eq!(json["unmapped_word_at_body_offset_12"], 0);
-    assert_eq!(json["unmapped_word_at_body_offset_16"], 0x0003_0000u32);
+    assert_eq!(
+        json["raw_words"],
+        serde_json::json!([0x0001_0008u32, 0x0010_0000u32, 0, 0x0003_0000u32])
+    );
 }
 
 #[test]

@@ -116,12 +116,18 @@ class TestApplicationSettingsCommands:
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
             sequence=0x0021,
+            record_revision=0x073A,
         )
 
         assert _executed(transport) == [
             (
                 "192.168.1.108",
-                {"command": "refresh_clock_status", "host_mac": "102030405060", "sequence": 0x0021},
+                {
+                    "command": "refresh_clock_status",
+                    "record_revision": 0x073A,
+                    "host_mac": "102030405060",
+                    "sequence": 0x0021,
+                },
             )
         ]
 

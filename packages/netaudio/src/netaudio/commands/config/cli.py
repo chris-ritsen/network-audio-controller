@@ -769,7 +769,7 @@ async def run_preferred_leader(application, devices, enabled: str | None, all_de
         targets,
         lambda device: application.set_preferred_leader(device, is_preferred),
         "preferred leader change",
-        lambda label: f"Preferred leader change requested for {label}: {enabled.lower()}; not verified.",
+        lambda label: f"Preferred leader {enabled.lower()} confirmed for {label}.",
     )
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)
@@ -907,3 +907,51 @@ from netaudio.commands.config.redundancy import redundancy
 
 app.command("interface")(interface)
 app.command("redundancy")(redundancy)
+
+
+async def run_clock_configuration(application, devices, changes, record_revision, preview):
+    from netaudio.monitoring.model import _json_safe
+
+    _, device = select_device(filter_devices(devices))[0]
+    if preview:
+        result = await application.preview_clock_configuration(device, changes, record_revision=record_revision)
+    else:
+        result = await application.set_clock_configuration(device, changes, record_revision=record_revision)
+    output_single(_json_safe(result))
+    if not preview and not result["effective_state_confirmed"]:
+        raise typer.Exit(code=ExitCode.ERROR)
+
+
+@app.command("clock")
+def clock_configuration(
+    source: Optional[int] = typer.Option(
+        None, "--source", help="0 internal, 1 external/BNC, 2 AES; device support required."
+    ),
+    preferred: Optional[bool] = typer.Option(
+        None, "--preferred/--not-preferred", help="Enable or disable preferred leader."
+    ),
+    subdomain: Optional[str] = typer.Option(None, "--subdomain", help="PTPv1 subdomain name, at most 15 bytes."),
+    global_unicast: Optional[bool] = typer.Option(
+        None, "--global-unicast/--no-global-unicast", help="Enable or disable global unicast delay requests."
+    ),
+    ptpv1_unicast: Optional[bool] = typer.Option(
+        None, "--ptpv1-unicast/--no-ptpv1-unicast", help="Enable or disable unicast delay requests on all PTPv1 ports."
+    ),
+    record_revision: Optional[int] = typer.Option(
+        None, "--record-revision", help="Explicit ConMon record revision when discovery cannot supply one."
+    ),
+    preview: bool = typer.Option(False, "--preview", help="Read current state and show changes without writing."),
+):
+    """Apply clock settings together and confirm them with fresh readback."""
+    changes = {
+        key: value
+        for key, value in {
+            "clock_source": source,
+            "preferred_leader": preferred,
+            "subdomain": subdomain,
+            "global_unicast_delay_requests": global_unicast,
+            "aggregate_ptpv1_unicast_delay_requests": ptpv1_unicast,
+        }.items()
+        if value is not None
+    }
+    run_command(run_clock_configuration, changes, record_revision, preview)

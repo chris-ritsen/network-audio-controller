@@ -23,6 +23,10 @@ def server():
     result = make_http_server({device.server_name: device})
     result.application.get_device_settings = AsyncMock(return_value={"configured_latency_ns": 1_000_000})
     result.application.probe_preferred_leader_state = AsyncMock(side_effect=[False, True])
+    result.application.preview_clock_configuration = AsyncMock(
+        return_value={"before": {"preferred_leader": False}, "changes": {"preferred_leader": True}}
+    )
+    result.application.set_clock_configuration = AsyncMock(return_value={"effective_state_confirmed": True})
     result.publish_inventory_snapshot = AsyncMock()
     return result
 
@@ -81,7 +85,7 @@ async def test_preview_is_offline_and_matches_only_exact_scope(server):
 async def test_invalid_xml_refused(server, content):
     status, _ = await post(server, "/presets/preview", {"xml": content, "devices": []})
     assert status == 400
-    server.application.set_preferred_leader.assert_not_called()
+    server.application.set_clock_configuration.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -100,7 +104,7 @@ async def test_invalid_xml_refused(server, content):
 async def test_load_requires_review_and_exact_targets(server, changes):
     status, _ = await post(server, "/presets/load", load_body(**changes))
     assert status == 400
-    server.application.set_preferred_leader.assert_not_called()
+    server.application.set_clock_configuration.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -109,7 +113,7 @@ async def test_missing_device_requires_explicit_skip(server):
     assert (await post(server, "/presets/load", load_body(content)))[0] == 400
     status, data = await post(server, "/presets/load", load_body(content, excluded=["Missing"]))
     assert status == 200 and data["complete"] is True
-    server.application.set_preferred_leader.assert_awaited_once()
+    server.application.set_clock_configuration.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -120,7 +124,7 @@ async def test_load_rechecks_availability_and_identity(server, offline, identity
     device.fetch_device_name.return_value = identity
     status, _ = await post(server, "/presets/load", load_body())
     assert status in (400, 409)
-    server.application.set_preferred_leader.assert_not_called()
+    server.application.set_clock_configuration.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -129,7 +133,7 @@ async def test_unsupported_action_is_reported_without_blocking_other_planned_cha
     status, data = await post(server, "/presets/load", load_body(content))
     assert status == 200 and data["complete"] is True
     assert any(operation["state"] == "unsupported" for operation in data["report"]["operations"])
-    server.application.set_preferred_leader.assert_awaited_once()
+    server.application.set_clock_configuration.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -137,13 +141,13 @@ async def test_success_is_verified_and_published(server):
     status, data = await post(server, "/presets/load", load_body())
     assert status == 200 and data["complete"]
     assert data["report"]["failures"] == data["report"]["unverified"] == 0
-    server.application.probe_preferred_leader_state.assert_awaited()
+    server.application.preview_clock_configuration.assert_awaited()
     server.publish_inventory_snapshot.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_failure_stops_remaining_settings(server):
-    server.application.set_preferred_leader.side_effect = RuntimeError("Device refused the change")
+    server.application.set_clock_configuration.side_effect = RuntimeError("Device refused the change")
     server.application.set_interface = AsyncMock()
     content = xml('<preferred_master value="true"/><interface><ipv4_address mode="dynamic"/></interface>')
     status, data = await post(server, "/presets/load", load_body(content))
@@ -158,7 +162,7 @@ async def test_apply_timeout_does_not_claim_no_changes(server, monkeypatch):
         await asyncio.sleep(1)
 
     monkeypatch.setattr(presets, "PRESET_APPLY_TIMEOUT", 0.01)
-    server.application.set_preferred_leader.side_effect = delayed
+    server.application.set_clock_configuration.side_effect = delayed
     status, data = await post(server, "/presets/load", load_body())
     assert status == 200 and not data["complete"] and data["interrupted"]
     assert data["report"]["unverified"] == 1

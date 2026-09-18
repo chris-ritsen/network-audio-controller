@@ -17,9 +17,14 @@ DEVICE_SCALAR_FIELDS = (
     "platform_versions_record",
     "clear_configuration_status",
     "clock_frequency_offset_parts_per_billion",
-    "clock_identity",
+    "ptpv1_device_uuid",
     "clock_monitoring_supported",
     "clock_port_records",
+    "clock_status",
+    "clock_diagnostics",
+    "supported_clock_sources",
+    "clock_observed_at",
+    "ptpv1_grandmaster_uuid",
     "clock_port_state_code",
     "clock_role",
     "clock_source_code",
@@ -102,7 +107,7 @@ DEVICE_SCALAR_FIELDS = (
     "is_locked",
     "last_seen",
     "latency",
-    "leader_clock_identity",
+    "ptpv1_master_uuid",
     "license_signature_length_bytes",
     "licensed_receive_channel_count",
     "licensed_redundancy_enabled",
@@ -248,6 +253,19 @@ class DanteDeviceSerializer:
             if isinstance(field_value, (bytes, bytearray)):
                 field_value = list(field_value)
             as_json[device_json_field_name(field_name)] = field_value
+
+        if isinstance(as_json.get("clock_status"), dict):
+            from netaudio.dante.clock_control import clock_status_fresh
+
+            clock = dict(as_json["clock_status"])
+            fresh = clock_status_fresh(as_json)
+            clock["observation_state"] = (
+                "fresh" if fresh else "stale" if clock.get("status_supported") else "unavailable"
+            )
+            if not fresh:
+                clock["observed_synchronization"] = clock.get("synchronization", "unknown")
+                clock["synchronization"] = "unknown"
+            as_json["clock_status"] = clock
 
         if device.is_licensed is not None:
             as_json["is_licensed"] = device.is_licensed

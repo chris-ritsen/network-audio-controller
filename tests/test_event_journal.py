@@ -21,8 +21,8 @@ def snapshot(server_name: str = "receiver.local.") -> dict:
         "online": True,
         "last_seen": 1_700_000_000.0,
         "clock_role": "Follower",
-        "clock_identity": "001dc1000001",
-        "leader_clock_identity": "001dc1000002",
+        "ptpv1_device_uuid": "001dc1000001",
+        "ptpv1_master_uuid": "001dc1000002",
         "clock_port_state_code": 9,
         "clock_frequency_offset_parts_per_billion": 12,
         "clock_port_records": [
@@ -273,7 +273,7 @@ def test_filtering_and_json_export_are_stable_and_preserve_raw_evidence():
     first_changed["clock_role"] = "Leader"
     observe(journal, first_changed, 1)
     second_changed = deepcopy(second)
-    second_changed["leader_clock_identity"] = "001dc1000003"
+    second_changed["ptpv1_master_uuid"] = "001dc1000003"
     observe(journal, second_changed, 2)
 
     payload = journal.export(
@@ -287,7 +287,7 @@ def test_filtering_and_json_export_are_stable_and_preserve_raw_evidence():
     [event] = payload["events"]
     assert event["device_identity"] == "second.local."
     assert event["derivation_status"] == "observed"
-    assert event["raw"]["current_clock_state"]["leader_clock_identity"] == "001dc1000003"
+    assert event["raw"]["current_clock_state"]["ptpv1_master_uuid"] == "001dc1000003"
     assert json.loads(json.dumps(payload, sort_keys=True)) == payload
 
 
@@ -348,7 +348,7 @@ def test_mute_leader_and_ptp_port_transitions_keep_subject_identity():
     initial = snapshot()
     observe(journal, initial, 0)
     changed = deepcopy(initial)
-    changed["leader_clock_identity"] = "001dc1000003"
+    changed["ptpv1_master_uuid"] = "001dc1000003"
     changed["channels"]["receivers"]["1"]["muted"] = True
     changed["clock_port_records"][0]["state_code"] = 3
     changed["clock_port_records"][0]["role"] = "Leader"
@@ -362,7 +362,7 @@ def test_mute_leader_and_ptp_port_transitions_keep_subject_identity():
     mute = next(event for event in events if event.kind is MonitoringEventKind.MUTE_STATE_CHANGED)
     assert mute.channel_identity == "rx:1"
     port = next(event for event in events if event.kind is MonitoringEventKind.PTP_PORT_STATE_CHANGED)
-    assert port.interface_identity == "network:2/ptp:1/multicast/record:1"
+    assert port.interface_identity == "ptp:1/multicast/record:1"
 
 
 def test_invalid_threshold_relationships_fail_closed():

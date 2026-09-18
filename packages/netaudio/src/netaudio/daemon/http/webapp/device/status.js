@@ -10,6 +10,8 @@ export function StatusSection({ device }) {
   const problems = subscriptions.filter(
     (entry) => entry.status && entry.status.severity !== "ok",
   );
+  const clock = device.clock_status || {};
+  const fresh = format.clockStatusFresh(device);
   return html`
     <div class="flex flex-col gap-4">
       <div class="split">
@@ -115,6 +117,44 @@ export function StatusSection({ device }) {
                 device.encoding ? `PCM ${device.encoding}` : format.ABSENT,
               ],
               ["Latency", format.latency(device.latency_ms)],
+              [
+                "Synchronization",
+                fresh ? clock.synchronization : "unavailable",
+              ],
+              [
+                "Clock mute",
+                fresh && clock.mute_flags != null
+                  ? clock.mute_flags === 0
+                    ? "none"
+                    : `${(clock.mute_reasons || []).join(", ")} (0x${clock.mute_flags.toString(16)})`
+                  : "unavailable",
+              ],
+              [
+                "Servo",
+                clock.servo_state ?? clock.servo_state_code ?? "unavailable",
+              ],
+              ["PTPv1 device UUID", device.ptpv1_device_uuid || "unavailable"],
+              [
+                "PTPv1 current master UUID",
+                device.ptpv1_master_uuid || "unavailable",
+              ],
+              [
+                "PTPv1 grandmaster UUID",
+                device.ptpv1_grandmaster_uuid || "unavailable",
+              ],
+              ["PTPv2 domain", String(clock.ptpv2_domain ?? "unavailable")],
+              [
+                "Word clock",
+                clock.word_clock_state ??
+                  clock.word_clock_state_code ??
+                  "unavailable",
+              ],
+              [
+                "Frequency offset",
+                clock.clock_frequency_offset_parts_per_billion == null
+                  ? "unavailable"
+                  : `${clock.clock_frequency_offset_parts_per_billion} ppb`,
+              ],
               ["Clock role", html`<${Value} value=${device.clock_role} />`],
               [
                 "Preferred leader",
@@ -133,6 +173,20 @@ export function StatusSection({ device }) {
           />
         <//>
       </div>
+      <${Panel} title="Clock ports">
+        <${Fields}
+          entries=${(
+            clock.clock_port_records ||
+            (clock.base_ports || []).map((port, index) => ({
+              ...port,
+              record_number: index + 1,
+            }))
+          ).map((port) => [
+            `Port ${port.record_number}${port.ptp_version == null ? "" : ` · PTPv${port.ptp_version}`}`,
+            `${port.state || port.state_code} · ${port.transport_path ?? port.transport_path_code ?? "path unavailable"} · interface ${port.network_interface_index == null ? "unavailable" : port.network_interface_index === 0 ? "primary" : port.network_interface_index === 1 ? "secondary" : port.network_interface_index} · link ${port.link_down == null ? "unavailable" : port.link_down ? "down" : "up"} · disabled ${port.user_disabled ?? "unavailable"} · unicast delay ${port.unicast_delay_requests ?? "unavailable"}`,
+          ])}
+        />
+      <//>
       <${Panel} title="Channels and subscriptions">
         <${Fields}
           entries=${[

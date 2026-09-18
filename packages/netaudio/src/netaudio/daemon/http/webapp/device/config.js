@@ -66,12 +66,12 @@ function SampleRateControl({ device, requestName }) {
       <span>${format.sampleRate(device.sample_rate_hz)}</span>
       <span class="text-sm opacity-70"
         >${
-        writable
-          ? inventoryReady.value
-            ? "Supported values are unavailable."
-            : "Loading supported values."
-          : operationReasonText(device, "sample_rate")
-      }</span
+          writable
+            ? inventoryReady.value
+              ? "Supported values are unavailable."
+              : "Loading supported values."
+            : operationReasonText(device, "sample_rate")
+        }</span
       >
     <//>`;
   }
@@ -118,14 +118,14 @@ function SampleRateControl({ device, requestName }) {
                   variant="danger"
                   description=${`change sample rate and remove flow channels on ${device.name || "device"}`}
                   onRun=${async () => {
-              const result = await api.setSampleRate(
-                requestName,
-                pending.rate,
-                true,
-              );
-              setPending(null);
-              return result;
-            }}
+                    const result = await api.setSampleRate(
+                      requestName,
+                      pending.rate,
+                      true,
+                    );
+                    setPending(null);
+                    return result;
+                  }}
                   >Change rate and remove channels<//
                 >
                 <button
@@ -152,12 +152,12 @@ function EncodingControl({ device, requestName }) {
       <span>${format.text(device.encoding)}</span>
       <span class="text-sm opacity-70"
         >${
-        writable
-          ? inventoryReady.value
-            ? "Supported values are unavailable."
-            : "Loading supported values."
-          : operationReasonText(device, "encoding")
-      }</span
+          writable
+            ? inventoryReady.value
+              ? "Supported values are unavailable."
+              : "Loading supported values."
+            : operationReasonText(device, "encoding")
+        }</span
       >
     <//>`;
   }
@@ -212,10 +212,10 @@ function PullupControl({ device, requestName }) {
       <span>${current}</span>
       <span class="text-sm opacity-70"
         >${
-        writable
-          ? "Supported values are unavailable."
-          : operationReasonText(device, "sample_rate_pullup")
-      }</span
+          writable
+            ? "Supported values are unavailable."
+            : operationReasonText(device, "sample_rate_pullup")
+        }</span
       >
     <//>`;
   }
@@ -246,60 +246,109 @@ function PullupControl({ device, requestName }) {
 }
 
 function ClockingControls({ device, requestName }) {
+  const preferred = useRef(null);
+  const source = useRef(null);
   const subdomain = useRef(null);
+  const unicast = useRef(null);
+  const [changeSubdomain, setChangeSubdomain] = useState(false);
+  const status = device.clock_status || {};
+  const caps = status.clock_capabilities;
+  const fresh = format.clockStatusFresh(device);
+  const managed = isEnrolled(device);
+  const preferredAllowed =
+    fresh &&
+    caps != null &&
+    !(caps & 0x120) &&
+    (status.record_revision < 0x072e ||
+      status.preferred_leader_locked === false);
+  const named = fresh && !!(caps & 4);
+  const perPort = !!(caps & 0x200);
+  const unicastAllowed = fresh && !!(caps & 0x208);
+  const apply = async () => {
+    const changes = {};
+    if (preferredAllowed && preferred.current?.value !== "keep")
+      changes.preferred_leader = preferred.current.value === "true";
+    if (source.current?.value !== "keep")
+      changes.clock_source = Number(source.current.value);
+    if (named && changeSubdomain) changes.subdomain = subdomain.current.value;
+    if (unicastAllowed && unicast.current?.value !== "keep")
+      changes[
+        perPort
+          ? "aggregate_ptpv1_unicast_delay_requests"
+          : "global_unicast_delay_requests"
+      ] = unicast.current.value === "true";
+    const result = await api.setClockConfiguration(requestName, changes);
+    return result;
+  };
   return html`
     <${Panel}
       title="Clocking"
-      actions=${html`<${AsyncButton}
-        small
-        description=${`refresh clock status for ${device.name || "device"}`}
-        onRun=${() => api.refreshClock(requestName)}
-      >
-        Refresh clock status
-      <//>`}
+      actions=${html`<${AsyncButton} small onRun=${() => api.refreshClock(requestName)}>Refresh clock status<//>`}
     >
-      <${FieldRow} label="Preferred leader">
-        <span>${format.preferredLeader(device.preferred_leader)}</span>
-        <${AsyncButton}
-          small
-          description=${`set ${device.name || "device"} as preferred leader`}
-          onRun=${() => api.setPreferredLeader(requestName, true)}
-        >
-          Enable
-        <//>
-        <${AsyncButton}
-          small
-          description=${`clear preferred leader on ${device.name || "device"}`}
-          onRun=${() => api.setPreferredLeader(requestName, false)}
-        >
-          Disable
-        <//>
-      <//>
-      <${FieldRow} label="Clock subdomain">
-        ${
-          isEnrolled(device)
-            ? html`<span>Managed by DDM</span>`
-            : html`
-                <span>${format.clockSubdomain(device.clock_subdomain)}</span>
+      ${
+        managed
+          ? html`<p>Clock settings are managed by DDM.</p>
+              <${AsyncButton}
+                small
+                onRun=${() => api.setPreferredLeader(requestName, true)}
+                >Prefer this device<//
+              >
+              <${AsyncButton}
+                small
+                onRun=${() => api.setPreferredLeader(requestName, false)}
+                >Clear preference<//
+              >`
+          : html`
+              ${!fresh && html`<p>Refresh clock status to check which settings this device allows.</p>`}
+              <${FieldRow} label="Preferred leader">
+                <select ref=${preferred} disabled=${!preferredAllowed}>
+                  <option value="keep">Keep current setting</option>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+                ${!preferredAllowed && fresh && html`<span>Unavailable or locked</span>`}
+              <//>
+              <${FieldRow} label="Clock source">
+                <select ref=${source} disabled=${!fresh}>
+                  <option value="keep">Keep current setting</option>
+                  <option value="0">Internal</option>
+                  ${(device.supported_clock_sources || []).filter((value) => value === 1 || value === 2).map((value) => html`<option value=${value}>${value === 1 ? "External/BNC" : "AES"}</option>`)}
+                </select>
+              <//>
+              <${FieldRow} label="Clock subdomain">
+                <label
+                  ><input
+                    type="checkbox"
+                    disabled=${!named}
+                    checked=${changeSubdomain}
+                    onChange=${(event) => setChangeSubdomain(event.target.checked)}
+                  />
+                  Change</label
+                >
                 <input
-                  key=${`clock-subdomain-${requestName}`}
                   ref=${subdomain}
-                  type="text"
-                  size="18"
-                  placeholder="Subdomain name"
+                  disabled=${!named || !changeSubdomain}
+                  maxlength="15"
                   defaultValue=${format.clockSubdomainInputValue(device.clock_subdomain)}
                 />
-                <${AsyncButton}
-                  variant="primary"
-                  small
-                  description=${`set clock subdomain on ${device.name || "device"}`}
-                  onRun=${() => api.setClockSubdomain(requestName, subdomain.current.value)}
-                >
-                  Apply
-                <//>
-              `
-        }
-      <//>
+              <//>
+              <${FieldRow}
+                label=${perPort ? "PTPv1 unicast delay requests" : "Unicast delay requests"}
+              >
+                <select ref=${unicast} disabled=${!unicastAllowed}>
+                  <option value="keep">Keep current setting</option>
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              <//>
+              <${AsyncButton}
+                variant="primary"
+                disabled=${!fresh}
+                onRun=${apply}
+                >Apply clock settings<//
+              >
+            `
+      }
     <//>
   `;
 }
@@ -430,13 +479,13 @@ function PerformanceControls({ device, requestName }) {
                 small
                 description=${`set receive-flow default slots on ${device.name || "device"}`}
                 onRun=${() => {
-            if (!slots.current.checkValidity())
-              throw new Error("Enter default slots from 0 through 65535");
-            return api.setReceiveFlowDefaultSlots(
-              requestName,
-              Number(slots.current.value),
-            );
-          }}
+                  if (!slots.current.checkValidity())
+                    throw new Error("Enter default slots from 0 through 65535");
+                  return api.setReceiveFlowDefaultSlots(
+                    requestName,
+                    Number(slots.current.value),
+                  );
+                }}
                 >Apply<//
               >
             `
@@ -534,60 +583,56 @@ function LatencyControl({ device }) {
   return html`
     <${FieldRow} label="Latency">
       ${
-            choices.length
-              ? html`<select
-                  key=${`latency-${requestName}`}
-                  ref=${control}
-                  aria-label="Latency"
-                  onChange=${(event) => setCustom(event.currentTarget.value === "custom")}
-                >
-                  ${choices.map(
-                  (value) =>
-                    html`<option
-                      key=${value}
-                      value=${value}
-                      selected=${Number(value) === Number(current)}
-                    >
-                      ${value} ms
-                    </option>`,
-                )}
-                  ${hasRange ? html`<option value="custom">Custom…</option>` : null}
-                </select>`
-              : null
-          }
+        choices.length
+          ? html`<select
+              key=${`latency-${requestName}`}
+              ref=${control}
+              aria-label="Latency"
+              onChange=${(event) => setCustom(event.currentTarget.value === "custom")}
+            >
+              ${choices.map(
+                (value) =>
+                  html`<option
+                    key=${value}
+                    value=${value}
+                    selected=${Number(value) === Number(current)}
+                  >
+                    ${value} ms
+                  </option>`,
+              )}
+              ${hasRange ? html`<option value="custom">Custom…</option>` : null}
+            </select>`
+          : null
+      }
       ${
-            custom || !choices.length
-              ? html`
-                  <input
-                    key=${`custom-latency-${requestName}`}
-                    ref=${customInput}
-                    aria-label="Custom latency in milliseconds"
-                    type="number"
-                    min=${minimum}
-                    max=${maximum}
-                    step="any"
-                    required
-                    defaultValue=${current ?? minimum}
-                  />
-                  <span>ms (${minimum}–${maximum})</span>
-                `
-              : null
-          }
+        custom || !choices.length
+          ? html`
+              <input
+                key=${`custom-latency-${requestName}`}
+                ref=${customInput}
+                aria-label="Custom latency in milliseconds"
+                type="number"
+                min=${minimum}
+                max=${maximum}
+                step="any"
+                required
+                defaultValue=${current ?? minimum}
+              />
+              <span>ms (${minimum}–${maximum})</span>
+            `
+          : null
+      }
       <${AsyncButton}
         variant="primary"
         small
         description=${`set latency on ${device.name || "device"}`}
         onRun=${() => {
-              const input =
-                custom || !choices.length
-                  ? customInput.current
-                  : control.current;
-              if (!input.checkValidity())
-                throw new Error(
-                  `Enter a latency from ${minimum} to ${maximum} ms`,
-                );
-              return api.setLatency(requestName, Number(input.value));
-            }}
+          const input =
+            custom || !choices.length ? customInput.current : control.current;
+          if (!input.checkValidity())
+            throw new Error(`Enter a latency from ${minimum} to ${maximum} ms`);
+          return api.setLatency(requestName, Number(input.value));
+        }}
       >
         Apply
       <//>

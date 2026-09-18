@@ -5,7 +5,7 @@ import struct
 import time
 from dataclasses import dataclass
 
-from netaudio.dante.clock_identity import canonical_clock_identity
+from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.dante.const import (
     CONMON_HEADER_LENGTH,
     CONMON_MAGIC,
@@ -279,31 +279,35 @@ def _parse_make_model(data: bytes, source_ip: str, device) -> ParsedStatus | Non
 
 def _parse_ptp_clock_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
     parsed = _core_parse("ptp_clock_status", data, source_ip, "PTP clock status")
+    from datetime import datetime, timezone
+
     if parsed is None:
-        return None
-    clock_subdomain = parsed.get("clock_subdomain")
-    status = {
-        "clock_frequency_offset_parts_per_billion": parsed["clock_frequency_offset_parts_per_billion"],
-        "clock_identity": canonical_clock_identity(parsed.get("clock_identity")),
-        "clock_port_records": parsed.get("clock_port_records"),
-        "clock_port_state_code": parsed["clock_port_state_code"],
-        "clock_role": parsed.get("clock_role"),
-        "clock_source_code": parsed["clock_source_code"],
-        "clock_subdomain": bytes(clock_subdomain) if clock_subdomain is not None else None,
-        "leader_clock_identity": canonical_clock_identity(parsed.get("leader_clock_identity")),
-        "preferred_leader": parsed["preferred_leader"],
-    }
-    logger.debug(
-        f"Conmon ptp_clock_status from {source_ip} ({len(data)}B): "
-        f"preferred_leader={status['preferred_leader']} "
-        f"clock_source_code=0x{status['clock_source_code']:04X} "
-        f"clock_frequency_offset_parts_per_billion={status['clock_frequency_offset_parts_per_billion']} "
-        f"clock_port_state_code=0x{status['clock_port_state_code']:04X} "
-        f"clock_role={status['clock_role']} "
-        f"clock_identity={status['clock_identity']} "
-        f"leader_clock_identity={status['leader_clock_identity']} "
-        f"clock_port_record_count={0 if status['clock_port_records'] is None else len(status['clock_port_records'])}"
+        return ParsedStatus(
+            STATUS_KIND_CLOCK,
+            {
+                "clock_status": {"status_supported": False, "error": "malformed", "raw_record": list(data[24:])},
+                "clock_observed_at": None,
+            },
+            None,
+        )
+    for field in ("ptpv1_device_uuid", "ptpv1_master_uuid", "ptpv1_grandmaster_uuid"):
+        parsed[field] = canonical_ptpv1_uuid(parsed.get(field))
+    fields = (
+        "clock_frequency_offset_parts_per_billion",
+        "clock_port_records",
+        "clock_port_state_code",
+        "clock_role",
+        "clock_source_code",
+        "preferred_leader",
+        "ptpv1_device_uuid",
+        "ptpv1_master_uuid",
+        "ptpv1_grandmaster_uuid",
     )
+    status = {field: parsed.get(field) for field in fields}
+    name = parsed.get("clock_subdomain")
+    status["clock_subdomain"] = bytes(name) if name is not None else None
+    status["clock_status"] = parsed
+    status["clock_observed_at"] = datetime.now(timezone.utc).isoformat()
     return ParsedStatus(STATUS_KIND_CLOCK, status, status)
 
 
@@ -369,7 +373,22 @@ def _parse_switch_configuration_status(data: bytes, source_ip: str, device) -> P
     return ParsedStatus(STATUS_KIND_SWITCH_CONFIGURATION, switch_configuration_fields(parsed), parsed)
 
 
+def _clock_diagnostic_parser(response_kind: str):
+    def parse(data: bytes, source_ip: str, device) -> ParsedStatus | None:
+        parsed = _core_parse(response_kind, data, source_ip, "clock diagnostic")
+        if parsed is None:
+            return None
+        diagnostics = dict(getattr(device, "clock_diagnostics", None) or {})
+        diagnostics[response_kind] = parsed
+        return ParsedStatus("clock_diagnostics", {"clock_diagnostics": diagnostics}, parsed)
+
+    return parse
+
+
 CONMON_STATUS_PARSERS = {
+    0x0022: _clock_diagnostic_parser("clock_master_status"),
+    0x0024: _clock_diagnostic_parser("clock_unicast_status"),
+    0x0026: _clock_diagnostic_parser("clock_identifier_status"),
     CONMON_OPCODE_AES67_CURRENT_NEW: _parse_aes67_current_new,
     CONMON_OPCODE_BLUETOOTH_STATUS: _parse_bluetooth_status,
     CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS: _parse_clear_configuration_status,
@@ -511,7 +530,7 @@ class NotificationPacketHandlers:
 
         self.notify_waiters(parsed.kind, source_ip, parsed.waiter_result)
         if parsed.kind == STATUS_KIND_CLOCK:
-            self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, source_ip, parsed.status["preferred_leader"])
+            self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, source_ip, parsed.status.get("preferred_leader"))
         self.notify_conmon_response(source_ip, opcode)
 
         device = self._lookup_device(source_ip)

@@ -178,7 +178,12 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError("device_identity must contain server_name, mac_address, or inventory_id")
         result["device_identity"] = copy.deepcopy(dict(identity))
-    for field_name in ("preferred_leader", "external_word_clock"):
+    for field_name in (
+        "preferred_leader",
+        "external_word_clock",
+        "global_unicast_delay_requests",
+        "aggregate_ptpv1_unicast_delay_requests",
+    ):
         if field_name in result:
             result[field_name] = _optional_boolean(result[field_name], field_name)
     if "interfaces" in result:
@@ -233,6 +238,13 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         result["receive_flow_default_slots"] = _unsigned_integer(
             result["receive_flow_default_slots"], "receive_flow_default_slots", 0xFFFF
         )
+    if "clock_subdomain" in result:
+        from netaudio.dante.clock_config import clock_subdomain_bytes
+
+        name = clock_subdomain_bytes(result["clock_subdomain"])
+        if name is None or b"\0" not in name or any(name[name.index(0) :]):
+            raise ValueError("clock_subdomain must contain at most 15 bytes followed by a NUL")
+        result["clock_subdomain"] = list(name)
     if "clock_source_code" in result:
         value = result["clock_source_code"]
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFF:

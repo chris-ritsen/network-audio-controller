@@ -57,10 +57,12 @@ def _observation_context(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 def _clock_evidence(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     return {
+        "clock_status": snapshot.get("clock_status"),
+        "ptpv1_grandmaster_uuid": snapshot.get("ptpv1_grandmaster_uuid"),
         "clock_role": snapshot.get("clock_role"),
         "clock_port_state_code": snapshot.get("clock_port_state_code"),
-        "clock_identity": snapshot.get("clock_identity"),
-        "leader_clock_identity": snapshot.get("leader_clock_identity"),
+        "ptpv1_device_uuid": snapshot.get("ptpv1_device_uuid"),
+        "ptpv1_master_uuid": snapshot.get("ptpv1_master_uuid"),
         "clock_frequency_offset_parts_per_billion": snapshot.get("clock_frequency_offset_parts_per_billion"),
     }
 
@@ -76,15 +78,25 @@ def _ptp_port_map(records: Any) -> dict[str, dict[str, Any]]:
         network_index = record.get("network_interface_index")
         ptp_version = record.get("ptp_version")
         transport = record.get("transport_path") or record.get("transport_path_code")
-        if not _unsigned_integer(record_number) or not _unsigned_integer(network_index):
+        if not _unsigned_integer(record_number) or (network_index is not None and not _unsigned_integer(network_index)):
             continue
-        identity = f"network:{network_index}/ptp:{ptp_version}/{transport}/record:{record_number}"
+        identity = f"ptp:{ptp_version}/{transport}/record:{record_number}"
         mapped[identity] = record
     return mapped
 
 
 def _ptp_state(record: Mapping[str, Any]) -> dict[str, Any]:
-    return {"state_code": record.get("state_code"), "role": record.get("role"), "link_down": record.get("link_down")}
+    return {
+        key: record.get(key)
+        for key in (
+            "state_code",
+            "role",
+            "link_down",
+            "user_disabled",
+            "unicast_delay_requests",
+            "network_interface_index",
+        )
+    }
 
 
 def _channel_map(channels: Any) -> dict[str, dict[str, Any]]:

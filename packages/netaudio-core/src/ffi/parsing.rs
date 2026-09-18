@@ -137,14 +137,14 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         }
         "tx_flow_page" => serialize_optional(kind, responses::parse_tx_flow_page(bytes)),
         "tx_flows" => serialize_optional(kind, responses::parse_tx_flows(bytes)),
-        "unmapped_0022_status" => {
-            serialize_optional(kind, responses::parse_unmapped_0022_status(bytes))
+        "clock_master_status" => {
+            serialize_optional(kind, responses::parse_clock_master_status(bytes))
         }
-        "unmapped_0024_status" => {
-            serialize_optional(kind, responses::parse_unmapped_0024_status(bytes))
+        "clock_unicast_status" => {
+            serialize_optional(kind, responses::parse_clock_unicast_status(bytes))
         }
-        "unmapped_0026_status" => {
-            serialize_optional(kind, responses::parse_unmapped_0026_status(bytes))
+        "clock_identifier_status" => {
+            serialize_optional(kind, responses::parse_clock_identifier_status(bytes))
         }
         "interface_statistics_status" => {
             serialize_optional(kind, responses::parse_interface_statistics_status(bytes))

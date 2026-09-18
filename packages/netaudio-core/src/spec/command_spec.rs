@@ -227,14 +227,6 @@ pub(super) enum CommandSpec {
         #[serde(default = "default_lock_reset_request_value")]
         request_value: u32,
     },
-    ProbePreferredLeader {
-        #[serde(default)]
-        clock_source: u16,
-        #[serde(default)]
-        host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
-        message_id: u16,
-    },
     ProbeSampleRate {
         #[serde(default)]
         host_mac: Option<String>,
@@ -354,7 +346,15 @@ pub(super) enum CommandSpec {
         message_id: u16,
         records: Vec<TransmitterChannelNameReconciliationEntry>,
     },
+    ClockControl {
+        control: commands::ClockControl,
+        #[serde(default)]
+        host_mac: Option<String>,
+        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        message_id: u16,
+    },
     RefreshClockStatus {
+        record_revision: u16,
         #[serde(default)]
         host_mac: Option<String>,
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -388,20 +388,6 @@ pub(super) enum CommandSpec {
         name: String,
         #[serde(default = "default_channel_name_protocol")]
         protocol_id: u16,
-    },
-    SetClockSource {
-        clock_source: u16,
-        #[serde(default)]
-        host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
-        message_id: u16,
-    },
-    SetClockSubdomain {
-        #[serde(default)]
-        host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
-        message_id: u16,
-        subdomain: [u8; 16],
     },
     SetEncoding {
         encoding: u32,
@@ -498,15 +484,6 @@ pub(super) enum CommandSpec {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
         message_id: u16,
         name: String,
-    },
-    SetPreferredLeader {
-        #[serde(default)]
-        clock_source: u16,
-        #[serde(default)]
-        host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
-        message_id: u16,
-        preferred: bool,
     },
     SetSampleRate {
         #[serde(default, alias = "sequence", alias = "transaction_id")]
@@ -619,7 +596,6 @@ impl CommandSpec {
             | CommandSpec::ProbeInterfaceStatus { message_id, .. }
             | CommandSpec::ProbeInterfaceStatistics { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
-            | CommandSpec::ProbePreferredLeader { message_id, .. }
             | CommandSpec::ProbeSampleRate { message_id, .. }
             | CommandSpec::ProbeSampleRatePullup { message_id, .. }
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
@@ -637,14 +613,13 @@ impl CommandSpec {
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
             | CommandSpec::Receivers { message_id, .. }
             | CommandSpec::ReconcileTransmitterChannelNames2809 { message_id, .. }
+            | CommandSpec::ClockControl { message_id, .. }
             | CommandSpec::RefreshClockStatus { message_id, .. }
             | CommandSpec::RemoveSubscriptions { message_id, .. }
             | CommandSpec::ResetChannelName { message_id, .. }
             | CommandSpec::ResetName { message_id, .. }
             | CommandSpec::SetAes67MulticastPrefix { message_id, .. }
             | CommandSpec::SetChannelName { message_id, .. }
-            | CommandSpec::SetClockSource { message_id, .. }
-            | CommandSpec::SetClockSubdomain { message_id, .. }
             | CommandSpec::SetEncoding { message_id, .. }
             | CommandSpec::SetGainLevel { message_id, .. }
             | CommandSpec::SetInterfaceDhcp { message_id, .. }
@@ -656,7 +631,6 @@ impl CommandSpec {
             | CommandSpec::SetTransmitFlowPerformance { message_id, .. }
             | CommandSpec::SetUnicastPerformance { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
-            | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
             | CommandSpec::StoreCurrentConfiguration { message_id, .. }
@@ -703,7 +677,6 @@ impl CommandSpec {
             | CommandSpec::ProbeInterfaceStatus { message_id, .. }
             | CommandSpec::ProbeInterfaceStatistics { message_id, .. }
             | CommandSpec::ProbeLockResetStatus { message_id, .. }
-            | CommandSpec::ProbePreferredLeader { message_id, .. }
             | CommandSpec::ProbeSampleRate { message_id, .. }
             | CommandSpec::ProbeSampleRatePullup { message_id, .. }
             | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
@@ -721,14 +694,13 @@ impl CommandSpec {
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
             | CommandSpec::Receivers { message_id, .. }
             | CommandSpec::ReconcileTransmitterChannelNames2809 { message_id, .. }
+            | CommandSpec::ClockControl { message_id, .. }
             | CommandSpec::RefreshClockStatus { message_id, .. }
             | CommandSpec::RemoveSubscriptions { message_id, .. }
             | CommandSpec::ResetChannelName { message_id, .. }
             | CommandSpec::ResetName { message_id, .. }
             | CommandSpec::SetAes67MulticastPrefix { message_id, .. }
             | CommandSpec::SetChannelName { message_id, .. }
-            | CommandSpec::SetClockSource { message_id, .. }
-            | CommandSpec::SetClockSubdomain { message_id, .. }
             | CommandSpec::SetEncoding { message_id, .. }
             | CommandSpec::SetGainLevel { message_id, .. }
             | CommandSpec::SetInterfaceDhcp { message_id, .. }
@@ -740,7 +712,6 @@ impl CommandSpec {
             | CommandSpec::SetTransmitFlowPerformance { message_id, .. }
             | CommandSpec::SetUnicastPerformance { message_id, .. }
             | CommandSpec::SetName { message_id, .. }
-            | CommandSpec::SetPreferredLeader { message_id, .. }
             | CommandSpec::SetSampleRate { message_id, .. }
             | CommandSpec::SetSampleRatePullup { message_id, .. }
             | CommandSpec::StoreCurrentConfiguration { message_id, .. }
@@ -814,11 +785,11 @@ impl CommandSpec {
             | CommandSpec::ProbeInterfaceStatus { .. }
             | CommandSpec::ProbeInterfaceStatistics { .. }
             | CommandSpec::ProbeLockResetStatus { .. }
-            | CommandSpec::ProbePreferredLeader { .. }
             | CommandSpec::ProbeSampleRate { .. }
             | CommandSpec::ProbeSampleRatePullup { .. }
             | CommandSpec::ProbeSwitchConfiguration { .. }
             | CommandSpec::Reboot { .. }
+            | CommandSpec::ClockControl { .. }
             | CommandSpec::RefreshClockStatus { .. }
             | CommandSpec::SetEncoding { .. }
             | CommandSpec::SetGainLevel { .. }
@@ -858,15 +829,6 @@ impl CommandSpec {
                 Fire {
                     repeat: 1,
                     interval_ms: 0,
-                },
-            ),
-            CommandSpec::SetClockSource { .. }
-            | CommandSpec::SetClockSubdomain { .. }
-            | CommandSpec::SetPreferredLeader { .. } => (
-                Settings,
-                Fire {
-                    repeat: 3,
-                    interval_ms: 500,
                 },
             ),
         }
@@ -1047,15 +1009,6 @@ pub(super) fn build_command(
             message_id,
             request_value,
         )?,
-        CommandSpec::ProbePreferredLeader {
-            clock_source,
-            host_mac,
-            message_id,
-        } => commands::build_probe_preferred_leader(
-            clock_source,
-            parse_mac(&host_mac, default_host_mac)?,
-            message_id,
-        )?,
         CommandSpec::ProbeSampleRate {
             host_mac,
             message_id,
@@ -1178,10 +1131,21 @@ pub(super) fn build_command(
                 .collect::<Vec<_>>(),
             message_id,
         )?,
+        CommandSpec::ClockControl {
+            control,
+            host_mac,
+            message_id,
+        } => commands::build_clock_control(
+            &control,
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
+        )?,
         CommandSpec::RefreshClockStatus {
+            record_revision,
             host_mac,
             message_id,
         } => commands::build_refresh_clock_status(
+            record_revision,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
@@ -1216,24 +1180,6 @@ pub(super) fn build_command(
             parse_channel_type(&channel_type)?,
             channel_number,
             &name,
-            message_id,
-        )?,
-        CommandSpec::SetClockSource {
-            clock_source,
-            host_mac,
-            message_id,
-        } => commands::build_set_clock_source(
-            clock_source,
-            parse_mac(&host_mac, default_host_mac)?,
-            message_id,
-        )?,
-        CommandSpec::SetClockSubdomain {
-            subdomain,
-            host_mac,
-            message_id,
-        } => commands::build_set_clock_subdomain(
-            subdomain,
-            parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
         CommandSpec::SetEncoding {
@@ -1360,17 +1306,6 @@ pub(super) fn build_command(
         CommandSpec::SetName { name, message_id } => {
             crate::protocol::build_set_device_name(&name, message_id)?
         }
-        CommandSpec::SetPreferredLeader {
-            preferred,
-            clock_source,
-            host_mac,
-            message_id,
-        } => commands::build_set_preferred_leader(
-            preferred,
-            clock_source,
-            parse_mac(&host_mac, default_host_mac)?,
-            message_id,
-        )?,
         CommandSpec::SetSampleRate {
             sample_rate,
             message_id,

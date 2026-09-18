@@ -84,11 +84,11 @@ def test_managed_device_summary_uses_ddm_clock_and_model_fallbacks():
 
 def test_clock_status_groups_devices_by_domain_and_names_leaders():
     payload = {
-        "lx-dante.local.": {**DEVICE, "clock_identity": "001dc1081258", "inventory_id": "ddm:lab:unenrolled:1"},
+        "lx-dante.local.": {**DEVICE, "ptpv1_device_uuid": "001dc1081258", "inventory_id": "ddm:lab:unenrolled:1"},
         "avio-bt-1.local.": {
             "clock_role": "Follower",
             "inventory_id": "ddm:lab:unenrolled:2",
-            "leader_clock_identity": "001dc1081258",
+            "ptpv1_master_uuid": "001dc1081258",
             "name": "avio-bt-1",
             "online": True,
         },

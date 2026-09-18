@@ -3,25 +3,9 @@ use crate::protocol::PROTOCOL_ARC_280F;
 use crate::test_support::decode_hexadecimal;
 
 #[test]
-fn set_clock_source_uses_mask_bit_zero_and_raw_selection() {
-    let packet =
-        build_set_clock_source(0xDED4, [0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0x0021).unwrap();
-    assert_eq!(&packet[0x20..0x25], &[0x00, 0x01, 0xDE, 0xD4, 0x00]);
-}
-
-#[test]
-fn set_clock_subdomain_uses_mask_bit_three_and_sixteen_byte_field() {
-    let mut subdomain = [0u8; 16];
-    subdomain[..5].copy_from_slice(&[0x74, 0x94, 0x11, 0x07, 0x01]);
-    let packet =
-        build_set_clock_subdomain(subdomain, [0x52, 0x55, 0x0A, 0x00, 0x02, 0x02], 0x0021).unwrap();
-    assert_eq!(&packet[0x20..0x22], &[0x00, 0x08]);
-    assert_eq!(&packet[0x28..0x38], &subdomain);
-}
-
-#[test]
 fn refresh_clock_status_matches_shipping_controller_frame_7536() {
-    let packet = build_refresh_clock_status([0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x0021).unwrap();
+    let packet =
+        build_refresh_clock_status(0x073a, [0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D], 0x0021).unwrap();
     assert_eq!(
             packet,
             decode_hexadecimal(

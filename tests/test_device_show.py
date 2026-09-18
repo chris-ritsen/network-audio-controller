@@ -54,8 +54,8 @@ def make_show_device() -> DanteDevice:
     device.is_locked = False
     device.preferred_leader = True
     device.clock_frequency_offset_parts_per_billion = -25_473
-    device.clock_identity = "001dc1081258"
-    device.leader_clock_identity = "001dc1081258"
+    device.ptpv1_device_uuid = "001dc1081258"
+    device.ptpv1_master_uuid = "001dc1081258"
     device.clock_port_records = [
         {
             "record_flags": 0,
@@ -276,8 +276,8 @@ def test_device_show_exposes_receiver_flow_latency_and_late_packet_counts():
 def test_device_show_includes_clock_frequency_offset_in_controller_units():
     rows = dict(device_commands._device_show_rows(make_show_device()))
     assert rows["Clock Frequency Offset"] == "-25.473 ppm"
-    assert rows["Clock Identity"] == "001dc1081258"
-    assert rows["Leader Clock Identity"] == "001dc1081258"
+    assert rows["PTPv1 Device UUID"] == "001dc1081258"
+    assert rows["PTPv1 Current Master UUID"] == "001dc1081258"
 
 
 def test_device_show_json_preserves_full_serializer(monkeypatch):
@@ -313,7 +313,7 @@ def test_device_show_plain_does_not_render_unknown_channel_counts_as_zero(monkey
     result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
-    assert "Channels                unknown TX / unknown RX" in result.output
+    assert " ".join("Channels                unknown TX / unknown RX".split()) in " ".join(result.output.split())
 
 
 def test_device_show_plain_formats_gain_capability_without_channel_inventory(monkeypatch):
@@ -331,9 +331,11 @@ def test_device_show_plain_formats_gain_capability_without_channel_inventory(mon
     result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
-    assert "Reference Controls      input" in result.output
-    assert "Reference Levels        1: -10 dBV, 2: +24 dBu" in result.output
-    assert "Reference Options       +24 dBu, +4 dBu, 0 dBu, 0 dBV, -10 dBV" in result.output
+    assert " ".join("Reference Controls      input".split()) in " ".join(result.output.split())
+    assert " ".join("Reference Levels        1: -10 dBV, 2: +24 dBu".split()) in " ".join(result.output.split())
+    assert " ".join("Reference Options       +24 dBu, +4 dBu, 0 dBu, 0 dBV, -10 dBV".split()) in " ".join(
+        result.output.split()
+    )
 
 
 def test_device_show_plain_includes_aes67_multicast_prefix_and_transmitter_flows(monkeypatch):
@@ -399,12 +401,12 @@ def test_device_show_plain_is_concise_and_formats_capabilities(monkeypatch):
     result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
-    assert "Name                    lx-dante" in result.output
-    assert "Channels                128 TX / 128 RX" in result.output
-    assert "Link Speed              1 Gbps" in result.output
-    assert "Supported Sample Rates  44.1, 48, 96 kHz" in result.output
-    assert "Supported Encodings     PCM16, PCM24, PCM32" in result.output
-    assert "Latency Range           0.15-21.3333 ms" in result.output
+    assert " ".join("Name                    lx-dante".split()) in " ".join(result.output.split())
+    assert " ".join("Channels                128 TX / 128 RX".split()) in " ".join(result.output.split())
+    assert " ".join("Link Speed              1 Gbps".split()) in " ".join(result.output.split())
+    assert " ".join("Supported Sample Rates  44.1, 48, 96 kHz".split()) in " ".join(result.output.split())
+    assert " ".join("Supported Encodings     PCM16, PCM24, PCM32".split()) in " ".join(result.output.split())
+    assert " ".join("Latency Range           0.15-21.3333 ms".split()) in " ".join(result.output.split())
     assert "'channels':" not in result.output
     assert "subscriptions" not in result.output
     assert "_netaudio-arc" not in result.output
@@ -423,7 +425,7 @@ def test_device_show_plain_labels_known_unsupported_aes67(monkeypatch):
     result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
-    assert "AES67                   unsupported" in result.output
+    assert " ".join("AES67                   unsupported".split()) in " ".join(result.output.split())
 
 
 def test_device_show_plain_labels_unknown_capabilities_only_after_failed_queries(monkeypatch):
@@ -451,9 +453,9 @@ def test_device_show_plain_labels_unknown_capabilities_only_after_failed_queries
     result = _show(monkeypatch, device)
 
     assert result.exit_code == 0
-    assert "Supported Sample Rates  unknown" in result.output
+    assert " ".join("Supported Sample Rates  unknown".split()) in " ".join(result.output.split())
     assert "Encoding\n" in result.output
-    assert "Supported Encodings     unknown" in result.output
+    assert " ".join("Supported Encodings     unknown".split()) in " ".join(result.output.split())
 
 
 def test_device_show_plain_omits_unnamed_clock_source(monkeypatch):
@@ -478,7 +480,7 @@ def test_device_show_plain_omits_unnamed_clock_source(monkeypatch):
 
 def test_device_show_presents_clock_ports_in_controller_terms():
     rows = dict(device_commands._device_show_rows(make_show_device()))
-    assert rows["Primary v1 Multicast"] == "Follower"
+    assert rows["Interface 2 v1 Multicast"] == "Follower"
     assert not any(key.startswith("Clock Port Record") for key in rows)
     assert not any("0x" in value for key, value in rows.items() if key.startswith("Primary"))
 
@@ -514,7 +516,7 @@ def test_device_show_clock_port_states_use_standard_ptp_names():
         },
     ]
     names = [device_display.clock_port_name(record, records) for record in records]
-    assert names == ["Primary v1 Multicast", "Primary v2 Unicast", "Secondary v2 Multicast"]
+    assert names == ["Interface 2 v1 Multicast", "Interface 2 v2 Unicast", "Interface 3 v2 Multicast"]
     assert [device_display._format_clock_port_record(record) for record in records] == [
         "Follower",
         "Disabled",

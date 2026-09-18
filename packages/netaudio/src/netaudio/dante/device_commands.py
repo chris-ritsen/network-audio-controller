@@ -608,56 +608,22 @@ class DanteDeviceCommands:
         )
         return self._settings(spec)
 
-    def command_set_clock_subdomain(self, subdomain, host_mac=None, sequence=None):
-        if isinstance(subdomain, str):
-            subdomain_bytes = subdomain.encode("ascii")
-        else:
-            subdomain_bytes = bytes(subdomain)
-        if len(subdomain_bytes) > 16:
-            raise ValueError("clock subdomain is longer than 16 bytes")
-        field = list(subdomain_bytes.ljust(16, b"\x00"))
-        spec = {
-            "command": "set_clock_subdomain",
-            "subdomain": field,
-            "sequence": self._next_settings_sequence() if sequence is None else sequence,
-        }
-        self._with_host_mac(spec, host_mac)
-        return self._settings(spec)
-
-    def command_set_clock_source(self, clock_source: int, host_mac=None, sequence=None):
-        spec = {
-            "command": "set_clock_source",
-            "clock_source": clock_source,
-            "sequence": self._next_settings_sequence() if sequence is None else sequence,
-        }
-        self._with_host_mac(spec, host_mac)
-        return self._settings(spec)
-
-    def command_set_preferred_leader(self, is_preferred: bool, clock_source: int = 0, host_mac=None, sequence=None):
-        spec = {
-            "command": "set_preferred_leader",
-            "preferred": bool(is_preferred),
-            "clock_source": clock_source,
-            "sequence": self._next_settings_sequence() if sequence is None else sequence,
-        }
-        self._with_host_mac(spec, host_mac)
-        return self._settings(spec)
-
-    def command_probe_preferred_leader(self, clock_source: int = 0, host_mac=None, sequence=None):
+    def command_clock_control(self, control: dict, host_mac=None, sequence=None):
         spec = self._with_host_mac(
             {
-                "command": "probe_preferred_leader",
-                "clock_source": clock_source,
+                "command": "clock_control",
+                "control": control,
                 "sequence": self._next_settings_sequence() if sequence is None else sequence,
             },
             host_mac,
         )
         return self._settings(spec)
 
-    def command_refresh_clock_status(self, host_mac=None, sequence=None):
+    def command_refresh_clock_status(self, record_revision: int, host_mac=None, sequence=None):
         spec = self._with_host_mac(
             {
                 "command": "refresh_clock_status",
+                "record_revision": record_revision,
                 "sequence": self._next_settings_sequence() if sequence is None else sequence,
             },
             host_mac,

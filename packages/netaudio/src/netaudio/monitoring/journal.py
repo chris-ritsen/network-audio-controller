@@ -446,9 +446,46 @@ class MonitoringEventJournal:
         }
 
     def _observe_clock(self, previous, current, timestamp, generated) -> None:
+        before_status = previous.get("clock_status") or {}
+        after_status = current.get("clock_status") or {}
+        fields = (
+            "synchronization",
+            "servo_state_code",
+            "clock_state_code",
+            "mute_flags",
+            "clock_source_code",
+            "ptpv1_grandmaster_uuid",
+            "ptpv2_domain",
+            "clock_capabilities",
+            "extension_flags",
+            "clock_subdomain",
+        )
+        before = {key: before_status.get(key) for key in fields}
+        after = {key: after_status.get(key) for key in fields}
+        if (
+            before_status
+            and after_status
+            and after_status.get("observation_state") not in {"stale", "unavailable"}
+            and before != after
+        ):
+            generated.append(
+                self._append(
+                    current,
+                    timestamp,
+                    MonitoringEventKind.CLOCK_STATUS_CHANGED,
+                    EventSeverity.WARNING
+                    if after.get("synchronization") == "lost" or after.get("mute_flags")
+                    else EventSeverity.INFO,
+                    before,
+                    after,
+                    {"clock_status": after_status},
+                    "device_clock_status",
+                    DerivationStatus.OBSERVED,
+                )
+            )
         for field, kind, severity in (
             ("clock_role", MonitoringEventKind.CLOCK_ROLE_CHANGED, EventSeverity.INFO),
-            ("leader_clock_identity", MonitoringEventKind.LEADER_IDENTITY_CHANGED, EventSeverity.WARNING),
+            ("ptpv1_master_uuid", MonitoringEventKind.LEADER_IDENTITY_CHANGED, EventSeverity.WARNING),
         ):
             before = previous.get(field)
             after = current.get(field)

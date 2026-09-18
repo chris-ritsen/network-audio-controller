@@ -5,6 +5,7 @@ import { html, useEffect, useState } from "../lib/preact.js";
 import { events } from "../store.js";
 
 const EVENT_LABELS = {
+  clock_status_changed: "Clock status changed",
   clock_role_changed: "Clock role changed",
   device_disappeared: "Device disappeared",
   device_reappeared: "Device reappeared",
@@ -15,7 +16,7 @@ const EVENT_LABELS = {
   issue_opened: "Issue opened",
   issue_resolved: "Issue resolved",
   issue_updated: "Issue updated",
-  leader_identity_changed: "Leader identity changed",
+  leader_identity_changed: "PTPv1 current master changed",
   late_packet_count_increased: "Late packet count increased",
   late_packet_counter_reset: "Late packet count reset",
   mute_state_changed: "Mute state changed",
@@ -41,6 +42,7 @@ const OPERATION_PHASE_LABELS = {
 };
 
 const OPERATION_LABELS = {
+  clock_configuration: "Clock settings",
   apply_preset: "Apply preset",
   create_transmit_flow: "Create transmit flow",
   delete_transmit_flow: "Delete transmit flow",
