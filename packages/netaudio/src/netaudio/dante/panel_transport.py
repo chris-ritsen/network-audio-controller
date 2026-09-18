@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections import defaultdict
 
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.panel_plan import matches, plan_panel
-from netaudio.dante.panel_state import QUERY_SELECTORS, observe_panel, panel_family, panel_permission, panel_snapshot
+from netaudio.dante.panel_state import (
+    QUERY_SELECTORS,
+    observation_time,
+    observe_panel,
+    panel_family,
+    panel_permission,
+    panel_snapshot,
+)
 
 
 class PanelTransport:
@@ -74,7 +80,7 @@ class PanelTransport:
             if not accepts(status):
                 return None
             status = {**status, "correlated": True}
-            status.setdefault("observed_at_unix", time.time())
+            status.setdefault("observed_at_unix", observation_time())
             if observe_panel(device, status):
                 self.application.dispatcher.emit_nowait(
                     DanteEvent(

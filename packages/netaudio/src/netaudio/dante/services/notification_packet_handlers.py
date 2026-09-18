@@ -99,14 +99,14 @@ def _parse_aes67_current_new(data: bytes, source_ip: str, device) -> ParsedStatu
 
 
 def _parse_panel_status(data: bytes, source_ip: str, device) -> ParsedStatus:
-    from netaudio.dante.panel_state import panel_family
+    from netaudio.dante.panel_state import observation_time, panel_family
 
     family = panel_family(device)
     kind = {"bluetooth": "panel_bluetooth_status", "dante_av": "panel_video_status"}.get(family, "panel_status")
     parsed = _core_parse(kind, data, source_ip, "panel status")
     if parsed is None:
         parsed = {"diagnostic_error": "Malformed panel record", "raw_record": list(data), "observations": []}
-    parsed["observed_at_unix"] = time.time()
+    parsed["observed_at_unix"] = observation_time()
     return ParsedStatus("panel_status", parsed, parsed)
 
 

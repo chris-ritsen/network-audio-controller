@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+from datetime import datetime, timezone
 from copy import deepcopy
 
 MAX_AGE = 10.0
@@ -24,6 +24,11 @@ QUERY_SELECTORS = {
         "visca": 7,
     },
 }
+
+
+def observation_time():
+    # Match the journal clock, including its microsecond resolution on Windows.
+    return datetime.now(timezone.utc).timestamp()
 
 
 def panel_family(device):
@@ -50,7 +55,7 @@ def fresh(device, observation, now=None):
     ):
         return False
     stamp = observation.get("observed_at_unix")
-    return isinstance(stamp, (float, int)) and 0 <= (time.time() if now is None else now) - stamp <= MAX_AGE
+    return isinstance(stamp, (float, int)) and 0 <= (observation_time() if now is None else now) - stamp <= MAX_AGE
 
 
 def observe_panel(device, status):
