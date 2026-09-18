@@ -10,6 +10,12 @@ DEVICE_SCALAR_FIELDS = (
     "aes67_configuration_supported",
     "availability_state",
     "bit_depth",
+    "device_controls",
+    "virtual_panel_supported",
+    "video_transmission_supported",
+    "video_reception_supported",
+    "codec_status",
+    "codec_observed_at",
     "bluetooth_connected",
     "bluetooth_device",
     "platform_model_name",
@@ -254,6 +260,12 @@ class DanteDeviceSerializer:
                 field_value = list(field_value)
             as_json[device_json_field_name(field_name)] = field_value
 
+        from netaudio.dante.panel_state import panel_snapshot
+
+        as_json["device_controls"] = panel_snapshot(device)
+        connection = as_json["device_controls"].get("observations", {}).get("bluetooth_connection")
+        if connection and not connection["fresh"]:
+            as_json["bluetooth_connected"] = None
         if isinstance(as_json.get("clock_status"), dict):
             from netaudio.dante.clock_control import clock_status_fresh
 

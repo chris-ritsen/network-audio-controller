@@ -67,7 +67,7 @@ CONMON_PARSE_KINDS = {
     0x1007: "aes67_status",
     0x1009: "lock_reset_status",
     0x100B: "codec_status",
-    0x100E: "bluetooth_status",
+    0x100E: "panel_status",
     0xFF05: "conmon_export_fragment",
 }
 

@@ -95,8 +95,17 @@ class DanteCommands:
             "records": records,
         }
 
-    def bluetooth_status(self, host_mac=None) -> dict:
-        return self._with_host_mac({"command": "bluetooth_status"}, host_mac)
+    def panel_control(self, request: dict, requester: int, sequence: int, host_mac=None) -> dict:
+        return self._with_host_mac(
+            {
+                "command": "panel_control",
+                "request": request,
+                "requester": requester,
+                "sequence": sequence,
+                "message_id": self._next_sequence(),
+            },
+            host_mac,
+        )
 
     def capability_partition_export(self, host_mac=None) -> dict:
         return self._sequenced({"command": "capability_partition_export"}, host_mac)

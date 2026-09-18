@@ -94,6 +94,10 @@ function SavePreset() {
           ["routing", "Channel names, receiver routing and transmit flows"],
           ["audio", "Clock, format, latency, pull-up and codec gain"],
           ["network", "All interfaces and redundancy settings"],
+          [
+            "device_controls",
+            "Bluetooth, video and serial settings (no pairing reset)",
+          ],
         ].map(
           ([id, label]) =>
             html`<label key=${id} class="flex items-center gap-2"
@@ -245,46 +249,48 @@ function LoadPreset() {
               <h3 class="font-semibold">${preview.name}</h3>
               <fieldset disabled=${busy} class="flex flex-col gap-4">
                 ${preview.devices.map(
-            (device, index) =>
-              html`<div
-                key=${device.name}
-                class="flex flex-col gap-2 border border-base-300 rounded-lg p-3"
-              >
-                <label class="flex items-center gap-2"
-                  ><input
-                    type="checkbox"
-                    checked=${choices[index].include}
-                    onChange=${(event) => change(index, { include: event.target.checked })}
-                  /><span class="font-semibold">${device.name}</span></label
-                >
-                ${
-              device.settings.length
-                ? html`<ul class="text-sm">
-                    ${device.settings.map((setting) => html`<li>${setting.label}: ${readable(setting.value)}</li>`)}
-                  </ul>`
-                : html`<p class="text-sm">
-                    No supported settings in this entry.
-                  </p>`
-            }
-                ${device.preserved.length ? html`<p class="text-sm">Preserved and skipped when no verified writer is available: ${device.preserved.join(", ")}.</p>` : null}
-                ${
-              choices[index].include
-                ? html`<label class="flex flex-col gap-2 text-sm"
-                    >Target for ${device.name}
-                    <select
-                      value=${choices[index].target}
-                      onChange=${(event) => change(index, { target: event.target.value })}
+                  (device, index) =>
+                    html`<div
+                      key=${device.name}
+                      class="flex flex-col gap-2 border border-base-300 rounded-lg p-3"
                     >
-                      <option value="">
-                        ${device.targets.some((target) => target.online) ? "Choose a device" : "No online matching device — skip this entry"}
-                      </option>
-                      ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : " · Offline"}</option>`)}
-                    </select></label
-                  >`
-                : html`<p class="text-sm">Skipped</p>`
-            }
-              </div>`,
-          )}
+                      <label class="flex items-center gap-2"
+                        ><input
+                          type="checkbox"
+                          checked=${choices[index].include}
+                          onChange=${(event) => change(index, { include: event.target.checked })}
+                        /><span class="font-semibold"
+                          >${device.name}</span
+                        ></label
+                      >
+                      ${
+                  device.settings.length
+                    ? html`<ul class="text-sm">
+                        ${device.settings.map((setting) => html`<li>${setting.label}: ${readable(setting.value)}</li>`)}
+                      </ul>`
+                    : html`<p class="text-sm">
+                        No supported settings in this entry.
+                      </p>`
+                }
+                      ${device.preserved.length ? html`<p class="text-sm">Preserved and skipped when no verified writer is available: ${device.preserved.join(", ")}.</p>` : null}
+                      ${
+                  choices[index].include
+                    ? html`<label class="flex flex-col gap-2 text-sm"
+                        >Target for ${device.name}
+                        <select
+                          value=${choices[index].target}
+                          onChange=${(event) => change(index, { target: event.target.value })}
+                        >
+                          <option value="">
+                            ${device.targets.some((target) => target.online) ? "Choose a device" : "No online matching device — skip this entry"}
+                          </option>
+                          ${device.targets.map((target) => html`<option value=${target.id} disabled=${!target.online}>${target.name}${target.address ? ` · ${target.address}` : ""}${target.context ? ` · ${target.context}` : ""}${target.online ? "" : " · Offline"}</option>`)}
+                        </select></label
+                      >`
+                    : html`<p class="text-sm">Skipped</p>`
+                }
+                    </div>`,
+                )}
                 <details>
                   <summary class="cursor-pointer">Advanced</summary>
                   <label class="flex items-start gap-2 mt-3 text-sm"
@@ -292,9 +298,9 @@ function LoadPreset() {
                       type="checkbox"
                       checked=${destructive}
                       onChange=${(event) => {
-              setDestructive(event.target.checked);
-              setConfirmed(false);
-            }}
+                        setDestructive(event.target.checked);
+                        setConfirmed(false);
+                      }}
                     />Allow sample-rate changes that rebuild routing.</label
                   >
                   <label class="flex items-start gap-2 mt-3 text-sm"
@@ -302,9 +308,9 @@ function LoadPreset() {
                       type="checkbox"
                       checked=${storeCurrent}
                       onChange=${(event) => {
-              setStoreCurrent(event.target.checked);
-              setConfirmed(false);
-            }}
+                        setStoreCurrent(event.target.checked);
+                        setConfirmed(false);
+                      }}
                     />Request configuration storage after every changed setting
                     has a successful effective-state readback.</label
                   >

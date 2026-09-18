@@ -238,6 +238,7 @@ class DaemonHTTPServer(
             "/set-sample-rate-pullup": self._handle_set_sample_rate_pullup,
             "/set-preferred-leader": self._handle_set_preferred_leader,
             "/set-clock-source": self._handle_set_clock_source,
+            "/device-controls": self._handle_device_controls,
             "/set-clock-configuration": self._handle_set_clock_configuration,
             "/set-clock-subdomain": self._handle_set_clock_subdomain,
             "/refresh-clock": self._handle_refresh_clock,

@@ -1,3 +1,4 @@
+import { DeviceControls } from "./controls.js";
 import { api } from "../api.js";
 import { AsyncButton, FieldRow, Panel } from "../components.js";
 import * as format from "../format.js";
@@ -545,6 +546,7 @@ export function DeviceConfigSection({ device }) {
       <//>
       <${PerformanceControls} device=${device} requestName=${requestName} />
       <${ClockingControls} device=${device} requestName=${requestName} />
+      <${DeviceControls} device=${device} />
     </div>
   `;
 }

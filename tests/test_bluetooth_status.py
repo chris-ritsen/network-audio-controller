@@ -1,64 +1,45 @@
+"""Retained packet fixtures are unsolicited observations, not current request replies."""
+
 import asyncio
+from unittest.mock import AsyncMock
 
-import pytest
-
-from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
-from netaudio.dante.device import DanteDevice
 from netaudio.dante.state import apply_device_status
+from tests.test_device_controls import device as panel_device
+from tests.status_test_support import receive_packets
 
 
-def _application_with_device():
-    application = DanteApplication()
-    device = DanteDevice(server_name="avio-bt-1.local.")
-    device.ipv4 = "192.168.1.61"
-    application.attach_devices({device.server_name: device})
-    return application, device
-
-
-def _publish_on_request(application, packets):
-    async def request_bluetooth_status(device, host_mac=None):
-        for packet in packets:
-            application.notifications._on_packet(packet, (str(device.ipv4), 8702))
-
-    application.send_bluetooth_status_request = request_bluetooth_status
-
-
-def test_probe_bluetooth_status_ignores_non_bluetooth_publications(load_fixture):
-    application, device = _application_with_device()
-    disconnected = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
-    _publish_on_request(application, [b"unrelated publication", disconnected])
-
-    status = asyncio.run(application.probe_bluetooth_status(device))
-
-    assert status["connected"] is False
-    assert device.bluetooth_connected is False
-    assert device.bluetooth_device is None
-
-
-def test_probe_bluetooth_status_preserves_connected_device_name(load_fixture):
-    application, device = _application_with_device()
-    connected = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
-    _publish_on_request(application, [connected])
-
-    status = asyncio.run(application.probe_bluetooth_status(device))
-
-    assert status["device_name"] == "s00pcan-iphone-17"
+def test_unsolicited_bluetooth_fixture_preserves_state_without_confirming_request(load_fixture):
+    app, device = panel_device()
+    receive_packets(
+        app, [b"unrelated", load_fixture("avio-bt-1_bluetooth_status_connected.bin")], (str(device.ipv4), 8702)
+    )
     assert device.bluetooth_connected is True
     assert device.bluetooth_device == "s00pcan-iphone-17"
+    assert device.device_controls["unsolicited_status"]["bluetooth_connection"]["correlated"] is False
+    assert not device.device_controls.get("correlated_status")
 
 
-def test_probe_bluetooth_status_times_out_without_a_publication():
-    application, device = _application_with_device()
-    _publish_on_request(application, [])
+def test_disconnected_fixture_does_not_invent_connected_name(load_fixture):
+    app, device = panel_device()
+    receive_packets(app, [load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")], (str(device.ipv4), 8702))
+    assert device.bluetooth_connected is False
+    assert device.bluetooth_device == ""
 
-    with pytest.raises(CapabilityProbeTimeout, match="bluetooth status readback timed out"):
-        asyncio.run(application.probe_bluetooth_status(device, timeout=0.01))
+
+def test_refresh_timeout_marks_prior_observation_unavailable(load_fixture):
+    app, device = panel_device()
+    receive_packets(app, [load_fixture("avio-bt-1_bluetooth_status_connected.bin")], (str(device.ipv4), 8702))
+    app._send_settings = AsyncMock()
+    status = asyncio.run(app.inspect_device_controls(device, timeout=0.001))
+    assert not status["observations"]["bluetooth_connection"]["fresh"]
+    assert device.bluetooth_connected is True
 
 
-def test_apply_bluetooth_status_reports_changes_once():
-    device = DanteDevice(server_name="avio-bt-1.local.")
-    status = {"connected": True, "device_name": "s00pcan-iphone-17"}
-
-    assert apply_device_status(device, "bluetooth_status", status) is True
-    assert apply_device_status(device, "bluetooth_status", status) is False
-    assert device.bluetooth_device == "s00pcan-iphone-17"
+def test_apply_panel_status_reports_changes_once():
+    _, device = panel_device()
+    status = {
+        "observed_at_unix": 1.0,
+        "observations": [{"category": "bluetooth_connection", "value": {"state": 1, "peer_name": "peer"}}],
+    }
+    assert apply_device_status(device, "panel_status", status)
+    assert not apply_device_status(device, "panel_status", status)

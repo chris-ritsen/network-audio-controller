@@ -445,7 +445,7 @@ fn audio_settings_accept_nonzero_wire_values_without_truncation() {
     }
     for level in MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL {
         assert!(
-            build_set_gain_level([1, 2, 3, 4, 5, 6], 1, u16::MAX, level, false).is_ok(),
+            build_set_gain_level([1, 2, 3, 4, 5, 6], 1, 2, level, false).is_ok(),
             "{level}"
         );
     }
@@ -510,10 +510,10 @@ fn set_gain_level_matches_captured_input_packet_1372() {
 }
 
 #[test]
-fn set_gain_level_encodes_output_direction_and_full_channel_number() {
-    let packet = build_set_gain_level([1, 2, 3, 4, 5, 6], 0x1234, 257, 5, false).unwrap();
+fn set_gain_level_encodes_output_direction_and_channel_mask() {
+    let packet = build_set_gain_level([1, 2, 3, 4, 5, 6], 0x1234, 2, 5, false).unwrap();
     assert_eq!(&packet[40..42], &0x0201u16.to_be_bytes());
-    assert_eq!(&packet[46..48], &257u16.to_be_bytes());
+    assert_eq!(&packet[44..48], &2u32.to_be_bytes());
     assert_eq!(&packet[48..52], &5u32.to_be_bytes());
 }
 

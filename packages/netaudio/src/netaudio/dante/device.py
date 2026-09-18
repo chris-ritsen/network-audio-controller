@@ -35,6 +35,14 @@ def device_advertises_aes67_multicast_prefix(device) -> bool:
 
 class DanteDevice:
     def __init__(self, server_name="", dump_payloads=False, debug=False, app=None):
+        self.device_controls: dict = {}
+        self.virtual_panel_supported: bool | None = None
+        self.video_transmission_supported: bool | None = None
+        self.video_reception_supported: bool | None = None
+        self.panel_read_allowed = True
+        self.panel_write_allowed = True
+        self.codec_status: dict | None = None
+        self.codec_observed_at: float | None = None
         self.bluetooth_device = None
         self.bluetooth_connected: bool | None = None
         self.is_locked = None

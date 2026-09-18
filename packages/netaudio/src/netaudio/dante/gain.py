@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import time
 
 
 INPUT_GAIN_LEVEL_LABELS = {
@@ -21,35 +22,39 @@ OUTPUT_GAIN_LEVEL_LABELS = {
 
 SUPPORTED_GAIN_LEVELS = (1, 2, 3, 4, 5)
 
-GAIN_CODEC_ADAPTERS = {
-    "avio-dai2": {"parameter_type": 1, "mode": 2, "device_type": "input"},
-    "avio-dao2": {"parameter_type": 2, "mode": 1, "device_type": "output"},
-}
-
 
 def gain_adapter_from_codec_status(device, codec_status: dict) -> dict | None:
-    model_id = (getattr(device, "model_id", None) or "").lower()
-    adapter = GAIN_CODEC_ADAPTERS.get(model_id)
-    if adapter is None:
-        return None
-    matches = [
-        parameter
-        for parameter in codec_status.get("parameters") or []
-        if parameter.get("parameter_type") == adapter["parameter_type"] and parameter.get("mode") == adapter["mode"]
-    ]
-    if len(matches) != 1:
-        return None
-    values = matches[0].get("values")
-    if not isinstance(values, list) or any(
-        isinstance(value, bool) or not isinstance(value, int) or value not in SUPPORTED_GAIN_LEVELS for value in values
+    recognized = {(1, 2): "input", (2, 1): "output"}
+    parameters = codec_status.get("parameters") or []
+    matches = [p for p in parameters if (p.get("parameter_type"), p.get("mode")) in recognized]
+    # Conflicting modes for an analog parameter make the projection ambiguous.
+    if len(matches) != 1 or any(
+        p.get("parameter_type") in (1, 2) and (p.get("parameter_type"), p.get("mode")) not in recognized
+        for p in parameters
     ):
         return None
-    return {**adapter, "channel_levels": list(values), "supported_levels": list(SUPPORTED_GAIN_LEVELS)}
+    parameter = matches[0]
+    values = parameter.get("values")
+    if (
+        not isinstance(values, list)
+        or not 1 <= len(values) <= 2
+        or any(isinstance(v, bool) or not isinstance(v, int) or v not in SUPPORTED_GAIN_LEVELS for v in values)
+    ):
+        return None
+    return {
+        "parameter_type": parameter["parameter_type"],
+        "mode": parameter["mode"],
+        "device_type": recognized[(parameter["parameter_type"], parameter["mode"])],
+        "channel_levels": list(values),
+        "supported_levels": list(SUPPORTED_GAIN_LEVELS),
+    }
 
 
 def codec_status_fields(device, codec_status: dict) -> dict:
     adapter = gain_adapter_from_codec_status(device, codec_status)
     fields = {
+        "codec_status": codec_status,
+        "codec_observed_at": time.time(),
         "codec_parameters": codec_status.get("parameters") or [],
         "gain_adapter": adapter,
         "gain_device_type": None,

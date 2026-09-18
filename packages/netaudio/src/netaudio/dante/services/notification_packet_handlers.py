@@ -10,7 +10,7 @@ from netaudio.dante.const import (
     CONMON_HEADER_LENGTH,
     CONMON_MAGIC,
     CONMON_OPCODE_AES67_CURRENT_NEW,
-    CONMON_OPCODE_BLUETOOTH_STATUS,
+    CONMON_OPCODE_PANEL_STATUS,
     CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS,
     CONMON_OPCODE_DANTE_MODEL_RESPONSE,
     CONMON_OPCODE_ENCODING_STATUS,
@@ -38,9 +38,7 @@ from netaudio.dante.packet_store import PacketRecord
 
 logger = logging.getLogger("netaudio")
 
-BLUETOOTH_SETTINGS_SUBTYPE = 0x000C
 STATUS_KIND_AES67 = "aes67"
-STATUS_KIND_BLUETOOTH = "bluetooth_status"
 STATUS_KIND_CLEAR_CONFIGURATION = "clear_configuration_status"
 STATUS_KIND_CLOCK = "clock_status"
 STATUS_KIND_DANTE_MODEL = "dante_model"
@@ -76,10 +74,6 @@ def extract_conmon_opcode(data: bytes) -> int | None:
     return struct.unpack(">H", data[opcode_position : opcode_position + 2])[0]
 
 
-def _is_bluetooth_status(data: bytes) -> bool:
-    return len(data) >= 36 and struct.unpack(">H", data[34:36])[0] == BLUETOOTH_SETTINGS_SUBTYPE
-
-
 def _core_parse(kind: str, data: bytes, source_ip: str, description: str):
     from netaudio import core
 
@@ -104,11 +98,16 @@ def _parse_aes67_current_new(data: bytes, source_ip: str, device) -> ParsedStatu
     return ParsedStatus(STATUS_KIND_AES67, status, (aes67_current, aes67_configured))
 
 
-def _parse_bluetooth_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
-    parsed = _core_parse("bluetooth_status", data, source_ip, "bluetooth status")
+def _parse_panel_status(data: bytes, source_ip: str, device) -> ParsedStatus:
+    from netaudio.dante.panel_state import panel_family
+
+    family = panel_family(device)
+    kind = {"bluetooth": "panel_bluetooth_status", "dante_av": "panel_video_status"}.get(family, "panel_status")
+    parsed = _core_parse(kind, data, source_ip, "panel status")
     if parsed is None:
-        return None
-    return ParsedStatus(STATUS_KIND_BLUETOOTH, parsed, parsed)
+        parsed = {"diagnostic_error": "Malformed panel record", "raw_record": list(data), "observations": []}
+    parsed["observed_at_unix"] = time.time()
+    return ParsedStatus("panel_status", parsed, parsed)
 
 
 def _parse_clear_configuration_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -185,6 +184,9 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
         "external_word_clock_read_only",
         "switch_redundancy_read_only",
         "static_ipv4_configuration_read_only",
+        "virtual_panel_supported",
+        "video_transmission_supported",
+        "video_reception_supported",
         "generic_codec_control_supported",
         "interface_statistics_supported",
         "clock_monitoring_supported",
@@ -390,7 +392,7 @@ CONMON_STATUS_PARSERS = {
     0x0024: _clock_diagnostic_parser("clock_unicast_status"),
     0x0026: _clock_diagnostic_parser("clock_identifier_status"),
     CONMON_OPCODE_AES67_CURRENT_NEW: _parse_aes67_current_new,
-    CONMON_OPCODE_BLUETOOTH_STATUS: _parse_bluetooth_status,
+    CONMON_OPCODE_PANEL_STATUS: _parse_panel_status,
     CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS: _parse_clear_configuration_status,
     CONMON_OPCODE_DANTE_MODEL_RESPONSE: _parse_dante_model,
     CONMON_OPCODE_ENCODING_STATUS: _parse_capability_status(
@@ -517,8 +519,6 @@ class NotificationPacketHandlers:
         parse = CONMON_STATUS_PARSERS.get(opcode)
         if parse is None:
             return False
-        if opcode == CONMON_OPCODE_BLUETOOTH_STATUS and not _is_bluetooth_status(data):
-            return False
 
         parsed = parse(data, source_ip, self._lookup_device(source_ip))
         self.notify_waiters("notification", source_ip, opcode)
@@ -528,6 +528,11 @@ class NotificationPacketHandlers:
             observation = self._interface_statistics_error_baselines.apply(parsed.status)
             parsed = ParsedStatus(parsed.kind, observation, observation)
 
+        if parsed.kind == "panel_status":
+            parsed.status["correlated"] = any(
+                waiter.accept is not None and waiter.accept(parsed.status)
+                for waiter in self.waiters_for("panel_status", source_ip)
+            )
         self.notify_waiters(parsed.kind, source_ip, parsed.waiter_result)
         if parsed.kind == STATUS_KIND_CLOCK:
             self.notify_waiters(WAITER_KIND_PREFERRED_LEADER, source_ip, parsed.status.get("preferred_leader"))

@@ -27,7 +27,8 @@ use crate::protocol::{
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
-const CONMON_OPCODE_BLUETOOTH_STATUS: u16 = 0x100E;
+#[cfg(test)]
+const CONMON_OPCODE_PANEL_STATUS: u16 = 0x100E;
 
 const METERING_V2_HEADER_SIZE: usize = 27;
 const METERING_FAMILY_OFFSET: usize = 24;
@@ -233,17 +234,14 @@ pub struct PlatformVersions {
     pub switch_redundancy_read_only: Option<bool>,
     pub static_ipv4_configuration_read_only: bool,
     pub generic_codec_control_supported: bool,
+    pub virtual_panel_supported: bool,
+    pub video_transmission_supported: bool,
+    pub video_reception_supported: bool,
     pub interface_statistics_supported: bool,
     pub clock_monitoring_supported: bool,
     pub per_channel_signal_presence_supported: bool,
     pub rx_flow_maximum_latency_monitoring_supported: bool,
     pub rx_flow_late_packet_monitoring_supported: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct BluetoothStatus {
-    pub connected: bool,
-    pub device_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -21,17 +21,207 @@
     "parsed": null
   },
   "avio-bt-1_bluetooth_status_connected.bin": {
-    "kind": "bluetooth_status",
+    "kind": "panel_bluetooth_status",
     "parsed": {
-      "connected": true,
-      "device_name": "s00pcan-iphone-17"
+      "record_revision": 1848,
+      "common_word": 0,
+      "envelope_length": 45,
+      "envelope_offset": 12,
+      "source_identifier": [
+        62,
+        66,
+        39,
+        76,
+        255,
+        36,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requester": 0,
+      "sequence": 9,
+      "application_payload": [
+        10,
+        25,
+        18,
+        23,
+        10,
+        21,
+        8,
+        1,
+        18,
+        17,
+        115,
+        48,
+        48,
+        112,
+        99,
+        97,
+        110,
+        45,
+        105,
+        112,
+        104,
+        111,
+        110,
+        101,
+        45,
+        49,
+        55
+      ],
+      "raw_record": [
+        7,
+        56,
+        16,
+        14,
+        0,
+        0,
+        0,
+        0,
+        0,
+        45,
+        0,
+        12,
+        18,
+        43,
+        10,
+        10,
+        62,
+        66,
+        39,
+        76,
+        255,
+        36,
+        0,
+        0,
+        0,
+        0,
+        24,
+        9,
+        34,
+        27,
+        10,
+        25,
+        18,
+        23,
+        10,
+        21,
+        8,
+        1,
+        18,
+        17,
+        115,
+        48,
+        48,
+        112,
+        99,
+        97,
+        110,
+        45,
+        105,
+        112,
+        104,
+        111,
+        110,
+        101,
+        45,
+        49,
+        55
+      ],
+      "observations": [
+        {
+          "category": "bluetooth_connection",
+          "value": {
+            "state": 1,
+            "peer_name": "s00pcan-iphone-17"
+          }
+        }
+      ],
+      "diagnostic_error": null
     }
   },
   "avio-bt-1_bluetooth_status_disconnected.bin": {
-    "kind": "bluetooth_status",
+    "kind": "panel_bluetooth_status",
     "parsed": {
-      "connected": false,
-      "device_name": null
+      "record_revision": 1848,
+      "common_word": 0,
+      "envelope_length": 26,
+      "envelope_offset": 12,
+      "source_identifier": [
+        62,
+        66,
+        39,
+        76,
+        255,
+        36,
+        0,
+        0,
+        0,
+        0
+      ],
+      "requester": 0,
+      "sequence": 9,
+      "application_payload": [
+        10,
+        6,
+        18,
+        4,
+        10,
+        2,
+        8,
+        2
+      ],
+      "raw_record": [
+        7,
+        56,
+        16,
+        14,
+        0,
+        0,
+        0,
+        0,
+        0,
+        26,
+        0,
+        12,
+        18,
+        24,
+        10,
+        10,
+        62,
+        66,
+        39,
+        76,
+        255,
+        36,
+        0,
+        0,
+        0,
+        0,
+        24,
+        9,
+        34,
+        8,
+        10,
+        6,
+        18,
+        4,
+        10,
+        2,
+        8,
+        2
+      ],
+      "observations": [
+        {
+          "category": "bluetooth_connection",
+          "value": {
+            "state": 2,
+            "peer_name": ""
+          }
+        }
+      ],
+      "diagnostic_error": null
     }
   },
   "core_device_info_avio-aes3-1.bin": {
@@ -392,7 +582,10 @@
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "virtual_panel_supported": false,
+      "video_transmission_supported": false,
+      "video_reception_supported": false
     }
   },
   "dante_model_ad4d_capture": {
@@ -459,7 +652,10 @@
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "virtual_panel_supported": false,
+      "video_transmission_supported": false,
+      "video_reception_supported": false
     }
   },
   "dante_model_lx_dante_capture": {
@@ -526,7 +722,10 @@
       "clock_monitoring_supported": true,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": true,
-      "rx_flow_late_packet_monitoring_supported": true
+      "rx_flow_late_packet_monitoring_supported": true,
+      "virtual_panel_supported": false,
+      "video_transmission_supported": false,
+      "video_reception_supported": false
     }
   },
   "encoding_status_packet_204720": {
@@ -573,7 +772,44 @@
           ]
         }
       ],
-      "record_protocol_version": 1831
+      "record_protocol_version": 1831,
+      "raw_header_word": 0,
+      "descriptor_stride": 8,
+      "descriptor_offset": 16,
+      "raw_record": [
+        7,
+        39,
+        16,
+        11,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        8,
+        0,
+        16,
+        1,
+        2,
+        0,
+        2,
+        0,
+        4,
+        0,
+        24,
+        0,
+        0,
+        0,
+        5,
+        0,
+        0,
+        0,
+        1
+      ]
     }
   },
   "codec_status_avio_output_packet_1585": {
@@ -590,7 +826,44 @@
           ]
         }
       ],
-      "record_protocol_version": 1831
+      "record_protocol_version": 1831,
+      "raw_header_word": 0,
+      "descriptor_stride": 8,
+      "descriptor_offset": 16,
+      "raw_record": [
+        7,
+        39,
+        16,
+        11,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        8,
+        0,
+        16,
+        2,
+        1,
+        0,
+        2,
+        0,
+        4,
+        0,
+        24,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        4
+      ]
     }
   },
   "interface_status_avio_applied_dhcp_packet_12362281": {
@@ -1280,7 +1553,10 @@
       "clock_monitoring_supported": false,
       "per_channel_signal_presence_supported": false,
       "rx_flow_maximum_latency_monitoring_supported": false,
-      "rx_flow_late_packet_monitoring_supported": false
+      "rx_flow_late_packet_monitoring_supported": false,
+      "virtual_panel_supported": false,
+      "video_transmission_supported": false,
+      "video_reception_supported": false
     }
   },
   "synthetic_make_model": {

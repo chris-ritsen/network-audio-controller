@@ -94,7 +94,7 @@ fn every_typed_response_parser_rejects_truncation() {
     let aes67_config = aes67_settings_response(&[(DEVICE_SETTINGS_INFO_AES67_CONFIGURED, 0x0003)]);
 
     let mut bluetooth = vec![0u8; 62];
-    stamp_conmon_response(&mut bluetooth, CONMON_OPCODE_BLUETOOTH_STATUS);
+    stamp_conmon_response(&mut bluetooth, CONMON_OPCODE_PANEL_STATUS);
     bluetooth[36..40].copy_from_slice(&[0x12, 0x18, 0x0A, 0x0A]);
     bluetooth[50..54].copy_from_slice(&[0x18, 0x09, 0x22, 0x08]);
     bluetooth[54..62].copy_from_slice(&[0x0A, 0x06, 0x12, 0x04, 0x0A, 0x02, 0x08, 0x02]);
@@ -111,7 +111,11 @@ fn every_typed_response_parser_rejects_truncation() {
         assert_eq!(parse_aes67_configured(&aes67_config[..length]), None);
     }
     for length in 0..bluetooth.len() {
-        assert_eq!(parse_bluetooth_status(&bluetooth[..length]), None);
+        assert!(crate::device_controls::parse_panel_status(
+            &bluetooth[..length],
+            Some("bluetooth")
+        )
+        .is_none());
     }
     for length in 0..make_model.len() {
         assert_eq!(parse_make_model(&make_model[..length]), None);
@@ -137,7 +141,7 @@ fn hostile_bytes_never_panic_or_decode_as_typed_responses() {
         assert_eq!(parse_cmc_registration_response(&data), None);
         assert_eq!(parse_tx_flows(&data), None);
         assert_eq!(parse_receiver_port_ranges(&data), None);
-        assert_eq!(parse_bluetooth_status(&data), None);
+        assert!(crate::device_controls::parse_panel_status(&data, Some("bluetooth")).is_none());
         assert_eq!(parse_conmon_opcode(&data), None);
         assert_eq!(parse_ptp_clock_status(&data), None);
         assert_eq!(parse_aes67_status(&data), None);

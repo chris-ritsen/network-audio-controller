@@ -608,6 +608,20 @@ class DanteDeviceCommands:
         )
         return self._settings(spec)
 
+    def command_panel_control(self, request, requester, request_sequence, host_mac=None, sequence=None):
+        return self._settings(
+            self._with_host_mac(
+                {
+                    "command": "panel_control",
+                    "request": request,
+                    "requester": requester,
+                    "sequence": request_sequence,
+                    "message_id": self._next_settings_sequence() if sequence is None else sequence,
+                },
+                host_mac,
+            )
+        )
+
     def command_clock_control(self, control: dict, host_mac=None, sequence=None):
         spec = self._with_host_mac(
             {
@@ -628,10 +642,6 @@ class DanteDeviceCommands:
             },
             host_mac,
         )
-        return self._settings(spec)
-
-    def command_bluetooth_status(self, host_mac=None):
-        spec = self._with_host_mac({"command": "bluetooth_status"}, host_mac)
         return self._settings(spec)
 
     def command_cmc_register(self, sequence, host_mac=None):

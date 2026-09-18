@@ -66,6 +66,10 @@ pub struct CodecParameterStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodecStatus {
     pub record_protocol_version: u16,
+    pub raw_header_word: u16,
+    pub descriptor_stride: u16,
+    pub descriptor_offset: u16,
+    pub raw_record: Vec<u8>,
     pub parameters: Vec<CodecParameterStatus>,
 }
 
@@ -813,10 +817,11 @@ pub fn parse_sample_rate_pullup_status(data: &[u8]) -> Option<ConfigurableU32Sta
 pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
     validate_conmon_envelope(data, CONMON_OPCODE_CODEC_STATUS)?;
     let record_protocol_version = read_u16(data, CONMON_BODY_OFFSET)?;
-    let parameter_count = usize::try_from(read_u32(data, CONMON_BODY_OFFSET + 8)?).ok()?;
+    let raw_header_word = read_u16(data, CONMON_BODY_OFFSET + 8)?;
+    let parameter_count = usize::from(read_u16(data, CONMON_BODY_OFFSET + 10)?);
     let descriptor_width = usize::from(read_u16(data, CONMON_BODY_OFFSET + 12)?);
     let descriptor_body_offset = usize::from(read_u16(data, CONMON_BODY_OFFSET + 14)?);
-    if descriptor_width != 8 || descriptor_body_offset % 2 != 0 {
+    if descriptor_width != 8 || descriptor_body_offset < 16 || descriptor_body_offset % 2 != 0 {
         return None;
     }
     let descriptors_offset = CONMON_BODY_OFFSET.checked_add(descriptor_body_offset)?;
@@ -824,6 +829,7 @@ pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
         descriptors_offset.checked_add(parameter_count.checked_mul(descriptor_width)?)?;
     data.get(descriptors_offset..descriptors_end)?;
 
+    let mut ranges = vec![(0, descriptors_end)];
     let mut parameters = Vec::with_capacity(parameter_count);
     for parameter_index in 0..parameter_count {
         let descriptor_offset =
@@ -839,6 +845,14 @@ pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
         let values_offset = CONMON_BODY_OFFSET.checked_add(values_body_offset)?;
         let values_end = values_offset.checked_add(value_count.checked_mul(value_width)?)?;
         data.get(values_offset..values_end)?;
+        if value_count != 0
+            && ranges
+                .iter()
+                .any(|(start, end)| values_offset < *end && values_end > *start)
+        {
+            return None;
+        }
+        ranges.push((values_offset, values_end));
         let mut values = Vec::with_capacity(value_count);
         for value_index in 0..value_count {
             values.push(read_u32(
@@ -854,6 +868,10 @@ pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
     }
     Some(CodecStatus {
         record_protocol_version,
+        raw_header_word,
+        descriptor_stride: descriptor_width as u16,
+        descriptor_offset: descriptor_body_offset as u16,
+        raw_record: data[CONMON_BODY_OFFSET..].to_vec(),
         parameters,
     })
 }

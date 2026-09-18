@@ -174,3 +174,94 @@ test("partial receiver-flow inventory is labeled without showing raw evidence", 
   await expect(page.locator("#content")).not.toContainText("feedbeef");
   await expect(page.locator("#content")).not.toContainText("33042");
 });
+
+function device() {
+  return {
+    ...Object.values(deviceFixture)[0],
+    server_name: "panel.local.",
+    name: "Bluetooth adapter",
+    management_state: "unmanaged",
+    inventory_sources: ["direct"],
+    ddm_enrolment_state: null,
+    online: true,
+    device_controls: {
+      family: "bluetooth",
+      readable: true,
+      writable: true,
+      observations: {
+        bluetooth_identification: {
+          fresh: true,
+          observed_at_unix: Date.now() / 1000,
+          value: { name_source: 1, custom_name: "Saved name" },
+        },
+        bluetooth_pairing: {
+          fresh: true,
+          observed_at_unix: Date.now() / 1000,
+          value: 3,
+        },
+      },
+    },
+  };
+}
+test("Bluetooth name preview and apply keep source selection and UTF-8 name", async ({
+  page,
+}) => {
+  const d = device();
+  await serveWebapp(page, { devices: { [d.server_name]: d } });
+  const requests = [];
+  await page.route("**/device-controls", (route) => {
+    const body = route.request().postDataJSON();
+    requests.push(body);
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        action: "change",
+        effective_state_confirmed: body.action === "apply",
+      }),
+    });
+  });
+  await page.goto("http://netaudio.test/devices/panel.local./device-config");
+  await page.getByLabel("Name source", { exact: true }).selectOption("2");
+  await page
+    .getByLabel("Custom Bluetooth name", { exact: true })
+    .fill("音楽 🎧");
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).last().click();
+  await expect.poll(() => requests.length).toBe(2);
+  expect(requests.map((r) => r.action)).toEqual(["plan", "apply"]);
+  for (const r of requests) {
+    expect(r.category).toBe("bluetooth_identification");
+    expect(r.requested).toEqual({ name_source: 2, custom_name: "音楽 🎧" });
+    expect(r.confirm_clear).toBe(false);
+  }
+});
+test("pairing clear needs its own confirmation and request", async ({
+  page,
+}) => {
+  const d = device();
+  await serveWebapp(page, { devices: { [d.server_name]: d } });
+  const requests = [];
+  await page.route("**/device-controls", (route) => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({
+      contentType: "application/json",
+      body: '{"success":true,"effective_state_confirmed":true}',
+    });
+  });
+  await page.goto("http://netaudio.test/devices/panel.local./device-config");
+  const clear = page.getByRole("button", {
+    name: "Clear pairing list",
+    exact: true,
+  });
+  await expect(clear).toBeDisabled();
+  await page.getByLabel("Confirm forgetting all paired devices").check();
+  await clear.click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0]).toMatchObject({
+    category: "bluetooth_pairing",
+    requested: "clear",
+    confirm_clear: true,
+  });
+  await expect(clear).toBeDisabled();
+});

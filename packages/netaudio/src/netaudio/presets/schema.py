@@ -238,6 +238,10 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         result["receive_flow_default_slots"] = _unsigned_integer(
             result["receive_flow_default_slots"], "receive_flow_default_slots", 0xFFFF
         )
+    if "device_controls" in result:
+        from netaudio.presets.device_controls import validate_device_controls
+
+        result["device_controls"] = validate_device_controls(result["device_controls"])
     if "clock_subdomain" in result:
         from netaudio.dante.clock_config import clock_subdomain_bytes
 

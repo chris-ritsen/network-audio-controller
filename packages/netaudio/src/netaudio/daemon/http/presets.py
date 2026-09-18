@@ -21,7 +21,7 @@ MAX_PRESET_BYTES = 4 * 1024 * 1024
 MAX_PRESET_DEVICES = 128
 PRESET_READ_TIMEOUT = 60
 PRESET_APPLY_TIMEOUT = 180
-PRESET_SECTIONS = {"routing", "audio", "network"}
+PRESET_SECTIONS = {"routing", "audio", "network", "device_controls"}
 
 
 def _xml_input(params):
@@ -227,6 +227,11 @@ class DaemonPresetHandlers:
                                 raise ValueError(f"{device.name}: incomplete {direction.upper()} channel inventory.")
                         if device.flow_protocol_id is not None or device.transmitter_flows is not None:
                             await self.application.inspect_transmit_flows(device)
+                    if "device_controls" in sections:
+                        from netaudio.dante.panel_state import panel_family
+
+                        if panel_family(device):
+                            await self.application.inspect_device_controls(device)
                     if "audio" in sections:
                         await self._preset_audio_snapshot(device)
                     if "network" in sections:

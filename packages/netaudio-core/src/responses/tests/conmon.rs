@@ -326,6 +326,10 @@ fn codec_status_preserves_generic_parameter_type_mode_and_raw_values() {
         parse_codec_status(&captured_avio_input_codec_status_packet_1528()),
         Some(CodecStatus {
             record_protocol_version: 0x0727,
+            raw_header_word: 0,
+            descriptor_stride: 8,
+            descriptor_offset: 16,
+            raw_record: captured_avio_input_codec_status_packet_1528()[24..].to_vec(),
             parameters: vec![CodecParameterStatus {
                 parameter_type: 1,
                 mode: 2,

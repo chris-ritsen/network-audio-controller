@@ -8,7 +8,6 @@ from weakref import WeakKeyDictionary
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante import flows
 from netaudio.dante.const import (
-    BLUETOOTH_MODEL_IDS,
     NOTIFICATION_AES67_STATUS,
     NOTIFICATION_CLEAR_CONFIG_STATUS,
     NOTIFICATION_CLOCKING_STATUS,
@@ -31,7 +30,6 @@ from netaudio.dante.latency import unavailable_latency_controls
 from netaudio.dante.operation_availability import probe_supported
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
-    STATUS_KIND_BLUETOOTH,
     STATUS_KIND_CLEAR_CONFIGURATION,
     STATUS_KIND_CLOCK,
     STATUS_KIND_DANTE_MODEL,
@@ -87,6 +85,9 @@ ALWAYS_OVERWRITTEN_MODEL_FIELDS = frozenset(
         "switch_redundancy_read_only",
         "redundancy_read_only_source",
         "static_ipv4_configuration_read_only",
+        "virtual_panel_supported",
+        "video_transmission_supported",
+        "video_reception_supported",
         "generic_codec_control_supported",
         "detailed_metering_supported",
         "interface_statistics_supported",
@@ -126,13 +127,12 @@ def _assign_changed(device, fields: dict) -> bool:
 
 
 def apply_device_status(device, kind: str, status) -> bool:
+    if kind == "panel_status":
+        from netaudio.dante.panel_state import observe_panel
+
+        return observe_panel(device, status)
     if kind == STATUS_KIND_AES67:
         return _assign_changed(device, {name: value for name, value in status.items() if value is not None})
-    if kind == STATUS_KIND_BLUETOOTH:
-        return _assign_changed(
-            device,
-            {"bluetooth_connected": status["connected"], "bluetooth_device": status["device_name"]},
-        )
     if kind == STATUS_KIND_CLEAR_CONFIGURATION:
         return _assign_changed(device, {"clear_configuration_status": status})
     if kind == STATUS_KIND_LOCK:
@@ -674,8 +674,10 @@ class DanteStateService:
                         if attempt < retries - 1:
                             logger.debug(f"Incomplete controls for {server_name}, retrying ({attempt + 1}/{retries})")
 
-                if device.bluetooth_connected is None and device.model_id in BLUETOOTH_MODEL_IDS:
-                    await self.application.send_bluetooth_status_request(device)
+                from netaudio.dante.panel_state import panel_family
+
+                if panel_family(device) and not device.device_controls:
+                    await self.application.inspect_device_controls(device)
 
                 if probe_supported(device, "aes67"):
                     await self._probe_with_retries(

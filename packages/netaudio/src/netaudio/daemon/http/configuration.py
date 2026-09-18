@@ -33,6 +33,32 @@ STATUS_TEXT = {
 
 
 class DaemonConfigurationHandlers:
+    async def _handle_device_controls(self, writer, params):
+        device = await self._require_device(writer, params.get("device"))
+        if not device:
+            return
+        action = params.get("action", "inspect")
+        try:
+            if action == "inspect":
+                result = await self.application.inspect_device_controls(device)
+            elif action in {"plan", "apply"}:
+                operation = (
+                    self.application.plan_device_control if action == "plan" else self.application.apply_device_control
+                )
+                result = await operation(
+                    device,
+                    params.get("category"),
+                    params.get("requested"),
+                    confirm_clear=params.get("confirm_clear") is True,
+                )
+            else:
+                raise ValueError("Action must be inspect, plan or apply.")
+        except (ValueError, TypeError, RuntimeError) as exc:
+            await self._send_json(writer, {"error": str(exc)}, 409)
+            return
+        success = action != "apply" or result.get("effective_state_confirmed") is True
+        await self._send_json(writer, {"success": success, **result}, 200 if success else 409)
+
     @staticmethod
     def _performance_result_status(result) -> int:
         return {

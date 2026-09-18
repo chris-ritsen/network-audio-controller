@@ -43,6 +43,7 @@ class OperationLifecyclePhase(str, Enum):
 class MonitoringEventKind(str, Enum):
     CLOCK_ROLE_CHANGED = "clock_role_changed"
     CLOCK_STATUS_CHANGED = "clock_status_changed"
+    DEVICE_CONTROL_CHANGED = "device_control_changed"
     DEVICE_DISAPPEARED = "device_disappeared"
     DEVICE_REAPPEARED = "device_reappeared"
     INTERFACE_ERROR_COUNTER_INCREASED = "interface_error_counter_increased"

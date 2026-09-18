@@ -106,6 +106,7 @@ class MonitoringEventJournal:
         generated: list[MonitoringEvent] = []
         self._observe_presence(previous, current, observed_at, generated)
         self._observe_clock(previous, current, observed_at, generated)
+        self._observe_device_controls(previous, current, observed_at, generated)
         self._observe_ptp_ports(previous, current, observed_at, generated)
         self._observe_mutes(previous, current, observed_at, generated)
         self._observe_subscriptions(previous, current, observed_at, generated)
@@ -444,6 +445,35 @@ class MonitoringEventJournal:
             "availability_state": snapshot.get("availability_state"),
             "last_seen": snapshot.get("last_seen"),
         }
+
+    def _observe_device_controls(self, previous, current, timestamp, generated):
+        before = (previous.get("device_controls") or {}).get("observations", {})
+        after = (current.get("device_controls") or {}).get("observations", {})
+        for category, observation in after.items():
+            if observation.get("fresh") is not True or current.get("online") is False:
+                continue
+            old = before.get(category, {}).get("value")
+            value = observation.get("value")
+            if old is None or value == old:
+                continue
+            # Peer identifiers stay in device status; the journal records state changes only.
+            if category == "bluetooth_connection":
+                old, value = {"state": old.get("state")}, {"state": value.get("state")}
+                if old == value:
+                    continue
+            generated.append(
+                self._append(
+                    current,
+                    timestamp,
+                    MonitoringEventKind.DEVICE_CONTROL_CHANGED,
+                    EventSeverity.INFO,
+                    old,
+                    value,
+                    {"category": category, "record_revision": observation.get("record_revision")},
+                    "device_control_status",
+                    DerivationStatus.OBSERVED,
+                )
+            )
 
     def _observe_clock(self, previous, current, timestamp, generated) -> None:
         before_status = previous.get("clock_status") or {}

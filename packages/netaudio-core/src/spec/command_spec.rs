@@ -62,9 +62,14 @@ pub(super) enum CommandSpec {
         message_id: u16,
         subscriptions: Vec<Subscription>,
     },
-    BluetoothStatus {
+    PanelControl {
+        request: crate::device_controls::PanelRequest,
+        requester: u32,
+        sequence: u32,
         #[serde(default)]
         host_mac: Option<String>,
+        #[serde(default)]
+        message_id: u16,
     },
     CapabilityPartitionExport {
         #[serde(default)]
@@ -613,6 +618,7 @@ impl CommandSpec {
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
             | CommandSpec::Receivers { message_id, .. }
             | CommandSpec::ReconcileTransmitterChannelNames2809 { message_id, .. }
+            | CommandSpec::PanelControl { message_id, .. }
             | CommandSpec::ClockControl { message_id, .. }
             | CommandSpec::RefreshClockStatus { message_id, .. }
             | CommandSpec::RemoveSubscriptions { message_id, .. }
@@ -640,8 +646,7 @@ impl CommandSpec {
             | CommandSpec::TransmitterNames { message_id, .. }
             | CommandSpec::Transmitters { message_id, .. }
             | CommandSpec::VolumeStart { message_id, .. } => *message_id,
-            CommandSpec::BluetoothStatus { .. }
-            | CommandSpec::DanteModel { .. }
+            CommandSpec::DanteModel { .. }
             | CommandSpec::MakeModel { .. }
             | CommandSpec::MeteringStop { .. }
             | CommandSpec::VolumeStop { .. } => 0,
@@ -694,6 +699,7 @@ impl CommandSpec {
             | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
             | CommandSpec::Receivers { message_id, .. }
             | CommandSpec::ReconcileTransmitterChannelNames2809 { message_id, .. }
+            | CommandSpec::PanelControl { message_id, .. }
             | CommandSpec::ClockControl { message_id, .. }
             | CommandSpec::RefreshClockStatus { message_id, .. }
             | CommandSpec::RemoveSubscriptions { message_id, .. }
@@ -721,8 +727,7 @@ impl CommandSpec {
             | CommandSpec::TransmitterNames { message_id, .. }
             | CommandSpec::Transmitters { message_id, .. }
             | CommandSpec::VolumeStart { message_id, .. } => Some(message_id),
-            CommandSpec::BluetoothStatus { .. }
-            | CommandSpec::DanteModel { .. }
+            CommandSpec::DanteModel { .. }
             | CommandSpec::MakeModel { .. }
             | CommandSpec::MeteringStop { .. }
             | CommandSpec::VolumeStop { .. } => None,
@@ -771,7 +776,7 @@ impl CommandSpec {
             | CommandSpec::ModernArcSubscriptionPage { .. }
             | CommandSpec::TransmitterNames { .. }
             | CommandSpec::Transmitters { .. } => (Arc, Request),
-            CommandSpec::BluetoothStatus { .. }
+            CommandSpec::PanelControl { .. }
             | CommandSpec::ClearAllConfiguration { .. }
             | CommandSpec::ClearAllConfigurationPreservingInternetProtocolSettings { .. }
             | CommandSpec::DanteModel { .. }
@@ -850,9 +855,19 @@ pub(super) fn build_command(
                 .collect();
             commands::build_add_subscriptions(&records, message_id)?
         }
-        CommandSpec::BluetoothStatus { host_mac } => {
-            commands::build_bluetooth_status(parse_mac(&host_mac, default_host_mac)?)?
-        }
+        CommandSpec::PanelControl {
+            request,
+            requester,
+            sequence,
+            host_mac,
+            message_id,
+        } => crate::device_controls::build_panel_control(
+            &request,
+            requester,
+            sequence,
+            parse_mac(&host_mac, default_host_mac)?,
+            message_id,
+        )?,
         CommandSpec::CapabilityPartitionExport {
             host_mac,
             message_id,

@@ -11,7 +11,7 @@ from netaudio.dante.const import (
     SERVICE_ARC,
 )
 from netaudio.dante.device_commands import DanteDeviceCommands
-from netaudio.dante.device_parser import DanteDeviceParser
+from netaudio import core
 
 
 class TestCommandTransmitters:
@@ -100,7 +100,9 @@ class TestSettingsCommandPacketFormat:
     def test_bluetooth_status_packet_format(self):
         host_mac = b"\xaa\xbb\xcc\xdd\xee\xff"
         commands = DanteDeviceCommands()
-        packet, _, port = commands.command_bluetooth_status(host_mac=host_mac)
+        packet, _, port = commands.command_panel_control(
+            {"operation": "bluetooth_query", "selector": 1}, 0, 9, host_mac=host_mac
+        )
         assert port == 8700
         assert len(packet) == 48
         self._check_header(packet, 0x10, 0x0D)
@@ -159,7 +161,7 @@ class TestSettingsCommandPacketFormat:
                 ({"record_revision": 0x073A, "clock_capabilities": 0, "extension_flags": 0, "preferred_leader": True},),
             ),
             ("command_refresh_clock_status", (0x073A,)),
-            ("command_bluetooth_status", ()),
+            ("command_panel_control", ({"operation": "bluetooth_query", "selector": 1}, 0, 9)),
         ],
     )
     def test_host_identified_settings_commands_use_discovered_mac(
@@ -251,10 +253,10 @@ class TestSettingsCommandPacketFormat:
 class TestParserBluetoothStatus:
     def test_connected_device_name(self, load_fixture):
         response = load_fixture("avio-bt-1_bluetooth_status_connected.bin")
-        name = DanteDeviceParser.parse_bluetooth_status(response)
+        name = core.parse_response("panel_bluetooth_status", response)["observations"][0]["value"]["peer_name"]
         assert name == "s00pcan-iphone-17"
 
     def test_disconnected_returns_none(self, load_fixture):
         response = load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
-        name = DanteDeviceParser.parse_bluetooth_status(response)
-        assert name is None
+        name = core.parse_response("panel_bluetooth_status", response)["observations"][0]["value"]["peer_name"]
+        assert name == ""

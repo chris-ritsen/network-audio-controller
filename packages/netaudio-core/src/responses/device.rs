@@ -1,14 +1,5 @@
 use super::*;
 
-impl BluetoothStatus {
-    fn disconnected() -> BluetoothStatus {
-        BluetoothStatus {
-            connected: false,
-            device_name: None,
-        }
-    }
-}
-
 pub fn parse_metering_frame(data: &[u8]) -> Option<MeteringFrame> {
     if data.len() < METERING_V2_HEADER_SIZE
         || read_u16(data, 0)? != 0xFFFF
@@ -596,6 +587,9 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
         static_ipv4_configuration_read_only: read_only_capabilities.unwrap_or(0)
             & DANTE_MODEL_STATIC_IPV4_READ_ONLY_MASK
             != 0,
+        virtual_panel_supported: secondary_capabilities & 0x100 != 0,
+        video_transmission_supported: secondary_capabilities & 0x8000 != 0,
+        video_reception_supported: secondary_capabilities & 0x10000 != 0,
         generic_codec_control_supported: secondary_capabilities
             & DANTE_MODEL_GENERIC_CODEC_CAPABILITY_MASK
             != 0,
@@ -689,73 +683,4 @@ pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistratio
         sequence: read_u16(response, 4)?,
         status: read_u16(response, 8)?,
     })
-}
-
-pub fn parse_bluetooth_status(response: &[u8]) -> Option<BluetoothStatus> {
-    validate_conmon_envelope(response, CONMON_OPCODE_BLUETOOTH_STATUS)?;
-    if response.len() < 50 {
-        return None;
-    }
-    if response[36] != 0x12 || response[38] != 0x0a {
-        return None;
-    }
-
-    let field1_len = usize::from(response[39]);
-    let mut position = 40usize.checked_add(field1_len)?;
-
-    if position < response.len() && response[position] == 0x18 {
-        position = position.checked_add(1)?;
-        while position < response.len() && response[position] & 0x80 != 0 {
-            position = position.checked_add(1)?;
-        }
-        position = position.checked_add(1)?;
-    }
-
-    if position >= response.len() || response[position] != 0x22 {
-        return None;
-    }
-
-    position = position.checked_add(1)?;
-    if position >= response.len() {
-        return None;
-    }
-
-    let field4_len = usize::from(response[position]);
-    position = position.checked_add(1)?;
-    let field4_end = position.checked_add(field4_len)?;
-    if field4_end != response.len() {
-        return None;
-    }
-
-    parse_bluetooth_payload(&response[position..field4_end])
-}
-
-fn length_delimited_payload(data: &[u8], tag: u8) -> Option<&[u8]> {
-    if data.first().copied()? != tag {
-        return None;
-    }
-    let length = usize::from(*data.get(1)?);
-    (length.checked_add(2)? == data.len()).then_some(&data[2..])
-}
-
-fn parse_bluetooth_payload(data: &[u8]) -> Option<BluetoothStatus> {
-    let level_one = length_delimited_payload(data, 0x0A)?;
-    let level_two = length_delimited_payload(level_one, 0x12)?;
-    let state = length_delimited_payload(level_two, 0x0A)?;
-    if state.get(0..2)? != [0x08, 0x02] {
-        if state.get(0..2)? != [0x08, 0x01] {
-            return None;
-        }
-        let name_payload = length_delimited_payload(state.get(2..)?, 0x12)?;
-        if name_payload.is_empty() {
-            return None;
-        }
-        let name = std::str::from_utf8(name_payload).ok()?;
-        return Some(BluetoothStatus {
-            connected: true,
-            device_name: Some(name.to_owned()),
-        });
-    }
-
-    (state.len() == 2).then(BluetoothStatus::disconnected)
 }
