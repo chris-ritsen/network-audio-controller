@@ -65,8 +65,9 @@ for (const managed of [true, false]) {
     await expect(page.getByLabel("Encoding", { exact: true })).toHaveValue("24");
     await expect(page.getByLabel("Latency", { exact: true })).toHaveValue("1");
     if (managed) {
-      await expect(row("Clock subdomain")).toContainText("Managed by DDM");
-      await expect(row("Clock subdomain").getByRole("textbox")).toHaveCount(0);
+      await expect(page.getByText("Clock settings are managed by DDM.", { exact: true })).toBeVisible();
+      await expect(row("Clock subdomain")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Apply clock settings", exact: true })).toHaveCount(0);
     }
     await page.getByLabel("Latency", { exact: true }).selectOption("2");
     await row("Latency").getByRole("button", { name: "Apply", exact: true }).click();
