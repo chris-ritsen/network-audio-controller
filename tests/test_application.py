@@ -2,6 +2,7 @@ import asyncio
 import time
 import warnings
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -675,7 +676,28 @@ class TestDanteApplication:
         assert not application.notifications.is_waiting("codec", "192.168.1.108")
 
     @pytest.mark.asyncio
-    async def test_set_gain_level_state_retries_and_returns_nonmatching_readback_without_success(self):
+    async def test_set_gain_level_state_retries_and_returns_nonmatching_readback_without_success(self, monkeypatch):
+        from netaudio.dante.services import notification
+
+        elapsed = 0.0
+        waits = []
+
+        async def expire_wait(coroutine, *, timeout):
+            nonlocal elapsed
+            coroutine.close()
+            waits.append(timeout)
+            elapsed += timeout
+            raise TimeoutError
+
+        monkeypatch.setattr(
+            notification,
+            "asyncio",
+            SimpleNamespace(
+                get_running_loop=lambda: SimpleNamespace(time=lambda: elapsed),
+                wait_for=expire_wait,
+                TimeoutError=TimeoutError,
+            ),
+        )
         application = DanteApplication()
         device = DanteDevice(server_name="avio-input.local.")
         device.ipv4 = "192.168.1.108"
@@ -699,6 +721,7 @@ class TestDanteApplication:
         assert result == ("input", [5, 1])
         assert device.gain_levels == [5, 1]
         assert application.send_set_gain_level.call_count == 3
+        assert waits == pytest.approx([0.01, 0.01, 0.02])
         assert not application.notifications.is_waiting("codec", "192.168.1.108")
 
     @pytest.mark.asyncio
