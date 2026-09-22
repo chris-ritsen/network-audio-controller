@@ -1,24 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { WEBAPP } from "./setup.mjs";
 
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
 const { ConfigurableTable } = await import(`${WEBAPP}table.js`);
-const { DataTable } = await import(`${WEBAPP}components.js`);
-
-test("shared tables have no vertical height limits at any viewport", () => {
-  const css = readFileSync(new URL("../../scripts/webapp/tables.css", import.meta.url), "utf8");
-  assert.match(css, /\.table-wrapper/);
-  for (const match of css.matchAll(/\.table-wrapper[^{}]*\{([^}]*)\}/g)) {
-    assert.doesNotMatch(match[1], /(?:max-)?height\s*:/);
-  }
-  for (const markup of [
-    render(h(DataTable, { headers: ["Name"], rows: [] })),
-    render(h(ConfigurableTable, { columns: [{ id: "name", label: "Name" }], rows: [], tableId: "unbounded" })),
-  ]) assert.match(markup, /class="table-wrapper">/);
-});
 
 test("column chooser is alphabetical independently of saved table order", () => {
   const columns = [

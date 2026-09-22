@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from netaudio import core
-from netaudio.dante.channel_status_paging import (
-    ChannelStatusPageAccumulator,
-    ChannelStatusPaginationError,
+from netaudio.dante.arc_protocol import (
+    ArcProtocolError,
     modern_arc_protocol_identifier_for_device,
 )
 from netaudio.dante.const import (
-    OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
     PROTOCOL_ARC_2809,
     PROTOCOL_ARC_280F,
     SERVICE_ARC,
 )
 from netaudio.dante.application import DanteApplication
-from tests.modern_arc_test_support import modern_arc_fixture, modern_arc_payloads
+from netaudio.dante.device import DanteDevice
+from tests.modern_arc_test_support import modern_arc_payloads
 
 
 def _arc_device(version: str, responses: list[bytes] | None = None):
@@ -38,21 +36,37 @@ def _without_transaction_id(payload: bytes) -> bytes:
     return payload[:4] + bytes(2) + payload[6:]
 
 
-def _parsed_pages(path: str, source_port: int, response_kind: str) -> list[dict]:
-    return [
-        core.parse_response(response_kind, payload)
-        for payload in modern_arc_payloads("pagination", path, source_port=source_port)
-    ]
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["rx", "tx"])
+@pytest.mark.parametrize("version", [None, "", "invalid", "2.8.16"])
+async def test_device_inventory_never_falls_back_to_legacy_without_a_known_revision(direction, version):
+    application = DanteApplication()
+    device = DanteDevice("receiver.local.", app=application)
+    device.ipv4 = "192.0.2.1"
+    device.services = _arc_device(version).services
+    device.call_core = AsyncMock()
+    device.execute = AsyncMock()
+
+    with pytest.raises(ArcProtocolError):
+        await getattr(device, f"get_{direction}_channels")()
+
+    device.call_core.assert_not_awaited()
+    device.execute.assert_not_awaited()
 
 
-def test_fixture_records_exact_digest_bound_capture_provenance():
-    captures = modern_arc_fixture()["_provenance"]["captures"]
-    assert captures["controller-pagination-8112.pcap"]["sha256"] == (
-        "c3497651fe101f9073486b25b465d816a9e63b05bc0e28f2990fa028f38e042c"
-    )
-    assert captures["controller-flow-baseline.pcap"]["sha256"] == (
-        "1775e0c7d171df638388d1d2a73ea4f4acff409f3bd48184d9d03e8072ab0abd"
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction,path", [("rx", "receiver_0x3400"), ("tx", "transmitter_0x2400")])
+async def test_device_inventory_consumes_native_protocol_and_media_metadata(direction, path):
+    device = DanteDevice("receiver.local.", app=DanteApplication())
+    device.ipv4 = "192.0.2.1"
+    device.services = _arc_device("2.8.15").services
+    device.execute = AsyncMock(side_effect=modern_arc_payloads("pagination", path, source_port=4_840))
+
+    await getattr(device, f"get_{direction}_channels")()
+
+    channels = getattr(device, f"{direction}_channels")
+    assert len(channels) == 64
+    assert all(channel.media_type == "audio" for channel in channels.values())
 
 
 @pytest.mark.parametrize(
@@ -68,7 +82,7 @@ def test_modern_arc_protocol_selection_uses_the_exact_advertised_version(version
 
 @pytest.mark.parametrize("version", ["2.8.16", "invalid", ""])
 def test_modern_arc_protocol_selection_rejects_unrecognized_versions(version):
-    with pytest.raises(ChannelStatusPaginationError, match="unsupported ARC protocol version"):
+    with pytest.raises(ArcProtocolError, match="unsupported ARC protocol version"):
         modern_arc_protocol_identifier_for_device(_arc_device(version))
 
 
@@ -94,7 +108,7 @@ def test_public_command_builder_reproduces_every_captured_280f_request(path, com
                 "media_selector": int.from_bytes(request[18:20], "big"),
                 "starting_channel_identifier": int.from_bytes(request[20:22], "big"),
                 "ending_channel_identifier": int.from_bytes(request[22:24], "big"),
-                "transaction_id": int.from_bytes(request[4:6], "big"),
+                "message_id": int.from_bytes(request[4:6], "big"),
             }
         )
         assert built == request
@@ -141,57 +155,6 @@ async def test_receiver_operation_fetches_a_short_final_page_and_merges_all_reco
     assert [_without_transaction_id(request) for request in actual_requests] == [
         _without_transaction_id(request) for request in captured_requests
     ]
-
-
-def test_page_accumulator_rejects_no_progress_conflicts_and_page_limit():
-    pages = _parsed_pages(
-        "transmitter_0x2400",
-        4_840,
-        "modern_arc_transmitter_channel_status_page",
-    )
-
-    no_progress = ChannelStatusPageAccumulator(PROTOCOL_ARC_280F, OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809)
-    assert no_progress.add(pages[0]) == (3, 17, 0)
-    with pytest.raises(ChannelStatusPaginationError, match="no progress"):
-        no_progress.add(pages[0])
-
-    conflicting = deepcopy(pages[1])
-    conflicting["records"][0]["channel_number"] = 1
-    global_conflict = ChannelStatusPageAccumulator(
-        PROTOCOL_ARC_280F,
-        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-    )
-    global_conflict.add(pages[0])
-    with pytest.raises(ChannelStatusPaginationError, match="conflicting global ID"):
-        global_conflict.add(conflicting)
-
-    duplicate = deepcopy(pages[1])
-    duplicate["records"][0] = deepcopy(pages[0]["records"][0])
-    duplicate["records"][0]["friendly_channel_name"] = "conflicting"
-    duplicate_conflict = ChannelStatusPageAccumulator(
-        PROTOCOL_ARC_280F,
-        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-    )
-    duplicate_conflict.add(pages[0])
-    with pytest.raises(ChannelStatusPaginationError, match="conflicting duplicate"):
-        duplicate_conflict.add(duplicate)
-
-    gapped = deepcopy(pages[0])
-    gapped["records"][1]["media_local_channel_id"] = 17
-    first_unresolved = ChannelStatusPageAccumulator(
-        PROTOCOL_ARC_280F,
-        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-    )
-    assert first_unresolved.add(gapped) == (3, 2, 0)
-
-    bounded = ChannelStatusPageAccumulator(
-        PROTOCOL_ARC_280F,
-        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-        maximum_pages=1,
-    )
-    bounded.add(pages[0])
-    with pytest.raises(ChannelStatusPaginationError, match="page limit"):
-        bounded.add(pages[1])
 
 
 def test_flow_fixtures_expose_media_identity_and_ordered_audio_slots():

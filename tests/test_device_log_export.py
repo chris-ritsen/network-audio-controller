@@ -21,7 +21,6 @@ from netaudio.dante.conmon_export import (
     ConmonExportError,
     ConmonExportUnavailableError,
 )
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.diagnostic_logs import (
     DeviceLogExportError,
     parse_device_audio_capabilities,
@@ -123,7 +122,7 @@ def test_export_builders_match_observed_requests():
             {
                 "command": "device_log_export",
                 "host_mac": "52550a000202",
-                "sequence": 1,
+                "message_id": 1,
             }
         )
         == LOG_REQUEST_PAYLOAD
@@ -133,19 +132,11 @@ def test_export_builders_match_observed_requests():
             {
                 "command": "capability_partition_export",
                 "host_mac": "c20f456899f5",
-                "sequence": 1,
+                "message_id": 1,
             }
         )
         == CAPABILITY_REQUEST_PAYLOAD
     )
-
-    commands = DanteDeviceCommands()
-    log_packet, _, log_port = commands.command_device_log_export(host_mac=bytes.fromhex("52550a000202"), sequence=1)
-    capability_packet, _, capability_port = commands.command_capability_partition_export(
-        host_mac=bytes.fromhex("c20f456899f5"), sequence=1
-    )
-    assert (log_packet, log_port) == (LOG_REQUEST_PAYLOAD, 8700)
-    assert (capability_packet, capability_port) == (CAPABILITY_REQUEST_PAYLOAD, 8700)
 
 
 def test_collector_reassembles_out_of_order_fragments_for_typed_decoders(tmp_path):

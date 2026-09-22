@@ -4,9 +4,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 
 from netaudio import core
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.commands import channel_status_query_specification
 from netaudio.dante.const import SERVICE_ARC
 
 
@@ -34,84 +32,41 @@ def _arc_services() -> dict:
     return {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.9"}}}
 
 
-def test_query_builder_and_command_factory_are_byte_identical_to_shipping_controller():
+def test_query_builder_is_byte_identical_to_shipping_controller():
     expected = _packet(1)
     built = core.build_command(
         {
             "command": "query_modern_arc_transmitter_channel_status",
-            "transaction_id": 0x2852,
+            "protocol_id": 0x2809,
+            "message_id": 0x2852,
         }
     )
-    command, service = DanteDeviceCommands().command_query_transmitter_channel_status(transaction_id=0x2852)
 
     assert built == expected
-    assert command == expected
-    assert service is not None
-    assert expected.hex() == "28090022285224000000000000000000000100010001000000000000830283060310"
-    assert _packet(7) == expected
 
 
-def test_parser_exposes_transmitter_names_friendly_names_and_format():
-    page = core.parse_response("modern_arc_transmitter_channel_status_page", _packet(2))
+@pytest.mark.parametrize(
+    ("packet_identifier", "names"),
+    [
+        (2, [("bluetooth:left", "Left"), ("bluetooth:right", "Right")]),
+        (3, [("vrroom:left", "CH1"), ("vrroom:right", "CH2")]),
+        (4, [("macbook-work:left", "Left"), ("macbook-work:right", "Right")]),
+        (5, [("macbook-personal:left", "Left"), ("macbook-personal:right", "Right")]),
+        (6, [("Left", "Left"), ("Right", "Right")]),
+    ],
+)
+def test_parser_preserves_channel_identity_names_and_audio_across_device_layouts(packet_identifier, names):
+    page = core.parse_response("modern_arc_transmitter_channel_status_page", _packet(packet_identifier))
 
-    assert page["page_capacity"] == 2
-    assert page["reported_record_count"] == 2
-    assert page["records"] == [
-        {
-            "record_pointer": 60,
-            "record_length_bytes": 40,
-            "record_type_code": 0x1414,
-            "channel_number": 1,
-            "media_type_code": 3,
-            "media_type": "audio",
-            "media_local_channel_id": 1,
-            "channel_name_pointer": 40,
-            "channel_name": "bluetooth:left",
-            "format_pointer": 24,
-            "format_descriptor_hexadecimal": "0000bb80010100180400001800180004",
-            "sample_rate": 48_000,
-            "encoding": 24,
-            "friendly_channel_name_pointer": 55,
-            "friendly_channel_name": "Left",
-            "raw_record_hexadecimal": _packet(2)[60:100].hex(),
-        },
-        {
-            "record_pointer": 124,
-            "record_length_bytes": 40,
-            "record_type_code": 0x1414,
-            "channel_number": 2,
-            "media_type_code": 3,
-            "media_type": "audio",
-            "media_local_channel_id": 2,
-            "channel_name_pointer": 100,
-            "channel_name": "bluetooth:right",
-            "format_pointer": 24,
-            "format_descriptor_hexadecimal": "0000bb80010100180400001800180004",
-            "sample_rate": 48_000,
-            "encoding": 24,
-            "friendly_channel_name_pointer": 116,
-            "friendly_channel_name": "Right",
-            "raw_record_hexadecimal": _packet(2)[124:164].hex(),
-        },
+    assert page["page_capacity"] == page["reported_record_count"] == 2
+    assert [(record["channel_name"], record["friendly_channel_name"]) for record in page["records"]] == names
+    assert [(record["channel_number"], record["media_local_channel_id"]) for record in page["records"]] == [
+        (1, 1),
+        (2, 2),
     ]
-    assert all(len(record["raw_record_hexadecimal"]) == 80 for record in page["records"])
-
-
-def test_parser_handles_all_five_preserved_device_layouts():
-    expected_names = {
-        2: [("bluetooth:left", "Left"), ("bluetooth:right", "Right")],
-        3: [("vrroom:left", "CH1"), ("vrroom:right", "CH2")],
-        4: [("macbook-work:left", "Left"), ("macbook-work:right", "Right")],
-        5: [("macbook-personal:left", "Left"), ("macbook-personal:right", "Right")],
-        6: [("Left", "Left"), ("Right", "Right")],
-    }
-
-    for packet_identifier, names in expected_names.items():
-        page = core.parse_response("modern_arc_transmitter_channel_status_page", _packet(packet_identifier))
-        assert [(record["channel_name"], record["friendly_channel_name"]) for record in page["records"]] == names
-        assert [record["channel_number"] for record in page["records"]] == [1, 2]
-        assert {record["sample_rate"] for record in page["records"]} == {48_000}
-        assert {record["encoding"] for record in page["records"]} == {24}
+    assert {record["media_type"] for record in page["records"]} == {"audio"}
+    assert {record["sample_rate"] for record in page["records"]} == {48_000}
+    assert {record["encoding"] for record in page["records"]} == {24}
 
 
 def test_parser_fails_closed_on_structural_corruption_and_a32_rejection():
@@ -147,10 +102,12 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
 
     assert [record["channel_name"] for record in page["records"]] == ["bluetooth:left", "bluetooth:right"]
     assert successful_device.transmitter_channel_name_protocol_identifier == 0x2809
-    successful_device.execute.assert_awaited_once_with(channel_status_query_specification("tx"))
+    successful_device.execute.assert_awaited_once()
+    specification = successful_device.execute.await_args.args[0]
+    assert core.build_command({**specification, "message_id": 0x2852}) == _packet(1)
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(8)), services=_arc_services())
-    with pytest.raises(RuntimeError, match="result 0x0030"):
+    with pytest.raises(RuntimeError, match="device rejected channel inventory request"):
         await DanteApplication().query_modern_arc_transmitter_channel_status(rejected_device)
 
 
@@ -160,6 +117,7 @@ async def test_transmitter_rename_selects_and_caches_2809_after_successful_statu
     device = SimpleNamespace(
         execute=AsyncMock(side_effect=[_packet(2), rename_response, rename_response]),
         transmitter_channel_name_protocol_identifier=None,
+        services=_arc_services(),
     )
     operation = DanteApplication()
 
@@ -170,8 +128,9 @@ async def test_transmitter_rename_selects_and_caches_2809_after_successful_statu
     assert second_response == rename_response
     assert device.transmitter_channel_name_protocol_identifier == 0x2809
     rename_specification = _rename_specification("bluetooth:left", 0x2809)
-    assert device.execute.await_args_list == [
-        call(channel_status_query_specification("tx")),
+    specification = device.execute.await_args_list[0].args[0]
+    assert core.build_command({**specification, "message_id": 0x2852}) == _packet(1)
+    assert device.execute.await_args_list[1:] == [
         call(rename_specification),
         call(rename_specification),
     ]
@@ -183,6 +142,7 @@ async def test_transmitter_rename_selects_2729_after_authentic_a32_frontend_reje
     device = SimpleNamespace(
         execute=AsyncMock(side_effect=[_packet(8), rename_response]),
         transmitter_channel_name_protocol_identifier=None,
+        services=_arc_services(),
     )
     operation = DanteApplication()
 

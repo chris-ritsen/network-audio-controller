@@ -1,5 +1,5 @@
 use super::*;
-use crate::network::{DanteRedundancyMode, DanteRedundancyStatus, NetworkInterface};
+use crate::network::{DanteRedundancyStatus, NetworkInterface};
 
 const INTERFACE_CONFIGURATION_SIZE: usize = 24;
 const INTERFACE_RECORD_STRIDE: usize = 28;
@@ -186,24 +186,7 @@ pub fn parse_interface_status(data: &[u8]) -> Option<InterfaceStatus> {
         }
         let flags = read_u16(data, offset)?;
         redundancy_flags = Some(flags);
-        if flags & !3 == 0 {
-            let mode = |mask| {
-                if flags & mask == 0 {
-                    DanteRedundancyMode::Switched
-                } else {
-                    DanteRedundancyMode::Redundant
-                }
-            };
-            redundancy = Some(DanteRedundancyStatus {
-                current: Some(mode(1)),
-                configured: Some(mode(2)),
-                supported: vec![
-                    DanteRedundancyMode::Switched,
-                    DanteRedundancyMode::Redundant,
-                ],
-                reboot_required: mode(1) != mode(2),
-            });
-        }
+        redundancy = crate::network::redundancy_from_flags(flags);
         let start = CONMON_RECORD_BASE.checked_add(pointer)?;
         for (index, entry) in interfaces.iter_mut().enumerate() {
             entry.configured = current_configuration(entry);

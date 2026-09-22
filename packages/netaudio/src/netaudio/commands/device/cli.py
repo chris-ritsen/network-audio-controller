@@ -12,13 +12,12 @@ from netaudio.cli_support.execution import (
     _enrich_lock_states,
     _load_device_for_show,
     _log_unreachable,
-    readback_after_notification,
     run_command,
 )
 from netaudio.cli_support.output import output_single, output_table, output_value, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.config.cli import app as device_config_app
-from netaudio.commands.config.readback import MUTATION_ERRORS
+from netaudio.dante.readback import MUTATION_ERRORS, readback_after_notification
 from netaudio.commands.device.display import (
     _device_show_rows,
     _diagnostic_audio_capabilities_data,

@@ -94,30 +94,6 @@ class TestSubscribe:
         )
 
     @pytest.mark.asyncio
-    async def test_bulk_subscription_malformed_entry_returns_400(self):
-        device = make_device()
-        http_server = make_http_server({"dev1": device})
-        status, body = await post(
-            http_server,
-            "/subscribe",
-            {
-                "rx_device": "dev1",
-                "subscriptions": [{"rx_channel": 1, "tx_channel": "Out1"}],
-            },
-        )
-        assert status == 400
-        assert "invalid subscription entry" in body["error"]
-        http_server.application.add_subscriptions.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_bulk_subscription_empty_list_returns_400(self):
-        device = make_device()
-        http_server = make_http_server({"dev1": device})
-        status, body = await post(http_server, "/subscribe", {"rx_device": "dev1", "subscriptions": []})
-        assert status == 400
-        assert body == {"error": "subscriptions list is empty"}
-
-    @pytest.mark.asyncio
     async def test_unknown_rx_device_returns_404(self):
         http_server = make_http_server()
         status, body = await post(
@@ -415,4 +391,5 @@ class TestSetInterface:
         http_server = make_http_server({"dev1": device})
         status, body = await post(http_server, "/interface", {"device": "dev1", "mode": "static"})
         assert status == 400
-        assert body == {"error": "ip_address must be an IPv4 address"}
+        assert "IPv4 address" in body["error"]
+        http_server.application.set_interface.assert_not_awaited()

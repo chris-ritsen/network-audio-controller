@@ -137,7 +137,14 @@ fn add_subscriptions_accepts_firmware_reported_channel_labels() {
 
 #[test]
 fn transmit_channel_name_matches_controller_request() {
-    let packet = build_set_channel_name(ChannelType::Tx, 1, "tett", 0x49A4).unwrap();
+    let packet = build_set_channel_name_for_protocol(
+        PROTOCOL_DANTE_FLOW,
+        ChannelType::Tx,
+        1,
+        "tett",
+        0x49A4,
+    )
+    .unwrap();
     assert_eq!(
         packet,
         vec![
@@ -443,7 +450,7 @@ fn audio_settings_accept_nonzero_wire_values_without_truncation() {
             "{level}"
         );
     }
-    for level in MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL {
+    for level in [1, 2, 3, 4, 5] {
         assert!(
             build_set_gain_level([1, 2, 3, 4, 5, 6], 1, 2, level, false).is_ok(),
             "{level}"
@@ -841,7 +848,7 @@ fn channel_mutations_reject_channel_zero() {
         Err(NetaudioError::InvalidChannel)
     );
     assert_eq!(
-        build_set_channel_name(ChannelType::Tx, 0, "tx-a", 0),
+        build_set_channel_name_for_protocol(PROTOCOL_DANTE_FLOW, ChannelType::Tx, 0, "tx-a", 0),
         Err(NetaudioError::InvalidChannel)
     );
 }

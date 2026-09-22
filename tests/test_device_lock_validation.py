@@ -122,32 +122,3 @@ async def test_core_lock_device_returns_core_error(monkeypatch):
     assert result["already"] is False
     assert result["error"] == "netaudio_client_lock: device did not respond"
     assert result["not_configured"] is False
-
-
-@pytest.mark.asyncio
-async def test_core_lock_device_uses_rust_client(monkeypatch):
-    called = False
-
-    class Client:
-        def __init__(self, device_ip, *, local_ip=None):
-            assert device_ip == "192.0.2.10"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc_info):
-            return None
-
-        def lock(self, pin, key):
-            nonlocal called
-            called = True
-            assert pin == "1234"
-            assert key == b"x" * 32
-            return {"status": 0, "lock_state": 1}
-
-    monkeypatch.setattr("netaudio.core.CoreClient", Client)
-
-    result = await core_lock_device("192.0.2.10", "1234", b"x" * 32)
-
-    assert called is True
-    assert result == {"status": 0, "lock_state": 1, "success": True, "already": False}

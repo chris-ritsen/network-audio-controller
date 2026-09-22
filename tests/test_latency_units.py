@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from netaudio import core
 from netaudio.cli_support.output import format_devices_xml
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
@@ -10,8 +11,39 @@ from netaudio.dante.latency import (
     latency_state_from_settings,
     milliseconds_to_microseconds,
     nanoseconds_to_milliseconds,
-    standard_latency_choices_for_range,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "milliseconds,configured,acknowledgement,state",
+    [
+        (0.15, 150_000, "27ff000a000011010001", "confirmed"),
+        (0.15, 250_000, "27ff000a000011010001", "unverified"),
+        (0.15, None, "27ff000a000011010001", "unavailable"),
+        (0.15, 150_000, "27ff000a000011010002", "rejected"),
+        (0.15, 150_000, "", "unavailable"),
+        (0.0000005, 1, "27ff000a000011010001", "confirmed"),
+    ],
+)
+async def test_latency_completion_uses_acknowledgement_and_configured_readback(
+    milliseconds, configured, acknowledgement, state
+):
+    application = DanteApplication()
+    application.mutate_and_wait_for_notification = AsyncMock(return_value=bytes.fromhex(acknowledgement))
+    application.get_latency_settings = AsyncMock(
+        return_value={"active_latency_ns": 1_000_000, "configured_latency_ns": configured}
+    )
+
+    result = await application.set_latency(SimpleNamespace(), milliseconds)
+
+    assert result["state"] == state
+    assert result["effective_state_confirmed"] is (state == "confirmed")
+    if state == "confirmed":
+        assert result["configured_latency_ns"] == configured
+        assert result["requested_latency_ns"] == configured
+    if state == "rejected" or not acknowledgement:
+        application.get_latency_settings.assert_not_awaited()
 
 
 def test_nanoseconds_convert_to_fractional_milliseconds_without_heuristics():
@@ -33,6 +65,7 @@ def test_core_device_settings_are_normalized_to_milliseconds():
             "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
+                "performance_values": [],
                 "sample_rate": 48_000,
                 "default_latency_ns": 1_000_000,
                 "configured_latency_ns": 250_000,
@@ -60,6 +93,7 @@ def test_configured_latency_is_effective_when_active_is_unavailable():
             "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
+                "performance_values": [],
                 "configured_latency_ns": 250_000,
                 "active_latency_ns": None,
             },
@@ -96,12 +130,50 @@ async def test_device_settings_operation_uses_configured_latency_when_active_is_
     assert device.configured_latency == 0.25
 
 
-def test_standard_latency_choices_are_derived_only_from_advertised_range():
-    assert standard_latency_choices_for_range(1.0, 20.3125) == [1.0, 2.0, 5.0]
-    assert standard_latency_choices_for_range(0.15, 21.333334) == [0.15, 0.25, 0.5, 1.0, 2.0, 5.0]
-    assert standard_latency_choices_for_range(None, 5.0) is None
-    assert standard_latency_choices_for_range(0.0, 999.0) == []
-    assert standard_latency_choices_for_range(0.25, 0.0) == []
+@pytest.mark.parametrize(
+    "settings,choices,effective",
+    [
+        (
+            {"min_latency_ns": 150000, "max_latency_ns": 5000000, "active_latency_ns": 750000},
+            [0.15, 0.25, 0.5, 1.0, 2.0, 5.0],
+            0.75,
+        ),
+        (
+            {
+                "min_latency_ns": 250000,
+                "max_latency_ns": 0,
+                "active_latency_ns": 250000,
+                "configured_latency_ns": 1000000,
+            },
+            [0.25],
+            0.25,
+        ),
+        ({"min_latency_ns": 0, "max_latency_ns": 0, "configured_latency_ns": 1000000}, [1.0], 1.0),
+        ({"min_latency_ns": None, "max_latency_ns": 5000000, "active_latency_ns": 250000}, None, 0.25),
+        (
+            {"min_latency_ns": 0, "max_latency_ns": 0, "active_latency_ns": None, "configured_latency_ns": None},
+            [],
+            None,
+        ),
+    ],
+)
+def test_native_latency_configuration_matches_device_controls_and_choices(settings, choices, effective):
+    configuration = core.latency_configuration(settings)
+
+    assert configuration["state"].get("latency_options_ms") == choices
+    assert configuration["controls"]["latency"] == effective
+    assert latency_state_from_settings(settings) == configuration["state"]
+
+    device = DanteDevice()
+    device.apply_controls(configuration["controls"])
+    assert device.standard_latency_choices == choices
+    assert device.latency == effective
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5, 4294967296, "250000"])
+def test_native_latency_configuration_rejects_values_that_are_not_wire_nanoseconds(value):
+    with pytest.raises(core.NetaudioCoreError):
+        core.latency_configuration({"configured_latency_ns": value})
 
 
 def test_device_without_a_usable_range_offers_only_its_current_latency():
@@ -202,6 +274,7 @@ def test_explicit_unavailable_latency_fields_clear_stale_device_state():
             "counts": (0, 0, None, 0),
             "aes67": None,
             "settings": {
+                "performance_values": [],
                 "configured_latency_ns": None,
                 "active_latency_ns": None,
                 "default_latency_ns": None,

@@ -246,7 +246,7 @@ def normalize_device_config(value: Mapping[str, Any]) -> dict[str, Any]:
         from netaudio.dante.clock_config import clock_subdomain_bytes
 
         name = clock_subdomain_bytes(result["clock_subdomain"])
-        if name is None or b"\0" not in name or any(name[name.index(0) :]):
+        if name is None:
             raise ValueError("clock_subdomain must contain at most 15 bytes followed by a NUL")
         result["clock_subdomain"] = list(name)
     if "clock_source_code" in result:

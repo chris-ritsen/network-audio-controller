@@ -44,7 +44,6 @@ NETWORK_STATUS_DISSECT_HEADERS = [
     "Transport",
     "Received At",
     "Packet Source",
-    "Switch Mode Codes",
     "Raw Record",
 ]
 
@@ -59,26 +58,26 @@ def _format_bit_rate(bits_per_second: int | None) -> str:
     return f"{bits_per_second} bps"
 
 
-def _switch_mode_summary(switch_configuration: dict | None, dissect: bool) -> tuple[str, str, str]:
+def _switch_mode_summary(switch_configuration: dict | None) -> tuple[str, str]:
     if switch_configuration is None:
-        return "", "", ""
-    choices = {choice["code"]: choice["label"] for choice in switch_configuration["choices"]}
-    mode_codes = switch_configuration["mode_codes_at_record_offsets_20_and_22"]
-    selected_labels = [choices.get(code, f"unknown 0x{code:04X}") for code in mode_codes]
-    switch_mode = selected_labels[0] if len(set(mode_codes)) == 1 else " / ".join(selected_labels)
-    switch_mode_codes = " ".join(f"0x{code:04X}" for code in mode_codes)
-    if dissect:
-        available_switch_modes = ", ".join(f"0x{code:04X} {label}" for code, label in choices.items())
-    else:
-        available_switch_modes = ", ".join(choices.values())
-    return switch_mode, switch_mode_codes, available_switch_modes
+        return "", ""
+
+    state = switch_configuration["redundancy"]
+    current = mode_label(state["current"])
+    configured = mode_label(state["configured"])
+    switch_mode = current if current == configured else f"{current} / {configured}"
+    available_switch_modes = ", ".join(mode_label(choice["mode"]) for choice in switch_configuration["choices"])
+
+    return switch_mode, available_switch_modes
 
 
-def _dissect_cells(observation, group, record_index: int, record, switch_mode_codes: str) -> list[str]:
+def _dissect_cells(observation, group, record_index: int, record) -> list[str]:
     return [
-        "yes"
-        if group.selected_stats is not None and record.record_pointer == group.selected_stats.record_pointer
-        else "no",
+        (
+            "yes"
+            if group.selected_stats is not None and record.record_pointer == group.selected_stats.record_pointer
+            else "no"
+        ),
         f"0x{group.group_pointer:04X}",
         str(record_index),
         f"0x{record.discriminator_status_word:08X}",
@@ -89,7 +88,6 @@ def _dissect_cells(observation, group, record_index: int, record, switch_mode_co
         observation.transport_source,
         observation.received_at,
         observation.packet_source,
-        switch_mode_codes,
         record.raw_record_hexadecimal,
     ]
 
@@ -103,7 +101,7 @@ def network_status_rows(
     switch_configuration_applicable: bool = True,
     redundancy: dict | None = None,
 ) -> list[list[str]]:
-    switch_mode, switch_mode_codes, available_switch_modes = _switch_mode_summary(switch_configuration, dissect)
+    switch_mode, available_switch_modes = _switch_mode_summary(switch_configuration)
     if switch_configuration is None and address:
         if redundancy and redundancy.get("current_mode"):
             switch_mode = mode_label(redundancy["current_mode"])
@@ -118,7 +116,7 @@ def network_status_rows(
         response_label = "no response" if address else ""
         row = [device_name, address, "", response_label, "", "", "", "", "", switch_mode, available_switch_modes]
         if dissect:
-            row.extend(["", "", "", "", "", "", "", "", "", "", "", switch_mode_codes, ""])
+            row.extend([""] * len(NETWORK_STATUS_DISSECT_HEADERS))
         return [row]
     rows = []
     observation = interface_statistics.at(time.monotonic())
@@ -134,12 +132,16 @@ def network_status_rows(
                 str(group.group_index + 1),
                 _format_bit_rate(record.transmit_bits_per_second) if record is not None else "not selected",
                 _format_bit_rate(record.receive_bits_per_second) if record is not None else "",
-                str(record.transmit_errors_since_local_reset)
-                if record and record.transmit_errors_since_local_reset is not None
-                else "",
-                str(record.receive_errors_since_local_reset)
-                if record and record.receive_errors_since_local_reset is not None
-                else "",
+                (
+                    str(record.transmit_errors_since_local_reset)
+                    if record and record.transmit_errors_since_local_reset is not None
+                    else ""
+                ),
+                (
+                    str(record.receive_errors_since_local_reset)
+                    if record and record.receive_errors_since_local_reset is not None
+                    else ""
+                ),
                 format_link_speed_megabits_per_second(record.speed_megabits_per_second) if record is not None else "",
                 "yes" if observation.fresh else "no",
                 switch_mode if first_record else "",
@@ -160,7 +162,6 @@ def network_status_rows(
                             observation.transport_source,
                             observation.received_at,
                             observation.packet_source,
-                            switch_mode_codes if first_record else "",
                             "",
                         ]
                     )
@@ -171,7 +172,6 @@ def network_status_rows(
                             group,
                             record_index,
                             record,
-                            switch_mode_codes if first_record else "",
                         )
                     )
             rows.append(row)

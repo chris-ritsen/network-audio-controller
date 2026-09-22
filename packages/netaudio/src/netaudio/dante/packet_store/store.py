@@ -10,7 +10,6 @@ import time
 import zlib
 from dataclasses import dataclass
 
-from netaudio.dante.const import PROTOCOL_NAMES
 from netaudio.dante.dissection.header import parse_packet_header
 from netaudio.dante.packet_store.payloads import decompress_payload
 from netaudio.dante.packet_store.queries import PacketStoreQueries
@@ -27,8 +26,6 @@ def _default_db_path():
 DEFAULT_DB_PATH = _default_db_path()
 
 TEMPORAL_CORRELATION_WINDOW = 0.1
-
-KNOWN_PROTOCOL_IDS = frozenset(PROTOCOL_NAMES.keys())
 
 
 @dataclass(frozen=True)
@@ -88,7 +85,8 @@ class PacketStore(PacketStoreQueries):
             return data.hex() if isinstance(data, bytes) else ""
 
     def _create_tables(self):
-        self._conn.executescript("""
+        self._conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS capture_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT,
@@ -187,7 +185,8 @@ class PacketStore(PacketStoreQueries):
             );
             CREATE INDEX IF NOT EXISTS idx_packet_sessions_session
                 ON packet_sessions(session_id, packet_id);
-        """)
+        """
+        )
         columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(packets)").fetchall()}
         if "session_id" not in columns:
             self._conn.execute("ALTER TABLE packets ADD COLUMN session_id INTEGER REFERENCES capture_sessions(id)")

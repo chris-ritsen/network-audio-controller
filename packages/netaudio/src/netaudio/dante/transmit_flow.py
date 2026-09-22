@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import copy
-import ipaddress
-import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Mapping, TypeVar
+from netaudio.core import _requests, _types
 
 
 FLOW_SPECIFICATION_SCHEMA_VERSION = 1
@@ -40,24 +39,6 @@ class FlowLifecycleState(str, Enum):
     DELETED = "deleted"
 
 
-def _integer(value: Any, label: str, minimum: int, maximum: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-        raise ValueError(f"{label} must be an integer from {minimum} through {maximum}")
-    return value
-
-
-def _optional_integer(value: Any, label: str, minimum: int, maximum: int) -> int | None:
-    return None if value is None else _integer(value, label, minimum, maximum)
-
-
-def _optional_text(value: Any, label: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{label} must be a non-empty string or null")
-    return value
-
-
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object")
@@ -68,6 +49,27 @@ def _copy_mapping(value: Any, label: str) -> dict[str, Any]:
     return copy.deepcopy(dict(_mapping(value, label)))
 
 
+_FlowValue = TypeVar("_FlowValue", bound=Mapping[str, Any])
+
+
+def _with_extra_fields(value: _FlowValue, extra_fields: Mapping[str, Any]) -> _FlowValue:
+    if not isinstance(value, dict):
+        raise TypeError("serialized flow value must be an object")
+
+    for key, item in extra_fields.items():
+        if key not in value:
+            value[key] = copy.deepcopy(item)
+
+    return value
+
+
+def _required(value: Mapping[str, Any], name: str) -> Any:
+    if name not in value:
+        raise ValueError(f"flow value requires {name}")
+
+    return value[name]
+
+
 @dataclass(frozen=True)
 class FlowSocket:
     address: str
@@ -76,14 +78,6 @@ class FlowSocket:
     extra_fields: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        try:
-            address = ipaddress.IPv4Address(self.address)
-        except (ipaddress.AddressValueError, TypeError) as exception:
-            raise ValueError("flow destination address must be IPv4") from exception
-        if address.is_unspecified or address == ipaddress.IPv4Address("255.255.255.255"):
-            raise ValueError("flow destination address must not be unspecified or limited broadcast")
-        _integer(self.port, "flow destination port", 1, 65535)
-        _optional_text(self.interface, "flow destination interface")
         if not isinstance(self.extra_fields, dict):
             raise ValueError("flow destination extra_fields must be an object")
 
@@ -92,16 +86,19 @@ class FlowSocket:
         value = _mapping(value, "flow destination")
         known = {"address", "port", "interface"}
         return cls(
-            address=value.get("address"),
-            port=value.get("port"),
+            address=_required(value, "address"),
+            port=_required(value, "port"),
             interface=value.get("interface"),
             extra_fields={key: copy.deepcopy(item) for key, item in value.items() if key not in known},
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        value = copy.deepcopy(self.extra_fields)
-        value.update({"address": self.address, "port": self.port, "interface": self.interface})
-        return value
+    def to_dict(self) -> _requests.Destination:
+        value: _requests.Destination = {
+            "address": self.address,
+            "port": self.port,
+            "interface": self.interface,
+        }
+        return _with_extra_fields(value, self.extra_fields)
 
 
 @dataclass(frozen=True)
@@ -111,8 +108,6 @@ class TransmitterChannelSlot:
     extra_fields: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        _integer(self.slot, "flow channel slot", 1, 65535)
-        _integer(self.transmitter_channel, "transmitter channel", 1, 65535)
         if not isinstance(self.extra_fields, dict):
             raise ValueError("flow channel slot extra_fields must be an object")
 
@@ -121,15 +116,14 @@ class TransmitterChannelSlot:
         value = _mapping(value, "flow channel slot")
         known = {"slot", "transmitter_channel"}
         return cls(
-            slot=value.get("slot"),
-            transmitter_channel=value.get("transmitter_channel"),
+            slot=_required(value, "slot"),
+            transmitter_channel=_required(value, "transmitter_channel"),
             extra_fields={key: copy.deepcopy(item) for key, item in value.items() if key not in known},
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        value = copy.deepcopy(self.extra_fields)
-        value.update({"slot": self.slot, "transmitter_channel": self.transmitter_channel})
-        return value
+    def to_dict(self) -> _requests.ChannelSlot:
+        value: _requests.ChannelSlot = {"slot": self.slot, "transmitter_channel": self.transmitter_channel}
+        return _with_extra_fields(value, self.extra_fields)
 
 
 @dataclass(frozen=True)
@@ -140,9 +134,6 @@ class FlowIdentity:
     extra_fields: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        _optional_integer(self.global_flow_id, "global flow identifier", 1, 65535)
-        _optional_integer(self.media_type_code, "media type code", 0, 65535)
-        _optional_integer(self.media_local_flow_id, "media-local flow identifier", 1, 65535)
         if not isinstance(self.extra_fields, dict):
             raise ValueError("flow identity extra_fields must be an object")
 
@@ -157,16 +148,13 @@ class FlowIdentity:
             extra_fields={key: copy.deepcopy(item) for key, item in value.items() if key not in known},
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        value = copy.deepcopy(self.extra_fields)
-        value.update(
-            {
-                "global_flow_id": self.global_flow_id,
-                "media_type_code": self.media_type_code,
-                "media_local_flow_id": self.media_local_flow_id,
-            }
-        )
-        return value
+    def to_dict(self) -> _requests.FlowIdentity:
+        value: _requests.FlowIdentity = {
+            "global_flow_id": self.global_flow_id,
+            "media_type_code": self.media_type_code,
+            "media_local_flow_id": self.media_local_flow_id,
+        }
+        return _with_extra_fields(value, self.extra_fields)
 
 
 @dataclass(frozen=True)
@@ -178,15 +166,9 @@ class FlowProtocolRequirements:
     extra_fields: dict[str, Any] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
-        _optional_integer(self.protocol_id, "flow protocol identifier", 0, 65535)
-        _optional_text(self.protocol_version, "flow protocol version")
-        _optional_text(self.cohort, "flow protocol cohort")
-        if not isinstance(self.required_capabilities, tuple) or any(
-            not isinstance(item, str) or not item for item in self.required_capabilities
-        ):
-            raise ValueError("required_capabilities must contain non-empty strings")
-        if len(set(self.required_capabilities)) != len(self.required_capabilities):
-            raise ValueError("required_capabilities must not contain duplicates")
+        if not isinstance(self.required_capabilities, tuple):
+            raise ValueError("required_capabilities must be a tuple")
+
         if not isinstance(self.extra_fields, dict):
             raise ValueError("flow protocol extra_fields must be an object")
 
@@ -205,17 +187,14 @@ class FlowProtocolRequirements:
             extra_fields={key: copy.deepcopy(item) for key, item in value.items() if key not in known},
         )
 
-    def to_dict(self) -> dict[str, Any]:
-        value = copy.deepcopy(self.extra_fields)
-        value.update(
-            {
-                "protocol_id": self.protocol_id,
-                "protocol_version": self.protocol_version,
-                "cohort": self.cohort,
-                "required_capabilities": list(self.required_capabilities),
-            }
-        )
-        return value
+    def to_dict(self) -> _requests.ProtocolRequirements:
+        value: _requests.ProtocolRequirements = {
+            "protocol_id": self.protocol_id,
+            "protocol_version": self.protocol_version,
+            "cohort": self.cohort,
+            "required_capabilities": list(self.required_capabilities),
+        }
+        return _with_extra_fields(value, self.extra_fields)
 
 
 @dataclass(frozen=True)
@@ -237,57 +216,33 @@ class TransmitFlowSpecification:
     schema_version: int = FLOW_SPECIFICATION_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != FLOW_SPECIFICATION_SCHEMA_VERSION:
-            raise ValueError(
-                f"unsupported transmit flow schema_version {self.schema_version}; "
-                f"expected {FLOW_SPECIFICATION_SCHEMA_VERSION}"
-            )
-        if not isinstance(self.media_mode, MediaMode):
-            raise ValueError("media_mode must be unknown, native_dante or rtp_aes67")
-        if not isinstance(self.flow_type, FlowType):
-            raise ValueError("flow_type must be unicast or multicast")
-        if not isinstance(self.channel_slots, tuple) or not self.channel_slots:
-            raise ValueError("channel_slots must be a non-empty ordered list")
-        if any(not isinstance(item, TransmitterChannelSlot) for item in self.channel_slots):
-            raise ValueError("channel_slots contains an invalid entry")
-        slots = [item.slot for item in self.channel_slots]
-        channels = [item.transmitter_channel for item in self.channel_slots]
-        if slots != sorted(slots) or len(slots) != len(set(slots)):
-            raise ValueError("flow channel slots must be unique and strictly ascending")
-        if len(channels) != len(set(channels)):
-            raise ValueError("transmitter channels must not contain duplicates")
-        _optional_text(self.name, "flow name")
-        if self.name is not None and "\0" in self.name:
-            raise ValueError("flow name must not contain NUL")
-        _optional_integer(self.sample_rate_hz, "sample rate", 1, 0xFFFFFFFF)
-        _optional_integer(self.encoding_bits, "encoding", 1, 0xFFFF)
-        _optional_integer(self.frames_per_packet, "frames per packet", 1, 0xFFFF)
-        if self.secondary_destination is not None and self.primary_destination is None:
-            raise ValueError("secondary destination requires a primary destination")
-        if self.redundancy is RedundancyConstraint.NONE and self.secondary_destination is not None:
-            raise ValueError("redundancy none forbids a secondary destination")
-        if self.redundancy is RedundancyConstraint.REQUIRED and self.secondary_destination is None:
-            raise ValueError("redundancy required needs a secondary destination")
-        if self.secondary_destination is not None:
-            if self.secondary_destination == self.primary_destination:
-                raise ValueError("primary and secondary destinations must differ")
-            primary_interface = self.primary_destination.interface if self.primary_destination else None
-            if primary_interface and self.secondary_destination.interface == primary_interface:
-                raise ValueError("primary and secondary destinations must use different interfaces")
+        from netaudio import core
+
+        if not isinstance(self.media_mode, MediaMode) or not isinstance(self.flow_type, FlowType):
+            raise ValueError("media_mode and flow_type must be typed flow values")
+
+        if not isinstance(self.redundancy, RedundancyConstraint):
+            raise ValueError("redundancy must be a typed constraint")
+
+        if not isinstance(self.channel_slots, tuple) or any(
+            not isinstance(item, TransmitterChannelSlot) for item in self.channel_slots
+        ):
+            raise ValueError("channel_slots must contain typed channel slots")
+
         for destination in (self.primary_destination, self.secondary_destination):
-            if destination is None:
-                continue
-            address = ipaddress.IPv4Address(destination.address)
-            if self.flow_type is FlowType.MULTICAST and not address.is_multicast:
-                raise ValueError("multicast flow destinations must use multicast IPv4 addresses")
-            if self.flow_type is FlowType.UNICAST and address.is_multicast:
-                raise ValueError("unicast flow destinations must not use multicast IPv4 addresses")
-        if not isinstance(self.identity, FlowIdentity):
-            raise ValueError("identity must be a flow identity")
-        if not isinstance(self.protocol, FlowProtocolRequirements):
-            raise ValueError("protocol must be flow protocol requirements")
+            if destination is not None and not isinstance(destination, FlowSocket):
+                raise ValueError("destination must be a flow socket")
+
+        if not isinstance(self.identity, FlowIdentity) or not isinstance(self.protocol, FlowProtocolRequirements):
+            raise ValueError("identity and protocol must be typed flow values")
+
         if not isinstance(self.raw_fields, dict) or not isinstance(self.extra_fields, dict):
             raise ValueError("raw_fields and extra_fields must be objects")
+
+        try:
+            core.validate_transmit_flow_specification(self.to_dict())
+        except core.NetaudioCoreError as error:
+            raise ValueError(str(error)) from error
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> TransmitFlowSpecification:
@@ -355,100 +310,44 @@ class TransmitFlowSpecification:
         record: Mapping[str, Any],
         *,
         protocol_id: int,
-        media_mode: MediaMode | None = None,
     ) -> TransmitFlowSpecification:
+        from netaudio import core
+
         record = _mapping(record, "transmitter flow inventory record")
-        channels = record.get("transmitter_channel_ids_by_slot")
-        if not isinstance(channels, list):
-            channels = record.get("channels")
-        if not isinstance(channels, list) or not channels:
-            raise ValueError("transmitter flow inventory has no ordered channel-slot mapping")
-        populated = [(index, channel) for index, channel in enumerate(channels, start=1) if channel]
-        if not populated:
-            raise ValueError("transmitter flow inventory has no populated channel slots")
-        flow_type_value = record.get("flow_type")
-        if flow_type_value not in {item.value for item in FlowType}:
-            raise ValueError("transmitter flow inventory has an unknown flow type")
-        media_mode_value = record.get("media_mode")
-        if media_mode_value is None:
-            observed_media_mode = media_mode or (
-                MediaMode.NATIVE_DANTE if protocol_id in (0x2729, 0x2801) else MediaMode.UNKNOWN
-            )
-        else:
-            try:
-                observed_media_mode = MediaMode(media_mode_value)
-            except (TypeError, ValueError) as exception:
-                raise ValueError("transmitter flow inventory has an unknown media mode") from exception
-        primary_value = record.get("primary_destination")
-        secondary_value = record.get("secondary_destination")
-        if primary_value is not None:
-            primary_destination = FlowSocket.from_dict(_mapping(primary_value, "primary destination"))
-        else:
-            address = record.get("destination_internet_protocol_version_four_address")
-            port = record.get("destination_user_datagram_port")
-            primary_destination = FlowSocket(str(address), port) if address and port else None
-        secondary_destination = (
-            FlowSocket.from_dict(_mapping(secondary_value, "secondary destination"))
-            if secondary_value is not None
-            else None
-        )
-        global_identifier = record.get("global_flow_id", record.get("flow_number"))
-        known_protocol_cohort = {
-            0x2729: "legacy_2729",
-            0x2801: "legacy_2801",
-            0x2809: "modern_2809",
-        }.get(protocol_id, "unknown")
-        return cls(
-            media_mode=observed_media_mode,
-            flow_type=FlowType(flow_type_value),
-            name=record.get("flow_name"),
-            channel_slots=tuple(
-                TransmitterChannelSlot(slot=index, transmitter_channel=channel) for index, channel in populated
-            ),
-            sample_rate_hz=record.get("sample_rate"),
-            encoding_bits=record.get("encoding"),
-            frames_per_packet=record.get("frames_per_packet"),
-            primary_destination=primary_destination,
-            secondary_destination=secondary_destination,
-            redundancy=RedundancyConstraint.DEVICE_DEFAULT,
-            identity=FlowIdentity(
-                global_flow_id=global_identifier,
-                media_type_code=record.get("media_type_code"),
-                media_local_flow_id=record.get("media_local_flow_id"),
-            ),
-            protocol=FlowProtocolRequirements(protocol_id=protocol_id, cohort=known_protocol_cohort),
-            raw_fields=copy.deepcopy(dict(record)),
-        )
+
+        try:
+            specification = core.transmit_flow_specification(dict(record), protocol_id=protocol_id)
+        except core.NetaudioCoreError as error:
+            raise ValueError(str(error)) from error
+
+        return cls.from_dict(specification)
 
     @property
     def channels(self) -> list[int]:
         return [item.transmitter_channel for item in self.channel_slots]
 
-    def to_dict(self) -> dict[str, Any]:
-        value = copy.deepcopy(self.extra_fields)
-        value.update(
-            {
-                "schema_version": self.schema_version,
-                "media_mode": self.media_mode.value,
-                "flow_type": self.flow_type.value,
-                "name": self.name,
-                "channel_slots": [item.to_dict() for item in self.channel_slots],
-                "sample_rate_hz": self.sample_rate_hz,
-                "encoding_bits": self.encoding_bits,
-                "frames_per_packet": self.frames_per_packet,
-                "primary_destination": (
-                    self.primary_destination.to_dict() if self.primary_destination is not None else None
-                ),
-                "secondary_destination": (
-                    self.secondary_destination.to_dict() if self.secondary_destination is not None else None
-                ),
-                "redundancy": self.redundancy.value,
-                "identity": self.identity.to_dict(),
-                "protocol": self.protocol.to_dict(),
-                "raw_fields": copy.deepcopy(self.raw_fields),
-            }
-        )
-        return value
+    def to_dict(self) -> _requests.TransmitFlowSpecification:
+        value: _requests.TransmitFlowSpecification = {
+            "schema_version": self.schema_version,
+            "media_mode": self.media_mode.value,
+            "flow_type": self.flow_type.value,
+            "name": self.name,
+            "channel_slots": [item.to_dict() for item in self.channel_slots],
+            "sample_rate_hz": self.sample_rate_hz,
+            "encoding_bits": self.encoding_bits,
+            "frames_per_packet": self.frames_per_packet,
+            "primary_destination": (
+                self.primary_destination.to_dict() if self.primary_destination is not None else None
+            ),
+            "secondary_destination": (
+                self.secondary_destination.to_dict() if self.secondary_destination is not None else None
+            ),
+            "redundancy": self.redundancy.value,
+            "identity": self.identity.to_dict(),
+            "protocol": self.protocol.to_dict(),
+            "raw_fields": copy.deepcopy(self.raw_fields),
+        }
+        return _with_extra_fields(value, self.extra_fields)
 
 
 @dataclass(frozen=True)
@@ -457,7 +356,7 @@ class FlowDifference:
     requested: Any
     effective: Any
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> _requests.FlowDifference:
         return {
             "field": self.field,
             "requested": copy.deepcopy(self.requested),
@@ -471,7 +370,15 @@ class FlowComparison:
     differences: tuple[FlowDifference, ...]
     unavailable_fields: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, Any]:
+    @classmethod
+    def from_dict(cls, value) -> FlowComparison:
+        return cls(
+            matches=value["matches"],
+            differences=tuple(FlowDifference(**difference) for difference in value["differences"]),
+            unavailable_fields=tuple(value["unavailable_fields"]),
+        )
+
+    def to_dict(self) -> _requests.FlowComparison:
         return {
             "matches": self.matches,
             "differences": [item.to_dict() for item in self.differences],
@@ -483,135 +390,11 @@ def compare_transmit_flows(
     requested: TransmitFlowSpecification,
     effective: TransmitFlowSpecification,
 ) -> FlowComparison:
-    differences = []
-    unavailable_fields = []
-    raw = effective.raw_fields
-    inventory_evidence = bool(raw)
+    from netaudio import core
 
-    def observed(*field_names: str, inferred: bool = False) -> bool:
-        return not inventory_evidence or inferred or any(field_name in raw for field_name in field_names)
+    result = core.compare_transmit_flows(requested.to_dict(), effective.to_dict())
 
-    def compare(
-        field_name: str,
-        requested_value: Any,
-        effective_value: Any,
-        *,
-        optional: bool = False,
-        is_observed: bool = True,
-    ) -> None:
-        if optional and requested_value is None:
-            return
-        if not is_observed:
-            unavailable_fields.append(field_name)
-            return
-        if requested_value != effective_value:
-            differences.append(FlowDifference(field_name, requested_value, effective_value))
-
-    compare(
-        "media_mode",
-        requested.media_mode.value,
-        effective.media_mode.value,
-        is_observed=observed(
-            "media_mode",
-            inferred=(
-                effective.protocol.protocol_id in (0x2729, 0x2801) and effective.media_mode is MediaMode.NATIVE_DANTE
-            ),
-        ),
-    )
-    compare(
-        "flow_type",
-        requested.flow_type.value,
-        effective.flow_type.value,
-        is_observed=observed("flow_type", "flow_type_code"),
-    )
-    compare(
-        "name",
-        requested.name,
-        effective.name,
-        optional=True,
-        is_observed=observed("flow_name"),
-    )
-    compare(
-        "channel_slots",
-        [item.to_dict() for item in requested.channel_slots],
-        [item.to_dict() for item in effective.channel_slots],
-        is_observed=observed("transmitter_channel_ids_by_slot", "channels"),
-    )
-    compare(
-        "sample_rate_hz",
-        requested.sample_rate_hz,
-        effective.sample_rate_hz,
-        optional=True,
-        is_observed=observed("sample_rate"),
-    )
-    compare(
-        "encoding_bits",
-        requested.encoding_bits,
-        effective.encoding_bits,
-        optional=True,
-        is_observed=observed("encoding"),
-    )
-    compare(
-        "frames_per_packet",
-        requested.frames_per_packet,
-        effective.frames_per_packet,
-        optional=True,
-        is_observed=observed("frames_per_packet"),
-    )
-    compare(
-        "primary_destination",
-        requested.primary_destination.to_dict() if requested.primary_destination else None,
-        effective.primary_destination.to_dict() if effective.primary_destination else None,
-        optional=True,
-        is_observed=observed(
-            "primary_destination",
-            inferred=(
-                "destination_internet_protocol_version_four_address" in raw and "destination_user_datagram_port" in raw
-            ),
-        ),
-    )
-    compare(
-        "secondary_destination",
-        requested.secondary_destination.to_dict() if requested.secondary_destination else None,
-        effective.secondary_destination.to_dict() if effective.secondary_destination else None,
-        optional=True,
-        is_observed=observed("secondary_destination"),
-    )
-    if requested.redundancy is not RedundancyConstraint.DEVICE_DEFAULT:
-        compare("redundancy", requested.redundancy.value, effective.redundancy.value)
-    compare(
-        "identity.global_flow_id",
-        requested.identity.global_flow_id,
-        effective.identity.global_flow_id,
-        optional=True,
-        is_observed=observed("global_flow_id", "flow_number"),
-    )
-    compare(
-        "identity.media_type_code",
-        requested.identity.media_type_code,
-        effective.identity.media_type_code,
-        optional=True,
-        is_observed=observed("media_type_code"),
-    )
-    compare(
-        "identity.media_local_flow_id",
-        requested.identity.media_local_flow_id,
-        effective.identity.media_local_flow_id,
-        optional=True,
-        is_observed=observed("media_local_flow_id"),
-    )
-    compare(
-        "protocol.protocol_id",
-        requested.protocol.protocol_id,
-        effective.protocol.protocol_id,
-        optional=True,
-        is_observed=True,
-    )
-    return FlowComparison(
-        matches=not differences and not unavailable_fields,
-        differences=tuple(differences),
-        unavailable_fields=tuple(unavailable_fields),
-    )
+    return FlowComparison.from_dict(result)
 
 
 @dataclass(frozen=True)
@@ -625,7 +408,7 @@ class FlowOperationPlan:
     reasons: tuple[str, ...]
     specification: TransmitFlowSpecification | None = None
     flow_id: int | None = None
-    wire_options: dict[str, Any] = field(default_factory=dict)
+    command_specification: dict[str, Any] | None = None
     wire_authored_fields: tuple[str, ...] = ()
     state_preconditions: dict[str, Any] = field(default_factory=dict)
 
@@ -640,7 +423,7 @@ class FlowOperationPlan:
             "reasons": list(self.reasons),
             "specification": self.specification.to_dict() if self.specification else None,
             "flow_id": self.flow_id,
-            "wire_options": copy.deepcopy(self.wire_options),
+            "command_specification": copy.deepcopy(self.command_specification),
             "wire_authored_fields": list(self.wire_authored_fields),
             "state_preconditions": copy.deepcopy(self.state_preconditions),
         }
@@ -651,7 +434,7 @@ class FlowOperationResult:
     operation: str
     state: FlowLifecycleState
     transport: str
-    request_acknowledgement: dict[str, Any] | None
+    request_acknowledgement: _types.CommandReceipt | None
     device_confirmation: bool | None
     persistence_confirmation: bool | None
     effective_state_confirmation: bool | None
@@ -682,17 +465,3 @@ class FlowOperationResult:
             "clock_lock_confirmed": self.clock_lock_confirmed,
             "decoded_audio_confirmed": self.decoded_audio_confirmed,
         }
-
-
-def packet_time_to_frames(packet_time_microseconds: float | int | None, sample_rate_hz: int | None) -> int | None:
-    if packet_time_microseconds is None or sample_rate_hz is None:
-        return None
-    if isinstance(packet_time_microseconds, bool) or not isinstance(packet_time_microseconds, (int, float)):
-        raise ValueError("packet time must be a number")
-    if not math.isfinite(float(packet_time_microseconds)) or packet_time_microseconds <= 0:
-        raise ValueError("packet time must be positive and finite")
-    frames = float(packet_time_microseconds) * sample_rate_hz / 1_000_000
-    rounded = round(frames)
-    if not math.isclose(frames, rounded, rel_tol=0, abs_tol=1e-9):
-        raise ValueError("packet time does not represent a whole number of frames")
-    return _integer(rounded, "frames per packet", 1, 0xFFFF)

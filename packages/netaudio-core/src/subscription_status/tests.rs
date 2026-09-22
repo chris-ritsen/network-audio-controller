@@ -1,4 +1,4 @@
-use super::{decode, state_for_identifier};
+use super::{classification_for_identifier, decode};
 use serde_json::Value;
 
 #[test]
@@ -17,10 +17,8 @@ fn all_external_observations() {
             assert_eq!(entry.code, code);
             assert_eq!(entry.status, group["api"]["status"].as_str(), "{code:#06x}");
             if let Some(status) = entry.status {
-                assert_eq!(entry.label, status);
-                assert_eq!(entry.detail, group["api"]["statusMessage"].as_str());
                 assert_eq!(entry.observed_summary, group["api"]["summary"].as_str());
-                assert_eq!(state_for_identifier(status), entry.state);
+                assert_eq!(classification_for_identifier(status).state, entry.state);
             } else {
                 assert_eq!(entry.state, "unknown");
             }
@@ -33,8 +31,6 @@ fn all_external_observations() {
             Some(record["wire"]["rx_status_code"].as_u64().unwrap() as u16),
         );
         assert_eq!(entry.status, record["api"]["status"].as_str());
-        assert_eq!(Some(entry.label), record["api"]["status"].as_str());
-        assert_eq!(entry.detail, record["api"]["statusMessage"].as_str());
         assert_eq!(entry.observed_summary, record["api"]["summary"].as_str());
     }
 }
@@ -69,7 +65,13 @@ fn code_one_requires_an_observed_receiver_context() {
 
 #[test]
 fn managed_identifiers_do_not_invent_numeric_values() {
-    assert_eq!(state_for_identifier("DYNAMIC"), "connected");
-    assert_eq!(state_for_identifier("UNRESOLVED"), "unresolved");
-    assert_eq!(state_for_identifier("NEW_UNKNOWN_STATUS"), "unknown");
+    assert_eq!(classification_for_identifier("DYNAMIC").state, "connected");
+    assert_eq!(
+        classification_for_identifier("UNRESOLVED").state,
+        "unresolved"
+    );
+    assert_eq!(
+        classification_for_identifier("NEW_UNKNOWN_STATUS").state,
+        "unknown"
+    );
 }

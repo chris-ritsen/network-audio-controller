@@ -16,7 +16,7 @@ def test_builder_matches_controller_prefix_writes():
             {
                 "command": "set_aes67_multicast_prefix",
                 "prefix": "239.238.0.0",
-                "transaction_id": 0x0403,
+                "message_id": 0x0403,
             }
         ).hex()
         == CONTROLLER_WRITE_239_238
@@ -26,7 +26,7 @@ def test_builder_matches_controller_prefix_writes():
             {
                 "command": "set_aes67_multicast_prefix",
                 "prefix": "239.69.0.0",
-                "transaction_id": 0x00C0,
+                "message_id": 0x00C0,
             }
         ).hex()
         == CONTROLLER_WRITE_239_69
@@ -66,6 +66,13 @@ def test_device_advertises_aes67_multicast_prefix_from_value_or_directory():
     assert device.advertises_aes67_multicast_prefix is False
     device.aes67_multicast_prefix = "239.69.0.0"
     assert device.advertises_aes67_multicast_prefix is True
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"property_id": True}, {"property_id": "32864"}, {"property_id": -1}])
+def test_malformed_directory_entries_do_not_advertise_prefix(entry):
+    device = DanteDevice()
+    device.settings_properties = [entry]
+    assert device.advertises_aes67_multicast_prefix is False
 
 
 @pytest.mark.asyncio

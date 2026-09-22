@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, call
 import pytest
 
 from netaudio import core
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.application import DanteApplication
 from tests.protocol_test_fixtures import load_protocol_packet
 
@@ -16,17 +15,11 @@ def _packet(opcode: int, packet_identifier: int) -> bytes:
     )
 
 
-def test_query_builder_and_command_factory_encode_open_ended_pagination_range():
-    built = core.build_command(
-        {
-            "command": "query_modern_arc_receiver_flow_status",
-            "transaction_id": 0x2856,
-        }
-    )
-    command, service = DanteDeviceCommands().command_query_modern_arc_receiver_flow_status(0x2856)
+def test_native_inventory_command_encodes_open_ended_pagination_range():
+    with core.ReceiverFlowInventory(0x2809) as inventory:
+        command = inventory.state()["next_command"]
 
-    assert built == command
-    assert service is not None
+    built = core.build_command({**command, "message_id": 0x2856})
     assert built.hex() == "28090022285636000000000000000000000100010000000000000000830283060310"
 
 
@@ -40,7 +33,8 @@ def test_parser_exposes_flow_format_latency_endpoint_and_receiver_mapping():
             "record_pointer": 32,
             "record_length_bytes": 84,
             "record_type_code": 0x1422,
-            "global_flow_id": 1,
+            "flow_number": 1,
+            "flow_type": None,
             "media_type_code": 3,
             "media_local_flow_id": 1,
             "flow_type_code": 1,
@@ -114,7 +108,7 @@ async def test_device_operation_returns_page_and_fails_loud_on_a32_frontend_reje
     )
 
     rejected_device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3600, 14)), services=services)
-    with pytest.raises(RuntimeError, match="result 0x0030"):
+    with pytest.raises(RuntimeError, match="rejected"):
         await DanteApplication().query_modern_arc_receiver_flow_status(rejected_device)
 
 
@@ -168,6 +162,7 @@ async def test_partial_flow_readback_is_unavailable_for_effective_state_decision
     from tests.issue_59_fixtures import packet
 
     device = DanteDevice(server_name="receiver.local.")
+    device.receiver_flow_inventory_family = "modern"
     page = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
     device._app = SimpleNamespace(query_modern_arc_receiver_flow_status=AsyncMock(return_value=page))
     fallback = AsyncMock()
@@ -175,9 +170,25 @@ async def test_partial_flow_readback_is_unavailable_for_effective_state_decision
     assert await flows.query_preferred_receiver_flow_inventory(device) is None
     assert device.receiver_flow_completeness == "partial"
     assert device.receiver_flow_status_page is None
-    diagnostic = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
-    assert len(diagnostic["flows"]) == 15
-    assert diagnostic["page_disposition"] == "more_pages"
-    assert diagnostic["result_code"] == 0x8112
-    assert diagnostic["status_page"] == page
     fallback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_receiver_inventory_reaches_device_serialization_without_translation():
+    from netaudio.dante.device import DanteDevice
+    from netaudio.dante.device_serializer import DanteDeviceSerializer
+    from netaudio.dante.flows import query_preferred_receiver_flow_inventory
+
+    device = DanteDevice(server_name="receiver.local.")
+    device.receiver_flow_inventory_family = "modern"
+    device.services = {"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}}
+    device.execute = AsyncMock(return_value=_packet(0x3600, 4))
+    device._app = DanteApplication()
+
+    inventory = await query_preferred_receiver_flow_inventory(device)
+    serialized = DanteDeviceSerializer.to_json(device)
+    assert inventory["flows"] == serialized["receiver_flows"]
+    assert inventory["flows"][0]["flow_number"] == 1
+    assert inventory["flows"][0]["flow_type"] is None
+    assert "global_flow_id" not in inventory["flows"][0]
+    assert "status_page" not in inventory

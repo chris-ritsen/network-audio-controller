@@ -9,9 +9,7 @@ from pathlib import Path
 from netaudio.common.manifest import write_manifest
 from netaudio.dante.const import (
     ARC_PROTOCOL_IDS,
-    ARC_SUCCESS_RESULT_CODES,
     CAPTURE_PROTOCOL_IDS,
-    OPCODE_RX_CHANNELS,
     PROTOCOL_CMC,
     PROTOCOL_LABELS,
     PROTOCOL_SETTINGS,
@@ -27,7 +25,7 @@ def _extract_subscription_status_codes(payload: bytes) -> set[int]:
     from netaudio import core
 
     header = parse_packet_header(payload)
-    if header is None or header["protocol_id"] not in ARC_PROTOCOL_IDS or header["opcode"] != OPCODE_RX_CHANNELS:
+    if header is None or header.get("response_decoder", {}).get("kind") != "rx":
         return set()
     try:
         records = core.parse_page("rx", payload, 1)
@@ -443,7 +441,7 @@ def _decode_packet_payload(data: bytes) -> dict:
 
     if header["result_code"] is not None:
         result["status"] = f"0x{header['result_code']:04X}"
-        result["status_ok"] = header["result_code"] in ARC_SUCCESS_RESULT_CODES
+        result["status_ok"] = header.get("result_accepted") is True
 
     result["raw_hex"] = data.hex()
 

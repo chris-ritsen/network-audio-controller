@@ -9,16 +9,8 @@ from typing import Any
 
 from netaudio import DanteDevice
 from netaudio.dante.latency import milliseconds_to_microseconds
-from netaudio.dante.performance_configuration import (
-    PROPERTY_RX_FLOW_DEFAULT_SLOTS,
-    PROPERTY_RX_FLOW_FRAMES_PER_PACKET,
-    PROPERTY_RX_FLOW_LATENCY_NS,
-    PROPERTY_TX_FLOW_FRAMES_PER_PACKET,
-    PROPERTY_TX_FLOW_LATENCY_NS,
-    PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET,
-    PROPERTY_UNICAST_CONFIGURED_LATENCY_NS,
-)
-from netaudio.dante.transmit_flow import MediaMode, TransmitFlowSpecification
+from netaudio.dante.performance_configuration import observed_performance_configuration
+from netaudio.dante.transmit_flow import TransmitFlowSpecification
 from netaudio.presets.schema import (
     PRESET_EXTENSION_CONTENT_TAG,
     PRESET_EXTENSION_TAG,
@@ -88,13 +80,12 @@ def _canonical_transmit_flows(device: DanteDevice) -> list[dict[str, Any]]:
     result = []
     for record in records:
         try:
-            if isinstance(record, Mapping) and "media_mode" in record:
+            if isinstance(record, Mapping) and "channel_slots" in record:
                 specification = TransmitFlowSpecification.from_dict(record)
             else:
                 specification = TransmitFlowSpecification.from_inventory_record(
                     record,
                     protocol_id=protocol_id,
-                    media_mode=MediaMode.NATIVE_DANTE,
                 )
         except (TypeError, ValueError) as exception:
             raise ValueError(
@@ -156,63 +147,7 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
         for field in ("clock_subdomain", "global_unicast_delay_requests", "aggregate_ptpv1_unicast_delay_requests"):
             if clock_status.get(field) is not None:
                 config[field] = clock_status[field]
-        performance = getattr(device, "performance_settings", None) or {}
-        advertised_performance_ids = {
-            entry.get("property_id")
-            for entry in (getattr(device, "settings_properties", None) or [])
-            if isinstance(entry, Mapping)
-            and isinstance(entry.get("property_id"), int)
-            and not isinstance(entry.get("property_id"), bool)
-        }
-
-        def performance_value(property_id):
-            for key in (property_id, str(property_id), f"0x{property_id:04x}"):
-                value = performance.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    return value
-            return None
-
-        def consistent_performance_value(property_ids):
-            if not property_ids:
-                return None
-            values = [performance_value(property_id) for property_id in property_ids]
-            if any(value is None for value in values) or len(set(values)) != 1:
-                return None
-            value = values[0]
-            return value if isinstance(value, int) else None
-
-        for field_name, latency_ids, frames_ids in (
-            (
-                "receive_flow_performance",
-                (PROPERTY_RX_FLOW_LATENCY_NS,),
-                (PROPERTY_RX_FLOW_FRAMES_PER_PACKET,),
-            ),
-            (
-                "transmit_flow_performance",
-                (PROPERTY_TX_FLOW_LATENCY_NS,),
-                (PROPERTY_TX_FLOW_FRAMES_PER_PACKET,),
-            ),
-            (
-                "unicast_performance",
-                (PROPERTY_UNICAST_CONFIGURED_LATENCY_NS, PROPERTY_RX_FLOW_LATENCY_NS),
-                (
-                    PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET,
-                    PROPERTY_RX_FLOW_FRAMES_PER_PACKET,
-                ),
-            ),
-        ):
-            advertised_latency_ids = advertised_performance_ids.intersection(latency_ids)
-            advertised_frames_ids = advertised_performance_ids.intersection(frames_ids)
-            latency_ns = consistent_performance_value(advertised_latency_ids)
-            frames = consistent_performance_value(advertised_frames_ids)
-            if latency_ns is not None and latency_ns % 1_000 == 0 and frames is not None:
-                config[field_name] = {
-                    "latency_microseconds": latency_ns // 1_000,
-                    "frames_per_packet": frames,
-                }
-        default_slots = performance_value(PROPERTY_RX_FLOW_DEFAULT_SLOTS)
-        if PROPERTY_RX_FLOW_DEFAULT_SLOTS in advertised_performance_ids and default_slots is not None:
-            config["receive_flow_default_slots"] = default_slots
+        config.update(observed_performance_configuration(device))
         clock_preferences = getattr(device, "ddm_clock_preferences", None)
         if isinstance(clock_preferences, Mapping) and clock_preferences.get("external_word_clock") is not None:
             config["external_word_clock"] = clock_preferences["external_word_clock"]
@@ -287,19 +222,17 @@ def device_preset_config(device: DanteDevice, sections: Collection[str]) -> dict
                     ],
                     "receiver_supports_multiple_interfaces": len(identity.get("interface_endpoints") or ()) > 1,
                 }
-            channels_by_name = {
-                name: number
-                for channel in device.rx_channels.values()
-                for name in (channel.name, channel.friendly_name)
-                if name
-                for number in (channel.number,)
-            }
             for subscription in device.subscriptions:
-                number = getattr(subscription, "_netaudio_rx_channel_number", None)
-                if number is None:
-                    number = channels_by_name.get(subscription.rx_channel_name)
+                channel = subscription.rx_channel
+
+                if channel is None:
+                    raise ValueError(f"{device.name}: receiver subscription identity is unavailable")
+
+                number = channel.number
+
                 if number not in subscriptions:
-                    continue
+                    raise ValueError(f"{device.name}: receiver subscription identity is not in the channel inventory")
+
                 if subscription.tx_channel_name and subscription.tx_device_name:
                     if subscriptions[number] is not None:
                         raise ValueError(

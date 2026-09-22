@@ -174,8 +174,8 @@ function GainCell({ channel, channelNumber, channelType, device, requestName }) 
   `;
 }
 
-function subscriptionForChannel(device, channel) {
-  return (device.subscriptions || []).find((entry) => entry.rx_channel === channel.name) || null;
+function subscriptionForChannel(device, number) {
+  return (device.subscriptions || []).find((entry) => entry.rx_channel_number === number) || null;
 }
 
 function receiveColumns(device, requestName, onRoute) {
@@ -268,7 +268,7 @@ function receiveRows(device) {
   return format.sortedChannelNumbers(receiveChannels).map((number) => ({
     channel: receiveChannels[number],
     number,
-    subscription: subscriptionForChannel(device, receiveChannels[number]),
+    subscription: subscriptionForChannel(device, number),
   }));
 }
 

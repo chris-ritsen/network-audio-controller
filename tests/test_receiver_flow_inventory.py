@@ -17,7 +17,7 @@ def test_receiver_flow_query_is_byte_identical_to_shipping_controller():
         {
             "command": "query_receiver_flows",
             "starting_flow": 1,
-            "transaction_id": 0x033A,
+            "message_id": 0x033A,
         }
     )
 
@@ -129,6 +129,7 @@ async def test_receiver_flow_inventory_uses_the_controller_query(monkeypatch):
         command_specification,
         timeout_ms,
         attempts,
+        device=None,
     ):
         command_specifications.append(
             {

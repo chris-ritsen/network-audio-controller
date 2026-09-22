@@ -1,3 +1,4 @@
+from netaudio import core
 from netaudio.dante.network_configuration import network_configuration_modes
 
 
@@ -141,7 +142,7 @@ DEVICE_SCALAR_FIELDS = (
     "receiver_flow_latency_nanoseconds",
     "receiver_flow_status_page",
     "receiver_flows",
-    "receiver_flow_inventory_opcode",
+    "receiver_flow_inventory_family",
     "requested_sample_rate_pullup_raw_value",
     "routing_capacity_receive_channel_count",
     "routing_capacity_transmit_channel_count",
@@ -159,6 +160,7 @@ DEVICE_SCALAR_FIELDS = (
     "sample_rate_pullup_raw_value",
     "sample_rate_pullup_update_mode",
     "sample_rate_pullup_flags",
+    "sample_rate_pullup_host_disabled",
     "settings_properties",
     "supported_encodings",
     "supported_gain_levels",
@@ -166,8 +168,7 @@ DEVICE_SCALAR_FIELDS = (
     "supported_sample_rates",
     "transmitter_flows",
     "transmit_flow_authoring_capability_word",
-    "transmit_flow_authoring_opcode",
-    "transmit_flow_authoring_protocol_id",
+    "transmit_flow_authoring",
     "tx_count",
     "tx_count_raw",
     "tx_flow_count",
@@ -175,6 +176,7 @@ DEVICE_SCALAR_FIELDS = (
 
 CHANNEL_OPTIONAL_FIELDS = (
     "bit_depth",
+    "direct_can_subscribe_self",
     "can_subscribe_self",
     "can_subscribe_self_conflict",
     "can_rename",
@@ -260,6 +262,15 @@ class DanteDeviceSerializer:
                 field_value = list(field_value)
             as_json[device_json_field_name(field_name)] = field_value
 
+        clock_sources = core.clock_sources(
+            {
+                "current": getattr(device, "clock_source_code", None),
+                "supported": getattr(device, "supported_clock_sources", None) or [],
+            }
+        )
+        as_json["clock_source"] = clock_sources["current"]
+        as_json["clock_source_choices"] = clock_sources["choices"]
+
         from netaudio.dante.panel_state import panel_snapshot
 
         as_json["device_controls"] = panel_snapshot(device)
@@ -343,19 +354,20 @@ class DanteDeviceSerializer:
         device.rx_channels = DanteDeviceSerializer._channels_from_json(channels.get("receivers") or {}, "rx", device)
         device.tx_channels = DanteDeviceSerializer._channels_from_json(channels.get("transmitters") or {}, "tx", device)
 
-        device.subscriptions = [
-            DanteDeviceSerializer._subscription_from_json(entry) for entry in data.get("subscriptions") or []
-        ]
-        for subscription in device.subscriptions:
-            channels = [
-                channel for channel in device.rx_channels.values() if channel.name == subscription.rx_channel_name
-            ]
-            if len(channels) == 1:
-                subscription.rx_channel = channels[0]
-                subscription.rx_device = device
-                subscription._netaudio_rx_channel_number = channels[0].number
+        device.subscriptions = []
+
+        for entry in data.get("subscriptions") or []:
+            subscription = DanteDeviceSerializer._subscription_from_json(entry)
+            number = entry.get("rx_channel_number")
+            subscription.rx_device = device
+
+            if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                subscription.rx_channel = device.rx_channels.get(number)
+
             if subscription.is_self_connection:
                 subscription.tx_device = device
+
+            device.subscriptions.append(subscription)
 
         return device
 
@@ -434,21 +446,13 @@ class DanteDeviceSerializer:
 
     @staticmethod
     def _status_to_json(code, receiver_status_code=None):
-        from netaudio.dante.const import subscription_status_entry
+        from netaudio.core import subscription_status
         from netaudio.icons import severity_icon
 
         if code is None:
             return None
-        from netaudio.dante.subscription_status import MANAGED_STATUS_PRESENTATION
-
-        entry = subscription_status_entry(code, receiver_status_code)
-        entry.pop("labels")
+        entry = subscription_status(code, receiver_status_code)
         entry["icon"] = severity_icon(entry["severity"])
-        presentation = MANAGED_STATUS_PRESENTATION.get(entry.get("status") or "")
-        if presentation is not None:
-            label, detail = presentation
-            entry["label"] = label
-            entry["detail"] = detail or entry.get("detail")
         return entry
 
     @staticmethod
@@ -473,6 +477,7 @@ class DanteDeviceSerializer:
             )
         as_json = {
             "rx_channel": subscription.rx_channel_name,
+            "rx_channel_number": subscription.rx_channel.number if subscription.rx_channel is not None else None,
             "rx_device": subscription.rx_device_name,
             "status": status,
             "tx_channel": subscription.tx_channel_name,

@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from netaudio.dante.const import subscription_status_entry
+from netaudio.core import subscription_status
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
-from netaudio.dante.subscription_status import MANAGED_STATUS_PRESENTATION
 
 
 FIXTURE = Path(__file__).parent / "fixtures/subscription/status-observations.json"
@@ -25,7 +24,7 @@ def test_fixture_digest_and_sweep_coverage():
 
 @pytest.mark.parametrize("code,api", MAPPINGS)
 def test_every_observed_numeric_mapping(code, api):
-    entry = subscription_status_entry(code, OBSERVATIONS["receiver_status_code"])
+    entry = subscription_status(code, OBSERVATIONS["receiver_status_code"])
     assert entry["code"] == code
     assert entry["receiver_status_code"] == 257
     assert entry["status"] == api["status"]
@@ -35,9 +34,6 @@ def test_every_observed_numeric_mapping(code, api):
     else:
         assert entry["observed_summary"] == api["summary"]
         assert entry["interpretation"] == "observed"
-        expected_label, catalog_detail = MANAGED_STATUS_PRESENTATION.get(api["status"], (api["status"], None))
-        assert entry["label"] == expected_label
-        assert entry["detail"] == (catalog_detail or api["statusMessage"])
         if api["summary"] == "CONNECTED":
             assert entry["state"] == "connected"
         if api["summary"] == "WARNING":
@@ -48,14 +44,14 @@ def test_every_observed_numeric_mapping(code, api):
 
 @pytest.mark.parametrize("record", OBSERVATIONS["context_records"])
 def test_code_one_cleanup_context(record):
-    entry = subscription_status_entry(record["wire"]["subscription_status_code"], record["wire"]["rx_status_code"])
+    entry = subscription_status(record["wire"]["subscription_status_code"], record["wire"]["rx_status_code"])
     assert entry["status"] == record["api"]["status"]
     assert entry["observed_summary"] == record["api"]["summary"]
 
 
 @pytest.mark.parametrize("receiver", [None, 1, 0x0100, 0x0102, 0xFFFF])
 def test_code_one_has_no_invented_precedence(receiver):
-    entry = subscription_status_entry(1, receiver)
+    entry = subscription_status(1, receiver)
     assert entry["code"] == 1
     assert entry["receiver_status_code"] == receiver
     assert entry["status"] is None
@@ -110,10 +106,10 @@ def test_absent_receiver_health_is_not_copied_from_subscription():
 @pytest.mark.parametrize("value", [-1, 65536, True, "9", 9.0, None])
 def test_binding_rejects_values_that_would_be_truncated(value):
     with pytest.raises(ValueError):
-        subscription_status_entry(value)
+        subscription_status(value)
     if value is not None:
         with pytest.raises(ValueError):
-            subscription_status_entry(9, value)
+            subscription_status(9, value)
 
 
 @pytest.mark.parametrize(
@@ -184,19 +180,57 @@ def test_status_to_json_includes_status_severity_and_icon():
 
 @pytest.mark.parametrize("code,api", [(code, api) for code, api in MAPPINGS if api["status"] is not None])
 def test_managed_identifier_classification_reuses_numeric_definitions(code, api):
-    from netaudio.core import subscription_state_for_identifier
+    from netaudio.core import subscription_classification_for_identifier
 
-    entry = subscription_status_entry(code, 257)
-    assert subscription_state_for_identifier(api["status"]) == entry["state"]
+    entry = subscription_status(code, 257)
+    managed = subscription_classification_for_identifier(api["status"])
+    assert {key: managed[key] for key in ("state", "severity", "settled")} == {
+        key: entry[key] for key in ("state", "severity", "settled")
+    }
 
 
 def test_managed_unknown_identifier_is_preserved_as_unknown():
-    from netaudio.core import subscription_state_for_identifier
+    from netaudio.core import subscription_classification_for_identifier
 
-    assert subscription_state_for_identifier("FUTURE_STATUS") == "unknown"
-    assert subscription_state_for_identifier(None) == "unknown"
+    for identifier in ("FUTURE_STATUS", None):
+        assert subscription_classification_for_identifier(identifier) == {
+            "state": "unknown",
+            "severity": "warning",
+            "settled": False,
+            "label": None,
+            "detail": None,
+        }
+
     with pytest.raises(ValueError):
-        subscription_state_for_identifier("DYNAMIC\0FUTURE_STATUS")
+        subscription_classification_for_identifier("DYNAMIC\0FUTURE_STATUS")
+
+
+@pytest.mark.parametrize(
+    "code,identifier,label,detail",
+    [
+        (9, "DYNAMIC", "Subscribed (unicast)", None),
+        (
+            0x1B,
+            "CLOCK_DOMAIN",
+            "Clock domain mismatch",
+            "The transmitter and receiver aren't in the same clock domain.",
+        ),
+        (0x12, "NO_RX", "No more flows (Rx)", "The receiver can't take on any more flows."),
+    ],
+)
+def test_native_and_python_clients_share_subscription_presentation(code, identifier, label, detail):
+    from netaudio import core
+    from netaudio.dante.subscription import managed_subscription_status
+
+    native = core.subscription_status(code, 257)
+    managed = core.subscription_classification_for_identifier(identifier)
+    serialized = DanteDeviceSerializer._status_to_json(code, 257)
+    assert native["label"] == managed["label"] == serialized["label"] == label
+    assert managed["detail"] == detail
+
+    presentation = managed_subscription_status(identifier, "Warning: Source name changed", "WARNING")
+    assert presentation["label"] == label
+    assert presentation["detail"] == (detail or "Source name changed")
 
 
 @pytest.mark.asyncio

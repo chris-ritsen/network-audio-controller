@@ -73,17 +73,14 @@ class ManagedSignalReceiver:
                     if domain != key[2].lower():
                         raise ValueError("Managed signal session selected a different domain")
             domain_bytes = bytes.fromhex(domain)
-            for identifier in range(2, 6):
-                writer.write(core.build_dapi_domain_subscription(domain_bytes, identifier))
             writer.write(
-                core.build_dapi_inventory_initialization(
+                core.build_dapi_domain_initialization(
                     domain_bytes,
                     core.next_message_id(),
                     notification.getsockname()[1],
                     ipaddress.IPv4Address(local_address).packed,
                 )
             )
-            writer.write(core.build_dapi_device_inventory_subscription(domain_bytes))
             await writer.drain()
             while key in self.targets:
                 frame = await self._frame(reader, writer)

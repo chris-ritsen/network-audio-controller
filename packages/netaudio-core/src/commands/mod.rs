@@ -7,10 +7,11 @@ use crate::protocol::{
     OPCODE_TX_CHANNEL_NAMES, PROTOCOL_ARC_2809,
 };
 
-pub const PROTOCOL_SETTINGS: u16 = 0xFFFF;
-pub const PROTOCOL_CMC: u16 = 0x1200;
-pub const PROTOCOL_DANTE_FLOW: u16 = 0x2729;
-pub const PROTOCOL_DANTE_FLOW_2801: u16 = 0x2801;
+pub const PROTOCOL_SETTINGS: u16 = crate::protocol::NetaudioProtocol::Settings as u16;
+pub const PROTOCOL_CMC: u16 = crate::protocol::NetaudioProtocol::Cmc as u16;
+pub const OPCODE_CMC_REGISTER: u16 = 0x1001;
+pub const PROTOCOL_DANTE_FLOW: u16 = crate::protocol::NetaudioProtocol::Arc2729 as u16;
+pub const PROTOCOL_DANTE_FLOW_2801: u16 = crate::protocol::NetaudioProtocol::Arc2801 as u16;
 
 pub const OPCODE_DEVICE_NAME: u16 = 0x1002;
 pub const OPCODE_DEVICE_INFO: u16 = 0x1003;
@@ -23,6 +24,7 @@ pub const OPCODE_RX_CHANNEL_NAME_SET: u16 = 0x3001;
 pub const OPCODE_SUBSCRIPTION_ADD: u16 = 0x3010;
 pub const OPCODE_SUBSCRIPTION_REMOVE: u16 = 0x3014;
 pub const OPCODE_QUERY_TX_FLOWS: u16 = 0x2200;
+pub const OPCODE_QUERY_TX_FLOW_LABELS: u16 = 0x2204;
 pub const OPCODE_QUERY_TRANSMIT_CHANNEL_CAPABILITIES: u16 = 0x2032;
 pub const OPCODE_QUERY_RECEIVER_FLOWS: u16 = 0x3200;
 pub const OPCODE_QUERY_RECEIVER_PORT_RANGES: u16 = 0x3300;
@@ -59,8 +61,8 @@ const CAPABILITY_PARTITION_EXPORT_SELECTOR: u16 = 2;
 
 const CLEAR_CONFIGURATION_MESSAGE_TYPE: u16 = 0x0077;
 const CLEAR_CONFIGURATION_REQUEST_VALUE: u32 = 100;
-const CLEAR_CONFIGURATION_ACTION_ALL: u32 = 1;
-const CLEAR_CONFIGURATION_ACTION_PRESERVE_INTERNET_PROTOCOL: u32 = 2;
+pub(crate) const CLEAR_CONFIGURATION_ACTION_ALL: u32 = 1;
+pub(crate) const CLEAR_CONFIGURATION_ACTION_PRESERVE_INTERNET_PROTOCOL: u32 = 2;
 const SYSTEM_RESET_MESSAGE_TYPE: u16 = 0x0090;
 const SYSTEM_RESET_REQUEST_VALUE: u32 = 100;
 const SYSTEM_RESET_PRESENT: u16 = 1;
@@ -68,8 +70,8 @@ const SYSTEM_RESET_MODE_REBOOT: u16 = 0;
 const SYSTEM_RESET_MODE_FACTORY: u16 = 1;
 
 const GAIN_MESSAGE_TYPE: u16 = 0x100A;
-const GAIN_INPUT_DIRECTION: u16 = 0x0102;
-const GAIN_OUTPUT_DIRECTION: u16 = 0x0201;
+pub(crate) const GAIN_INPUT_DIRECTION: u16 = 0x0102;
+pub(crate) const GAIN_OUTPUT_DIRECTION: u16 = 0x0201;
 
 const AUDIO_CONFIG_PSEUDO_MAC: [u8; 6] = [b'R', b'T', 0, 0, 0, 0];
 
@@ -84,13 +86,12 @@ const LATENCY_CONFIG_QUERY_INFO_CODES: [u8; 48] = [
     0x80, 0x60, 0x00, 0x22, 0x00, 0x63, 0x00, 0x64, 0x00, 0x65, 0x02, 0x22, 0x02, 0x12, 0x83, 0x21,
 ];
 
-pub const MIN_GAIN_LEVEL: u8 = 1;
-pub const MAX_GAIN_LEVEL: u8 = 5;
+pub(crate) const GAIN_LEVELS: [u32; 5] = [1, 2, 3, 4, 5];
 pub const MAX_LATENCY_MILLISECONDS: f64 = u32::MAX as f64 / 1_000_000.0;
 
 pub fn build_cmc_register(message_id: u16, host_mac: [u8; 6]) -> Result<Vec<u8>, NetaudioError> {
     let mut body = Vec::with_capacity(14);
-    body.extend_from_slice(&0x1001u16.to_be_bytes());
+    body.extend_from_slice(&OPCODE_CMC_REGISTER.to_be_bytes());
     body.extend_from_slice(&0u32.to_be_bytes());
     body.extend_from_slice(&host_mac);
     body.extend_from_slice(&0u16.to_be_bytes());

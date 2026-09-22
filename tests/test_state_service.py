@@ -244,7 +244,7 @@ class TestRoutingNotifications:
         detect = AsyncMock(return_value=0x2729)
         query = AsyncMock(
             return_value={
-                "max_flow_slots": 16,
+                "maximum_flow_slots": 16,
                 "flows": [
                     {
                         "flow_number": 32,
@@ -266,22 +266,17 @@ class TestRoutingNotifications:
 
         await state._on_transmitter_flow_changed(event)
 
-        detect.assert_awaited_once_with("192.168.1.50", 4440)
-        query.assert_awaited_once_with("192.168.1.50", 4440, 0x2729)
+        detect.assert_awaited_once_with("192.168.1.50", 4440, device=device)
+        query.assert_awaited_once_with("192.168.1.50", 4440, 0x2729, device=device)
         assert device.flow_protocol_id == 0x2729
         assert device.tx_flow_count == 1
         assert device.transmitter_flows == [
             {
                 "flow_number": 32,
                 "flow_type": "multicast",
-                "flow_type_code": None,
                 "channel_count": 8,
                 "sample_rate": 48000,
                 "encoding": 24,
-                "destination_internet_protocol_version_four_address": None,
-                "destination_user_datagram_port": None,
-                "subscriber_device_name": None,
-                "subscriber_flow_name": None,
             }
         ]
         assert len(emitted_events(application)) == 1
@@ -1024,7 +1019,7 @@ async def test_partial_receiver_flow_notification_keeps_last_complete_state(monk
     application = make_application({device.server_name: device})
     state = DanteStateService(application)
     partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
-    query = AsyncMock(return_value=flows.inventory_from_receiver_flow_status_page(partial))
+    query = AsyncMock(return_value=partial)
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
     event = DanteEvent(type=EventType.NOTIFICATION_RECEIVED, server_name=device.server_name)
     await state._on_receiver_flow_changed(event)

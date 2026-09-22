@@ -27,7 +27,6 @@ use crate::protocol::{
 
 pub use crate::protocol::{RESPONSE_HEADER_SIZE, RESULT_CODE_SUCCESS};
 
-#[cfg(test)]
 const CONMON_OPCODE_PANEL_STATUS: u16 = 0x100E;
 
 const METERING_V2_HEADER_SIZE: usize = 27;
@@ -143,6 +142,7 @@ pub struct DeviceSettings {
     pub aes67_multicast_prefix: Option<String>,
     pub inline_values: Vec<DeviceSettingsInlineValue>,
     pub referenced_values: Vec<DeviceSettingsReferencedValue>,
+    pub performance_values: Vec<crate::commands::PerformanceProperty>,
     pub unavailable_property_ids: Vec<u16>,
 }
 
@@ -247,7 +247,7 @@ pub struct PlatformVersions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CmcRegistrationResponse {
     pub sequence: u16,
-    pub status: u16,
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -396,6 +396,7 @@ pub struct ModernArcReceiverChannelStatus {
     pub source_device_name_pointer: u16,
     pub source_device_name: Option<String>,
     pub subscription_status_code: u16,
+    pub is_self_connection: bool,
     pub receiver_status_code: u16,
     pub receiver_capability_flags: u32,
     pub can_subscribe_self: bool,
@@ -422,7 +423,8 @@ pub struct ModernArcReceiverFlowStatus {
     pub record_pointer: u16,
     pub record_length_bytes: u16,
     pub record_type_code: u16,
-    pub global_flow_id: u16,
+    pub flow_number: u16,
+    pub flow_type: Option<String>,
     pub media_type_code: u16,
     pub media_local_flow_id: u16,
     pub flow_type_code: u16,

@@ -139,7 +139,7 @@ function buildAxis(devices, direction, expandedSet, filter, subscriptionsFor, gr
           label,
           name: channel.name,
           number: channel.number,
-          subscription: subscriptionsFor ? subscriptionsFor(device, channel.name) : null,
+          subscription: subscriptionsFor ? subscriptionsFor(device, channel.number) : null,
         });
       };
       if (groups.enabled) {
@@ -165,13 +165,13 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
     const byChannel = new Map();
     for (const subscription of device.subscriptions || []) {
       if (subscription.tx_device && subscription.tx_channel) {
-        byChannel.set(subscription.rx_channel, subscription);
+        byChannel.set(subscription.rx_channel_number, subscription);
       }
     }
     subscriptionIndex.set(format.deviceLabel(device), byChannel);
   }
-  const subscriptionsFor = (device, channelName) =>
-    subscriptionIndex.get(format.deviceLabel(device)).get(channelName) || null;
+  const subscriptionsFor = (device, channelNumber) =>
+    subscriptionIndex.get(format.deviceLabel(device)).get(channelNumber) || null;
   const columns = buildAxis(sorted, "transmitters", expandedTransmitters, transmitterFilter, null, groups);
   const rows = buildAxis(sorted, "receivers", expandedReceivers, receiverFilter, subscriptionsFor, groups);
   for (const entry of rows) {
@@ -181,7 +181,7 @@ export function buildMatrixModel({ devices, expandedReceivers, expandedTransmitt
       const update = pending[pendingKey(deviceRequestName(entry.device), channel.number)]
         || pending[pendingKey(entry.label, channel.number)];
       if (update) return ["pending"];
-      const subscription = subscriptionIndex.get(entry.label).get(channel.name);
+      const subscription = subscriptionIndex.get(entry.label).get(channel.number);
       return subscription ? [subscriptionSeverity(subscription)] : [];
     });
     if (!severities.length) continue;
@@ -265,7 +265,7 @@ export function cellState(row, column, subscriptionIndex, pending, flipped = fal
   let count = 0;
   let worst = 0;
   for (const subscription of receiverSubscriptions.values()) {
-    if (row.kind === "group" && !row.channels.some((channel) => channel.name === subscription.rx_channel)) continue;
+    if (row.kind === "group" && !row.channels.some((channel) => channel.number === subscription.rx_channel_number)) continue;
     if (column.kind === "group" && !column.channels.some((channel) => channel.name === subscription.tx_channel)) continue;
     if (subscription.tx_device !== column.label) {
       continue;

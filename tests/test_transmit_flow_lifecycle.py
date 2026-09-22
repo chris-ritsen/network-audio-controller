@@ -43,66 +43,55 @@ FIXTURE_DIRECTORY = Path(__file__).parent / "fixtures" / "transmit_flow_lifecycl
 
 
 def fixture(name: str) -> bytes:
-    return (FIXTURE_DIRECTORY / name).read_bytes()
-
-
-def test_promoted_flow_fixtures_are_digest_bound_and_builders_match_requests():
     provenance = json.loads((FIXTURE_DIRECTORY / "provenance.json").read_text(encoding="utf-8"))
     records = {name: record for cohort in provenance["cohorts"].values() for name, record in cohort["files"].items()}
-    for name, record in records.items():
-        payload = fixture(name)
-        assert len(payload) == record["size_bytes"]
-        assert hashlib.sha256(payload).hexdigest() == record["sha256"]
-
-    assert core.build_command(
-        {
-            "command": "create_tx_flow",
-            "flow_protocol_id": 0x2729,
-            "flow_slot": 2,
-            "channels": [2],
-            "transaction_id": 0x2201,
-        }
-    ) == fixture("legacy-2729-create-request.bin")
-    assert core.build_command(
-        {
-            "command": "delete_tx_flow",
-            "flow_protocol_id": 0x2729,
-            "flow_slot": 2,
-            "transaction_id": 0x2202,
-        }
-    ) == fixture("legacy-2729-delete-request.bin")
-    assert core.build_command(
-        {
-            "command": "create_multicast_flow_2809",
-            "channels": [1, 2],
-            "media_local_flow_id": 2,
-            "transport": "native",
-            "request_options_word": 0,
-            "transaction_id": 0x3CF2,
-        }
-    ) == fixture("modern-2809-create-request.bin")
-    assert core.build_command(
-        {
-            "command": "delete_tx_flow",
-            "flow_protocol_id": 0x2809,
-            "flow_slot": 2,
-            "transaction_id": 0x1602,
-        }
-    ) == fixture("modern-2809-delete-request.bin")
+    payload = (FIXTURE_DIRECTORY / name).read_bytes()
+    assert len(payload) == records[name]["size_bytes"]
+    assert hashlib.sha256(payload).hexdigest() == records[name]["sha256"]
+    return payload
 
 
 def test_promoted_modern_acknowledgement_and_readback_reject_truncation():
     acknowledgement = fixture("modern-2809-create-acknowledgement.bin")
-    assert core.parse_response("multicast_flow_creation_2809", acknowledgement)["channels"] == [1, 2]
+    allocation = core.parse_response("multicast_flow_creation_2809", acknowledgement)
+    assert allocation["channels"] == [1, 2]
+    assert core.command_acknowledgement(acknowledgement)["allocation"] == allocation
+
     for length in range(len(acknowledgement)):
         with pytest.raises(core.NetaudioCoreError):
             core.parse_response("multicast_flow_creation_2809", acknowledgement[:length])
 
-    readback = fixture("modern-2809-create-readback.bin")
-    assert core.parse_response("transmitter_flow_status_page", readback)["reported_flow_count"] == 1
-    for length in range(len(readback)):
-        with pytest.raises(core.NetaudioCoreError):
-            core.parse_response("transmitter_flow_status_page", readback[:length])
+        result = core.command_acknowledgement(acknowledgement[:length])
+        assert result is None or result.get("allocation") is None
+
+    for name, count in (("modern-2809-create-readback.bin", 1), ("modern-2809-delete-readback.bin", 0)):
+        readback = fixture(name)
+        assert core.parse_response("transmitter_flow_status_page", readback)["reported_flow_count"] == count
+        for length in range(len(readback)):
+            with pytest.raises(core.NetaudioCoreError):
+                core.parse_response("transmitter_flow_status_page", readback[:length])
+
+
+@pytest.mark.parametrize("ambiguous", ["duplicate_identity", "partial_inventory"])
+def test_creation_candidate_never_confirms_ambiguous_inventory(ambiguous):
+    inventory = core.parse_response("transmitter_flow_status_page", fixture("modern-2809-create-readback.bin"))
+    record = inventory["flows"][0]
+    flow_id = record.get("global_flow_id", record.get("flow_number"))
+    if ambiguous == "duplicate_identity":
+        inventory["flows"].append(deepcopy(record))
+    else:
+        inventory["page_disposition"] = "more_pages"
+    _, candidate, comparison = flow_lifecycle._creation_candidate(
+        before={"flows": []},
+        after=inventory,
+        requested=specification(
+            identity=FlowIdentity(media_local_flow_id=2), protocol=FlowProtocolRequirements(protocol_id=0x2809)
+        ),
+        protocol_id=0x2809,
+        correlated_flow_id=flow_id,
+    )
+    assert candidate is None
+    assert comparison is None
 
 
 def test_native_builders_reject_channel_overflow_and_invalid_slot_mappings():
@@ -173,9 +162,8 @@ def device(protocol_id=0x2729, *, managed=False, locked=False):
     return SimpleNamespace(
         flow_protocol_id=protocol_id,
         transmit_flow_authoring_capability_word=capability_word,
-        transmit_flow_authoring_opcode=0x2601 if modern_authoring else 0x2201,
-        transmit_flow_authoring_protocol_id=0x2809 if modern_authoring else 0x2729,
-        receiver_flow_inventory_opcode=0x3600 if modern_authoring else 0x3200,
+        transmit_flow_authoring=core.flow_authoring_capabilities(capability_word)["transmit_flow_authoring"],
+        receiver_flow_inventory_family="modern" if modern_authoring else "legacy",
         requires_managed_control=managed,
         is_locked=locked,
         tx_channels={1: object(), 2: object()},
@@ -257,27 +245,37 @@ def test_canonical_specification_rejects_invalid_mapping_or_destination(change, 
         specification(**change)
 
 
-def test_inventory_conversion_retains_the_complete_raw_record():
-    record = {
-        "global_flow_id": 2,
-        "media_type_code": 3,
-        "media_local_flow_id": 2,
-        "flow_name": "Program",
-        "flow_type": "multicast",
-        "transmitter_channel_ids_by_slot": [1, 0, 2],
-        "sample_rate": 48_000,
-        "encoding": 24,
-        "frames_per_packet": 48,
-        "destination_internet_protocol_version_four_address": "239.1.2.3",
-        "destination_user_datagram_port": 5004,
-        "unmapped_extension": "retained",
-    }
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": True},
+        {"schema_version": 2},
+        {"media_mode": "guessed"},
+        {"flow_type": "guessed"},
+        {"channel_slots": []},
+        {"channel_slots": [{"slot": 0, "transmitter_channel": 1}]},
+        {"channel_slots": [{"slot": 1, "transmitter_channel": True}]},
+        {"channel_slots": [{"slot": 1, "transmitter_channel": 1}, {"slot": 2, "transmitter_channel": 1}]},
+        {"name": "bad\0name"},
+        {"sample_rate_hz": 1 << 32},
+        {"encoding_bits": True},
+        {"frames_per_packet": 0},
+        {"primary_destination": {"address": "192.0.2.1", "port": 5004}},
+        {"primary_destination": {"address": "239.1.1.1", "port": 0}},
+        {"secondary_destination": {"address": "239.1.1.1", "port": 5004}},
+        {"redundancy": "required"},
+        {"identity": {"global_flow_id": 0}},
+        {"protocol": {"required_capabilities": ["routing", "routing"]}},
+    ],
+)
+def test_native_and_python_flow_specifications_reject_the_same_invalid_state(change):
+    value = {**specification().to_dict(), **change}
 
-    parsed = TransmitFlowSpecification.from_inventory_record(record, protocol_id=0x2809)
+    with pytest.raises(core.NetaudioCoreError):
+        core.validate_transmit_flow_specification(value)
 
-    assert [(entry.slot, entry.transmitter_channel) for entry in parsed.channel_slots] == [(1, 1), (3, 2)]
-    assert parsed.raw_fields == record
-    assert parsed.to_dict()["raw_fields"]["unmapped_extension"] == "retained"
+    with pytest.raises(ValueError):
+        TransmitFlowSpecification.from_dict(value)
 
 
 def test_comparison_only_requires_optional_authoring_fields_when_requested():
@@ -297,24 +295,182 @@ def test_comparison_only_requires_optional_authoring_fields_when_requested():
     comparison = compare_transmit_flows(changed, effective)
     assert not comparison.matches
     assert comparison.differences[0].field == "sample_rate_hz"
+    assert core.compare_transmit_flows(changed.to_dict(), effective.to_dict()) == comparison.to_dict()
 
 
-def test_modern_inventory_keeps_unobserved_media_mode_unknown():
-    parsed = TransmitFlowSpecification.from_inventory_record(
-        {
-            "global_flow_id": 2,
-            "media_type_code": 3,
-            "media_local_flow_id": 7,
-            "flow_name": "Program",
-            "flow_type": "multicast",
-            "transmitter_channel_ids_by_slot": [1, 2],
-            "sample_rate": 48_000,
-            "encoding": 24,
-        },
-        protocol_id=0x2809,
+@pytest.mark.parametrize("extension", ["channel_slots", "primary_destination"])
+def test_flow_comparison_ignores_annotations_not_encoded_on_the_wire(extension):
+    fields = {}
+
+    if extension == "channel_slots":
+        fields[extension] = (
+            TransmitterChannelSlot(1, 1, extra_fields={"description": "Console"}),
+            TransmitterChannelSlot(2, 2),
+        )
+    else:
+        fields[extension] = FlowSocket("239.69.1.2", 5004, extra_fields={"description": "Studio"})
+
+    requested = specification(**fields)
+    effective = specification(
+        primary_destination=FlowSocket("239.69.1.2", 5004) if extension == "primary_destination" else None
     )
 
-    assert parsed.media_mode is MediaMode.UNKNOWN
+    assert compare_transmit_flows(requested, effective).matches
+
+
+def test_flow_comparison_does_not_confirm_missing_required_state():
+    comparison = core.compare_transmit_flows(specification().to_dict(), {})
+
+    assert comparison["matches"] is False
+    assert {"media_mode", "flow_type", "channel_slots"} <= set(comparison["unavailable_fields"])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("media_mode", 3),
+        ("flow_type", "unknown"),
+        ("channel_slots", [{"slot": 0, "transmitter_channel": 1}]),
+        ("channel_slots", [{"slot": 1, "transmitter_channel": 1}, {"slot": 1, "transmitter_channel": 2}]),
+        ("primary_destination", {"address": "not an address", "port": 5004}),
+        ("sample_rate_hz", True),
+    ],
+)
+def test_native_flow_comparison_does_not_confirm_malformed_fields(field, value):
+    requested = {**specification().to_dict(), field: value}
+    comparison = core.compare_transmit_flows(requested, requested)
+
+    assert comparison["matches"] is False
+    assert field in comparison["unavailable_fields"]
+
+
+@pytest.mark.parametrize("protocol_id", [0x2729, 0x2809])
+@pytest.mark.parametrize("raw_fields", [{}, {"request_options_word": None}])
+def test_native_flow_plan_produces_capture_backed_command(protocol_id, raw_fields):
+    modern = protocol_id == 0x2809
+    plan = core.plan_transmit_flow_create(
+        {
+            "protocol_id": protocol_id,
+            "device": flow_lifecycle._flow_device_facts(device(protocol_id)),
+            "specification": specification(
+                channel_slots=(
+                    (TransmitterChannelSlot(1, 1), TransmitterChannelSlot(2, 2))
+                    if modern
+                    else (TransmitterChannelSlot(1, 2),)
+                ),
+                identity=FlowIdentity(media_local_flow_id=2) if modern else FlowIdentity(global_flow_id=2),
+                protocol=FlowProtocolRequirements(protocol_id=protocol_id),
+                raw_fields=raw_fields,
+            ).to_dict(),
+        }
+    )
+    assert plan["reasons"] == []
+    command = {**plan["command"], "message_id": 0x3CF2 if modern else 1}
+
+    if modern:
+        assert core.build_command(command) == fixture("modern-2809-create-request.bin")
+    else:
+        # The retained legacy fixture carries its own transaction identifier.
+        expected = fixture("legacy-2729-create-request.bin")
+        command["message_id"] = int.from_bytes(expected[4:6], "big")
+        assert core.build_command(command) == expected
+
+
+def test_native_flow_plan_rejects_conflicting_protocol_requirement():
+    plan = core.plan_transmit_flow_create(
+        {
+            "protocol_id": 0x2809,
+            "device": flow_lifecycle._flow_device_facts(device(0x2809)),
+            "specification": specification(identity=FlowIdentity(media_local_flow_id=2)).to_dict(),
+        }
+    )
+
+    assert plan["command"] is None
+    assert any("protocol" in reason and "match" in reason for reason in plan["reasons"])
+
+
+@pytest.mark.parametrize("channels", [list(range(1, 216)), [1, 1]])
+def test_native_flow_plan_never_accepts_a_command_the_serializer_rejects(channels):
+    value = specification(
+        identity=FlowIdentity(media_local_flow_id=7),
+        protocol=FlowProtocolRequirements(protocol_id=0x2809),
+    ).to_dict()
+    value["channel_slots"] = [
+        {"slot": slot, "transmitter_channel": channel} for slot, channel in enumerate(channels, 1)
+    ]
+    plan = core.plan_transmit_flow_create(
+        {
+            "protocol_id": 0x2809,
+            "specification": value,
+            "device": flow_lifecycle._flow_device_facts(device(0x2809)),
+        }
+    )
+    assert plan["reasons"]
+    assert plan["command"] is None
+
+
+@pytest.mark.parametrize("protocol_id", [0x2729, 0x2809])
+def test_native_delete_plan_produces_capture_backed_command(protocol_id):
+    modern = protocol_id == 0x2809
+    plan = core.plan_transmit_flow_delete(
+        {"protocol_id": protocol_id, "flow_id": 2, "device": flow_lifecycle._flow_device_facts(device(protocol_id))}
+    )
+    expected = fixture("modern-2809-delete-request.bin" if modern else "legacy-2729-delete-request.bin")
+    command = {**plan["command"], "message_id": int.from_bytes(expected[4:6], "big")}
+    assert not plan["reasons"]
+    assert core.build_command(command) == expected
+
+
+@pytest.mark.parametrize("protocol_id,flow_id", [(0x2809, 3), (0x2801, 2), (0x2729, 33), (None, 2)])
+def test_native_delete_plan_rejects_unestablished_or_unrepresentable_request(protocol_id, flow_id):
+    plan = core.plan_transmit_flow_delete(
+        {
+            "protocol_id": protocol_id,
+            "flow_id": flow_id,
+            "device": flow_lifecycle._flow_device_facts(device(protocol_id)),
+        }
+    )
+    assert plan["reasons"]
+    assert plan["command"] is None
+
+
+@pytest.mark.parametrize("operation", ["create", "delete"])
+@pytest.mark.parametrize(
+    "field,value,reason",
+    [
+        ("managed", True, "managed"),
+        ("locked", True, "device is locked"),
+        ("locked", None, "lock state is unknown"),
+        ("capability_word", None, "capability word is unavailable"),
+        ("capability_word", True, "capability word is unavailable"),
+    ],
+)
+def test_native_flow_planner_enforces_device_preconditions(operation, field, value, reason):
+    facts = flow_lifecycle._flow_device_facts(device())
+    facts[field] = value
+    request = {"protocol_id": 0x2729, "device": facts}
+    if operation == "create":
+        result = core.plan_transmit_flow_create({**request, "specification": specification().to_dict()})
+    else:
+        result = core.plan_transmit_flow_delete({**request, "flow_id": 2})
+    assert result["command"] is None
+    assert any(reason in item for item in result["reasons"])
+
+
+def test_flow_plan_rejects_sparse_slots_instead_of_silently_renumbering_them():
+    requested = specification(
+        channel_slots=(TransmitterChannelSlot(1, 1), TransmitterChannelSlot(3, 2)),
+    )
+    plan = flow_lifecycle.plan_create_transmit_flow(device(), requested)
+    assert not plan.supported
+    assert "contiguous" in "; ".join(plan.reasons)
+
+
+def test_delete_planner_gets_wire_limits_from_native_plan():
+    plan = flow_lifecycle.plan_delete_transmit_flow(device(), 33)
+    assert not plan.supported
+    assert plan.command_specification is None
+    assert plan.reasons
 
 
 def test_planner_separates_supported_direct_and_unsupported_managed_or_rtp_paths():
@@ -402,9 +558,9 @@ async def test_create_fails_closed_before_mutation_when_fresh_authoring_family_i
 
 @pytest.mark.asyncio
 async def test_legacy_create_preserves_acknowledgement_and_verifies_fresh_readback(monkeypatch):
-    before = {"max_flow_slots": 4, "flows": []}
+    before = {"maximum_flow_slots": 4, "flows": []}
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "flow_number": 2,
@@ -459,7 +615,7 @@ async def test_static_modern_native_create_serializes_fields_without_format_muta
         raw_fields={"request_options_word": 1},
     )
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "global_flow_id": 2,
@@ -475,7 +631,7 @@ async def test_static_modern_native_create_serializes_fields_without_format_muta
             }
         ],
     }
-    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    inventories = iter(({"maximum_flow_slots": 4, "flows": []}, after))
     sent = []
     acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
     acknowledgement[40:42] = (7).to_bytes(2, "big")
@@ -533,7 +689,7 @@ async def test_static_rtp_create_correlates_allocated_and_media_local_identities
         protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
     )
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "global_flow_id": 2,
@@ -551,7 +707,7 @@ async def test_static_rtp_create_correlates_allocated_and_media_local_identities
             }
         ],
     }
-    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    inventories = iter(({"maximum_flow_slots": 4, "flows": []}, after))
     sent = []
     acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
     acknowledgement[40:42] = (7).to_bytes(2, "big")
@@ -606,7 +762,7 @@ async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch
         protocol=FlowProtocolRequirements(protocol_id=0x2809, cohort="modern_2809"),
     )
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "global_flow_id": 2,
@@ -622,7 +778,7 @@ async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch
             }
         ],
     }
-    inventories = iter(({"max_flow_slots": 4, "flows": []}, after))
+    inventories = iter(({"maximum_flow_slots": 4, "flows": []}, after))
     acknowledgement = bytearray(fixture("modern-2809-create-acknowledgement.bin"))
     acknowledgement[40:42] = (7).to_bytes(2, "big")
     sent = []
@@ -653,7 +809,19 @@ async def test_modern_create_keeps_unexposed_readback_fields_partial(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_modern_create_requires_fresh_format_preconditions_before_sending(monkeypatch):
+@pytest.mark.parametrize(
+    "readback",
+    [
+        "timeout",
+        None,
+        {},
+        {"current_value": True},
+        {"current_value": 0},
+        {"current_value": -1},
+        {"current_value": 2**32},
+    ],
+)
+async def test_modern_create_requires_fresh_format_preconditions_before_sending(monkeypatch, readback):
     requested = specification(
         sample_rate_hz=48_000,
         encoding_bits=24,
@@ -663,12 +831,15 @@ async def test_modern_create_requires_fresh_format_preconditions_before_sending(
     target = device(protocol_id=0x2809)
 
     async def unavailable_probe(_device, timeout=2.0):
-        raise RuntimeError("readback unavailable")
+        if readback == "timeout":
+            raise TimeoutError("readback unavailable")
+
+        return readback
 
     target.application.probe_sample_rate_status = unavailable_probe
 
     async def read_inventory(_device, _protocol_id):
-        return {"max_flow_slots": 4, "flows": []}
+        return {"maximum_flow_slots": 4, "flows": []}
 
     sent = []
 
@@ -688,9 +859,49 @@ async def test_modern_create_requires_fresh_format_preconditions_before_sending(
     assert sent == []
 
 
+@pytest.mark.parametrize(
+    "value,state",
+    [
+        (48_000, "confirmed"),
+        (96_000, "unverified"),
+        (0, "unavailable"),
+        (True, "unavailable"),
+        (2**32, "unavailable"),
+        (None, "unavailable"),
+    ],
+)
+def test_flow_format_readback_requires_a_valid_positive_wire_value(value, state):
+    result = core.flow_format_readback({"current_value": value}, 48_000)
+
+    assert result["state"] == state
+    assert result["effective_state_confirmed"] is (state == "confirmed")
+
+
+@pytest.mark.parametrize(
+    "inventory,flow_id,state",
+    [
+        (None, 2, "unavailable"),
+        ({"flows": []}, 2, "unavailable"),
+        ({"maximum_flow_slots": True, "flows": []}, 2, "unavailable"),
+        ({"maximum_flow_slots": 4, "flows": [], "page_disposition": "more_pages"}, 2, "unavailable"),
+        ({"maximum_flow_slots": 4, "flows": []}, 2, "ready"),
+        ({"maximum_flow_slots": 4, "flows": []}, None, "ready"),
+        ({"maximum_flow_slots": 0, "flows": []}, 2, "rejected"),
+        ({"maximum_flow_slots": 4, "flows": []}, 5, "rejected"),
+        ({"maximum_flow_slots": 4, "flows": [{"flow_number": 2}]}, 2, "rejected"),
+        ({"maximum_flow_slots": 1, "flows": [{"flow_number": 1}]}, None, "rejected"),
+    ],
+)
+def test_flow_create_preflight_uses_complete_inventory_and_advertised_capacity(inventory, flow_id, state):
+    result = core.flow_create_preflight({"inventory": inventory, "requested_flow_id": flow_id})
+
+    assert result["state"] == state
+    assert bool(result["reason"]) is (state != "ready")
+
+
 @pytest.mark.asyncio
 async def test_create_reports_acknowledged_without_readback_as_partial(monkeypatch):
-    inventories = iter(({"max_flow_slots": 4, "flows": []}, None))
+    inventories = iter(({"maximum_flow_slots": 4, "flows": []}, None))
 
     async def read_inventory(_device, _protocol_id):
         return next(inventories)
@@ -719,18 +930,13 @@ async def test_rejected_acknowledgement_does_not_invent_confirmation(monkeypatch
 
     async def read_inventory(_device, _protocol_id):
         reads.append(True)
-        return {"max_flow_slots": 4, "flows": []}
+        return {"maximum_flow_slots": 4, "flows": []}
 
     async def send_once(_device, _command):
-        return b"rejected"
+        return bytes.fromhex("2729000a000122010007")
 
     monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
     monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
-    monkeypatch.setattr(
-        flow_lifecycle,
-        "_acknowledgement",
-        lambda _response: {"received": True, "parseable": True, "result_code": 7, "accepted": False},
-    )
 
     result = await flow_lifecycle.create_transmit_flow(device(), specification())
 
@@ -759,8 +965,8 @@ async def test_delete_requires_absent_readback_and_unchanged_unrelated_flows(mon
     }
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": [deepcopy(other), target]},
-            {"max_flow_slots": 4, "flows": [deepcopy(other)]},
+            {"maximum_flow_slots": 4, "flows": [deepcopy(other), target]},
+            {"maximum_flow_slots": 4, "flows": [deepcopy(other)]},
         )
     )
 
@@ -783,6 +989,64 @@ async def test_delete_requires_absent_readback_and_unchanged_unrelated_flows(mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["preflight", "post_write"])
+@pytest.mark.parametrize("invalid", ["partial", "duplicate_identity", "missing_records", "count_mismatch"])
+async def test_delete_never_uses_incomplete_or_ambiguous_inventory_as_confirmation(monkeypatch, stage, invalid):
+    target = {"flow_number": 2, "flow_type": "multicast", "channels": [1, 2], "sample_rate": 48000, "encoding": 24}
+    other = {**target, "flow_number": 1}
+    bad = {
+        "partial": {"page_disposition": "more_pages", "flows": []},
+        "duplicate_identity": {"flows": [other, deepcopy(other)]},
+        "missing_records": {},
+        "count_mismatch": {"reported_flow_count": 2, "flows": []},
+    }[invalid]
+    inventories = iter([bad] if stage == "preflight" else [{"flows": [target]}, bad])
+    sent = []
+
+    async def read_inventory(*_args):
+        return next(inventories)
+
+    async def send_once(_device, command):
+        sent.append(command)
+        return bytes.fromhex("2729000a000122020001")
+
+    async def no_more_polls(_deadline):
+        return False
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    monkeypatch.setattr(flow_lifecycle, "_wait_for_next_poll", no_more_polls)
+    result = await flow_lifecycle.delete_transmit_flow(device(), 2)
+    assert result.effective_state_confirmation is not True
+    assert result.state is (FlowLifecycleState.PENDING if stage == "preflight" else FlowLifecycleState.PARTIAL)
+    assert len(sent) == (0 if stage == "preflight" else 1)
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_call_missing_readback_fields_a_contradiction(monkeypatch):
+    target = {"flow_number": 2, "flow_type": "multicast", "channels": [1, 2], "sample_rate": 48000, "encoding": 24}
+    incomplete = {key: value for key, value in target.items() if key != "encoding"}
+    inventories = iter([{"flows": [target]}, {"flows": [incomplete]}])
+
+    async def read_inventory(*_args):
+        return next(inventories)
+
+    async def send_once(*_args):
+        return bytes.fromhex("2729000a000122020001")
+
+    async def no_more_polls(_deadline):
+        return False
+
+    monkeypatch.setattr(flow_lifecycle, "_read_inventory", read_inventory)
+    monkeypatch.setattr(flow_lifecycle, "_send_once", send_once)
+    monkeypatch.setattr(flow_lifecycle, "_wait_for_next_poll", no_more_polls)
+    result = await flow_lifecycle.delete_transmit_flow(device(), 2)
+    assert result.state is FlowLifecycleState.PARTIAL
+    assert result.effective_state_confirmation is None
+    assert result.comparison.unavailable_fields == ("encoding_bits",)
+
+
+@pytest.mark.asyncio
 async def test_delete_acknowledged_timeout_is_partial_and_does_not_retry_write(monkeypatch):
     target = {
         "flow_number": 2,
@@ -791,7 +1055,7 @@ async def test_delete_acknowledged_timeout_is_partial_and_does_not_retry_write(m
         "sample_rate": 48_000,
         "encoding": 24,
     }
-    inventory = {"max_flow_slots": 4, "flows": [target]}
+    inventory = {"maximum_flow_slots": 4, "flows": [target]}
     sent = []
 
     async def read_inventory(_device, _protocol_id):
@@ -816,9 +1080,9 @@ async def test_delete_acknowledged_timeout_is_partial_and_does_not_retry_write(m
 
 @pytest.mark.asyncio
 async def test_create_polls_until_change_is_visible_and_sends_only_once(monkeypatch):
-    before = {"max_flow_slots": 4, "flows": []}
+    before = {"maximum_flow_slots": 4, "flows": []}
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "flow_number": 2,
@@ -860,9 +1124,9 @@ async def test_create_polls_until_change_is_visible_and_sends_only_once(monkeypa
 
 @pytest.mark.asyncio
 async def test_create_lost_acknowledgement_can_be_confirmed_by_fresh_readback(monkeypatch):
-    before = {"max_flow_slots": 4, "flows": []}
+    before = {"maximum_flow_slots": 4, "flows": []}
     after = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "flow_number": 2,
@@ -894,9 +1158,9 @@ async def test_create_lost_acknowledgement_can_be_confirmed_by_fresh_readback(mo
 
 @pytest.mark.asyncio
 async def test_create_definitive_contradiction_is_inconsistent(monkeypatch):
-    before = {"max_flow_slots": 4, "flows": []}
+    before = {"maximum_flow_slots": 4, "flows": []}
     contradictory = {
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "flows": [
             {
                 "flow_number": 2,
@@ -946,8 +1210,8 @@ async def test_unrelated_volatile_fields_do_not_create_false_inconsistency(monke
     }
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": [other_before]},
-            {"max_flow_slots": 4, "flows": [other_after, target]},
+            {"maximum_flow_slots": 4, "flows": [other_before]},
+            {"maximum_flow_slots": 4, "flows": [other_after, target]},
         )
     )
 
@@ -964,6 +1228,19 @@ async def test_unrelated_volatile_fields_do_not_create_false_inconsistency(monke
 
     assert result.state is FlowLifecycleState.CONFIRMED
     assert result.verification_observations[-1]["inventory"]["flows"][0]["diagnostic_counter"] == 2
+
+
+def test_topology_comparison_ignores_order_target_and_uninterpreted_payload():
+    known = {"flow_number": 1, "flow_type": "unicast", "channels": [1], "sample_rate": 48000, "encoding": 24}
+    unknown = {"flow_number": 3, "opaque": [1, 2, 3]}
+    target = {**known, "flow_number": 2}
+    before = {"flows": [known, unknown, target]}
+    after = {"flows": [{**unknown, "opaque": [9]}, {**known, "diagnostic_counter": 99}]}
+    assert flow_lifecycle._concurrent_topology_activity(before, after, 0x2729, target_flow_id=2) is None
+    after["flows"][1]["encoding"] = 16
+    change = flow_lifecycle._concurrent_topology_activity(before, after, 0x2729, target_flow_id=2)
+    assert change is not None
+    assert len(change["before"]) == len(change["after"]) == 2
 
 
 @pytest.mark.asyncio
@@ -1000,8 +1277,8 @@ async def test_actual_unrelated_flow_change_is_recorded_without_blocking_confirm
         after_flows = [target, {**other, "encoding": 16}]
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": before_flows},
-            {"max_flow_slots": 4, "flows": after_flows},
+            {"maximum_flow_slots": 4, "flows": before_flows},
+            {"maximum_flow_slots": 4, "flows": after_flows},
         )
     )
 
@@ -1040,9 +1317,9 @@ async def test_create_continues_polling_after_concurrent_topology_activity(monke
     }
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": [other]},
-            {"max_flow_slots": 4, "flows": [changed_other]},
-            {"max_flow_slots": 4, "flows": [changed_other, target]},
+            {"maximum_flow_slots": 4, "flows": [other]},
+            {"maximum_flow_slots": 4, "flows": [changed_other]},
+            {"maximum_flow_slots": 4, "flows": [changed_other, target]},
         )
     )
 
@@ -1089,8 +1366,8 @@ async def test_delete_confirms_absence_despite_concurrent_topology_activity(monk
     }
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": [other, target]},
-            {"max_flow_slots": 4, "flows": [{**other, "encoding": 16}]},
+            {"maximum_flow_slots": 4, "flows": [other, target]},
+            {"maximum_flow_slots": 4, "flows": [{**other, "encoding": 16}]},
         )
     )
 
@@ -1121,8 +1398,8 @@ async def test_delete_correlated_target_change_is_inconsistent(monkeypatch):
     }
     inventories = iter(
         (
-            {"max_flow_slots": 4, "flows": [target]},
-            {"max_flow_slots": 4, "flows": [{**target, "encoding": 16}]},
+            {"maximum_flow_slots": 4, "flows": [target]},
+            {"maximum_flow_slots": 4, "flows": [{**target, "encoding": 16}]},
         )
     )
 

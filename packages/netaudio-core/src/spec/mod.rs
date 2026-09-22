@@ -10,6 +10,18 @@ use crate::protocol::NetaudioError;
 
 mod command_defaults;
 mod command_values;
+mod external_subscription;
+mod managed;
+mod subscription_plan;
+
+pub use command_spec::plan_performance_command;
+pub(crate) use command_spec::SubscriptionPageEntry;
+pub use external_subscription::{
+    external_subscription_readback, ExternalReadbackRequest, ExternalSubscriptionReadback,
+};
+pub use managed::{build_managed_command, ManagedCommand, ManagedCommandRequest};
+pub use subscription_plan::{plan_subscription_commands, Receiver};
+pub(crate) use subscription_plan::{plan_subscription_request, SubscriptionPlanRequest};
 
 #[derive(Debug)]
 pub enum SpecError {
@@ -45,7 +57,9 @@ impl From<NetaudioError> for SpecError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
 pub enum Target {
     Arc,
     Control,
@@ -72,13 +86,17 @@ pub fn build_routed_command(
     assign_message_id: impl FnOnce() -> u16,
 ) -> Result<Routed, SpecError> {
     let mut spec = parse_command_spec(json)?;
-    if let Some(message_id) = spec.message_id_mut() {
+    let message_id = if let Some(message_id) = spec.message_id_mut() {
         if *message_id == 0 {
             *message_id = assign_message_id();
         }
-    }
+
+        *message_id
+    } else {
+        0
+    };
+
     let (target, io) = spec.route();
-    let message_id = spec.message_id();
     let packet = build_command(spec, default_host_mac)?;
     Ok(Routed {
         io,

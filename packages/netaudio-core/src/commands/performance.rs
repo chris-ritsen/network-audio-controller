@@ -1,12 +1,5 @@
 use super::*;
 
-pub const PERFORMANCE_PROTOCOL_FLOOR_2601: u16 = 0x2601;
-pub const PERFORMANCE_PROTOCOL_FLOOR_280A: u16 = 0x280a;
-const PERFORMANCE_PROTOCOL_FLOORS: [u16; 2] = [
-    PERFORMANCE_PROTOCOL_FLOOR_2601,
-    PERFORMANCE_PROTOCOL_FLOOR_280A,
-];
-
 pub const PROPERTY_TX_FLOW_LATENCY_NS: u16 = 0x8204;
 pub const PROPERTY_UNICAST_CONFIGURED_LATENCY_NS: u16 = 0x8205;
 pub const PROPERTY_TX_FLOW_FRAMES_PER_PACKET: u16 = 0x0210;
@@ -27,24 +20,28 @@ pub const PERFORMANCE_PROPERTY_IDS: [u16; 8] = [
     PROPERTY_PRE_3_COMPATIBILITY,
 ];
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PerformanceProperty {
+    pub property_id: u16,
+    pub value: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PropertyValue {
+pub(crate) enum PropertyValue {
     InlineU16(u16),
     ReferencedU32(u32),
 }
 
-fn capped_protocol_id(negotiated_protocol_id: u16) -> u16 {
-    negotiated_protocol_id.min(PROTOCOL_ARC_2809)
-}
-
-fn require_performance_protocol(negotiated_protocol_id: u16) -> Result<u16, NetaudioError> {
-    if PERFORMANCE_PROTOCOL_FLOORS
-        .iter()
-        .all(|floor| negotiated_protocol_id < *floor)
+pub(crate) fn require_performance_protocol(
+    negotiated_protocol_id: u16,
+) -> Result<u16, NetaudioError> {
+    if !crate::protocol::is_supported_arc_protocol(negotiated_protocol_id)
+        && !matches!(negotiated_protocol_id, 0x2601 | 0x280a)
     {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
-    Ok(capped_protocol_id(negotiated_protocol_id))
+
+    Ok(negotiated_protocol_id.min(PROTOCOL_ARC_2809))
 }
 
 fn latency_nanoseconds(latency_microseconds: u64) -> Result<u32, NetaudioError> {
@@ -74,6 +71,19 @@ fn build_property_write(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let protocol_id = require_performance_protocol(negotiated_protocol_id)?;
+    let body = property_write_body(properties)?;
+
+    arc_packet_with_reserved_word(
+        protocol_id,
+        OPCODE_DEVICE_SETTINGS_SET,
+        &body,
+        transaction_id,
+    )
+}
+
+pub(crate) fn property_write_body(
+    properties: &[(u16, PropertyValue)],
+) -> Result<Vec<u8>, NetaudioError> {
     let count = u8::try_from(properties.len()).map_err(|_| NetaudioError::PacketTooLarge)?;
     let directory_bytes = properties
         .len()
@@ -107,12 +117,7 @@ fn build_property_write(
         }
     }
 
-    arc_packet_with_reserved_word(
-        protocol_id,
-        OPCODE_DEVICE_SETTINGS_SET,
-        &body,
-        transaction_id,
-    )
+    Ok(body)
 }
 
 pub fn build_store_current_configuration(
@@ -120,7 +125,7 @@ pub fn build_store_current_configuration(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     arc_packet_with_reserved_word(
-        capped_protocol_id(negotiated_protocol_id),
+        require_performance_protocol(negotiated_protocol_id)?,
         OPCODE_STORE_CURRENT_CONFIGURATION,
         &[],
         transaction_id,
@@ -132,19 +137,14 @@ pub fn build_query_performance_settings(
     property_ids: &[u16],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    require_performance_protocol(negotiated_protocol_id)?;
+    let protocol_id = require_performance_protocol(negotiated_protocol_id)?;
     let count = u16::try_from(property_ids.len()).map_err(|_| NetaudioError::PacketTooLarge)?;
     let mut body = Vec::with_capacity(2 + property_ids.len() * 2);
     body.extend_from_slice(&count.to_be_bytes());
     for property_id in property_ids {
         body.extend_from_slice(&property_id.to_be_bytes());
     }
-    arc_packet_with_reserved_word(
-        capped_protocol_id(negotiated_protocol_id),
-        OPCODE_DEVICE_SETTINGS,
-        &body,
-        transaction_id,
-    )
+    arc_packet_with_reserved_word(protocol_id, OPCODE_DEVICE_SETTINGS, &body, transaction_id)
 }
 
 pub fn build_set_receive_flow_performance(
@@ -155,6 +155,21 @@ pub fn build_set_receive_flow_performance(
     platform_software_version: [u16; 3],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    let properties = receive_flow_performance_properties(
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+        platform_software_version,
+    )?;
+    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+}
+
+pub(crate) fn receive_flow_performance_properties(
+    supported_property_ids: &[u16],
+    latency_microseconds: u64,
+    frames_per_packet: u16,
+    platform_software_version: [u16; 3],
+) -> Result<Vec<(u16, PropertyValue)>, NetaudioError> {
     let mut properties = vec![
         (
             PROPERTY_RX_FLOW_LATENCY_NS,
@@ -178,7 +193,7 @@ pub fn build_set_receive_flow_performance(
             .map(|(property_id, _)| *property_id)
             .collect::<Vec<_>>(),
     )?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    Ok(properties)
 }
 
 pub fn build_set_transmit_flow_performance(
@@ -188,7 +203,20 @@ pub fn build_set_transmit_flow_performance(
     frames_per_packet: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    let properties = [
+    let properties = transmit_flow_performance_properties(
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+    )?;
+    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+}
+
+pub(crate) fn transmit_flow_performance_properties(
+    supported_property_ids: &[u16],
+    latency_microseconds: u64,
+    frames_per_packet: u16,
+) -> Result<Vec<(u16, PropertyValue)>, NetaudioError> {
+    let properties = vec![
         (
             PROPERTY_TX_FLOW_LATENCY_NS,
             PropertyValue::ReferencedU32(latency_nanoseconds(latency_microseconds)?),
@@ -205,7 +233,7 @@ pub fn build_set_transmit_flow_performance(
             PROPERTY_TX_FLOW_FRAMES_PER_PACKET,
         ],
     )?;
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    Ok(properties)
 }
 
 pub fn build_set_unicast_performance(
@@ -216,6 +244,21 @@ pub fn build_set_unicast_performance(
     platform_software_version: [u16; 3],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    let properties = unicast_performance_properties(
+        supported_property_ids,
+        latency_microseconds,
+        frames_per_packet,
+        platform_software_version,
+    )?;
+    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+}
+
+pub(crate) fn unicast_performance_properties(
+    supported_property_ids: &[u16],
+    latency_microseconds: u64,
+    frames_per_packet: u16,
+    platform_software_version: [u16; 3],
+) -> Result<Vec<(u16, PropertyValue)>, NetaudioError> {
     let latency_ns = latency_nanoseconds(latency_microseconds)?;
     let mut properties = Vec::new();
     for (property_id, value) in [
@@ -249,7 +292,7 @@ pub fn build_set_unicast_performance(
     } else if properties.is_empty() {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
-    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+    Ok(properties)
 }
 
 pub fn build_set_receive_flow_default_slots(
@@ -258,15 +301,19 @@ pub fn build_set_receive_flow_default_slots(
     default_slots: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    let properties = receive_flow_default_slot_properties(supported_property_ids, default_slots)?;
+    build_property_write(negotiated_protocol_id, &properties, transaction_id)
+}
+
+pub(crate) fn receive_flow_default_slot_properties(
+    supported_property_ids: &[u16],
+    default_slots: u16,
+) -> Result<Vec<(u16, PropertyValue)>, NetaudioError> {
     require_properties(supported_property_ids, &[PROPERTY_RX_FLOW_DEFAULT_SLOTS])?;
-    build_property_write(
-        negotiated_protocol_id,
-        &[(
-            PROPERTY_RX_FLOW_DEFAULT_SLOTS,
-            PropertyValue::InlineU16(default_slots),
-        )],
-        transaction_id,
-    )
+    Ok(vec![(
+        PROPERTY_RX_FLOW_DEFAULT_SLOTS,
+        PropertyValue::InlineU16(default_slots),
+    )])
 }
 
 #[cfg(test)]

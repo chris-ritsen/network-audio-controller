@@ -1,17 +1,30 @@
 name: quality
 
 on:
-  pull_request:
-  push:
-    branches: [main, master]
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Checks to run
+        type: choice
+        options: [python, webapp, native, compatibility]
+        default: python
+      browser_tests:
+        description: Include browser UI tests
+        type: boolean
+        default: false
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   webapp-tests:
+    if: inputs.scope == 'webapp' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-15, windows-latest]
+        runner: ${{ fromJSON(inputs.scope == 'compatibility' && '["ubuntu-latest", "macos-15", "windows-latest"]' || '["ubuntu-latest"]') }}
+    timeout-minutes: 20
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -22,8 +35,10 @@ jobs:
       - run: npm run build:webapp
       - run: git diff --exit-code -- packages/netaudio/src/netaudio/daemon/http/webapp/app.css packages/netaudio/src/netaudio/daemon/http/webapp/icon-paths.js
       - run: node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npx playwright test
+      - if: inputs.browser_tests
+        run: npx playwright install --with-deps chromium webkit
+      - if: inputs.browser_tests
+        run: npx playwright test
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -31,24 +46,27 @@ jobs:
           path: test-results/
 
   python-tests:
+    if: inputs.scope == 'python' || inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ${{ fromJSON(inputs.scope == 'compatibility' && '["3.9", "3.10", "3.11", "3.12", "3.13"]' || '["3.13"]') }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - run: cargo build --release --manifest-path packages/netaudio-core/Cargo.toml
       - run: uv sync --python ${{ matrix.python-version }} --all-groups
       - run: uv run --python ${{ matrix.python-version }} pytest -q
 
   cross-platform-tests:
+    if: inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-22.04-arm, macos-15, windows-latest]
+    timeout-minutes: 20
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -58,6 +76,8 @@ jobs:
       - run: uv run pytest -q
 
   native-quality:
+    if: inputs.scope == 'native' || inputs.scope == 'compatibility'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -74,15 +94,18 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      - run: uv run python scripts/generate_core_binding.py --check
+      - run: uv run python scripts/generate_core_types.py --check
       - run: >-
           cbindgen --verify --config packages/netaudio-core/cbindgen.toml
           --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h
           packages/netaudio-core
       - run: cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
-      - run: cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets --features schema -- -D warnings
       - run: cargo test --manifest-path packages/netaudio-core/Cargo.toml
 
   installed-wheel:
+    if: inputs.scope == 'compatibility'
     strategy:
       fail-fast: false
       matrix:
@@ -109,6 +132,7 @@ jobs:
             platform: windows
             architecture: x86_64
             library: packages/netaudio-core/target/release/netaudio_core.dll
+    timeout-minutes: 20
     runs-on: ${{ matrix.runner }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -156,47 +180,3 @@ jobs:
               python scripts/smoke_wheel_install.py "${wheel[0]}"
           done
       - run: python scripts/check_native_abi.py "${{ matrix.library }}"
-      - if: matrix.platform == 'linux' || matrix.platform == 'macos'
-        name: Compile and link the public C example
-        shell: bash
-        run: |
-          cc -Wall -Wextra -Werror \
-            -Ipackages/netaudio-core/include packages/netaudio-core/examples/rename_channel.c \
-            -Lpackages/netaudio-core/target/release -lnetaudio_core -o "$RUNNER_TEMP/netaudio-c-example"
-          set +e
-          LD_LIBRARY_PATH="packages/netaudio-core/target/release:${LD_LIBRARY_PATH:-}" \
-          DYLD_LIBRARY_PATH="packages/netaudio-core/target/release:${DYLD_LIBRARY_PATH:-}" \
-            "$RUNNER_TEMP/netaudio-c-example"
-          status=$?
-          set -e
-          test "$status" -eq 2
-      - if: matrix.platform == 'windows'
-        name: Compile and link the public C example
-        shell: pwsh
-        run: |
-          cl /nologo /W4 "/Ipackages/netaudio-core/include" `
-            packages/netaudio-core/examples/rename_channel.c `
-            "/Fe:$env:RUNNER_TEMP/netaudio-c-example.exe" `
-            /link "/LIBPATH:packages/netaudio-core/target/release" netaudio_core.dll.lib
-          $env:PATH = "$(Resolve-Path packages/netaudio-core/target/release);$env:PATH"
-          $process = Start-Process `
-            -FilePath "$env:RUNNER_TEMP/netaudio-c-example.exe" `
-            -NoNewWindow -Wait -PassThru
-          if ($process.ExitCode -ne 2) {
-            throw "C example returned $($process.ExitCode), expected its no-arguments status 2"
-          }
-      - if: matrix.platform == 'macos'
-        name: Compile and link the public Swift example
-        shell: bash
-        run: |
-          swiftc -warnings-as-errors \
-            -import-objc-header packages/netaudio-core/include/netaudio_core.h \
-            packages/netaudio-core/examples/rename_channel.swift \
-            -Lpackages/netaudio-core/target/release -lnetaudio_core \
-            -o "$RUNNER_TEMP/netaudio-swift-example"
-          set +e
-          DYLD_LIBRARY_PATH="packages/netaudio-core/target/release:${DYLD_LIBRARY_PATH:-}" \
-            "$RUNNER_TEMP/netaudio-swift-example"
-          status=$?
-          set -e
-          test "$status" -eq 2

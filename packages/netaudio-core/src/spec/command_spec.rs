@@ -2,6 +2,72 @@ use super::command_defaults::*;
 use super::command_values::*;
 use super::*;
 
+pub fn plan_performance_command(
+    json: &str,
+) -> Result<Vec<commands::PerformanceProperty>, SpecError> {
+    // The plan must obey every validation applied when this command is encoded.
+    super::build_command_from_json(json)?;
+    let properties = match parse_command_spec(json)? {
+        CommandSpec::SetReceiveFlowPerformance {
+            supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            platform_software_version,
+            ..
+        } => commands::receive_flow_performance_properties(
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            platform_software_version,
+        )?,
+        CommandSpec::SetTransmitFlowPerformance {
+            supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            ..
+        } => commands::transmit_flow_performance_properties(
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+        )?,
+        CommandSpec::SetUnicastPerformance {
+            supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            platform_software_version,
+            ..
+        } => commands::unicast_performance_properties(
+            &supported_property_ids,
+            latency_microseconds,
+            frames_per_packet,
+            platform_software_version,
+        )?,
+        CommandSpec::SetReceiveFlowDefaultSlots {
+            supported_property_ids,
+            default_slots,
+            ..
+        } => {
+            commands::receive_flow_default_slot_properties(&supported_property_ids, default_slots)?
+        }
+        _ => {
+            return Err(SpecError::InvalidJson(
+                "command does not configure performance properties".into(),
+            ))
+        }
+    };
+
+    Ok(properties
+        .into_iter()
+        .map(|(property_id, value)| {
+            let value = match value {
+                commands::PropertyValue::InlineU16(value) => u32::from(value),
+                commands::PropertyValue::ReferencedU32(value) => value,
+            };
+            commands::PerformanceProperty { property_id, value }
+        })
+        .collect())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Subscription {
@@ -10,10 +76,10 @@ pub(super) struct Subscription {
     tx_device: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "action", rename_all = "snake_case")]
-pub(super) enum SubscriptionPageEntry {
+pub(crate) enum SubscriptionPageEntry {
     Set {
         rx_channel: u16,
         tx_channel: String,
@@ -41,9 +107,9 @@ pub(super) struct TransmitterChannelNameReconciliationEntry {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ExternalRtpDestinationSpec {
-    address: String,
+    pub(super) address: String,
     #[serde(default)]
-    port: u16,
+    pub(super) port: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,7 +124,7 @@ pub(super) enum MulticastFlowTransportSpec {
 #[serde(tag = "command", rename_all = "snake_case")]
 pub(super) enum CommandSpec {
     AddSubscriptions {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         subscriptions: Vec<Subscription>,
     },
@@ -74,11 +140,11 @@ pub(super) enum CommandSpec {
     CapabilityPartitionExport {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ChannelCount {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
@@ -86,19 +152,19 @@ pub(super) enum CommandSpec {
     ClearAllConfiguration {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ClearAllConfigurationPreservingInternetProtocolSettings {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     CmcRegister {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     #[serde(rename = "create_multicast_flow_2809")]
@@ -113,14 +179,14 @@ pub(super) enum CommandSpec {
         media_local_flow_id: u16,
         request_options_word: u16,
         transport: MulticastFlowTransportSpec,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     CreateTxFlow {
         channels: Vec<u16>,
         flow_protocol_id: u16,
         flow_slot: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     DanteModel {
@@ -129,11 +195,11 @@ pub(super) enum CommandSpec {
     DeleteTxFlow {
         flow_protocol_id: u16,
         flow_slot: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     DeviceInfo {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
@@ -141,32 +207,32 @@ pub(super) enum CommandSpec {
     DeviceLogExport {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     DeviceName {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     DeviceSettings {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     EnableAes67 {
         enabled: bool,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     FactoryReset {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     Identify {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     MakeModel {
@@ -177,7 +243,7 @@ pub(super) enum CommandSpec {
         #[serde(default)]
         ipv4: String,
         mac: String,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         port: u16,
     },
@@ -189,31 +255,31 @@ pub(super) enum CommandSpec {
     ProbeAes67 {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeClearConfigurationStatus {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeEncoding {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeCodecStatus {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeInterfaceStatus {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeInterfaceStatistics {
@@ -221,13 +287,13 @@ pub(super) enum CommandSpec {
         extended_073a: bool,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeLockResetStatus {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_lock_reset_request_value")]
         request_value: u32,
@@ -235,33 +301,33 @@ pub(super) enum CommandSpec {
     ProbeSampleRate {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeSampleRatePullup {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ProbeSwitchConfiguration {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     PropertyDirectory {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
     },
     QueryLatencyConfig {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     QueryPerformanceSettings {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
         property_ids: Vec<u16>,
@@ -272,30 +338,28 @@ pub(super) enum CommandSpec {
         ending_channel_identifier: u16,
         #[serde(default = "default_flow_start")]
         media_selector: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
-        #[serde(default = "default_modern_arc_protocol")]
         protocol_id: u16,
         #[serde(default = "default_flow_start")]
         starting_channel_identifier: u16,
     },
     #[serde(rename = "query_modern_arc_receiver_flow_status")]
     QueryModernArcReceiverFlowStatus {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
-        #[serde(default = "default_modern_arc_protocol")]
         protocol_id: u16,
         #[serde(default = "default_flow_start")]
         starting_flow: u16,
     },
     QueryReceiverFlows {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_start")]
         starting_flow: u16,
     },
     QueryReceiverPortRanges {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_protocol")]
         protocol_id: u16,
@@ -303,7 +367,7 @@ pub(super) enum CommandSpec {
     QueryTransmitChannelCapabilities {
         #[serde(default)]
         maximum_channel_count: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_start")]
         starting_channel_identifier: u16,
@@ -314,16 +378,15 @@ pub(super) enum CommandSpec {
         ending_channel_identifier: u16,
         #[serde(default = "default_flow_start")]
         media_selector: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
-        #[serde(default = "default_modern_arc_protocol")]
         protocol_id: u16,
         #[serde(default = "default_flow_start")]
         starting_channel_identifier: u16,
     },
     QueryTxFlows {
         flow_protocol_id: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_flow_start")]
         starting_flow: u16,
@@ -331,23 +394,23 @@ pub(super) enum CommandSpec {
     Reboot {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     #[serde(rename = "receive_channel_name_page_2729")]
     ReceiveChannelNamePage2729 {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         records: Vec<ReceiveChannelNamePageEntry>,
     },
     Receivers {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         page: u16,
     },
     #[serde(rename = "reconcile_transmitter_channel_names_2809")]
     ReconcileTransmitterChannelNames2809 {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         records: Vec<TransmitterChannelNameReconciliationEntry>,
     },
@@ -355,48 +418,47 @@ pub(super) enum CommandSpec {
         control: commands::ClockControl,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     RefreshClockStatus {
         record_revision: u16,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     RemoveSubscriptions {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         rx_channels: Vec<u32>,
     },
     ResetChannelName {
         channel_number: u8,
         channel_type: String,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     ResetName {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     SetAes67MulticastPrefix {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         prefix: String,
     },
     SetChannelName {
         channel_number: u16,
         channel_type: String,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         name: String,
-        #[serde(default = "default_channel_name_protocol")]
         protocol_id: u16,
     },
     SetEncoding {
         encoding: u32,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     SetGainLevel {
@@ -405,35 +467,29 @@ pub(super) enum CommandSpec {
         gain_level: u8,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     SetInterfaceDhcp {
         #[serde(default)]
         interface: crate::network::NetworkInterface,
         #[serde(default)]
-        record_protocol_identifier: Option<u16>,
-        #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     SetDanteRedundancy {
-        #[serde(default)]
-        record_protocol_identifier: Option<u16>,
         mode: crate::network::DanteRedundancyMode,
         #[serde(default)]
         switch_configuration_choice: Option<u16>,
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
     },
     SetInterfaceStatic {
         #[serde(default)]
         interface: crate::network::NetworkInterface,
-        #[serde(default)]
-        record_protocol_identifier: Option<u16>,
         #[serde(default)]
         dns: String,
         #[serde(default)]
@@ -441,20 +497,20 @@ pub(super) enum CommandSpec {
         #[serde(default)]
         host_mac: Option<String>,
         ip: String,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         netmask: String,
     },
     SetLatency {
         latency: f64,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
     },
     SetReceiveFlowDefaultSlots {
         default_slots: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
         supported_property_ids: Vec<u16>,
@@ -463,7 +519,7 @@ pub(super) enum CommandSpec {
         platform_software_version: [u16; 3],
         frames_per_packet: u16,
         latency_microseconds: u64,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
         supported_property_ids: Vec<u16>,
@@ -471,7 +527,7 @@ pub(super) enum CommandSpec {
     SetTransmitFlowPerformance {
         frames_per_packet: u16,
         latency_microseconds: u64,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
         supported_property_ids: Vec<u16>,
@@ -480,30 +536,30 @@ pub(super) enum CommandSpec {
         platform_software_version: [u16; 3],
         frames_per_packet: u16,
         latency_microseconds: u64,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
         supported_property_ids: Vec<u16>,
     },
     SetName {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         name: String,
     },
     SetSampleRate {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         sample_rate: u32,
     },
     SetSampleRatePullup {
         #[serde(default)]
         host_mac: Option<String>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         raw_value: u32,
     },
     StoreCurrentConfiguration {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         negotiated_protocol_id: u16,
     },
@@ -514,7 +570,7 @@ pub(super) enum CommandSpec {
         clock_offset: u32,
         device_protocol: u16,
         flow_slot_assignments: Vec<u16>,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         primary_destination: ExternalRtpDestinationSpec,
         receiver_channel_ids: Vec<u16>,
@@ -527,23 +583,22 @@ pub(super) enum CommandSpec {
     },
     #[serde(rename = "subscription_page_2729")]
     SubscriptionPage2729 {
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         records: Vec<SubscriptionPageEntry>,
     },
     ModernArcSubscriptionPage {
         #[serde(default = "default_flow_start")]
         media_type_code: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         page_capacity: u8,
-        #[serde(default = "default_modern_arc_protocol")]
         protocol_id: u16,
         records: Vec<SubscriptionPageEntry>,
     },
     TransmitterNames {
         channel_count: u16,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         #[serde(default = "default_arc_protocol")]
         protocol_id: u16,
@@ -551,7 +606,7 @@ pub(super) enum CommandSpec {
     Transmitters {
         #[serde(default)]
         friendly_names: bool,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         page: u16,
     },
@@ -560,7 +615,7 @@ pub(super) enum CommandSpec {
         #[serde(default)]
         ipv4: String,
         mac: String,
-        #[serde(default, alias = "sequence", alias = "transaction_id")]
+        #[serde(default)]
         message_id: u16,
         port: u16,
     },
@@ -572,87 +627,6 @@ pub(super) enum CommandSpec {
 }
 
 impl CommandSpec {
-    pub(super) fn message_id(&self) -> u16 {
-        match self {
-            CommandSpec::AddSubscriptions { message_id, .. }
-            | CommandSpec::CapabilityPartitionExport { message_id, .. }
-            | CommandSpec::ChannelCount { message_id, .. }
-            | CommandSpec::ClearAllConfiguration { message_id, .. }
-            | CommandSpec::ClearAllConfigurationPreservingInternetProtocolSettings {
-                message_id,
-                ..
-            }
-            | CommandSpec::CmcRegister { message_id, .. }
-            | CommandSpec::CreateTxFlow { message_id, .. }
-            | CommandSpec::CreateMulticastFlow2809 { message_id, .. }
-            | CommandSpec::DeleteTxFlow { message_id, .. }
-            | CommandSpec::DeviceInfo { message_id, .. }
-            | CommandSpec::DeviceLogExport { message_id, .. }
-            | CommandSpec::DeviceName { message_id, .. }
-            | CommandSpec::DeviceSettings { message_id, .. }
-            | CommandSpec::EnableAes67 { message_id, .. }
-            | CommandSpec::FactoryReset { message_id, .. }
-            | CommandSpec::Identify { message_id, .. }
-            | CommandSpec::MeteringStart { message_id, .. }
-            | CommandSpec::ProbeAes67 { message_id, .. }
-            | CommandSpec::ProbeClearConfigurationStatus { message_id, .. }
-            | CommandSpec::ProbeEncoding { message_id, .. }
-            | CommandSpec::ProbeCodecStatus { message_id, .. }
-            | CommandSpec::ProbeInterfaceStatus { message_id, .. }
-            | CommandSpec::ProbeInterfaceStatistics { message_id, .. }
-            | CommandSpec::ProbeLockResetStatus { message_id, .. }
-            | CommandSpec::ProbeSampleRate { message_id, .. }
-            | CommandSpec::ProbeSampleRatePullup { message_id, .. }
-            | CommandSpec::ProbeSwitchConfiguration { message_id, .. }
-            | CommandSpec::PropertyDirectory { message_id, .. }
-            | CommandSpec::QueryLatencyConfig { message_id, .. }
-            | CommandSpec::QueryPerformanceSettings { message_id, .. }
-            | CommandSpec::QueryModernArcReceiverChannelStatus { message_id, .. }
-            | CommandSpec::QueryModernArcReceiverFlowStatus { message_id, .. }
-            | CommandSpec::QueryReceiverFlows { message_id, .. }
-            | CommandSpec::QueryReceiverPortRanges { message_id, .. }
-            | CommandSpec::QueryTransmitChannelCapabilities { message_id, .. }
-            | CommandSpec::QueryModernArcTransmitterChannelStatus { message_id, .. }
-            | CommandSpec::QueryTxFlows { message_id, .. }
-            | CommandSpec::Reboot { message_id, .. }
-            | CommandSpec::ReceiveChannelNamePage2729 { message_id, .. }
-            | CommandSpec::Receivers { message_id, .. }
-            | CommandSpec::ReconcileTransmitterChannelNames2809 { message_id, .. }
-            | CommandSpec::PanelControl { message_id, .. }
-            | CommandSpec::ClockControl { message_id, .. }
-            | CommandSpec::RefreshClockStatus { message_id, .. }
-            | CommandSpec::RemoveSubscriptions { message_id, .. }
-            | CommandSpec::ResetChannelName { message_id, .. }
-            | CommandSpec::ResetName { message_id, .. }
-            | CommandSpec::SetAes67MulticastPrefix { message_id, .. }
-            | CommandSpec::SetChannelName { message_id, .. }
-            | CommandSpec::SetEncoding { message_id, .. }
-            | CommandSpec::SetGainLevel { message_id, .. }
-            | CommandSpec::SetInterfaceDhcp { message_id, .. }
-            | CommandSpec::SetDanteRedundancy { message_id, .. }
-            | CommandSpec::SetInterfaceStatic { message_id, .. }
-            | CommandSpec::SetLatency { message_id, .. }
-            | CommandSpec::SetReceiveFlowDefaultSlots { message_id, .. }
-            | CommandSpec::SetReceiveFlowPerformance { message_id, .. }
-            | CommandSpec::SetTransmitFlowPerformance { message_id, .. }
-            | CommandSpec::SetUnicastPerformance { message_id, .. }
-            | CommandSpec::SetName { message_id, .. }
-            | CommandSpec::SetSampleRate { message_id, .. }
-            | CommandSpec::SetSampleRatePullup { message_id, .. }
-            | CommandSpec::StoreCurrentConfiguration { message_id, .. }
-            | CommandSpec::SubscribeExternalRtp { message_id, .. }
-            | CommandSpec::SubscriptionPage2729 { message_id, .. }
-            | CommandSpec::ModernArcSubscriptionPage { message_id, .. }
-            | CommandSpec::TransmitterNames { message_id, .. }
-            | CommandSpec::Transmitters { message_id, .. }
-            | CommandSpec::VolumeStart { message_id, .. } => *message_id,
-            CommandSpec::DanteModel { .. }
-            | CommandSpec::MakeModel { .. }
-            | CommandSpec::MeteringStop { .. }
-            | CommandSpec::VolumeStop { .. } => 0,
-        }
-    }
-
     pub(super) fn message_id_mut(&mut self) -> Option<&mut u16> {
         match self {
             CommandSpec::AddSubscriptions { message_id, .. }
@@ -1215,13 +1189,11 @@ pub(super) fn build_command(
             parse_gain_device_type(&device_type)?,
         )?,
         CommandSpec::SetDanteRedundancy {
-            record_protocol_identifier,
             mode,
             switch_configuration_choice,
             host_mac,
             message_id,
         } => commands::build_set_dante_redundancy(
-            record_protocol_identifier,
             mode,
             switch_configuration_choice,
             parse_mac(&host_mac, default_host_mac)?,
@@ -1229,18 +1201,15 @@ pub(super) fn build_command(
         )?,
         CommandSpec::SetInterfaceDhcp {
             interface,
-            record_protocol_identifier,
             host_mac,
             message_id,
         } => commands::build_set_interface_dhcp(
             interface,
-            record_protocol_identifier,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,
         CommandSpec::SetInterfaceStatic {
             interface,
-            record_protocol_identifier,
             ip,
             netmask,
             dns,
@@ -1255,7 +1224,6 @@ pub(super) fn build_command(
                 gateway: parse_optional_ipv4_address(&gateway)?,
             },
             interface,
-            record_protocol_identifier,
             parse_mac(&host_mac, default_host_mac)?,
             message_id,
         )?,

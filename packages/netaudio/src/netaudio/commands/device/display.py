@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 
+from netaudio.core import canonical_device_mac
+
 from netaudio.dante.clock_config import format_clock_subdomain
-from netaudio.dante.const import BLUETOOTH_MODEL_IDS
-from netaudio.dante.latency import nanoseconds_to_milliseconds, standard_latency_choices_for_range
+from netaudio.dante.latency import nanoseconds_to_milliseconds, latency_choices
 from netaudio.dante.sample_rate_pullup import (
     format_supported_sample_rate_pullup_values,
     sample_rate_pullup_label,
@@ -135,13 +136,7 @@ def format_lock_state(device) -> str:
 
 
 def format_mac_address(mac: str | None) -> str:
-    if not mac:
-        return ""
-    raw = mac.replace(":", "").replace("-", "").upper()
-    if len(raw) == 16 and raw[6:10] == "FFFE":
-        raw = raw[:6] + raw[10:]
-    elif len(raw) == 16 and raw.endswith("0000"):
-        raw = raw[:12]
+    raw = (canonical_device_mac(mac) or "").upper()
     return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
 
 
@@ -180,7 +175,7 @@ def _format_standard_latency_choices(
     maximum_latency_milliseconds: float | None,
 ) -> str:
     return format_latency_choices_milliseconds(
-        standard_latency_choices_for_range(minimum_latency_milliseconds, maximum_latency_milliseconds)
+        latency_choices(minimum_latency_milliseconds, maximum_latency_milliseconds)
     )
 
 
@@ -207,37 +202,22 @@ def _device_encoding(device) -> int | None:
 def _format_bluetooth(device) -> str:
     if device.bluetooth_connected is True:
         return device.bluetooth_device or "connected"
+
     if device.bluetooth_connected is False:
         return "disconnected"
+
     return unknown_or_blank(device, "bluetooth")
-
-
-PTP_PORT_STATE_NAMES = {
-    1: "Initializing",
-    2: "Faulty",
-    3: "Disabled",
-    4: "Listening",
-    5: "Pre-Leader",
-    6: "Leader",
-    7: "Passive",
-    8: "Uncalibrated",
-    9: "Follower",
-}
-
-
-def ptp_port_state_name(state_code: int | None) -> str:
-    if state_code is None:
-        return ""
-    return PTP_PORT_STATE_NAMES.get(state_code, f"Unknown state (0x{state_code:04X})")
 
 
 def clock_port_name(record: dict, records: list[dict]) -> str:
     index = record.get("network_interface_index")
     interface = {0: "Primary", 1: "Secondary"}.get(
         index,
-        f"Interface {index}"
-        if index is not None
-        else f"Port {record.get('record_number', '?')} (interface unavailable)",
+        (
+            f"Interface {index}"
+            if index is not None
+            else f"Port {record.get('record_number', '?')} (interface unavailable)"
+        ),
     )
     version = {1: "v1", 2: "v2"}.get(record["ptp_version"], "")
     transport = {"multicast": "Multicast", "unicast": "Unicast"}.get(record.get("transport_path") or "", "")
@@ -247,7 +227,16 @@ def clock_port_name(record: dict, records: list[dict]) -> str:
 def _format_clock_port_record(record: dict) -> str:
     if record.get("link_down"):
         return "Link down"
-    return ptp_port_state_name(record["state_code"])
+
+    if record.get("role"):
+        return record["role"]
+
+    state = record.get("state")
+
+    if state == "pre-master":
+        return "Pre-Leader"
+
+    return state.title() if state else "Unknown"
 
 
 def _format_reference_levels(device) -> str:
@@ -513,8 +502,10 @@ def _device_identity_rows(device) -> list[list[str]]:
     ):
         if value:
             rows.append([label, value])
-    if device.model_id in BLUETOOTH_MODEL_IDS or device.bluetooth_connected is not None:
+
+    if device.bluetooth_connected is not None:
         rows.append(["Bluetooth", _format_bluetooth(device)])
+
     rows.extend(_device_management_rows(device))
     return rows
 
@@ -659,9 +650,11 @@ def _device_clock_rows(device) -> list[list[str]]:
             rows.append(
                 [
                     "Clock Mute",
-                    ("; ".join(status.get("mute_reasons") or []) or "none") + f" (0x{status['mute_flags']:04x})"
-                    if fresh
-                    else "unavailable",
+                    (
+                        ("; ".join(status.get("mute_reasons") or []) or "none") + f" (0x{status['mute_flags']:04x})"
+                        if fresh
+                        else "unavailable"
+                    ),
                 ]
             )
         for label, field in (
@@ -690,9 +683,7 @@ def _device_clock_rows(device) -> list[list[str]]:
     records = list(device.clock_port_records or [])
     if not records and status.get("base_ports"):
         for index, port in enumerate(status["base_ports"], 1):
-            rows.append([f"Clock Port {index}", ptp_port_state_name(port["state_code"])])
-    elif device.clock_port_state_code is not None and not records:
-        rows.append(["Clock Port State", ptp_port_state_name(device.clock_port_state_code)])
+            rows.append([f"Clock Port {index}", _format_clock_port_record(port)])
     for record in sorted(
         records,
         key=lambda entry: (
@@ -776,13 +767,15 @@ def device_list_row(server_name: str, device, verbose: bool) -> list[str]:
             format_latency_range_milliseconds(device.min_latency, device.max_latency),
             format_latency_choices_milliseconds(device.standard_latency_choices),
             _format_aes67(device),
-            sample_rate_pullup_label(device.sample_rate_pullup_raw_value)
-            if device.sample_rate_pullup_raw_value is not None
-            else "",
+            (
+                sample_rate_pullup_label(device.sample_rate_pullup_raw_value)
+                if device.sample_rate_pullup_raw_value is not None
+                else ""
+            ),
             format_on_off(device.preferred_leader),
             format_clock_subdomain(device.clock_subdomain) if device.clock_subdomain is not None else "",
             device.clock_role or "",
-            _format_bluetooth(device) if device.model_id in BLUETOOTH_MODEL_IDS else "",
+            _format_bluetooth(device),
         ]
     )
     return row

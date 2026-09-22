@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
+from netaudio import core
+from netaudio.core import _requests
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
-
-
-FALLBACK_CHANNEL_CAPACITIES = {
-    "a32 dante ad/da converter": {
-        44_100: (64, 64),
-        48_000: (64, 64),
-        88_200: (32, 32),
-        96_000: (32, 32),
-        176_400: (16, 16),
-        192_000: (16, 16),
-    },
-    "avio-dai2": {44_100: (0, 2), 48_000: (0, 2), 88_200: (0, 2), 96_000: (0, 2)},
-    "avio-dao2": {44_100: (2, 0), 48_000: (2, 0), 88_200: (2, 0), 96_000: (2, 0)},
-    "wing-dante64": {44_100: (64, 64), 48_000: (64, 64)},
-}
+from netaudio.dante.operation_availability import require_writable
 
 
 class SampleRateTopologyError(RuntimeError):
@@ -67,7 +55,7 @@ class SampleRateChannelCapacity:
     receive_channel_count: int
     transmit_channel_count: int
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> _requests.ChannelCapacity:
         return {
             "sample_rate_hertz": self.sample_rate_hertz,
             "receive_channel_count": self.receive_channel_count,
@@ -82,7 +70,7 @@ class ReceiverSubscriptionState:
     transmitter_channel_name: str
     transmitter_device_name: str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> _requests.ReceiverSubscription:
         return {
             "receiver_channel_number": self.receiver_channel_number,
             "receiver_channel_name": self.receiver_channel_name,
@@ -94,14 +82,15 @@ class ReceiverSubscriptionState:
 @dataclass(frozen=True)
 class TransmitterFlowState:
     flow_number: int
-    flow_type: str
+    flow_type: _requests.FlowType
     channel_count: int
     channel_members: tuple[int, ...]
     sample_rate_hertz: int
     encoding: int
     frames_per_packet: int | None
+    may_retire_after_sample_rate_change: bool
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> _requests.FlowTopology:
         return {
             "flow_number": self.flow_number,
             "flow_type": self.flow_type,
@@ -110,6 +99,7 @@ class TransmitterFlowState:
             "sample_rate_hertz": self.sample_rate_hertz,
             "encoding": self.encoding,
             "frames_per_packet": self.frames_per_packet,
+            "may_retire_after_sample_rate_change": self.may_retire_after_sample_rate_change,
         }
 
 
@@ -120,7 +110,7 @@ class SampleRateTopologySnapshot:
     transmitter_flows: tuple[TransmitterFlowState, ...]
     flow_protocol_identifier: int
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> _requests.TopologySnapshot:
         return {
             "capacity": self.capacity.to_dict(),
             "receiver_subscriptions": [state.to_dict() for state in self.receiver_subscriptions],
@@ -171,20 +161,11 @@ class SampleRateTopologyPreflight:
     reversible_receiver_clipping: tuple[ReceiverSubscriptionState, ...]
     destructive_transmitter_membership_loss: tuple[TransmitterFlowMembershipLoss, ...]
     uncharacterized_transmitter_flows: tuple[UncharacterizedTransmitterFlow, ...]
+    requires_destructive_confirmation: bool
 
     @property
     def capacity_known(self) -> bool:
         return self.target_capacity is not None
-
-    @property
-    def requires_destructive_confirmation(self) -> bool:
-        if self.destructive_transmitter_membership_loss:
-            return True
-        return (
-            self.current_snapshot is not None
-            and self.target_capacity is None
-            and bool(self.current_snapshot.transmitter_flows)
-        )
 
     @property
     def is_classified(self) -> bool:
@@ -240,82 +221,29 @@ def _positive_integer(value, field_name: str) -> int:
     return value
 
 
-def _nonnegative_integer(value, field_name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise SampleRateTopologyUnsupportedError(f"{field_name} must be a nonnegative integer")
-    return value
-
-
 def _device_label(device) -> str:
     return device.name or device.server_name or str(device.ipv4)
 
 
-def _reported_capacity_table(device) -> dict[int, SampleRateChannelCapacity]:
-    capacities = getattr(device, "sample_rate_channel_capacities", None)
-    if capacities is None:
-        return {}
-    if not isinstance(capacities, list):
-        raise SampleRateTopologyUnsupportedError("device sample-rate channel capacities are malformed")
-    table = {}
-    for entry in capacities:
-        if not isinstance(entry, dict):
-            raise SampleRateTopologyUnsupportedError("device sample-rate channel capacities are malformed")
-        sample_rate = _positive_integer(entry.get("sample_rate_hertz"), "sample_rate_hertz")
-        receive_count = _nonnegative_integer(entry.get("receive_channel_count"), "receive_channel_count")
-        transmit_count = _nonnegative_integer(entry.get("transmit_channel_count"), "transmit_channel_count")
-        capacity = SampleRateChannelCapacity(sample_rate, receive_count, transmit_count)
-        if sample_rate in table and table[sample_rate] != capacity:
-            raise SampleRateTopologyUnsupportedError(
-                f"device reports conflicting channel capacities for {sample_rate} Hz"
-            )
-        table[sample_rate] = capacity
-    return table
-
-
-def _fallback_capacity_table(device) -> dict[int, tuple[int, int]]:
-    for value in (
-        getattr(device, "model", None),
-        getattr(device, "dante_model", None),
-        getattr(device, "platform_model_name", None),
-    ):
-        if not isinstance(value, str):
-            continue
-        name = value.casefold()
-        for product, table in FALLBACK_CHANNEL_CAPACITIES.items():
-            if name.startswith(product):
-                return table
-    return {}
-
-
 def _capacity_for_rate(device, sample_rate_hertz: int) -> SampleRateChannelCapacity | None:
-    reported = _reported_capacity_table(device).get(sample_rate_hertz)
-    if reported is not None:
-        return reported
-    counts = _fallback_capacity_table(device).get(sample_rate_hertz)
-    if counts is None:
-        return None
-    receive_count, transmit_count = counts
-    return SampleRateChannelCapacity(sample_rate_hertz, receive_count, transmit_count)
+    try:
+        capacity = core.sample_rate_capacity(getattr(device, "sample_rate_channel_capacities", None), sample_rate_hertz)
+    except NetaudioCoreError as exception:
+        raise SampleRateTopologyUnsupportedError(str(exception)) from exception
+
+    return SampleRateChannelCapacity(**capacity) if capacity is not None else None
 
 
 def _validated_sample_rate_status(status) -> tuple[int, tuple[int, ...]]:
     if status is None:
         raise SampleRateTopologyReadbackError("sample-rate readback was unavailable")
-    if not isinstance(status, dict):
-        raise SampleRateTopologyVerificationError("sample-rate readback was unavailable")
-    current_sample_rate = status.get("current_value")
-    supported_sample_rates = status.get("available_values")
-    current_sample_rate = _positive_integer(current_sample_rate, "current sample rate")
-    if not isinstance(supported_sample_rates, list) or not supported_sample_rates:
-        raise SampleRateTopologyVerificationError("supported sample-rate readback was unavailable")
-    normalized_supported = tuple(_positive_integer(value, "supported sample rate") for value in supported_sample_rates)
-    if len(set(normalized_supported)) != len(normalized_supported):
-        raise SampleRateTopologyVerificationError("supported sample-rate readback contains duplicates")
-    if current_sample_rate not in normalized_supported:
-        raise SampleRateTopologyVerificationError(
-            "current sample rate is absent from the device's supported sample-rate list"
-        )
-    return current_sample_rate, normalized_supported
+
+    try:
+        evidence = core.sample_rate_status_evidence(status)
+    except NetaudioCoreError as exception:
+        raise SampleRateTopologyVerificationError(str(exception)) from exception
+
+    return evidence["current_value"], tuple(evidence["available_values"])
 
 
 def _receiver_subscription_states(device) -> tuple[ReceiverSubscriptionState, ...]:
@@ -339,65 +267,37 @@ def _receiver_subscription_states(device) -> tuple[ReceiverSubscriptionState, ..
     return tuple(sorted(states, key=lambda state: state.receiver_channel_number))
 
 
-def _transmitter_flow_states(inventory: dict, *, modern: bool = False) -> tuple[TransmitterFlowState, ...]:
+def _transmitter_flow_states(inventory: dict, *, protocol_id: int) -> tuple[TransmitterFlowState, ...]:
     raw_flows = inventory.get("flows")
+
     if not isinstance(raw_flows, list):
         raise SampleRateTopologyVerificationError("fresh transmitter-flow inventory is malformed")
+
     states = []
+
     for flow in raw_flows:
-        if not isinstance(flow, dict):
-            raise SampleRateTopologyVerificationError("fresh transmitter-flow inventory is malformed")
-        flow_number = _positive_integer(
-            flow.get("global_flow_id" if modern else "flow_number"), "transmitter flow number"
-        )
-        flow_type = flow.get("flow_type")
-        channel_count = _positive_integer(
-            flow.get("channel_slot_count" if modern else "channel_count"), "transmitter flow channel count"
-        )
-        channel_members = flow.get("transmitter_channel_ids_by_slot" if modern else "channels")
-        sample_rate_hertz = _positive_integer(flow.get("sample_rate"), "transmitter flow sample rate")
-        encoding = _positive_integer(flow.get("encoding"), "transmitter flow encoding")
-        frames_per_packet = (
-            None
-            if modern
-            else _positive_integer(
-                flow.get("frames_per_packet"),
-                "transmitter flow frames per packet",
-            )
-        )
-        if not isinstance(flow_type, str) or flow_type not in ("multicast", "unicast"):
-            raise SampleRateTopologyVerificationError("fresh transmitter-flow type is uncharacterized")
-        if not isinstance(channel_members, list) or any(
-            isinstance(member, bool) or not isinstance(member, int) or member < 0 for member in channel_members
-        ):
-            raise SampleRateTopologyVerificationError("fresh transmitter-flow members are malformed")
-        if (modern or flow_type == "multicast") and len(channel_members) != channel_count:
-            raise SampleRateTopologyVerificationError(
-                f"multicast flow {flow_number} member count does not match its channel count"
-            )
-        if modern and flow.get("media_type_code") != 3:
-            raise SampleRateTopologyVerificationError("transmitter flow is not a supported audio flow")
-        if not modern and flow_type == "unicast" and channel_members:
-            raise SampleRateTopologyVerificationError(
-                f"unicast flow {flow_number} unexpectedly contains decoded channel members"
-            )
+        try:
+            state = core.transmit_flow_topology(flow, protocol_id=protocol_id)
+        except NetaudioCoreError as exception:
+            raise SampleRateTopologyVerificationError(str(exception)) from exception
+
         states.append(
             TransmitterFlowState(
-                flow_number=flow_number,
-                flow_type=flow_type,
-                channel_count=channel_count,
-                channel_members=tuple(channel_members),
-                sample_rate_hertz=sample_rate_hertz,
-                encoding=encoding,
-                frames_per_packet=frames_per_packet,
+                flow_number=state["flow_number"],
+                flow_type=state["flow_type"],
+                channel_count=state["channel_count"],
+                channel_members=tuple(state["channel_members"]),
+                sample_rate_hertz=state["sample_rate_hertz"],
+                encoding=state["encoding"],
+                frames_per_packet=state["frames_per_packet"],
+                may_retire_after_sample_rate_change=state["may_retire_after_sample_rate_change"],
             )
         )
+
     return tuple(sorted(states, key=lambda state: state.flow_number))
 
 
 async def _fresh_channel_counts(device) -> tuple[int, int] | None:
-    from netaudio import core
-
     response = await device.execute({"command": "channel_count"})
     counts = core.parse_response("channel_count", response) if response else None
     if not isinstance(counts, dict):
@@ -449,14 +349,15 @@ async def capture_sample_rate_topology(
             await device.get_rx_channels()
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:
         raise SampleRateTopologyReadbackError(f"fresh receiver inventory failed: {exception}") from exception
-    receiver_channel_numbers = set(device.rx_channels)
-    expected_receiver_channel_numbers = set(range(1, capacity.receive_channel_count + 1))
-    if receiver_channel_numbers != expected_receiver_channel_numbers:
-        raise SampleRateTopologyVerificationError(
-            "fresh receiver inventory does not match the reported active channel capacity"
-        )
+    receiver_channel_numbers = [channel.number for channel in device.rx_channels.values()]
+
+    try:
+        core.verify_sample_rate_receiver_inventory(receiver_channel_numbers, capacity.receive_channel_count)
+    except NetaudioCoreError as exception:
+        raise SampleRateTopologyVerificationError(str(exception)) from exception
+
     if managed and capacity.transmit_channel_count == 0:
-        from netaudio.dante.channel_status_paging import modern_arc_protocol_identifier_for_device
+        from netaudio.dante.arc_protocol import modern_arc_protocol_identifier_for_device
 
         return SampleRateTopologySnapshot(
             capacity=capacity,
@@ -465,7 +366,7 @@ async def capture_sample_rate_topology(
             flow_protocol_identifier=modern_arc_protocol_identifier_for_device(device),
         )
     managed_option = {"device": device} if managed else {}
-    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), device._arc_port(), **managed_option)
+    flow_protocol_identifier = await flows.detect_flow_protocol(str(device.ipv4), device._arc_port(), device=device)
     if flow_protocol_identifier is None:
         raise SampleRateTopologyReadbackError("transmitter-flow protocol did not respond")
     flow_inventory = await flows.query_tx_flow_inventory(
@@ -476,73 +377,13 @@ async def capture_sample_rate_topology(
     )
     if flow_inventory is None:
         raise SampleRateTopologyReadbackError("fresh transmitter-flow inventory did not respond")
-    from netaudio.dante.const import MODERN_ARC_PROTOCOL_IDS
-
-    transmitter_flows = _transmitter_flow_states(
-        flow_inventory, modern=flow_protocol_identifier in MODERN_ARC_PROTOCOL_IDS
-    )
-    mismatched_flow_rates = [
-        state.flow_number for state in transmitter_flows if state.sample_rate_hertz != capacity.sample_rate_hertz
-    ]
-    if mismatched_flow_rates:
-        flow_labels = ", ".join(str(flow_number) for flow_number in mismatched_flow_rates)
-        raise SampleRateTopologyVerificationError(
-            f"fresh transmitter flows report a different sample rate: {flow_labels}"
-        )
+    transmitter_flows = _transmitter_flow_states(flow_inventory, protocol_id=flow_protocol_identifier)
     return SampleRateTopologySnapshot(
         capacity=capacity,
         receiver_subscriptions=_receiver_subscription_states(device),
         transmitter_flows=transmitter_flows,
         flow_protocol_identifier=flow_protocol_identifier,
     )
-
-
-def _classify_transmitter_flows(
-    snapshot: SampleRateTopologySnapshot,
-    target_capacity: SampleRateChannelCapacity,
-) -> tuple[tuple[TransmitterFlowMembershipLoss, ...], tuple[UncharacterizedTransmitterFlow, ...]]:
-    if target_capacity.transmit_channel_count >= snapshot.capacity.transmit_channel_count:
-        return (), ()
-    destructive = []
-    uncharacterized = []
-    for flow in snapshot.transmitter_flows:
-        if flow.flow_type == "unicast":
-            uncharacterized.append(
-                UncharacterizedTransmitterFlow(
-                    flow_number=flow.flow_number,
-                    flow_type=flow.flow_type,
-                    channel_count=flow.channel_count,
-                    reason="the proven unicast inventory does not expose transmitter channel members",
-                )
-            )
-            continue
-        retained_members = tuple(
-            member for member in flow.channel_members if 1 <= member <= target_capacity.transmit_channel_count
-        )
-        removed_members = tuple(
-            member for member in flow.channel_members if member > target_capacity.transmit_channel_count
-        )
-        if not removed_members:
-            continue
-        if not retained_members:
-            uncharacterized.append(
-                UncharacterizedTransmitterFlow(
-                    flow_number=flow.flow_number,
-                    flow_type=flow.flow_type,
-                    channel_count=flow.channel_count,
-                    reason="all active members fall outside the target capacity and that transition is unproven",
-                )
-            )
-            continue
-        destructive.append(
-            TransmitterFlowMembershipLoss(
-                flow_number=flow.flow_number,
-                flow_type=flow.flow_type,
-                retained_channel_members=retained_members,
-                removed_channel_members=removed_members,
-            )
-        )
-    return tuple(destructive), tuple(uncharacterized)
 
 
 async def preflight_sample_rate_change(
@@ -552,11 +393,20 @@ async def preflight_sample_rate_change(
     load_channel_capacities: Callable[[], Awaitable[None]] | None = None,
 ) -> SampleRateTopologyPreflight:
     target_sample_rate_hertz = _positive_integer(target_sample_rate_hertz, "target sample rate")
-    status = _validated_sample_rate_status(await probe_sample_rate_status())
-    current_sample_rate_hertz, supported_sample_rates_hertz = status
+    status = await probe_sample_rate_status()
+
+    if status is None:
+        raise SampleRateTopologyReadbackError("sample-rate readback was unavailable")
+
+    current_sample_rate_hertz, supported_sample_rates_hertz = _validated_sample_rate_status(status)
     device.sample_rate = current_sample_rate_hertz
     device.supported_sample_rates = list(supported_sample_rates_hertz)
-    if target_sample_rate_hertz not in supported_sample_rates_hertz:
+    device.sample_rate_update_mode = status.get("update_mode")
+    restrictions = core.audio_capability_control(
+        device.sample_rate_update_mode, list(supported_sample_rates_hertz), target_sample_rate_hertz
+    )
+
+    if "value_not_advertised" in restrictions:
         raise SampleRateTopologyUnsupportedError(
             f"requested sample rate {target_sample_rate_hertz} is not supported; "
             f"device reports {list(supported_sample_rates_hertz)}"
@@ -571,7 +421,15 @@ async def preflight_sample_rate_change(
             reversible_receiver_clipping=(),
             destructive_transmitter_membership_loss=(),
             uncharacterized_transmitter_flows=(),
+            requires_destructive_confirmation=False,
         )
+
+    if "fixed" in restrictions:
+        raise SampleRateTopologyUnsupportedError("device reports a fixed sample-rate update mode")
+
+    if "update_mode_unknown" in restrictions:
+        raise SampleRateTopologyReadbackError("device did not report a known writable sample-rate update mode")
+
     if (
         load_channel_capacities is not None
         and getattr(device, "sample_rate_channel_capacities", None) is None
@@ -581,16 +439,29 @@ async def preflight_sample_rate_change(
     current_capacity = _capacity_for_rate(device, current_sample_rate_hertz)
     target_capacity = _capacity_for_rate(device, target_sample_rate_hertz)
     current_snapshot = await capture_sample_rate_topology(device, current_capacity, current_sample_rate_hertz)
-    if target_capacity is None:
-        reversible_receiver_clipping = ()
-        destructive, uncharacterized = (), ()
-    else:
-        reversible_receiver_clipping = tuple(
-            state
-            for state in current_snapshot.receiver_subscriptions
-            if state.receiver_channel_number > target_capacity.receive_channel_count
+    try:
+        impact = core.sample_rate_topology_impact(
+            current_snapshot.to_dict(), target_capacity.to_dict() if target_capacity is not None else None
         )
-        destructive, uncharacterized = _classify_transmitter_flows(current_snapshot, target_capacity)
+    except NetaudioCoreError as exception:
+        raise SampleRateTopologyVerificationError(str(exception)) from exception
+
+    reversible_receiver_clipping = tuple(
+        ReceiverSubscriptionState(**state) for state in impact["reversible_receiver_clipping"]
+    )
+    destructive = tuple(
+        TransmitterFlowMembershipLoss(
+            **{
+                **state,
+                "retained_channel_members": tuple(state["retained_channel_members"]),
+                "removed_channel_members": tuple(state["removed_channel_members"]),
+            }
+        )
+        for state in impact["destructive_transmitter_membership_loss"]
+    )
+    uncharacterized = tuple(
+        UncharacterizedTransmitterFlow(**state) for state in impact["uncharacterized_transmitter_flows"]
+    )
     return SampleRateTopologyPreflight(
         device_name=_device_label(device),
         current_sample_rate_hertz=current_sample_rate_hertz,
@@ -600,6 +471,7 @@ async def preflight_sample_rate_change(
         reversible_receiver_clipping=reversible_receiver_clipping,
         destructive_transmitter_membership_loss=destructive,
         uncharacterized_transmitter_flows=uncharacterized,
+        requires_destructive_confirmation=impact["requires_destructive_confirmation"],
     )
 
 
@@ -609,68 +481,16 @@ def _verify_resulting_topology(
 ) -> None:
     if preflight.current_snapshot is None:
         raise SampleRateTopologyVerificationError("sample-rate topology verification lacks a characterized preflight")
-    if resulting_snapshot.flow_protocol_identifier != preflight.current_snapshot.flow_protocol_identifier:
-        raise SampleRateTopologyVerificationError(
-            "transmitter-flow protocol changed during the sample-rate operation",
-            preflight,
-        )
-    if preflight.target_capacity is None:
-        mismatched = [
-            flow.flow_number
-            for flow in resulting_snapshot.transmitter_flows
-            if flow.sample_rate_hertz != preflight.target_sample_rate_hertz
-        ]
-        if mismatched:
-            raise SampleRateTopologyVerificationError(
-                "transmitter flows did not adopt the target sample rate: "
-                + ", ".join(str(number) for number in mismatched),
-                preflight,
-            )
-        return
-    expected_subscriptions = {
-        state.receiver_channel_number: state
-        for state in preflight.current_snapshot.receiver_subscriptions
-        if state.receiver_channel_number <= preflight.target_capacity.receive_channel_count
-    }
-    resulting_subscriptions = {
-        state.receiver_channel_number: state for state in resulting_snapshot.receiver_subscriptions
-    }
-    if resulting_subscriptions != expected_subscriptions:
-        raise SampleRateTopologyVerificationError(
-            "receiver subscriptions did not reach the exact expected in-capacity state",
-            preflight,
-        )
-    expected_flows = {
-        state.flow_number: replace(
-            state,
-            channel_members=tuple(
-                member if member == 0 or member <= preflight.target_capacity.transmit_channel_count else 0
-                for member in state.channel_members
-            ),
-            sample_rate_hertz=preflight.target_sample_rate_hertz,
-        )
-        for state in preflight.current_snapshot.transmitter_flows
-    }
-    resulting_flows = {state.flow_number: state for state in resulting_snapshot.transmitter_flows}
-    from netaudio.dante.const import MODERN_ARC_PROTOCOL_IDS
 
-    if (
-        resulting_snapshot.flow_protocol_identifier in MODERN_ARC_PROTOCOL_IDS
-        and preflight.target_capacity.transmit_channel_count
-        >= preflight.current_snapshot.capacity.transmit_channel_count
-    ):
-        # Automatic unicast flows can close when a receiver retains the old
-        # sample rate. Their retirement does not remove configured subscriptions.
-        expected_flows = {
-            number: flow
-            for number, flow in expected_flows.items()
-            if flow.flow_type != "unicast" or number in resulting_flows
-        }
-    if resulting_flows != expected_flows:
-        raise SampleRateTopologyVerificationError(
-            "transmitter flows did not reach the exact expected membership and metadata state",
-            preflight,
+    try:
+        core.verify_sample_rate_topology(
+            preflight.current_snapshot.to_dict(),
+            resulting_snapshot.to_dict(),
+            preflight.target_capacity.to_dict() if preflight.target_capacity is not None else None,
+            preflight.target_sample_rate_hertz,
         )
+    except NetaudioCoreError as exception:
+        raise SampleRateTopologyVerificationError(str(exception), preflight) from exception
 
 
 async def change_sample_rate_topology_safe(
@@ -711,6 +531,8 @@ async def change_sample_rate_topology_safe(
                 "transmitter flows cannot be predicted; explicit confirmation is required"
             )
         raise SampleRateTopologyConfirmationRequired(message, preflight)
+    require_writable(device, "sample_rate", target_sample_rate_hertz)
+
     try:
         await mutate()
     except (OSError, RuntimeError, TimeoutError, ValueError, NetaudioCoreError) as exception:

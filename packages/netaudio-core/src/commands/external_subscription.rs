@@ -216,6 +216,10 @@ pub fn build_external_receiver_subscription(
     specification: &ExternalReceiverSubscription<'_>,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
+    if !crate::protocol::is_supported_arc_protocol(specification.device_protocol) {
+        return Err(NetaudioError::UnsupportedProtocolOperation);
+    }
+
     validate_mapping(specification)?;
     let destinations = validated_destinations(specification)?;
     let identity = identity_descriptor(specification.flow_identity, specification.clock_offset)?;

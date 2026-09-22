@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 
+from netaudio.dante.const import DEVICE_ARC_PORT, DEVICE_CONTROL_PORT
 from netaudio.capture.fact import (
     _build_spec_data,
     _spec_to_markdown,
@@ -367,8 +368,8 @@ REACTIVE_FACTS = {
 }
 
 PORT_BY_CATEGORY = {
-    "arc_opcode": 4440,
-    "cmc_opcode": 8800,
+    "arc_opcode": DEVICE_ARC_PORT,
+    "cmc_opcode": DEVICE_CONTROL_PORT,
 }
 
 
@@ -414,7 +415,7 @@ def _select_verification_entries(facts: list[dict], provenance_directory: Path, 
         if request_packet is None:
             skipped_lines.append(f"  [SKIP] {fact_key:30s} {fact['name']} (no request packet in evidence)")
             continue
-        port = destination_port or PORT_BY_CATEGORY.get(fact["category"], 4440)
+        port = destination_port or PORT_BY_CATEGORY.get(fact["category"], DEVICE_ARC_PORT)
         entries.append(VerificationEntry(fact=fact, fact_key=fact_key, port=port, request_packet=request_packet))
     if not entries:
         for line in skipped_lines:

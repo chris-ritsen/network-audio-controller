@@ -5,9 +5,20 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from netaudio import core
+from netaudio.dante.network_configuration import NetworkConfigurationUnverified
+
 from netaudio.presets.loading import (
     MatchedPresetDevice,
     PresetActionState,
+    PresetLoadReport,
+    _apply_external_receiver_subscriptions,
+    _apply_interface,
+    _apply_audio_setting,
+    _apply_codec_gain,
+    _plan_interfaces,
+    _plan_codec_gain,
+    _plan_latency,
     _plan_redundancy,
     _plan_receiver_subscriptions,
     apply_preset_plan,
@@ -16,6 +27,199 @@ from netaudio.presets.loading import (
 from netaudio.presets.parsing import parse_preset_xml
 from netaudio.presets.schema import ParsedPresetDevices, normalize_device_config
 from netaudio.presets.serialization import device_preset_config, format_preset_configs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supported,expected", [([1, 2, 3, 4, 5], "confirmed"), ([], "failed")])
+async def test_gain_preset_requires_a_supported_readback_level(supported, expected):
+    application = SimpleNamespace(
+        set_gain_level=AsyncMock(
+            return_value={"device_type": "input", "channel_levels": [3], "supported_levels": supported}
+        )
+    )
+    report = PresetLoadReport()
+    context = SimpleNamespace(application=application, report=report)
+    entry = SimpleNamespace(device=SimpleNamespace(), device_name="Desk")
+    action = SimpleNamespace(kind="codec_gain", payload={"channel": 1, "level": 3, "device_type": "input"})
+
+    await _apply_codec_gain(context, entry, action)
+
+    [result] = report.operations
+    assert result.state == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured", [250_000, 1_000_000, None])
+async def test_latency_preset_plans_and_verifies_configured_not_active_state(configured):
+    settings = {"active_latency_ns": 1_000_000, "configured_latency_ns": configured}
+    application = SimpleNamespace(
+        get_device_settings=AsyncMock(return_value=settings),
+        get_latency_settings=AsyncMock(return_value=settings),
+        set_latency=AsyncMock(return_value=core.latency_control(1.0, settings, True)),
+    )
+    device = SimpleNamespace()
+    plan = await _plan_latency(application, device, 1.0)
+    expected = {
+        250_000: PresetActionState.CHANGE,
+        1_000_000: PresetActionState.UNCHANGED,
+        None: PresetActionState.UNAVAILABLE,
+    }
+
+    assert plan.state is expected[configured]
+
+    report = PresetLoadReport()
+    context = SimpleNamespace(application=application, report=report)
+    entry = SimpleNamespace(device=device, device_name="Desk", config={"latency": 1.0})
+    await _apply_audio_setting(context, entry, SimpleNamespace(kind="latency", payload=1.0))
+
+    [result] = report.operations
+    assert result.state == ("confirmed" if configured == 1_000_000 else "failed")
+    assert result.effective == configured
+    application.get_device_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observed", [16, 24, None])
+async def test_encoding_preset_uses_application_readback_without_a_second_probe(observed):
+    application = SimpleNamespace(
+        set_encoding=AsyncMock(return_value={"current_value": observed} if observed is not None else None),
+        probe_encoding_status=AsyncMock(side_effect=RuntimeError("no second readback")),
+    )
+    report = PresetLoadReport()
+    context = SimpleNamespace(application=application, report=report)
+    entry = SimpleNamespace(device=SimpleNamespace(), device_name="Desk", config={"encoding": 16})
+    action = SimpleNamespace(kind="encoding", payload=16)
+
+    await _apply_audio_setting(context, entry, action)
+
+    [result] = report.operations
+    assert result.state == ("confirmed" if observed == 16 else "failed")
+    assert result.effective == observed
+    application.probe_encoding_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record", [{"mode": "dynamic"}, {"interface": "primary", "mode": "dynamic"}])
+async def test_interface_plan_does_not_guess_identity_or_configured_state(record):
+    application = SimpleNamespace(probe_interface_status=AsyncMock(return_value=[record]))
+    config = {"interfaces": [{"identity": "primary", "mode": "dynamic"}]}
+
+    [action] = await _plan_interfaces(application, _planning_device(), config)
+
+    assert action.state is PresetActionState.UNAVAILABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unverified", [False, True])
+async def test_interface_preset_uses_the_verified_setter_result_without_another_probe(unverified):
+    configured = {"mode": "dynamic"}
+    application = SimpleNamespace(
+        set_interface=AsyncMock(return_value=[{"interface": "primary", "configured": configured}]),
+        probe_interface_status=AsyncMock(side_effect=RuntimeError("a second probe is unavailable")),
+    )
+
+    if unverified:
+        application.set_interface.side_effect = NetworkConfigurationUnverified("fresh readback unavailable")
+
+    report = PresetLoadReport()
+    context = SimpleNamespace(application=application, report=report)
+    entry = SimpleNamespace(device=SimpleNamespace(interface_reboot_required=False), device_name="Desk")
+    action = SimpleNamespace(kind="interface", payload={"identity": "primary", "mode": "dhcp", "configuration": None})
+
+    await _apply_interface(context, entry, action)
+
+    [result] = report.operations
+    assert result.state == ("acknowledged" if unverified else "confirmed")
+    assert result.effective == (None if unverified else configured)
+    assert result.effective_state_confirmation is (None if unverified else True)
+    application.probe_interface_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "readback,expected", [("matching", True), ("conflicting", False), ("changed_endpoint", False), ("missing", None)]
+)
+async def test_external_preset_completion_verifies_full_intent_not_command_confirmation(readback, expected):
+    subscription = {
+        "flow_identity": {"source_ipv4": "198.51.100.10", "session_id": 42},
+        "flow_slot": 1,
+        "interface_endpoints": [{"ipv4_address": "239.69.1.10", "udp_port": 5004}],
+    }
+    identity = {
+        "receiver_channel": 2,
+        "flow_slot": 1,
+        **subscription["flow_identity"],
+        "interface_endpoints": subscription["interface_endpoints"],
+    }
+    identities = [identity]
+
+    if readback == "conflicting":
+        identities.append({**identity, "session_id": 43})
+    elif readback == "changed_endpoint":
+        identities[0] = {**identity, "interface_endpoints": [{"ipv4_address": "239.69.1.99", "udp_port": 5004}]}
+
+    inventory = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "flows": [{"effective_subscription_identities": identities}],
+    }
+    operation = AsyncMock(
+        return_value={
+            "request_acknowledged": True,
+            "arc_effective_state_confirmed": True,
+            "receiver_flow_after": None if readback == "missing" else inventory,
+        }
+    )
+    report = PresetLoadReport()
+    context = SimpleNamespace(
+        application=SimpleNamespace(
+            external_flows=SimpleNamespace(get=lambda *_: object()), subscribe_external_rtp=operation
+        ),
+        report=report,
+    )
+    entry = SimpleNamespace(device=_planning_device(), device_name="Desk")
+    action = SimpleNamespace(kind="external_receiver_subscriptions", payload=[(2, subscription)])
+
+    await _apply_external_receiver_subscriptions(context, entry, action)
+
+    [result] = report.operations
+    assert result.state == ("confirmed" if expected is True else "failed" if expected is False else "acknowledged")
+    assert result.effective_state_confirmation is expected
+    assert operation.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gain_preset_reports_direction_mismatch_without_reinterpreting_the_native_adapter():
+    adapter = {"device_type": "input", "channel_levels": [3, 3], "supported_levels": [1, 2, 3, 4, 5]}
+    application = SimpleNamespace(probe_gain_adapter=AsyncMock(return_value=adapter))
+    requested = {"channel": 1, "device_type": "output", "level": 2}
+
+    [action] = await _plan_codec_gain(application, _planning_device(), [requested])
+
+    assert action.state is PresetActionState.UNSUPPORTED
+    assert action.payload == requested
+    assert "input" in action.reason
+
+
+@pytest.mark.parametrize("media_mode", [None, "rtp_aes67"])
+def test_preset_export_keeps_observed_transmitter_media_mode(media_mode):
+    from pathlib import Path
+    from netaudio import core
+    from netaudio.dante.device import DanteDevice
+
+    response = (Path(__file__).parent / "fixtures/transmit_flow_lifecycle/modern-2809-create-readback.bin").read_bytes()
+    record = core.parse_response("transmitter_flow_status_page", response)["flows"][0]
+
+    if media_mode is not None:
+        record["media_mode"] = media_mode
+
+    device = DanteDevice("desk.local.")
+    device.name = "Desk"
+    device.flow_protocol_id = 0x2809
+    device.apply_transmitter_flow_status_page({"reported_flow_count": 1, "flows": [record]})
+    exported = device_preset_config(device, {"routing"})
+    assert exported["transmit_flows"][0]["media_mode"] == (media_mode or "unknown")
+    assert exported["transmit_flows"][0]["raw_fields"] == record
 
 
 def _flow() -> dict:
@@ -182,9 +386,8 @@ def _planning_device():
         requires_managed_control=False,
         flow_protocol_id=0x2729,
         transmit_flow_authoring_capability_word=0,
-        transmit_flow_authoring_opcode=0x2201,
-        transmit_flow_authoring_protocol_id=0x2729,
-        receiver_flow_inventory_opcode=0x3200,
+        transmit_flow_authoring=core.flow_authoring_capabilities(0)["transmit_flow_authoring"],
+        receiver_flow_inventory_family="legacy",
         transmitter_flows=[],
         tx_channels=channels,
         rx_channels=channels,
@@ -303,13 +506,29 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
             }
         ),
         probe_sample_rate_status=AsyncMock(
-            return_value={"current_value": 48000, "available_values": [48000], "update_mode": 2}
+            return_value={
+                "current_value": 48000,
+                "requested_value": 48000,
+                "available_values": [48000],
+                "update_mode": 2,
+            }
         ),
-        probe_encoding_status=AsyncMock(return_value={"current_value": 24, "available_values": [24], "update_mode": 2}),
-        get_device_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}),
+        probe_encoding_status=AsyncMock(
+            return_value={"current_value": 24, "requested_value": 24, "available_values": [24], "update_mode": 2}
+        ),
+        get_latency_settings=AsyncMock(
+            return_value={"active_latency_ns": 1_000_000, "configured_latency_ns": 1_000_000}
+        ),
         probe_preferred_leader_state=AsyncMock(return_value=False),
         probe_sample_rate_pullup_status=AsyncMock(
-            return_value={"current_value": 0, "available_values": [0, 1], "update_mode": 2}
+            return_value={
+                "current_value": 0,
+                "requested_value": 0,
+                "available_values": [0, 1],
+                "update_mode": 2,
+                "flags": 0,
+                "host_disabled": False,
+            }
         ),
         preview_clock_configuration=AsyncMock(
             return_value={
@@ -318,7 +537,9 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
             }
         ),
         resolve_channel_name_protocol_identifier=AsyncMock(return_value=0x2809),
-        probe_gain_adapter=AsyncMock(return_value=("input", [3, 3])),
+        probe_gain_adapter=AsyncMock(
+            return_value={"device_type": "input", "channel_levels": [3, 3], "supported_levels": [1, 2, 3, 4, 5]}
+        ),
         probe_interface_status=AsyncMock(
             return_value=[
                 {"interface": "primary", "configured": {"mode": "dynamic"}},
@@ -339,7 +560,9 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
         "netaudio.presets.loading.inspect_transmit_flows",
         AsyncMock(return_value={"flows": []}),
     )
-    plan = await build_preset_plan(application, [MatchedPresetDevice(_configuration(), device, "Desk", "desk.local.")])
+    configuration = _configuration()
+    configuration["transmit_flows"][0]["channel_slots"][1]["slot"] = 2
+    plan = await build_preset_plan(application, [MatchedPresetDevice(configuration, device, "Desk", "desk.local.")])
     actions = plan.device_actions[0].actions
     kinds = [action.kind for action in actions]
 
@@ -381,15 +604,17 @@ async def test_plan_orders_supported_changes_and_preserves_unsupported_categorie
 
 
 @pytest.mark.asyncio
-async def test_unchanged_fresh_value_is_not_scheduled_or_written():
+@pytest.mark.parametrize("mode", [0, 2, 77])
+@pytest.mark.parametrize("choices", [[], [48000, 96000]])
+async def test_unchanged_fresh_value_is_not_scheduled_or_written(mode, choices):
     device = _planning_device()
     application = SimpleNamespace(
         probe_sample_rate_status=AsyncMock(
             return_value={
                 "current_value": 48000,
                 "requested_value": 48000,
-                "available_values": [48000, 96000],
-                "update_mode": 2,
+                "available_values": choices,
+                "update_mode": mode,
             }
         ),
         set_sample_rate=AsyncMock(),
@@ -408,7 +633,33 @@ async def test_unchanged_fresh_value_is_not_scheduled_or_written():
 
 
 @pytest.mark.asyncio
-async def test_external_subscription_is_unchanged_from_arc_identity_without_sdp(monkeypatch):
+async def test_preset_pullup_plan_uses_fresh_native_host_disable_state():
+    import struct
+
+    from netaudio import core
+    from tests.test_services import SAMPLE_RATE_PULLUP_STATUS_PACKET
+
+    packet = bytearray(SAMPLE_RATE_PULLUP_STATUS_PACKET)
+    struct.pack_into(">I", packet, 52, 1)
+    observed = core.parse_response("sample_rate_pullup_status", bytes(packet))
+    device = _planning_device()
+    device.sample_rate_pullup_host_disabled = False
+    application = SimpleNamespace(probe_sample_rate_pullup_status=AsyncMock(return_value=observed))
+
+    plan = await build_preset_plan(
+        application,
+        [MatchedPresetDevice({"sample_rate_pullup": 2}, device, "Desk", "desk.local.")],
+    )
+
+    [action] = plan.device_actions[0].actions
+    assert action.state is PresetActionState.UNAVAILABLE
+    assert "host_disabled" in action.reason
+    assert device.sample_rate_pullup_host_disabled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("readback", ["matching", "duplicate", "conflicting", "incomplete", "malformed"])
+async def test_external_subscription_plan_requires_unambiguous_complete_arc_identity(monkeypatch, readback):
     from netaudio.dante import flows
 
     device = _planning_device()
@@ -442,6 +693,17 @@ async def test_external_subscription_is_unchanged_from_arc_identity_without_sdp(
             }
         ],
     }
+    identities = receiver_inventory["flows"][0]["effective_subscription_identities"]
+
+    if readback == "duplicate":
+        identities.append(dict(identities[0]))
+    elif readback == "conflicting":
+        identities.append({**identities[0], "session_id": 43})
+    elif readback == "incomplete":
+        receiver_inventory["page_disposition"] = "more_pages"
+    elif readback == "malformed":
+        identities.append({"receiver_channel": 2})
+
     monkeypatch.setattr(
         flows,
         "query_preferred_receiver_flow_inventory",
@@ -451,7 +713,16 @@ async def test_external_subscription_is_unchanged_from_arc_identity_without_sdp(
     [action] = await _plan_receiver_subscriptions(device, "Desk", desired)
 
     assert action.kind == "external_receiver_subscriptions"
-    assert action.state is PresetActionState.UNCHANGED
+    assert (
+        action.state
+        is {
+            "matching": PresetActionState.UNCHANGED,
+            "duplicate": PresetActionState.CHANGE,
+            "conflicting": PresetActionState.CHANGE,
+            "incomplete": PresetActionState.UNAVAILABLE,
+            "malformed": PresetActionState.UNAVAILABLE,
+        }[readback]
+    )
 
 
 @pytest.mark.asyncio

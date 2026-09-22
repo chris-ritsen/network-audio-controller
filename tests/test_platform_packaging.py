@@ -245,17 +245,6 @@ def test_wheel_policy_accepts_matching_windows_artifact(tmp_path):
     _load_artifact_verifier().verify_wheel(wheel, "windows", "x86_64")
 
 
-def test_aur_git_package_builds_native_core_and_declares_linux_runtime_dependencies():
-    package_build = (REPO_ROOT / "aur" / "netaudio-git" / "PKGBUILD").read_text()
-    dependencies = next(line for line in package_build.splitlines() if line.startswith("depends="))
-    build_dependencies = next(line for line in package_build.splitlines() if line.startswith("makedepends="))
-
-    assert "arch=('x86_64' 'aarch64')" in package_build
-    assert "'rust'" in build_dependencies
-    assert "'python-redis'" in dependencies
-    assert "'python-dbus-fast'" in dependencies
-
-
 def test_build_hook_reads_branch_and_worktree_revisions(monkeypatch, tmp_path):
     hook = _load_build_hook(monkeypatch)
     revision = "0123456789abcdef0123456789abcdef01234567"

@@ -1,8 +1,8 @@
 import pytest
 
 from netaudio import core
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+from netaudio.dante.operation_availability import operation_availability
 from tests.protocol_test_fixtures import load_protocol_packet
 from tests.status_test_support import application_with_device, receive_packets
 
@@ -25,18 +25,35 @@ def _packet(packet_identifier: int) -> bytes:
     return load_protocol_packet("model_refresh", MODEL_PACKET_FILENAMES[packet_identifier])
 
 
+@pytest.mark.parametrize("revision,applicable", [(0x0709, False), (0x070A, True)])
+def test_native_read_only_field_presence_controls_mutation_preflight(revision, applicable):
+    packet = bytearray(_packet(8))
+    packet[24:26] = revision.to_bytes(2, "big")
+    parsed = core.parse_response("dante_model", bytes(packet))
+    assert (parsed["switch_redundancy_read_only"] is not None) is applicable
+    application, device = application_with_device("device.local.", "192.0.2.1")
+    receive_packets(application, [bytes(packet)], ("192.0.2.1", 8702))
+
+    source = device.redundancy_read_only_source
+    assert source["field_applicable"] is applicable
+    source.pop("record_protocol_version")
+    device.redundancy_advertised_support_source.pop("record_protocol_version")
+    device.switch_redundancy_read_only = None
+    source["fresh"] = False
+
+    reasons = operation_availability(device, "redundancy", "redundant").reasons
+    assert ("read_only_unknown" in reasons) is applicable
+
+
 def test_model_query_builders_are_byte_identical_to_shipping_controller():
-    commands = DanteDeviceCommands()
 
     for packet_identifier, device_mac_address in [(1, "000eddfd4e13"), (3, "001dc1081258")]:
         expected = _packet(packet_identifier)
         assert core.build_command({"command": "make_model", "mac": device_mac_address}) == expected
-        assert commands.command_make_model(device_mac_address) == expected
 
     for packet_identifier, device_mac_address in [(5, "000eddfd4e13"), (7, "001dc1081258")]:
         expected = _packet(packet_identifier)
         assert core.build_command({"command": "dante_model", "mac": device_mac_address}) == expected
-        assert commands.command_dante_model(device_mac_address) == expected
 
 
 def test_make_model_parser_decodes_packed_versions_and_preserves_raw_record():

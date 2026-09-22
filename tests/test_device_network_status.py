@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
+
 from netaudio import core
 from netaudio.commands.device.network_status import (
     NETWORK_STATUS_DISSECT_HEADERS,
@@ -55,9 +57,26 @@ def test_network_status_rows_keep_raw_fields_behind_dissect():
     assert row["Pointer"] == "0x0028"
     assert row["Transport"] == "conmon_0x0040"
     assert row["Packet Source"] == "192.168.1.247"
-    assert row["Switch Mode Codes"] == "0x0001 0x0001"
-    assert row["Available Switch Modes"] == "0x0001 Switched, 0x0002 Split/Redundant"
+    assert row["Available Switch Modes"] == "Switched, Split/Redundant"
     assert row["Raw Record"] == "00085fd80009926d00000000000000000000000100000064"
+
+
+@pytest.mark.parametrize("dissect", [False, True])
+@pytest.mark.parametrize(
+    "current,expected", [(1, "Switched"), (2, "Split/Redundant / Switched"), (99, "Unknown / Switched")]
+)
+def test_switch_mode_display_uses_native_meaning(current, expected, dissect):
+    packet = bytearray.fromhex(SWITCH_CONFIGURATION_FIXTURE.read_text().strip())
+    packet[44:46] = current.to_bytes(2, "big")
+    parsed = core.parse_response("switch_configuration_status", bytes(packet))
+    rows = network_status_rows("receiver", "192.0.2.1", None, parsed, dissect=dissect)
+    headers = NETWORK_STATUS_HEADERS + (NETWORK_STATUS_DISSECT_HEADERS if dissect else [])
+
+    assert len(rows[0]) == len(headers)
+    row = dict(zip(headers, rows[0]))
+    assert row["Switch Mode"] == expected
+    assert row["Available Switch Modes"] == "Switched, Split/Redundant"
+    assert all("0x" not in cell for cell in rows[0])
 
 
 def test_network_status_rows_label_missing_responses():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 from dataclasses import dataclass, replace
@@ -7,12 +8,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from ipaddress import AddressValueError, IPv4Address
 
+from netaudio import core
 from netaudio.dante.sdp import SdpDocument, SdpParseError, parse_sdp
 
 SAP_MULTICAST_ADDRESS = "239.255.255.255"
 SAP_PORT = 9875
 SAP_EXPIRY_SECONDS = 3600.0
-SAP_CONTENT_TYPE = b"application/sdp\x00"
 
 
 class SapParseError(ValueError):
@@ -47,68 +48,25 @@ class SapPacket:
             "authentication_data_hexadecimal": self.authentication_data_hexadecimal,
             "content_type": self.content_type,
             "raw_sdp": self.raw_sdp,
-            "sdp": self.sdp.to_dict(),
+            "sdp": copy.deepcopy(self.sdp),
         }
 
 
 def parse_sap_packet(data: bytes) -> SapPacket:
     if not isinstance(data, bytes):
         raise SapParseError("SAP packet must be bytes")
-    if len(data) < 8:
-        raise SapParseError("SAP packet is shorter than its IPv4 header")
-    flags = data[0]
-    version = flags >> 5
-    address_type_ipv6 = bool(flags & 0x10)
-    reserved = bool(flags & 0x08)
-    delete = bool(flags & 0x04)
-    encrypted = bool(flags & 0x02)
-    compressed = bool(flags & 0x01)
-    if version != 1:
-        raise SapParseError("only SAP version 1 is supported")
-    if address_type_ipv6:
-        raise SapParseError("SAP IPv6 origin addresses are not supported")
-    if encrypted:
-        raise SapParseError("encrypted SAP packets are not supported")
-    if compressed:
-        raise SapParseError("compressed SAP packets are not supported")
 
-    authentication_length_words = data[1]
-    message_hash = int.from_bytes(data[2:4], "big")
-    if message_hash == 0:
-        raise SapParseError("SAP message hash must be nonzero")
-    origin = IPv4Address(data[4:8])
-    if origin.is_unspecified:
-        raise SapParseError("SAP origin address must be nonzero")
-    authentication_size = authentication_length_words * 4
-    payload_offset = 8 + authentication_size
-    if payload_offset > len(data):
-        raise SapParseError("SAP authentication length exceeds the packet")
-    payload = data[payload_offset:]
-    if not payload.startswith(SAP_CONTENT_TYPE):
-        raise SapParseError("SAP payload type must be exactly NUL-terminated application/sdp")
-    raw_sdp_bytes = payload[len(SAP_CONTENT_TYPE) :]
-    if not raw_sdp_bytes:
-        raise SapParseError("SAP packet has no SDP payload")
     try:
-        raw_sdp = raw_sdp_bytes.decode("utf-8")
-    except UnicodeDecodeError as exception:
-        raise SapParseError("SAP SDP payload is not valid UTF-8") from exception
+        announcement = core.parse_sap(data)
+    except core.NetaudioCoreError as exception:
+        raise SapParseError(str(exception)) from exception
+
     try:
-        sdp = parse_sdp(raw_sdp)
+        sdp = parse_sdp(announcement["raw_sdp"])
     except SdpParseError as exception:
         raise SapParseError(f"invalid SAP SDP payload: {exception}") from exception
-    return SapPacket(
-        version=version,
-        delete=delete,
-        reserved=reserved,
-        authentication_length_words=authentication_length_words,
-        message_hash=message_hash,
-        origin_address=str(origin),
-        authentication_data_hexadecimal=data[8:payload_offset].hex(),
-        content_type="application/sdp",
-        raw_sdp=raw_sdp,
-        sdp=sdp,
-    )
+
+    return SapPacket(**announcement, sdp=sdp)
 
 
 @dataclass(frozen=True)
@@ -164,32 +122,32 @@ class DiscoveredExternalFlow:
         wall_time: float,
         expiry_seconds: float,
     ) -> DiscoveredExternalFlow:
-        audio = packet.sdp.routable_audio
+        audio = packet.sdp["routable_audio"]
         expires_wall_time = wall_time + expiry_seconds
         return cls(
             source_ipv4=packet.origin_address,
-            session_id=packet.sdp.session_id,
+            session_id=packet.sdp["session_id"],
             message_hash=packet.message_hash,
             content_sha256=hashlib.sha256(packet.raw_sdp.encode("utf-8")).hexdigest(),
-            flow_name=packet.sdp.session_name,
-            media_title=audio.media_title if audio else None,
-            origin_username=packet.sdp.origin_username,
-            ptp_domain_token=audio.ptp_domain_token if audio else None,
-            channel_count=audio.channel_count if audio else None,
-            clock_offset=audio.clock_offset if audio else None,
-            primary_destination_address=audio.primary_destination_address if audio else None,
-            primary_destination_port=audio.destination_port if audio else None,
-            secondary_destination_address=audio.secondary_destination_address if audio else None,
-            secondary_destination_port=audio.destination_port
-            if audio and audio.secondary_destination_address
+            flow_name=packet.sdp["session_name"],
+            media_title=audio["media_title"] if audio else None,
+            origin_username=packet.sdp["origin_username"],
+            ptp_domain_token=audio["ptp_domain_token"] if audio else None,
+            channel_count=audio["channel_count"] if audio else None,
+            clock_offset=audio["clock_offset"] if audio else None,
+            primary_destination_address=audio["primary_destination_address"] if audio else None,
+            primary_destination_port=audio["destination_port"] if audio else None,
+            secondary_destination_address=audio["secondary_destination_address"] if audio else None,
+            secondary_destination_port=audio["destination_port"]
+            if audio and audio["secondary_destination_address"]
             else None,
-            encoding=audio.encoding if audio else None,
-            sample_rate=audio.sample_rate if audio else None,
-            packet_time_microseconds=audio.packet_time_microseconds if audio else None,
-            direction=audio.direction if audio else None,
-            dante_origin=audio.dante_origin if audio else False,
-            routable=packet.sdp.routable,
-            routability_errors=packet.sdp.routability_errors,
+            encoding=audio["encoding"] if audio else None,
+            sample_rate=audio["sample_rate"] if audio else None,
+            packet_time_microseconds=audio["packet_time_microseconds"] if audio else None,
+            direction=audio["direction"] if audio else None,
+            dante_origin=audio["dante_origin"] if audio else False,
+            routable=packet.sdp["routable"],
+            routability_errors=tuple(packet.sdp["routability_errors"]),
             announcement_interface=announcement_interface,
             packet_source_ipv4=packet_source_ipv4,
             packet_source_port=packet_source_port,
@@ -265,7 +223,7 @@ class DiscoveredExternalFlow:
             "authentication_length_words": self.authentication_length_words,
             "authentication_data_hexadecimal": self.authentication_data_hexadecimal,
             "raw_sdp": self.raw_sdp,
-            "sdp": self.sdp.to_dict(),
+            "sdp": copy.deepcopy(self.sdp),
         }
 
 
@@ -336,7 +294,7 @@ class SapFlowInventory:
         received_monotonic = time.monotonic() if received_monotonic is None else received_monotonic
         wall_time = time.time() if wall_time is None else wall_time
         packet = parse_sap_packet(data)
-        identity = (packet.origin_address, packet.sdp.session_id)
+        identity = (packet.origin_address, packet.sdp["session_id"])
         existing = self._flows.get(identity)
         if existing is not None and received_monotonic >= existing.expires_monotonic:
             del self._flows[identity]
@@ -395,7 +353,6 @@ class SapFlowInventory:
 
 __all__ = [
     "DiscoveredExternalFlow",
-    "SAP_CONTENT_TYPE",
     "SAP_EXPIRY_SECONDS",
     "SAP_MULTICAST_ADDRESS",
     "SAP_PORT",

@@ -1,9 +1,11 @@
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import CapabilityProbeTimeout
 from netaudio.dante.network_configuration import (
@@ -40,8 +42,53 @@ def _flag_state(current="switched", configured="switched"):
                 "reboot_required": current != configured,
             },
         },
-        SimpleNamespace(switch_configuration_choices=None, dante_redundancy=None),
+        SimpleNamespace(dante_redundancy=None),
     )
+
+
+@pytest.mark.parametrize(
+    ("flags", "current", "configured", "reboot"),
+    [
+        (0, "switched", "switched", False),
+        (1, "redundant", "switched", True),
+        (2, "switched", "redundant", True),
+        (3, "redundant", "redundant", False),
+    ],
+)
+def test_native_interface_flags_supply_modes_choices_and_evidence(flags, current, configured, reboot):
+    facts = core.interface_redundancy_status({"flags": flags, "observed_at_unix": 0})
+
+    assert {key: facts[key] for key in ("current", "configured", "supported", "reboot_required")} == {
+        "current": current,
+        "configured": configured,
+        "supported": ["switched", "redundant"],
+        "reboot_required": reboot,
+    }
+    assert [choice["mode"] for choice in facts["available_modes"]] == ["switched", "redundant"]
+    assert facts["current_mode_evidence"]["mode"] == current
+    assert facts["configured_mode_evidence"]["mode"] == configured
+    assert facts["current_mode_evidence"]["flag_set"] is (current == "redundant")
+    assert facts["configured_mode_evidence"]["flag_set"] is (configured == "redundant")
+
+
+@pytest.mark.parametrize("flags", [4, 8, 65535])
+def test_native_unknown_interface_flags_do_not_advertise_modes(flags):
+    facts = core.interface_redundancy_status({"flags": flags, "observed_at_unix": 0})
+
+    assert facts["current"] is None
+    assert facts["configured"] is None
+    assert facts["available_modes"] is None
+    assert facts["current_mode_evidence"]["status"] == "unknown_raw"
+
+
+def test_native_absent_interface_flags_are_unavailable():
+    assert core.interface_redundancy_status({"flags": None, "observed_at_unix": 0}) is None
+
+
+@pytest.mark.parametrize("flags", [True, "3", -1, 65536])
+def test_native_interface_flags_reject_invalid_types_or_width(flags):
+    with pytest.raises(core.NetaudioCoreError):
+        core.interface_redundancy_status({"flags": flags, "observed_at_unix": 0})
 
 
 def _device(*, support=True, read_only=False, interfaces=None, managed=False):
@@ -54,7 +101,6 @@ def _device(*, support=True, read_only=False, interfaces=None, managed=False):
         interface_status_protocol=0x0724,
         interfaces=[{"interface": "primary"}] if interfaces is None else interfaces,
         dante_redundancy=_flag_state(),
-        switch_configuration_choices=None,
         switch_redundancy_supported=support,
         redundancy_advertised_support_source=_source(),
         switch_redundancy_read_only=read_only,
@@ -66,29 +112,133 @@ def _device(*, support=True, read_only=False, interfaces=None, managed=False):
 
 
 def _choice_status(*entries, current=1, configured=1):
-    labels = {"Switched": "switched", "Redundant": "redundant", "Split/Redundant": "split_redundant"}
-    choices = [
-        {
-            "code": code,
-            "label": label,
-            "raw_label_field_hexadecimal": f"{code:04x}",
-            "raw_choice_hexadecimal": f"feed{code:04x}",
-        }
-        for code, label in entries
-    ]
-    by_code = {entry[0]: labels.get(entry[1]) for entry in entries}
-    return {
-        "record_protocol_identifier": 0x072E,
-        "mode_codes_at_record_offsets_20_and_22": [current, configured],
-        "choices": choices,
-        "redundancy": {
-            "current": by_code.get(current),
-            "configured": by_code.get(configured),
-            "supported": [mode for mode in by_code.values() if mode is not None],
-            "reboot_required": current != configured,
-        },
-        "raw_record_hexadecimal": "cafe",
-    }
+    fixture = Path(__file__).parent / "fixtures/switch_configuration/ad4d-switched-0014.hex"
+    packet = bytearray.fromhex(fixture.read_text().strip())
+    assert len(entries) == 2
+    packet[44:46] = current.to_bytes(2, "big")
+    packet[46:48] = configured.to_bytes(2, "big")
+
+    for index, (code, label) in enumerate(entries):
+        offset = 48 + index * 148
+        packet[offset : offset + 2] = code.to_bytes(2, "big")
+        packet[offset + 4 : offset + 132] = label.encode().ljust(128, b"\0")
+
+    return core.parse_response("switch_configuration_status", bytes(packet))
+
+
+@pytest.mark.parametrize(
+    "code,label,mode,status",
+    [(7, "Redundant", "redundant", "known"), (7, "Future Mode", None, "unknown_raw"), (99, None, None, "unknown_raw")],
+)
+def test_native_switch_evidence_tracks_advertised_choices(code, label, mode, status):
+    parsed = _choice_status((1, "Switched"), (7, label or "Redundant"), current=code, configured=1)
+    evidence = parsed["current_mode_evidence"]
+
+    assert evidence["mode"] == parsed["redundancy"]["current"] == mode
+    assert evidence["status"] == status
+    assert evidence["raw_code"] == code
+    assert evidence.get("raw_label") == label
+    assert parsed["configured_mode_evidence"]["mode"] == "switched"
+    assert parsed["redundancy"]["reboot_required"] is (mode == "redundant")
+
+    fields = switch_configuration_fields(parsed)["dante_redundancy"]
+    native_state = parsed["state"]
+    assert native_state["current"] == mode
+    assert native_state["configured"] == "switched"
+    assert native_state["available_modes"] == parsed["choices"]
+    assert native_state["available_modes_source"] == "switch_configuration_choice_table"
+    assert native_state["state_fresh"] is True
+    assert fields["state_source"]["observed_at_unix"] > 0
+    assert fields["current_mode_evidence"] == evidence
+    assert fields["configured_mode_evidence"] == parsed["configured_mode_evidence"]
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("flags", [None, 0, 8])
+def test_interface_refresh_preserves_choice_inventory_and_its_freshness(flags, fresh):
+    parsed = _choice_status((1, "Switched"), (7, "Split/Redundant"))
+    previous = switch_configuration_fields(parsed)["dante_redundancy"]
+    previous["available_modes_fresh"] = fresh
+    device = SimpleNamespace(dante_redundancy=previous)
+    expected_choices = deepcopy(previous["available_modes"])
+
+    updated = interface_redundancy_status({"redundancy_flags": flags}, device)
+
+    assert updated["available_modes"] == expected_choices
+    assert updated["available_modes_source"] == "switch_configuration_choice_table"
+    assert updated["available_modes_fresh"] is fresh
+    if flags is None:
+        assert updated["state_fresh"] is False
+
+    updated["available_modes"].clear()
+    assert previous["available_modes"] == expected_choices
+
+
+@pytest.mark.parametrize("code", [7, 65535])
+def test_native_redundancy_control_selects_the_advertised_serializer_value(code):
+    parsed = _choice_status((1, "Switched"), (code, "Redundant"))
+    state = switch_configuration_fields(parsed)["dante_redundancy"]
+
+    control = core.redundancy_control(state, "redundant")
+
+    assert control["reasons"] == []
+    assert control["serializer_cohort"] == "switch_configuration_choice_table"
+    assert control["switch_configuration_choice"] == code
+
+
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        ({"state_fresh": False}, "state_stale"),
+        ({"current": None}, "state_unavailable"),
+        ({"available_modes": None}, "available_modes_unknown"),
+        ({"available_modes_fresh": False}, "available_modes_stale"),
+        ({"available_modes": []}, "available_modes_empty"),
+        ({"available_modes": [{"code": 7, "mode": None}]}, "available_modes_empty"),
+        ({"available_modes_source": "unrecognized"}, "protocol_unsupported"),
+        ({"available_modes": [{"mode": "redundant"}]}, "serializer_unavailable"),
+        ({"available_modes": [{"code": True, "mode": "redundant"}]}, "serializer_unavailable"),
+        ({"available_modes": [{"code": 65536, "mode": "redundant"}]}, "serializer_unavailable"),
+    ],
+)
+def test_native_redundancy_control_rejects_unusable_observations(change, reason):
+    parsed = _choice_status((1, "Switched"), (7, "Redundant"))
+    state = switch_configuration_fields(parsed)["dante_redundancy"]
+    state.update(change)
+
+    assert reason in core.redundancy_control(state, "redundant")["reasons"]
+
+
+def test_native_redundancy_control_does_not_treat_unknown_choices_as_available_modes():
+    state = _flag_state()
+    state["available_modes"] = [{"mode": None}]
+    device = _device()
+    device.dante_redundancy = state
+
+    assert "available_modes_empty" in core.redundancy_control(state)["reasons"]
+    assert not operation_availability(device, "redundancy").writable
+
+
+def test_native_redundancy_control_uses_flag_serializer_without_a_choice_code():
+    control = core.redundancy_control(_flag_state(), "redundant")
+
+    assert control["reasons"] == []
+    assert control["serializer_cohort"] == "interface_status_flags"
+    assert control["switch_configuration_choice"] is None
+    assert "requested_mode_not_advertised" in core.redundancy_control(_flag_state(), "split_redundant")["reasons"]
+
+
+@pytest.mark.parametrize("mode", ["bogus", True, 1, []])
+def test_native_redundancy_control_rejects_invalid_requested_modes(mode):
+    with pytest.raises(core.NetaudioCoreError):
+        core.redundancy_control(_flag_state(), mode)
+
+
+def test_flag_serializer_cannot_express_a_split_mode_even_if_listed():
+    state = _flag_state()
+    state["available_modes"].append({"mode": "split_redundant", "code": 2})
+
+    assert "serializer_unavailable" in core.redundancy_control(state, "split_redundant")["reasons"]
 
 
 @pytest.mark.asyncio
@@ -142,7 +292,6 @@ async def test_missing_versions_record_stays_unknown_after_diagnostic_choice_pro
     async def choices(_device, timeout):
         fields = switch_configuration_fields(parsed)
         device.dante_redundancy = fields["dante_redundancy"]
-        device.switch_configuration_choices = fields["switch_configuration_choices"]
         return parsed
 
     application = SimpleNamespace(probe_switch_configuration=AsyncMock(side_effect=choices))
@@ -166,20 +315,6 @@ async def test_read_only_capability_keeps_readable_state_and_refuses_mutation():
     application._send_settings.assert_not_awaited()
 
 
-def test_older_versions_preserve_unavailable_read_only_field_without_inventing_bit():
-    device = _device()
-    device.switch_redundancy_read_only = None
-    device.redundancy_read_only_source = {
-        **_source(reported=False, version=0x0709),
-        "unavailable_reason": "record_protocol_version",
-    }
-
-    availability = operation_availability(device, "redundancy", "redundant")
-    assert "read_only" not in availability.reasons
-    assert "read_only_unknown" not in availability.reasons
-    assert redundancy_snapshot(device)["read_only"] is None
-
-
 def test_stale_applicable_read_only_observation_blocks_mutation():
     device = _device()
     device.redundancy_read_only_source["fresh"] = False
@@ -197,6 +332,15 @@ def test_missing_read_only_value_for_applicable_version_blocks_mutation():
     snapshot = redundancy_snapshot(device)
     assert snapshot["read_only"] is None
     assert "read_only_unknown" in snapshot["operation_availability"]["reasons"]
+
+
+def test_missing_read_only_applicability_cannot_authorize_mutation():
+    device = _device()
+    device.switch_redundancy_read_only = None
+    device.redundancy_read_only_source = None
+    device.redundancy_advertised_support_source.pop("record_protocol_version")
+
+    assert "read_only_unknown" in operation_availability(device, "redundancy", "redundant").reasons
 
 
 def test_stale_versions_record_makes_capability_unknown_instead_of_unsupported():
@@ -251,7 +395,6 @@ async def test_choice_table_is_exact_and_unadvertised_mode_is_rejected_before_se
     device = _device()
     device.interface_status_protocol = 0x072E
     device.dante_redundancy = fields["dante_redundancy"]
-    device.switch_configuration_choices = fields["switch_configuration_choices"]
     application = SimpleNamespace(
         probe_interface_status=AsyncMock(return_value=device.interfaces),
         probe_switch_configuration=AsyncMock(return_value=parsed),
@@ -271,7 +414,6 @@ def test_unknown_choice_code_and_label_survive_without_guessed_mode():
     device = _device()
     device.interface_status_protocol = 0x072E
     device.dante_redundancy = fields["dante_redundancy"]
-    device.switch_configuration_choices = fields["switch_configuration_choices"]
     snapshot = redundancy_snapshot(device)
 
     assert snapshot["current_mode"] is None
@@ -280,7 +422,7 @@ def test_unknown_choice_code_and_label_survive_without_guessed_mode():
         "mode": None,
         "raw_code": 99,
         "raw_label": "Future Mode",
-        "raw_choice_hexadecimal": "feed0063",
+        "raw_choice_hexadecimal": parsed["choices"][1]["raw_choice_hexadecimal"],
     }
     assert snapshot["available_modes"][1]["label"] == "Future Mode"
     assert snapshot["available_modes"][1]["mode"] is None
@@ -295,7 +437,6 @@ async def test_choice_mode_without_a_raw_code_cannot_select_a_serializer():
     device.interface_status_protocol = 0x072E
     device.dante_redundancy = fields["dante_redundancy"]
     device.dante_redundancy["available_modes"][1].pop("code")
-    device.switch_configuration_choices = fields["switch_configuration_choices"]
     application = SimpleNamespace(
         probe_interface_status=AsyncMock(return_value=device.interfaces),
         probe_switch_configuration=AsyncMock(return_value=parsed),
@@ -314,13 +455,12 @@ async def test_choice_probe_timeout_preserves_choices_marks_stale_and_keeps_capa
     fields = switch_configuration_fields(parsed)
     device = _device()
     device.dante_redundancy = fields["dante_redundancy"]
-    device.switch_configuration_choices = fields["switch_configuration_choices"]
-    before = deepcopy(device.switch_configuration_choices)
+    before = deepcopy(device.dante_redundancy["available_modes"])
     application = SimpleNamespace(probe_switch_configuration=AsyncMock(side_effect=CapabilityProbeTimeout("timed out")))
 
     assert await probe_switch_configuration_if_reported(application, device) is None
     snapshot = redundancy_snapshot(device)
-    assert device.switch_configuration_choices == before
+    assert device.dante_redundancy["available_modes"] == before
     assert snapshot["available_modes"] == before
     assert snapshot["available_modes_fresh"] is False
     assert snapshot["state_fresh"] is False

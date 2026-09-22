@@ -134,11 +134,13 @@
           "category": "bluetooth_connection",
           "value": {
             "state": 1,
+            "connected": true,
             "peer_name": "s00pcan-iphone-17"
           }
         }
       ],
-      "diagnostic_error": null
+      "diagnostic_error": null,
+      "followup_requests": []
     }
   },
   "avio-bt-1_bluetooth_status_disconnected.bin": {
@@ -217,11 +219,13 @@
           "category": "bluetooth_connection",
           "value": {
             "state": 2,
+            "connected": false,
             "peer_name": ""
           }
         }
       ],
-      "diagnostic_error": null
+      "diagnostic_error": null,
+      "followup_requests": []
     }
   },
   "core_device_info_avio-aes3-1.bin": {
@@ -249,6 +253,15 @@
   "core_device_settings_avio-aes3-1.bin": {
     "kind": "device_settings",
     "parsed": {
+      "performance_values": [
+        {"property_id": 33284, "value": 1000000},
+        {"property_id": 33285, "value": 1000000},
+        {"property_id": 528, "value": 16},
+        {"property_id": 529, "value": 16},
+        {"property_id": 33537, "value": 1000000},
+        {"property_id": 784, "value": 16},
+        {"property_id": 771, "value": 2}
+      ],
       "sample_rate": 48000,
       "configured_latency_ns": 1000000,
       "active_latency_ns": 1000000,
@@ -400,6 +413,15 @@
   "core_device_settings_lx-dante.bin": {
     "kind": "device_settings",
     "parsed": {
+      "performance_values": [
+        {"property_id": 33284, "value": 1000000},
+        {"property_id": 33285, "value": 1000000},
+        {"property_id": 528, "value": 16},
+        {"property_id": 529, "value": 16},
+        {"property_id": 33537, "value": 1000000},
+        {"property_id": 784, "value": 16},
+        {"property_id": 771, "value": 4}
+      ],
       "sample_rate": 48000,
       "configured_latency_ns": 1000000,
       "active_latency_ns": 1000000,
@@ -762,6 +784,11 @@
     "hex": "ffff003806110000001dc1fffe50692e417564696e6174650727100b00000000000000010008001001020002000400180000000500000001",
     "kind": "codec_status",
     "parsed": {
+      "gain_adapter": {
+        "device_type": "input",
+        "channel_levels": [5, 1],
+        "supported_levels": [1, 2, 3, 4, 5]
+      },
       "parameters": [
         {
           "mode": 2,
@@ -816,6 +843,11 @@
     "hex": "ffff003808100000001dc1fffe507b8d417564696e6174650727100b00000000000000010008001002010002000400180000000400000004",
     "kind": "codec_status",
     "parsed": {
+      "gain_adapter": {
+        "device_type": "output",
+        "channel_levels": [4, 4],
+        "supported_levels": [1, 2, 3, 4, 5]
+      },
       "parameters": [
         {
           "mode": 1,

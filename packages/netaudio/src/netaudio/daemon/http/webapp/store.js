@@ -2,6 +2,7 @@ import { batch, computed, signal } from "./lib/preact.js";
 import { readInventoryCache, writeInventoryCache } from "./inventory-cache.js";
 import { visibleInventory } from "./inventory-visibility.js";
 import { inventoryFilters, matchesDeviceFilters } from "./device-filters.js";
+import { setMeteringScale } from "./format.js";
 
 const EVENT_LOG_LIMIT = 400;
 const METER_TABLE_INTERVAL_MILLISECONDS = 250;
@@ -160,7 +161,7 @@ export function clearPendingForDevice(device) {
   for (const [key, entry] of Object.entries(current)) {
     const [receiverName, number] = key.split("\u0000");
     const channel = device.channels?.receivers?.[number];
-    const subscription = channel && (device.subscriptions || []).find((entry) => entry.rx_channel === channel.name);
+    const subscription = channel && (device.subscriptions || []).find((entry) => entry.rx_channel_number === Number(number));
     const confirmed = channel && (entry.action === "remove"
       ? !subscription?.tx_device
       : subscription?.tx_device === entry.tx_device && subscription?.tx_channel === entry.tx_channel);
@@ -186,6 +187,7 @@ function applyEvent(payload) {
     return;
   }
   if (kind === "snapshot") {
+    setMeteringScale(payload.metering_scale);
     batch(() => {
       if (payload.managed) {
         managedState.value = payload.managed.status;

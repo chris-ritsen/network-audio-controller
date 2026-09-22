@@ -146,6 +146,22 @@ pub unsafe extern "C" fn netaudio_client_get_rx_channels_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn netaudio_client_get_channel_audio_metadata_json(
+    client: *mut NetaudioClient,
+    tx_count: u16,
+    rx_count: u16,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    guard(|| unsafe {
+        client_json_query(client, out_buffer, out_capacity, out_length, |client| {
+            client.get_channel_audio_metadata(tx_count, rx_count)
+        })
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn netaudio_client_get_rx_inventory_json(
     client: *mut NetaudioClient,
     rx_count: u16,

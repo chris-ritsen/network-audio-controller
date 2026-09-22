@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from netaudio import core
@@ -15,7 +18,7 @@ def test_transmit_channel_capability_command_matches_shipping_controller():
         core.build_command(
             {
                 "command": "query_transmit_channel_capabilities",
-                "transaction_id": 0x0329,
+                "message_id": 0x0329,
             }
         )
         == CONTROLLER_REQUEST
@@ -34,57 +37,49 @@ def test_transmit_channel_capability_parser_preserves_reported_ranges():
 
 
 @pytest.mark.asyncio
-async def test_product_query_uses_the_proven_controller_request(monkeypatch):
-    command_specifications = []
-
-    async def request(device_ip, arc_port, command_specification, timeout_ms, attempts):
-        command_specifications.append(
-            {
-                "device_ip": device_ip,
-                "arc_port": arc_port,
-                "command_specification": command_specification,
-                "timeout_ms": timeout_ms,
-                "attempts": attempts,
-            }
-        )
-        return VIRTUAL_A32_RESPONSE
-
-    monkeypatch.setattr(flows, "_request", request)
+async def test_product_query_uses_the_proven_controller_request():
+    device = SimpleNamespace(execute=AsyncMock(return_value=VIRTUAL_A32_RESPONSE))
 
     assert await flows.query_transmit_channel_capabilities(
         "192.0.2.10",
         4440,
         starting_channel_identifier=1,
         maximum_channel_count=32,
+        device=device,
     ) == {
         "record_count": 1,
         "ranges": [{"first_transmit_channel": 1, "last_transmit_channel": 32, "unknown_value": 0x7FFF}],
     }
-    assert command_specifications == [
-        {
-            "device_ip": "192.0.2.10",
-            "arc_port": 4440,
-            "command_specification": {
-                "command": "query_transmit_channel_capabilities",
-                "starting_channel_identifier": 1,
-                "maximum_channel_count": 32,
-            },
-            "timeout_ms": 1000,
-            "attempts": 2,
-        }
-    ]
+    device.execute.assert_awaited_once()
+    specification = device.execute.call_args.args[0]
+    assert core.build_command({**specification, "message_id": 0x0329}) == CONTROLLER_REQUEST[:-2] + b"\x00\x20"
 
 
 @pytest.mark.asyncio
-async def test_product_query_treats_empty_range_inventory_as_valid(monkeypatch):
-    async def request(device_ip, arc_port, command_specification, timeout_ms, attempts):
-        return AVIO_SHORT_SUCCESS_RESPONSE
-
-    monkeypatch.setattr(flows, "_request", request)
+async def test_product_query_treats_empty_range_inventory_as_valid():
+    device = SimpleNamespace(execute=AsyncMock(return_value=AVIO_SHORT_SUCCESS_RESPONSE))
 
     assert await flows.query_transmit_channel_capabilities(
         "192.0.2.10",
         4440,
         starting_channel_identifier=1,
         maximum_channel_count=0,
+        device=device,
     ) == {"record_count": 0, "ranges": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        b"",
+        VIRTUAL_A32_RESPONSE[:9],
+        VIRTUAL_A32_RESPONSE[:8] + b"\x00\x02" + VIRTUAL_A32_RESPONSE[10:],
+        VIRTUAL_A32_RESPONSE[:6] + b"\xff\xff" + VIRTUAL_A32_RESPONSE[8:],
+    ],
+)
+async def test_product_query_rejects_missing_malformed_and_failed_responses(response):
+    device = SimpleNamespace(execute=AsyncMock(return_value=response))
+
+    assert await flows.query_transmit_channel_capabilities("192.0.2.10", 4440, device=device) is None

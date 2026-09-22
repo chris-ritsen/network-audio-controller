@@ -1,34 +1,17 @@
 import ctypes
 import json
-import shutil
 import socket
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
 import pytest
 
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.commands import validate_dante_name
+from netaudio import core as native_core
+from netaudio.core import _abi as abi
 from tests.protocol_test_fixtures import load_protocol_packet
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-CRATE_DIR = Path(__file__).parent.parent / "packages" / "netaudio-core"
-
-NETAUDIO_OK = 0
-NETAUDIO_NULL_POINTER = 1
-NETAUDIO_INVALID_UTF8 = 2
-NETAUDIO_NAME_TOO_LONG = 3
-NETAUDIO_NAME_INVALID_HYPHEN = 4
-NETAUDIO_NAME_INVALID_CHARS = 5
-NETAUDIO_BUFFER_TOO_SMALL = 6
-NETAUDIO_INVALID_ADDRESS = 7
-NETAUDIO_IO_ERROR = 8
-NETAUDIO_TIMEOUT = 9
-NETAUDIO_MALFORMED_RESPONSE = 10
-NETAUDIO_SERIALIZATION_ERROR = 11
 
 VALID_NAMES = [
     "a",
@@ -43,97 +26,32 @@ VALID_NAMES = [
 ]
 
 INVALID_NAMES = {
-    "a" * 32: NETAUDIO_NAME_TOO_LONG,
-    "ü" * 32: NETAUDIO_NAME_TOO_LONG,
-    "-leading": NETAUDIO_NAME_INVALID_HYPHEN,
-    "trailing-": NETAUDIO_NAME_INVALID_HYPHEN,
-    "-both-": NETAUDIO_NAME_INVALID_HYPHEN,
-    "": NETAUDIO_NAME_INVALID_CHARS,
-    "under_score": NETAUDIO_NAME_INVALID_CHARS,
-    "has space": NETAUDIO_NAME_INVALID_CHARS,
-    "über": NETAUDIO_NAME_INVALID_CHARS,
-    "dot.name": NETAUDIO_NAME_INVALID_CHARS,
+    "a" * 32: abi.STATUS_NAME_TOO_LONG,
+    "ü" * 32: abi.STATUS_NAME_TOO_LONG,
+    "-leading": abi.STATUS_NAME_INVALID_HYPHEN,
+    "trailing-": abi.STATUS_NAME_INVALID_HYPHEN,
+    "-both-": abi.STATUS_NAME_INVALID_HYPHEN,
+    "": abi.STATUS_NAME_INVALID_CHARS,
+    "under_score": abi.STATUS_NAME_INVALID_CHARS,
+    "has space": abi.STATUS_NAME_INVALID_CHARS,
+    "über": abi.STATUS_NAME_INVALID_CHARS,
+    "dot.name": abi.STATUS_NAME_INVALID_CHARS,
+    "Studio\n": abi.STATUS_NAME_INVALID_CHARS,
+    "Studio\r": abi.STATUS_NAME_INVALID_CHARS,
+    "Studio\x00": abi.STATUS_NAME_INVALID_CHARS,
 }
-
-
-def _library_name():
-    if sys.platform == "darwin":
-        return "libnetaudio_core.dylib"
-    if sys.platform == "win32":
-        return "netaudio_core.dll"
-    return "libnetaudio_core.so"
-
-
-def _find_or_build_library():
-    if not shutil.which("cargo"):
-        pytest.skip("cargo is required to build netaudio-core for protocol tests")
-    subprocess.run(["cargo", "build"], cwd=CRATE_DIR, check=True, capture_output=True)
-    library_path = CRATE_DIR / "target" / "debug" / _library_name()
-    if library_path.exists():
-        return library_path
-    pytest.fail(f"cargo build succeeded but the expected library is missing: {library_path}")
 
 
 @pytest.fixture(scope="module")
 def core():
-    library = ctypes.CDLL(str(_find_or_build_library()))
-    library.netaudio_build_command.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    library.netaudio_build_command.restype = ctypes.c_int
-    library.netaudio_client_new.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.c_uint16,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    library.netaudio_client_new.restype = ctypes.c_int
-    library.netaudio_client_set_device_name.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    library.netaudio_client_set_device_name.restype = ctypes.c_int
-    library.netaudio_client_get_channel_count.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_int32),
-    ]
-    library.netaudio_client_get_channel_count.restype = ctypes.c_int
-    for name in (
-        "netaudio_client_get_rx_channels_json",
-        "netaudio_client_get_tx_channels_json",
-        "netaudio_client_get_property_directory_json",
-    ):
-        function = getattr(library, name)
-        function.argtypes = [
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_uint8),
-            ctypes.c_size_t,
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        function.restype = ctypes.c_int
-    library.netaudio_client_get_rx_inventory_json.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint16,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    library.netaudio_client_get_rx_inventory_json.restype = ctypes.c_int
-    library.netaudio_client_free.argtypes = [ctypes.c_void_p]
-    library.netaudio_client_free.restype = None
-    return library
+    return native_core.require()
 
 
 def rust_client_json(core, function_name, client, capacity=65536):
     buffer = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = getattr(core, function_name)(client, buffer, capacity, ctypes.byref(length))
-    if status != NETAUDIO_OK:
+    if status != abi.STATUS_OK:
         return status, None
     return status, json.loads(bytes(buffer[: length.value]))
 
@@ -148,7 +66,7 @@ def rust_rx_inventory_json(core, client, rx_count, capacity=65536):
         capacity,
         ctypes.byref(length),
     )
-    if status != NETAUDIO_OK:
+    if status != abi.STATUS_OK:
         return status, None
     return status, json.loads(bytes(buffer[: length.value]))
 
@@ -239,7 +157,7 @@ def client_factory(core):
         status = core.netaudio_client_new(
             b"127.0.0.1", None, port, timeout_milliseconds, attempts, ctypes.byref(handle)
         )
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
         created.append(handle)
         return handle
 
@@ -252,7 +170,7 @@ def client_factory(core):
 def rust_build_set_device_name(core, name, transaction_id=0, capacity=64):
     buffer = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
-    specification = json.dumps({"command": "set_name", "name": name, "transaction_id": transaction_id})
+    specification = json.dumps({"command": "set_name", "name": name, "message_id": transaction_id})
     status = core.netaudio_build_command(specification.encode("utf-8"), buffer, capacity, ctypes.byref(length))
     return status, bytes(buffer[: length.value])
 
@@ -265,14 +183,7 @@ def _control_packet(opcode, payload, transaction_id, protocol_id=0x27FF):
     return header + payload
 
 
-class TestSetDeviceNameParity:
-    @pytest.mark.parametrize("name", VALID_NAMES)
-    def test_packet_bytes_match_python(self, core, name):
-        python_packet, python_service = DanteDeviceCommands().command_set_name(name)
-        status, rust_packet = rust_build_set_device_name(core, name)
-        assert status == NETAUDIO_OK
-        assert rust_packet == python_packet
-
+class TestDeviceNames:
     @pytest.mark.parametrize("transaction_id", [0x0001, 0x1234, 0xFFFF])
     def test_transaction_id_matches_python(self, core, transaction_id):
         python_packet = _control_packet(
@@ -282,30 +193,25 @@ class TestSetDeviceNameParity:
             protocol_id=0x2809,
         )
         status, rust_packet = rust_build_set_device_name(core, "Studio-AVIO", transaction_id=transaction_id)
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
         assert rust_packet == python_packet
 
     @pytest.mark.parametrize("name,expected_status", INVALID_NAMES.items())
-    def test_validation_rejects_what_python_rejects(self, core, name, expected_status):
+    def test_invalid_names_rejected_by_native_and_frontend(self, core, name, expected_status):
         assert validate_dante_name(name) is not None
         status, packet = rust_build_set_device_name(core, name)
         assert status == expected_status
         assert packet == b""
 
     @pytest.mark.parametrize("name", VALID_NAMES)
-    def test_validation_accepts_what_python_accepts(self, core, name):
+    def test_valid_names_accepted_by_native_and_frontend(self, core, name):
         assert validate_dante_name(name) is None
         status, packet = rust_build_set_device_name(core, name)
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
 
     def test_buffer_too_small(self, core):
         status, packet = rust_build_set_device_name(core, "Studio-AVIO", capacity=4)
-        assert status == NETAUDIO_BUFFER_TOO_SMALL
-
-    def test_length_field_matches_packet_length(self, core):
-        status, packet = rust_build_set_device_name(core, "Studio-AVIO")
-        assert status == NETAUDIO_OK
-        assert int.from_bytes(packet[2:4], "big") == len(packet)
+        assert status == abi.STATUS_BUFFER_TOO_SMALL
 
 
 class TestClientSetDeviceName:
@@ -314,7 +220,7 @@ class TestClientSetDeviceName:
             client = client_factory(device.port)
             status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
 
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
         expected = _control_packet(
             0x1001,
             b"\x00\x00" + b"Studio-AVIO" + b"\x00",
@@ -324,31 +230,28 @@ class TestClientSetDeviceName:
         assert device.requests == [expected]
 
     def test_transaction_id_increments_across_calls(self, core, client_factory):
-        with FakeDanteDevice() as first_device:
-            client = client_factory(first_device.port)
-            core.netaudio_client_set_device_name(client, b"First")
+        acknowledgement = _control_packet(0x1001, b"\x00\x01", 1, protocol_id=0x2809)
 
-        assert int.from_bytes(first_device.requests[0][4:6], "big") == 1
+        with FakeReplayDevice([acknowledgement, acknowledgement]) as device:
+            client = client_factory(device.port)
+            assert core.netaudio_client_set_device_name(client, b"First") == abi.STATUS_OK
+            assert core.netaudio_client_set_device_name(client, b"Second") == abi.STATUS_OK
 
-        with FakeDanteDevice() as second_device:
-            second_client = client_factory(second_device.port)
-            core.netaudio_client_set_device_name(second_client, b"Second")
-
-        assert int.from_bytes(second_device.requests[0][4:6], "big") == 1
+        assert [int.from_bytes(request[4:6], "big") for request in device.requests] == [1, 2]
 
     def test_failure_acknowledgement_is_not_reported_as_success(self, core, client_factory):
         with FakeDanteDevice(result_code=0x0600) as device:
             client = client_factory(device.port)
             status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
 
-        assert status == NETAUDIO_MALFORMED_RESPONSE
+        assert status == abi.STATUS_MALFORMED_RESPONSE
 
     def test_timeout_when_device_silent(self, core, client_factory):
         with FakeDanteDevice(respond=False) as device:
             client = client_factory(device.port, timeout_milliseconds=100)
             status = core.netaudio_client_set_device_name(client, b"Studio-AVIO")
 
-        assert status == NETAUDIO_TIMEOUT
+        assert status == abi.STATUS_TIMEOUT
         assert len(device.requests) == 1
 
     def test_invalid_name_rejected_before_sending(self, core, client_factory):
@@ -356,17 +259,17 @@ class TestClientSetDeviceName:
             client = client_factory(device.port, timeout_milliseconds=100)
             status = core.netaudio_client_set_device_name(client, b"-bad")
 
-        assert status == NETAUDIO_NAME_INVALID_HYPHEN
+        assert status == abi.STATUS_NAME_INVALID_HYPHEN
         assert device.requests == []
 
     def test_invalid_address_rejected(self, core):
         handle = ctypes.c_void_p()
         status = core.netaudio_client_new(b"not-an-ip", None, 4440, 100, 1, ctypes.byref(handle))
-        assert status == NETAUDIO_INVALID_ADDRESS
+        assert status == abi.STATUS_INVALID_ADDRESS
 
     def test_null_client_rejected(self, core):
         status = core.netaudio_client_set_device_name(None, b"Studio-AVIO")
-        assert status == NETAUDIO_NULL_POINTER
+        assert status == abi.STATUS_NULL_POINTER
 
 
 CHANNEL_FIXTURES = {
@@ -402,8 +305,8 @@ class TestChannelCountBuilderAndParse:
                 ctypes.byref(locked),
             )
 
-        assert status == NETAUDIO_OK
-        expected_request = DanteDeviceCommands().command_channel_count(transaction_id=1)[0]
+        assert status == abi.STATUS_OK
+        expected_request = native_core.build_command({"command": "channel_count", "message_id": 1})
         assert device.requests == [expected_request]
         assert tx.value == int.from_bytes(count_fixture[12:14], "big")
         assert rx.value == int.from_bytes(count_fixture[14:16], "big")
@@ -479,7 +382,7 @@ class TestRxChannelsGolden:
             client = client_factory(device.port)
             status, rust_channels = rust_client_json(core, "netaudio_client_get_rx_channels_json", client)
 
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
 
         expected = GOLDEN_RX_CHANNELS[device_name]
         assert len(rust_channels) == len(expected)
@@ -489,7 +392,7 @@ class TestRxChannelsGolden:
                     f"{device_name} ch{expected_channel['number']} {key}: {rust_channel[key]!r} != {value!r}"
                 )
 
-    def test_request_sequence_matches_python_builders(self, core, client_factory):
+    def test_request_sequence_matches_native_commands(self, core, client_factory):
         count_fixture = load_fixture(CHANNEL_FIXTURES["avio-usb-2"][0])
         receivers_fixture = load_fixture(CHANNEL_FIXTURES["avio-usb-2"][1])
 
@@ -497,9 +400,8 @@ class TestRxChannelsGolden:
             client = client_factory(device.port)
             rust_client_json(core, "netaudio_client_get_rx_channels_json", client)
 
-        commands = DanteDeviceCommands()
-        assert device.requests[0] == commands.command_channel_count(transaction_id=1)[0]
-        assert device.requests[1] == commands.command_receivers(0, transaction_id=2)[0]
+        assert device.requests[0] == native_core.build_command({"command": "channel_count", "message_id": 1})
+        assert device.requests[1] == native_core.build_command({"command": "receivers", "page": 0, "message_id": 2})
 
     def test_combined_inventory_uses_single_receivers_response(self, core, client_factory):
         receivers_fixture = load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin")
@@ -508,7 +410,7 @@ class TestRxChannelsGolden:
             client = client_factory(device.port)
             status, inventory = rust_rx_inventory_json(core, client, 16)
 
-        assert status == NETAUDIO_OK
+        assert status == abi.STATUS_OK
         assert len(inventory["channels"]) == 16
         assert inventory["channels"][0]["number"] == 1
         assert inventory["channel_audio_metadata"] == {
@@ -518,7 +420,7 @@ class TestRxChannelsGolden:
             "supported_encodings": [24],
         }
         assert len(device.requests) == 1
-        assert device.requests[0] == DanteDeviceCommands().command_receivers(0, transaction_id=1)[0]
+        assert device.requests[0] == native_core.build_command({"command": "receivers", "page": 0, "message_id": 1})
 
 
 def test_property_directory_getter_uses_capture_backed_empty_query(core, client_factory):
@@ -531,7 +433,7 @@ def test_property_directory_getter_uses_capture_backed_empty_query(core, client_
         client = client_factory(device.port)
         status, directory = rust_client_json(core, "netaudio_client_get_property_directory_json", client)
 
-    assert status == NETAUDIO_OK
+    assert status == abi.STATUS_OK
     assert directory["aes67_configured_property_advertised"] is False
     assert directory["properties"][0] == {"property_id": 0x8020, "flags": 0x0001}
     assert device.requests == [bytes.fromhex("27ff000a000111020000")]

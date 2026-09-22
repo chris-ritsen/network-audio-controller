@@ -1,5 +1,58 @@
 use super::*;
 
+const SAMPLE_RATE_REQUEST: u16 = 0x0081;
+const ENCODING_REQUEST: u16 = 0x0083;
+
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AudioConfigurationRequest {
+    SampleRate { value: Option<u32> },
+    Encoding { value: Option<u32> },
+}
+
+pub fn parse_audio_configuration_request(data: &[u8]) -> Option<AudioConfigurationRequest> {
+    use crate::bytes::{read_u16, read_u32};
+
+    let message_id = read_u16(data, 4)?;
+    let host_mac: [u8; 6] = data.get(8..14)?.try_into().ok()?;
+    let kind = read_u16(data, 26)?;
+    let mode = read_u32(data, 32)?;
+    let value = read_u32(data, 36)?;
+    let canonical = match (kind, mode) {
+        (SAMPLE_RATE_REQUEST, 0) => build_probe_sample_rate(host_mac, message_id),
+        (ENCODING_REQUEST, 0) => build_probe_encoding(host_mac, message_id),
+        (SAMPLE_RATE_REQUEST, 1) => build_set_sample_rate(value, message_id),
+        (ENCODING_REQUEST, 1) => build_set_encoding(value, message_id),
+        _ => return None,
+    }
+    .ok()?;
+
+    if canonical != data {
+        return None;
+    }
+
+    let value = (mode == 1).then_some(value);
+    Some(match kind {
+        SAMPLE_RATE_REQUEST => AudioConfigurationRequest::SampleRate { value },
+        ENCODING_REQUEST => AudioConfigurationRequest::Encoding { value },
+        _ => return None,
+    })
+}
+
+pub fn parse_set_latency_request(data: &[u8]) -> Option<u32> {
+    use crate::bytes::{read_u16, read_u32};
+
+    let latency_ns = read_u32(data, 10 + LATENCY_SET_PREAMBLE.len())?;
+    let canonical = build_set_latency_for_protocol(
+        read_u16(data, 0)?,
+        f64::from(latency_ns) / 1_000_000.0,
+        read_u16(data, 4)?,
+    )
+    .ok()?;
+
+    (canonical == data).then_some(latency_ns)
+}
+
 pub fn build_set_latency(
     latency_milliseconds: f64,
     transaction_id: u16,
@@ -11,27 +64,24 @@ pub fn build_set_latency(
     )
 }
 
-pub fn build_set_latency_for_protocol(
-    protocol_id: u16,
-    latency_milliseconds: f64,
-    transaction_id: u16,
-) -> Result<Vec<u8>, NetaudioError> {
+pub(crate) fn require_latency_protocol(protocol_id: u16) -> Result<(), NetaudioError> {
     if !matches!(
         protocol_id,
         crate::protocol::PROTOCOL_ID | crate::protocol::PROTOCOL_ARC_2809
     ) {
         return Err(NetaudioError::UnsupportedProtocolOperation);
     }
-    if !latency_milliseconds.is_finite()
-        || !(0.0..=MAX_LATENCY_MILLISECONDS).contains(&latency_milliseconds)
-    {
-        return Err(NetaudioError::InvalidLatency);
-    }
-    let rounded_nanoseconds = (latency_milliseconds * 1_000_000.0).round();
-    if rounded_nanoseconds > f64::from(u32::MAX) {
-        return Err(NetaudioError::InvalidLatency);
-    }
-    let latency_ns = rounded_nanoseconds as u32;
+
+    Ok(())
+}
+
+pub fn build_set_latency_for_protocol(
+    protocol_id: u16,
+    latency_milliseconds: f64,
+    transaction_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
+    require_latency_protocol(protocol_id)?;
+    let latency_ns = crate::latency_configuration::requested_nanoseconds(latency_milliseconds)?;
     let latency_bytes = latency_ns.to_be_bytes();
 
     let mut payload = Vec::new();
@@ -128,28 +178,28 @@ pub fn build_set_encoding(encoding: u32, message_id: u16) -> Result<Vec<u8>, Net
     if encoding == 0 {
         return Err(NetaudioError::InvalidEncoding);
     }
-    if message_id == 0 {
-        return Err(NetaudioError::InvalidSequence);
-    }
-    let mut tail = vec![0x00, 0x83, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01];
-    tail.extend_from_slice(&encoding.to_be_bytes());
-    settings_packet(
-        message_id,
-        AUDIO_CONFIG_PSEUDO_MAC,
-        SETTINGS_SUFFIX_AUDIO_CONFIG,
-        &tail,
-    )
+    build_audio_config_write(ENCODING_REQUEST, encoding, message_id)
 }
 
 pub fn build_set_sample_rate(sample_rate: u32, message_id: u16) -> Result<Vec<u8>, NetaudioError> {
     if sample_rate == 0 {
         return Err(NetaudioError::InvalidSampleRate);
     }
+    build_audio_config_write(SAMPLE_RATE_REQUEST, sample_rate, message_id)
+}
+
+fn build_audio_config_write(
+    kind: u16,
+    value: u32,
+    message_id: u16,
+) -> Result<Vec<u8>, NetaudioError> {
     if message_id == 0 {
         return Err(NetaudioError::InvalidSequence);
     }
-    let mut tail = vec![0x00, 0x81, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x01];
-    tail.extend_from_slice(&sample_rate.to_be_bytes());
+    let mut tail = kind.to_be_bytes().to_vec();
+    tail.extend_from_slice(&100u32.to_be_bytes());
+    tail.extend_from_slice(&1u32.to_be_bytes());
+    tail.extend_from_slice(&value.to_be_bytes());
     settings_packet(
         message_id,
         AUDIO_CONFIG_PSEUDO_MAC,
@@ -175,11 +225,11 @@ pub fn build_probe_sample_rate(
     host_mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_audio_config_probe(host_mac, message_id, 0x0081)
+    build_audio_config_probe(host_mac, message_id, SAMPLE_RATE_REQUEST)
 }
 
 pub fn build_probe_encoding(host_mac: [u8; 6], message_id: u16) -> Result<Vec<u8>, NetaudioError> {
-    build_audio_config_probe(host_mac, message_id, 0x0083)
+    build_audio_config_probe(host_mac, message_id, ENCODING_REQUEST)
 }
 
 fn build_sample_rate_pullup_control(
@@ -236,7 +286,7 @@ pub fn build_set_gain_level(
     if !(1..=2).contains(&channel_number) {
         return Err(NetaudioError::InvalidChannel);
     }
-    if !(MIN_GAIN_LEVEL..=MAX_GAIN_LEVEL).contains(&gain_level) {
+    if !GAIN_LEVELS.contains(&u32::from(gain_level)) {
         return Err(NetaudioError::InvalidGainLevel);
     }
     let direction = if is_input {
@@ -402,7 +452,9 @@ pub fn build_set_aes67_multicast_prefix(
 ) -> Result<Vec<u8>, NetaudioError> {
     let mut body = Vec::with_capacity(10);
     body.extend_from_slice(&0x0101u16.to_be_bytes());
-    body.extend_from_slice(&0x8060u16.to_be_bytes());
+    body.extend_from_slice(
+        &crate::responses::DEVICE_SETTINGS_INFO_AES67_MULTICAST_PREFIX.to_be_bytes(),
+    );
     body.extend_from_slice(&0x0010u16.to_be_bytes());
     body.extend_from_slice(&prefix.octets());
     arc_packet_with_reserved_word(

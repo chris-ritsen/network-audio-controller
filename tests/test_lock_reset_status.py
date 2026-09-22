@@ -8,7 +8,6 @@ import pytest
 from netaudio import core
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
 
@@ -51,19 +50,11 @@ def test_controller_query_builder_is_byte_identical():
     specification = {
         "command": "probe_lock_reset_status",
         "host_mac": "3e42274cff24",
-        "sequence": 0x18C1,
+        "message_id": 0x18C1,
         "request_value": 100,
     }
 
     assert core.build_command(specification) == controller_request
-    packet, service, port = DanteDeviceCommands().command_probe_lock_reset_status(
-        host_mac=bytes.fromhex("3e42274cff24"),
-        sequence=0x18C1,
-        request_value=100,
-    )
-    assert packet == controller_request
-    assert service is None
-    assert port == 8700
 
 
 def test_parser_preserves_status_zero_and_one_without_speculative_labels():

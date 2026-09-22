@@ -11,6 +11,19 @@ from tests.http_api_test_support import FakeWriter, get, make_device, make_http_
 
 class TestDaemonLockStatus:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("pin", ["١٢٣٤", "１２３４", "1234\x00ignored", 1234, [1, 2, 3, 4]])
+    async def test_invalid_pin_is_rejected_before_device_mutation(self, monkeypatch, pin):
+        http_server = make_http_server({"dev1": make_device()})
+        monkeypatch.setattr(http_server, "_get_lock_key", lambda: b"k" * 32)
+
+        status, response = await post(http_server, "/lock", {"device": "dev1", "pin": pin})
+
+        assert status == 400
+        assert response["error"]
+        http_server.application.lock_device.assert_not_awaited()
+        http_server.application.unlock_device.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_failed_lock_result_uses_conflict_status(self, monkeypatch):
         device = make_device()
         previous_status = {"lock_state_code": 1, "is_locked": True, "status_code": 0}

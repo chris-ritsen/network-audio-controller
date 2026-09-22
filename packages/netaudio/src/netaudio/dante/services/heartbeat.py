@@ -5,6 +5,8 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from netaudio.core import _requests
+
 from netaudio.dante.const import DEVICE_HEARTBEAT_PORT, MULTICAST_GROUP_HEARTBEAT
 from netaudio.dante.heartbeat_connection_health import (
     CONNECTION_HEALTH_FRESHNESS_SECONDS,
@@ -65,18 +67,13 @@ def parse_interface_traffic_records(data: bytes) -> list[dict]:
     return records if isinstance(records, list) else []
 
 
-def parse_connection_health_records(data: bytes) -> dict | None:
+def parse_connection_health_records(data: bytes) -> _requests.HeartbeatConnectionHealthRecords | None:
     from netaudio import core
 
     try:
-        records = core.parse_response("heartbeat_connection_health", data)
+        return core.parse_connection_health(data)
     except core.NetaudioCoreError:
         return None
-    if not isinstance(records, dict):
-        return None
-    if not records.get("latency_records") and not records.get("late_packet_records"):
-        return None
-    return records
 
 
 class DanteHeartbeatService(DanteMulticastService):

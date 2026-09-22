@@ -32,7 +32,7 @@ Python application and native iOS client.
 | Web interface | Control and monitor the network in a browser, served by the NetAudio daemon. |
 | Background daemon | Maintain network discovery, device inventory, monitoring, event history, and control services across client sessions. |
 | HTTP API and live events | Integrate network state and device control into other applications, with server-sent events (SSE) for live updates. |
-| Protocol library | Use the Rust core directly or through its C interface; see the [C and Swift examples](packages/netaudio-core/examples). |
+| Protocol library | Use the Rust core directly or through its [C interface](packages/netaudio-core/include/netaudio_core.h). |
 
 The CLI and daemon run on Linux, macOS, and Windows. Automated checks cover all
 three platforms, including native libraries and installed Python packages.

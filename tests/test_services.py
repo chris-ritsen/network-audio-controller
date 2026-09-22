@@ -4,11 +4,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from netaudio import core
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.const import (
-    CONMON_OPCODE_CODEC_STATUS,
-    CONMON_OPCODE_INTERFACE_STATUS,
-    CONMON_OPCODE_ROUTING_CAPACITY_STATUS,
+    NOTIFICATION_CODEC_STATUS,
+    NOTIFICATION_INTERFACE_STATUS,
+    NOTIFICATION_ROUTING_READY,
 )
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -16,10 +17,11 @@ from netaudio.dante.services.notification import (
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEventDispatcher, EventType
-from netaudio.dante.gain import gain_adapter_from_codec_status
+from netaudio.dante.virtual_device import VirtualDevice, VirtualDeviceConfig
 from tests.status_test_support import (
     application_with_device,
     count_events,
+    deliver_status_events,
     receive_packets,
     status_events,
 )
@@ -84,7 +86,7 @@ def _executed(transport):
 
 def _gain_adapter_accepts(device, direction, channel, level):
     def accept(status):
-        adapter = gain_adapter_from_codec_status(device, status)
+        adapter = status.get("gain_adapter")
         return bool(
             adapter
             and (direction is None or direction == adapter["device_type"])
@@ -97,27 +99,36 @@ def _gain_adapter_accepts(device, direction, channel, level):
 
 class TestApplicationSettingsCommands:
     @pytest.mark.asyncio
-    async def test_identify_executes_typed_command(self):
-        transport = _recording_transport()
-        application = DanteApplication()
-        application.transport = transport
+    @pytest.mark.parametrize(
+        "kind,initial,desired,supported",
+        [("sample_rate", 48000, 96000, [48000, 96000]), ("encoding", 24, 16, [24, 16, 32])],
+    )
+    async def test_audio_settings_round_trip_through_native_packets_and_device_state(
+        self, kind, initial, desired, supported
+    ):
+        address = "192.0.2.10"
+        application, device = application_with_device("receiver.local.", address)
+        peer = VirtualDevice(VirtualDeviceConfig(supported_sample_rates=[48000, 96000]))
+        peer._local_ip = address
+        peer._mcast_transport = SimpleNamespace(
+            sendto=lambda packet, destination: application.notifications._on_packet(packet, (address, 8702))
+        )
 
-        await application.send_identify("192.168.1.1")
+        async def execute(target, specification, **options):
+            assert target == address
+            peer._handle_request(core.build_command(specification), ("192.0.2.11", 49152))
+            await deliver_status_events(application)
 
-        [(address, specification)] = _executed(transport)
-        assert address == "192.168.1.1"
-        assert specification["command"] == "identify"
-        assert 1 <= specification["sequence"] <= 0xFFFF
+        application.transport = SimpleNamespace(execute=execute)
+        await getattr(application, f"send_probe_{kind}")(device, host_mac="020000000001")
 
-    @pytest.mark.asyncio
-    async def test_probe_sample_rate_executes_typed_command(self):
-        transport = _recording_transport()
-        application = DanteApplication()
-        application.transport = transport
+        assert getattr(device, kind) == initial
+        assert getattr(device, f"supported_{kind}s") == supported
 
-        await application.send_probe_sample_rate("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        await getattr(application, f"send_set_{kind}")(device, desired)
 
-        assert _executed(transport) == [("192.168.1.108", {"command": "probe_sample_rate", "host_mac": "102030405060"})]
+        assert getattr(peer.config, kind) == desired
+        assert getattr(device, kind) == desired
 
     @pytest.mark.asyncio
     async def test_refresh_clock_status_executes_typed_command(self):
@@ -128,7 +139,7 @@ class TestApplicationSettingsCommands:
         await application.send_refresh_clock_status(
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
-            sequence=0x0021,
+            message_id=0x0021,
             record_revision=0x073A,
         )
 
@@ -139,20 +150,27 @@ class TestApplicationSettingsCommands:
                     "command": "refresh_clock_status",
                     "record_revision": 0x073A,
                     "host_mac": "102030405060",
-                    "sequence": 0x0021,
+                    "message_id": 0x0021,
                 },
             )
         ]
 
     @pytest.mark.asyncio
-    async def test_probe_encoding_executes_typed_command(self):
+    async def test_default_clock_refreshes_use_distinct_wire_message_ids(self):
         transport = _recording_transport()
         application = DanteApplication()
         application.transport = transport
 
-        await application.send_probe_encoding("192.168.1.108", host_mac=b"\x10\x20\x30\x40\x50\x60")
+        for _ in range(2):
+            await application.send_refresh_clock_status(
+                "192.0.2.10", host_mac=b"\x10\x20\x30\x40\x50\x60", record_revision=0x073A
+            )
 
-        assert _executed(transport) == [("192.168.1.108", {"command": "probe_encoding", "host_mac": "102030405060"})]
+        packets = [core.build_command(specification) for _, specification in _executed(transport)]
+        identifiers = [int.from_bytes(packet[4:6], "big") for packet in packets]
+        assert len(set(identifiers)) == 2
+        assert all(identifiers)
+        assert packets[0][:4] + packets[0][6:] == packets[1][:4] + packets[1][6:]
 
     @pytest.mark.asyncio
     async def test_sample_rate_pullup_commands_execute_typed_specifications(self):
@@ -171,10 +189,11 @@ class TestApplicationSettingsCommands:
         assert write_specification["command"] == "set_sample_rate_pullup"
         assert write_specification["raw_value"] == 4
         assert write_specification["host_mac"] == "102030405060"
-        assert "sequence" in write_specification
+        assert "message_id" in write_specification
 
     @pytest.mark.asyncio
-    async def test_probe_lock_reset_status_executes_typed_command(self):
+    @pytest.mark.parametrize("request_value,expected", [(None, 100), (0, 0), (4321, 4321)])
+    async def test_probe_lock_reset_status_preserves_native_default_and_explicit_values(self, request_value, expected):
         transport = _recording_transport()
         application = DanteApplication()
         application.transport = transport
@@ -182,14 +201,15 @@ class TestApplicationSettingsCommands:
         await application.send_probe_lock_reset_status(
             "192.168.1.108",
             host_mac=b"\x10\x20\x30\x40\x50\x60",
-            request_value=100,
+            request_value=request_value,
         )
 
         [(address, specification)] = _executed(transport)
         assert address == "192.168.1.108"
         assert specification["command"] == "probe_lock_reset_status"
-        assert specification["request_value"] == 100
         assert specification["host_mac"] == "102030405060"
+        packet = core.build_command(specification)
+        assert int.from_bytes(packet[-4:], "big") == expected
 
     @pytest.mark.asyncio
     async def test_probe_gain_executes_typed_command(self):
@@ -227,16 +247,12 @@ class TestApplicationSettingsCommands:
 
 
 class TestDanteCMCService:
-    def test_instantiation(self):
-        transport = _recording_transport()
-        service = DanteCMCService(transport, host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
-        assert service.registered_devices == frozenset()
+    @pytest.mark.parametrize("status,accepted", [(0, False), (1, True), (2, False), (65535, False)])
+    def test_native_registration_reply_reports_acceptance(self, status, accepted):
+        response = bytearray.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
+        response[8:10] = status.to_bytes(2, "big")
 
-    def test_exposes_host_address_used_by_cmc_commands(self):
-        host_address = b"\x00\x1d\xc1\x50\x23\x68"
-        service = DanteCMCService(_recording_transport(), host_media_access_control_address=host_address)
-
-        assert service.host_media_access_control_address == host_address
+        assert core.parse_response("cmc_registration", bytes(response)) == {"sequence": 0, "accepted": accepted}
 
     def test_controller_identity_uses_the_target_path(self, monkeypatch):
         from netaudio import core
@@ -273,63 +289,38 @@ class TestDanteCMCService:
         await service.register_device("192.168.1.61")
 
         lookup.assert_not_called()
-        assert _executed(transport) == [("192.168.1.61", {"command": "cmc_register", "sequence": 0})]
+        [(address, specification)] = _executed(transport)
+        assert address == "192.168.1.61"
+        assert specification["command"] == "cmc_register"
+        assert specification["message_id"] > 0
+        assert "host_mac" not in specification
 
     @pytest.mark.asyncio
-    async def test_registration_executes_typed_specification(self):
+    @pytest.mark.parametrize("reply_kind", ["accepted", "rejected", "wrong_id", "malformed"])
+    async def test_registration_checks_native_encoded_identifier_and_reply(self, reply_kind):
+        async def exchange(address, specification):
+            packet = core.build_command(specification)
+            assert int.from_bytes(packet[4:6], "big") != 0
+            response = bytearray.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
+            response[4:6] = packet[4:6]
+
+            if reply_kind == "rejected":
+                response[8:10] = b"\x00\x00"
+            elif reply_kind == "wrong_id":
+                response[4:6] = b"\x00\x00"
+            elif reply_kind == "malformed":
+                response[2:4] = b"\x00\x1f"
+
+            return bytes(response)
+
         transport = _recording_transport()
+        transport.execute.side_effect = exchange
         service = DanteCMCService(transport, host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
-        service._sequence_counter = 0x1234
-
-        await service.register_device("192.168.1.61")
-
-        assert _executed(transport) == [
-            ("192.168.1.61", {"command": "cmc_register", "host_mac": "001dc1502368", "sequence": 0x1234})
-        ]
-
-    @pytest.mark.asyncio
-    async def test_registration_requires_matching_success_response(self):
-        transport = _recording_transport()
-        service = DanteCMCService(transport, host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
-        successful_response = bytes.fromhex("120000200000100100010000020000000001000000010000c0a8013d21fc0000")
-        transport.execute.return_value = successful_response
 
         response = await service.register_device("192.168.1.61")
 
-        assert response == successful_response
-        assert service.registered_devices == {"192.168.1.61"}
-
-    @pytest.mark.asyncio
-    async def test_registration_rejects_failure_response(self):
-        transport = _recording_transport()
-        service = DanteCMCService(transport, host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
-        transport.execute.return_value = bytes.fromhex(
-            "120000200000100100000000020000000001000000010000c0a8013d21fc0000"
-        )
-
-        response = await service.register_device("192.168.1.61")
-
-        assert response is None
-        assert service.registered_devices == frozenset()
-
-    @pytest.mark.asyncio
-    async def test_registration_rejects_mismatched_sequence_and_malformed_envelope(self):
-        transport = _recording_transport()
-        service = DanteCMCService(transport, host_media_access_control_address=b"\x00\x1d\xc1\x50\x23\x68")
-        service._sequence_counter = 0x1234
-        transport.execute.return_value = bytes.fromhex(
-            "120000200000100100010000020000000001000000010000c0a8013d21fc0000"
-        )
-
-        assert await service.register_device("192.168.1.61") is None
-        assert service.registered_devices == frozenset()
-
-        transport.execute.return_value = bytes.fromhex(
-            "1200001f1235100100010000020000000001000000010000c0a8013d21fc0000"
-        )
-
-        assert await service.register_device("192.168.1.61") is None
-        assert service.registered_devices == frozenset()
+        assert (response is not None) == (reply_kind == "accepted")
+        assert service.registered_devices == ({"192.168.1.61"} if reply_kind == "accepted" else set())
 
     @pytest.mark.asyncio
     async def test_required_registration_fails_loudly_on_timeout(self):
@@ -368,7 +359,7 @@ class TestDanteNotificationService:
         struct.pack_into(">H", packet, 2, len(packet))
         packet[0x10:0x18] = b"Audinate"
         struct.pack_into(">H", packet, 0x18, 0x073A)
-        struct.pack_into(">H", packet, 0x1A, CONMON_OPCODE_INTERFACE_STATUS)
+        struct.pack_into(">H", packet, 0x1A, NOTIFICATION_INTERFACE_STATUS)
         struct.pack_into(">H", packet, 0x20, 2)
         struct.pack_into(">I", packet, 0x24, 1000)
 
@@ -402,12 +393,33 @@ class TestDanteNotificationService:
         receive_packets(application, [self._build_dual_interface_packet(secondary_mac)], (device_ip, 1030))
         return device
 
-    def test_instantiation(self):
-        dispatcher = DanteEventDispatcher()
-        service = DanteNotificationService(dispatcher=dispatcher)
-        assert service._dispatcher is dispatcher
-        assert service._multicast_group == "224.0.0.231"
-        assert service._multicast_port == 8702
+    @pytest.mark.parametrize(
+        "packet,kind",
+        [
+            (SAMPLE_RATE_STATUS_PACKET, "sample_rate_status"),
+            (ENCODING_STATUS_PACKET, "encoding_status"),
+            (ROUTING_CAPACITY_READY_PACKET, "routing_capacity_status"),
+            (OUTPUT_GAIN_STATUS_PACKET, "codec_status"),
+        ],
+    )
+    def test_native_notification_dispatch_identifies_status_parser(self, packet, kind):
+        envelope = core.parse_response("notification_envelope", packet)
+        assert envelope["response_kind"] == kind
+        assert core.parse_response("packet_header", packet)["response_decoder"]["kind"] == kind
+        assert core.parse_response(envelope["response_kind"], packet)
+
+    def test_unmapped_record_uses_one_decoder_without_inventing_device_state(self):
+        packet = bytes.fromhex("ffff0020000100000011223344550000417564696e6174650724010600000007")
+        envelope = core.parse_response("notification_envelope", packet)
+        decoder = core.parse_response("packet_header", packet)["response_decoder"]
+
+        assert envelope["response_kind"] == decoder["kind"] == "unmapped_0106_status"
+        assert core.parse_response(decoder["kind"], packet) == {"unmapped_word_at_body_offset_0": 7}
+
+        application, _ = application_with_device("device.local.", "192.0.2.1")
+        [event] = receive_packets(application, [packet], ("192.0.2.1", 8702))
+        assert event.type is EventType.NOTIFICATION_RECEIVED
+        assert event.data["notification_name"] == "Unknown notification"
 
     @pytest.mark.parametrize(
         "notification_id,name",
@@ -418,12 +430,14 @@ class TestDanteNotificationService:
             (258, "RX Channel Change"),
             (4103, "AES67 Status"),
             (4107, "Codec Status"),
-            (0xABCD, "Unknown(0xABCD)"),
+            (0xABCD, "Unknown notification"),
         ],
     )
     def test_notification_event_preserves_identity_payload_and_label(self, notification_id, name):
         application, device = application_with_device("device.local.", "192.0.2.1", name="Test Device")
         packet = struct.pack(">HH", 0x27FF, 28) + bytes(22) + struct.pack(">H", notification_id)
+        envelope = core.parse_response("notification_envelope", packet)
+        assert (envelope["notification_name"] or "Unknown notification") == name
 
         [event] = receive_packets(application, [packet], ("192.0.2.1", 8702))
 
@@ -448,6 +462,22 @@ class TestDanteNotificationService:
 
         dispatcher.emit_nowait.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "packet",
+        [
+            struct.pack(">HH", 0x1234, 28) + bytes(22) + bytes.fromhex("0102"),
+            struct.pack(">HH", 0x27FF, 29) + bytes(22) + bytes.fromhex("0102"),
+            struct.pack(">HH", 0xFFFF, 28) + bytes(22) + bytes.fromhex("0102"),
+        ],
+    )
+    def test_invalid_notification_envelope_cannot_emit_or_complete_waiters(self, packet):
+        application, _ = application_with_device("device.local.", "192.0.2.1")
+        service = application.notifications
+        service.notify_waiters = MagicMock()
+
+        assert receive_packets(application, [packet], ("192.0.2.1", 8702)) == []
+        service.notify_waiters.assert_not_called()
+
     def test_routing_capacity_ready_updates_capacity_and_active_counts(self):
         application, device = application_with_device("lx-dante.local.", "192.168.1.108")
 
@@ -461,7 +491,7 @@ class TestDanteNotificationService:
         assert device.rx_count == device.rx_count_raw == 128
         assert count_events(events, EventType.DEVICE_UPDATED) == 1
         [status_event] = status_events(events)
-        assert status_event.data["notification_id"] == CONMON_OPCODE_ROUTING_CAPACITY_STATUS
+        assert status_event.data["notification_id"] == NOTIFICATION_ROUTING_READY
         assert status_event.data["kind"] == "routing_capacity"
 
     def test_routing_capacity_transition_preserves_active_counts(self):
@@ -659,11 +689,17 @@ class TestDanteNotificationService:
         assert count_events(repeated_events, EventType.DEVICE_UPDATED) == 0
         assert len(status_events(repeated_events)) == 1
 
-    def test_sample_rate_pullup_status_updates_device_and_waiter(self):
+    @pytest.mark.parametrize("flags,disabled", [(0, False), (1, True), (2, False)])
+    def test_sample_rate_pullup_status_updates_device_and_waiter(self, flags, disabled):
+        from netaudio.dante.operation_availability import operation_availability
+        from netaudio.dante.state import apply_audio_capability
+
         application, device = application_with_device("a32.local.", "10.0.2.15", name="A32")
         waiter = application.notifications.register_waiter("sample_rate_pullup", "10.0.2.15")
+        packet = bytearray(SAMPLE_RATE_PULLUP_STATUS_PACKET)
+        struct.pack_into(">I", packet, 52, flags)
 
-        events = receive_packets(application, [SAMPLE_RATE_PULLUP_STATUS_PACKET], ("10.0.2.15", 8702))
+        events = receive_packets(application, [bytes(packet)], ("10.0.2.15", 8702))
 
         assert waiter.is_set()
         assert waiter.latest_result == {
@@ -672,8 +708,18 @@ class TestDanteNotificationService:
             "requested_value": 1,
             "update_mode": 2,
             "available_values": [0, 1, 2, 3, 4],
-            "flags": 0,
+            "flags": flags,
+            "host_disabled": disabled,
         }
+        device.sample_rate_pullup_configuration_supported = True
+        device.is_locked = False
+        assert device.sample_rate_pullup_host_disabled is disabled
+        assert operation_availability(device, "sample_rate_pullup", 1).writable is not disabled
+
+        device.sample_rate_pullup_host_disabled = None
+        apply_audio_capability(device, waiter.latest_result, kind="sample_rate_pullup")
+        assert device.sample_rate_pullup_host_disabled is disabled
+        assert device.to_json()["sample_rate_pullup_host_disabled"] is disabled
         assert device.sample_rate_pullup_raw_value == 1
         assert device.requested_sample_rate_pullup_raw_value == 1
         assert device.supported_sample_rate_pullup_raw_values == [0, 1, 2, 3, 4]
@@ -733,6 +779,7 @@ class TestDanteNotificationService:
             "descriptor_offset": 16,
             "raw_record": list(LIVE_AVIO_INPUT_GAIN_STATUS_PACKET[24:]),
             "parameters": [{"parameter_type": 1, "mode": 2, "values": [4, 4]}],
+            "gain_adapter": {"device_type": "input", "channel_levels": [4, 4], "supported_levels": [1, 2, 3, 4, 5]},
         }
         assert core.parse_response("codec_status", LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET) == {
             "record_protocol_version": 0x0738,
@@ -741,6 +788,7 @@ class TestDanteNotificationService:
             "descriptor_offset": 16,
             "raw_record": list(LIVE_AVIO_OUTPUT_GAIN_STATUS_PACKET[24:]),
             "parameters": [{"parameter_type": 2, "mode": 1, "values": [4, 4]}],
+            "gain_adapter": {"device_type": "output", "channel_levels": [4, 4], "supported_levels": [1, 2, 3, 4, 5]},
         }
 
     def test_input_codec_status_applies_the_device_scoped_gain_adapter(self):
@@ -761,7 +809,7 @@ class TestDanteNotificationService:
         ]
         assert count_events(events, EventType.DEVICE_UPDATED) == 1
         [status_event] = status_events(events)
-        assert status_event.data["notification_id"] == CONMON_OPCODE_CODEC_STATUS
+        assert status_event.data["notification_id"] == NOTIFICATION_CODEC_STATUS
 
     def test_generic_codec_status_clears_a_stale_device_scoped_gain_adapter(self):
         application, device = application_with_device("avio-input.local.", "192.168.1.108")
@@ -830,6 +878,7 @@ class TestDanteNotificationService:
         assert device.gain_device_type == "input"
         assert device.gain_levels == [5, 1]
         assert device.supported_gain_levels == [1, 2, 3, 4, 5]
+        assert device.codec_status == core.parse_response("codec_status", INPUT_GAIN_STATUS_PACKET)
 
 
 class TestKeyExtraction:

@@ -12,6 +12,15 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 crypto_secretbox = "0.1"
+schemars = { version = "=1.2.1", optional = true }
+
+[features]
+schema = ["dep:schemars"]
+
+[[bin]]
+name = "export-schema"
+path = "src/bin/export_schema.rs"
+required-features = ["schema"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -17,16 +17,15 @@ export function signalIndicator(values, channelNumber, now = Date.now(), directi
   const timestamp = values?.[`${direction}_updated_at`]?.[channelNumber] ?? values?.wall_time;
   if (!Number.isFinite(timestamp) || now - timestamp * 1000 > SIGNAL_MAX_AGE_MS || timestamp * 1000 > now + 1000) return STATES.unknown;
   const raw = values?.[direction]?.[channelNumber];
-  if (raw === 0) return STATES.clipping;
-  if (raw === 254) return STATES.muted;
-  if (raw === 255) return STATES.unknown;
+  const presence = raw == null ? values?.[`${direction}_signal_presence`]?.[channelNumber] : format.meteringSignalPresence(raw);
+  const state = STATES[presence] || STATES.unknown;
   const dbfs = raw == null ? null : format.meteringDecibelsFullScale(raw);
+
   if (dbfs !== null) {
-    const state = dbfs > format.METER_FLOOR_DBFS ? STATES.signal_present : STATES.below_threshold;
     return { ...state, dbfs, level: (dbfs + 126) / 126, icon: state.state === "quiet" ? state.icon : dbfs < -24 ? "signal-low" : "signal-high" };
   }
-  const presence = values?.[`${direction}_signal_presence`]?.[channelNumber];
-  return STATES[presence] || STATES.unknown;
+
+  return state;
 }
 
 export function SignalPresence({ serverName, channelNumber, online, direction = "rx" }) {

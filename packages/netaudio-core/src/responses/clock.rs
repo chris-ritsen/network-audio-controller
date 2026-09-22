@@ -191,7 +191,7 @@ pub fn parse_ptp_clock_status(data: &[u8]) -> Option<PtpClockStatus> {
         synchronization: "unknown".into(),
         preferred_leader: preferred,
         clock_source_code: source,
-        clock_source: label(source, &["internal", "external/BNC", "AES"]),
+        clock_source: crate::clock_configuration::clock_source_name(source).map(str::to_owned),
         stratum,
         ptpv1_device_uuid: None,
         ptpv1_master_uuid: None,

@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-from netaudio.dante.gain import gain_adapter_from_codec_status
+from copy import deepcopy
+
+from netaudio import core
 
 
 def permission(device, *, write):
-    if device.requires_managed_control:
-        return "Managed analog-control transport is unavailable."
-    if not device.ipv4 or getattr(device, "online", None) is False:
-        return "Device is unavailable."
-    if device.generic_codec_control_supported is not True:
-        return "Codec-control support is unavailable."
-    if write and device.is_locked is not False:
-        return "Device is locked or its lock state is unknown."
-    return None
+    return core.analog_access(
+        {
+            "managed": bool(device.requires_managed_control),
+            "address_available": bool(device.ipv4),
+            "online": getattr(device, "online", None),
+            "supported": device.generic_codec_control_supported,
+            "locked": device.is_locked,
+            "write": write,
+        }
+    )
 
 
 async def plan_analog(application, device, channel, level, direction=None, *, timeout=1.0):
@@ -25,42 +28,31 @@ async def plan_analog(application, device, channel, level, direction=None, *, ti
         "action": "unavailable",
         "reason": permission(device, write=False),
     }
+
     if plan["reason"]:
         return plan
-    if (
-        isinstance(channel, bool)
-        or not isinstance(channel, int)
-        or channel not in (1, 2)
-        or isinstance(level, bool)
-        or not isinstance(level, int)
-        or level not in (1, 2, 3, 4, 5)
-    ):
-        return {
-            **plan,
-            "action": "unsupported",
-            "reason": "Select a reported channel (1 or 2) and a level from 1 through 5.",
-        }
+
+    validation = core.analog_level_control(None, channel, level, direction)
+
+    if validation["action"] == "unsupported":
+        return {**plan, **validation}
+
     try:
         status = await application.probe_codec_status(device, timeout=timeout)
     except (RuntimeError, TimeoutError):
         device.codec_observed_at = None
+
         return {**plan, "reason": "Fresh analog status is unavailable."}
+
     application._apply_codec_status(device, status)
-    adapter = gain_adapter_from_codec_status(device, status)
-    if adapter is None:
-        return {
-            **plan,
-            "action": "ambiguous",
-            "reason": "Codec status does not identify one unambiguous analog control.",
-        }
-    if direction is not None and direction != adapter["device_type"]:
-        return {**plan, "action": "unsupported", "reason": "Requested direction differs from device status."}
-    if channel > len(adapter["channel_levels"]):
-        return {**plan, "action": "unsupported", "reason": "Channel is not reported by the device."}
-    plan.update(before=adapter["channel_levels"][channel - 1], direction=adapter["device_type"])
-    if plan["before"] == level:
-        return {**plan, "action": "unchanged", "reason": None}
+    plan.update(core.analog_level_control(status.get("gain_adapter"), channel, level, direction))
+    plan["status"] = deepcopy(status.get("gain_adapter"))
+
+    if plan["action"] != "change":
+        return plan
+
     reason = permission(device, write=True)
+
     return {**plan, "action": "unavailable" if reason else "change", "reason": reason}
 
 
@@ -77,33 +69,40 @@ async def apply_analog(application, device, channel, level, direction=None, time
             "effective_state_confirmed": plan["action"] == "unchanged",
             "persistence": "unknown",
             "media_readiness": "unknown",
+            "status": plan.get("status"),
         }
+
         if plan["action"] != "change":
             return result
+
         reason = permission(device, write=True)
+
         if reason:
             return {**result, "reason": reason}
+
         await application.send_set_gain_level(device, channel, level, plan["direction"])
         result["request_sent"] = True
         deadline = asyncio.get_running_loop().time() + timeout
+
         while asyncio.get_running_loop().time() < deadline:
             reason = permission(device, write=False)
+
             if reason:
                 return {**result, "reason": reason}
+
             try:
                 status = await application.probe_codec_status(
                     device, timeout=min(0.5, deadline - asyncio.get_running_loop().time())
                 )
                 application._apply_codec_status(device, status)
-                adapter = gain_adapter_from_codec_status(device, status)
-                if (
-                    adapter
-                    and adapter["device_type"] == plan["direction"]
-                    and channel <= len(adapter["channel_levels"])
-                    and adapter["channel_levels"][channel - 1] == level
-                ):
+                readback = core.analog_level_control(status.get("gain_adapter"), channel, level, plan["direction"])
+                result["status"] = deepcopy(status.get("gain_adapter"))
+
+                if readback["action"] == "unchanged":
                     return {**result, "effective_state_confirmed": True}
             except (TimeoutError, RuntimeError):
                 device.codec_observed_at = None
+
             await asyncio.sleep(0.02)
+
         return result

@@ -10,6 +10,14 @@ def _arc_packet(protocol_identifier: int, opcode: int, status: int, body: bytes 
     return struct.pack(">HHHHH", protocol_identifier, packet_length, 0x1234, opcode, status) + body
 
 
+@pytest.mark.parametrize("opcode", [0x2400, 0x2600, 0x3400, 0x3600])
+def test_dissection_does_not_select_modern_parsers_for_legacy_protocol(opcode):
+    result = dissect(_arc_packet(0x2729, opcode, 1), facts=[])
+
+    assert result.core_kind is None
+    assert result.core_fields is None
+
+
 def test_sample_rate_fields_are_rendered_as_frequency():
     payload = bytearray(40)
     payload[36:40] = (44_100).to_bytes(4, "big")
@@ -92,26 +100,15 @@ def _rx_channels_packet(status_code: int) -> bytes:
     return _arc_packet(0x27FF, 0x3000, 0x0001, body)
 
 
-def test_rx_channels_response_renders_core_records():
+def test_rx_channels_response_preserves_receiver_identity_and_status():
     result = dissect(_rx_channels_packet(0x0004), facts=[])
 
     assert result.core_kind == "rx"
-    assert result.core_fields == {
-        "starting_channel": 1,
-        "records": [
-            {
-                "can_rename": True,
-                "can_subscribe_self": False,
-                "number": 1,
-                "receiver_flags": 0,
-                "rx_channel_name": "rx1",
-                "rx_status_code": 0,
-                "subscription_status_code": 4,
-                "tx_channel_name": "tx1",
-                "tx_device_name": "dev",
-            }
-        ],
-    }
+    assert result.core_fields["starting_channel"] == 1
+    [record] = result.core_fields["records"]
+    assert (record["number"], record["rx_channel_name"]) == (1, "rx1")
+    assert (record["tx_channel_name"], record["tx_device_name"]) == ("tx1", "dev")
+    assert record["subscription_status_code"] == 4
 
 
 def test_encoding_status_dissects_current_and_supported_encodings():
@@ -219,7 +216,7 @@ def test_interface_status_packet_12362182_dissects_link_speed_from_protocol_fact
     result = dissect(payload, facts=facts)
     spans_by_name = {span.name: span for span in result.spans if span.name}
 
-    assert spans_by_name["message_type"].detail == "interface_status_announcement"
+    assert spans_by_name["message_type"].detail == result.core_kind == "interface_status"
     assert spans_by_name["interface_count"].value == "1"
     assert spans_by_name["link_speed_mbps"].value == "100"
     assert spans_by_name["link_speed_mbps"].detail == "100 Mbps"

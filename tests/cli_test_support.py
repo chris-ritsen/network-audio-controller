@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import click
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import CapabilityProbeTimeout
 
@@ -225,7 +226,9 @@ class FakeApplication:
         return self._record("reset_channel_name", device, channel_type, channel_number)
 
     async def set_latency(self, device, milliseconds):
-        return self._record("set_latency", device, milliseconds)
+        self._record("set_latency", device, milliseconds)
+
+        return core.latency_control(milliseconds, await self.get_latency_settings(device), True)
 
     async def set_encoding(self, device, encoding):
         self._record("set_encoding", device, encoding)
@@ -313,7 +316,7 @@ class FakeApplication:
         status = device.gain_adapter_probe_status
         if status is None:
             raise CapabilityProbeTimeout("gain status readback timed out")
-        return status
+        return {"device_type": status[0], "channel_levels": status[1], "supported_levels": [1, 2, 3, 4, 5]}
 
     async def set_gain_level(self, device, channel_number, gain_level, device_type):
         if device.gain_write_status == "applied":
@@ -322,7 +325,11 @@ class FakeApplication:
             device.gain_device_type = device_type
             device.gain_levels = channel_levels
             device.supported_gain_levels = [1, 2, 3, 4, 5]
-            return device_type, channel_levels
+            return {
+                "device_type": device_type,
+                "channel_levels": channel_levels,
+                "supported_levels": device.supported_gain_levels,
+            }
         return device.gain_write_status
 
     async def set_sample_rate(self, device, sample_rate, confirm_destructive=False, timeout=4.0):

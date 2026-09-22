@@ -5,11 +5,11 @@ from typing import Optional
 
 import typer
 
+from netaudio import core
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
 from netaudio.cli_support.execution import (
     CapabilityProbeTimeout,
-    readback_after_notification,
     report_inventory_failures,
     run_command,
 )
@@ -24,10 +24,10 @@ from netaudio.cli_support.selection import (
     select_device,
     sort_devices,
 )
-from netaudio.commands.config.readback import MUTATION_ERRORS
-from netaudio.dante.channel_frontend import ChannelFrontendError, channel_result_code
-from netaudio.dante.const import RESULT_CODE_SUCCESS
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, gain_channel_type, gain_level_label
+from netaudio.dante.readback import MUTATION_ERRORS, readback_after_notification
+from netaudio.dante.channel import channel_by_number
+from netaudio.dante.channel_frontend import ChannelFrontendError, require_channel_acknowledgement
+from netaudio.dante.gain import gain_channel_type, gain_level_label
 from netaudio.dante.state import apply_device_status
 from netaudio.icons import icon
 
@@ -102,14 +102,16 @@ def channel_list():
 async def _read_channel_name(device, channel_type: str, channel_number: int) -> str:
     if channel_type == "rx":
         await device.get_rx_channels()
-        refreshed = device.rx_channels.get(channel_number)
+        refreshed = channel_by_number(device.rx_channels.values(), channel_number)
         reported_name = refreshed.name if refreshed else None
     else:
         await device.get_tx_channels()
-        refreshed = device.tx_channels.get(channel_number)
+        refreshed = channel_by_number(device.tx_channels.values(), channel_number)
         reported_name = refreshed.friendly_name if refreshed else None
+
     if not isinstance(reported_name, str):
         raise RuntimeError("channel name readback was unavailable")
+
     return reported_name
 
 
@@ -148,9 +150,7 @@ async def run_channel_name(application, devices, reference: ChannelReference, ne
 
     try:
         response = await application.set_channel_name(device, channel_type, found_channel.number, new_name)
-        result_code = channel_result_code(response, "channel name change")
-        if result_code != RESULT_CODE_SUCCESS:
-            raise ChannelFrontendError(f"channel name change failed with result 0x{result_code:04X}")
+        require_channel_acknowledgement(response, "channel name change")
     except (*MUTATION_ERRORS, ChannelFrontendError) as exception:
         typer.echo(f"Error: could not send channel name change: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
@@ -215,7 +215,7 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
 
     if device.gain_levels is None:
         try:
-            device_type, channel_levels = await application.probe_gain_adapter(device)
+            adapter = await application.probe_gain_adapter(device)
         except CapabilityProbeTimeout as exception:
             typer.echo(f"Error: could not read gain status: {exception}", err=True)
             raise typer.Exit(code=ExitCode.ERROR)
@@ -227,9 +227,10 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
                 device,
                 "gain",
                 {
-                    "gain_device_type": device_type,
-                    "gain_levels": channel_levels,
-                    "supported_gain_levels": list(SUPPORTED_GAIN_LEVELS),
+                    "gain_adapter": adapter,
+                    "gain_device_type": adapter["device_type"],
+                    "gain_levels": adapter["channel_levels"],
+                    "supported_gain_levels": adapter["supported_levels"],
                 },
             )
 
@@ -267,10 +268,13 @@ async def run_channel_gain(application, devices, reference: ChannelReference, le
     if status is None:
         typer.echo("Error: gain change sent, but device readback was unavailable.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
-    observed_device_type, channel_levels = status
+    observed_device_type = status["device_type"]
+    channel_levels = status["channel_levels"]
     channel_index = found_channel.number - 1
     observed_level = channel_levels[channel_index] if 0 <= channel_index < len(channel_levels) else None
-    if observed_device_type != device_type or observed_level != level:
+    readback = core.analog_level_control(status, found_channel.number, level, device_type)
+
+    if readback["action"] != "unchanged":
         typer.echo(
             "Error: gain change was not applied; "
             f"device reports {observed_device_type} channel {found_channel.number} level {observed_level}.",

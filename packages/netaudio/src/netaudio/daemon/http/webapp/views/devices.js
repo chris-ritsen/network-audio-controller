@@ -180,7 +180,7 @@ const INFO_COLUMNS = [
     defaultHidden: true,
   },
   {
-    cell: (device) => format.clockSourceCode(device.clock_source_code),
+    cell: (device) => format.text(device.clock_source || "Unknown"),
     id: "clock-source",
     label: "Clock source",
     defaultHidden: true,

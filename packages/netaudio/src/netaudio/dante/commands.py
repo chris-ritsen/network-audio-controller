@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import re
-import secrets
-
-from netaudio.dante.const import PROTOCOL_ARC_2809
-
-DANTE_NAME_MAX_LENGTH = 31
-DANTE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")
+from netaudio import core
 
 
 def _mac_to_hex(value):
@@ -17,58 +11,18 @@ def _mac_to_hex(value):
     return value
 
 
-def channel_status_query_specification(
-    channel_type: str,
-    protocol_id: int = PROTOCOL_ARC_2809,
-    media_selector: int = 1,
-    starting_channel_identifier: int = 1,
-    ending_channel_identifier: int = 0,
-) -> dict:
-    command = (
-        "query_modern_arc_receiver_channel_status"
-        if channel_type == "rx"
-        else "query_modern_arc_transmitter_channel_status"
-    )
-    return {
-        "command": command,
-        "ending_channel_identifier": ending_channel_identifier,
-        "media_selector": media_selector,
-        "protocol_id": protocol_id,
-        "starting_channel_identifier": starting_channel_identifier,
-    }
-
-
-def subscription_records(subscriptions) -> list[dict]:
-    return [
-        {"rx_channel": rx_channel, "tx_channel": tx_channel, "tx_device": tx_device}
-        for rx_channel, tx_channel, tx_device in subscriptions
-    ]
-
-
 def validate_dante_name(name: str) -> str | None:
-    if len(name) > DANTE_NAME_MAX_LENGTH:
-        return f"Name exceeds {DANTE_NAME_MAX_LENGTH} characters"
-
-    if not DANTE_NAME_PATTERN.match(name):
-        if name.startswith("-") or name.endswith("-"):
-            return "Name cannot begin or end with a hyphen"
-        return "Name must contain only A-Z, a-z, 0-9, and hyphens"
+    try:
+        core.build_command({"command": "set_name", "name": name})
+    except core.NetaudioCoreError as error:
+        return error.detail or str(error)
 
     return None
 
 
 class DanteCommands:
-    def __init__(self):
-        self._sequence = secrets.randbelow(0xFFFF)
-
-    def _next_sequence(self) -> int:
-        self._sequence = (self._sequence + 1) & 0xFFFF
-        if self._sequence == 0:
-            self._sequence = 1
-        return self._sequence
-
-    def _sequenced(self, specification: dict, host_mac=None) -> dict:
-        specification["sequence"] = self._next_sequence()
+    def _with_message_id(self, specification: dict, host_mac=None) -> dict:
+        specification["message_id"] = core.next_message_id()
         return self._with_host_mac(specification, host_mac)
 
     @staticmethod
@@ -77,24 +31,6 @@ class DanteCommands:
             specification["host_mac"] = _mac_to_hex(host_mac)
         return specification
 
-    def add_subscriptions(self, records) -> dict:
-        return {"command": "add_subscriptions", "subscriptions": subscription_records(records)}
-
-    def modern_arc_subscription_page(
-        self,
-        protocol_id: int,
-        page_capacity: int,
-        media_type_code: int,
-        records: list[dict],
-    ) -> dict:
-        return {
-            "command": "modern_arc_subscription_page",
-            "protocol_id": protocol_id,
-            "page_capacity": page_capacity,
-            "media_type_code": media_type_code,
-            "records": records,
-        }
-
     def panel_control(self, request: dict, requester: int, sequence: int, host_mac=None) -> dict:
         return self._with_host_mac(
             {
@@ -102,64 +38,68 @@ class DanteCommands:
                 "request": request,
                 "requester": requester,
                 "sequence": sequence,
-                "message_id": self._next_sequence(),
+                "message_id": core.next_message_id(),
             },
             host_mac,
         )
 
     def capability_partition_export(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "capability_partition_export"}, host_mac)
+        return self._with_message_id({"command": "capability_partition_export"}, host_mac)
 
     def clear_all_configuration(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "clear_all_configuration"}, host_mac)
+        return self._with_message_id({"command": "clear_all_configuration"}, host_mac)
 
     def clear_all_configuration_preserving_internet_protocol_settings(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "clear_all_configuration_preserving_internet_protocol_settings"}, host_mac)
+        return self._with_message_id(
+            {"command": "clear_all_configuration_preserving_internet_protocol_settings"}, host_mac
+        )
 
     def dante_model(self, mac) -> dict:
         return {"command": "dante_model", "mac": _mac_to_hex(mac)}
 
     def device_log_export(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "device_log_export"}, host_mac)
+        return self._with_message_id({"command": "device_log_export"}, host_mac)
 
     def enable_aes67(self, is_enabled: bool, host_mac=None) -> dict:
-        return self._sequenced({"command": "enable_aes67", "enabled": bool(is_enabled)}, host_mac)
+        return self._with_message_id({"command": "enable_aes67", "enabled": is_enabled}, host_mac)
 
     def factory_reset(self, host_mac: bytes | None = None) -> dict:
-        specification = {"command": "factory_reset"}
-        if host_mac is not None:
-            specification["host_mac"] = host_mac.hex()
-        return specification
+        return self._with_host_mac({"command": "factory_reset"}, host_mac)
 
     def identify(self) -> dict:
-        return self._sequenced({"command": "identify"})
+        return self._with_message_id({"command": "identify"})
 
     def make_model(self, mac) -> dict:
         return {"command": "make_model", "mac": _mac_to_hex(mac)}
 
     def probe_aes67(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_aes67"}, host_mac)
+        return self._with_message_id({"command": "probe_aes67"}, host_mac)
 
     def probe_clear_configuration_status(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_clear_configuration_status"}, host_mac)
+        return self._with_message_id({"command": "probe_clear_configuration_status"}, host_mac)
 
     def probe_encoding(self, host_mac=None) -> dict:
         return self._with_host_mac({"command": "probe_encoding"}, host_mac)
 
     def probe_codec_status(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_codec_status"}, host_mac)
+        return self._with_message_id({"command": "probe_codec_status"}, host_mac)
 
     def probe_interface_status(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_interface_status"}, host_mac)
+        return self._with_message_id({"command": "probe_interface_status"}, host_mac)
 
     def probe_interface_statistics(self, host_mac=None, *, extended_073a: bool = False) -> dict:
-        return self._sequenced(
+        return self._with_message_id(
             {"command": "probe_interface_statistics", "extended_073a": extended_073a},
             host_mac,
         )
 
-    def probe_lock_reset_status(self, host_mac=None, request_value: int = 100) -> dict:
-        return self._sequenced({"command": "probe_lock_reset_status", "request_value": request_value}, host_mac)
+    def probe_lock_reset_status(self, host_mac=None, request_value: int | None = None) -> dict:
+        specification = {"command": "probe_lock_reset_status"}
+
+        if request_value is not None:
+            specification["request_value"] = request_value
+
+        return self._with_message_id(specification, host_mac)
 
     def probe_sample_rate(self, host_mac=None) -> dict:
         return self._with_host_mac({"command": "probe_sample_rate"}, host_mac)
@@ -168,19 +108,17 @@ class DanteCommands:
         return self._with_host_mac({"command": "probe_sample_rate_pullup"}, host_mac)
 
     def probe_switch_configuration(self, host_mac=None) -> dict:
-        return self._sequenced({"command": "probe_switch_configuration"}, host_mac)
+        return self._with_message_id({"command": "probe_switch_configuration"}, host_mac)
 
     def set_dante_redundancy(
         self,
-        record_protocol_identifier: int | None,
         mode: str,
         switch_configuration_choice: int | None = None,
         host_mac=None,
     ) -> dict:
-        return self._sequenced(
+        return self._with_message_id(
             {
                 "command": "set_dante_redundancy",
-                "record_protocol_identifier": record_protocol_identifier,
                 "mode": mode,
                 "switch_configuration_choice": switch_configuration_choice,
             },
@@ -190,39 +128,20 @@ class DanteCommands:
     def query_latency_config(self) -> dict:
         return {"command": "query_latency_config"}
 
-    def query_performance_settings(self, negotiated_protocol_id: int, property_ids) -> dict:
-        return {
-            "command": "query_performance_settings",
-            "negotiated_protocol_id": negotiated_protocol_id,
-            "property_ids": list(property_ids),
-        }
-
-    def query_modern_arc_receiver_flow_status(self, protocol_id=PROTOCOL_ARC_2809, starting_flow: int = 1) -> dict:
-        return {
-            "command": "query_modern_arc_receiver_flow_status",
-            "protocol_id": protocol_id,
-            "starting_flow": starting_flow,
-        }
-
-    def query_modern_arc_transmitter_flow_status(self, protocol_id=PROTOCOL_ARC_2809) -> dict:
-        return {"command": "query_tx_flows", "flow_protocol_id": protocol_id, "starting_flow": 1}
-
     def reboot(self, host_mac: bytes | None = None) -> dict:
-        specification = {"command": "reboot"}
-        if host_mac is not None:
-            specification["host_mac"] = host_mac.hex()
-        return specification
+        return self._with_host_mac({"command": "reboot"}, host_mac)
 
     def clock_control(self, control: dict, host_mac=None) -> dict:
-        return self._sequenced({"command": "clock_control", "control": control}, host_mac)
+        return self._with_message_id({"command": "clock_control", "control": control}, host_mac)
 
-    def refresh_clock_status(self, record_revision: int, host_mac=None, sequence: int = 0x0021) -> dict:
-        return self._with_host_mac(
-            {"command": "refresh_clock_status", "record_revision": record_revision, "sequence": sequence}, host_mac
-        )
+    def refresh_clock_status(self, record_revision: int, host_mac=None, message_id: int | None = None) -> dict:
+        specification = {"command": "refresh_clock_status", "record_revision": record_revision}
 
-    def remove_subscriptions(self, channel_numbers) -> dict:
-        return {"command": "remove_subscriptions", "rx_channels": list(channel_numbers)}
+        if message_id is None:
+            return self._with_message_id(specification, host_mac)
+
+        specification["message_id"] = message_id
+        return self._with_host_mac(specification, host_mac)
 
     def reset_channel_name(self, channel_type: str, channel_number: int) -> dict:
         return {"channel_number": channel_number, "channel_type": channel_type, "command": "reset_channel_name"}
@@ -233,22 +152,20 @@ class DanteCommands:
     def set_aes67_multicast_prefix(self, prefix: str) -> dict:
         return {"command": "set_aes67_multicast_prefix", "prefix": prefix}
 
-    def set_channel_name(self, channel_type: str, channel_number: int, name: str, protocol_id=None) -> dict:
-        specification = {
+    def set_channel_name(self, channel_type: str, channel_number: int, name: str, protocol_id: int) -> dict:
+        return {
             "channel_number": channel_number,
             "channel_type": channel_type,
             "command": "set_channel_name",
             "name": name,
+            "protocol_id": protocol_id,
         }
-        if protocol_id is not None:
-            specification["protocol_id"] = protocol_id
-        return specification
 
     def set_encoding(self, encoding: int) -> dict:
-        return self._sequenced({"command": "set_encoding", "encoding": encoding})
+        return self._with_message_id({"command": "set_encoding", "encoding": encoding})
 
     def set_gain_level(self, channel_number: int, gain_level: int, device_type: str, host_mac=None) -> dict:
-        return self._sequenced(
+        return self._with_message_id(
             {
                 "channel_number": channel_number,
                 "command": "set_gain_level",
@@ -258,12 +175,11 @@ class DanteCommands:
             host_mac,
         )
 
-    def set_interface_dhcp(self, host_mac=None, *, interface="primary", record_protocol_identifier=None) -> dict:
-        return self._sequenced(
+    def set_interface_dhcp(self, host_mac=None, *, interface="primary") -> dict:
+        return self._with_message_id(
             {
                 "command": "set_interface_dhcp",
                 "interface": interface,
-                "record_protocol_identifier": record_protocol_identifier,
             },
             host_mac,
         )
@@ -277,13 +193,11 @@ class DanteCommands:
         host_mac=None,
         *,
         interface="primary",
-        record_protocol_identifier=None,
     ) -> dict:
-        return self._sequenced(
+        return self._with_message_id(
             {
                 "command": "set_interface_static",
                 "interface": interface,
-                "record_protocol_identifier": record_protocol_identifier,
                 "dns": dns_server,
                 "gateway": gateway,
                 "ip": ip_address,
@@ -295,79 +209,14 @@ class DanteCommands:
     def set_latency(self, latency_milliseconds: float) -> dict:
         return {"command": "set_latency", "latency": latency_milliseconds}
 
-    def set_receive_flow_default_slots(
-        self, negotiated_protocol_id: int, supported_property_ids, default_slots: int
-    ) -> dict:
-        return {
-            "command": "set_receive_flow_default_slots",
-            "negotiated_protocol_id": negotiated_protocol_id,
-            "supported_property_ids": list(supported_property_ids),
-            "default_slots": default_slots,
-        }
-
-    def set_receive_flow_performance(
-        self,
-        negotiated_protocol_id: int,
-        supported_property_ids,
-        latency_microseconds: int,
-        frames_per_packet: int,
-        platform_software_version,
-    ) -> dict:
-        return {
-            "command": "set_receive_flow_performance",
-            "negotiated_protocol_id": negotiated_protocol_id,
-            "supported_property_ids": list(supported_property_ids),
-            "latency_microseconds": latency_microseconds,
-            "frames_per_packet": frames_per_packet,
-            "platform_software_version": list(platform_software_version),
-        }
-
-    def set_transmit_flow_performance(
-        self,
-        negotiated_protocol_id: int,
-        supported_property_ids,
-        latency_microseconds: int,
-        frames_per_packet: int,
-    ) -> dict:
-        return {
-            "command": "set_transmit_flow_performance",
-            "negotiated_protocol_id": negotiated_protocol_id,
-            "supported_property_ids": list(supported_property_ids),
-            "latency_microseconds": latency_microseconds,
-            "frames_per_packet": frames_per_packet,
-        }
-
-    def set_unicast_performance(
-        self,
-        negotiated_protocol_id: int,
-        supported_property_ids,
-        latency_microseconds: int,
-        frames_per_packet: int,
-        platform_software_version,
-    ) -> dict:
-        return {
-            "command": "set_unicast_performance",
-            "negotiated_protocol_id": negotiated_protocol_id,
-            "supported_property_ids": list(supported_property_ids),
-            "latency_microseconds": latency_microseconds,
-            "frames_per_packet": frames_per_packet,
-            "platform_software_version": list(platform_software_version),
-        }
-
-    def store_current_configuration(self, negotiated_protocol_id: int) -> dict:
-        return {
-            "command": "store_current_configuration",
-            "negotiated_protocol_id": negotiated_protocol_id,
-        }
-
     def set_name(self, name: str) -> dict:
         return {"command": "set_name", "name": name}
 
     def set_sample_rate(self, sample_rate: int) -> dict:
-        return self._sequenced({"command": "set_sample_rate", "sample_rate": sample_rate})
+        return self._with_message_id({"command": "set_sample_rate", "sample_rate": sample_rate})
 
     def set_sample_rate_pullup(self, raw_value: int, host_mac=None) -> dict:
-        return self._sequenced({"command": "set_sample_rate_pullup", "raw_value": raw_value}, host_mac)
+        return self._with_message_id({"command": "set_sample_rate_pullup", "raw_value": raw_value}, host_mac)
 
     def subscribe_external_rtp(
         self,
@@ -399,4 +248,4 @@ class DanteCommands:
         }
         if secondary_destination is not None:
             specification["secondary_destination"] = dict(secondary_destination)
-        return self._sequenced(specification)
+        return self._with_message_id(specification)

@@ -4,8 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from netaudio.dante.application import DanteApplication
+from netaudio import core
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.self_connection import (
     SelfConnectionCapabilityUnavailableError,
     SelfConnectionUnsupportedError,
@@ -19,6 +21,7 @@ def _receiver_device(server_name="receiver.local.", name="Receiver"):
     application = DanteApplication()
     device = DanteDevice(server_name, app=application)
     device.name = name
+    device.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.255"}}}
     channel = DanteChannel()
     channel.channel_type = "rx"
     channel.device = device
@@ -75,6 +78,54 @@ def test_receiver_self_connection_summary(values, expected):
     assert receiver_self_connection_support(channels) == expected
 
 
+@pytest.mark.parametrize(
+    "authority,direct,managed,fresh,supported,conflict",
+    [
+        ("direct", True, False, True, None, True),
+        ("direct", True, False, False, True, False),
+        ("direct", None, True, True, None, False),
+        ("managed", True, False, True, None, True),
+        ("managed", True, None, True, None, False),
+        ("managed", True, True, False, None, False),
+        ("managed", None, False, True, False, False),
+        ("observed", None, True, True, True, False),
+        ("observed", True, None, True, True, False),
+        ("observed", None, True, False, None, False),
+        ("observed", False, True, True, None, True),
+        ("observed", True, True, True, True, False),
+    ],
+)
+def test_native_self_connection_evidence_respects_authority_and_freshness(
+    authority, direct, managed, fresh, supported, conflict
+):
+    result = core.receiver_self_connection_capabilities(
+        {
+            "authority": authority,
+            "channels": [{"direct": direct, "managed": managed, "managed_fresh": fresh}],
+        }
+    )
+
+    assert result["channels"] == [{"supported": supported, "conflict": conflict}]
+    assert result["support"] == ("unknown" if supported is None else "supported" if supported else "unsupported")
+
+
+@pytest.mark.parametrize("damage", ["authority", "direct", "freshness", "unknown_field"])
+def test_native_self_connection_evidence_rejects_guessed_inputs(damage):
+    request = {"authority": "direct", "channels": [{"direct": True, "managed": None, "managed_fresh": False}]}
+
+    if damage == "authority":
+        request["authority"] = "guess"
+    elif damage == "direct":
+        request["channels"][0]["direct"] = 1
+    elif damage == "freshness":
+        del request["channels"][0]["managed_fresh"]
+    else:
+        request["channels"][0]["model"] = "assumed supported"
+
+    with pytest.raises(core.NetaudioCoreError):
+        core.receiver_self_connection_capabilities(request)
+
+
 def test_canonical_identity_survives_rename_and_display_name_is_not_identity():
     receiver = DanteDevice("stable-receiver.local.")
     receiver.name = "Renamed Receiver"
@@ -91,6 +142,23 @@ def test_canonical_identity_survives_rename_and_display_name_is_not_identity():
     assert is_self_connection_request(receiver, "stable-receiver.local.", [receiver, same_name]) is True
     assert is_self_connection_request(receiver, "Renamed Receiver", [receiver, correlated]) is True
     assert is_self_connection_request(receiver, "Renamed Receiver", [receiver, same_name]) is False
+
+
+@pytest.mark.parametrize("address", ["0011.2233.4455", "00-11-22-33-44-55", "001122fffe334455", "0011223344550000"])
+def test_self_connection_identity_uses_the_same_native_address_as_display(address):
+    from netaudio.commands.device.display import format_mac_address
+
+    first = SimpleNamespace(mac_address=address)
+    second = SimpleNamespace(mac_address="00:11:22:33:44:55")
+
+    assert same_canonical_device(first, second)
+    assert core.canonical_device_mac(address) == "001122334455"
+    assert format_mac_address(address) == "00:11:22:33:44:55"
+
+
+@pytest.mark.parametrize("address", ["000000000000", "000000fffe000000", "zz001122334455", "", None])
+def test_unavailable_or_invalid_mac_is_not_proof_of_self_connection(address):
+    assert not same_canonical_device(SimpleNamespace(mac_address=address), SimpleNamespace(mac_address=address))
 
 
 @pytest.mark.asyncio
@@ -112,15 +180,16 @@ async def test_fresh_false_refuses_self_connection_before_sending():
 
 @pytest.mark.asyncio
 async def test_fresh_true_permits_normal_subscription_without_claiming_effective_state():
-    application, device, channel = _receiver_device(name="Renamed Receiver")
+    application, device, channel = _receiver_device(name="Renamed-Receiver")
 
     async def refresh():
         channel.receiver_flags = 0x000F
         channel.can_subscribe_self = True
+        device.rx_channels = {"Input": channel}
 
     device.get_rx_channels = AsyncMock(side_effect=refresh)
 
-    response = await application.send_add_subscriptions(device, [(1, "Output", "receiver.local.")])
+    response = await application.send_add_subscriptions(device, [(1, "Output", device.name)])
 
     assert response == b"acknowledged"
     assert device.subscriptions == []
@@ -176,9 +245,57 @@ async def test_managed_fresh_true_permits_subscription_processing():
 
 
 @pytest.mark.asyncio
-async def test_conflicting_fresh_managed_and_direct_observations_are_unavailable():
+async def test_serialized_capability_conflict_still_blocks_managed_self_connection():
+    from netaudio.dante.device_serializer import DanteDeviceSerializer
+
+    application, managed, device, channel = _managed_receiver(True)
+    channel.direct_can_subscribe_self = False
+    channel.managed_can_subscribe_self = True
+    channel.managed_can_subscribe_self_fresh = True
+    channel.can_subscribe_self = None
+    channel.can_subscribe_self_conflict = True
+    restored = DanteDeviceSerializer.device_from_json(DanteDeviceSerializer.to_json(device))
+    device.rx_channels = restored.rx_channels
+
+    with pytest.raises(SelfConnectionCapabilityUnavailableError):
+        await application.add_subscriptions(device, [(1, "Output", ".")])
+
+    managed.set_subscriptions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory", ["rekeyed", "wrong_channel", "duplicate"])
+async def test_managed_self_connection_permission_uses_receiver_identity(inventory):
+    application, managed, device, channel = _managed_receiver(True)
+
+    if inventory == "rekeyed":
+        device.rx_channels = {"Input": channel}
+    elif inventory == "wrong_channel":
+        channel.number = 2
+    else:
+        duplicate = DanteChannel()
+        duplicate.number = 1
+        device.rx_channels[2] = duplicate
+
+    if inventory == "rekeyed":
+        assert await application.add_subscriptions(device, [(1, "Output", ".")]) == "accepted"
+        managed.set_subscriptions.assert_awaited_once()
+    else:
+        with pytest.raises(SelfConnectionCapabilityUnavailableError):
+            await application.add_subscriptions(device, [(1, "Output", ".")])
+
+        managed.set_subscriptions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_conflicting_fresh_managed_and_direct_observations_are_unavailable(load_fixture):
     application, managed, device, channel = _managed_receiver(False)
-    channel.receiver_flags = 0x000F
+    records = core.parse_page("rx", load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin"), 1)
+    device.rx_channels, _ = device._build_rx_from_records(records)
+    channel = device.rx_channels[1]
+
+    # The parsed capability remains authoritative without the diagnostic wire flags.
+    channel.receiver_flags = None
 
     with pytest.raises(SelfConnectionCapabilityUnavailableError):
         await application.add_subscriptions(device, [(1, "Output", ".")])
@@ -186,6 +303,43 @@ async def test_conflicting_fresh_managed_and_direct_observations_are_unavailable
     assert channel.can_subscribe_self is None
     assert channel.can_subscribe_self_conflict is True
     managed.set_subscriptions.assert_not_awaited()
+
+    managed.fetch_device.return_value = SimpleNamespace(
+        rx_channels=(SimpleNamespace(index=1, can_subscribe_self=True),)
+    )
+    assert await application.add_subscriptions(device, [(1, "Output", ".")]) == "accepted"
+    assert channel.can_subscribe_self is True
+    assert channel.can_subscribe_self_conflict is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_legacy_refresh_cannot_lose_managed_denial_when_channel_keys_change(load_fixture, ambiguous):
+    application, device, channel = _receiver_device()
+    channel.managed_can_subscribe_self = False
+    channel.managed_can_subscribe_self_fresh = True
+    device.rx_channels = {"Input": channel}
+
+    if ambiguous:
+        duplicate = DanteChannel()
+        duplicate.number = 1
+        device.rx_channels["Duplicate"] = duplicate
+
+    records = core.parse_page("rx", load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin"), 1)
+
+    async def refresh():
+        device.rx_channels, device.subscriptions = device._build_rx_from_records(records)
+
+    device.get_rx_channels = AsyncMock(side_effect=refresh)
+
+    with pytest.raises(SelfConnectionCapabilityUnavailableError):
+        await application.add_subscriptions(device, [(1, "Output", ".")])
+
+    device.execute.assert_not_awaited()
+
+    if not ambiguous:
+        assert device.rx_channels[1].can_subscribe_self is None
+        assert device.rx_channels[1].can_subscribe_self_conflict is True
 
 
 @pytest.mark.asyncio
@@ -228,7 +382,7 @@ def test_subscription_status_readback_does_not_overwrite_advertised_capability()
     device = DanteDevice("receiver.local.")
     device.name = "Receiver"
     for status_code in (0x0004, 0x0022):
-        device.apply_receiver_channel_status_page(
+        device.apply_receiver_channel_inventory(
             {
                 "records": [
                     {
@@ -236,6 +390,7 @@ def test_subscription_status_readback_does_not_overwrite_advertised_capability()
                         "local_channel_name": "Input",
                         "source_device_name": "Receiver" if status_code == 0x0004 else ".",
                         "source_channel_name": "Output",
+                        "is_self_connection": True,
                         "receiver_capability_flags": 0x0000_0008,
                         "can_subscribe_self": True,
                         "subscription_status_code": status_code,

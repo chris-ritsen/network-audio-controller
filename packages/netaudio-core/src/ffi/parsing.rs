@@ -3,6 +3,39 @@ use super::*;
 fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
     use crate::responses;
     match kind {
+        "sdp" => {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                FfiError::new(NetaudioStatus::MalformedResponse, "SDP must be UTF-8 text")
+            })?;
+            let document = crate::sdp::parse(text)
+                .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
+            serialize_optional(kind, Some(document))
+        }
+        "sap" => {
+            let announcement = crate::sap::parse(bytes)
+                .map_err(|message| FfiError::new(NetaudioStatus::MalformedResponse, message))?;
+            serialize_optional(kind, Some(announcement))
+        }
+        "device_request" => {
+            serialize_optional(kind, crate::device_requests::parse_device_request(bytes))
+        }
+        "packet_header" => {
+            serialize_optional(kind, crate::protocol::diagnostic_packet_header(bytes))
+        }
+        "set_channel_name_request" => {
+            serialize_optional(kind, crate::commands::parse_set_channel_name_request(bytes))
+        }
+        "set_latency_request" => {
+            serialize_optional(kind, crate::commands::parse_set_latency_request(bytes))
+        }
+        "add_subscriptions_request" => serialize_optional(
+            kind,
+            crate::commands::parse_add_subscriptions_request(bytes),
+        ),
+        "remove_subscriptions_request" => serialize_optional(
+            kind,
+            crate::commands::parse_remove_subscriptions_request(bytes),
+        ),
         "panel_status" => serialize_optional(
             kind,
             crate::device_controls::parse_panel_status(bytes, None),
@@ -34,6 +67,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             serialize_optional(kind, responses::parse_conmon_export_fragment(bytes))
         }
         "conmon_opcode" => serialize_optional(kind, responses::parse_conmon_opcode(bytes)),
+        "notification_envelope" => {
+            serialize_optional(kind, responses::parse_notification_envelope(bytes))
+        }
         "dante_brooklyn_control_protocol_flow_setup_request" => serialize_optional(
             kind,
             responses::parse_dante_brooklyn_control_protocol_flow_setup_request(bytes),
@@ -44,6 +80,9 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         ),
         "dante_model" => serialize_optional(kind, responses::parse_dante_model(bytes)),
         "dapi_frame_header" => serialize_optional(kind, crate::dapi::parse_frame_header(bytes)),
+        "dapi_arc_request_header" => {
+            serialize_optional(kind, crate::dapi::parse_arc_request_header(bytes))
+        }
         "dapi_device_announcement" => {
             serialize_optional(kind, crate::dapi::parse_device_announcement(bytes))
         }
@@ -73,7 +112,6 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
         "device_name" => serialize_optional(kind, responses::parse_device_name(bytes)),
         "device_settings" => serialize_optional(kind, responses::parse_device_settings(bytes)),
         "encoding_status" => serialize_optional(kind, responses::parse_encoding_status(bytes)),
-        "gain_status" => serialize_optional(kind, responses::parse_gain_status(bytes)),
         "codec_status" => serialize_optional(kind, responses::parse_codec_status(bytes)),
         "heartbeat_clock_frequency_offset" => serialize_optional(
             kind,
@@ -113,6 +151,16 @@ fn parse_response_kind(kind: &str, bytes: &[u8]) -> Result<Vec<u8>, FfiError> {
             serialize_optional(kind, responses::parse_receiver_port_ranges(bytes))
         }
         "result_code" => serialize_optional(kind, responses::parse_result_code(bytes)),
+        "receiver_channel_name_protocol" => {
+            serialize_optional(kind, responses::parse_channel_name_protocol(bytes, true))
+        }
+        "transmitter_channel_name_protocol" => {
+            serialize_optional(kind, responses::parse_channel_name_protocol(bytes, false))
+        }
+        "command_acknowledgement" => {
+            serialize_optional(kind, responses::parse_command_acknowledgement(bytes))
+        }
+        "command_receipt" => serialize_optional(kind, Some(responses::command_receipt(bytes))),
         "routing_capacity_status" => {
             serialize_optional(kind, responses::parse_routing_capacity_status(bytes))
         }

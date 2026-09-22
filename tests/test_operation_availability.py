@@ -1,8 +1,76 @@
 import pytest
+from unittest.mock import AsyncMock
 
+from netaudio import core
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.operation_availability import operation_availability, operation_availability_map, require_writable
+
+
+@pytest.mark.parametrize(
+    "operation,locked,managed,permission,reasons,permitted",
+    [
+        ("identify", True, False, None, [], True),
+        ("locking", True, False, None, [], True),
+        ("aes67", True, False, None, ["device_locked"], False),
+        ("aes67", None, False, None, ["lock_state_unknown"], True),
+        ("identify", False, True, None, ["managed_permission_missing"], False),
+        ("identify", False, True, False, ["managed_permission_denied"], False),
+        ("locking", False, True, True, ["managed_transport_unavailable"], False),
+    ],
+)
+def test_native_operation_policy_is_shared_by_clients(operation, locked, managed, permission, reasons, permitted):
+    result = core.operation_availability(
+        {
+            "operation": operation,
+            "supported": True,
+            "readable": False,
+            "locked": locked,
+            "managed": managed,
+            "permission": permission,
+            "transport_available": True,
+            "has_adapter": True,
+        }
+    )
+
+    assert result["reasons"] == reasons
+    assert result["writable"] == (not reasons)
+    assert result["write_permitted"] is permitted
+
+
+def test_native_operation_policy_cannot_treat_an_unknown_operation_as_identify():
+    with pytest.raises(core.NetaudioCoreError):
+        core.operation_availability({"operation": "future_operation"})
+
+
+@pytest.mark.parametrize("source", [None, {}, {"fresh": False, "field_reported": True}, {"fresh": True}])
+def test_native_redundancy_capability_requires_fresh_reported_evidence(source):
+    result = core.operation_availability(
+        {
+            "operation": "redundancy",
+            "supported": True,
+            "supported_source": source,
+            "read_only": False,
+            "read_only_source": source,
+            "readable": True,
+            "locked": False,
+            "managed": False,
+            "transport_available": True,
+            "has_adapter": False,
+        }
+    )
+
+    assert result["supported"] is None
+    assert result["read_only"] is None
+    assert "capability_unknown" in result["reasons"]
+    assert "read_only_unknown" in result["reasons"]
+    assert result["write_permitted"] is False
+
+
+@pytest.mark.parametrize("mode", [-1, 65536, True, "2", 2.0])
+def test_native_audio_update_mode_rejects_values_that_would_be_coerced(mode):
+    with pytest.raises(core.NetaudioCoreError):
+        core.audio_capability_control(mode, None)
 
 
 def device_for(operation: str) -> DanteDevice:
@@ -121,14 +189,48 @@ def test_configurable_components_require_known_writable_modes_and_advertised_val
     assert operation_availability(device, "sample_rate", 44_100).reasons == ("value_not_advertised",)
 
 
-def test_pullup_host_disable_flag_blocks_writes_and_empty_choices_remain_valid():
+def test_pullup_empty_choices_do_not_invent_a_value_restriction():
     device = device_for("sample_rate_pullup")
-    device.sample_rate_pullup_flags = 1
-    assert "host_disabled" in operation_availability(device, "sample_rate_pullup", 1).reasons
-
-    device.sample_rate_pullup_flags = 0
     device.supported_sample_rate_pullup_raw_values = []
     assert operation_availability(device, "sample_rate_pullup", 99).writable is True
+
+
+@pytest.mark.parametrize(
+    "mode,choices,requested,disabled,reasons",
+    [
+        (2, [0, 1], 1, False, []),
+        (1, [0, 1], 1, False, []),
+        (0, [0], 1, True, ["fixed", "value_not_advertised", "host_disabled"]),
+        (77, None, 1, None, ["update_mode_unknown"]),
+        (65535, None, 1, None, ["update_mode_unknown"]),
+        (None, [], None, None, ["update_mode_unknown"]),
+        (2, [], 99, False, []),
+    ],
+)
+def test_native_audio_control_preserves_independent_restrictions(mode, choices, requested, disabled, reasons):
+    assert core.audio_capability_control(mode, choices, requested, disabled) == reasons
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation,value", [("encoding", 24), ("sample_rate_pullup", 1)])
+async def test_audio_setter_agrees_with_availability_for_empty_choices(operation, value):
+    from netaudio.dante.application import DanteApplication
+
+    device = device_for(operation)
+    choices_field = "supported_encodings" if operation == "encoding" else "supported_sample_rate_pullup_raw_values"
+    setattr(device, choices_field, [])
+    application = DanteApplication()
+    send = AsyncMock()
+    setattr(application, f"send_set_{operation}", send)
+
+    async def complete_mutation(_device, mutate, *_arguments):
+        await mutate()
+        return None
+
+    application.mutate_and_wait_for_capability_value = complete_mutation
+    assert operation_availability(device, operation, value).writable
+    await getattr(application, f"set_{operation}")(device, value)
+    send.assert_awaited_once_with(device, value)
 
 
 def test_network_read_only_masks_and_lock_state_block_writes():

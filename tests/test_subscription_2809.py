@@ -21,7 +21,7 @@ def test_audio_subscription_page_matches_controller_capture(exchange):
             "page_capacity": exchange["page_capacity"],
             "media_type_code": 3,
             "records": exchange["records"],
-            "transaction_id": exchange["transaction_id"],
+            "message_id": exchange["transaction_id"],
         }
     )
     assert packet.hex() == exchange["request"]["hexadecimal"]

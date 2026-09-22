@@ -29,7 +29,7 @@ def test_multicast_creation_matches_digest_bound_exchange(exchange):
             "media_local_flow_id": 2,
             "transport": "native",
             "request_options_word": exchange["request_options_word"],
-            "transaction_id": exchange["transaction_id"],
+            "message_id": exchange["transaction_id"],
         }
     )
     assert request.hex() == exchange["request"]["hexadecimal"]

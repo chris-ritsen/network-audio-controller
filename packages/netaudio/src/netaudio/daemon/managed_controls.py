@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 
+from netaudio.dante.channel import channel_by_number
 from netaudio.dante.device_serializer import DEVICE_SCALAR_FIELDS, DanteDeviceSerializer
 
 
@@ -125,11 +126,15 @@ async def refresh_managed_subscriptions(application, device):
     )
 
     fresh = await application.managed_transport(device).fetch_device(device)
+
     if fresh.rx_channels is None:
         raise RuntimeError("Managed receiver status is unavailable")
+
     receivers = _managed_channels(fresh)["receivers"]
+
     for number, channel in receivers.items():
-        existing = device.rx_channels.get(int(number))
+        existing = channel_by_number(device.rx_channels.values(), int(number))
+
         if existing is not None:
             merged_channels = {
                 "receivers": {number: DanteDeviceSerializer.channel_to_json(existing)},
@@ -140,6 +145,8 @@ async def refresh_managed_subscriptions(application, device):
                 {"receivers": {number: channel}, "transmitters": {}},
             )
             receivers[number] = merged_channels["receivers"][number]
+            receivers[number]["name"] = channel["name"]
+
     readback = DanteDeviceSerializer.device_from_json(
         {
             "name": device.name,
@@ -148,9 +155,13 @@ async def refresh_managed_subscriptions(application, device):
         }
     )
     device.rx_channels = readback.rx_channels
+
     for channel in device.rx_channels.values():
         channel.device = device
+
     device.subscriptions = readback.subscriptions
+
     for subscription in device.subscriptions:
         subscription.rx_device = device
+
     device.rx_count = len(device.rx_channels)

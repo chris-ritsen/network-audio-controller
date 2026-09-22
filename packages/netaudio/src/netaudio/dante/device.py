@@ -6,8 +6,9 @@ import time
 from copy import deepcopy
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
-from netaudio.dante.channel import DanteChannel
-from netaudio.dante.const import DEVICE_ARC_PORT, MODERN_ARC_MEDIA_TYPE_LABELS, SERVICE_ARC
+from netaudio.dante.arc_protocol import ArcProtocolError, arc_protocol_for_device
+from netaudio.dante.channel import DanteChannel, channels_by_number
+from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.core_transport import (
     DEFAULT_REQUEST_ATTEMPTS,
     DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
@@ -18,19 +19,20 @@ from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.gain import gain_channel_type, gain_level_choices, gain_level_label
 from netaudio.dante.latency import latency_choices, latency_controls_from_settings
 from netaudio.dante.subscription import DanteSubscription
+from netaudio.dante.self_connection import apply_self_connection_capability
 
 logger = logging.getLogger("netaudio")
 
-AES67_MULTICAST_PREFIX_PROPERTY_ID = 0x8060
-
 
 def device_advertises_aes67_multicast_prefix(device) -> bool:
-    if getattr(device, "aes67_multicast_prefix", None):
-        return True
-    for entry in getattr(device, "settings_properties", None) or []:
-        if isinstance(entry, dict) and entry.get("property_id") == AES67_MULTICAST_PREFIX_PROPERTY_ID:
-            return True
-    return False
+    from netaudio import core
+
+    return core.settings_capabilities(
+        {
+            "multicast_prefix": getattr(device, "aes67_multicast_prefix", None),
+            "properties": getattr(device, "settings_properties", None),
+        }
+    )["aes67_multicast_prefix"]
 
 
 class DanteDevice:
@@ -75,6 +77,7 @@ class DanteDevice:
         self.requested_sample_rate_pullup_raw_value: int | None = None
         self.sample_rate_pullup_update_mode: int | None = None
         self.sample_rate_pullup_flags: int | None = None
+        self.sample_rate_pullup_host_disabled: bool | None = None
         self.supported_sample_rate_pullup_raw_values: list[int] | None = None
         self.aes67_configured = None
         self.aes67_current = None
@@ -129,9 +132,8 @@ class DanteDevice:
         self.receiver_flow_status_page: dict | None = None
         self.flow_protocol_id: int | None = None
         self.transmit_flow_authoring_capability_word: int | None = None
-        self.transmit_flow_authoring_opcode: int | None = None
-        self.transmit_flow_authoring_protocol_id: int | None = None
-        self.receiver_flow_inventory_opcode: int | None = None
+        self.transmit_flow_authoring: dict | None = None
+        self.receiver_flow_inventory_family: str | None = None
         self.media_types: list[str] | None = None
         self.receiver_channel_name_protocol_identifier: int | None = None
         self.transmitter_channel_name_protocol_identifier: int | None = None
@@ -188,7 +190,6 @@ class DanteDevice:
         self.interface_reboot_required: bool = False
         self.interface_status_protocol: int | None = None
         self.dante_redundancy: dict | None = None
-        self.switch_configuration_choices: list[dict] | None = None
         self.redundancy_probe_outcomes: dict[str, dict] = {}
         self.lock_reset_status: dict | None = None
         self.clear_configuration_status: dict | None = None
@@ -396,8 +397,10 @@ class DanteDevice:
         )
 
     def _build_rx_from_records(self, records):
+        previous_channels = channels_by_number(self.rx_channels.values())
         rx_channels = {}
         subscriptions = []
+
         for record in records:
             channel = DanteChannel()
             channel.channel_type = "rx"
@@ -411,21 +414,16 @@ class DanteDevice:
             channel.receiver_status_flags = None
             can_subscribe_self = record.get("can_subscribe_self")
             channel.can_subscribe_self = can_subscribe_self if isinstance(can_subscribe_self, bool) else None
+            channel.direct_can_subscribe_self = channel.can_subscribe_self
             can_rename = record.get("can_rename")
             channel.can_rename = can_rename if isinstance(can_rename, bool) else None
-            previous = self.rx_channels.get(channel.number)
+            previous = previous_channels.get(channel.number)
+
             if previous is not None:
                 channel.managed_can_subscribe_self = previous.managed_can_subscribe_self
                 channel.managed_can_subscribe_self_fresh = previous.managed_can_subscribe_self_fresh
-                managed_value = channel.managed_can_subscribe_self
-                if (
-                    channel.managed_can_subscribe_self_fresh is True
-                    and isinstance(managed_value, bool)
-                    and isinstance(channel.can_subscribe_self, bool)
-                    and managed_value != channel.can_subscribe_self
-                ):
-                    channel.can_subscribe_self = None
-                    channel.can_subscribe_self_conflict = True
+
+            apply_self_connection_capability(channel, authority="direct")
             rx_channels[record["number"]] = channel
 
             subscription = DanteSubscription()
@@ -437,7 +435,7 @@ class DanteDevice:
             subscription.status_code = record["subscription_status_code"]
             subscription.rx_channel_status_code = record["rx_status_code"]
             tx_device_name = record["tx_device_name"]
-            is_self_connection = tx_device_name == "." or record["subscription_status_code"] == 0x0004
+            is_self_connection = record.get("is_self_connection") is True
             subscription._is_self_connection = is_self_connection
             subscription.tx_device = self if is_self_connection else None
             subscription.tx_device_name = self.name if is_self_connection else tx_device_name
@@ -493,32 +491,42 @@ class DanteDevice:
         if isinstance(latency_nanoseconds, int):
             self.receiver_flow_latency_nanoseconds = latency_nanoseconds
 
-    def apply_transmitter_channel_status_page(self, page: dict) -> None:
-        for record in page.get("records") or []:
+    def apply_transmitter_channel_inventory(self, inventory: dict) -> None:
+        previous = channels_by_number(self.tx_channels.values())
+        channels = {}
+
+        for record in inventory["records"]:
             channel_number = record.get("channel_number")
-            channel = self.tx_channels.get(channel_number)
+            channel = previous.get(channel_number)
+
             if channel is None:
                 channel = DanteChannel()
                 channel.channel_type = "tx"
                 channel.device = self
                 channel.number = channel_number
-                self.tx_channels[channel_number] = channel
+
+            channels[channel_number] = channel
             channel_name = record.get("channel_name")
+
             if channel_name:
                 channel.name = channel_name
+
             factory_name = record.get("friendly_channel_name")
+
             if factory_name:
                 channel.friendly_name = factory_name
                 channel.factory_name = factory_name
+
             self._apply_modern_arc_channel_metadata(channel, record)
+
+        self.tx_channels = channels
         self.tx_count = len(self.tx_channels)
         self._refresh_media_types()
 
     @staticmethod
     def _apply_modern_arc_channel_metadata(channel, record: dict) -> None:
-        media_type_code = record.get("media_type_code")
-        channel.media_type_code = media_type_code
-        channel.media_type = MODERN_ARC_MEDIA_TYPE_LABELS.get(media_type_code) if media_type_code is not None else None
+        channel.media_type_code = record.get("media_type_code")
+        channel.media_type = record.get("media_type")
         channel.media_local_id = record.get("media_local_channel_id")
         channel.format_descriptor_hexadecimal = record.get("format_descriptor_hexadecimal")
         channel.sample_rate = record.get("sample_rate")
@@ -533,67 +541,47 @@ class DanteDevice:
         self.media_types = sorted(values) or None
 
     def apply_transmitter_flow_status_page(self, page: dict) -> None:
-        reported_flow_count = page.get("reported_flow_count")
-        if isinstance(reported_flow_count, int):
-            self.tx_flow_count = reported_flow_count
-        transmitter_flows = []
-        for flow in page.get("flows") or []:
-            if not isinstance(flow, dict):
-                continue
-            retained_flow = {
-                "flow_type": flow.get("flow_type"),
-                "flow_type_code": flow.get("flow_type_code"),
-                "sample_rate": flow.get("sample_rate"),
-                "encoding": flow.get("encoding"),
-                "destination_internet_protocol_version_four_address": flow.get(
-                    "destination_internet_protocol_version_four_address"
-                ),
-                "destination_user_datagram_port": flow.get("destination_user_datagram_port"),
-                "subscriber_device_name": flow.get("subscriber_device_name"),
-                "subscriber_flow_name": flow.get("subscriber_flow_name"),
-            }
-            for field in ("media_type_code", "format_descriptor_hexadecimal"):
-                if field in flow:
-                    retained_flow[field] = flow[field]
-            if "global_flow_id" in flow:
-                protocol_fields = (
-                    "global_flow_id",
-                    "media_local_flow_id",
-                    "channel_slot_segment_header",
-                    "channel_slot_count",
-                    "transmitter_channel_ids_by_slot",
-                    "populated_transmitter_channel_ids",
-                    "populated_slot_count",
-                )
-            else:
-                protocol_fields = (
-                    "flow_number",
-                    "channel_count",
-                    "channels",
-                    "frames_per_packet",
-                )
-            retained_flow.update({field: flow[field] for field in protocol_fields if field in flow})
-            transmitter_flows.append(retained_flow)
-        self.transmitter_flows = transmitter_flows
+        records = page.get("flows")
 
-    def apply_receiver_channel_status_page(self, page: dict) -> None:
-        for record in page.get("records") or []:
+        if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+            raise ValueError("transmitter-flow inventory is malformed")
+
+        count = page.get("reported_flow_count", len(records))
+
+        if type(count) is not int or count != len(records):
+            raise ValueError("transmitter-flow inventory count is malformed")
+
+        self.transmitter_flows = deepcopy(records)
+        self.tx_flow_count = count
+
+    def apply_receiver_channel_inventory(self, inventory: dict) -> None:
+        previous = channels_by_number(self.rx_channels.values())
+        channels = {}
+        subscriptions = []
+
+        for record in inventory["records"]:
             channel_number = record.get("channel_number")
-            channel = self.rx_channels.get(channel_number)
+            channel = previous.get(channel_number)
+
             if channel is None:
                 channel = DanteChannel()
                 channel.channel_type = "rx"
                 channel.device = self
                 channel.number = channel_number
-                self.rx_channels[channel_number] = channel
-            previous_channel_name = channel.name
+
+            channels[channel_number] = channel
+
             local_channel_name = record.get("local_channel_name")
+
             if local_channel_name:
                 channel.name = local_channel_name
+
             factory_name = record.get("friendly_channel_name")
+
             if factory_name:
                 channel.friendly_name = factory_name
                 channel.factory_name = factory_name
+
             self._apply_modern_arc_channel_metadata(channel, record)
             receiver_capability_flags = record.get("receiver_capability_flags")
             can_subscribe_self = record.get("can_subscribe_self")
@@ -605,93 +593,72 @@ class DanteDevice:
             receiver_status_flags = record.get("status_flags")
             channel.receiver_status_flags = receiver_status_flags if isinstance(receiver_status_flags, int) else None
             channel.can_subscribe_self = can_subscribe_self if isinstance(can_subscribe_self, bool) else None
+            channel.direct_can_subscribe_self = channel.can_subscribe_self
             channel.can_rename = can_rename if isinstance(can_rename, bool) else None
-            managed_value = channel.managed_can_subscribe_self
-            if (
-                channel.managed_can_subscribe_self_fresh is True
-                and isinstance(managed_value, bool)
-                and isinstance(channel.can_subscribe_self, bool)
-                and managed_value != channel.can_subscribe_self
-            ):
-                channel.can_subscribe_self = None
-                channel.can_subscribe_self_conflict = True
-            else:
-                channel.can_subscribe_self_conflict = None
+            apply_self_connection_capability(channel, authority="direct")
+
             status_code = record.get("subscription_status_code")
+
             if isinstance(status_code, int):
                 channel.status_code = status_code
+
             source_device_name = record.get("source_device_name")
             source_channel_name = record.get("source_channel_name")
-            subscription = next(
-                (
-                    entry
-                    for entry in self.subscriptions
-                    if getattr(entry, "_netaudio_rx_channel_number", None) == channel_number
-                    or entry.rx_channel_name in {previous_channel_name, channel.name}
-                ),
-                None,
-            )
-            if subscription is None and source_device_name and source_channel_name:
-                subscription = DanteSubscription()
-                subscription.rx_device_name = self.name
-                subscription.rx_channel = channel
-                self.subscriptions.append(subscription)
-            if subscription is None:
+
+            if not source_device_name and not source_channel_name:
                 continue
-            if not source_device_name or not source_channel_name:
-                self.subscriptions.remove(subscription)
-                continue
-            subscription._netaudio_rx_channel_number = channel_number
+
+            subscription = DanteSubscription()
             subscription.rx_channel = channel
             subscription.rx_device = self
             subscription.rx_device_name = self.name
             subscription.rx_channel_name = channel.name
-            is_self_connection = source_device_name == "." or status_code == 0x0004
+            is_self_connection = record.get("is_self_connection") is True
             subscription._is_self_connection = is_self_connection
             subscription.tx_device = self if is_self_connection else None
             subscription.tx_device_name = self.name if is_self_connection else source_device_name
             subscription.tx_channel_name = source_channel_name
+
             if isinstance(status_code, int):
                 subscription.status_code = status_code
+
             receiver_status_code = record.get("receiver_status_code")
+
             if isinstance(receiver_status_code, int):
                 subscription.rx_channel_status_code = receiver_status_code
+
+            subscriptions.append(subscription)
+
+        self.rx_channels = channels
+        self.subscriptions = subscriptions
         self.rx_count = len(self.rx_channels)
         self._refresh_media_types()
 
     async def get_rx_channels(self):
-        if self.requires_managed_control:
-            page = await self._require_application().query_modern_arc_receiver_channel_status(self)
-            self.apply_receiver_channel_status_page(page)
-            return
-        from netaudio.dante.channel_status_paging import advertised_arc_protocol_identifier_for_device
-        from netaudio.dante.const import MODERN_ARC_PROTOCOL_IDS
+        protocol = arc_protocol_for_device(self)
 
-        protocol_id = advertised_arc_protocol_identifier_for_device(self)
-        if protocol_id in MODERN_ARC_PROTOCOL_IDS:
+        if protocol is None:
+            raise ArcProtocolError("device has no ARC service metadata")
+
+        if protocol["modern_channel_inventory"]:
             page = await self._require_application().query_modern_arc_receiver_channel_status(self)
-            self.apply_receiver_channel_status_page(page)
+            self.apply_receiver_channel_inventory(page)
             return
-        if self.ipv4 is None:
-            return
+
         records = await self.call_core(lambda client: client.get_rx_channels())
         self.rx_channels, self.subscriptions = self._build_rx_from_records(records)
 
     async def get_tx_channels(self):
-        if self.requires_managed_control:
-            page = await self._require_application().query_modern_arc_transmitter_channel_status(self)
-            self.apply_transmitter_channel_status_page(page)
-            return
-        from netaudio.dante.channel_status_paging import advertised_arc_protocol_identifier_for_device
-        from netaudio.dante.const import MODERN_ARC_PROTOCOL_IDS
+        protocol = arc_protocol_for_device(self)
 
-        protocol_id = advertised_arc_protocol_identifier_for_device(self)
-        if protocol_id in MODERN_ARC_PROTOCOL_IDS:
+        if protocol is None:
+            raise ArcProtocolError("device has no ARC service metadata")
+
+        if protocol["modern_channel_inventory"]:
             page = await self._require_application().query_modern_arc_transmitter_channel_status(self)
-            self.apply_transmitter_channel_status_page(page)
+            self.apply_transmitter_channel_inventory(page)
             return
-        if self.ipv4 is None:
-            return
+
         records = await self.call_core(lambda client: client.get_tx_channels())
         self.tx_channels = self._build_tx_from_records(records)
 
@@ -781,6 +748,8 @@ class DanteDevice:
         return self.controls_data_from_core(raw)
 
     def controls_data_from_core(self, data):
+        from netaudio import core
+
         controls = {}
         if data["name"]:
             controls["name"] = data["name"]
@@ -791,14 +760,10 @@ class DanteDevice:
         if isinstance(transmit_flow_authoring_capability_word, int) and not isinstance(
             transmit_flow_authoring_capability_word, bool
         ):
-            uses_modern_authoring = transmit_flow_authoring_capability_word & 0x1000 != 0
-            controls["transmit_flow_authoring_opcode"] = 0x2601 if uses_modern_authoring else 0x2201
-            controls["transmit_flow_authoring_protocol_id"] = 0x2809 if uses_modern_authoring else 0x2729
-            controls["receiver_flow_inventory_opcode"] = 0x3600 if uses_modern_authoring else 0x3200
+            controls.update(core.flow_authoring_capabilities(transmit_flow_authoring_capability_word))
         else:
-            controls["transmit_flow_authoring_opcode"] = None
-            controls["transmit_flow_authoring_protocol_id"] = None
-            controls["receiver_flow_inventory_opcode"] = None
+            controls["transmit_flow_authoring"] = None
+            controls["receiver_flow_inventory_family"] = None
         if locked is not None:
             controls["is_locked"] = locked
         if data.get("aes67") is not None:
@@ -818,9 +783,7 @@ class DanteDevice:
             controls.update(latency_controls_from_settings(settings_data))
             from netaudio.dante.performance_configuration import performance_settings_from_response
 
-            performance_settings = performance_settings_from_response(settings_data)
-            if performance_settings:
-                controls["performance_settings"] = performance_settings
+            controls["performance_settings"] = performance_settings_from_response(settings_data)
         channel_audio_metadata = data.get("channel_audio_metadata")
         if channel_audio_metadata:
             current_encoding = channel_audio_metadata.get("current_encoding")
@@ -879,12 +842,10 @@ class DanteDevice:
             self.rx_count = self.rx_count_raw = data["rx_count"]
         if "transmit_flow_authoring_capability_word" in data:
             self.transmit_flow_authoring_capability_word = data["transmit_flow_authoring_capability_word"]
-        if "transmit_flow_authoring_opcode" in data:
-            self.transmit_flow_authoring_opcode = data["transmit_flow_authoring_opcode"]
-        if "transmit_flow_authoring_protocol_id" in data:
-            self.transmit_flow_authoring_protocol_id = data["transmit_flow_authoring_protocol_id"]
-        if "receiver_flow_inventory_opcode" in data:
-            self.receiver_flow_inventory_opcode = data["receiver_flow_inventory_opcode"]
+        if "transmit_flow_authoring" in data:
+            self.transmit_flow_authoring = data["transmit_flow_authoring"]
+        if "receiver_flow_inventory_family" in data:
+            self.receiver_flow_inventory_family = data["receiver_flow_inventory_family"]
         if "is_locked" in data:
             self.is_locked = data["is_locked"]
         if "aes67_configured" in data:

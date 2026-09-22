@@ -4,9 +4,7 @@ import pytest
 
 from netaudio import core
 from netaudio.commands.config import cli as config_cli
-from netaudio.dante.const import DEVICE_SETTINGS_PORT, SERVICE_ARC
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher, EventType
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -42,16 +40,13 @@ class TestAES67ConfiguredFromARC1100:
         assert core.parse_response("aes67_configured", response) is None
 
     def test_query_latency_config_matches_captured(self):
-        commands = DanteDeviceCommands()
-        packet, service, port = commands.command_query_latency_config(transaction_id=0x0745)
+        packet = core.build_command({"command": "query_latency_config", "message_id": 0x0745})
         captured = bytes.fromhex(
             "2809003a07451100000000170201820482050210"
             "021182188219830183028306031003110303802100"
             "f080600022006300640065022202128321"
         )
         assert packet == captured
-        assert service == SERVICE_ARC
-        assert port is None
 
 
 class TestAES67CurrentNewFromConmon1007:
@@ -114,11 +109,6 @@ def test_aes67_reboot_required(current, configured, expected):
 
 
 class TestDanteDeviceAES67Model:
-    def test_default_state_is_none(self):
-        device = DanteDevice()
-        assert device.aes67_configured is None
-        assert device.aes67_current is None
-
     def test_serializer_includes_aes67_fields(self):
         device = DanteDevice()
         device.name = "test"
@@ -138,48 +128,6 @@ class TestDanteDeviceAES67Model:
         json_data = device.to_json()
         assert "aes67_configured" not in json_data
         assert "aes67_current" not in json_data
-
-
-class TestAES67ProbePacket:
-    def test_probe_packet_length(self):
-        commands = DanteDeviceCommands()
-        packet, _, port = commands.command_probe_aes67()
-        assert len(packet) == 36
-        assert port == DEVICE_SETTINGS_PORT
-
-    def test_probe_packet_structure(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_aes67()
-        assert struct.unpack(">H", packet[0:2])[0] == 0xFFFF
-        magic_offset = packet.find(b"Audinate")
-        assert magic_offset == 0x10
-        message_type = struct.unpack(">H", packet[0x1A:0x1C])[0]
-        assert message_type == 0x1006
-
-    def test_probe_has_zero_presence_and_enable_flags(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_aes67()
-        assert packet[32:34] == b"\x00\x00"
-        assert packet[34:36] == b"\x00\x00"
-
-    def test_probe_has_nonzero_sequence(self):
-        commands = DanteDeviceCommands()
-        packet, _, _ = commands.command_probe_aes67()
-        sequence = struct.unpack(">H", packet[4:6])[0]
-        assert sequence != 0
-
-    def test_probe_with_custom_mac(self):
-        commands = DanteDeviceCommands()
-        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
-        packet, _, _ = commands.command_probe_aes67(host_mac=mac)
-        assert packet[8:14] == mac
-
-    def test_probe_differs_from_enable(self):
-        commands = DanteDeviceCommands()
-        probe, _, _ = commands.command_probe_aes67()
-        enable, _, _ = commands.command_enable_aes67(True)
-        assert probe[32:36] == b"\x00\x00\x00\x00"
-        assert enable[32:36] == b"\x00\x01\x00\x01"
 
 
 class TestAES67Waiter:

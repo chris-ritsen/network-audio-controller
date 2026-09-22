@@ -1,6 +1,32 @@
 import { test, expect } from "@playwright/test";
 import { serveWebapp, deviceFixture } from "./fixture.mjs";
 
+test("long device tables remain reachable through page scrolling", async ({ page }, testInfo) => {
+  const template = Object.values(deviceFixture).find((device) => device.online);
+  const devices = Object.fromEntries(Array.from({ length: 40 }, (_, index) => {
+    const name = `Receiver ${String(index + 1).padStart(2, "0")}`;
+    const server_name = `receiver-${index + 1}.local.`;
+    return [server_name, { ...template, name, server_name }];
+  }));
+  await page.setViewportSize({ width: 1600, height: 600 });
+  await serveWebapp(page, { devices });
+  await page.goto("http://netaudio.test/devices");
+  const table = page.locator("table.data").first();
+  await expect(table.locator("tbody tr")).toHaveCount(40);
+  const geometry = await table.evaluate((node) => {
+    const wrapper = node.closest(".table-wrapper");
+    return { table: node.getBoundingClientRect().height, wrapper: wrapper.getBoundingClientRect().height };
+  });
+  expect(geometry.table).toBeGreaterThan(600);
+  expect(geometry.wrapper).toBeGreaterThanOrEqual(geometry.table - 1);
+  await page.locator("#content").hover();
+  await page.mouse.wheel(0, 5000);
+  await expect(table.locator("tbody tr").last()).toBeInViewport();
+  const artifact = testInfo.outputPath("device-table-last-row.png");
+  await page.screenshot({ path: artifact });
+  await testInfo.attach("device-table-last-row", { path: artifact, contentType: "image/png" });
+});
+
 test("flipping axes keeps routing options open", async ({ page }) => {
   await serveWebapp(page);
   await page.addInitScript(() => localStorage.setItem("netaudio.routing.filters", JSON.stringify({ panelOpen: false })));

@@ -5,34 +5,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field as dataclass_field
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioEvent
 from netaudio.dante.const import (
     DEVICE_INFO_PORT,
     DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
-    NOTIFICATION_AES67_STATUS,
-    NOTIFICATION_CLEAR_CONFIG_STATUS,
-    NOTIFICATION_CLOCKING_STATUS,
-    NOTIFICATION_DEVICE_REBOOT,
-    NOTIFICATION_ENCODING_STATUS,
-    NOTIFICATION_CODEC_STATUS,
-    NOTIFICATION_INTERFACE_STATUS,
-    NOTIFICATION_LATENCY_CHANGE,
-    NOTIFICATION_MANF_VERSIONS_STATUS,
-    NOTIFICATION_NAMES,
-    NOTIFICATION_PROPERTY_CHANGE,
-    NOTIFICATION_ROUTING_DEVICE_CHANGE,
-    NOTIFICATION_ROUTING_READY,
-    NOTIFICATION_RX_CHANNEL_CHANGE,
-    NOTIFICATION_RX_FLOW_CHANGE,
-    NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS,
-    NOTIFICATION_SAMPLE_RATE_STATUS,
-    NOTIFICATION_SETTINGS_CHANGE,
-    NOTIFICATION_TOPOLOGY_CHANGE,
-    NOTIFICATION_TX_CHANNEL_CHANGE,
-    NOTIFICATION_TX_FLOW_CHANGE,
-    NOTIFICATION_TX_LABEL_CHANGE,
-    NOTIFICATION_VERSIONS_STATUS,
 )
 from netaudio.dante.conmon_export import (
     ConmonExport,
@@ -48,29 +26,6 @@ from netaudio.dante.services.notification_packet_handlers import NotificationPac
 __all__ = [
     "ConmonExportWaiter",
     "DanteNotificationService",
-    "NOTIFICATION_AES67_STATUS",
-    "NOTIFICATION_CLEAR_CONFIG_STATUS",
-    "NOTIFICATION_CLOCKING_STATUS",
-    "NOTIFICATION_DEVICE_REBOOT",
-    "NOTIFICATION_ENCODING_STATUS",
-    "NOTIFICATION_CODEC_STATUS",
-    "NOTIFICATION_INTERFACE_STATUS",
-    "NOTIFICATION_LATENCY_CHANGE",
-    "NOTIFICATION_MANF_VERSIONS_STATUS",
-    "NOTIFICATION_NAMES",
-    "NOTIFICATION_PROPERTY_CHANGE",
-    "NOTIFICATION_ROUTING_DEVICE_CHANGE",
-    "NOTIFICATION_ROUTING_READY",
-    "NOTIFICATION_RX_CHANNEL_CHANGE",
-    "NOTIFICATION_RX_FLOW_CHANGE",
-    "NOTIFICATION_SAMPLE_RATE_PULLUP_STATUS",
-    "NOTIFICATION_SAMPLE_RATE_STATUS",
-    "NOTIFICATION_SETTINGS_CHANGE",
-    "NOTIFICATION_TOPOLOGY_CHANGE",
-    "NOTIFICATION_TX_CHANNEL_CHANGE",
-    "NOTIFICATION_TX_FLOW_CHANGE",
-    "NOTIFICATION_TX_LABEL_CHANGE",
-    "NOTIFICATION_VERSIONS_STATUS",
     "Waiter",
     "mutate_and_wait_for_capability_value",
     "mutate_and_wait_for_clear_configuration_status",
@@ -250,7 +205,7 @@ async def mutate_and_wait_for_capability_value(
     waiter = notifications.register_waiter(
         capability_name,
         device_ip_address,
-        accept=lambda result: result["current_value"] == expected_value,
+        accept=lambda result: core.audio_capability_readback(result, expected_value)["effective_state_confirmed"],
     )
     probe_task = None
 
@@ -285,24 +240,21 @@ async def mutate_and_wait_for_capability_value(
 async def mutate_and_wait_for_clear_configuration_status(
     notifications: DanteNotificationService,
     device_ip_address: str,
-    expected_action_result_code: int,
+    expected_action: str,
     mutate,
     timeout: float,
 ) -> dict | None:
     waiter = notifications.register_waiter(
         "clear_configuration_status",
         device_ip_address,
-        accept=lambda status: status["action_result_code"] == expected_action_result_code,
+        accept=lambda status: status["completed_action"] == expected_action,
     )
     try:
         await mutate()
         try:
             await asyncio.wait_for(waiter.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            logger.debug(
-                f"Timed out waiting for clear-configuration result "
-                f"{expected_action_result_code} from {device_ip_address}"
-            )
+            logger.debug("Timed out waiting for %s from %s", expected_action, device_ip_address)
         return waiter.latest_result
     finally:
         notifications.unregister_waiter(waiter)

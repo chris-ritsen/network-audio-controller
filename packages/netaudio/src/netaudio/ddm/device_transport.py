@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 
 from netaudio import core
 from netaudio.common.managed_api import ManagedAPIConfiguration
-from netaudio.dante.const import PROTOCOL_ARC_2809, PROTOCOL_SETTINGS
 from netaudio.ddm.client import ManagedAPIClient
 from netaudio.ddm.controller import (
     identify_managed_device_with_api_key,
@@ -27,79 +26,6 @@ class ManagedOperationResult:
     operation: str
     successful: bool = True
 
-
-MODERN_PROTOCOL_COMMANDS = frozenset(
-    {
-        "channel_count",
-        "device_info",
-        "property_directory",
-        "query_receiver_port_ranges",
-        "set_channel_name",
-        "set_latency",
-        "transmitter_names",
-    }
-)
-
-SETTINGS_RESPONSE_OPCODES = {
-    "bluetooth_status": 0x100E,
-    "clear_all_configuration": 0x0078,
-    "clear_all_configuration_preserving_internet_protocol_settings": 0x0078,
-    "dante_model": 0x0060,
-    "enable_aes67": 0x1007,
-    "make_model": 0x00C0,
-    "probe_aes67": 0x1007,
-    "probe_clear_configuration_status": 0x0078,
-    "probe_encoding": 0x0082,
-    "probe_codec_status": 0x100B,
-    "probe_interface_status": 0x0011,
-    "probe_interface_statistics": 0x0040,
-    "probe_lock_reset_status": 0x1009,
-    "probe_sample_rate": 0x0080,
-    "probe_sample_rate_pullup": 0x0084,
-    "probe_switch_configuration": 0x0014,
-    "refresh_clock_status": 0x0020,
-    "set_dante_redundancy": 0x0011,
-    "set_encoding": 0x0082,
-    "set_gain_level": 0x100B,
-    "set_interface_dhcp": 0x0011,
-    "set_interface_static": 0x0011,
-    "set_sample_rate": 0x0080,
-    "set_sample_rate_pullup": 0x0084,
-}
-
-SETTINGS_COMMANDS_REQUIRING_HOST_MAC = frozenset(
-    {
-        "bluetooth_status",
-        "clear_all_configuration",
-        "clear_all_configuration_preserving_internet_protocol_settings",
-        "enable_aes67",
-        "probe_aes67",
-        "probe_clear_configuration_status",
-        "probe_encoding",
-        "probe_codec_status",
-        "probe_interface_status",
-        "probe_interface_statistics",
-        "probe_lock_reset_status",
-        "probe_sample_rate",
-        "probe_sample_rate_pullup",
-        "probe_switch_configuration",
-        "refresh_clock_status",
-        "set_dante_redundancy",
-        "set_gain_level",
-        "set_interface_dhcp",
-        "set_interface_static",
-        "set_sample_rate_pullup",
-    }
-)
-
-COMMANDS_WITHOUT_MESSAGE_ID = frozenset(
-    {
-        "bluetooth_status",
-        "dante_model",
-        "make_model",
-        "probe_interface_status",
-    }
-)
 
 SUBSCRIPTION_MUTATION = (
     "mutation DeviceRxChannelsSubscriptionSet($input: DeviceRxChannelsSubscriptionSetInput!) "
@@ -205,26 +131,6 @@ class ManagedDeviceTransport:
             raise ManagedDeviceControlError("could not determine the host MAC address required for DDM control")
         return host_mac
 
-    def _prepare_specification(self, specification: Mapping[str, Any]) -> dict[str, Any]:
-        prepared = dict(specification)
-        command = prepared.get("command")
-        if not isinstance(command, str) or not command:
-            raise ValueError("command specification has no command")
-        if command in MODERN_PROTOCOL_COMMANDS:
-            protocol_id = prepared.setdefault("protocol_id", PROTOCOL_ARC_2809)
-            if not isinstance(protocol_id, int) or isinstance(protocol_id, bool) or protocol_id != PROTOCOL_ARC_2809:
-                rendered_protocol = f"0x{protocol_id:04X}" if isinstance(protocol_id, int) else repr(protocol_id)
-                raise ManagedDeviceControlError(
-                    f"{command} selected protocol {rendered_protocol}, which DDM control does not support"
-                )
-        if command in SETTINGS_COMMANDS_REQUIRING_HOST_MAC and "host_mac" not in prepared:
-            prepared["host_mac"] = self._host_mac().hex()
-        if command not in COMMANDS_WITHOUT_MESSAGE_ID and not any(
-            key in prepared for key in ("message_id", "sequence", "transaction_id")
-        ):
-            prepared["message_id"] = core.next_message_id()
-        return prepared
-
     async def execute(self, device, specification: Mapping[str, Any]) -> bytes | None:
         device_id = await self._control_device_id(device)
         command = specification.get("command")
@@ -254,12 +160,18 @@ class ManagedDeviceTransport:
             )
             return None
 
-        prepared = self._prepare_specification(specification)
-        packet = core.build_command(prepared)
-        if len(packet) < 2:
-            raise ManagedDeviceControlError(f"{command} produced an invalid packet")
-        protocol_id = int.from_bytes(packet[:2], "big")
-        if protocol_id == PROTOCOL_ARC_2809:
+        try:
+            plan = core.build_managed_command(
+                dict(specification), host_mac=core.host_mac(), message_id=core.next_message_id()
+            )
+        except core.NetaudioCoreError as exception:
+            raise ManagedDeviceControlError(
+                f"{command} is not available through DDM control: {exception}"
+            ) from exception
+
+        packet = bytes(plan["packet"])
+
+        if plan["transport"] == "arc":
             return await asyncio.to_thread(
                 query_managed_arc_with_api_key,
                 self.server,
@@ -268,22 +180,17 @@ class ManagedDeviceTransport:
                 packet,
                 **self._domain_options(device),
             )
-        if protocol_id == PROTOCOL_SETTINGS:
-            expected_opcode = SETTINGS_RESPONSE_OPCODES.get(str(command))
-            if expected_opcode is None:
-                raise ManagedDeviceControlError(f"{command} has no observed DDM settings completion and was not sent")
+        if plan["transport"] == "settings":
             return await asyncio.to_thread(
                 query_managed_settings_with_api_key,
                 self.server,
                 self._credential(),
                 device_id,
                 packet,
-                expected_opcode,
+                plan["response_opcode"],
                 **self._domain_options(device),
             )
-        raise ManagedDeviceControlError(
-            f"{command} uses protocol 0x{protocol_id:04X}, which is not available through DDM control"
-        )
+        raise ManagedDeviceControlError(f"{command} has no supported managed transport")
 
     async def set_subscriptions(self, device, records) -> ManagedOperationResult:
         subscriptions = [

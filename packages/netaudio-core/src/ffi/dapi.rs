@@ -1,5 +1,46 @@
 use super::*;
 
+/// Advance a session-local wrapper ID. Pass zero for the first command after initialization.
+#[no_mangle]
+pub extern "C" fn netaudio_dapi_next_wrapper_id(previous: u16) -> u16 {
+    crate::dapi::next_wrapper_id(previous)
+}
+
+/// Advance settings completion using a correlated acknowledgement and optional publication.
+/// A null response opcode requests acknowledgement-only completion, not device-state confirmation.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_dapi_advance_settings_exchange(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            crate::dapi::advance_settings_exchange(request)
+                .map_err(|message| FfiError::new(NetaudioStatus::InvalidSequence, message))
+        })
+    }
+}
+
+/// Match a managed ARC reply against its wrapper and complete inner request identity.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_dapi_correlate_arc_response(
+    json: *const c_char,
+    out_buffer: *mut u8,
+    out_capacity: usize,
+    out_length: *mut usize,
+) -> NetaudioStatus {
+    unsafe {
+        json_output((out_buffer, out_capacity, out_length), || {
+            let request = decode_json(c_string(json)?)?;
+            crate::dapi::correlate_arc_response(request)
+                .map_err(|message| FfiError::new(NetaudioStatus::InvalidSequence, message))
+        })
+    }
+}
+
 unsafe fn input_bytes<'a>(data: *const u8, data_len: usize) -> Result<&'a [u8], FfiError> {
     if data.is_null() {
         return Err(NetaudioStatus::NullPointer.into());
@@ -48,53 +89,7 @@ pub unsafe extern "C" fn netaudio_dapi_build_authentication(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn netaudio_dapi_build_domain_subscription(
-    domain_id: *const u8,
-    domain_id_len: usize,
-    subscription_id: u16,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    guard(|| {
-        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
-        let domain_id = unsafe { input_bytes(domain_id, domain_id_len)? };
-        let frame = crate::dapi::build_domain_subscription(domain_id, subscription_id).ok_or_else(
-            || {
-                FfiError::new(
-                    NetaudioStatus::InvalidLength,
-                    "DAPI domain ID must be 16 bytes and subscription ID must be 2 through 5",
-                )
-            },
-        )?;
-        unsafe { write_bytes(&frame, out_buffer, out_capacity, out_length) }
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_dapi_build_device_inventory_subscription(
-    domain_id: *const u8,
-    domain_id_len: usize,
-    out_buffer: *mut u8,
-    out_capacity: usize,
-    out_length: *mut usize,
-) -> NetaudioStatus {
-    guard(|| {
-        unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
-        let domain_id = unsafe { input_bytes(domain_id, domain_id_len)? };
-        let frame =
-            crate::dapi::build_device_inventory_subscription(domain_id).ok_or_else(|| {
-                FfiError::new(
-                    NetaudioStatus::InvalidLength,
-                    "DAPI domain ID must be exactly 16 bytes",
-                )
-            })?;
-        unsafe { write_bytes(&frame, out_buffer, out_capacity, out_length) }
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn netaudio_dapi_build_inventory_initialization(
+pub unsafe extern "C" fn netaudio_dapi_build_domain_initialization(
     domain_id: *const u8,
     domain_id_len: usize,
     first_message_id: u16,
@@ -108,7 +103,7 @@ pub unsafe extern "C" fn netaudio_dapi_build_inventory_initialization(
         unsafe { prepare_output(out_buffer, out_capacity, out_length)? };
         let domain_id = unsafe { input_bytes(domain_id, domain_id_len)? };
         let local_ipv4 = unsafe { input_bytes(local_ipv4, 4)? };
-        let frames = crate::dapi::build_inventory_initialization(
+        let frames = crate::dapi::build_domain_initialization(
             domain_id,
             first_message_id,
             notification_port,

@@ -59,12 +59,13 @@ def test_controller_login_fails_closed_on_an_unobserved_token_shape(monkeypatch)
 
 
 def _response(payload: bytes) -> bytes:
-    return controller.DAPI_RESPONSE_MARKER + (2).to_bytes(4, "big") + len(payload).to_bytes(4, "big") + payload
+    return bytes.fromhex("b91a372500000002") + len(payload).to_bytes(4, "big") + payload
 
 
 class FakeSocket:
-    def __init__(self, incoming: bytes):
+    def __init__(self, incoming: bytes, chunk_size=None):
         self.incoming = bytearray(incoming)
+        self.chunk_size = chunk_size
         self.sent = []
         self.timeouts = []
         self.closed = False
@@ -73,6 +74,8 @@ class FakeSocket:
         self.sent.append(data)
 
     def recv(self, length):
+        if self.chunk_size is not None:
+            length = min(length, self.chunk_size)
         result = bytes(self.incoming[:length])
         del self.incoming[:length]
         return result
@@ -87,217 +90,196 @@ class FakeSocket:
         self.closed = True
 
 
+def _session_description():
+    # Synthetic session using the envelope exercised by the native codec tests.
+    frame = bytearray(160)
+    frame[:12] = bytes.fromhex("b91a37250000000300000094")
+    for offset, value in ((12, 0x18), (36, 0x7C), (42, 12), (44, 3), (46, 20), (64, 0x7FF)):
+        frame[offset : offset + 2] = value.to_bytes(2, "big")
+    return bytes(frame)
+
+
+def _device_announcement(target_selector):
+    payload = bytearray(78)
+    payload[:8] = bytes.fromhex("0018000110000208")
+    payload[26:34] = bytes.fromhex("200b00040018000c")
+    payload[52:54] = target_selector.to_bytes(2, "big")
+    payload.extend(b"_netaudio-cmc._udp\x00id=001dc1fffe50692e")
+    payload[24:26] = (len(payload) - 24).to_bytes(2, "big")
+    return _response(payload)
+
+
 @pytest.mark.parametrize("target_selector", (0, 2))
-def test_dapi_session_authenticates_maps_the_device_and_confirms_identify(monkeypatch, target_selector):
-    incoming = b"".join((_response(b"session"), _response(b"announcement"), _response(b"confirmation")))
-    fake_socket = FakeSocket(incoming)
-    built = []
-
-    monkeypatch.setattr(controller.core, "build_dapi_session_open", lambda: b"open")
-    monkeypatch.setattr(controller.core, "build_dapi_authentication", lambda token: b"auth:" + token.encode())
-
-    def subscription(domain_id, subscription_id):
-        frame = b"subscribe:" + domain_id + bytes([subscription_id])
-        built.append(frame)
-        return frame
-
-    monkeypatch.setattr(controller.core, "build_dapi_domain_subscription", subscription)
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_device_inventory_subscription",
-        lambda domain_id: b"device-inventory:" + domain_id,
-    )
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_inventory_initialization",
-        lambda domain_id, first_message_id, notification_port, local_ipv4: (
-            b"inventory:" + domain_id + bytes([first_message_id]) + notification_port.to_bytes(2, "big") + local_ipv4
-        ),
-    )
+@pytest.mark.parametrize("chunk_size", (None, 3))
+@pytest.mark.parametrize("matching_confirmation", (False, True))
+def test_dapi_session_authenticates_maps_the_device_and_confirms_identify(
+    monkeypatch, target_selector, chunk_size, matching_confirmation
+):
+    announcement = _device_announcement(target_selector)
+    confirmation = _settings_publication().replace(bytes.fromhex("07381007"), bytes.fromhex("07380062"))
+    wrong_device = confirmation.replace(bytes.fromhex("001dc1fffe50692e"), bytes.fromhex("001dc1fffe50692f"))
+    incoming = _session_description() + announcement + wrong_device
+    if matching_confirmation:
+        incoming += confirmation
+    fake_socket = FakeSocket(incoming, chunk_size)
     message_ids = iter((7, 8))
     monkeypatch.setattr(controller.core, "next_message_id", lambda: next(message_ids))
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_service_acknowledgement",
-        lambda frame: b"ack:" + frame[-12:],
-    )
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_identify",
-        lambda target_selector, wrapper_id, message_id, mac: (
-            f"identify:{target_selector}:{wrapper_id}:{message_id}:".encode() + mac
-        ),
-    )
-
-    def parse(kind, frame):
-        if kind == "dapi_session_description" and frame.endswith(b"session"):
-            return {"domain_id": "00" * 16}
-        if kind == "dapi_device_announcement" and frame.endswith(b"announcement"):
-            return {"device_id": "001dc1fffe507b8d", "target_selector": target_selector}
-        if kind == "dapi_service_announcement" and frame.endswith(b"announcement"):
-            return {"message_id": 12}
-        if kind == "dapi_identify_confirmation" and frame.endswith(b"confirmation"):
-            return {"device_id": "001dc1fffe507b8d"}
-        return None
-
-    monkeypatch.setattr(controller.core, "parse_response", parse)
     context = ssl.create_default_context()
 
     def connector(server, port, ssl_context, timeout):
         return fake_socket
 
     with controller.DAPISession("ddm.example", 8001, context, connector=connector) as session:
-        session.identify("x" * 43, "001dc1fffe507b8d:0", bytes.fromhex("842f5774e86d"))
+        notification_port = session.notification_socket.getsockname()[1]
+        if matching_confirmation:
+            session.identify("x" * 43, "001dc1fffe50692e:0", bytes.fromhex("842f5774e86d"))
+        else:
+            with pytest.raises(controller.DAPISessionError, match="closed"):
+                session.identify("x" * 43, "001dc1fffe50692e:0", bytes.fromhex("842f5774e86d"))
 
-    assert fake_socket.sent[:2] == [b"open", b"auth:" + b"x" * 43]
-    assert fake_socket.sent[2:6] == built
-    assert fake_socket.sent[6].startswith(b"inventory:" + b"\x00" * 16 + b"\x07")
-    assert int.from_bytes(fake_socket.sent[6][-6:-4], "big") > 0
-    assert fake_socket.sent[6][-4:] == bytes([127, 0, 0, 1])
-    assert fake_socket.sent[7] == b"device-inventory:" + b"\x00" * 16
-    assert fake_socket.sent[8] == b"ack:announcement"
-    assert fake_socket.sent[-1] == f"identify:{target_selector}:6:8:".encode() + bytes.fromhex("842f5774e86d")
+    assert fake_socket.sent[:2] == [
+        bytes.fromhex("b91a3726000000050000000400000000"),
+        bytes.fromhex("b91a3726000000010000002b") + b"x" * 43,
+    ]
+    assert fake_socket.sent[2] == controller.core.build_dapi_domain_initialization(
+        bytes(16), 7, notification_port, bytes([127, 0, 0, 1])
+    )
+    assert fake_socket.sent[3] == controller.core.build_dapi_service_acknowledgement(announcement)
+    assert len(fake_socket.sent) == 5
+    request = controller.core.parse_response("dapi_settings_request", fake_socket.sent[-1])
+    assert request["target_selector"] == target_selector
+    assert request["wrapper_id"] == 6
+    assert request["opcode"] == 0x63
+    assert bytes.fromhex(request["packet_hex"])[4:6] == b"\x00\x08"
     assert fake_socket.closed is True
 
 
-def test_dapi_session_correlates_a_managed_arc_response(monkeypatch):
-    incoming = b"".join(
-        (
-            _response(b"session"),
-            _response(b"announcement"),
-            _response(b"unrelated-arc"),
-            _response(b"matched-arc"),
-        )
+@pytest.mark.parametrize("previous,expected", [(0, 6), (6, 7), (65534, 65535), (65535, 1)])
+def test_managed_wrapper_sequence_reserves_initialization_ids_and_skips_zero(previous, expected):
+    assert controller.core.next_dapi_wrapper_id(previous) == expected
+    session = controller.DAPISession("ddm.example", 8001, ssl.create_default_context())
+
+    if previous:
+        session.wrapper_id = previous
+
+    assert session._next_wrapper_id() == expected
+    assert session.wrapper_id == expected
+
+
+@pytest.mark.parametrize("previous", [-1, 65536, True, None, "6"])
+def test_managed_wrapper_sequence_rejects_values_that_ctypes_would_coerce(previous):
+    with pytest.raises(ValueError):
+        controller.core.next_dapi_wrapper_id(previous)
+
+
+def _managed_arc_response(*, wrapper_id=6, protocol=0x2809, transaction=114, opcode=0x1000):
+    # Synthetic response using the layout exercised by the codec fixture below.
+    packet = b"".join(value.to_bytes(2, "big") for value in (protocol, 10, transaction, opcode, 1))
+    payload = (
+        bytes.fromhex("0018000110000308084001060015000908410100000000050020200400040008")
+        + wrapper_id.to_bytes(2, "big")
+        + bytes.fromhex("0000000a001400000000")
+        + packet
+        + bytes(2)
     )
+    return _response(payload)
+
+
+def test_dapi_session_correlates_a_managed_arc_response():
+    incoming = _managed_arc_response(wrapper_id=99) + _managed_arc_response(protocol=0x2801) + _managed_arc_response()
     fake_socket = FakeSocket(incoming)
-    monkeypatch.setattr(controller.core, "build_dapi_session_open", lambda: b"open")
-    monkeypatch.setattr(controller.core, "build_dapi_authentication", lambda token: b"auth:" + token.encode())
-    monkeypatch.setattr(
-        controller.core, "build_dapi_domain_subscription", lambda domain_id, index: b"sub" + bytes([index])
+    session = controller.DAPISession(
+        "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
     )
-    monkeypatch.setattr(controller.core, "build_dapi_device_inventory_subscription", lambda domain_id: b"devices")
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_inventory_initialization",
-        lambda domain_id, first_message_id, notification_port, local_ipv4: b"inventory",
-    )
-    monkeypatch.setattr(controller.core, "build_dapi_service_acknowledgement", lambda frame: b"announcement-ack")
-    monkeypatch.setattr(controller.core, "next_message_id", lambda: 7)
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_arc_request",
-        lambda target_selector, wrapper_id, packet: f"arc:{target_selector}:{wrapper_id}:".encode() + packet,
-    )
-
-    def parse(kind, frame):
-        if kind == "dapi_session_description" and frame.endswith(b"session"):
-            return {"domain_id": "00" * 16}
-        if kind == "dapi_device_announcement" and frame.endswith(b"announcement"):
-            return {"device_id": "001dc1fffe50692e", "target_selector": 0}
-        if kind == "dapi_service_announcement" and frame.endswith(b"announcement"):
-            return {"message_id": 12}
-        if kind == "dapi_arc_response" and frame.endswith(b"unrelated-arc"):
-            return {
-                "wrapper_id": 99,
-                "transaction_id": 114,
-                "opcode": 0x1000,
-                "packet_hex": "2809000a007210000001",
-            }
-        if kind == "dapi_arc_response" and frame.endswith(b"matched-arc"):
-            return {
-                "wrapper_id": 6,
-                "transaction_id": 114,
-                "opcode": 0x1000,
-                "packet_hex": "2809000a007210000001",
-            }
-        return None
-
-    monkeypatch.setattr(controller.core, "parse_response", parse)
+    session.initialized = True
+    session.target_selectors["001dc1fffe50692e"] = 0
     request = bytes.fromhex("2809000a007210000000")
-    with controller.DAPISession(
-        "ddm.example",
-        8001,
-        ssl.create_default_context(),
-        connector=lambda *args: fake_socket,
-    ) as session:
+
+    with session:
         response = session.query_arc("x" * 43, "001dc1fffe50692e:0", request)
 
     assert response == bytes.fromhex("2809000a007210000001")
-    assert fake_socket.sent[-1] == b"arc:0:6:" + request
+    assert fake_socket.sent == [controller.core.build_dapi_arc_request(0, 6, request)]
 
 
-def test_dapi_session_rejects_a_mismatched_inner_arc_response(monkeypatch):
+@pytest.mark.parametrize("changed", [{"transaction": 115}, {"opcode": 0x1001}])
+def test_dapi_session_rejects_a_mismatched_inner_arc_response(changed):
     session = controller.DAPISession(
         "ddm.example",
         8001,
         ssl.create_default_context(),
-        connector=lambda *args: FakeSocket(b""),
+        connector=lambda *args: FakeSocket(_managed_arc_response(**changed)),
     )
     session.initialized = True
     session.target_selectors["001dc1fffe50692e"] = 0
-    monkeypatch.setattr(controller.core, "build_dapi_arc_request", lambda *args: b"arc")
-    monkeypatch.setattr(
-        session,
-        "_read_frame",
-        lambda deadline: _response(b"mismatched"),
-    )
-    monkeypatch.setattr(
-        controller.core,
-        "parse_response",
-        lambda kind, frame: {
-            "wrapper_id": 6,
-            "transaction_id": 115,
-            "opcode": 0x1000,
-            "packet_hex": "2809000a007310000001",
-        },
-    )
 
     with session, pytest.raises(controller.DAPISessionError, match="mismatched"):
-        session.query_arc(
-            "x" * 43,
-            "001dc1fffe50692e",
-            bytes.fromhex("2809000a007210000000"),
-        )
+        session.query_arc("x" * 43, "001dc1fffe50692e", bytes.fromhex("2809000a007210000000"))
 
 
-def test_dapi_settings_query_requires_both_publication_and_transport_ack(monkeypatch):
-    fake_socket = FakeSocket(b"".join((_response(b"publication"), _response(b"ack"))))
+def _settings_acknowledgement(wrapper_id=6):
+    return _response(
+        bytes.fromhex("0018000110000308084001060015000a0841010000000004000c200200040000")
+        + wrapper_id.to_bytes(2, "big")
+        + bytes(2)
+    )
+
+
+def _settings_publication():
+    return bytes.fromhex(
+        "b91a3725000000020000006400180001100003080841ffffffff00000840010600150010"
+        "004c20030004000c000000000024002800020018000000006176696f2d696e7075742d32"
+        "002c0003ffff00241c400000001dc1fffe50692e417564696e6174650738100700000000"
+        "00000000"
+    )
+
+
+@pytest.mark.parametrize("missing", ["packet_hex", "response_opcode"])
+def test_managed_settings_state_requires_complete_snapshot(missing):
+    request = {
+        "device_id": "001dc1fffe50692e",
+        "wrapper_id": 6,
+        "response_opcode": 0x1007,
+        "frame": list(_settings_acknowledgement()),
+    }
+    result = controller.core.advance_managed_settings(request)
+    state = result["state"]
+    del state[missing]
+
+    with pytest.raises(controller.core.NetaudioCoreError):
+        controller.core.advance_managed_settings({**request, "state": state})
+
+
+@pytest.mark.parametrize("publication_first", [False, True])
+@pytest.mark.parametrize("omitted", [None, "acknowledgement", "publication"])
+def test_dapi_settings_query_requires_both_publication_and_transport_ack(publication_first, omitted):
+    publication = _settings_publication()
+    wrong_target = publication.replace(bytes.fromhex("001dc1fffe50692e"), bytes.fromhex("001dc1fffe50692f"))
+    wrong_opcode = publication.replace(bytes.fromhex("07381007"), bytes.fromhex("07381008"))
+    events = [("acknowledgement", _settings_acknowledgement()), ("publication", publication)]
+
+    if publication_first:
+        events.reverse()
+
+    incoming = _settings_acknowledgement(99) + wrong_target + wrong_opcode
+    incoming += b"".join(frame for name, frame in events if name != omitted)
+    fake_socket = FakeSocket(incoming)
     session = controller.DAPISession(
-        "ddm.example",
-        8001,
-        ssl.create_default_context(),
-        connector=lambda *args: fake_socket,
+        "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
     )
     session.initialized = True
     session.target_selectors["001dc1fffe50692e"] = 0
-    monkeypatch.setattr(
-        controller.core,
-        "build_dapi_settings_request",
-        lambda target_selector, wrapper_id, packet: f"settings:{target_selector}:{wrapper_id}:".encode() + packet,
-    )
+    request = bytes.fromhex("ffff0024002d7e3f842f5774e86d0000417564696e617465073a10060000006400000000")
 
-    def parse(kind, frame):
-        if kind == "dapi_settings_publication" and frame.endswith(b"publication"):
-            return {
-                "device_id": "001dc1fffe50692e",
-                "opcode": 0x1007,
-                "packet_hex": "ffff001c00010000001dc1fffe50692e417564696e61746507381007",
-            }
-        if kind == "dapi_settings_acknowledgement" and frame.endswith(b"ack"):
-            return {"wrapper_id": 6}
-        return None
-
-    monkeypatch.setattr(controller.core, "parse_response", parse)
     with session:
-        response = session.query_settings(
-            "x" * 43,
-            "001dc1fffe50692e",
-            b"settings-request",
-            0x1007,
-        )
+        if omitted is not None:
+            with pytest.raises(controller.DAPISessionError, match="closed"):
+                session.query_settings("x" * 43, "001dc1fffe50692e", request, 0x1007)
+        else:
+            response = session.query_settings("x" * 43, "001dc1fffe50692e", request, 0x1007)
+            assert response.hex() == "ffff00241c400000001dc1fffe50692e417564696e617465073810070000000000000000"
 
-    assert response == bytes.fromhex("ffff001c00010000001dc1fffe50692e417564696e61746507381007")
-    assert fake_socket.sent == [b"settings:0:6:settings-request"]
+    assert fake_socket.sent == [controller.core.build_dapi_settings_request(0, 6, request)]
 
 
 @pytest.mark.parametrize("operation", ["identify", "reboot"])
@@ -359,7 +341,7 @@ def test_api_key_device_operation_skips_password_login(monkeypatch, operation):
 
 @pytest.mark.parametrize("matching_ack", [True, False])
 def test_managed_reboot_requires_correlated_ack_without_retry(monkeypatch, matching_ack):
-    incoming = _response(b"wrong") + (_response(b"matching") if matching_ack else b"")
+    incoming = _settings_acknowledgement(5) + (_settings_acknowledgement() if matching_ack else b"")
     fake_socket = FakeSocket(incoming)
     session = controller.DAPISession(
         "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
@@ -369,12 +351,6 @@ def test_managed_reboot_requires_correlated_ack_without_retry(monkeypatch, match
     session.target_selectors["001dc1fffe50692e"] = 2
     monkeypatch.setattr(controller.core, "next_message_id", lambda: 71)
 
-    def parse(kind, frame):
-        if kind == "dapi_settings_acknowledgement":
-            return {"wrapper_id": 6 if frame.endswith(b"matching") else 5}
-        return None
-
-    monkeypatch.setattr(controller.core, "parse_response", parse)
     with session:
         if matching_ack:
             session.reboot("credential", "001dc1fffe50692e:0", b"\x01\x02\x03\x04\x05\x06", "11" * 16)
@@ -403,20 +379,19 @@ def test_managed_reboot_rejects_an_unobserved_controller_version(monkeypatch):
         )
 
 
-def test_dapi_session_rejects_an_authenticated_domain_other_than_the_selected_context(monkeypatch):
-    session = controller.DAPISession("ddm.example", 8001, ssl.create_default_context())
-    monkeypatch.setattr(controller.core, "build_dapi_session_open", lambda: b"open")
-    monkeypatch.setattr(controller.core, "build_dapi_authentication", lambda credential: b"auth")
-    monkeypatch.setattr(session, "_send", lambda frame: None)
-    monkeypatch.setattr(session, "_read_frame", lambda deadline: b"session")
-    monkeypatch.setattr(
-        session,
-        "_parse",
-        lambda kind, frame: {"domain_id": "00" * 16} if kind == "dapi_session_description" else None,
-    )
+def test_dapi_session_rejects_an_authenticated_domain_other_than_the_selected_context():
+    fake_socket = FakeSocket(_session_description(), chunk_size=3)
+    with controller.DAPISession(
+        "ddm.example", 8001, ssl.create_default_context(), connector=lambda *args: fake_socket
+    ) as session:
+        with pytest.raises(controller.DAPISessionError, match="selected domain.*expected"):
+            session._initialize("x" * 43, float("inf"), "11" * 16)
 
-    with pytest.raises(controller.DAPISessionError, match="selected domain.*expected"):
-        session._initialize("credential", float("inf"), "11" * 16)
+        assert session.initialized is False
+        assert session.domain_id is None
+
+    assert len(fake_socket.sent) == 2
+    assert fake_socket.closed
 
 
 @pytest.mark.parametrize(
@@ -442,21 +417,48 @@ def test_managed_device_id_is_strict(value):
         controller.normalize_device_id(value)
 
 
-def test_dapi_session_rejects_an_unobserved_frame_marker():
-    fake_socket = FakeSocket(b"unsupported!" + b"ignored")
+@pytest.mark.parametrize(
+    "header",
+    [b"unsupported!", bytes.fromhex("b91a37250000000200100001"), bytes.fromhex("b91a37260000000200000007")],
+)
+def test_dapi_session_rejects_invalid_frame_header_without_reading_payload(header):
+    fake_socket = FakeSocket(header + b"ignored")
     session = controller.DAPISession(
         "ddm.example",
         8001,
         ssl.create_default_context(),
         connector=lambda *args: fake_socket,
     )
-    with session, pytest.raises(controller.DAPISessionError, match="frame marker"):
+    with session, pytest.raises(controller.DAPISessionError, match="frame"):
         session._read_frame(float("inf"))
+
+    assert fake_socket.incoming == b"ignored"
+
+
+@pytest.mark.parametrize(
+    "packet",
+    [
+        b"",
+        bytes.fromhex("2809000a007210000001"),
+        bytes.fromhex("1234000a007210000000"),
+        bytes.fromhex("2809000b007210000000"),
+    ],
+)
+def test_dapi_session_rejects_invalid_arc_request_before_initialization(monkeypatch, packet):
+    session = controller.DAPISession("ddm.example", 8001, ssl.create_default_context())
+
+    def unexpected_initialization(*args):
+        raise AssertionError("invalid request reached session initialization")
+
+    monkeypatch.setattr(session, "_initialize", unexpected_initialization)
+
+    with pytest.raises(ValueError, match="ARC request"):
+        session.query_arc("credential", "001dc1fffe50692e", packet)
 
 
 def test_core_managed_arc_and_settings_codecs_use_the_capture_backed_layouts():
     arc_packet = controller.core.build_command(
-        {"command": "channel_count", "protocol_id": 0x2809, "transaction_id": 0x0072}
+        {"command": "channel_count", "protocol_id": 0x2809, "message_id": 0x0072}
     )
     assert arc_packet == bytes.fromhex("2809000a007210000000")
     assert controller.core.build_dapi_arc_request(0, 27, arc_packet) == bytes.fromhex(

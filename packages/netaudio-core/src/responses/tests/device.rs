@@ -403,7 +403,7 @@ fn cmc_registration_response_parser_validates_envelope_and_fields() {
         parse_cmc_registration_response(&response),
         Some(CmcRegistrationResponse {
             sequence: 0,
-            status: 1,
+            accepted: true,
         })
     );
 

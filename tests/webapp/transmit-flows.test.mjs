@@ -3,18 +3,32 @@ import { test } from "node:test";
 
 import { WEBAPP } from "./setup.mjs";
 
-const { canonicalFlowRequest, flowEvidenceRows, ReceiverFlows } = await import(
-  `${WEBAPP}device/flows.js`
-);
+const { canonicalFlowRequest, flowEvidenceRows, ReceiverFlows, TransmitFlows } =
+  await import(`${WEBAPP}device/flows.js`);
 const { h } = await import("preact");
 const { render } = await import("preact-render-to-string");
+
+const legacyAuthoring = {
+  protocol_id: 0x2729,
+  identity_field: "global_flow_id",
+  identifier_max: 32,
+  media_modes: ["native_dante"],
+  supports_flow_options: false,
+};
+const modernAuthoring = {
+  protocol_id: 0x2809,
+  identity_field: "media_local_flow_id",
+  identifier_max: 65535,
+  media_modes: ["native_dante", "rtp_aes67"],
+  supports_flow_options: true,
+};
 
 test("browser creates the canonical legacy flow schema", () => {
   const result = canonicalFlowRequest({
     channels: "2,4",
     encoding: 24,
     flowId: "3",
-    protocolId: 0x2729,
+    authoring: legacyAuthoring,
     sampleRate: 48000,
   });
   assert.deepEqual(result.channel_slots, [
@@ -22,7 +36,7 @@ test("browser creates the canonical legacy flow schema", () => {
     { slot: 2, transmitter_channel: 4 },
   ]);
   assert.equal(result.identity.global_flow_id, 3);
-  assert.equal(result.protocol.cohort, "legacy_2729");
+  assert.equal(result.protocol.protocol_id, 0x2729);
   assert.deepEqual(result.raw_fields, {});
 });
 
@@ -31,13 +45,13 @@ test("browser emits an allocation request for the observed ARC 2.8.9 cohort", ()
     channels: [1, 2],
     encoding: 24,
     flowId: "31",
-    protocolId: 0x2809,
+    authoring: modernAuthoring,
     sampleRate: 48000,
   });
   assert.equal(result.identity.global_flow_id, null);
   assert.equal(result.identity.media_local_flow_id, 31);
-  assert.equal(result.protocol.cohort, "modern_2809");
-  assert.deepEqual(result.raw_fields, { request_options_word: 0 });
+  assert.equal(result.protocol.protocol_id, 0x2809);
+  assert.deepEqual(result.raw_fields, {});
 });
 
 test("browser emits scoped RTP fields without treating device format as a wire mutation", () => {
@@ -50,7 +64,7 @@ test("browser emits scoped RTP fields without treating device format as a wire m
     mediaMode: "rtp_aes67",
     primaryAddress: "239.69.1.2",
     primaryPort: "5004",
-    protocolId: 0x2809,
+    authoring: modernAuthoring,
     sampleRate: 48000,
     secondaryAddress: "239.69.1.3",
     secondaryPort: "5006",
@@ -73,18 +87,26 @@ test("browser emits scoped RTP fields without treating device format as a wire m
   });
   assert.equal(result.sample_rate_hz, 48000);
   assert.equal(result.encoding_bits, 24);
-  assert.equal(result.identity.media_type_code, 3);
+  assert.equal(result.identity.media_type_code, null);
 });
 
-test("browser rejects duplicate channels and missing legacy identifiers", () => {
+test("browser preserves channel intent for native validation and requires identifiers", () => {
+  const duplicate = canonicalFlowRequest({
+    channels: "1,1",
+    flowId: 2,
+    authoring: legacyAuthoring,
+  });
+  assert.deepEqual(duplicate.channel_slots, [
+    { slot: 1, transmitter_channel: 1 },
+    { slot: 2, transmitter_channel: 1 },
+  ]);
   assert.throws(
     () =>
-      canonicalFlowRequest({ channels: "1,1", flowId: 2, protocolId: 0x2729 }),
-    /unique/,
-  );
-  assert.throws(
-    () =>
-      canonicalFlowRequest({ channels: "1", flowId: "", protocolId: 0x2729 }),
+      canonicalFlowRequest({
+        channels: "1",
+        flowId: "",
+        authoring: legacyAuthoring,
+      }),
     /flow identifier/,
   );
   assert.throws(
@@ -92,9 +114,9 @@ test("browser rejects duplicate channels and missing legacy identifiers", () => 
       canonicalFlowRequest({
         channels: "1",
         flowId: "",
-        protocolId: 0x2809,
+        authoring: modernAuthoring,
       }),
-    /media-local flow identifier/,
+    /flow identifier/,
   );
   assert.throws(
     () =>
@@ -102,9 +124,29 @@ test("browser rejects duplicate channels and missing legacy identifiers", () => 
         channels: "1",
         flowId: 1,
         mediaMode: "rtp_aes67",
-        protocolId: 0x2729,
+        authoring: legacyAuthoring,
       }),
-    /scoped to ARC 0x2809/,
+    /not available/,
+  );
+});
+
+test("flow editor uses advertised authoring independently of inventory revision", () => {
+  const markup = render(
+    h(TransmitFlows, {
+      device: {
+        server_name: "desk.local.",
+        flow_protocol_id: 0x2729,
+        transmit_flow_authoring: modernAuthoring,
+      },
+    }),
+  );
+
+  assert.match(markup, /Media-local flow identifier/);
+  assert.match(markup, /RTP\/AES67/);
+  assert.doesNotMatch(markup, /Global flow identifier/);
+  assert.throws(
+    () => canonicalFlowRequest({ channels: "1", flowId: 1 }),
+    /unavailable/,
   );
 });
 

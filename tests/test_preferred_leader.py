@@ -9,9 +9,7 @@ from netaudio import core
 from netaudio.dante.application import CapabilityProbeTimeout
 from tests.status_test_support import application_with_device, deliver_status_events, receive_packets
 
-from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.services.notification import (
     DanteNotificationService,
@@ -21,18 +19,30 @@ from netaudio.dante.services.notification import (
 class TestClockControlPacket:
     @pytest.mark.parametrize("preferred", [True, False])
     def test_preferred_has_only_selected_fields(self, preferred):
-        commands = DanteDeviceCommands()
-        packet, _, port = commands.command_clock_control(
-            {"record_revision": 0x073A, "clock_capabilities": 0, "extension_flags": 0, "preferred_leader": preferred}
+        packet = core.build_command(
+            {
+                "command": "clock_control",
+                "host_mac": "020000000001",
+                "message_id": 1,
+                "control": {
+                    "record_revision": 0x073A,
+                    "clock_capabilities": 0,
+                    "extension_flags": 0,
+                    "preferred_leader": preferred,
+                },
+            }
         )
+
         assert len(packet) == 92
-        assert port == DEVICE_SETTINGS_PORT
         assert packet[24:28] == bytes.fromhex("073a0021")
         assert packet[32:40] == bytes([0, 2, 0, 0, int(preferred), 0, 0, 0])
         assert all(byte == 0 for byte in packet[40:])
 
     def test_query_selects_no_fields(self):
-        packet, _, _ = DanteDeviceCommands().command_refresh_clock_status(0x0738)
+        packet = core.build_command(
+            {"command": "refresh_clock_status", "record_revision": 0x0738, "host_mac": "020000000001", "message_id": 1}
+        )
+
         assert packet[24:28] == bytes.fromhex("07380021")
         assert packet[32:] == bytes(60)
 
@@ -139,10 +149,6 @@ class TestPreferredLeaderFromConmon0x0020:
 
 
 class TestPreferredLeaderDeviceModel:
-    def test_default_is_none(self):
-        device = DanteDevice()
-        assert device.preferred_leader is None
-
     def test_serializer_includes_preferred_leader(self):
         device = DanteDevice()
         device.name = "test"

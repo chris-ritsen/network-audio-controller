@@ -16,6 +16,7 @@ from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
+from netaudio.dante.metering import metering_scale
 from netaudio.common.app_config import DEFAULT_DAEMON_PORT
 from netaudio.common.app_config import settings as app_settings
 from netaudio.common.managed_api import DDMConfiguration
@@ -484,14 +485,17 @@ class DaemonHTTPServer(
             "external_flows": self.application.external_flows.to_dict(),
             "shure_devices": shure_state,
             "metering": metering_state,
-            "managed": {
-                "status": self.managed_inventory.status(),
-                "domains": self.managed_inventory.domains(),
-                "connections": self._connection_state(self.managed_inventory.configuration),
-            }
-            if self.managed_inventory is not None
-            and isinstance(getattr(self.managed_inventory, "configuration", None), DDMConfiguration)
-            else None,
+            "metering_scale": metering_scale(),
+            "managed": (
+                {
+                    "status": self.managed_inventory.status(),
+                    "domains": self.managed_inventory.domains(),
+                    "connections": self._connection_state(self.managed_inventory.configuration),
+                }
+                if self.managed_inventory is not None
+                and isinstance(getattr(self.managed_inventory, "configuration", None), DDMConfiguration)
+                else None
+            ),
         }
 
     async def publish_inventory_snapshot(self) -> None:

@@ -1,83 +1,63 @@
-import ctypes
-import json
+import socket
 import threading
+
+import pytest
 
 from netaudio import core
 from netaudio.dante.core_transport import CoreTransport
 
 
-class _Function:
-    def __init__(self, behavior):
-        self.behavior = behavior
-        self.calls = []
-
-    def __call__(self, *arguments):
-        self.calls.append(arguments)
-        return self.behavior(*arguments)
-
-
-class _Library:
-    def __init__(self, captures):
-        payload = json.dumps(captures).encode()
-
-        def read(handle, out, capacity, length_reference):
-            length_reference._obj.value = len(payload)
-            if capacity < len(payload):
-                return 6
-            out[: len(payload)] = payload
-            return core.STATUS_OK
-
-        self.netaudio_client_clear_wire_captures = _Function(lambda handle: core.STATUS_OK)
-        self.netaudio_client_get_wire_captures_json = _Function(read)
-
-
-class _Client:
-    def __init__(self, library):
-        self._device_ip = "192.0.2.10"
-        self._handle = ctypes.c_void_p(1)
-        self._library = library
-
-    def _require_library(self):
-        return self._library
-
-
-def test_core_module_exports_status_constants_used_by_transport():
-    assert core.STATUS_OK == 0
-    assert core.STATUS_TIMEOUT == 9
-    assert core.STATUS_INVALID_SEQUENCE == 31
-
-
-def test_observer_receives_wire_captures_around_operation():
-    library = _Library(
-        [
-            {"payload_hex": "ffff0010", "port": 4440, "direction": "sent"},
-            {"payload_hex": "ffff0020", "port": 4440, "direction": "received"},
-        ]
-    )
-    client = _Client(library)
+def test_observer_reads_large_native_capture_and_clears_previous_operation():
     observed = []
     transport = CoreTransport(
         observer=lambda payload, ip, port, direction: observed.append((payload, ip, port, direction))
     )
+    # Synthetic loopback datagrams exercise capture buffering, not a device command.
+    packet = b"\x27\xff\x05\x78\x00\x01" + bytes(1394)
 
-    result = transport._call_and_observe(client, threading.Lock(), lambda active: ("done", active))
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(("127.0.0.1", 0))
+        receiver.settimeout(1)
+        port = receiver.getsockname()[1]
 
-    assert result == ("done", client)
-    assert len(library.netaudio_client_clear_wire_captures.calls) == 1
-    assert observed == [
-        (bytes.fromhex("ffff0010"), "192.0.2.10", 4440, "sent"),
-        (bytes.fromhex("ffff0020"), "192.0.2.10", 4440, "received"),
-    ]
+        with core.CoreClient("127.0.0.1", local_ip="127.0.0.1") as client:
+
+            def send(active):
+                for _ in range(100):
+                    active.request(packet, port, expect_response=False)
+                    assert receiver.recv(65535) == packet
+
+                return "sent"
+
+            assert transport._call_and_observe(client, threading.Lock(), send) == "sent"
+            assert observed == [(packet, "127.0.0.1", port, "request")] * 100
+            assert len(client.get_wire_captures()) == 100
+            observed.clear()
+            transport._call_and_observe(client, threading.Lock(), lambda active: None)
+            assert observed == []
+            assert client.get_wire_captures() == []
 
 
-def test_operation_without_observer_skips_wire_capture_functions():
-    library = _Library([])
-    client = _Client(library)
-    transport = CoreTransport()
+def test_timeout_preserves_sent_capture_for_observer():
+    observed = []
+    transport = CoreTransport(observer=lambda *record: observed.append(record))
+    packet = core.build_command({"command": "device_name", "message_id": 1})
 
-    assert transport._call_and_observe(client, threading.Lock(), lambda active: "plain") == "plain"
-    assert library.netaudio_client_clear_wire_captures.calls == []
-    assert library.netaudio_client_get_wire_captures_json.calls == []
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(("127.0.0.1", 0))
+        port = receiver.getsockname()[1]
+
+        with core.CoreClient("127.0.0.1", local_ip="127.0.0.1", timeout_ms=20, attempts=1) as client:
+            with pytest.raises(core.NetaudioCoreError) as failure:
+                transport._call_and_observe(client, threading.Lock(), lambda active: active.request(packet, port))
+
+            assert failure.value.status == core.STATUS_TIMEOUT
+            assert observed == [(packet, "127.0.0.1", port, "request")]
+
+
+def test_operation_without_observer_requires_no_capture_interface():
+    client = object()
+    assert CoreTransport()._call_and_observe(client, threading.Lock(), lambda active: active) is client
 
 
 def test_core_package_exports_every_public_binding_name():

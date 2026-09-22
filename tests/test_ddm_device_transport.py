@@ -222,40 +222,28 @@ domain_id = "22222222222222222222222222222222"
 
 @pytest.mark.asyncio
 async def test_managed_arc_normalizes_latency_to_2809_and_uses_controller_service(monkeypatch):
-    built = []
     sent = []
     response = bytes.fromhex("2809000a123411010001")
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
-
-    def build(specification):
-        built.append(specification)
-        return bytes.fromhex("2809000a123411010000")
 
     def query(server, credential, device_id, packet, **options):
         sent.append((server, credential, device_id, packet, options))
         return response
 
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x1234)
-    monkeypatch.setattr(device_transport.core, "build_command", build)
     monkeypatch.setattr(device_transport, "query_managed_arc_with_api_key", query)
 
     result = await transport.execute(_device(), {"command": "set_latency", "latency": 2.0})
 
     assert result == response
-    assert built == [
-        {
-            "command": "set_latency",
-            "latency": 2.0,
-            "message_id": 0x1234,
-            "protocol_id": 0x2809,
-        }
-    ]
     assert sent == [
         (
             "ddm.example",
             API_KEY,
             "001dc1fffe50692e:0",
-            bytes.fromhex("2809000a123411010000"),
+            device_transport.core.build_command(
+                {"command": "set_latency", "latency": 2.0, "message_id": 0x1234, "protocol_id": 0x2809}
+            ),
             {"expected_domain_id": "11" * 16},
         )
     ]
@@ -281,35 +269,23 @@ async def test_private_managed_action_requires_the_device_records_domain(monkeyp
 
 @pytest.mark.asyncio
 async def test_managed_arc_normalizes_receiver_port_range_query_to_2809(monkeypatch):
-    built = []
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
 
-    def build(specification):
-        built.append(specification)
-        return bytes.fromhex("2809000a123433000000")
-
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x1234)
-    monkeypatch.setattr(device_transport.core, "build_command", build)
+    query = MagicMock(return_value=bytes.fromhex("2809000a123433000001"))
     monkeypatch.setattr(
         device_transport,
         "query_managed_arc_with_api_key",
-        lambda *_args, **_kwargs: bytes.fromhex("2809000a123433000001"),
+        query,
     )
 
     await transport.execute(_device(), {"command": "query_receiver_port_ranges"})
 
-    assert built == [
-        {
-            "command": "query_receiver_port_ranges",
-            "message_id": 0x1234,
-            "protocol_id": 0x2809,
-        }
-    ]
+    assert query.call_args.args[3] == bytes.fromhex("2809000a123433000000")
 
 
 @pytest.mark.asyncio
 async def test_managed_settings_query_injects_host_mac_and_correlates_the_publication(monkeypatch):
-    built = []
     sent = []
     publication = bytes.fromhex("ffff001c00010000001dc1fffe50692e417564696e61746507380080")
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
@@ -317,27 +293,18 @@ async def test_managed_settings_query_injects_host_mac_and_correlates_the_public
     monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("001122334455"))
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x4321)
 
-    def build(specification):
-        built.append(specification)
-        return bytes.fromhex("ffff0024002d7e3f0011223344550000417564696e617465073a00810000000000000000")
-
     def query(server, credential, device_id, packet, expected_opcode, **options):
-        sent.append((server, credential, device_id, expected_opcode, options))
+        sent.append((server, credential, device_id, expected_opcode, options, packet))
         return publication
 
-    monkeypatch.setattr(device_transport.core, "build_command", build)
     monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
 
     result = await transport.execute(_device(), {"command": "probe_sample_rate"})
 
     assert result == publication
-    assert built == [
-        {
-            "command": "probe_sample_rate",
-            "host_mac": "001122334455",
-            "message_id": 0x4321,
-        }
-    ]
+    assert sent[0][5] == device_transport.core.build_command(
+        {"command": "probe_sample_rate", "host_mac": "001122334455", "message_id": 0x4321}
+    )
     assert sent[0][3] == 0x0080
 
 
@@ -346,15 +313,53 @@ async def test_managed_transport_fails_closed_before_sending_unsupported_or_unve
     sent = MagicMock()
     transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
     monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 1)
-    monkeypatch.setattr(
-        device_transport.core, "build_command", lambda specification: bytes.fromhex("27ff000a000110020000")
-    )
     monkeypatch.setattr(device_transport, "query_managed_arc_with_api_key", sent)
 
     with pytest.raises(device_transport.ManagedDeviceControlError, match="not available through DDM"):
         await transport.execute(_device(), {"command": "device_name"})
 
     sent.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "specification",
+    [
+        {"command": "set_latency", "latency": 2.0, "protocol_id": 0x2729},
+        {"command": "device_log_export"},
+        {"command": "device_name"},
+        {"command": "probe_sample_rate", "unexpected": True},
+    ],
+)
+def test_native_managed_plan_rejects_unsupported_commands(specification):
+    with pytest.raises(device_transport.core.NetaudioCoreError):
+        device_transport.core.build_managed_command(specification, host_mac=bytes.fromhex("001122334455"), message_id=1)
+
+
+@pytest.mark.parametrize(
+    "specification,completion",
+    [
+        ({"command": "probe_sample_rate"}, 0x0080),
+        ({"command": "set_dante_redundancy", "mode": "redundant"}, 0x0011),
+        ({"command": "probe_switch_configuration"}, 0x0014),
+    ],
+)
+def test_native_managed_plan_preserves_explicit_identity_and_completion(specification, completion):
+    spec = {**specification, "host_mac": "020000000062", "message_id": 23}
+    plan = device_transport.core.build_managed_command(spec, host_mac=bytes.fromhex("001122334455"), message_id=1)
+
+    assert plan["transport"] == "settings"
+    assert plan["response_opcode"] == completion
+    assert bytes(plan["packet"]) == device_transport.core.build_command(spec)
+
+
+def test_native_managed_arc_plan_does_not_require_host_mac():
+    plan = device_transport.core.build_managed_command({"command": "channel_count"}, message_id=23)
+
+    assert plan["transport"] == "arc"
+    assert plan["response_opcode"] is None
+    assert bytes(plan["packet"]) == device_transport.core.build_command(
+        {"command": "channel_count", "protocol_id": 0x2809, "message_id": 23}
+    )
 
 
 @pytest.mark.asyncio
@@ -560,20 +565,24 @@ async def test_managed_device_without_an_ip_uses_exact_device_for_clear_configur
     device.ipv4 = None
     application.attach_devices({device.server_name: device})
     key = application._control_key(device)
+    expected_status = device_transport.core.parse_response(
+        "clear_configuration_status",
+        bytes.fromhex("ffff0028000f00000200000000010000417564696e61746507240078000000000000000300000001"),
+    )
 
     async def clear(target):
         assert target is device
         application.notifications.notify_waiters(
             "clear_configuration_status",
             key,
-            {"action_result_code": 1, "available_actions_mask": 3},
+            expected_status,
         )
 
     application.send_clear_all_configuration = clear
 
     status = await application.clear_configuration(device, preserve_internet_protocol_settings=False)
 
-    assert status["action_result_code"] == 1
+    assert status == expected_status
 
 
 @pytest.mark.asyncio
@@ -666,7 +675,6 @@ async def test_managed_wing_redundancy_uses_core_packet_and_interface_completion
         _device(),
         {
             "command": "set_dante_redundancy",
-            "record_protocol_identifier": 0x073D,
             "mode": "redundant",
         },
     )
@@ -674,23 +682,3 @@ async def test_managed_wing_redundancy_uses_core_packet_and_interface_completion
     packet, completion = query.call_args.args[3:5]
     assert packet == bytes.fromhex("ffff0028426c00000200000000620000417564696e617465073a0013000000640000000000010001")
     assert completion == 0x0011
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("protocol", [None, 0x0724, 0x072E, 0x0777])
-async def test_managed_redundancy_packet_does_not_depend_on_the_reported_revision(monkeypatch, protocol):
-    transport = device_transport.ManagedDeviceTransport(_configuration(), client=FakeClient())
-    monkeypatch.setattr(device_transport.core, "host_mac", lambda: bytes.fromhex("020000000062"))
-    monkeypatch.setattr(device_transport.core, "next_message_id", lambda: 0x426C)
-    query = MagicMock(return_value=b"verified publication")
-    monkeypatch.setattr(device_transport, "query_managed_settings_with_api_key", query)
-    await transport.execute(
-        _device(),
-        {
-            "command": "set_dante_redundancy",
-            "record_protocol_identifier": protocol,
-            "mode": "redundant",
-        },
-    )
-    packet = query.call_args.args[3]
-    assert packet == bytes.fromhex("ffff0028426c00000200000000620000417564696e617465073a0013000000640000000000010001")

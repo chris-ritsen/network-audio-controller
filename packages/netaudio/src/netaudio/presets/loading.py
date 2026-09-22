@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-import math
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from functools import partial
 from typing import Any, Awaitable, Callable
 
-from netaudio.cli_support.execution import readback_after_notification
-from netaudio.commands.config.readback import MUTATION_ERRORS
-from netaudio.dante.network_configuration import NetworkConfigurationUnverified, validate_interface_configuration
+from netaudio import core
+from netaudio.dante.audio_capabilities import audio_capability_fields
+from netaudio.dante.readback import MUTATION_ERRORS, ReadbackResult, audio_readback_result, readback_after_notification
+from netaudio.dante.network_configuration import (
+    NetworkConfigurationUnverified,
+    interface_configuration,
+    validate_interface_configuration,
+)
 from netaudio.dante.performance_configuration import requested_performance_properties
 from netaudio.dante.flow_lifecycle import inspect_transmit_flows, plan_create_transmit_flow
 from netaudio.dante.transmit_flow import TransmitFlowSpecification, compare_transmit_flows
@@ -93,20 +96,42 @@ class PresetOperationResult:
     verification_observations: list[dict[str, Any]] = field(default_factory=list)
     message: str = ""
 
+    @property
+    def failed(self) -> bool:
+        return self.state in {"failed", "rejected", "contradicted", "inconsistent"}
+
+    @property
+    def unverified(self) -> bool:
+        if self.failed:
+            return False
+
+        if self.state in {"confirmed", "deleted"}:
+            if self.kind == "store_current_configuration":
+                return self.persistence_confirmation is not True
+
+            return self.effective_state_confirmation is False
+
+        return self.state not in {"unchanged", "unsupported", "skipped"}
+
 
 @dataclass
 class PresetLoadReport:
-    failures: int = 0
-    unverified: int = 0
     needs_reboot: list[str] = field(default_factory=list)
     results: list[tuple[str, str]] = field(default_factory=list)
     operations: list[PresetOperationResult] = field(default_factory=list)
 
-    def record(self, device_name: str, text: str, *, failed: bool = False, verified: bool = True) -> None:
-        if failed:
-            self.failures += 1
-        if not verified:
-            self.unverified += 1
+    @property
+    def failures(self) -> int:
+        return sum(operation.failed for operation in self.operations)
+
+    @property
+    def unverified(self) -> int:
+        return sum(operation.unverified for operation in self.operations)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "failures": self.failures, "unverified": self.unverified}
+
+    def record(self, device_name: str, text: str) -> None:
         self.results.append((device_name, text))
 
     def operation(
@@ -124,8 +149,6 @@ class PresetLoadReport:
         persistence_request_acknowledgement: Any = None,
         persistence_confirmation: bool | None = None,
         verification_observations: list[dict[str, Any]] | None = None,
-        failed: bool = False,
-        verified: bool = True,
     ) -> None:
         self.operations.append(
             PresetOperationResult(
@@ -143,7 +166,7 @@ class PresetLoadReport:
                 message=message,
             )
         )
-        self.record(device_name, message, failed=failed, verified=verified)
+        self.record(device_name, message)
 
 
 @dataclass
@@ -213,28 +236,21 @@ def _ambiguous(kind: str, requested: Any, reason: str, *, current: Any = None) -
     )
 
 
-def _validate_config(device_name: str, config: dict) -> None:
-    sample_rate = config.get("sample_rate")
-    if sample_rate is not None and (
-        isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or not 1 <= sample_rate <= 0xFFFFFFFF
-    ):
-        raise ValueError(f"{device_name}: sample rate must be an integer from 1 through 4294967295")
-    encoding = config.get("encoding")
-    if encoding is not None and (
-        isinstance(encoding, bool) or not isinstance(encoding, int) or not 1 <= encoding <= 0xFFFFFFFF
-    ):
-        raise ValueError(f"{device_name}: encoding must be an integer from 1 through 4294967295")
-    latency = config.get("latency")
-    if latency is not None and (
-        isinstance(latency, bool) or not isinstance(latency, (int, float)) or not math.isfinite(latency) or latency < 0
-    ):
-        raise ValueError(f"{device_name}: latency must be a finite, nonnegative number")
+def _validate_config(config: dict) -> None:
+    for field_name in ("sample_rate", "encoding", "latency"):
+        value = config.get(field_name)
+
+        if value is None:
+            continue
+
+        core.build_command({"command": f"set_{field_name}", field_name: value})
+
     for interface in _interface_entries(config):
         mode = "dhcp" if interface["mode"] in ("dynamic", "dhcp") else interface["mode"]
         try:
             validate_interface_configuration(mode, interface if mode == "static" else None)
         except (TypeError, ValueError) as exception:
-            raise ValueError(f"{device_name}: interface {interface['identity']}: {exception}") from exception
+            raise ValueError(f"interface {interface['identity']}: {exception}") from exception
 
 
 def _interface_entries(config: dict) -> list[dict[str, Any]]:
@@ -269,9 +285,7 @@ def _interface_payload(interface: dict[str, Any]) -> dict[str, Any]:
 
 
 def _expected_interface_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload["mode"] == "dhcp":
-        return {"mode": "dynamic"}
-    return {"mode": "static", **payload["configuration"]}
+    return validate_interface_configuration(payload["mode"], payload["configuration"])
 
 
 async def _plan_device_name(device, requested: str) -> PresetAction:
@@ -344,10 +358,20 @@ async def _plan_status_setting(
         status = await getattr(application, probe_name)(device, timeout=2.0)
     except READBACK_ERRORS as exception:
         return _unavailable(kind, requested, f"fresh {kind.replace('_', ' ')} readback failed: {exception}")
+
     if not isinstance(status, dict) or status.get("current_value") is None:
         return _unavailable(kind, requested, f"fresh {kind.replace('_', ' ')} value was unavailable")
+
     current = status["current_value"]
+
+    for field_name, value in audio_capability_fields(status, kind=kind).items():
+        setattr(device, field_name, value)
+
+    if requested == current:
+        return _change_or_unchanged(kind, requested, current)
+
     available = status.get("available_values")
+
     if not isinstance(available, list):
         return _unavailable(
             kind,
@@ -355,73 +379,41 @@ async def _plan_status_setting(
             f"{kind.replace('_', ' ')} capability values were unavailable",
             current=current,
         )
-    if requested not in available:
-        return _unsupported(
-            kind,
-            requested,
-            f"device reports supported {kind.replace('_', ' ')} values {available}",
-            current=current,
-        )
-    update_mode = status.get("update_mode")
-    if update_mode not in (1, 2):
-        return _unsupported(
-            kind,
-            requested,
-            f"device reports non-writable update mode {update_mode!r}",
-            current=current,
-        )
-    fields = {
-        "sample_rate": (
-            "sample_rate",
-            "requested_sample_rate",
-            "sample_rate_update_mode",
-            "supported_sample_rates",
-        ),
-        "encoding": (
-            "encoding",
-            "requested_encoding",
-            "encoding_update_mode",
-            "supported_encodings",
-        ),
-        "sample_rate_pullup": (
-            "sample_rate_pullup_raw_value",
-            "requested_sample_rate_pullup_raw_value",
-            "sample_rate_pullup_update_mode",
-            "supported_sample_rate_pullup_raw_values",
-        ),
-    }[kind]
-    setattr(device, fields[0], current)
-    setattr(device, fields[1], status.get("requested_value"))
-    setattr(device, fields[2], update_mode)
-    setattr(device, fields[3], available)
+
     from netaudio.dante.operation_availability import operation_availability
 
     availability = operation_availability(device, kind, requested)
-    if not availability.writable and requested != current:
-        state_factory = _unsupported if availability.supported is False else _unavailable
+
+    if not availability.writable:
+        unsupported = availability.supported is False or any(
+            reason in {"fixed", "value_not_advertised"} for reason in availability.reasons
+        )
+        state_factory = _unsupported if unsupported else _unavailable
+        reason = f"{kind.replace('_', ' ')} capability is not writable: {', '.join(availability.reasons)}"
+
+        if "value_not_advertised" in availability.reasons:
+            reason = f"device reports supported {kind.replace('_', ' ')} values {available}"
+
         return state_factory(
             kind,
             requested,
-            f"{kind.replace('_', ' ')} capability is not writable: {', '.join(availability.reasons)}",
+            reason,
             current=current,
         )
+
     return _change_or_unchanged(kind, requested, current)
 
 
 async def _plan_latency(application, device, requested: float) -> PresetAction:
     try:
-        settings = await application.get_device_settings(device)
+        settings = await _read_latency_state(application, device)
     except READBACK_ERRORS as exception:
         return _unavailable("latency", requested, f"fresh latency readback failed: {exception}")
-    active = settings.get("active_latency_ns") if isinstance(settings, dict) else None
-    if isinstance(active, bool) or not isinstance(active, (int, float)):
-        return _unavailable("latency", requested, "fresh active latency was unavailable")
-    current = active / 1_000_000
+
+    control = core.latency_control(requested, settings, True)
+
     return _change_or_unchanged(
-        "latency",
-        requested,
-        current,
-        matches=math.isclose(float(requested), float(current), rel_tol=0, abs_tol=1e-9),
+        "latency", requested, settings["configured_latency_ms"], matches=control["effective_state_confirmed"]
     )
 
 
@@ -595,7 +587,7 @@ async def _plan_transmit_flows(application, device, config: dict) -> list[Preset
 
 
 async def _fresh_receiver_state(device, requested_channels: set[int]) -> tuple[dict[int, Any], list[int]]:
-    from netaudio.commands.subscription import _index_fresh_subscriptions, _subscription_signature
+    from netaudio.dante.subscription_operations import subscription_sources
 
     await device.get_rx_channels()
     channels = getattr(device, "rx_channels", None)
@@ -603,8 +595,7 @@ async def _fresh_receiver_state(device, requested_channels: set[int]) -> tuple[d
         raise RuntimeError("fresh receiver channel inventory was unavailable")
     by_number = {channel.number: channel for channel in channels.values()}
     missing = sorted(requested_channels - set(by_number))
-    _index_fresh_subscriptions(device)
-    current = {number: _subscription_signature(device, number) for number in requested_channels if number in by_number}
+    current = subscription_sources(device, requested_channels & set(by_number))
     return current, missing
 
 
@@ -666,9 +657,11 @@ async def _plan_receiver_subscriptions(device, device_name: str, config: dict) -
 
             try:
                 receiver_inventory = await flows.query_preferred_receiver_flow_inventory(device)
-            except (*READBACK_ERRORS, AttributeError):
-                receiver_inventory = None
-            if receiver_inventory is None:
+                readback = _external_subscription_readback(external, receiver_inventory)
+            except READBACK_ERRORS:
+                readback = None
+
+            if readback is None or readback["arc_effective_state_confirmed"] is None:
                 actions.append(
                     _unavailable(
                         "external_receiver_subscriptions",
@@ -677,25 +670,12 @@ async def _plan_receiver_subscriptions(device, device_name: str, config: dict) -
                     )
                 )
             else:
-                effective = flows.effective_external_subscription_index(receiver_inventory)
-                requested = {
-                    number: _preset_external_identity(number, subscription) for number, subscription in external
-                }
-                observed = {number: effective.get(number, []) for number, _ in external}
-                matches = all(
-                    any(
-                        _preset_external_identity_projection(candidate)
-                        == _preset_external_identity_projection(expected)
-                        for candidate in observed[number]
-                    )
-                    for number, expected in requested.items()
-                )
                 actions.append(
                     _change_or_unchanged(
                         "external_receiver_subscriptions",
                         external,
-                        observed,
-                        matches=matches,
+                        readback["observed_effective_identities"],
+                        matches=readback["arc_effective_state_confirmed"],
                     )
                 )
     return actions
@@ -712,21 +692,13 @@ def _preset_external_identity(receiver_channel: int, subscription: dict) -> dict
     }
 
 
-def _preset_external_identity_projection(identity: dict) -> tuple:
-    endpoints = identity.get("interface_endpoints")
-    endpoint_projection = None
-    if endpoints is not None:
-        endpoint_projection = tuple(
-            (endpoint.get("ipv4_address"), endpoint.get("udp_port"))
-            for endpoint in endpoints
-            if isinstance(endpoint, dict)
-        )
-    return (
-        identity.get("receiver_channel"),
-        identity.get("flow_slot"),
-        identity.get("source_ipv4"),
-        identity.get("session_id"),
-        endpoint_projection,
+def _external_subscription_readback(subscriptions: list[tuple[int, dict]], inventory: dict | None) -> dict:
+    return core.external_subscription_readback(
+        {
+            "kind": "identities",
+            "identities": [_preset_external_identity(number, subscription) for number, subscription in subscriptions],
+            "inventory": inventory,
+        }
     )
 
 
@@ -734,15 +706,17 @@ async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> 
     if not gains:
         return []
     try:
-        device_type, levels = await application.probe_gain_adapter(device, timeout=2.0)
+        adapter = await application.probe_gain_adapter(device, timeout=2.0)
+        device_type = adapter["device_type"]
+        levels = adapter["channel_levels"]
     except READBACK_ERRORS as exception:
         return [_unavailable("codec_gain", gain, f"fresh codec/gain readback failed: {exception}") for gain in gains]
     if device_type not in {"input", "output"} or not isinstance(levels, list):
         return [_unavailable("codec_gain", gain, "fresh codec/gain adapter state was unavailable") for gain in gains]
-    device.gain_adapter = {"device_type": device_type, "channel_levels": list(levels)}
+    device.gain_adapter = adapter
     device.gain_device_type = device_type
     device.gain_levels = list(levels)
-    device.supported_gain_levels = [1, 2, 3, 4, 5]
+    device.supported_gain_levels = adapter["supported_levels"]
     from netaudio.dante.operation_availability import operation_availability
 
     availability = operation_availability(device, "codec_control")
@@ -758,7 +732,6 @@ async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> 
             actions.append(
                 _unsupported(
                     "codec_gain",
-                    "device_controls",
                     gain,
                     f"device reports a {device_type} gain adapter",
                     current=current,
@@ -773,7 +746,7 @@ async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> 
                     current=current,
                 )
             )
-        elif gain["level"] not in {1, 2, 3, 4, 5}:
+        elif gain["level"] not in adapter["supported_levels"]:
             actions.append(
                 _unsupported(
                     "codec_gain",
@@ -806,22 +779,27 @@ async def _plan_codec_gain(application, device, gains: list[dict[str, Any]]) -> 
 
 async def _plan_interfaces(application, device, config: dict) -> list[PresetAction]:
     entries = _interface_entries(config)
+
     if not entries:
         return []
+
     requested = [_interface_payload(interface) for interface in entries]
+
     try:
         interfaces = await application.probe_interface_status(device, timeout=2.0)
     except READBACK_ERRORS as exception:
         return [
             _unavailable("interface", payload, f"fresh interface readback failed: {exception}") for payload in requested
         ]
+
     actions = []
-    from netaudio.dante.network_configuration import interface_configuration
     from netaudio.dante.operation_availability import operation_availability
 
     availability = operation_availability(device, "static_ipv4")
+
     for payload in requested:
         identity = payload["identity"]
+
         if identity not in {"primary", "secondary"}:
             actions.append(
                 _unsupported(
@@ -831,19 +809,20 @@ async def _plan_interfaces(application, device, config: dict) -> list[PresetActi
                 )
             )
             continue
+
         try:
-            if identity == "primary" and len(interfaces) == 1 and interfaces[0].get("interface") is None:
-                selected = interfaces[0]
-            else:
-                selected = interface_configuration(interfaces, identity)
+            selected = interface_configuration(interfaces, identity)
         except (LookupError, TypeError, ValueError, RuntimeError) as exception:
             actions.append(
                 _unavailable("interface", payload, f"fresh {identity} interface was unavailable: {exception}")
             )
             continue
+
         expected = _expected_interface_payload(payload)
-        reported = selected.get("configured") if isinstance(selected.get("configured"), dict) else selected
+        reported = selected.get("configured")
+        reported = reported if isinstance(reported, dict) else {}
         current = {field: reported.get(field) for field in expected}
+
         if any(value is None for value in current.values()):
             actions.append(
                 _unavailable(
@@ -865,6 +844,7 @@ async def _plan_interfaces(application, device, config: dict) -> list[PresetActi
             )
         else:
             actions.append(_change_or_unchanged("interface", payload, current, matches=current == expected))
+
     return actions
 
 
@@ -926,7 +906,7 @@ def _preserved_actions(config: dict) -> list[PresetAction]:
 
 async def _plan_device_actions(application, matched: MatchedPresetDevice) -> PresetDeviceActions:
     config = matched.config
-    _validate_config(matched.device_name, config)
+    _validate_config(config)
     actions = []
     if "device_name" in config:
         actions.append(await _plan_device_name(matched.device, config["device_name"]))
@@ -1049,34 +1029,13 @@ async def build_preset_plan(application, matched_devices: list[MatchedPresetDevi
     return PresetLoadPlan(device_actions=device_actions)
 
 
-async def _read_sample_rate(application, device):
-    settings = await application.get_device_settings(device)
-    if not isinstance(settings, dict) or settings.get("sample_rate") is None:
-        raise RuntimeError("sample-rate readback was unavailable")
-    return settings["sample_rate"]
+async def _read_latency_state(application, device):
+    settings = await application.get_latency_settings(device)
 
+    if not isinstance(settings, dict) or settings.get("configured_latency_ns") is None:
+        raise RuntimeError("configured latency readback was unavailable")
 
-async def _read_encoding(application, device):
-    from netaudio.commands.config.readback import _read_encoding_status
-
-    return await _read_encoding_status(application, device)
-
-
-async def _read_latency(application, device):
-    settings = await application.get_device_settings(device)
-    if not isinstance(settings, dict) or settings.get("active_latency_ns") is None:
-        raise RuntimeError("active latency readback was unavailable")
-    return settings["active_latency_ns"]
-
-
-async def _read_audio_setting(action, application, device):
-    if action == "sample_rate":
-        return await _read_sample_rate(application, device)
-    if action == "encoding":
-        return await _read_encoding(application, device)
-    if action == "latency":
-        return await _read_latency(application, device)
-    raise ValueError(f"unsupported audio setting: {action}")
+    return core.latency_configuration(settings)["state"]
 
 
 async def _read_preferred_leader(application, device):
@@ -1086,72 +1045,116 @@ async def _read_preferred_leader(application, device):
     return state
 
 
-def _expected_interface_config(action: PresetAction) -> dict:
-    mode = action.payload["mode"]
-    if mode == "dhcp":
-        return {"mode": "dynamic"}
-    return {"mode": "static", **action.payload["configuration"]}
-
-
-async def _read_interface_config(application, device, interface: str, expected: dict):
-    from netaudio.dante.network_configuration import interface_configuration
-
-    interfaces = await application.probe_interface_status(device, timeout=1.0)
-    if not interfaces:
-        raise RuntimeError("interface readback was unavailable")
-    if interface == "primary" and len(interfaces) == 1 and interfaces[0].get("interface") is None:
-        selected = interfaces[0]
-    else:
-        selected = interface_configuration(interfaces, interface)
-    reported = selected.get("configured") or selected
-    return {field_name: reported.get(field_name) for field_name in expected}
-
-
 async def _apply_sample_rate(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
     report = context.report
+
     try:
         result = await context.application.set_sample_rate(
             entry.device, action.payload, confirm_destructive=context.confirm_destructive
         )
     except SampleRateTopologyChangedButUnverifiedError as exception:
-        report.record(entry.device_name, f"sample rate: CHANGED BUT UNVERIFIED ({exception})", failed=True)
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"sample rate: CHANGED BUT UNVERIFIED ({exception})",
+            requested=action.payload,
+        )
+
         return
     except SampleRateTopologyMutationOutcomeUnknownError as exception:
-        report.record(entry.device_name, f"sample rate: MUTATION OUTCOME UNKNOWN ({exception})", failed=True)
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"sample rate: MUTATION OUTCOME UNKNOWN ({exception})",
+            requested=action.payload,
+        )
+
         return
     except MUTATION_ERRORS as exception:
-        report.record(entry.device_name, f"sample rate: REFUSED ({exception})", failed=True)
-        return
-    if result.changed:
-        report.record(entry.device_name, f"sample rate {result.observed_sample_rate_hertz} Hz and topology (verified)")
-    else:
-        report.record(
+        report.operation(
             entry.device_name,
+            action.kind,
+            "failed",
+            f"sample rate: REFUSED ({exception})",
+            requested=action.payload,
+        )
+
+        return
+
+    if result.changed:
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            f"sample rate {result.observed_sample_rate_hertz} Hz and topology (verified)",
+            requested=action.payload,
+            effective=result.observed_sample_rate_hertz,
+        )
+    else:
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "unchanged",
             f"sample rate already {result.observed_sample_rate_hertz} Hz (verified; no write sent)",
+            requested=action.payload,
+            effective=result.observed_sample_rate_hertz,
         )
 
 
 async def _apply_receiver_subscriptions(
     context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction
 ) -> None:
-    from netaudio.commands.subscription import reconcile_receiver_subscriptions
+    from netaudio.dante.subscription_operations import reconcile_receiver_subscriptions
 
     report = context.report
+
     try:
         result = await reconcile_receiver_subscriptions(context.application, entry.device, action.payload)
     except MUTATION_ERRORS as exception:
-        report.record(entry.device_name, f"receiver subscriptions: FAILED ({exception})", failed=True)
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"receiver subscriptions: FAILED ({exception})",
+            requested=action.payload,
+        )
+
         return
+
     if result.unchanged and not result.verified and not result.failures:
-        report.record(entry.device_name, f"receiver subscriptions already match ({len(result.unchanged)} channels)")
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "unchanged",
+            f"receiver subscriptions already match ({len(result.unchanged)} channels)",
+            requested=action.payload,
+        )
+
     for receiver_channel_number, desired_source in sorted(result.verified.items()):
         if desired_source is None:
             description = f"receiver channel {receiver_channel_number} unsubscribed"
         else:
             description = f"receiver channel {receiver_channel_number} <- {desired_source[0]}@{desired_source[1]}"
-        report.record(entry.device_name, f"{description} (verified)")
+
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            f"{description} (verified)",
+            requested={receiver_channel_number: desired_source},
+            effective={receiver_channel_number: desired_source},
+        )
+
     for receiver_channel_number, detail in sorted(result.failures.items()):
-        report.record(entry.device_name, f"receiver channel {receiver_channel_number}: FAILED ({detail})", failed=True)
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"receiver channel {receiver_channel_number}: FAILED ({detail})",
+            requested={receiver_channel_number: action.payload[receiver_channel_number]},
+        )
 
 
 async def _apply_transmitter_channel_names(
@@ -1160,18 +1163,46 @@ async def _apply_transmitter_channel_names(
     from netaudio.dante.transmitter_channel_name_reconciliation import reconcile_transmitter_channel_names
 
     report = context.report
+
     try:
         result = await reconcile_transmitter_channel_names(context.application, entry.device, action.payload)
     except MUTATION_ERRORS as exception:
-        report.record(entry.device_name, f"transmitter channel names: FAILED ({exception})", failed=True)
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"transmitter channel names: FAILED ({exception})",
+            requested=action.payload,
+        )
+
         return
+
     if result.unchanged and not result.verified and not result.failures:
-        report.record(entry.device_name, f"transmitter channel names already match ({len(result.unchanged)} channels)")
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "unchanged",
+            f"transmitter channel names already match ({len(result.unchanged)} channels)",
+            requested=action.payload,
+        )
+
     for transmitter_channel_number, channel_name in sorted(result.verified.items()):
-        report.record(entry.device_name, f"transmitter channel {transmitter_channel_number}: {channel_name} (verified)")
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            f"transmitter channel {transmitter_channel_number}: {channel_name} (verified)",
+            requested={transmitter_channel_number: channel_name},
+            effective={transmitter_channel_number: channel_name},
+        )
+
     for transmitter_channel_number, detail in sorted(result.failures.items()):
-        report.record(
-            entry.device_name, f"transmitter channel {transmitter_channel_number}: FAILED ({detail})", failed=True
+        report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"transmitter channel {transmitter_channel_number}: FAILED ({detail})",
+            requested={transmitter_channel_number: action.payload[transmitter_channel_number]},
         )
 
 
@@ -1179,6 +1210,7 @@ async def _read_channel_names(device, channel_type: str, channel_numbers: tuple[
     await (device.get_rx_channels() if channel_type == "rx" else device.get_tx_channels())
     channels = device.rx_channels if channel_type == "rx" else device.tx_channels
     by_number = {channel.number: channel for channel in channels.values()}
+
     return {
         number: by_number[number].friendly_name or by_number[number].name
         for number in channel_numbers
@@ -1193,9 +1225,11 @@ async def _apply_receiver_channel_names(
     current = await _read_channel_names(entry.device, "rx", tuple(desired))
     failures = 0
     changed = 0
+
     for number, name in desired.items():
         if current.get(number) == name:
             continue
+
         try:
             await context.application.set_channel_name(entry.device, "rx", number, name)
             readback = await readback_after_notification(
@@ -1203,25 +1237,51 @@ async def _apply_receiver_channel_names(
                 {number: name},
             )
         except MUTATION_ERRORS as exception:
-            context.report.record(entry.device_name, f"receiver channel {number}: FAILED ({exception})", failed=True)
-            failures += 1
-            continue
-        if readback.matched:
-            context.report.record(entry.device_name, f"receiver channel {number}: {name} (verified)")
-            changed += 1
-        else:
-            context.report.record(
+            context.report.operation(
                 entry.device_name,
-                f"receiver channel {number}: FAILED (fresh readback reports {readback.observed!r})",
-                failed=True,
+                action.kind,
+                "failed",
+                f"receiver channel {number}: FAILED ({exception})",
+                requested={number: name},
             )
             failures += 1
+            continue
+
+        if readback.matched:
+            context.report.operation(
+                entry.device_name,
+                action.kind,
+                "confirmed",
+                f"receiver channel {number}: {name} (verified)",
+                requested={number: name},
+                effective=readback.observed,
+            )
+            changed += 1
+        else:
+            context.report.operation(
+                entry.device_name,
+                action.kind,
+                "failed",
+                f"receiver channel {number}: FAILED (fresh readback reports {readback.observed!r})",
+                requested={number: name},
+                effective=readback.observed,
+            )
+            failures += 1
+
     if not changed and not failures:
-        context.report.record(entry.device_name, f"receiver channel names already match ({len(desired)} channels)")
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "unchanged",
+            f"receiver channel names already match ({len(desired)} channels)",
+            requested=desired,
+            effective=current,
+        )
 
 
 async def _apply_device_name(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
     desired = action.payload
+
     try:
         acknowledgement = await context.application.set_device_name(entry.device, desired)
         observed = await entry.device.fetch_device_name()
@@ -1232,9 +1292,10 @@ async def _apply_device_name(context: PresetLoadContext, entry: PresetDeviceActi
             "failed",
             f"device name: FAILED ({exception})",
             requested=desired,
-            failed=True,
         )
+
         return
+
     if observed == desired:
         entry.device.name = observed
         context.report.operation(
@@ -1255,7 +1316,6 @@ async def _apply_device_name(context: PresetLoadContext, entry: PresetDeviceActi
             requested=desired,
             effective=observed,
             acknowledgement=acknowledgement,
-            failed=True,
         )
 
 
@@ -1278,9 +1338,10 @@ async def _apply_redundancy(context: PresetLoadContext, entry: PresetDeviceActio
                 evidence.get("effective_state_confirmation") if isinstance(evidence, dict) else None
             ),
             persistence_confirmation=(evidence.get("persistence_confirmation") if isinstance(evidence, dict) else None),
-            failed=True,
         )
+
         return
+
     readback = observed.get("effective_readback") if isinstance(observed, dict) else None
     effective = readback.get("configured_mode") if isinstance(readback, dict) else None
     matched = effective == action.payload
@@ -1294,7 +1355,6 @@ async def _apply_redundancy(context: PresetLoadContext, entry: PresetDeviceActio
         effective=effective,
         acknowledgement=(observed.get("request_acknowledgement") if isinstance(observed, dict) else None),
         persistence_confirmation=(observed.get("persistence_confirmation") if isinstance(observed, dict) else None),
-        failed=not matched,
     )
 
 
@@ -1304,18 +1364,38 @@ async def _apply_sample_rate_pullup(
     try:
         observed = await context.application.set_sample_rate_pullup(entry.device, action.payload)
     except MUTATION_ERRORS as exception:
-        context.report.record(entry.device_name, f"sample rate pull-up: FAILED ({exception})", failed=True)
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"sample rate pull-up: FAILED ({exception})",
+            requested=action.payload,
+        )
+
         return
+
     effective = observed.get("current_value") if isinstance(observed, dict) else None
+
     if effective is None:
         effective = getattr(entry.device, "sample_rate_pullup_raw_value", None)
+
     if effective == action.payload:
-        context.report.record(entry.device_name, f"sample rate pull-up {action.payload} (verified)")
-    else:
-        context.report.record(
+        context.report.operation(
             entry.device_name,
+            action.kind,
+            "confirmed",
+            f"sample rate pull-up {action.payload} (verified)",
+            requested=action.payload,
+            effective=effective,
+        )
+    else:
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
             f"sample rate pull-up {action.payload}: FAILED (device reports {effective!r})",
-            failed=True,
+            requested=action.payload,
+            effective=effective,
         )
 
 
@@ -1323,13 +1403,21 @@ async def _apply_device_control(context, entry, action):
     try:
         result = await context.application.apply_device_control(entry.device, **action.payload)
         confirmed = result["effective_state_confirmed"]
-        context.report.record(
+        context.report.operation(
             entry.device_name,
+            action.kind,
+            "confirmed" if confirmed else "failed",
             f"{action.payload['category']}: {'verified' if confirmed else 'not confirmed'}",
-            failed=not confirmed,
+            requested=action.payload,
         )
     except MUTATION_ERRORS as exc:
-        context.report.record(entry.device_name, f"device control: FAILED ({exc})", failed=True)
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"device control: FAILED ({exc})",
+            requested=action.payload,
+        )
 
 
 async def _apply_clock_configuration(
@@ -1338,16 +1426,37 @@ async def _apply_clock_configuration(
     try:
         result = await context.application.set_clock_configuration(entry.device, action.payload)
     except MUTATION_ERRORS as exception:
-        context.report.record(entry.device_name, f"clock settings: FAILED ({exception})", failed=True)
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"clock settings: FAILED ({exception})",
+            requested=action.payload,
+        )
+
         return
+
     if result["effective_state_confirmed"]:
-        context.report.record(entry.device_name, "clock settings verified; persistence unknown")
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            "clock settings verified; persistence unknown",
+            requested=action.payload,
+        )
     else:
-        context.report.record(entry.device_name, "clock settings sent but not confirmed", failed=True)
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            "clock settings sent but not confirmed",
+            requested=action.payload,
+        )
 
 
 async def _apply_codec_gain(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
     requested = action.payload
+
     try:
         observed = await context.application.set_gain_level(
             entry.device,
@@ -1356,22 +1465,37 @@ async def _apply_codec_gain(context: PresetLoadContext, entry: PresetDeviceActio
             requested["device_type"],
         )
     except MUTATION_ERRORS as exception:
-        context.report.record(
-            entry.device_name, f"codec gain channel {requested['channel']}: FAILED ({exception})", failed=True
-        )
-        return
-    levels = observed[1] if isinstance(observed, tuple) and len(observed) == 2 else None
-    effective = levels[requested["channel"] - 1] if levels and len(levels) >= requested["channel"] else None
-    if effective == requested["level"]:
-        context.report.record(
+        context.report.operation(
             entry.device_name,
+            action.kind,
+            "failed",
+            f"codec gain channel {requested['channel']}: FAILED ({exception})",
+            requested=requested,
+        )
+
+        return
+
+    levels = observed["channel_levels"] if observed is not None else None
+    effective = levels[requested["channel"] - 1] if levels and len(levels) >= requested["channel"] else None
+    readback = core.analog_level_control(observed, requested["channel"], requested["level"], requested["device_type"])
+
+    if readback["action"] == "unchanged":
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
             f"codec gain channel {requested['channel']} level {requested['level']} (verified)",
+            requested=requested,
+            effective=effective,
         )
     else:
-        context.report.record(
+        context.report.operation(
             entry.device_name,
+            action.kind,
+            "failed",
             f"codec gain channel {requested['channel']}: FAILED (device reports {effective!r})",
-            failed=True,
+            requested=requested,
+            effective=effective,
         )
 
 
@@ -1385,9 +1509,10 @@ async def _apply_transmit_flow(context: PresetLoadContext, entry: PresetDeviceAc
             "failed",
             f"transmit flow: FAILED ({exception})",
             requested=action.payload,
-            failed=True,
         )
+
         return
+
     serialized = result.to_dict() if hasattr(result, "to_dict") else result
     state = serialized.get("state") if isinstance(serialized, dict) else None
     message = (
@@ -1395,7 +1520,6 @@ async def _apply_transmit_flow(context: PresetLoadContext, entry: PresetDeviceAc
     )
     acknowledgement = serialized.get("request_acknowledgement") if isinstance(serialized, dict) else None
     effective = serialized.get("effective") if isinstance(serialized, dict) else None
-    confirmed = state == "confirmed"
     context.report.operation(
         entry.device_name,
         action.kind,
@@ -1412,8 +1536,6 @@ async def _apply_transmit_flow(context: PresetLoadContext, entry: PresetDeviceAc
         verification_observations=(
             serialized.get("verification_observations", []) if isinstance(serialized, dict) else []
         ),
-        failed=not confirmed,
-        verified=confirmed,
     )
 
 
@@ -1421,6 +1543,8 @@ async def _apply_external_receiver_subscriptions(
     context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction
 ) -> None:
     groups: dict[tuple[str, int, bool], list[tuple[int, int]]] = {}
+    requested = dict(action.payload)
+
     for receiver_channel, subscription in action.payload:
         identity = subscription["flow_identity"]
         key = (
@@ -1429,9 +1553,11 @@ async def _apply_external_receiver_subscriptions(
             bool(subscription.get("receiver_supports_multiple_interfaces", False)),
         )
         groups.setdefault(key, []).append((receiver_channel, subscription["flow_slot"]))
+
     for (source, session_id, multiple_interfaces), mappings in groups.items():
         inventory = getattr(context.application, "external_flows", None)
         flow = inventory.get(source, session_id) if inventory is not None else None
+
         if flow is None:
             context.report.operation(
                 entry.device_name,
@@ -1441,7 +1567,9 @@ async def _apply_external_receiver_subscriptions(
                 requested=dict(mappings),
             )
             continue
+
         mappings.sort()
+
         try:
             result = await context.application.subscribe_external_rtp(
                 entry.device,
@@ -1457,11 +1585,19 @@ async def _apply_external_receiver_subscriptions(
                 "failed",
                 f"external RTP {source}/{session_id}: FAILED ({exception})",
                 requested=dict(mappings),
-                failed=True,
             )
             continue
+
         acknowledged = bool(result.get("request_acknowledged"))
-        arc_effective_state = result.get("arc_effective_state_confirmed")
+
+        try:
+            readback = _external_subscription_readback(
+                [(number, requested[number]) for number, _ in mappings], result.get("receiver_flow_after")
+            )
+        except READBACK_ERRORS:
+            readback = {"arc_effective_state_confirmed": None, "observed_effective_identities": []}
+
+        arc_effective_state = readback["arc_effective_state_confirmed"]
         confirmed = arc_effective_state is True
         contradicted = arc_effective_state is False
         context.report.operation(
@@ -1471,16 +1607,20 @@ async def _apply_external_receiver_subscriptions(
             (
                 f"external RTP {source}/{session_id}: ARC effective state confirmed"
                 if confirmed
-                else f"external RTP {source}/{session_id}: FAILED; complete fresh ARC readback contradicts the request"
-                if contradicted
-                else f"external RTP {source}/{session_id}: request acknowledged; ARC readback unconfirmed"
-                if acknowledged
-                else f"external RTP {source}/{session_id}: request rejected"
+                else (
+                    f"external RTP {source}/{session_id}: FAILED; complete fresh ARC readback contradicts the request"
+                    if contradicted
+                    else (
+                        f"external RTP {source}/{session_id}: request acknowledged; ARC readback unconfirmed"
+                        if acknowledged
+                        else f"external RTP {source}/{session_id}: request rejected"
+                    )
+                )
             ),
             requested=dict(mappings),
             acknowledgement=result,
-            failed=contradicted or not acknowledged,
-            verified=confirmed,
+            effective=readback["observed_effective_identities"],
+            effective_state_confirmation=arc_effective_state,
         )
 
 
@@ -1495,6 +1635,7 @@ async def _apply_skipped(context: PresetLoadContext, entry: PresetDeviceActions,
         message = f"receiver subscriptions already match ({len(action.payload)} channels; no write sent)"
     else:
         message = f"{action.kind.replace('_', ' ')}: {action.state.value} ({action.reason or 'no mutation scheduled'})"
+
     context.report.operation(
         entry.device_name,
         action.kind,
@@ -1502,88 +1643,131 @@ async def _apply_skipped(context: PresetLoadContext, entry: PresetDeviceActions,
         message,
         requested=action.payload,
         effective=action.current,
-        verified=action.state not in {PresetActionState.UNAVAILABLE, PresetActionState.AMBIGUOUS},
     )
-
-
-def _structured_state_from_message(message: str) -> str:
-    lowered = message.casefold()
-    if "failed" in lowered or "refused" in lowered or "outcome unknown" in lowered:
-        return "failed"
-    if "already" in lowered:
-        return "unchanged"
-    if "not verified" in lowered or "unconfirmed" in lowered:
-        return "acknowledged"
-    if "verified" in lowered:
-        return "confirmed"
-    return "applied"
 
 
 async def _send_request(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> bool:
     application = context.application
+
     try:
         if action.kind == "preferred_leader":
             await application.set_preferred_leader(entry.device, action.payload)
-        elif action.kind == "encoding":
-            await application.set_encoding(entry.device, action.payload)
-        elif action.kind == "latency":
-            await application.set_latency(entry.device, action.payload)
         else:
-            await application.set_interface(
-                entry.device,
-                action.payload["mode"],
-                action.payload["configuration"],
-                interface=action.payload["identity"],
-            )
+            raise ValueError(f"unsupported scalar setting: {action.kind}")
     except MUTATION_ERRORS as exception:
         action_label = action.kind.replace("_", " ")
-        context.report.record(entry.device_name, f"{action_label}: FAILED to send request: {exception}", failed=True)
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"{action_label}: FAILED to send request: {exception}",
+            requested=action.payload,
+        )
+
         return False
+
     return True
 
 
 async def _apply_audio_setting(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
-    if not await _send_request(context, entry, action):
-        return
     if action.kind == "encoding":
-        expected = entry.config["encoding"]
+        expected = action.payload
         success = f"encoding {expected}-bit"
+
+        try:
+            status = await context.application.set_encoding(entry.device, expected)
+        except MUTATION_ERRORS as exception:
+            context.report.operation(
+                entry.device_name, action.kind, "failed", f"{success}: FAILED ({exception})", requested=action.payload
+            )
+
+            return
+
+        result = audio_readback_result(status, expected)
     else:
-        expected = int(round(entry.config["latency"] * 1_000_000))
         success = f"latency {entry.config['latency']:g} ms"
-    result = await readback_after_notification(
-        partial(_read_audio_setting, action.kind, context.application, entry.device), expected
-    )
+
+        try:
+            status = await context.application.set_latency(entry.device, action.payload)
+        except MUTATION_ERRORS as exception:
+            context.report.operation(
+                entry.device_name, action.kind, "failed", f"{success}: FAILED ({exception})", requested=action.payload
+            )
+
+            return
+
+        observed = status["configured_latency_ns"]
+        result = ReadbackResult(
+            matched=status["effective_state_confirmed"], observed=observed, observed_available=observed is not None
+        )
+
     if result.matched:
-        context.report.record(entry.device_name, f"{success} (verified)")
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            f"{success} (verified)",
+            requested=action.payload,
+            effective=result.observed,
+            effective_state_confirmation=True,
+        )
+
         return
+
     if result.observed_available:
         detail = f"device reports {result.observed!r}"
     else:
-        detail = f"fresh readback was unavailable: {result.error}"
-    context.report.record(entry.device_name, f"{success}: FAILED ({detail})", failed=True)
+        detail = "fresh readback was unavailable"
+
+        if result.error is not None:
+            detail += f": {result.error}"
+
+    context.report.operation(
+        entry.device_name,
+        action.kind,
+        "failed",
+        f"{success}: FAILED ({detail})",
+        requested=action.payload,
+        effective=result.observed,
+    )
 
 
 async def _apply_preferred_leader(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
     if not await _send_request(context, entry, action):
         return
+
     expected = entry.config["preferred_leader"]
     enabled = "on" if expected else "off"
     result = await readback_after_notification(
         lambda device=entry.device: _read_preferred_leader(context.application, device), expected
     )
+
     if result.matched:
-        context.report.record(entry.device_name, f"preferred leader {enabled} (verified)")
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "confirmed",
+            f"preferred leader {enabled} (verified)",
+            requested=action.payload,
+            effective=result.observed,
+        )
     elif result.observed_available:
-        context.report.record(
-            entry.device_name, f"preferred leader {enabled}: FAILED (device reports {result.observed!r})", failed=True
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"preferred leader {enabled}: FAILED (device reports {result.observed!r})",
+            requested=action.payload,
+            effective=result.observed,
         )
     else:
         detail = f": {result.error}" if result.error is not None else ""
-        context.report.record(
+        context.report.operation(
             entry.device_name,
+            action.kind,
+            "acknowledged",
             f"preferred leader {enabled} requested; not verified (fresh readback unavailable{detail})",
-            verified=False,
+            requested=action.payload,
         )
 
 
@@ -1591,6 +1775,7 @@ async def _apply_performance_setting(
     context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction
 ) -> None:
     method = getattr(context.application, f"set_{action.kind}")
+
     try:
         if action.kind == "receive_flow_default_slots":
             result = await method(entry.device, action.payload)
@@ -1607,12 +1792,11 @@ async def _apply_performance_setting(
             "failed",
             f"{action.kind.replace('_', ' ')}: FAILED ({exception})",
             requested=action.payload,
-            failed=True,
         )
+
         return
+
     payload = result.to_dict()
-    confirmed = result.state == "confirmed" and result.effective_state_confirmation is True
-    failed = result.state in {"rejected", "contradicted"}
     context.report.operation(
         entry.device_name,
         action.kind,
@@ -1626,44 +1810,48 @@ async def _apply_performance_setting(
         persistence_request_acknowledgement=payload["persistence_request_acknowledgement"],
         persistence_confirmation=payload["persistence_confirmation"],
         verification_observations=payload["verification_observations"],
-        failed=failed,
-        verified=confirmed,
     )
 
 
 async def _apply_interface(context: PresetLoadContext, entry: PresetDeviceActions, action: PresetAction) -> None:
-    if not await _send_request(context, entry, action):
-        return
     mode = action.payload["mode"]
     identity = action.payload["identity"]
-    mode_label = "dynamic" if mode == "dhcp" else mode
+    mode_label = _expected_interface_payload(action.payload)["mode"]
     interface_label = "interface" if identity == "primary" else f"{identity} interface"
-    expected = _expected_interface_config(action)
-    result = await readback_after_notification(
-        lambda device=entry.device, expected=expected: _read_interface_config(
-            context.application, device, identity, expected
-        ),
-        expected,
-    )
-    if entry.device.interface_reboot_required:
-        context.report.needs_reboot.append(entry.device_name)
-    if result.matched:
-        context.report.record(entry.device_name, f"{interface_label} {mode_label} (verified)")
-    elif result.observed_available:
-        context.report.record(
+
+    try:
+        interfaces = await context.application.set_interface(
+            entry.device, mode, action.payload["configuration"], interface=identity
+        )
+    except NetworkConfigurationUnverified as exception:
+        context.report.operation(
             entry.device_name,
-            f"{interface_label} {mode_label} requested; not verified "
-            f"(device currently reports {result.observed!r}; reboot may be pending)",
-            verified=False,
+            action.kind,
+            "acknowledged",
+            f"{interface_label} {mode_label} requested; not verified: {exception}",
+            requested=action.payload,
+        )
+    except MUTATION_ERRORS as exception:
+        context.report.operation(
+            entry.device_name,
+            action.kind,
+            "failed",
+            f"{interface_label}: FAILED: {exception}",
+            requested=action.payload,
         )
     else:
-        detail = f": {result.error}" if result.error is not None else ""
-        context.report.record(
+        context.report.operation(
             entry.device_name,
-            f"{interface_label} {mode_label} requested; not verified "
-            f"(fresh readback unavailable{detail}; reboot may be pending)",
-            verified=False,
+            action.kind,
+            "confirmed",
+            f"{interface_label} {mode_label} (verified)",
+            requested=action.payload,
+            effective=interface_configuration(interfaces, identity)["configured"],
+            effective_state_confirmation=True,
         )
+
+    if entry.device.interface_reboot_required:
+        context.report.needs_reboot.append(entry.device_name)
 
 
 ACTION_HANDLERS: dict[str, ActionHandler] = {
@@ -1701,23 +1889,27 @@ async def _apply_plan(
 ) -> None:
     processed_action_count = 0
     planned_action_count = sum(len(entry.actions) for entry in plan.device_actions)
+
     for entry in plan.device_actions:
         if not entry.actions:
             context.report.record(entry.device_name, "no supported changes")
             continue
+
         entry_failures = context.report.failures
         entry_unverified = context.report.unverified
         changed = False
+
         for action in entry.actions:
             operation_count = len(context.report.operations)
-            result_count = len(context.report.results)
             recorder = None
             handle = None
+
             if action.state is not PresetActionState.CHANGE:
                 await _apply_skipped(context, entry, action)
             else:
                 changed = True
                 recorder = getattr(context.application, "operation_recorder", None)
+
                 if recorder is not None:
                     handle = await recorder.begin_operation(
                         entry.device,
@@ -1725,6 +1917,7 @@ async def _apply_plan(
                         action.payload,
                         parent_preset_run_id=preset_run_id,
                     )
+
                 try:
                     if recorder is None:
                         await ACTION_HANDLERS[action.kind](context, entry, action)
@@ -1734,18 +1927,9 @@ async def _apply_plan(
                 except Exception as exception:
                     if recorder is not None and handle is not None:
                         await recorder.fail_operation(entry.device, handle, exception)
+
                     raise
-            if len(context.report.operations) == operation_count:
-                for _, message in context.report.results[result_count:]:
-                    context.report.operations.append(
-                        PresetOperationResult(
-                            device_name=entry.device_name,
-                            kind=action.kind,
-                            state=_structured_state_from_message(message),
-                            requested=action.payload,
-                            message=message,
-                        )
-                    )
+
             action_results = context.report.operations[operation_count:]
             action_summary_state = (
                 _preset_summary_state(action_results)
@@ -1755,8 +1939,10 @@ async def _apply_plan(
                 else "unavailable"
             )
             processed_action_count += 1
+
             if summary_states is not None:
                 summary_states.append(action_summary_state)
+
             if action.state is PresetActionState.CHANGE and recorder is not None and handle is not None:
                 if len(action_results) == 1:
                     operation_result = action_results[0]
@@ -1778,26 +1964,29 @@ async def _apply_plan(
                         "state": state,
                         "requested_values": action.payload,
                         "effective_values": [result.effective for result in action_results],
-                        "effective_state_confirmation": True
-                        if state == "confirmed"
-                        else False
-                        if state == "inconsistent"
-                        else None,
+                        "effective_state_confirmation": (
+                            True if state == "confirmed" else False if state == "inconsistent" else None
+                        ),
                         "verification_observations": [
                             {"kind": result.kind, "state": result.state, "message": result.message}
                             for result in action_results
                         ],
                         "message": "; ".join(result.message for result in action_results),
                     }
+
                 await recorder.complete_operation(entry.device, handle, audit_result)
+
             if stop_on_failure and (context.report.failures or context.report.unverified):
                 context.report.record(
                     entry.device_name,
                     "Stopped after an unsuccessful or unverified change; remaining settings were not sent.",
                 )
+
                 if summary_states is not None:
                     summary_states.extend("skipped" for _ in range(planned_action_count - processed_action_count))
+
                 return
+
         if (
             store_current_configuration
             and changed
@@ -1806,6 +1995,7 @@ async def _apply_plan(
         ):
             recorder = getattr(context.application, "operation_recorder", None)
             handle = None
+
             if recorder is not None:
                 handle = await recorder.begin_operation(
                     entry.device,
@@ -1813,6 +2003,7 @@ async def _apply_plan(
                     {},
                     parent_preset_run_id=preset_run_id,
                 )
+
             try:
                 if recorder is None:
                     result = await context.application.store_current_configuration(entry.device)
@@ -1825,15 +2016,15 @@ async def _apply_plan(
                     "store_current_configuration",
                     "failed",
                     f"configuration storage: FAILED ({exception})",
-                    failed=True,
                 )
+
                 if recorder is not None and handle is not None:
                     await recorder.fail_operation(entry.device, handle, exception)
+
                 if summary_states is not None:
                     summary_states.append("failed")
             else:
                 payload = result.to_dict()
-                acknowledged = bool(payload.get("persistence_request_acknowledgement", {}).get("accepted"))
                 context.report.operation(
                     entry.device_name,
                     "store_current_configuration",
@@ -1841,31 +2032,42 @@ async def _apply_plan(
                     result.message,
                     persistence_request_acknowledgement=payload["persistence_request_acknowledgement"],
                     persistence_confirmation=payload["persistence_confirmation"],
-                    failed=not acknowledged,
-                    verified=acknowledged,
                 )
+
                 if recorder is not None and handle is not None:
                     await recorder.complete_operation(entry.device, handle, result)
+
                 if summary_states is not None:
                     summary_states.append(_preset_summary_state(context.report.operations[-1:]))
 
 
 def _preset_summary_state(results: list[PresetOperationResult]) -> str:
     states = [result.state for result in results]
+
     if "failed" in states:
         return "failed"
+
     if any(value in {"contradicted", "inconsistent"} for value in states):
         return "inconsistent"
+
     if "rejected" in states:
         return "rejected"
+
     if any(value in {"unsupported", "unavailable", "ambiguous"} for value in states):
         return "unavailable"
+
+    if any(result.unverified for result in results):
+        return "partial"
+
     if states and all(value in {"confirmed", "deleted"} for value in states):
         return "confirmed"
+
     if states and all(value == "unchanged" for value in states):
         return "unchanged"
+
     if states and all(value == "skipped" for value in states):
         return "skipped"
+
     return "partial"
 
 
@@ -1880,8 +2082,10 @@ def _preset_summary(states: list[str]) -> dict[str, int]:
         "unchanged": 0,
         "skipped": 0,
     }
+
     for state in states:
         summary[state] += 1
+
     return summary
 
 
@@ -1903,6 +2107,7 @@ async def apply_preset_plan(
     preset_handle = None
     summary_states: list[str] = []
     scope = None
+
     if recorder is not None:
         run_id = str(uuid.uuid4())
         scope = {
@@ -1922,6 +2127,7 @@ async def apply_preset_plan(
             operation_id=run_id,
             kind=MonitoringEventKind.PRESET_RUN,
         )
+
     try:
         await _apply_plan(
             context,
@@ -1935,10 +2141,13 @@ async def apply_preset_plan(
         if recorder is not None and preset_handle is not None:
             assert scope is not None
             await recorder.fail_operation(scope, preset_handle, exception)
+
         raise
+
     if recorder is not None and preset_handle is not None:
         assert scope is not None
         summary = _preset_summary(summary_states)
+
         if summary["failed"]:
             state = "failed"
         elif summary["inconsistent"]:
@@ -1949,19 +2158,19 @@ async def apply_preset_plan(
             state = "partial"
         else:
             state = "confirmed"
+
         await recorder.complete_operation(
             scope,
             preset_handle,
             {
                 "state": state,
                 "effective_values": summary,
-                "effective_state_confirmation": True
-                if state == "confirmed"
-                else False
-                if state == "inconsistent"
-                else None,
+                "effective_state_confirmation": (
+                    True if state == "confirmed" else False if state == "inconsistent" else None
+                ),
                 "message": "preset application completed",
                 "verification_observations": [{"summary": summary}],
             },
         )
+
     return context.report

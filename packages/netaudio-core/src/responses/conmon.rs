@@ -9,6 +9,57 @@ pub struct ConfigurableU32Status {
     pub update_mode: u16,
     pub available_values: Vec<u32>,
     pub flags: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_disabled: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct AudioCapabilityReadback {
+    pub status: Option<serde_json::Map<String, serde_json::Value>>,
+    pub requested_value: u32,
+}
+
+#[derive(Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AudioReadbackState {
+    Confirmed,
+    Unverified,
+    Unavailable,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AudioReadbackResult {
+    pub state: AudioReadbackState,
+    pub requested_value: u32,
+    pub current_value: Option<u32>,
+    pub effective_state_confirmed: bool,
+}
+
+impl AudioCapabilityReadback {
+    pub fn resolve(&self) -> AudioReadbackResult {
+        let current = self
+            .status
+            .as_ref()
+            .and_then(|status| status.get("current_value"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok());
+        let state = match current {
+            Some(value) if value == self.requested_value => AudioReadbackState::Confirmed,
+            Some(_) => AudioReadbackState::Unverified,
+            None => AudioReadbackState::Unavailable,
+        };
+
+        AudioReadbackResult {
+            effective_state_confirmed: state == AudioReadbackState::Confirmed,
+            state,
+            requested_value: self.requested_value,
+            current_value: current,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -17,6 +68,7 @@ pub struct ClearConfigurationStatus {
     pub unmapped_first_word: u32,
     pub available_actions_mask: u32,
     pub action_result_code: u32,
+    pub completed_action: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -32,6 +84,7 @@ pub struct RoutingCapacityStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SwitchConfigurationChoice {
     pub code: u16,
+    pub mode: Option<crate::network::DanteRedundancyMode>,
     pub unmapped_word: u16,
     pub label: String,
     pub raw_label_field_hexadecimal: String,
@@ -40,8 +93,63 @@ pub struct SwitchConfigurationChoice {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SwitchConfigurationStatus {
+pub struct SwitchModeEvidence {
+    pub status: &'static str,
+    pub mode: Option<crate::network::DanteRedundancyMode>,
+    pub raw_code: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_choice_hexadecimal: Option<String>,
+}
+
+impl SwitchModeEvidence {
+    fn from_choices(code: u16, choices: &[SwitchConfigurationChoice]) -> Self {
+        let choice = choices.iter().find(|choice| choice.code == code);
+        let mode = choice.and_then(|choice| choice.mode);
+
+        Self {
+            status: if mode.is_some() {
+                "known"
+            } else {
+                "unknown_raw"
+            },
+            mode,
+            raw_code: code,
+            raw_label: choice.map(|choice| choice.label.clone()),
+            raw_choice_hexadecimal: choice.map(|choice| choice.raw_choice_hexadecimal.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SwitchStateSource {
+    pub kind: &'static str,
+    pub opcode: u16,
+    pub record_protocol_identifier: u16,
+    pub cohort: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SwitchRedundancyState {
+    #[serde(flatten)]
     pub redundancy: crate::network::DanteRedundancyStatus,
+    pub current_mode_evidence: SwitchModeEvidence,
+    pub configured_mode_evidence: SwitchModeEvidence,
+    pub available_modes: Vec<SwitchConfigurationChoice>,
+    pub available_modes_source: &'static str,
+    pub available_modes_fresh: bool,
+    pub state_source: SwitchStateSource,
+    pub state_fresh: bool,
+    pub raw_record_hexadecimal: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SwitchConfigurationStatus {
+    pub state: SwitchRedundancyState,
+    pub redundancy: crate::network::DanteRedundancyStatus,
+    pub current_mode_evidence: SwitchModeEvidence,
+    pub configured_mode_evidence: SwitchModeEvidence,
     pub record_protocol_identifier: u16,
     pub unmapped_prefix_word: u32,
     pub choice_count: u16,
@@ -49,7 +157,6 @@ pub struct SwitchConfigurationStatus {
     pub referenced_value_pointer: u16,
     pub referenced_value_size: u16,
     pub referenced_value_hexadecimal: String,
-    pub mode_codes_at_record_offsets_20_and_22: [u16; 2],
     pub choices: Vec<SwitchConfigurationChoice>,
     pub unmapped_before_choice_table_hexadecimal: String,
     pub unmapped_after_choice_table_hexadecimal: String,
@@ -71,6 +178,7 @@ pub struct CodecStatus {
     pub descriptor_offset: u16,
     pub raw_record: Vec<u8>,
     pub parameters: Vec<CodecParameterStatus>,
+    pub gain_adapter: Option<GainStatus>,
 }
 
 pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfigurationStatus> {
@@ -78,6 +186,16 @@ pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfiguratio
     if data.len() != CONMON_CLEAR_CONFIGURATION_PACKET_SIZE || data.get(25).copied()? != 0x24 {
         return None;
     }
+
+    let action_result_code = read_u32(data, CONMON_CLEAR_CONFIGURATION_ACTION_RESULT_CODE_OFFSET)?;
+    let completed_action = match action_result_code {
+        crate::commands::CLEAR_CONFIGURATION_ACTION_ALL => Some("clear_all_configuration"),
+        crate::commands::CLEAR_CONFIGURATION_ACTION_PRESERVE_INTERNET_PROTOCOL => {
+            Some("clear_all_configuration_preserving_internet_protocol_settings")
+        }
+        _ => None,
+    };
+
     Some(ClearConfigurationStatus {
         record_protocol_identifier: read_u16(
             data,
@@ -88,7 +206,8 @@ pub fn parse_clear_configuration_status(data: &[u8]) -> Option<ClearConfiguratio
             data,
             CONMON_CLEAR_CONFIGURATION_AVAILABLE_ACTIONS_MASK_OFFSET,
         )?,
-        action_result_code: read_u32(data, CONMON_CLEAR_CONFIGURATION_ACTION_RESULT_CODE_OFFSET)?,
+        action_result_code,
+        completed_action,
     })
 }
 
@@ -179,6 +298,7 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
             .to_owned();
         choices.push(SwitchConfigurationChoice {
             code: read_u16(choice, 0)?,
+            mode: redundancy_mode_for_label(&label),
             unmapped_word: read_u16(choice, 2)?,
             label,
             raw_label_field_hexadecimal: bytes_to_hex(label_field),
@@ -204,27 +324,42 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
         });
     }
 
-    let mode_for = |code| {
-        choices
-            .iter()
-            .find(|choice| choice.code == code)
-            .and_then(|choice| redundancy_mode_for_label(&choice.label))
+    let current_mode_evidence = SwitchModeEvidence::from_choices(read_u16(record, 20)?, &choices);
+    let configured_mode_evidence =
+        SwitchModeEvidence::from_choices(read_u16(record, 22)?, &choices);
+    let current = current_mode_evidence.mode;
+    let configured = configured_mode_evidence.mode;
+    let supported: Vec<crate::network::DanteRedundancyMode> =
+        choices.iter().filter_map(|choice| choice.mode).collect();
+
+    let redundancy = crate::network::DanteRedundancyStatus {
+        current,
+        configured,
+        reboot_required: current.is_some() && configured.is_some() && current != configured,
+        supported,
     };
-    let current = mode_for(read_u16(record, 20)?);
-    let configured = mode_for(read_u16(record, 22)?);
-    let supported: Vec<crate::network::DanteRedundancyMode> = choices
-        .iter()
-        .filter_map(|choice| redundancy_mode_for_label(&choice.label))
-        .collect();
-    let current = current.filter(|mode| supported.contains(mode));
-    let configured = configured.filter(|mode| supported.contains(mode));
-    Some(SwitchConfigurationStatus {
-        redundancy: crate::network::DanteRedundancyStatus {
-            current,
-            configured,
-            reboot_required: current.is_some() && configured.is_some() && current != configured,
-            supported,
+    let state = SwitchRedundancyState {
+        redundancy: redundancy.clone(),
+        current_mode_evidence: current_mode_evidence.clone(),
+        configured_mode_evidence: configured_mode_evidence.clone(),
+        available_modes: choices.clone(),
+        available_modes_source: "switch_configuration_choice_table",
+        available_modes_fresh: true,
+        state_source: SwitchStateSource {
+            kind: "switch_configuration_status",
+            opcode: 0x0014,
+            record_protocol_identifier: read_u16(record, 0)?,
+            cohort: "choice_table",
         },
+        state_fresh: true,
+        raw_record_hexadecimal: bytes_to_hex(record),
+    };
+
+    Some(SwitchConfigurationStatus {
+        state,
+        redundancy,
+        current_mode_evidence,
+        configured_mode_evidence,
         record_protocol_identifier: read_u16(record, 0)?,
         unmapped_prefix_word: read_u32(record, 4)?,
         choice_count,
@@ -232,7 +367,6 @@ pub fn parse_switch_configuration_status(data: &[u8]) -> Option<SwitchConfigurat
         referenced_value_pointer,
         referenced_value_size,
         referenced_value_hexadecimal: bytes_to_hex(referenced_value),
-        mode_codes_at_record_offsets_20_and_22: [read_u16(record, 20)?, read_u16(record, 22)?],
         choices,
         unmapped_before_choice_table_hexadecimal: bytes_to_hex(
             record.get(CONMON_SWITCH_CONFIGURATION_FIXED_RECORD_SIZE..choice_table_offset)?,
@@ -252,6 +386,47 @@ const CONFIGURABLE_MINIMUM_VECTOR_BODY_OFFSET: usize = 0x18;
 const CONFIGURABLE_UPDATE_MODE_VERSION: u16 = 0x0501;
 const SAMPLE_RATE_PULLUP_FLAGS_VERSION: u16 = 0x070F;
 const SAMPLE_RATE_PULLUP_FLAGS_BODY_OFFSET: usize = 0x1C;
+
+fn audio_update_mode_writable(mode: u16) -> Option<bool> {
+    match mode {
+        0 => Some(false),
+        1 | 2 => Some(true),
+        _ => None,
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct AudioCapabilityControl {
+    pub update_mode: Option<u16>,
+    pub available_values: Option<Vec<u32>>,
+    pub requested_value: Option<u32>,
+    pub host_disabled: Option<bool>,
+}
+
+pub fn audio_capability_control(control: &AudioCapabilityControl) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+
+    match control.update_mode.and_then(audio_update_mode_writable) {
+        Some(true) => {}
+        Some(false) => reasons.push("fixed"),
+        None => reasons.push("update_mode_unknown"),
+    }
+
+    if let (Some(choices), Some(requested)) = (&control.available_values, control.requested_value) {
+        // An empty advertised vector does not establish a value restriction.
+        if !choices.is_empty() && !choices.contains(&requested) {
+            reasons.push("value_not_advertised");
+        }
+    }
+
+    if control.host_disabled == Some(true) {
+        reasons.push("host_disabled");
+    }
+
+    reasons
+}
 
 fn parse_configurable_u32_status(
     data: &[u8],
@@ -322,6 +497,7 @@ fn parse_configurable_u32_status(
         update_mode,
         available_values,
         flags,
+        host_disabled: flags.map(|flags| flags & 1 != 0),
     })
 }
 
@@ -872,6 +1048,7 @@ pub fn parse_codec_status(data: &[u8]) -> Option<CodecStatus> {
         descriptor_stride: descriptor_width as u16,
         descriptor_offset: descriptor_body_offset as u16,
         raw_record: data[CONMON_BODY_OFFSET..].to_vec(),
+        gain_adapter: gain_adapter_from_parameters(&parameters),
         parameters,
     })
 }

@@ -9,6 +9,7 @@ from typing import Optional
 
 import typer
 
+from netaudio.dante.const import DEVICE_ARC_PORT
 from netaudio.capture.packets import _compact_hexdump, _hexdump, _label_packet
 from netaudio.commands.capture.options import (
     _load_capture_profile,
@@ -23,7 +24,7 @@ from netaudio.dante.packet_store import PacketRecord, PacketStore
 
 def provenance_send(
     device_ip: str = typer.Option(..., "--device-ip", help="Target device IP address."),
-    port: int = typer.Option(4440, "--port", help="Target UDP port."),
+    port: int = typer.Option(DEVICE_ARC_PORT, "--port", help="Target UDP port."),
     payload_hex: Optional[str] = typer.Option(None, "--payload-hex", help="Raw payload as hex string."),
     packet_id: Optional[int] = typer.Option(
         None, "--packet-id", help="Replay an existing packet's payload (to a new target)."
@@ -235,7 +236,7 @@ def _pair_requests_with_responses(
             {
                 "sample": sample,
                 "payload": payload,
-                "port": sample.get("dst_port") or 4440,
+                "port": sample.get("dst_port") or DEVICE_ARC_PORT,
                 "original_response": original_response,
                 "original_response_sample": original_response_sample,
             }

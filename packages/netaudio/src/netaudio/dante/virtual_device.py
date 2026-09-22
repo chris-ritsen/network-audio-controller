@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from zeroconf import IPVersion, ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
+from netaudio import core
 from netaudio.dante.const import (
     DEVICE_ARC_PORT,
     DEVICE_CONTROL_PORT,
@@ -18,16 +19,10 @@ from netaudio.dante.const import (
     DEVICE_SETTINGS_PORT,
     MULTICAST_GROUP_CONTROL_MONITORING,
     MULTICAST_GROUP_HEARTBEAT,
-    SERVICE_ARC,
-    SERVICE_CHAN,
-    SERVICE_CMC,
 )
 from netaudio.dante.device_kind import VIRTUAL_DEVICE_MANUFACTURER, VIRTUAL_DEVICE_MODEL
 from netaudio.dante.const import (
     DEVICE_ARC_SECONDARY_PORT,
-    MCAST_HEADER_LENGTH,
-    PCM_ENCODING_CAPABILITY_BITS,
-    PCM_ENCODING_OCTETS,
 )
 from netaudio.dante.virtual_device_requests import VirtualDeviceRequestHandler
 
@@ -98,20 +93,17 @@ class VirtualDevice(VirtualDeviceRequestHandler):
         ]
         return ":".join(f"{b:02x}" for b in octets)
 
-    def _build_mcast_packet(self, start_code: int, opcode: bytes, content: bytes) -> bytes:
-        total_length = MCAST_HEADER_LENGTH + len(content)
-        ip_bytes = socket.inet_aton(self._local_ip) if self._local_ip else b"\x00\x00\x00\x00"
-        device_id = b"\x00\x00" + ip_bytes + b"\x00\x00"
-        vendor = b"Audinate\x00"[:8].ljust(8, b"\x00")
+    def _build_publication(self, publication: dict) -> bytes:
+        packet = core.build_publication(
+            {
+                "source_ip": self._local_ip or "0.0.0.0",
+                "message_id": self._mcast_seqnum,
+                "publication": publication,
+            }
+        )
+        self._mcast_seqnum = core.next_publication_id(self._mcast_seqnum)
 
-        header = struct.pack(">HHH", start_code, total_length, self._mcast_seqnum)
-        header += struct.pack(">H", 0)
-        header += device_id
-        header += vendor
-        header += opcode[:8].ljust(8, b"\x00")
-
-        self._mcast_seqnum = (self._mcast_seqnum + 1) & 0xFFFF
-        return header + content
+        return packet
 
     def _detect_local_ip(self) -> str:
         if self._config.interface_ip:
@@ -167,150 +159,81 @@ class VirtualDevice(VirtualDeviceRequestHandler):
 
         logger.info(f"Virtual device '{self._config.name}' stopped")
 
-    def _mcast_send(self, dest_ip: str, dest_port: int, start_code: int, opcode: bytes, content: bytes) -> None:
+    def _send_status_publication(self, publication: dict) -> None:
+        self._send_publication_packet(
+            self._build_publication(publication), MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT
+        )
+
+    def _send_publication_packet(self, packet: bytes, dest_ip: str, dest_port: int) -> None:
         if self._mcast_transport:
-            packet = self._build_mcast_packet(start_code, opcode, content)
             self._mcast_transport.sendto(packet, (dest_ip, dest_port))
         elif self._mcast_sock:
-            packet = self._build_mcast_packet(start_code, opcode, content)
             self._mcast_sock.sendto(packet, (dest_ip, dest_port))
         else:
             logger.warning("no mcast socket available")
 
     def _send_mcast_board_info(self) -> None:
-        self._mcast_send(
-            MULTICAST_GROUP_CONTROL_MONITORING,
-            DEVICE_INFO_PORT,
-            0xFFFF,
-            bytes([0x07, 0x2A, 0x00, 0x60, 0, 0, 0, 0]),
-            self._build_board_info_content(),
-        )
-        logger.debug("Sent mcast board_info")
+        self._send_status_publication({"kind": "board_info", "name": self._config.name})
 
     def _send_mcast_product_info(self) -> None:
-        self._mcast_send(
-            MULTICAST_GROUP_CONTROL_MONITORING,
-            DEVICE_INFO_PORT,
-            0xFFFF,
-            bytes([0x07, 0x2A, 0x00, 0xC0, 0, 0, 0, 0]),
-            self._build_product_info_content(),
+        self._send_status_publication(
+            {
+                "kind": "product_info",
+                "name": self._config.name,
+                "manufacturer": self._config.manufacturer,
+                "model": self._config.model,
+            }
         )
-        logger.debug("Sent mcast product_info")
 
     def _send_mcast_clock_stats(self) -> None:
-        mac_bytes = bytes.fromhex(self._mac.replace(":", ""))
-        content = bytearray(120)
-        content[0:8] = bytes([0x00, 0x03, 0x00, 0x03, 0x00, 0x00, 0x00, 0x9F])
-        struct.pack_into(">i", content, 8, 0)
-        content[12:18] = mac_bytes
-        self._mcast_send(
-            MULTICAST_GROUP_CONTROL_MONITORING,
-            DEVICE_INFO_PORT,
-            0xFFFF,
-            bytes([0x07, 0x2A, 0x00, 0x20, 0, 0, 0, 0]),
-            bytes(content),
+        self._send_status_publication(
+            {"kind": "clock_status", "mac_address": list(bytes.fromhex(self._mac.replace(":", "")))}
         )
 
     def _send_mcast_network_info(self) -> None:
-        ip_bytes = socket.inet_aton(self._local_ip) if self._local_ip else b"\x00\x00\x00\x00"
-        mac_bytes = bytes.fromhex(self._mac.replace(":", ""))
-        content = bytearray()
-        content += bytes([0x00, 0x01, 0x00, 0x00, 0x00, 0x00])
-        content += struct.pack(">H", 1000)
-        content += struct.pack(">H", 1)
-        content += mac_bytes
-        content += ip_bytes
-        content += bytes([255, 255, 255, 0])
-        content += ip_bytes
-        content += ip_bytes
-        content += bytes(32)
-        self._mcast_send(
-            MULTICAST_GROUP_CONTROL_MONITORING,
-            DEVICE_INFO_PORT,
-            0xFFFF,
-            bytes([0x07, 0x2A, 0x00, 0x11, 0, 0, 0, 0]),
-            bytes(content),
+        self._send_status_publication(
+            {"kind": "interface_status", "mac_address": list(bytes.fromhex(self._mac.replace(":", "")))}
         )
 
     def _build_audio_capability_status_packet(
         self,
-        status_opcode: int,
+        kind: str,
         current_value: int,
         supported_values: list[int],
     ) -> bytes:
-        content = struct.pack(">HHI", 0x0018, len(supported_values), current_value)
-        content += struct.pack(">II", 0, 0x00020000)
-        content += b"".join(struct.pack(">I", value) for value in supported_values)
-        return self._build_mcast_packet(
-            0xFFFF,
-            bytes([0x07, 0x24]) + struct.pack(">H", status_opcode) + bytes(4),
-            content,
+        return self._build_publication(
+            {
+                "kind": "audio",
+                "capability": kind,
+                "current_value": current_value,
+                "supported_values": supported_values,
+            }
         )
 
     def _send_audio_capability_status(
         self,
-        status_opcode: int,
+        kind: str,
         current_value: int,
         supported_values: list[int],
     ) -> None:
-        packet = self._build_audio_capability_status_packet(status_opcode, current_value, supported_values)
-        if self._mcast_transport:
-            self._mcast_transport.sendto(packet, (MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT))
-        elif self._mcast_sock:
-            self._mcast_sock.sendto(packet, (MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT))
-        else:
-            logger.warning("no mcast socket available")
+        packet = self._build_audio_capability_status_packet(kind, current_value, supported_values)
+
+        self._send_publication_packet(packet, MULTICAST_GROUP_CONTROL_MONITORING, DEVICE_INFO_PORT)
 
     def _send_sample_rate_status(self) -> None:
+        assert self._config.supported_sample_rates is not None
+
         self._send_audio_capability_status(
-            0x0080,
+            "sample_rate",
             self._config.sample_rate,
             self._config.supported_sample_rates,
         )
 
     def _send_encoding_status(self) -> None:
         self._send_audio_capability_status(
-            0x0082,
+            "encoding",
             self._config.encoding,
             self._config.supported_encodings,
-        )
-
-    def _pcm_property_capability(self) -> tuple[int, int] | None:
-        current_encoding_octets = PCM_ENCODING_OCTETS.get(self._config.encoding)
-        if current_encoding_octets is None:
-            return None
-
-        capability_bitmap = 0
-        for supported_encoding in self._config.supported_encodings:
-            capability_bit = PCM_ENCODING_CAPABILITY_BITS.get(supported_encoding)
-            if capability_bit is None:
-                return None
-            capability_bitmap |= capability_bit
-
-        return current_encoding_octets, capability_bitmap
-
-    def _pcm_capability_property(self) -> str | None:
-        pcm_capability = self._pcm_property_capability()
-        if pcm_capability is None:
-            return None
-        current_encoding_octets, capability_bitmap = pcm_capability
-
-        return f"{current_encoding_octets} 0x{capability_bitmap:x}"
-
-    def _build_channel_metadata(self) -> bytes | None:
-        pcm_capability = self._pcm_property_capability()
-        if pcm_capability is None:
-            return None
-        _, capability_bitmap = pcm_capability
-        return struct.pack(
-            ">IHHHHHH",
-            self._config.sample_rate,
-            0x0101,
-            self._config.encoding,
-            0x0400,
-            self._config.encoding,
-            self._config.encoding,
-            capability_bitmap,
         )
 
     async def _start_mcast_server(self) -> None:
@@ -368,71 +291,34 @@ class VirtualDevice(VirtualDeviceRequestHandler):
                 logger.warning(f"Could not bind port {port}: {e}")
 
     async def _register_mdns(self) -> None:
-        ip_bytes = socket.inet_aton(self._local_ip)
+        if self._local_ip is None:
+            raise RuntimeError("A local address is required before registering discovery services")
 
-        server_name = f"{self._config.name}.local."
-
-        arc_info = ServiceInfo(
-            SERVICE_ARC,
-            f"{self._config.name}.{SERVICE_ARC}",
-            addresses=[ip_bytes],
-            port=self._arc_port,
-            properties={
-                "arcp_vers": "2.7.41",
-                "arcp_min": "0.2.4",
-                "router_vers": "4.0.2",
-                "router_info": self._config.model,
-                "mf": self._config.manufacturer,
+        advertisements = core.virtual_device_advertisements(
+            {
+                "name": self._config.name,
                 "model": self._config.model,
-            },
-            server=server_name,
-        )
-
-        cmc_info = ServiceInfo(
-            SERVICE_CMC,
-            f"{self._config.name}.{SERVICE_CMC}",
-            addresses=[ip_bytes],
-            port=DEVICE_CONTROL_PORT,
-            properties={
-                "id": "0000" + ip_bytes.hex() + "0000",
-                "process": "0",
-                "cmcp_vers": "1.2.0",
-                "cmcp_min": "1.0.0",
-                "server_vers": "4.0.2",
-                "channels": "0x6000004d",
-                "mf": self._config.manufacturer,
-                "model": self._config.model,
-            },
-            server=server_name,
-        )
-
-        self._service_infos = [arc_info, cmc_info]
-
-        for i, ch_name in enumerate(self._config.tx_channels):
-            channel_properties = {
-                "txtvers": "2",
-                "dbcp1": "0x1102",
-                "dbcp": "0x1004",
-                "id": str(i + 1),
-                "rate": str(self._config.sample_rate),
-                "enc": str(self._config.encoding),
-                "en": str(self._config.encoding),
-                "latency_ns": str(self._config.configured_latency_ns),
-                "fpp": "32,2",
-                "nchan": "8",
+                "manufacturer": self._config.manufacturer,
+                "address": self._local_ip,
+                "arc_port": self._arc_port,
+                "tx_channels": self._config.tx_channels,
+                "sample_rate": self._config.sample_rate,
+                "encoding": self._config.encoding,
+                "supported_encodings": self._config.supported_encodings,
+                "configured_latency_ns": self._config.configured_latency_ns,
             }
-            pcm_capability_property = self._pcm_capability_property()
-            if pcm_capability_property is not None:
-                channel_properties["pcm"] = pcm_capability_property
-            chan_info = ServiceInfo(
-                SERVICE_CHAN,
-                f"{ch_name}@{self._config.name}.{SERVICE_CHAN}",
-                addresses=[ip_bytes],
-                port=DEVICE_ARC_SECONDARY_PORT,
-                properties=channel_properties,
-                server=server_name,
+        )
+        self._service_infos = [
+            ServiceInfo(
+                advertisement["service_type"],
+                advertisement["name"],
+                addresses=[bytes(advertisement["address"])],
+                port=advertisement["port"],
+                properties=advertisement["properties"],
+                server=advertisement["server"],
             )
-            self._service_infos.append(chan_info)
+            for advertisement in advertisements
+        ]
 
         self._zeroconf = AsyncZeroconf(
             interfaces=[self._local_ip],
@@ -460,38 +346,15 @@ class VirtualDevice(VirtualDeviceRequestHandler):
             pass
 
     def _send_heartbeat(self) -> None:
-        ctr = self._mcast_seqnum
-        tx_count = len(self._config.tx_channels)
-        rx_count = len(self._config.rx_channels)
-
-        hb_content = bytearray()
-
-        hb_content += struct.pack(">HH", 16, 0x8001)
-        hb_content += struct.pack(">HH", 4, 4)
-        hb_content += struct.pack(">HH", ctr, 0)
-        hb_content += struct.pack(">i", 0)
-
-        total_peaks = tx_count + rx_count
-        payload_length = (12 + total_peaks + 3) & ~3
-        record_length = 12 + payload_length
-        padding_length = record_length - 24 - total_peaks
-        hb_content += struct.pack(">HH", record_length, 0x8002)
-        hb_content += struct.pack(">HH", 4, payload_length)
-        hb_content += struct.pack(">HH", ctr, 0)
-        hb_content += struct.pack(">HH", tx_count, 0)
-        hb_content += struct.pack(">HH", rx_count, 0)
-        hb_content += struct.pack(">HH", 24, 0)
-        hb_content += b"\xff" * total_peaks
-        hb_content += b"\x00" * padding_length
-
-        self._mcast_send(
-            MULTICAST_GROUP_HEARTBEAT,
-            DEVICE_HEARTBEAT_PORT,
-            0xFFFE,
-            bytes([0, 8, 0, 1, 0x10, 0, 0, 0]),
-            bytes(hb_content),
+        packet = self._build_publication(
+            {
+                "kind": "heartbeat",
+                "tx_count": len(self._config.tx_channels),
+                "rx_count": len(self._config.rx_channels),
+            }
         )
-        logger.debug(f"Heartbeat sent ({len(hb_content) + MCAST_HEADER_LENGTH}B)")
+
+        self._send_publication_packet(packet, MULTICAST_GROUP_HEARTBEAT, DEVICE_HEARTBEAT_PORT)
 
 
 class _ARCProtocol(asyncio.DatagramProtocol):
@@ -520,6 +383,4 @@ class _McastInfoProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         logger.debug(f"MCAST_RECV {addr} ({len(data)}B)")
-        if len(data) < MCAST_HEADER_LENGTH:
-            return
-        self._device._handle_mcast_format_request(data, addr)
+        self._device._handle_request(data, addr, settings_only=True)

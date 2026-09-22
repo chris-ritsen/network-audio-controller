@@ -1,52 +1,33 @@
 from __future__ import annotations
 
-import ipaddress
-import logging
-import socket
+from functools import lru_cache
+
+from netaudio import core
 
 
-logger = logging.getLogger("netaudio")
+@lru_cache(maxsize=1)
+def metering_scale() -> list[dict]:
+    return core.metering_scale()
+
+
+def _metering_value(value: int) -> dict:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < len(metering_scale()):
+        raise ValueError("metering value must fit in one byte")
+
+    return metering_scale()[value]
 
 
 def metering_value_dbfs(value: int) -> float | None:
-    if not 0 <= value <= 0xFF:
-        raise ValueError("metering value must fit in one byte")
-    if value == 0x01:
-        return 0.0
-    if 0x02 <= value <= 0xFD:
-        return -((value - 1) / 2)
-    return None
+    return _metering_value(value)["dbfs"]
 
 
 def classify_signal_presence(value: int) -> str:
-    if not 0 <= value <= 0xFF:
-        raise ValueError("metering value must fit in one byte")
-    if value == 0x00:
-        return "clipping"
-    if value <= 0x7B:
-        return "signal_present"
-    if value <= 0xFD:
-        return "below_threshold"
-    if value == 0xFE:
-        return "muted"
-    return "unknown"
+    return _metering_value(value)["state"]
 
 
 def parse_metering_levels(data: bytes) -> dict:
-    from netaudio import core
-
     parsed = core.parse_response("metering", data)
     return {
         "tx": {index: level for index, level in enumerate(parsed["tx_levels"], start=1)},
         "rx": {index: level for index, level in enumerate(parsed["rx_levels"], start=1)},
     }
-
-
-def _get_local_ip() -> ipaddress.IPv4Address:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("224.0.0.231", 1))
-        local_ip = sock.getsockname()[0]
-    finally:
-        sock.close()
-    return ipaddress.IPv4Address(local_ip)

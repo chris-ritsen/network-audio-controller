@@ -1,10 +1,11 @@
 import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.daemon.http.api import DaemonHTTPServer
+from netaudio.dante.application import DanteApplication
 from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.sap import SapFlowInventory
 from netaudio.dante.services.notification import DanteNotificationService
@@ -132,7 +133,9 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
         send_set_encoding=AsyncMock(return_value=None),
         set_channel_name=AsyncMock(return_value=arc_success),
         set_device_name=AsyncMock(return_value=arc_success),
-        set_gain_level=AsyncMock(return_value=("input", [3])),
+        set_gain_level=AsyncMock(
+            return_value={"device_type": "input", "channel_levels": [3], "supported_levels": [1, 2, 3, 4, 5]}
+        ),
         set_latency=AsyncMock(return_value=arc_success),
         subscribe_external_rtp=AsyncMock(),
         get_latency_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}),
@@ -156,7 +159,9 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
                 "flags": None,
             }
         ),
-        probe_gain_adapter=AsyncMock(return_value=("input", [3])),
+        probe_gain_adapter=AsyncMock(
+            return_value={"device_type": "input", "channel_levels": [3], "supported_levels": [1, 2, 3, 4, 5]}
+        ),
         probe_interface_status=AsyncMock(return_value=[{"mode": "dynamic", "ip_address": "192.168.1.50"}]),
         probe_lock_status=AsyncMock(
             return_value=LockStatusObservation(
@@ -200,6 +205,10 @@ def make_http_server(devices=None, metering=None, on_shutdown=None, tls=None):
             ]
         ),
     )
+    application.mutate_and_wait_for_capability_value = MethodType(
+        DanteApplication.mutate_and_wait_for_capability_value, application
+    )
+    application.set_encoding = AsyncMock(side_effect=MethodType(DanteApplication.set_encoding, application))
     application.unregister_device = MagicMock(
         side_effect=lambda server_name: application.devices.pop(server_name, None),
     )

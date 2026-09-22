@@ -61,12 +61,6 @@ class TestClockPortStateFromConmon0x0020:
 
 
 class TestClockPortStateDeviceModel:
-    def test_default_is_none(self):
-        device = DanteDevice()
-        assert device.clock_frequency_offset_parts_per_billion is None
-        assert device.clock_port_state_code is None
-        assert device.clock_role is None
-
     def test_serializer_includes_role(self):
         device = DanteDevice()
         device.name = "test"

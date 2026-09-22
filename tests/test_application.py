@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import warnings
 from pathlib import Path
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from netaudio import core
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import EventType
@@ -25,10 +27,14 @@ def configurable_status(current_value, available_values, *, requested_value=None
 
 
 def codec_status(parameter_type, mode, values):
-    return {
-        "record_protocol_version": 0x0727,
-        "parameters": [{"parameter_type": parameter_type, "mode": mode, "values": values}],
-    }
+    fixture = json.loads((Path(__file__).parent / "fixtures/core_responses_golden.json").read_text())
+    packet = bytearray.fromhex(fixture["codec_status_avio_input_packet_1528"]["hex"])
+    packet[40] = parameter_type
+    packet[41] = mode
+    packet[42:44] = len(values).to_bytes(2, "big")
+    packet[48:] = b"".join(value.to_bytes(4, "big") for value in values)
+    packet[2:4] = len(packet).to_bytes(2, "big")
+    return core.parse_response("codec_status", bytes(packet))
 
 
 def make_arc_device(server_name: str, ip_address: str) -> DanteDevice:
@@ -42,6 +48,84 @@ def make_arc_device(server_name: str, ip_address: str) -> DanteDevice:
         }
     }
     return device
+
+
+@pytest.mark.parametrize(
+    "channel,level,direction,action",
+    [
+        (1, 5, "input", "unchanged"),
+        (2, 3, None, "change"),
+        (1, 5, "output", "unsupported"),
+        (3, 3, "input", "unsupported"),
+        (0, 3, "input", "unsupported"),
+        (-1, 3, "input", "unsupported"),
+        (True, 3, "input", "unsupported"),
+        (1, True, "input", "unsupported"),
+        (1, 0, "input", "unsupported"),
+        (1, 6, "input", "unsupported"),
+        (1, 3.0, "input", "unsupported"),
+    ],
+)
+def test_native_analog_plan_uses_decoded_capabilities(channel, level, direction, action):
+    adapter = codec_status(1, 2, [5, 1])["gain_adapter"]
+    plan = core.analog_level_control(adapter, channel, level, direction)
+
+    assert plan["action"] == action
+
+    if action in {"change", "unchanged"}:
+        assert plan["direction"] == "input"
+        assert plan["before"] == adapter["channel_levels"][channel - 1]
+        assert plan["reason"] is None
+    else:
+        assert plan["reason"]
+
+
+def test_native_analog_plan_does_not_guess_missing_or_restricted_capabilities():
+    assert core.analog_level_control(None, 1, 3, "input")["action"] == "ambiguous"
+    adapter = {"device_type": "input", "channel_levels": [2], "supported_levels": [2, 4]}
+
+    assert core.analog_level_control(adapter, 1, 3, "input")["action"] == "unsupported"
+    assert core.analog_level_control(adapter, 1, 4, "input")["action"] == "change"
+
+
+@pytest.mark.parametrize(
+    "overrides,write,denial",
+    [
+        ({}, False, None),
+        ({}, True, None),
+        ({"managed": True}, False, "Managed analog-control transport is unavailable."),
+        ({"address_available": False}, False, "Device is unavailable."),
+        ({"online": False}, True, "Device is unavailable."),
+        ({"supported": None}, False, "Codec-control support is unavailable."),
+        ({"supported": False}, True, "Codec-control support is unavailable."),
+        ({"locked": True}, False, None),
+        ({"locked": None}, False, None),
+        ({"locked": True}, True, "Device is locked or its lock state is unknown."),
+        ({"locked": None}, True, "Device is locked or its lock state is unknown."),
+    ],
+)
+def test_analog_access_uses_one_native_policy(overrides, write, denial):
+    from netaudio.dante.analog_control import permission
+
+    facts = {
+        "managed": False,
+        "address_available": True,
+        "online": True,
+        "supported": True,
+        "locked": False,
+        "write": write,
+        **overrides,
+    }
+    device = SimpleNamespace(
+        requires_managed_control=facts["managed"],
+        ipv4="192.0.2.10" if facts["address_available"] else None,
+        online=facts["online"],
+        generic_codec_control_supported=facts["supported"],
+        is_locked=facts["locked"],
+    )
+
+    assert core.analog_access(facts) == denial
+    assert permission(device, write=write) == denial
 
 
 class TestDanteApplication:
@@ -71,14 +155,6 @@ class TestDanteApplication:
         assert device.aes67_current is (True if status[0] is None else status[0])
         assert device.aes67_configured is status[1]
         assert not application.notifications.is_waiting("aes67", application._control_key(device))
-
-    def test_instantiation(self):
-        application = DanteApplication()
-        assert application.devices == {}
-        assert application.dispatcher is not None
-        assert application.commands is not None
-        assert application.cmc is not None
-        assert application.notifications is not None
 
     @pytest.mark.asyncio
     async def test_injected_sap_service_publishes_external_flow_changes(self):
@@ -647,16 +723,67 @@ class TestDanteApplication:
         assert not application.notifications.is_waiting("codec", "192.168.1.108")
 
     @pytest.mark.asyncio
-    async def test_set_gain_level_requires_fresh_matching_readback_and_sends_once(self):
+    @pytest.mark.parametrize("channel,level", [(0, 3), (3, 3), (1, 6), (True, 3), (1, True)])
+    async def test_gain_mutation_rejects_invalid_or_unreported_controls_without_sending(self, channel, level):
         application = DanteApplication()
         device = DanteDevice(server_name="analog.local.")
         device.ipv4 = "192.0.2.1"
         device.generic_codec_control_supported = True
         device.is_locked = False
         application.send_set_gain_level = AsyncMock()
-        application.probe_codec_status = AsyncMock(side_effect=[codec_status(1, 2, [5, 1]), codec_status(1, 2, [3, 1])])
-        assert await application.set_gain_level(device, 1, 3, "input", timeout=0.1) == ("input", [3, 1])
-        application.send_set_gain_level.assert_awaited_once_with(device, 1, 3, "input")
+        application.probe_codec_status = AsyncMock(return_value=codec_status(1, 2, [5, 1]))
+
+        with pytest.raises(RuntimeError):
+            await application.set_gain_level(device, channel, level, "input", timeout=0.01)
+
+        application.send_set_gain_level.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("before", [[5, 1], [3, 1]])
+    @pytest.mark.parametrize("entrypoint", ["set_gain_level", "apply_device_control"])
+    async def test_set_gain_level_returns_confirming_observation_not_later_cached_state(self, before, entrypoint):
+        application = DanteApplication()
+        device = DanteDevice(server_name="analog.local.")
+        device.ipv4 = "192.0.2.1"
+        device.generic_codec_control_supported = True
+        device.is_locked = False
+        application.send_set_gain_level = AsyncMock()
+        application.probe_codec_status = AsyncMock(side_effect=[codec_status(1, 2, before), codec_status(1, 2, [3, 1])])
+        expected = {
+            "device_type": "input",
+            "channel_levels": [3, 1],
+            "supported_levels": [1, 2, 3, 4, 5],
+        }
+
+        async def record_operation(target, name, requested, operation, **kwargs):
+            result = await operation()
+            target.codec_status["gain_adapter"]["channel_levels"][0] = 1
+            audit = kwargs["result_adapter"](result)
+
+            assert audit["state"] == "confirmed"
+            assert audit["effective_values"] == expected
+            assert audit["effective_state_confirmation"] is True
+
+            return result
+
+        application.set_operation_recorder(SimpleNamespace(run_operation=record_operation))
+
+        if entrypoint == "set_gain_level":
+            status = await application.set_gain_level(device, 1, 3, "input", timeout=0.1)
+        else:
+            result = await application.apply_device_control(
+                device, "analog_level", {"channel": 1, "level": 3, "direction": "input"}, timeout=0.1
+            )
+            status = result["status"]
+
+        assert status == expected
+
+        if before[0] != 3:
+            application.send_set_gain_level.assert_awaited_once_with(device, 1, 3, "input")
+        else:
+            application.send_set_gain_level.assert_not_awaited()
+
+        assert device.codec_status["gain_adapter"]["channel_levels"] == [1, 1]
 
     @pytest.mark.asyncio
     async def test_set_gain_level_does_not_retry_mutation_on_nonmatching_readback(self):

@@ -6,6 +6,32 @@ import pytest
 from netaudio import core
 from tests.core_golden import response_input_bytes
 
+
+@pytest.mark.parametrize("result,accepted", [(1, True), (0x8112, True), (7, False), (0, False)])
+def test_native_command_acknowledgement_classifies_recognized_replies(result, accepted):
+    response = bytes.fromhex("2729000a00012201") + result.to_bytes(2, "big")
+    assert core.command_acknowledgement(response) == {
+        "received": True,
+        "parseable": True,
+        "result_code": result,
+        "accepted": accepted,
+        "raw_response_hexadecimal": response.hex(),
+    }
+
+
+@pytest.mark.parametrize("response", [b"", b"truncated", bytes.fromhex("2810000a000122010001")])
+def test_unrecognized_acknowledgement_is_not_reported_as_rejection(response):
+    assert core.command_acknowledgement(response) == {
+        "received": True,
+        "parseable": False,
+        "raw_response_hexadecimal": response.hex(),
+    }
+
+
+def test_missing_acknowledgement_remains_unavailable():
+    assert core.command_acknowledgement(None) is None
+
+
 if not core.available():
     pytest.skip("netaudio-core library not available", allow_module_level=True)
 
@@ -39,6 +65,55 @@ def test_channel_count_preserves_u16_counts():
         "rx_count": 520,
         "locked": None,
     }
+
+
+@pytest.mark.parametrize(
+    "word,protocol,inventory",
+    [
+        (0, 0x2729, "legacy"),
+        (0x0030, 0x2729, "legacy"),
+        (0x1000, 0x2809, "modern"),
+        (0x1030, 0x2809, "modern"),
+    ],
+)
+def test_authoring_capabilities_are_consistent_from_wire_to_device(word, protocol, inventory):
+    from netaudio.dante.device import DanteDevice
+
+    response = _channel_count_response()
+    response[10:12] = word.to_bytes(2, "big")
+    parsed = core.parse_response("channel_count", bytes(response))
+    expected = {
+        "transmit_flow_authoring": {
+            "protocol_id": protocol,
+            "identity_field": "media_local_flow_id" if inventory == "modern" else "global_flow_id",
+            "identifier_max": 65535 if inventory == "modern" else 32,
+            "media_modes": ["native_dante", "rtp_aes67"] if inventory == "modern" else ["native_dante"],
+            "supports_flow_options": inventory == "modern",
+        },
+        "receiver_flow_inventory_family": inventory,
+    }
+    assert core.flow_authoring_capabilities(word) == expected
+    assert parsed["uses_modern_transmit_flow_authoring"] is (protocol == 0x2809)
+    device = DanteDevice("receiver.local.")
+    controls = device.controls_data_from_core(
+        {
+            "name": "Receiver",
+            "counts": (260, 520, None, word),
+            "rx": [],
+            "tx": [],
+            "channels_included": False,
+        }
+    )
+    device.apply_controls(controls)
+
+    assert device.tx_count == 260 and device.rx_count == 520
+    assert {name: getattr(device, name) for name in expected} == expected
+
+
+@pytest.mark.parametrize("word", [None, True, -1, 65536])
+def test_flow_capabilities_never_guess_from_missing_or_truncated_words(word):
+    with pytest.raises(ValueError):
+        core.flow_authoring_capabilities(word)
 
 
 @pytest.mark.parametrize(

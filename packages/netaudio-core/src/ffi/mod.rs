@@ -147,6 +147,66 @@ impl NetaudioStatus {
             NetaudioStatus::UnsupportedProtocolOperation => c"unsupported_protocol_operation",
         }
     }
+
+    pub fn description(self) -> &'static CStr {
+        match self {
+            NetaudioStatus::Ok => c"ok",
+            NetaudioStatus::NullPointer => c"null pointer",
+            NetaudioStatus::InvalidUtf8 => c"invalid utf-8",
+            NetaudioStatus::NameTooLong => c"name too long",
+            NetaudioStatus::NameInvalidHyphen => c"name cannot begin or end with a hyphen",
+            NetaudioStatus::NameInvalidChars => c"name contains unsupported characters",
+            NetaudioStatus::BufferTooSmall => c"buffer too small",
+            NetaudioStatus::InvalidAddress => c"invalid address",
+            NetaudioStatus::IoError => c"io error",
+            NetaudioStatus::Timeout => c"device did not respond",
+            NetaudioStatus::MalformedResponse => c"malformed binary response",
+            NetaudioStatus::SerializationError => c"FFI/API serialization failure",
+            NetaudioStatus::SubscriptionCount => c"subscription count must be 1-16",
+            NetaudioStatus::InvalidJson => c"invalid command json",
+            NetaudioStatus::InvalidMac => c"invalid mac",
+            NetaudioStatus::InvalidIp => c"invalid ip",
+            NetaudioStatus::InvalidChannelType => c"invalid channel type",
+            NetaudioStatus::InvalidKey => c"invalid lock key",
+            NetaudioStatus::InvalidPin => c"pin must be exactly 4 digits",
+            NetaudioStatus::CryptoError => c"crypto error",
+            NetaudioStatus::InvalidPage => c"invalid page",
+            NetaudioStatus::InvalidSubscriptionChannel => {
+                c"subscription receiver channel must fit in one byte"
+            }
+            NetaudioStatus::InvalidDeviceType => c"device type must be 'input' or 'output'",
+            NetaudioStatus::PacketTooLarge => c"command packet exceeds the protocol length limit",
+            NetaudioStatus::InvalidChannel => c"channel number must be at least 1",
+            NetaudioStatus::InvalidLatency => {
+                c"latency must be finite, nonnegative, and fit on the wire"
+            }
+            NetaudioStatus::InvalidSampleRate => c"sample rate must be nonzero",
+            NetaudioStatus::InvalidEncoding => c"encoding value must be nonzero",
+            NetaudioStatus::InvalidGainLevel => c"gain level must be an integer from 1 through 5",
+            NetaudioStatus::InvalidFlowSlot => c"flow slot must be from 1 through 32",
+            NetaudioStatus::InvalidFlowProtocol => c"unsupported flow protocol",
+            NetaudioStatus::InvalidSequence => c"sequence must be nonzero",
+            NetaudioStatus::UnsupportedProtocolOperation => {
+                c"the selected protocol does not support this operation"
+            }
+            NetaudioStatus::InternalPanic => c"internal panic",
+            NetaudioStatus::UnknownKind => c"unknown response or page kind",
+            NetaudioStatus::InvalidLength => c"byte buffer has the wrong length",
+            NetaudioStatus::InvalidDestination => c"invalid external RTP destination",
+            NetaudioStatus::InvalidFlowIdentity => c"invalid external flow identity",
+            NetaudioStatus::InvalidReceiverMapping => c"invalid external receiver mapping",
+        }
+    }
+
+    pub fn category(self) -> &'static CStr {
+        match self {
+            NetaudioStatus::IoError | NetaudioStatus::Timeout => c"transport",
+            NetaudioStatus::MalformedResponse => c"binary_response",
+            NetaudioStatus::SerializationError => c"api_serialization",
+            NetaudioStatus::InvalidJson => c"json_input",
+            _ => c"api",
+        }
+    }
 }
 
 impl From<crate::lock::LockError> for NetaudioStatus {
@@ -187,6 +247,7 @@ impl From<NetaudioError> for NetaudioStatus {
             NetaudioError::InvalidFlowProtocol => NetaudioStatus::InvalidFlowProtocol,
             NetaudioError::InvalidFlowSlot => NetaudioStatus::InvalidFlowSlot,
             NetaudioError::InvalidGainLevel => NetaudioStatus::InvalidGainLevel,
+            NetaudioError::InvalidNetworkConfiguration(_) => NetaudioStatus::InvalidIp,
             NetaudioError::InvalidLatency => NetaudioStatus::InvalidLatency,
             NetaudioError::InvalidPage => NetaudioStatus::InvalidPage,
             NetaudioError::InvalidReceiverMapping => NetaudioStatus::InvalidReceiverMapping,
@@ -312,7 +373,7 @@ impl NetaudioClient {
     }
 }
 
-pub const NETAUDIO_ABI_VERSION: u32 = 8;
+pub const NETAUDIO_ABI_VERSION: u32 = 9;
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
@@ -389,6 +450,35 @@ fn lock_client(client: &NetaudioClient) -> MutexGuard<'_, Client> {
     }
 }
 
+type OutputBuffer = (*mut u8, usize, *mut usize);
+
+unsafe fn json_output<T: serde::Serialize>(
+    output: OutputBuffer,
+    operation: impl FnOnce() -> Result<T, FfiError>,
+) -> NetaudioStatus {
+    guard(|| {
+        unsafe { prepare_output(output.0, output.1, output.2)? };
+        let value = operation()?;
+        unsafe { write_json(&value, output.0, output.1, output.2) }
+    })
+}
+
+unsafe fn bytes_output(
+    output: OutputBuffer,
+    operation: impl FnOnce() -> Result<Vec<u8>, FfiError>,
+) -> NetaudioStatus {
+    guard(|| {
+        unsafe { prepare_output(output.0, output.1, output.2)? };
+        let value = operation()?;
+        unsafe { write_bytes(&value, output.0, output.1, output.2) }
+    })
+}
+
+fn decode_json<T: serde::de::DeserializeOwned>(input: &str) -> Result<T, FfiError> {
+    serde_json::from_str(input)
+        .map_err(|error| crate::spec::SpecError::InvalidJson(error.to_string()).into())
+}
+
 unsafe fn write_json<T: serde::Serialize>(
     value: &T,
     out_buffer: *mut u8,
@@ -452,17 +542,41 @@ unsafe fn write_bytes(
     Ok(())
 }
 
+mod audio;
+mod capabilities;
 mod client_actions;
 mod client_queries;
+mod clock;
 mod dapi;
-mod metadata;
+mod encoding;
+mod flows;
+mod inventory;
+mod monitoring;
+mod network;
+mod panels;
 mod parsing;
+mod performance;
+mod protocol;
+mod runtime;
+mod subscriptions;
 
+pub use audio::*;
+pub use capabilities::*;
 pub use client_actions::*;
 pub use client_queries::*;
+pub use clock::*;
 pub use dapi::*;
-pub use metadata::*;
+pub use encoding::*;
+pub use flows::*;
+pub use inventory::*;
+pub use monitoring::*;
+pub use network::*;
+pub use panels::*;
 pub use parsing::*;
+pub use performance::*;
+pub use protocol::*;
+pub use runtime::*;
+pub use subscriptions::*;
 
 #[cfg(test)]
 mod tests;

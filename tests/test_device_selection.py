@@ -31,3 +31,22 @@ def test_name_filter_matches_device_and_server_names_case_insensitively(pattern)
 def test_name_filter_rejects_unrelated_names():
     state.names = ["wing*"]
     assert filter_devices({"avio-usb-tv-1.local.": _device("avio-usb-tv-1")}) == {}
+
+
+@pytest.mark.parametrize("address", ["001d.c100.0001", "001dc1fffe000001", "001dc10000010000"])
+def test_mac_selection_matches_supported_device_identity_representations(address):
+    state.names = []
+    state.macs = [address]
+    device = _device("receiver")
+
+    assert filter_devices({"receiver.local.": device}) == {"receiver.local.": device}
+
+
+@pytest.mark.parametrize("address", ["000000000000", "zz001122334455", ""])
+def test_mac_selection_never_matches_two_invalid_identities(address):
+    state.names = []
+    state.macs = [address]
+    device = _device("receiver")
+    device.mac_address = address
+
+    assert filter_devices({"receiver.local.": device}) == {}

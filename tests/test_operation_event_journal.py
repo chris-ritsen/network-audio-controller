@@ -7,6 +7,7 @@ import pytest
 
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
+from netaudio.dante.channel import DanteChannel
 from netaudio.dante.transmit_flow import TransmitFlowSpecification
 from netaudio.monitoring import MonitoringEventJournal, MonitoringEventKind, MutationAuditRecorder, remote_recorder
 from netaudio.presets.loading import (
@@ -29,6 +30,86 @@ def device() -> DanteDevice:
 
 def operation_events(journal: MonitoringEventJournal):
     return list(reversed(journal.list_events(kind=MonitoringEventKind.CONFIGURATION_OPERATION)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["already", "failed", "unverified"])
+async def test_preset_channel_names_do_not_determine_operation_outcomes(name):
+    journal = MonitoringEventJournal()
+    target = device()
+    channel = DanteChannel()
+    channel.number = 1
+    channel.name = "Original"
+    channel.channel_type = "rx"
+    channel.device = target
+    target.rx_channels = {1: channel}
+    target.get_rx_channels = AsyncMock()
+
+    async def rename(_device, _side, _number, value):
+        channel.name = value
+
+    application = SimpleNamespace(
+        operation_recorder=MutationAuditRecorder.from_journal(journal),
+        set_channel_name=rename,
+    )
+    plan = PresetLoadPlan(
+        [
+            PresetDeviceActions(
+                actions=[PresetAction("receiver_channel_names", {1: name}, PresetActionState.CHANGE)],
+                config={},
+                device=target,
+                device_name=target.name,
+                server_name=target.server_name,
+            )
+        ]
+    )
+
+    report = await apply_preset_plan(application, plan)
+
+    assert channel.name == name
+    assert report.failures == report.unverified == 0
+    assert [result.state for result in report.operations] == ["confirmed"]
+    assert operation_events(journal)[-1].final_operation_state == "confirmed"
+    parent = journal.list_events(kind=MonitoringEventKind.PRESET_RUN)[0]
+    assert parent.effective_values["confirmed"] == 1
+    assert parent.effective_values["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_preset_unverified_sample_rate_remains_failed_in_report_and_journal():
+    from netaudio.dante.sample_rate_topology import SampleRateTopologyChangedButUnverifiedError
+
+    journal = MonitoringEventJournal()
+    target = device()
+    application = SimpleNamespace(
+        operation_recorder=MutationAuditRecorder.from_journal(journal),
+        set_sample_rate=AsyncMock(
+            side_effect=SampleRateTopologyChangedButUnverifiedError(
+                "readback unavailable",
+                SimpleNamespace(to_dict=lambda: {}),
+            )
+        ),
+    )
+    plan = PresetLoadPlan(
+        [
+            PresetDeviceActions(
+                actions=[PresetAction("sample_rate", 96000, PresetActionState.CHANGE)],
+                config={},
+                device=target,
+                device_name=target.name,
+                server_name=target.server_name,
+            )
+        ]
+    )
+
+    report = await apply_preset_plan(application, plan, stop_on_failure=True)
+
+    assert report.failures == 1
+    assert [result.state for result in report.operations] == ["failed"]
+    assert operation_events(journal)[-1].final_operation_state != "confirmed"
+    parent = journal.list_events(kind=MonitoringEventKind.PRESET_RUN)[0]
+    assert parent.effective_values["failed"] == 1
+    assert parent.effective_values["confirmed"] == 0
 
 
 @pytest.mark.asyncio
@@ -55,6 +136,21 @@ async def test_acknowledgement_without_readback_is_partial_and_never_confirmed()
         "partial_unobservable",
     ]
     assert all(event.final_operation_state != "confirmed" for event in events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [bytes.fromhex("27ff000a000130140001"), b"truncated", None])
+async def test_subscription_removal_journal_does_not_invent_effective_confirmation(response):
+    journal = MonitoringEventJournal()
+    application = DanteApplication()
+    application.operation_recorder = MutationAuditRecorder.from_journal(journal)
+    application.mutate_and_wait_for_notification = AsyncMock(return_value=response)
+
+    assert await application.remove_subscriptions(device(), [1]) == response
+
+    events = operation_events(journal)
+    assert events[-1].final_operation_state != "confirmed"
+    assert events[-1].acknowledgement_result_code == (1 if response and response != b"truncated" else None)
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,65 @@ const PCM24_CAPABILITY_BIT: u16 = 0x0004;
 const PCM32_CAPABILITY_BIT: u16 = 0x0008;
 const KNOWN_PCM_CAPABILITY_BITS: u16 =
     PCM16_CAPABILITY_BIT | PCM24_CAPABILITY_BIT | PCM32_CAPABILITY_BIT;
+const PCM_ENCODINGS: [(u16, u16); 3] = [
+    (16, PCM16_CAPABILITY_BIT),
+    (24, PCM24_CAPABILITY_BIT),
+    (32, PCM32_CAPABILITY_BIT),
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiverFlowInventoryFamily {
+    Legacy,
+    Modern,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FlowAuthoringCapabilities {
+    pub receiver_flow_inventory_family: ReceiverFlowInventoryFamily,
+    pub transmit_flow_authoring: FlowAuthoringProfile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FlowAuthoringProfile {
+    pub protocol_id: u16,
+    pub identity_field: &'static str,
+    pub identifier_max: u16,
+    pub media_modes: Vec<&'static str>,
+    pub supports_flow_options: bool,
+}
+
+pub fn flow_authoring_capabilities(capability_word: u16) -> FlowAuthoringCapabilities {
+    use crate::commands::PROTOCOL_DANTE_FLOW;
+    use crate::protocol::PROTOCOL_ARC_2809;
+
+    if capability_word & 0x1000 != 0 {
+        FlowAuthoringCapabilities {
+            receiver_flow_inventory_family: ReceiverFlowInventoryFamily::Modern,
+            transmit_flow_authoring: FlowAuthoringProfile {
+                protocol_id: PROTOCOL_ARC_2809,
+                identity_field: "media_local_flow_id",
+                identifier_max: u16::MAX,
+                media_modes: vec!["native_dante", "rtp_aes67"],
+                supports_flow_options: true,
+            },
+        }
+    } else {
+        FlowAuthoringCapabilities {
+            receiver_flow_inventory_family: ReceiverFlowInventoryFamily::Legacy,
+            transmit_flow_authoring: FlowAuthoringProfile {
+                protocol_id: PROTOCOL_DANTE_FLOW,
+                identity_field: "global_flow_id",
+                identifier_max: crate::commands::MAX_LEGACY_FLOW_ID,
+                media_modes: vec!["native_dante"],
+                supports_flow_options: false,
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChannelCount {
@@ -64,6 +123,7 @@ pub struct RxChannel {
     pub rx_channel_name: Option<String>,
     pub tx_channel_name: Option<String>,
     pub tx_device_name: Option<String>,
+    pub is_self_connection: bool,
     pub rx_status_code: u16,
     pub subscription_status_code: u16,
 }
@@ -81,6 +141,56 @@ pub struct ChannelAudioMetadata {
     pub current_encoding: u16,
     pub encoding_capability_bitmap: u16,
     pub supported_encodings: Option<Vec<u16>>,
+}
+
+#[derive(serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ChannelAudioConfiguration {
+    pub sample_rate: u32,
+    pub encoding: u16,
+    pub supported_encodings: Vec<u16>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ChannelAudioPublication {
+    pub channel_metadata: Vec<u8>,
+    pub pcm_property: String,
+}
+
+pub fn channel_audio_publication(
+    config: &ChannelAudioConfiguration,
+) -> Option<ChannelAudioPublication> {
+    if config.sample_rate == 0 || !config.supported_encodings.contains(&config.encoding) {
+        return None;
+    }
+
+    let mut bitmap = 0u16;
+
+    for encoding in &config.supported_encodings {
+        let (_, bit) = PCM_ENCODINGS.iter().find(|(known, _)| known == encoding)?;
+        bitmap |= bit;
+    }
+
+    let mut metadata = Vec::with_capacity(CHANNEL_AUDIO_METADATA_SIZE);
+    metadata.extend_from_slice(&config.sample_rate.to_be_bytes());
+
+    for value in [
+        0x0101,
+        config.encoding,
+        0x0400,
+        config.encoding,
+        config.encoding,
+        bitmap,
+    ] {
+        metadata.extend_from_slice(&value.to_be_bytes());
+    }
+
+    Some(ChannelAudioPublication {
+        channel_metadata: metadata,
+        pcm_property: format!("{} 0x{bitmap:x}", config.encoding / 8),
+    })
 }
 
 pub fn parse_channel_audio_metadata(response: &[u8]) -> Option<ChannelAudioMetadata> {
@@ -134,11 +244,7 @@ pub fn parse_channel_audio_metadata(response: &[u8]) -> Option<ChannelAudioMetad
         && encoding_capability_bitmap & !KNOWN_PCM_CAPABILITY_BITS == 0
     {
         let mut encodings = Vec::new();
-        for (encoding, capability_bit) in [
-            (16, PCM16_CAPABILITY_BIT),
-            (24, PCM24_CAPABILITY_BIT),
-            (32, PCM32_CAPABILITY_BIT),
-        ] {
+        for (encoding, capability_bit) in PCM_ENCODINGS {
             if encoding_capability_bitmap & capability_bit != 0 {
                 encodings.push(encoding);
             }
@@ -168,7 +274,12 @@ pub fn parse_channel_count(response: &[u8]) -> Option<ChannelCount> {
     let transmit_flow_authoring_capability_word = read_u16(response, RESPONSE_HEADER_SIZE)?;
     Some(ChannelCount {
         transmit_flow_authoring_capability_word,
-        uses_modern_transmit_flow_authoring: transmit_flow_authoring_capability_word & 0x1000 != 0,
+        uses_modern_transmit_flow_authoring: flow_authoring_capabilities(
+            transmit_flow_authoring_capability_word,
+        )
+        .transmit_flow_authoring
+        .protocol_id
+            == crate::protocol::PROTOCOL_ARC_2809,
         tx_count: read_u16(response, CHANNEL_COUNT_TX_OFFSET)?,
         rx_count: read_u16(response, CHANNEL_COUNT_RX_OFFSET)?,
         locked: None,
@@ -309,6 +420,12 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
         };
 
         let receiver_flags = u16_at(record, RX_RECORD_FLAGS);
+        let subscription_status_code = u16_at(record, RX_RECORD_SUBSCRIPTION_STATUS);
+        let is_self_connection = crate::subscription_status::is_self_connection(
+            tx_device_name.as_deref(),
+            subscription_status_code,
+        );
+
         channels.push(RxChannel {
             number: channel_number,
             receiver_flags,
@@ -317,8 +434,9 @@ pub fn parse_rx_page(response: &[u8], starting_channel: u16) -> Option<Vec<RxCha
             rx_channel_name,
             tx_channel_name,
             tx_device_name,
+            is_self_connection,
             rx_status_code: u16_at(record, RX_RECORD_RX_STATUS),
-            subscription_status_code: u16_at(record, RX_RECORD_SUBSCRIPTION_STATUS),
+            subscription_status_code,
         });
     }
 

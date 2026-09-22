@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from netaudio import core
+from netaudio.dante.commands import DanteCommands
 from tests.protocol_test_fixtures import load_protocol_packet
 
 if not core.available():
@@ -14,10 +15,49 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 GOLDEN = json.loads((FIXTURES_DIR / "core_commands_golden.json").read_text())
 
 
+@pytest.mark.parametrize(
+    "command,constant",
+    [("identify", "PROTOCOL_SETTINGS"), ("device_info", "PROTOCOL_DEFAULT_ARC")],
+)
+def test_generated_protocol_identifiers_match_native_packets(command, constant):
+    from netaudio.core import _abi
+
+    packet = core.build_command({"command": command})
+
+    assert int.from_bytes(packet[:2], "big") == getattr(_abi, constant)
+
+
+@pytest.mark.parametrize("alias", ["sequence", "transaction_id"])
+def test_command_specification_rejects_obsolete_message_id_aliases(alias):
+    with pytest.raises(core.NetaudioCoreError) as error:
+        core.build_command({"command": "identify", alias: 17})
+
+    assert error.value.category == "json_input"
+
+
 @pytest.mark.parametrize("case_id", list(GOLDEN))
 def test_build_command_matches_golden(case_id):
     entry = GOLDEN[case_id]
     assert core.build_command(entry["spec"]) == bytes.fromhex(entry["hex"])
+
+
+@pytest.mark.parametrize("enabled", ["false", "true", 0, 1, None])
+def test_aes67_command_wrapper_preserves_native_boolean_validation(enabled):
+    specification = DanteCommands().enable_aes67(enabled, host_mac="001dc1502368")
+
+    with pytest.raises(core.NetaudioCoreError) as error:
+        core.build_command(specification)
+
+    assert error.value.category == "json_input"
+
+
+@pytest.mark.parametrize("case_id", ["enable_aes67:29", "enable_aes67:30"])
+def test_aes67_command_wrapper_emits_the_requested_boolean(case_id):
+    entry = GOLDEN[case_id]
+    specification = DanteCommands().enable_aes67(entry["spec"]["enabled"], entry["spec"]["host_mac"])
+    specification["message_id"] = entry["spec"]["message_id"]
+
+    assert core.build_command(specification) == bytes.fromhex(entry["hex"])
 
 
 def test_reboot_without_host_mac_is_rejected():
@@ -26,13 +66,44 @@ def test_reboot_without_host_mac_is_rejected():
     assert exc_info.value.status == 14
 
 
+@pytest.mark.parametrize("channel_type", ["rx", "tx"])
+def test_channel_rename_requires_an_explicit_protocol(channel_type):
+    with pytest.raises(core.NetaudioCoreError) as error:
+        core.build_command(
+            {"command": "set_channel_name", "channel_type": channel_type, "channel_number": 1, "name": "Console"}
+        )
+
+    assert error.value.category == "json_input"
+
+
+@pytest.mark.parametrize(
+    "specification",
+    [
+        {"command": "query_modern_arc_receiver_channel_status"},
+        {"command": "query_modern_arc_transmitter_channel_status"},
+        {"command": "query_modern_arc_receiver_flow_status"},
+        {
+            "command": "modern_arc_subscription_page",
+            "page_capacity": 1,
+            "media_type_code": 3,
+            "records": [{"action": "clear", "rx_channel": 1}],
+        },
+    ],
+)
+def test_modern_commands_require_an_explicit_protocol(specification):
+    with pytest.raises(core.NetaudioCoreError) as error:
+        core.build_command(specification)
+
+    assert error.value.category == "json_input"
+
+
 def test_reboot_zero_sequence_is_rejected():
     with pytest.raises(core.NetaudioCoreError) as exc_info:
         core.build_command(
             {
                 "command": "reboot",
                 "host_mac": "001dc1502368",
-                "sequence": 0,
+                "message_id": 0,
             }
         )
     assert exc_info.value.status == 31
@@ -44,7 +115,7 @@ def test_reboot_zero_sequence_is_rejected():
         {
             "command": "set_interface_dhcp",
             "host_mac": "001dc1502368",
-            "sequence": 0,
+            "message_id": 0,
         },
         {
             "command": "set_interface_static",
@@ -53,7 +124,7 @@ def test_reboot_zero_sequence_is_rejected():
             "dns": "8.8.8.8",
             "gateway": "192.168.1.1",
             "host_mac": "001dc1502368",
-            "sequence": 0,
+            "message_id": 0,
         },
     ],
 )
@@ -73,7 +144,7 @@ def test_interface_dhcp_matches_controller_capture():
         {
             "command": "set_interface_dhcp",
             "host_mac": captured[8:14].hex(),
-            "sequence": int.from_bytes(captured[4:6], "big"),
+            "message_id": int.from_bytes(captured[4:6], "big"),
         }
     )
     assert built == captured
@@ -89,7 +160,7 @@ def test_interface_static_matches_controller_capture():
             "dns": "8.8.8.8",
             "gateway": "192.168.1.1",
             "host_mac": captured[8:14].hex(),
-            "sequence": int.from_bytes(captured[4:6], "big"),
+            "message_id": int.from_bytes(captured[4:6], "big"),
         }
     )
     assert built == captured
@@ -131,7 +202,7 @@ def _receive_channel_name_page_spec(captured):
     return {
         "command": "receive_channel_name_page_2729",
         "records": records,
-        "transaction_id": int.from_bytes(captured[4:6], "big"),
+        "message_id": int.from_bytes(captured[4:6], "big"),
     }
 
 
@@ -162,7 +233,7 @@ def test_subscription_page_2729_matches_controller_assignment_capture():
         {
             "command": "subscription_page_2729",
             "records": records,
-            "transaction_id": int.from_bytes(captured[4:6], "big"),
+            "message_id": int.from_bytes(captured[4:6], "big"),
         }
     )
     assert built == captured
@@ -182,7 +253,7 @@ def test_subscription_page_2729_excludes_unreferenced_controller_tail():
                 }
                 for channel in range(65, 97)
             ],
-            "transaction_id": int.from_bytes(captured[4:6], "big"),
+            "message_id": int.from_bytes(captured[4:6], "big"),
         }
     )
     assert built[:2] == captured[:2]
@@ -202,7 +273,7 @@ def test_subscription_page_2729_matches_controller_clear_capture():
                 }
                 for channel in range(1, 33)
             ],
-            "transaction_id": 0x0768,
+            "message_id": 0x0768,
         }
     )
     assert built == captured
@@ -221,7 +292,7 @@ def test_subscription_page_2729_matches_controller_single_assignment_capture():
                     "tx_device": "avio-bt-1",
                 }
             ],
-            "transaction_id": 0x29AB,
+            "message_id": 0x29AB,
         }
     )
     assert built == captured
@@ -233,7 +304,7 @@ def test_subscription_page_2729_matches_controller_single_removal_capture():
         {
             "command": "subscription_page_2729",
             "records": [{"action": "clear", "rx_channel": 1}],
-            "transaction_id": 0x297A,
+            "message_id": 0x297A,
         }
     )
     assert built == captured
@@ -247,7 +318,8 @@ def test_set_transmit_channel_name_matches_controller_capture():
             "channel_type": "tx",
             "channel_number": 1,
             "name": "tett",
-            "transaction_id": 0x49A4,
+            "protocol_id": 0x2729,
+            "message_id": 0x49A4,
         }
     )
     assert built == captured
@@ -259,7 +331,7 @@ def test_set_device_name_matches_controller_capture():
         {
             "command": "set_name",
             "name": "avio-bt-11",
-            "transaction_id": 0x261B,
+            "message_id": 0x261B,
         }
     )
     assert built == captured
@@ -271,10 +343,16 @@ def test_reboot_matches_controller_capture():
         {
             "command": "reboot",
             "host_mac": captured[8:14].hex(),
-            "sequence": int.from_bytes(captured[4:6], "big"),
+            "message_id": int.from_bytes(captured[4:6], "big"),
         }
     )
     assert built == captured
+
+
+def test_factory_reset_matches_authentic_selector_one_request():
+    packet = core.build_command({"command": "factory_reset", "host_mac": "3e42274cff24", "message_id": 0x18A4})
+
+    assert packet.hex() == "ffff002418a400003e42274cff240000417564696e617465073a00900000006400010001"
 
 
 class TestSpecErrors:
@@ -315,11 +393,11 @@ class TestSpecErrors:
         assert packet[36:40] == sample_rate.to_bytes(4, "big")
 
     def test_sample_rate_write_accepts_a_changing_transaction_identifier(self):
-        packet = core.build_command({"command": "set_sample_rate", "sample_rate": 48_000, "sequence": 0x18B1})
+        packet = core.build_command({"command": "set_sample_rate", "sample_rate": 48_000, "message_id": 0x18B1})
         assert packet[4:6] == bytes.fromhex("18b1")
 
     def test_sample_rate_write_rejects_zero_transaction_identifier(self):
-        assert self._status({"command": "set_sample_rate", "sample_rate": 48_000, "sequence": 0}) == 31
+        assert self._status({"command": "set_sample_rate", "sample_rate": 48_000, "message_id": 0}) == 31
 
     def test_zero_encoding_is_rejected(self):
         assert self._status({"command": "set_encoding", "encoding": 0}) == 27

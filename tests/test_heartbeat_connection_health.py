@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from copy import deepcopy
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -104,6 +106,34 @@ def tracker_update(
     state = tracker.update(parsed(packet), observed_at, observed_monotonic)
     assert state is not None
     return state
+
+
+def test_invalid_second_stream_cannot_partially_commit_first_stream():
+    tracker = ReceiverFlowConnectionHealthTracker()
+    tracker_update(tracker, BASELINE_PACKET, 100.0)
+    baseline = deepcopy(tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER))
+    update = parsed(TREATMENT_PACKET)
+    update["late_packet_records"][0]["entries"][0]["late_packet_count"] = -1
+
+    assert tracker.update(update, "later", 101.0) is None
+    assert tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER) == baseline
+
+
+def test_sequence_wrap_is_forward_but_a_replayed_packet_is_not():
+    tracker = ReceiverFlowConnectionHealthTracker()
+    tracker_update(tracker, heartbeat_packet(late_packet_sequence=65535, late_packet_counts=(2,)), 100.0)
+    state = tracker_update(tracker, heartbeat_packet(late_packet_sequence=0, late_packet_counts=(5,)), 101.0)
+    assert state["flows"][0]["late_packet_delta"] == 3
+    baseline = deepcopy(tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER))
+
+    assert tracker.update(parsed(heartbeat_packet(late_packet_sequence=65535)), "replay", 102.0) is None
+    assert tracker.history_snapshot(DEVICE_EXTENDED_UNIQUE_IDENTIFIER) == baseline
+
+
+def test_latency_conversion_does_not_lose_precision_at_the_wire_limit():
+    tracker = ReceiverFlowConnectionHealthTracker()
+    state = tracker_update(tracker, heartbeat_packet(latency_sequence=1, latency_sample_counts=(4294967295,)), 100.0)
+    assert state["flows"][0]["current_latency_nanoseconds"] == round(Fraction(4294967295 * 1_000_000_000, 48_000))
 
 
 def test_parser_uses_digest_bound_permitted_capture_and_late_packet_names():

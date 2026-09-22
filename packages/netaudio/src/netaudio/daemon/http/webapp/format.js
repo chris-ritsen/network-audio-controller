@@ -117,38 +117,27 @@ export function subscriptionSource(subscription) {
 
 export const METER_FLOOR_DBFS = -61;
 
+let meteringScale = [];
+
+export function setMeteringScale(scale) {
+  meteringScale = Array.isArray(scale) ? scale : [];
+}
+
 export function meteringDecibelsFullScale(value) {
-  const raw = Number(value);
-  if (!Number.isInteger(raw) || raw < 0 || raw > 0xff) {
-    return null;
-  }
-  if (raw === 0x01) {
-    return 0;
-  }
-  if (raw >= 0x02 && raw <= 0xfd) {
-    return -((raw - 1) / 2);
-  }
-  return null;
+  return Number.isInteger(value) ? meteringScale[value]?.dbfs ?? null : null;
+}
+
+export function meteringSignalPresence(value) {
+  return Number.isInteger(value) ? meteringScale[value]?.state ?? "unknown" : "unknown";
 }
 
 export function meteringLabel(value) {
   if (value === null || value === undefined) {
     return ABSENT;
   }
-  const raw = Number(value);
-  if (!Number.isInteger(raw) || raw < 0 || raw > 0xff) {
-    return text(value);
-  }
-  if (raw === 0x00) {
-    return "clipping";
-  }
-  if (raw === 0xfe) {
-    return "muted";
-  }
-  if (raw === 0xff) {
-    return "invalid";
-  }
-  return `${meteringDecibelsFullScale(raw).toFixed(1)} dBFS`;
+  const dbfs = meteringDecibelsFullScale(value);
+
+  return dbfs === null ? stateLabel(meteringSignalPresence(value)) : `${dbfs.toFixed(1)} dBFS`;
 }
 
 export function macAddress(device) {
@@ -195,11 +184,11 @@ export function clockLeaderName(device, inventory) {
 }
 
 export function meterFraction(value) {
-  const raw = Number(value);
-  if (raw === 0x00) {
+  if (meteringSignalPresence(value) === "clipping") {
     return 1;
   }
-  const decibelsFullScale = meteringDecibelsFullScale(raw);
+
+  const decibelsFullScale = meteringDecibelsFullScale(value);
   if (decibelsFullScale === null || decibelsFullScale <= METER_FLOOR_DBFS) {
     return 0;
   }
@@ -349,18 +338,6 @@ export function clockSubdomainInputValue(value) {
     return "";
   }
   return formatted;
-}
-
-export function clockSourceCode(value) {
-  if (
-    value === null ||
-    value === undefined ||
-    typeof value !== "number" ||
-    !Number.isInteger(value)
-  ) {
-    return ABSENT;
-  }
-  return "Device-defined";
 }
 
 export function preferredLeader(value) {

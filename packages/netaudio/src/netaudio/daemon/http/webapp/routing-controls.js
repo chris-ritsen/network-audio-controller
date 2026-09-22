@@ -14,7 +14,7 @@ export function receiverChannels(device) {
     number,
     name: channels[number].name || `Channel ${number}`,
     subscription: (device.subscriptions || []).find(
-      (item) => item.rx_channel === channels[number].name,
+      (item) => item.rx_channel_number === number,
     ),
   }));
 }

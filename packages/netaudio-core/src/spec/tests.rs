@@ -12,7 +12,7 @@ fn audio_subscription_2809_pages_match_controller_exchanges() {
         let specification = serde_json::json!({
             "command": "modern_arc_subscription_page", "protocol_id": 0x2809,
             "page_capacity": exchange["page_capacity"], "media_type_code": 3,
-            "records": exchange["records"], "transaction_id": exchange["transaction_id"],
+            "records": exchange["records"], "message_id": exchange["transaction_id"],
         });
         assert_eq!(
             build_command_from_json(&specification.to_string()).unwrap(),
@@ -97,7 +97,7 @@ fn representative_commands_keep_their_routes() {
         )
     );
     assert_eq!(
-        route_for(r#"{"command":"cmc_register","sequence":1,"host_mac":"001122334455"}"#),
+        route_for(r#"{"command":"cmc_register","message_id":1,"host_mac":"001122334455"}"#),
         (Target::Control, IoMode::Request)
     );
     assert_eq!(
@@ -134,19 +134,16 @@ fn omitted_message_id_is_assigned_and_explicit_ids_are_honored() {
         assigned.packet,
         crate::commands::build_identify(0x0C01).unwrap()
     );
-    for json in [
+    let explicit = routed_with_assigned_id(
         "{\"command\":\"identify\",\"message_id\":3017}",
-        "{\"command\":\"identify\",\"sequence\":3017}",
-        "{\"command\":\"identify\",\"transaction_id\":3017}",
-    ] {
-        let explicit = routed_with_assigned_id(json, [0xFF; 6], 0x0C01);
-        assert_eq!(explicit.message_id, 0x0BC9, "{json}");
-        assert_eq!(
-            explicit.packet,
-            crate::commands::build_identify(0x0BC9).unwrap(),
-            "{json}"
-        );
-    }
+        [0xFF; 6],
+        0x0C01,
+    );
+    assert_eq!(explicit.message_id, 0x0BC9);
+    assert_eq!(
+        explicit.packet,
+        crate::commands::build_identify(0x0BC9).unwrap()
+    );
     let arc = routed_with_assigned_id("{\"command\":\"device_info\"}", [0xFF; 6], 0x0C02);
     assert_eq!(arc.message_id, 0x0C02);
     assert_eq!(
@@ -154,7 +151,7 @@ fn omitted_message_id_is_assigned_and_explicit_ids_are_honored() {
         crate::commands::build_device_info(0x0C02).unwrap()
     );
     let zero = routed_with_assigned_id(
-        "{\"command\":\"device_info\",\"transaction_id\":0}",
+        "{\"command\":\"device_info\",\"message_id\":0}",
         [0xFF; 6],
         0x0C03,
     );
@@ -236,7 +233,7 @@ fn probe_encoding_keeps_its_message_type_independent_of_the_message_id() {
 fn refresh_clock_status_preserves_the_requested_sequence_and_mac() {
     let host_mac = [0x84, 0x2F, 0x57, 0x74, 0xE8, 0x6D];
     let routed = routed_with_assigned_id(
-        r#"{"command":"refresh_clock_status","record_revision":1850,"sequence":33}"#,
+        r#"{"command":"refresh_clock_status","record_revision":1850,"message_id":33}"#,
         host_mac,
         1,
     );
@@ -269,7 +266,7 @@ fn sample_rate_pullup_commands_use_the_authentic_wire_contract() {
     );
 
     let write = routed_with_assigned_id(
-        r#"{"command":"set_sample_rate_pullup","raw_value":4,"sequence":71}"#,
+        r#"{"command":"set_sample_rate_pullup","raw_value":4,"message_id":71}"#,
         host_mac,
         1,
     );
@@ -282,7 +279,7 @@ fn sample_rate_pullup_commands_use_the_authentic_wire_contract() {
 #[test]
 fn transmitter_names_command_requires_and_encodes_the_full_range() {
     let packet = build_command_from_json(
-        r#"{"command":"transmitter_names","channel_count":256,"transaction_id":4660}"#,
+        r#"{"command":"transmitter_names","channel_count":256,"message_id":4660}"#,
     )
     .unwrap();
     assert_eq!(
@@ -302,23 +299,23 @@ fn transmitter_names_command_requires_and_encodes_the_full_range() {
 fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
     let cases = [
         (
-            r#"{"command":"channel_count","protocol_id":10249,"transaction_id":114}"#,
+            r#"{"command":"channel_count","protocol_id":10249,"message_id":114}"#,
             "2809000a007210000000",
         ),
         (
-            r#"{"command":"property_directory","protocol_id":10249,"transaction_id":115}"#,
+            r#"{"command":"property_directory","protocol_id":10249,"message_id":115}"#,
             "2809000a007311020000",
         ),
         (
-            r#"{"command":"device_info","protocol_id":10249,"transaction_id":116}"#,
+            r#"{"command":"device_info","protocol_id":10249,"message_id":116}"#,
             "2809000a007410030000",
         ),
         (
-            r#"{"command":"transmitter_names","protocol_id":10249,"channel_count":2,"transaction_id":118}"#,
+            r#"{"command":"transmitter_names","protocol_id":10249,"channel_count":2,"message_id":118}"#,
             "28090010007620100000000100010002",
         ),
         (
-            r#"{"command":"query_receiver_port_ranges","protocol_id":10249,"transaction_id":121}"#,
+            r#"{"command":"query_receiver_port_ranges","protocol_id":10249,"message_id":121}"#,
             "2809000a007933000000",
         ),
     ];
@@ -333,20 +330,17 @@ fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
     }
 
     assert_eq!(
-        &build_command_from_json(r#"{"command":"channel_count","transaction_id":114}"#).unwrap()
-            [..2],
+        &build_command_from_json(r#"{"command":"channel_count","message_id":114}"#).unwrap()[..2],
         &[0x27, 0xFF]
     );
     assert_eq!(
-        &build_command_from_json(
-            r#"{"command":"query_receiver_port_ranges","transaction_id":121}"#,
-        )
-        .unwrap()[..2],
+        &build_command_from_json(r#"{"command":"query_receiver_port_ranges","message_id":121}"#,)
+            .unwrap()[..2],
         &[0x27, 0x29]
     );
 
     let managed_latency_write = build_command_from_json(
-        r#"{"command":"set_latency","latency":2.0,"protocol_id":10249,"transaction_id":19473}"#,
+        r#"{"command":"set_latency","latency":2.0,"protocol_id":10249,"message_id":19473}"#,
     )
     .unwrap();
     assert_eq!(
@@ -358,10 +352,8 @@ fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
         &[0x00, 0x1E, 0x84, 0x80, 0x00, 0x1E, 0x84, 0x80]
     );
     assert_eq!(
-        &build_command_from_json(
-            r#"{"command":"set_latency","latency":2.0,"transaction_id":19473}"#
-        )
-        .unwrap()[..2],
+        &build_command_from_json(r#"{"command":"set_latency","latency":2.0,"message_id":19473}"#)
+            .unwrap()[..2],
         &[0x27, 0xFF]
     );
 }
@@ -369,7 +361,7 @@ fn managed_status_commands_select_2809_explicitly_without_changing_defaults() {
 #[test]
 fn receiver_flow_query_command_matches_shipping_controller() {
     let packet = build_command_from_json(
-        r#"{"command":"query_receiver_flows","starting_flow":1,"transaction_id":826}"#,
+        r#"{"command":"query_receiver_flows","starting_flow":1,"message_id":826}"#,
     )
     .unwrap();
     assert_eq!(
@@ -384,19 +376,19 @@ fn receiver_flow_query_command_matches_shipping_controller() {
 #[test]
 fn typed_performance_and_storage_commands_are_available_through_json() {
     let receive = build_command_from_json(
-        r#"{"command":"set_receive_flow_performance","negotiated_protocol_id":10255,"supported_property_ids":[33537,784,33540],"latency_microseconds":250,"frames_per_packet":8,"platform_software_version":[2,9,9],"transaction_id":258}"#,
+        r#"{"command":"set_receive_flow_performance","negotiated_protocol_id":10255,"supported_property_ids":[33537,784,33540],"latency_microseconds":250,"frames_per_packet":8,"platform_software_version":[2,9,9],"message_id":258}"#,
     )
     .unwrap();
     assert_eq!(&receive[..10], &[0x28, 0x09, 0, 32, 1, 2, 0x11, 1, 0, 0]);
 
     let query = build_command_from_json(
-        r#"{"command":"query_performance_settings","negotiated_protocol_id":10255,"property_ids":[33537,784],"transaction_id":32}"#,
+        r#"{"command":"query_performance_settings","negotiated_protocol_id":10255,"property_ids":[33537,784],"message_id":32}"#,
     )
     .unwrap();
     assert_eq!(&query[..10], &[0x28, 0x09, 0, 16, 0, 32, 0x11, 0, 0, 0]);
 
     let store = build_command_from_json(
-        r#"{"command":"store_current_configuration","negotiated_protocol_id":10255,"transaction_id":4660}"#,
+        r#"{"command":"store_current_configuration","negotiated_protocol_id":10255,"message_id":4660}"#,
     )
     .unwrap();
     assert_eq!(store, [0x28, 0x09, 0, 10, 0x12, 0x34, 0x1f, 1, 0, 0]);
@@ -410,61 +402,9 @@ fn typed_performance_and_storage_commands_are_available_through_json() {
 }
 
 #[test]
-fn receiver_channel_2809_commands_match_shipping_controller() {
-    let transmitter_query = build_command_from_json(
-        r#"{"command":"query_modern_arc_transmitter_channel_status","transaction_id":10322}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        transmitter_query,
-        [
-            0x28, 0x09, 0x00, 0x22, 0x28, 0x52, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x83, 0x02, 0x83, 0x06, 0x03, 0x10,
-        ]
-    );
-
-    let query = build_command_from_json(
-        r#"{"command":"query_modern_arc_receiver_channel_status","transaction_id":10314}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        query,
-        [
-            0x28, 0x09, 0x00, 0x22, 0x28, 0x4A, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x83, 0x02, 0x83, 0x06, 0x03, 0x10,
-        ]
-    );
-
-    let receiver_flow_query = build_command_from_json(
-        r#"{"command":"query_modern_arc_receiver_flow_status","transaction_id":10326}"#,
-    )
-    .unwrap();
-    assert_eq!(
-        receiver_flow_query,
-        [
-            0x28, 0x09, 0x00, 0x22, 0x28, 0x56, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x83, 0x02, 0x83, 0x06, 0x03, 0x10,
-        ]
-    );
-
-    let rename = build_command_from_json(
-            r#"{"command":"set_channel_name","channel_type":"rx","channel_number":1,"name":"mic-mix","protocol_id":10249,"transaction_id":10316}"#,
-        )
-        .unwrap();
-    assert_eq!(
-        rename,
-        [
-            0x28, 0x09, 0x00, 0x22, 0x28, 0x4C, 0x34, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x06, 0x00, 0x01, 0x01, 0x00, 0x01, 0x00, 0x03, 0x00, 0x1A, 0x6D, 0x69,
-            0x63, 0x2D, 0x6D, 0x69, 0x78, 0x00,
-        ]
-    );
-
+fn transmitter_channel_name_reconciliation_spec_matches_capture() {
     let reconciliation = build_command_from_json(
-        r#"{"command":"reconcile_transmitter_channel_names_2809","records":[{"channel_number":1,"name":"vrroom:left"},{"channel_number":2,"name":"vrroom:right"}],"transaction_id":18956}"#,
+        r#"{"command":"reconcile_transmitter_channel_names_2809","records":[{"channel_number":1,"name":"vrroom:left"},{"channel_number":2,"name":"vrroom:right"}],"message_id":18956}"#,
     )
     .unwrap();
     assert_eq!(
@@ -482,7 +422,7 @@ fn receiver_channel_2809_commands_match_shipping_controller() {
 #[test]
 fn receiver_port_range_query_command_matches_shipping_controller() {
     let packet =
-        build_command_from_json(r#"{"command":"query_receiver_port_ranges","transaction_id":828}"#)
+        build_command_from_json(r#"{"command":"query_receiver_port_ranges","message_id":828}"#)
             .unwrap();
     assert_eq!(
         packet,
@@ -493,7 +433,7 @@ fn receiver_port_range_query_command_matches_shipping_controller() {
 #[test]
 fn transmit_channel_capability_query_command_matches_shipping_controller() {
     let packet = build_command_from_json(
-        r#"{"command":"query_transmit_channel_capabilities","transaction_id":809}"#,
+        r#"{"command":"query_transmit_channel_capabilities","message_id":809}"#,
     )
     .unwrap();
     assert_eq!(

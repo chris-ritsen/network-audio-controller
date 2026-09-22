@@ -17,8 +17,6 @@ from netaudio import core
 DEFAULT_AUTH_PORT = 8443
 DEFAULT_TIMEOUT_SECONDS = 10.0
 MAXIMUM_RESPONSE_BYTES = 1024 * 1024
-MAXIMUM_DAPI_FRAME_BYTES = 1024 * 1024
-DAPI_RESPONSE_MARKER = bytes.fromhex("b91a3725")
 
 
 class ControllerServiceError(RuntimeError):
@@ -158,7 +156,7 @@ class ControllerAPIClient:
             encoded_auth_token = auth_token.encode("ascii") if isinstance(auth_token, str) else b""
         except UnicodeEncodeError:
             encoded_auth_token = b""
-        if len(encoded_auth_token) != 43:
+        if not isinstance(auth_token, str) or len(encoded_auth_token) != 43:
             raise ControllerAuthenticationError("DDM returned an unsupported Controller authentication token")
         returned = _decode_endpoints(body)
         if returned != advertised:
@@ -228,7 +226,7 @@ class DAPISession:
         self.socket = None
         self.notification_socket = None
         self.local_ipv4 = None
-        self.wrapper_id = 5
+        self.wrapper_id = 0
         self.initialized = False
         self.domain_id: str | None = None
         self.target_selectors: dict[str, int] = {}
@@ -290,12 +288,12 @@ class DAPISession:
 
     def _read_frame(self, deadline: float) -> bytes:
         header = self._read_exactly(12, deadline)
-        if header[:4] != DAPI_RESPONSE_MARKER:
-            raise DAPISessionError("DDM returned an unsupported Controller frame marker")
-        payload_length = int.from_bytes(header[8:12], "big")
-        if payload_length > MAXIMUM_DAPI_FRAME_BYTES:
-            raise DAPISessionError("DDM Controller frame exceeded the configured limit")
-        frame = header + self._read_exactly(payload_length, deadline)
+        parsed = self._parse("dapi_frame_header", header)
+
+        if parsed is None or not parsed["server_to_client"]:
+            raise DAPISessionError("DDM returned an invalid or unsupported Controller frame header")
+
+        frame = header + self._read_exactly(parsed["payload_length"], deadline)
         announcement = self._parse("dapi_service_announcement", frame)
         if announcement is not None:
             self._send(core.build_dapi_service_acknowledgement(frame))
@@ -310,9 +308,7 @@ class DAPISession:
         return value if isinstance(value, dict) else None
 
     def _next_wrapper_id(self) -> int:
-        self.wrapper_id = (self.wrapper_id + 1) & 0xFFFF
-        if self.wrapper_id == 0:
-            self.wrapper_id = 1
+        self.wrapper_id = core.next_dapi_wrapper_id(self.wrapper_id)
         return self.wrapper_id
 
     def _initialize(self, credential: str, deadline: float, expected_domain_id: str | None = None) -> None:
@@ -340,20 +336,17 @@ class DAPISession:
                         f"DDM Controller session selected domain {announced_domain}, expected {expected_domain}"
                     )
                 self.domain_id = announced_domain
-        for subscription_id in range(2, 6):
-            self._send(core.build_dapi_domain_subscription(domain_id, subscription_id))
         if self.notification_socket is None or self.local_ipv4 is None:
             raise DAPISessionError("DDM Controller notification socket is not open")
         notification_port = self.notification_socket.getsockname()[1]
         self._send(
-            core.build_dapi_inventory_initialization(
+            core.build_dapi_domain_initialization(
                 domain_id,
                 core.next_message_id(),
                 notification_port,
                 self.local_ipv4,
             )
         )
-        self._send(core.build_dapi_device_inventory_subscription(domain_id))
         self.initialized = True
 
     def _target_selector(self, target_id: str, deadline: float) -> int:
@@ -409,10 +402,11 @@ class DAPISession:
         expected_domain_id: str | None = None,
     ) -> bytes:
         target_id = normalize_device_id(device_id)
-        if len(arc_packet) < 10:
-            raise ValueError("ARC request packet is too short")
-        expected_transaction_id = int.from_bytes(arc_packet[4:6], "big")
-        expected_opcode = int.from_bytes(arc_packet[6:8], "big")
+        request = self._parse("dapi_arc_request_header", arc_packet)
+
+        if request is None:
+            raise ValueError("invalid or unsupported ARC request packet")
+
         deadline = time.monotonic() + self.timeout
         self._initialize(credential, deadline, expected_domain_id)
         target_selector = self._target_selector(target_id, deadline)
@@ -420,18 +414,19 @@ class DAPISession:
         self._send(core.build_dapi_arc_request(target_selector, wrapper_id, arc_packet))
 
         while True:
-            response = self._parse("dapi_arc_response", self._read_frame(deadline))
-            if response is None or response.get("wrapper_id") != wrapper_id:
-                continue
-            if response.get("transaction_id") != expected_transaction_id or response.get("opcode") != expected_opcode:
-                raise DAPISessionError("DDM returned a mismatched managed ARC response")
-            packet_hex = response.get("packet_hex")
-            if not isinstance(packet_hex, str):
-                raise DAPISessionError("DDM returned an invalid managed ARC response")
             try:
-                return bytes.fromhex(packet_hex)
-            except ValueError as exception:
-                raise DAPISessionError("DDM returned an invalid managed ARC response") from exception
+                response = core.correlate_managed_arc(
+                    {
+                        "request_packet": list(arc_packet),
+                        "wrapper_id": wrapper_id,
+                        "response_frame": list(self._read_frame(deadline)),
+                    }
+                )
+            except core.NetaudioCoreError as exception:
+                raise DAPISessionError(exception.detail or str(exception)) from exception
+
+            if response is not None:
+                return bytes.fromhex(response["packet_hex"])
 
     def reboot(
         self,
@@ -451,10 +446,31 @@ class DAPISession:
         self._send(core.build_dapi_settings_request(target_selector, wrapper_id, packet))
         # Reboot has a transport acknowledgement, but no settings publication.
         # Acceptance does not establish that the device has finished restarting.
+        self._settings_completion(target_id, wrapper_id, None, deadline)
+
+    def _settings_completion(
+        self, target_id: str, wrapper_id: int, response_opcode: int | None, deadline: float
+    ) -> str | None:
+        state = None
+
         while True:
-            acknowledgement = self._parse("dapi_settings_acknowledgement", self._read_frame(deadline))
-            if acknowledgement is not None and acknowledgement.get("wrapper_id") == wrapper_id:
-                return
+            try:
+                result = core.advance_managed_settings(
+                    {
+                        "device_id": target_id,
+                        "wrapper_id": wrapper_id,
+                        "response_opcode": response_opcode,
+                        "frame": list(self._read_frame(deadline)),
+                        "state": state,
+                    }
+                )
+            except core.NetaudioCoreError as exception:
+                raise DAPISessionError(exception.detail or str(exception)) from exception
+
+            state = result["state"]
+
+            if result["complete"]:
+                return state["packet_hex"]
 
     def query_settings(
         self,
@@ -477,27 +493,12 @@ class DAPISession:
         wrapper_id = self._next_wrapper_id()
         self._send(core.build_dapi_settings_request(target_selector, wrapper_id, settings_packet))
 
-        acknowledged = False
-        matching_packet: bytes | None = None
-        while not acknowledged or matching_packet is None:
-            frame = self._read_frame(deadline)
-            acknowledgement = self._parse("dapi_settings_acknowledgement", frame)
-            if acknowledgement is not None and acknowledgement.get("wrapper_id") == wrapper_id:
-                acknowledged = True
-            publication = self._parse("dapi_settings_publication", frame)
-            if (
-                publication is not None
-                and publication.get("device_id") == target_id
-                and publication.get("opcode") == expected_response_opcode
-            ):
-                packet_hex = publication.get("packet_hex")
-                if not isinstance(packet_hex, str):
-                    raise DAPISessionError("DDM returned an invalid managed settings publication")
-                try:
-                    matching_packet = bytes.fromhex(packet_hex)
-                except ValueError as exception:
-                    raise DAPISessionError("DDM returned an invalid managed settings publication") from exception
-        return matching_packet
+        packet_hex = self._settings_completion(target_id, wrapper_id, expected_response_opcode, deadline)
+
+        if packet_hex is None:
+            raise DAPISessionError("DDM settings exchange completed without a publication")
+
+        return bytes.fromhex(packet_hex)
 
 
 def identify_managed_device(

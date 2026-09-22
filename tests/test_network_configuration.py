@@ -10,6 +10,7 @@ import pytest
 from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante.application import DanteApplication
+from netaudio.dante.commands import DanteCommands
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.network_configuration import (
     NetworkConfigurationError,
@@ -22,6 +23,43 @@ from netaudio.dante.network_configuration import (
     validate_interface_configuration,
 )
 from tests.http_api_test_support import get, make_device, make_http_server, post
+
+
+@pytest.mark.parametrize(
+    "overrides,modes,completeness,transport",
+    [
+        ({}, ["dhcp", "static"], "complete", True),
+        ({"writable": False}, [], "complete", True),
+        ({"entry": {}}, [], "complete", True),
+        ({"entry": None}, [], "complete", True),
+        ({"interfaces": [{}]}, ["dhcp", "static"], "partial", True),
+        ({"interfaces": None}, ["dhcp", "static"], "unknown", True),
+        ({"redundancy_supported": None}, ["dhcp", "static"], "unknown", True),
+        ({"managed": True}, ["dhcp", "static"], "complete", False),
+        ({"managed": True, "transports": ["ddm"]}, ["dhcp", "static"], "complete", True),
+        ({"transports": []}, ["dhcp", "static"], "complete", False),
+        ({"address_available": False}, ["dhcp", "static"], "complete", False),
+    ],
+)
+def test_native_network_control_preserves_unknown_inventory_and_explicit_transport_denials(
+    overrides, modes, completeness, transport
+):
+    facts = {
+        "entry": {"configured": {}},
+        "interfaces": [{}, {}],
+        "writable": True,
+        "redundancy_supported": True,
+        "managed": False,
+        "transports": None,
+        "address_available": True,
+        **overrides,
+    }
+    result = core.network_control_state(facts)
+
+    assert result["configuration_modes"] == modes
+    assert result["inventory_completeness"] == completeness
+    assert result["transport_available"] is transport
+    assert result["reported_count"] == (len(facts["interfaces"]) if facts["interfaces"] is not None else None)
 
 
 @pytest.mark.parametrize("case,pending", [("before", False), ("pending", True), ("restored", False)])
@@ -50,7 +88,6 @@ def network_device(protocol=0x0724):
         interface_status_protocol=protocol,
         dante_redundancy=None,
         interfaces=[],
-        switch_configuration_choices=None,
         interface_reboot_required=False,
         link_speed_mbps=1000,
         is_locked=False,
@@ -97,9 +134,13 @@ def redundancy_application(device, observations):
         observation = next(observations)
         if isinstance(observation, Exception):
             raise observation
-        if isinstance(observation, dict) and device.switch_configuration_choices:
+        previous = device.dante_redundancy or {}
+        if (
+            isinstance(observation, dict)
+            and previous.get("available_modes_source") == "switch_configuration_choice_table"
+        ):
             observation = deepcopy(observation)
-            observation["available_modes"] = deepcopy(device.switch_configuration_choices)
+            observation["available_modes"] = deepcopy(previous["available_modes"])
             observation["available_modes_source"] = "switch_configuration_choice_table"
         device.dante_redundancy = deepcopy(observation)
         return []
@@ -121,7 +162,7 @@ async def test_redundancy_verifies_configured_not_active_without_reboot():
     assert result["state"] == "effective_state_confirmed"
     assert result["effective_readback"]["configured_mode"] == "redundant"
     assert result["persistence_confirmation"] is None
-    application.commands.set_dante_redundancy.assert_called_once_with(0x0724, "redundant", None)
+    application.commands.set_dante_redundancy.assert_called_once_with("redundant", None)
     application._send_settings.assert_awaited_once()
     assert application.probe_interface_status.await_count == 2
     application.reboot.assert_not_awaited()
@@ -179,18 +220,35 @@ async def test_unsupported_choice_fails_closed():
 
 
 @pytest.mark.asyncio
-async def test_unobserved_revision_with_reported_support_fails_closed():
-    device = network_device(0x0777)
-    application = redundancy_application(device, iter([redundancy_status(), redundancy_status(configured="redundant")]))
-    with pytest.raises(RuntimeError, match="protocol_unsupported"):
-        await set_redundancy(application, device, "redundant")
-    application._send_settings.assert_not_awaited()
+async def test_native_recognized_flag_layout_drives_redundancy_serialization():
+    fixture = json.loads((Path(__file__).parent / "fixtures/managed_network_configuration.json").read_text())
+    packet = bytes.fromhex(fixture["cases"]["before"]["hexadecimal"])
+    parsed = core.parse_response("interface_status", packet)
+    device = network_device(parsed["record_protocol_identifier"])
+    before = interface_redundancy_status(parsed, device)
+    assert before["current"] == "switched"
+    after = deepcopy(before)
+    after["configured"] = "redundant"
+    application = redundancy_application(device, iter([before, after]))
+    application.commands = DanteCommands()
+
+    result = await set_redundancy(application, device, "redundant")
+
+    assert result["mutation_sent"] is True
+    application._send_settings.assert_awaited_once()
+    specification = application._send_settings.call_args.args[1]
+    encoded = core.build_command({**specification, "host_mac": "020000000001"})
+    assert encoded[26:28] == bytes.fromhex("0013")
+    assert encoded[-4:] == bytes.fromhex("00010001")
 
 
 @pytest.mark.asyncio
 async def test_reported_choice_table_selects_the_choice_code_for_the_mode():
     device = network_device(0x0777)
-    device.switch_configuration_choices = switch_choices()
+    device.dante_redundancy = {
+        "available_modes": switch_choices(),
+        "available_modes_source": "switch_configuration_choice_table",
+    }
     application = redundancy_application(
         device,
         iter(
@@ -201,14 +259,13 @@ async def test_reported_choice_table_selects_the_choice_code_for_the_mode():
         ),
     )
     await set_redundancy(application, device, "split_redundant")
-    application.commands.set_dante_redundancy.assert_called_once_with(0x0777, "split_redundant", 2)
+    application.commands.set_dante_redundancy.assert_called_once_with("split_redundant", 2)
     assert application.probe_switch_configuration.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_ad4d_uses_fresh_choice_status():
     device = network_device(0x072E)
-    device.switch_configuration_choices = switch_choices()
     application = redundancy_application(device, iter([None]))
     expected = redundancy_status(configured="split_redundant", supported=["switched", "split_redundant"])
 
@@ -244,9 +301,7 @@ async def test_matching_secondary_does_not_verify_primary_change():
     )
     with pytest.raises(NetworkConfigurationUnverified):
         await set_interface(application, device, "dhcp")
-    application.send_set_interface_dhcp.assert_awaited_once_with(
-        device, interface="primary", record_protocol_identifier=0x0724
-    )
+    application.send_set_interface_dhcp.assert_awaited_once_with(device, interface="primary")
     application.reboot.assert_not_awaited()
 
 
@@ -262,9 +317,32 @@ async def test_matching_primary_pending_change_is_verified(protocol, managed):
         send_set_interface_dhcp=AsyncMock(),
     )
     assert await set_interface(application, device, "dhcp") == [pending]
-    application.send_set_interface_dhcp.assert_awaited_once_with(
-        device, interface="primary", record_protocol_identifier=protocol
+    application.send_set_interface_dhcp.assert_awaited_once_with(device, interface="primary")
+
+
+@pytest.mark.asyncio
+async def test_interface_write_verifies_refreshed_packet_evidence_without_hiding_redundancy_changes():
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "managed_network_configuration.json").read_text())
+    device = network_device()
+    observations = iter(["before", "pending"])
+
+    async def probe(_device, timeout):
+        packet = bytes.fromhex(fixture["cases"][next(observations)]["hexadecimal"])
+        parsed = core.parse_response("interface_status", packet)
+        device.dante_redundancy = interface_redundancy_status(parsed, device)
+
+        return parsed["interfaces"]
+
+    application = SimpleNamespace(
+        probe_interface_status=AsyncMock(side_effect=probe), send_set_interface_static=AsyncMock()
     )
+    pending_packet = bytes.fromhex(fixture["cases"]["pending"]["hexadecimal"])
+    expected = core.parse_response("interface_status", pending_packet)["interfaces"][0]["configured"]
+
+    result = await set_interface(application, device, "static", expected)
+
+    assert result[0]["configured"] == expected
+    application.send_set_interface_static.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -288,9 +366,7 @@ async def test_secondary_write_proceeds_for_an_unobserved_revision_with_a_config
         probe_interface_status=AsyncMock(side_effect=[[before], [after]]), send_set_interface_dhcp=AsyncMock()
     )
     assert await set_interface(application, device, "dhcp", interface="secondary") == [after]
-    application.send_set_interface_dhcp.assert_awaited_once_with(
-        device, interface="secondary", record_protocol_identifier=0x07FE
-    )
+    application.send_set_interface_dhcp.assert_awaited_once_with(device, interface="secondary")
 
 
 @pytest.mark.asyncio
@@ -317,9 +393,7 @@ async def test_secondary_configuration_reaches_the_selected_interface(mode):
     )
     assert await set_interface(application, device, mode, fields, interface="secondary") == after
     if mode == "dhcp":
-        application.send_set_interface_dhcp.assert_awaited_once_with(
-            device, interface="secondary", record_protocol_identifier=0x073D
-        )
+        application.send_set_interface_dhcp.assert_awaited_once_with(device, interface="secondary")
         application.send_set_interface_static.assert_not_awaited()
     else:
         application.send_set_interface_static.assert_awaited_once_with(
@@ -329,7 +403,6 @@ async def test_secondary_configuration_reaches_the_selected_interface(mode):
             fields["dns_server"],
             fields["gateway"],
             interface="secondary",
-            record_protocol_identifier=0x073D,
         )
         application.send_set_interface_dhcp.assert_not_awaited()
 
@@ -371,8 +444,44 @@ def test_interface_selection_requires_one_identified_target(entries):
     ],
 )
 def test_invalid_static_configuration_is_rejected(override):
+    configuration = {"ip_address": "192.0.2.34", "netmask": "255.255.255.0", **override}
+
     with pytest.raises(ValueError):
-        validate_interface_configuration("static", {"ip_address": "192.0.2.34", "netmask": "255.255.255.0", **override})
+        validate_interface_configuration("static", configuration)
+
+    with pytest.raises(core.NetaudioCoreError):
+        optional = {
+            key: value
+            for key, value in {"dns": configuration.get("dns_server"), "gateway": configuration.get("gateway")}.items()
+            if value is not None
+        }
+        core.build_command(
+            {
+                "command": "set_interface_static",
+                "ip": configuration["ip_address"],
+                "netmask": configuration["netmask"],
+                **optional,
+                "host_mac": "020000000001",
+                "message_id": 1,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "ip,netmask", [("192.0.2.34", "255.255.255.0"), ("192.0.2.0", "255.255.255.254"), ("192.0.2.1", "255.255.255.255")]
+)
+def test_native_network_configuration_normalization_and_encoding_agree(ip, netmask):
+    configuration = {"ip_address": ip, "netmask": netmask, "dns_server": "", "gateway": None}
+    expected = {"mode": "static", "ip_address": ip, "netmask": netmask, "dns_server": "0.0.0.0", "gateway": "0.0.0.0"}
+
+    assert core.interface_configuration({"mode": "static", **configuration}) == expected
+    assert validate_interface_configuration("static", configuration) == expected
+    packet = core.build_command(
+        {"command": "set_interface_static", "ip": ip, "netmask": netmask, "host_mac": "020000000001", "message_id": 7}
+    )
+    assert packet[44:48] == bytes(map(int, ip.split(".")))
+    assert packet[48:52] == bytes(map(int, netmask.split(".")))
+    assert packet[52:60] == bytes(8)
 
 
 def test_controller_configured_gateway_and_dns_are_preserved_as_distinct_fields():
@@ -468,7 +577,10 @@ async def test_managed_wing_redundancy_restores_active_mode_without_reboot():
     device = network_device(0x073D)
     device.requires_managed_control = True
     device.control_transports = ["ddm"]
-    device.switch_configuration_choices = switch_choices(("Switched", 1), ("Redundant", 2))
+    device.dante_redundancy = {
+        "available_modes": switch_choices(("Switched", 1), ("Redundant", 2)),
+        "available_modes_source": "switch_configuration_choice_table",
+    }
     application = redundancy_application(
         device,
         iter(
@@ -501,6 +613,29 @@ async def test_redundancy_detects_unrelated_interface_changes():
         await set_redundancy(application, device, "redundant")
     application._send_settings.assert_awaited_once()
     application.reboot.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "fresh,configured,current,interfaces,outcome",
+    [
+        (True, "redundant", "switched", [], "verified"),
+        (True, "redundant", "redundant", [], "verified"),
+        (False, "redundant", "switched", [], "configuration_unconfirmed"),
+        (True, "switched", "switched", [], "configuration_unconfirmed"),
+        (True, "redundant", "split_redundant", [], "network_changed"),
+        (True, "redundant", "switched", [{"interface": "primary"}], "network_changed"),
+    ],
+)
+def test_native_redundancy_readback_owns_confirmation_and_collateral_change_checks(
+    fresh, configured, current, interfaces, outcome
+):
+    result = core.redundancy_control(
+        {"state_fresh": fresh, "configured": configured, "current": current},
+        "redundant",
+        readback={"before_mode": "switched", "before_interfaces": [], "after_interfaces": interfaces},
+    )
+
+    assert result["readback"] == outcome
 
 
 @pytest.mark.asyncio

@@ -84,7 +84,7 @@ def _report_preset_load(report: PresetLoadReport) -> None:
         typer.echo(f"  {device_name}: {result}", err=True)
     if report.needs_reboot:
         typer.echo(f"\nReboot required: {', '.join(dict.fromkeys(report.needs_reboot))}", err=True)
-    if report.failures:
+    if report.failures or report.unverified:
         raise typer.Exit(code=ExitCode.ERROR)
 
 

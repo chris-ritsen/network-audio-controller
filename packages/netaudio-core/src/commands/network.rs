@@ -10,7 +10,6 @@ fn interface_selector(interface: NetworkInterface) -> u16 {
 
 fn build_interface_configuration(
     interface: NetworkInterface,
-    _record_protocol_identifier: Option<u16>,
     configuration: Option<StaticInterfaceConfiguration>,
     mac: [u8; 6],
     message_id: u16,
@@ -50,31 +49,22 @@ fn build_interface_configuration(
 
 pub fn build_set_interface_dhcp(
     interface: NetworkInterface,
-    record_protocol_identifier: Option<u16>,
     mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_interface_configuration(interface, record_protocol_identifier, None, mac, message_id)
+    build_interface_configuration(interface, None, mac, message_id)
 }
 
 pub fn build_set_interface_static(
     configuration: StaticInterfaceConfiguration,
     interface: NetworkInterface,
-    record_protocol_identifier: Option<u16>,
     mac: [u8; 6],
     message_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    build_interface_configuration(
-        interface,
-        record_protocol_identifier,
-        Some(configuration),
-        mac,
-        message_id,
-    )
+    build_interface_configuration(interface, Some(configuration.validate()?), mac, message_id)
 }
 
 pub fn build_set_dante_redundancy(
-    _record_protocol_identifier: Option<u16>,
     mode: DanteRedundancyMode,
     switch_configuration_choice: Option<u16>,
     mac: [u8; 6],

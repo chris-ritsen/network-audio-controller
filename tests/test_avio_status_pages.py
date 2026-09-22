@@ -1,35 +1,31 @@
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.flows import inventory_from_receiver_flow_status_page
+import pytest
 
 
-def test_receiver_flow_status_page_becomes_receiver_flow_inventory():
-    inventory = inventory_from_receiver_flow_status_page(
-        {
-            "maximum_flow_slots": 8,
-            "flows": [
-                {
-                    "global_flow_id": 1,
-                    "media_type_code": 3,
-                    "media_local_flow_id": 1,
-                    "flow_type_code": 17,
-                    "local_receiver_channel_count": 1,
-                    "status_code": 9,
-                    "destination_internet_protocol_version_four_address": "239.255.0.1",
-                    "destination_user_datagram_port": 5004,
-                    "sample_rate": 48000,
-                    "encoding": 24,
-                    "latency_nanoseconds": 1000000,
-                }
-            ],
-        }
-    )
-    assert inventory["maximum_flow_slots"] == 8
-    assert inventory["flows"][0]["flow_type"] == "0x0011"
-    assert inventory["flows"][0]["status_code"] == 9
-    assert "subscription_status_code" not in inventory["flows"][0]
-    assert inventory["flows"][0]["sample_rate"] == 48000
+@pytest.mark.parametrize("page", [{}, {"flows": [None]}, {"flows": [], "reported_flow_count": 2}])
+def test_invalid_transmitter_inventory_cannot_clear_cached_records(page):
+    device = DanteDevice()
+    baseline = {"reported_flow_count": 1, "flows": [{"flow_number": 1, "channels": [1, 2]}]}
+    device.apply_transmitter_flow_status_page(baseline)
+
+    with pytest.raises(ValueError, match="malformed"):
+        device.apply_transmitter_flow_status_page(page)
+
+    assert device.transmitter_flows == baseline["flows"]
+    assert device.tx_flow_count == 1
+
+
+def test_transmitter_inventory_cache_owns_its_snapshot():
+    device = DanteDevice()
+    page = {"flows": [{"flow_number": 1, "channels": [1, 2], "flow_name": "Program"}]}
+    device.apply_transmitter_flow_status_page(page)
+    page["flows"][0]["channels"].clear()
+
+    assert device.transmitter_flows[0]["channels"] == [1, 2]
+    assert device.transmitter_flows[0]["flow_name"] == "Program"
+    assert device.tx_flow_count == 1
 
 
 def test_receiver_flow_status_page_stores_configured_latency():
@@ -80,7 +76,7 @@ def test_transmitter_channel_status_page_sets_controller_and_factory_names():
     channel.friendly_name = "bluetooth:left"
     device.tx_channels = {1: channel}
 
-    device.apply_transmitter_channel_status_page(
+    device.apply_transmitter_channel_inventory(
         {
             "records": [
                 {
@@ -136,11 +132,12 @@ def test_receiver_channel_status_page_fills_empty_subscription_and_factory_name(
     channel.channel_type = "rx"
     device.rx_channels = {1: channel}
     subscription = DanteSubscription()
+    subscription.rx_channel = channel
     subscription.rx_channel_name = "01"
     subscription.rx_device_name = device.name
     device.subscriptions = [subscription]
 
-    device.apply_receiver_channel_status_page(
+    device.apply_receiver_channel_inventory(
         {
             "records": [
                 {
@@ -157,6 +154,7 @@ def test_receiver_channel_status_page_fills_empty_subscription_and_factory_name(
 
     assert channel.factory_name == "CH1"
     assert channel.status_code == 9
+    subscription = device.subscriptions[0]
     assert subscription.tx_device_name == "lx-dante"
     assert subscription.tx_channel_name == "01"
     assert subscription.status_code == 9
@@ -172,12 +170,13 @@ def test_receiver_channel_status_page_replaces_stale_source_with_authoritative_r
     channel.name = "mic-mix-1"
     device.rx_channels = {1: channel}
     subscription = DanteSubscription()
+    subscription.rx_channel = channel
     subscription.rx_channel_name = "mic-mix-1"
     subscription.tx_device_name = "lx-dante"
     subscription.tx_channel_name = "mic-mix:high"
     device.subscriptions = [subscription]
 
-    device.apply_receiver_channel_status_page(
+    device.apply_receiver_channel_inventory(
         {
             "records": [
                 {
@@ -192,6 +191,7 @@ def test_receiver_channel_status_page_replaces_stale_source_with_authoritative_r
     )
 
     assert channel.factory_name == "Left"
+    subscription = device.subscriptions[0]
     assert subscription.tx_device_name == "other-device"
     assert subscription.tx_channel_name == "other-channel"
     assert subscription.status_code == 9
@@ -207,7 +207,7 @@ def test_partial_receiver_flow_page_preserves_last_complete_inventory_and_surviv
         "page_disposition": "complete",
         "result_code": 1,
         "reported_flow_count": 16,
-        "flows": [{"global_flow_id": number, "latency_nanoseconds": 1000000} for number in range(1, 17)],
+        "flows": [{"flow_number": number, "latency_nanoseconds": 1000000} for number in range(1, 17)],
     }
     device.apply_receiver_flow_status_page(complete)
     partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
@@ -230,9 +230,9 @@ def test_partial_receiver_flow_page_preserves_last_complete_inventory_and_surviv
 
 def test_receiver_flow_state_without_completeness_cannot_clear_inventory():
     device = DanteDevice()
-    device.receiver_flows = [{"global_flow_id": 16}]
+    device.receiver_flows = [{"flow_number": 16}]
     device.rx_flow_count = 1
     device.apply_receiver_flow_status_page({"flows": [], "reported_flow_count": 0})
-    assert device.receiver_flows == [{"global_flow_id": 16}]
+    assert device.receiver_flows == [{"flow_number": 16}]
     assert device.rx_flow_count == 1
     assert device.receiver_flow_completeness == "unknown"

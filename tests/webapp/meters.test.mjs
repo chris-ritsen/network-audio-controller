@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WEBAPP } from "./setup.mjs";
+import { WEBAPP, fixture } from "./setup.mjs";
 
 const { drawMeters } = await import(`${WEBAPP}meters.js`);
+const format = await import(`${WEBAPP}format.js`);
+format.setMeteringScale(Object.assign([], fixture("metering-scale")));
 
 test("meter frames reuse text layout until names or width change", () => {
   let measured = 0;
@@ -61,7 +63,7 @@ test("meter tracks keep their geometry as readable signal labels and levels chan
     [30, "signal_present", "-14.5 dBFS  Signal"],
     [0, "clipping", "Clipping"],
     [254, "muted", "Muted"],
-    [255, "unknown", "invalid  Unknown"],
+    [255, "unknown", "Unknown"],
     [undefined, undefined, "—"],
   ];
   for (const [level, presence] of samples) {
@@ -70,4 +72,21 @@ test("meter tracks keep their geometry as readable signal labels and levels chan
   assert.deepEqual(labels, samples.map((sample) => sample[2]));
   assert.equal(tracks.length, samples.length);
   for (const track of tracks) assert.deepEqual(track, tracks[0]);
+});
+
+test("meter interpretation arrives with the event snapshot instead of a browser protocol formula", async () => {
+  let receive;
+  globalThis.EventSource = class {
+    addEventListener(kind, callback) { if (kind === "message") receive = callback; }
+  };
+  const { connect } = await import(`${WEBAPP}store.js`);
+  connect();
+  receive({ data: JSON.stringify({ event: "snapshot", devices: {}, metering_scale: [
+    { dbfs: -10, state: "signal_present" },
+  ] }) });
+  assert.equal(format.meteringLabel(0), "-10.0 dBFS");
+  assert.equal(format.meterFraction(0), 51 / 61);
+  assert.equal(format.meteringLabel(1), "Unknown");
+  assert.equal(format.meterFraction(null), 0);
+  format.setMeteringScale(Object.assign([], fixture("metering-scale")));
 });

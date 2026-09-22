@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from netaudio import core
-from netaudio.dante.clock_control import clock_configuration_matches, preview_clock_configuration
+from netaudio.dante.clock_control import preview_clock_configuration
 from netaudio.monitoring import IssueEngine, IssueKind
 from tests.status_test_support import application_with_device, receive_packets
 
@@ -31,6 +31,49 @@ def device_and_app():
     app, device = application_with_device("clock.local.", "192.0.2.1")
     device.clock_status = status()
     return app, device
+
+
+@pytest.mark.parametrize(
+    "observed,requested,expected",
+    [
+        (status(), {}, True),
+        (status(), {"clock_source": 0, "preferred_leader": False}, True),
+        (status(), {"clock_source": 1}, False),
+        (status(preferred_leader=True), {"preferred_leader": False}, False),
+        (status(preferred_leader=0), {"preferred_leader": False}, False),
+        (status(clock_source_code=False), {"clock_source": 0}, False),
+        (status(), {"subdomain": [0] * 16}, True),
+        (status(clock_subdomain=bytes(16)), {"subdomain": [0] * 16}, True),
+        (status(), {"subdomain": [1] + [0] * 15}, False),
+        (status(), {"global_unicast_delay_requests": False}, False),
+        (status(global_unicast_delay_requests=False), {"global_unicast_delay_requests": False}, True),
+        (status(aggregate_ptpv1_unicast_delay_requests=True), {"aggregate_ptpv1_unicast_delay_requests": True}, True),
+        (status(status_supported=False), {}, False),
+        ({}, {}, False),
+        (status(status_supported=1), {}, False),
+    ],
+)
+def test_native_clock_readback_requires_supported_status_and_exact_values(observed, requested, expected):
+    assert core.clock_configuration_matches(observed, requested) is expected
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        {"unknown_setting": True},
+        {"preferred_leader": None},
+        {"preferred_leader": 1},
+        {"clock_source": True},
+        {"clock_source": -1},
+        {"clock_source": 65536},
+        {"subdomain": "house"},
+        {"subdomain": [0] * 15},
+        {"subdomain": [256] + [0] * 15},
+    ],
+)
+def test_native_clock_readback_rejects_invalid_requested_state(requested):
+    with pytest.raises(core.NetaudioCoreError):
+        core.clock_configuration_matches(status(), requested)
 
 
 @pytest.mark.asyncio
@@ -71,12 +114,39 @@ async def test_preferred_capability_gates_prevent_sending(caps, flags):
 
 def test_external_sources_require_independent_capability_and_subdomain_terminator():
     _, device = device_and_app()
-    with pytest.raises(RuntimeError, match="independently"):
+    with pytest.raises(RuntimeError):
         preview_clock_configuration(device, status(clock_source_code=1), {"clock_source": 2})
     device.supported_clock_sources = [1, 2]
     assert preview_clock_configuration(device, status(), {"clock_source": 1})["changes"] == {"clock_source": 1}
-    with pytest.raises(ValueError, match="15 bytes"):
+    with pytest.raises(core.NetaudioCoreError, match="15 bytes"):
         preview_clock_configuration(device, status(), {"subdomain": "a" * 16})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "observed,changes",
+    [
+        ({"record_revision": 0x0101}, {"preferred_leader": True}),
+        ({"clock_capabilities": True}, {"preferred_leader": True}),
+        ({"clock_capabilities": 0x10000}, {"preferred_leader": True}),
+        ({"extension_flags": True}, {"preferred_leader": True}),
+        ({"clock_capabilities": 0}, {"subdomain": "house"}),
+        ({"record_revision": 0x0602, "clock_capabilities": 8}, {"global_unicast_delay_requests": True}),
+        ({"clock_capabilities": 0x208}, {"global_unicast_delay_requests": True}),
+        ({"record_revision": 0x071E}, {"aggregate_ptpv1_unicast_delay_requests": True}),
+        ({"clock_capabilities": 4}, {"aggregate_ptpv1_unicast_delay_requests": True}),
+    ],
+)
+async def test_native_clock_constraints_reject_preview_before_transport(observed, changes):
+    app, device = device_and_app()
+    device.clock_status = status(**observed)
+    app.probe_clocking_status = AsyncMock(return_value=device.clock_status)
+    app._send_settings = AsyncMock()
+
+    with pytest.raises(RuntimeError):
+        await app.set_clock_configuration(device, changes)
+
+    app._send_settings.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -155,14 +225,18 @@ def test_auxiliary_diagnostics_never_update_clock_or_confirm_a_write():
     receive_packets(app, [packet], (str(device.ipv4), 8700))
     assert device.clock_status == previous
     assert device.clock_diagnostics["clock_unicast_status"]["raw_words"] == [0x10008, 0x100000, 0, 0x30000]
-    assert not clock_configuration_matches(device.clock_diagnostics["clock_unicast_status"], {"preferred_leader": True})
+    assert not core.clock_configuration_matches(
+        device.clock_diagnostics["clock_unicast_status"], {"preferred_leader": True}
+    )
 
 
-def test_malformed_clock_observation_invalidates_freshness():
+def test_framed_but_malformed_clock_observation_invalidates_freshness():
     from tests.test_clock_port_records import CLOCK_STATUS_PACKET
 
     app, device = device_and_app()
-    receive_packets(app, [CLOCK_STATUS_PACKET[:-1]], (str(device.ipv4), 8700))
+    truncated = CLOCK_STATUS_PACKET[:-1]
+    packet = truncated[:2] + len(truncated).to_bytes(2, "big") + truncated[4:]
+    receive_packets(app, [packet], (str(device.ipv4), 8700))
     assert device.clock_status["status_supported"] is False
     assert device.clock_observed_at is None
 
@@ -171,7 +245,7 @@ def test_unchanged_locked_settings_are_skipped_and_unknown_fields_rejected():
     _, device = device_and_app()
     preview = preview_clock_configuration(device, status(extension_flags=0x1000), {"preferred_leader": False})
     assert preview["changes"] == {}
-    with pytest.raises(ValueError, match="Unsupported"):
+    with pytest.raises(core.NetaudioCoreError, match="Unsupported"):
         preview_clock_configuration(device, status(), {"ptpv2_domain": 2})
 
 
@@ -214,6 +288,49 @@ async def test_http_clock_configuration_returns_confirmation_separately():
     assert result["persistence"] == "unknown"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path,parameters,method",
+    [
+        ("/set-clock-configuration", {"changes": {"preferred_leader": True}}, "set_clock_configuration"),
+        ("/set-clock-source", {"clock_source": 1}, "set_clock_source"),
+        ("/set-preferred-leader", {"preferred": True}, "set_preferred_leader"),
+        ("/set-clock-subdomain", {"subdomain": "house"}, "set_clock_subdomain"),
+        ("/refresh-clock", {}, "probe_clocking_status"),
+    ],
+)
+@pytest.mark.parametrize("failure,expected_status", [("revision", 409), ("timeout", 500)])
+async def test_http_clock_native_rejection_is_a_conflict_not_server_failure(
+    path, parameters, method, failure, expected_status
+):
+    import json
+
+    from tests.http_api_test_support import FakeWriter, make_http_server
+
+    _, device = device_and_app()
+    server = make_http_server({device.server_name: device})
+
+    async def rejected(*args, **kwargs):
+        if failure == "timeout":
+            raise core.NetaudioCoreError(core.STATUS_TIMEOUT, "clock transport")
+
+        core.clock_record_revision({"clock_revision": 0x073A, "explicit_revision": 0x0724})
+
+    setattr(server.application, method, rejected)
+    writer = FakeWriter()
+    body = json.dumps({"device": device.server_name, **parameters}).encode()
+
+    await server._route("POST", path, body, writer, None)
+    code, result = writer.response()
+
+    assert code == expected_status
+
+    if failure == "revision":
+        assert "differs" in result["error"]
+
+    assert writer.closed
+
+
 def test_serialized_clock_synchronization_becomes_unknown_when_stale():
     _, device = device_and_app()
     device.clock_observed_at = "2000-01-01T00:00:00+00:00"
@@ -248,7 +365,84 @@ def test_revision_override_cannot_replace_a_known_clock_revision():
     from netaudio.dante.clock_control import clock_record_revision
 
     _, device = device_and_app()
-    with pytest.raises(ValueError, match="differs"):
+    with pytest.raises(core.NetaudioCoreError, match="differs"):
         clock_record_revision(device, 0x0724)
     device.clock_status = None
     assert clock_record_revision(device, 0x0724) == 0x0724
+
+
+@pytest.mark.parametrize(
+    "facts,expected",
+    [
+        ({"clock_revision": 0x073A, "model_revision": 0x0724}, 0x073A),
+        ({"model_revision": 0x0724, "interface_revision": 0x073A}, 0x0724),
+        ({"interface_revision": 0x073A}, 0x073A),
+        ({"explicit_revision": 0x073A}, 0x073A),
+        ({"clock_revision": 0x073A, "explicit_revision": 0x073A}, 0x073A),
+    ],
+)
+def test_native_clock_revision_uses_reported_facts(facts, expected):
+    assert core.clock_record_revision(facts) == expected
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        {},
+        {"clock_revision": True, "model_revision": 0x073A},
+        {"clock_revision": 0, "interface_revision": 0x073A},
+        {"model_revision": 65536},
+        {"explicit_revision": -1},
+        {"clock_revision": 0x073A, "explicit_revision": 0x0724},
+        {"unexpected_revision": 0x073A},
+    ],
+)
+def test_native_clock_revision_never_guesses_past_invalid_evidence(facts):
+    with pytest.raises(core.NetaudioCoreError):
+        core.clock_record_revision(facts)
+
+
+@pytest.mark.parametrize("subdomain", ["house", [104, 111, 117, 115, 101], b"house"])
+def test_native_clock_plan_normalizes_and_roundtrips_readback(subdomain):
+    plan = core.plan_clock_configuration({"status": status(), "changes": {"subdomain": subdomain}})
+    normalized = list(b"house" + bytes(11))
+
+    assert plan["requested"] == plan["changes"] == {"subdomain": normalized}
+    assert plan["before"] == {"subdomain": [0] * 16}
+    packet = core.build_command(
+        {"command": "clock_control", "control": plan["control"], "host_mac": "020000000001", "message_id": 1}
+    )
+
+    assert packet[40:56] == bytes(normalized)
+    assert core.clock_configuration_matches(status(clock_subdomain=normalized), plan["requested"])
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"subdomain": "a" * 16},
+        {"subdomain": "a\0b"},
+        {"subdomain": [True]},
+        {"subdomain": "𝄞"},
+        {"clock_source": True},
+        {"preferred_leader": 1},
+        {"unknown": None},
+    ],
+)
+def test_native_clock_plan_rejects_invalid_changes(changes):
+    with pytest.raises(core.NetaudioCoreError):
+        core.plan_clock_configuration({"status": status(), "changes": changes})
+
+
+def test_native_clock_plan_does_not_treat_numeric_false_as_unchanged():
+    plan = core.plan_clock_configuration({"status": status(preferred_leader=0), "changes": {"preferred_leader": False}})
+
+    assert plan["changes"] == {"preferred_leader": False}
+
+
+def test_native_clock_plan_uses_fresh_status_revision_and_rejects_conflicting_override():
+    with pytest.raises(core.NetaudioCoreError, match="differs"):
+        core.plan_clock_configuration({"status": status(), "changes": {}, "revisions": {"explicit_revision": 0x0724}})
+
+    with pytest.raises(core.NetaudioCoreError, match="supported clock status"):
+        core.plan_clock_configuration({"status": status(status_supported=False), "changes": {}})

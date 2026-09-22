@@ -749,7 +749,7 @@ fn receiver_flow_status_2809_parser_decodes_controller_refresh_pages() {
     let flow = &page.flows[0];
     assert_eq!(flow.record_pointer, 32);
     assert_eq!(flow.record_type_code, 0x1422);
-    assert_eq!(flow.global_flow_id, 1);
+    assert_eq!(flow.flow_number, 1);
     assert_eq!(flow.media_type_code, 3);
     assert_eq!(flow.media_local_flow_id, 1);
     assert_eq!(flow.flow_type_code, 1);
@@ -1208,7 +1208,7 @@ fn modern_arc_280f_video_flow_pages_do_not_mislabel_the_format_as_audio() {
     assert_eq!(receiver.protocol_id, PROTOCOL_ARC_280F);
     assert_eq!(rx.record_type_code, 0x1626);
     assert_eq!(rx.record_length_bytes, 92);
-    assert_eq!(rx.global_flow_id, 1);
+    assert_eq!(rx.flow_number, 1);
     assert_eq!(rx.media_type_code, MEDIA_TYPE_VIDEO);
     assert_eq!(rx.media_local_flow_id, 1);
     assert_eq!(rx.flow_type_code, 0x8001);

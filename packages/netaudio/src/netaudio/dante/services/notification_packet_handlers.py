@@ -1,33 +1,15 @@
 from __future__ import annotations
 
 import logging
-import struct
 import time
 from dataclasses import dataclass
 
+from netaudio import core
+from netaudio.dante.audio_capabilities import audio_capability_fields
 from netaudio.dante.ptpv1_uuid import canonical_ptpv1_uuid
 from netaudio.dante.const import (
-    CONMON_HEADER_LENGTH,
-    CONMON_MAGIC,
-    CONMON_OPCODE_AES67_CURRENT_NEW,
-    CONMON_OPCODE_PANEL_STATUS,
-    CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS,
-    CONMON_OPCODE_DANTE_MODEL_RESPONSE,
-    CONMON_OPCODE_ENCODING_STATUS,
-    CONMON_OPCODE_EXPORT_FRAGMENT,
-    CONMON_OPCODE_CODEC_STATUS,
-    CONMON_OPCODE_INTERFACE_STATUS,
-    CONMON_OPCODE_INTERFACE_STATISTICS,
-    CONMON_OPCODE_LOCK_RESET_STATUS,
-    CONMON_OPCODE_MAKE_MODEL_RESPONSE,
-    CONMON_OPCODE_PTP_CLOCK_STATUS,
-    CONMON_OPCODE_ROUTING_CAPACITY_STATUS,
-    CONMON_OPCODE_SAMPLE_RATE_PULLUP_STATUS,
-    CONMON_OPCODE_SAMPLE_RATE_STATUS,
-    CONMON_OPCODE_SWITCH_CONFIGURATION_STATUS,
+    NOTIFICATION_VERSIONS_STATUS,
     DEVICE_SETTINGS_PORT,
-    NOTIFICATION_NAMES,
-    PROTOCOL_SETTINGS,
 )
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.gain import codec_status_fields
@@ -62,21 +44,7 @@ class ParsedStatus:
     waiter_result: object
 
 
-def extract_conmon_opcode(data: bytes) -> int | None:
-    if len(data) < CONMON_HEADER_LENGTH:
-        return None
-    magic_position = data.find(CONMON_MAGIC, 4)
-    if magic_position < 0:
-        return None
-    opcode_position = magic_position + 10
-    if opcode_position + 2 > len(data):
-        return None
-    return struct.unpack(">H", data[opcode_position : opcode_position + 2])[0]
-
-
 def _core_parse(kind: str, data: bytes, source_ip: str, description: str):
-    from netaudio import core
-
     try:
         return core.parse_response(kind, data)
     except core.NetaudioCoreError as exception:
@@ -153,7 +121,7 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
     observed_at = time.time()
     source = {
         "kind": "conmon_dante_model",
-        "opcode": CONMON_OPCODE_DANTE_MODEL_RESPONSE,
+        "opcode": NOTIFICATION_VERSIONS_STATUS,
         "record_protocol_version": parsed["record_protocol_version"],
         "observed_at_unix": observed_at,
         "fresh": True,
@@ -164,6 +132,7 @@ def _parse_dante_model(data: bytes, source_ip: str, device) -> ParsedStatus | No
     }
     status["redundancy_read_only_source"] = {
         **source,
+        "field_applicable": parsed["switch_redundancy_read_only"] is not None,
         "field_reported": parsed["switch_redundancy_read_only"] is not None,
         **(
             {}
@@ -202,7 +171,7 @@ def _parse_codec_status(data: bytes, source_ip: str, device) -> ParsedStatus | N
     parsed = _core_parse("codec_status", data, source_ip, "codec status")
     if parsed is None:
         return None
-    return ParsedStatus(STATUS_KIND_CODEC, codec_status_fields(device, parsed), parsed)
+    return ParsedStatus(STATUS_KIND_CODEC, codec_status_fields(parsed), parsed)
 
 
 def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus | None:
@@ -230,8 +199,6 @@ def _parse_interface_status(data: bytes, source_ip: str, device) -> ParsedStatus
 
 
 def _parse_interface_statistics(data: bytes, source_ip: str, device) -> ParsedStatus | None:
-    from netaudio import core
-
     try:
         parsed = core.parse_response("interface_statistics_status", data)
         observation = InterfaceStatisticsObservation.from_core(parsed, source_ip)
@@ -341,12 +308,7 @@ def _parse_capability_status(
             f"Conmon {response_kind} from {source_ip} ({len(data)}B): "
             f"current={current_value} supported={supported_values}"
         )
-        status = {
-            kind: current_value,
-            f"requested_{kind}": parsed["requested_value"],
-            f"{kind}_update_mode": parsed["update_mode"],
-            f"supported_{kind}s": supported_values,
-        }
+        status = audio_capability_fields(parsed, kind=kind)
         return ParsedStatus(kind, status, parsed)
 
     return parse
@@ -356,15 +318,7 @@ def _parse_sample_rate_pullup_status(data: bytes, source_ip: str, device) -> Par
     parsed = _core_parse("sample_rate_pullup_status", data, source_ip, "sample rate pull-up status")
     if parsed is None:
         return None
-    current_raw_value = parsed["current_value"]
-    supported_raw_values = parsed["available_values"]
-    status = {
-        "requested_sample_rate_pullup_raw_value": parsed["requested_value"],
-        "sample_rate_pullup_raw_value": current_raw_value,
-        "sample_rate_pullup_update_mode": parsed["update_mode"],
-        "sample_rate_pullup_flags": parsed["flags"],
-        "supported_sample_rate_pullup_raw_values": supported_raw_values,
-    }
+    status = audio_capability_fields(parsed, kind="sample_rate_pullup")
     return ParsedStatus(STATUS_KIND_SAMPLE_RATE_PULLUP, status, parsed)
 
 
@@ -388,32 +342,32 @@ def _clock_diagnostic_parser(response_kind: str):
 
 
 CONMON_STATUS_PARSERS = {
-    0x0022: _clock_diagnostic_parser("clock_master_status"),
-    0x0024: _clock_diagnostic_parser("clock_unicast_status"),
-    0x0026: _clock_diagnostic_parser("clock_identifier_status"),
-    CONMON_OPCODE_AES67_CURRENT_NEW: _parse_aes67_current_new,
-    CONMON_OPCODE_PANEL_STATUS: _parse_panel_status,
-    CONMON_OPCODE_CLEAR_CONFIGURATION_STATUS: _parse_clear_configuration_status,
-    CONMON_OPCODE_DANTE_MODEL_RESPONSE: _parse_dante_model,
-    CONMON_OPCODE_ENCODING_STATUS: _parse_capability_status(
+    "clock_master_status": _clock_diagnostic_parser("clock_master_status"),
+    "clock_unicast_status": _clock_diagnostic_parser("clock_unicast_status"),
+    "clock_identifier_status": _clock_diagnostic_parser("clock_identifier_status"),
+    "aes67_status": _parse_aes67_current_new,
+    "panel_status": _parse_panel_status,
+    "clear_configuration_status": _parse_clear_configuration_status,
+    "dante_model": _parse_dante_model,
+    "encoding_status": _parse_capability_status(
         STATUS_KIND_ENCODING,
         "encoding_status",
         "encoding",
     ),
-    CONMON_OPCODE_CODEC_STATUS: _parse_codec_status,
-    CONMON_OPCODE_INTERFACE_STATUS: _parse_interface_status,
-    CONMON_OPCODE_INTERFACE_STATISTICS: _parse_interface_statistics,
-    CONMON_OPCODE_LOCK_RESET_STATUS: _parse_lock_reset_status,
-    CONMON_OPCODE_MAKE_MODEL_RESPONSE: _parse_make_model,
-    CONMON_OPCODE_PTP_CLOCK_STATUS: _parse_ptp_clock_status,
-    CONMON_OPCODE_ROUTING_CAPACITY_STATUS: _parse_routing_capacity_status,
-    CONMON_OPCODE_SAMPLE_RATE_PULLUP_STATUS: _parse_sample_rate_pullup_status,
-    CONMON_OPCODE_SAMPLE_RATE_STATUS: _parse_capability_status(
+    "codec_status": _parse_codec_status,
+    "interface_status": _parse_interface_status,
+    "interface_statistics_status": _parse_interface_statistics,
+    "lock_reset_status": _parse_lock_reset_status,
+    "make_model": _parse_make_model,
+    "ptp_clock_status": _parse_ptp_clock_status,
+    "routing_capacity_status": _parse_routing_capacity_status,
+    "sample_rate_pullup_status": _parse_sample_rate_pullup_status,
+    "sample_rate_status": _parse_capability_status(
         STATUS_KIND_SAMPLE_RATE,
         "sample_rate_status",
         "sample rate",
     ),
-    CONMON_OPCODE_SWITCH_CONFIGURATION_STATUS: _parse_switch_configuration_status,
+    "switch_configuration_status": _parse_switch_configuration_status,
 }
 
 
@@ -433,23 +387,19 @@ class NotificationPacketHandlers:
         if self._packet_store:
             self._store_notification(data, source_ip, addr[1])
 
-        protocol_id = struct.unpack(">H", data[0:2])[0]
-
-        if protocol_id == PROTOCOL_SETTINGS:
-            if self._handle_conmon_response(data, source_ip):
-                return
-            self._handle_settings_notification(data, source_ip)
+        try:
+            envelope = core.parse_response("notification_envelope", data)
+        except core.NetaudioCoreError:
             return
 
-        if len(data) < 28:
-            logger.debug(
-                f"Short multicast packet from {source_ip}, "
-                f"{len(data)} bytes, protocol=0x{protocol_id:04X}, hex={data.hex()}"
-            )
+        notification_id = envelope["notification_id"]
+
+        if envelope["is_conmon"] and self._handle_conmon_response(
+            data, source_ip, notification_id, envelope["response_kind"]
+        ):
             return
 
-        notification_id = struct.unpack(">H", data[26:28])[0]
-        self._emit_notification(data, source_ip, notification_id)
+        self._emit_notification(data, source_ip, notification_id, envelope["notification_name"])
 
     def _log_dissected(self, data: bytes, source_ip: str, source_port: int) -> None:
         from netaudio.common.app_config import settings as app_settings
@@ -476,9 +426,11 @@ class NotificationPacketHandlers:
             )
         )
 
-    def _emit_notification(self, data: bytes, source_ip: str, notification_id: int) -> None:
+    def _emit_notification(
+        self, data: bytes, source_ip: str, notification_id: int, notification_name: str | None
+    ) -> None:
         device = self._lookup_device(source_ip)
-        notification_name = NOTIFICATION_NAMES.get(notification_id, f"Unknown(0x{notification_id:04X})")
+        notification_name = notification_name or "Unknown notification"
         self.notify_waiters("notification", source_ip, notification_id)
         logger.debug(
             f"Notification from {source_ip} ({device.name if device else ''}): "
@@ -498,25 +450,11 @@ class NotificationPacketHandlers:
             )
         )
 
-    def _handle_settings_notification(self, data: bytes, source_ip: str) -> None:
-        notification_id = struct.unpack(">H", data[26:28])[0] if len(data) >= 28 else None
-        logger.debug(
-            f"Settings notification from {source_ip}, "
-            f"{len(data)} bytes, notification_id={notification_id}, hex={data.hex()}"
-        )
-        if notification_id is not None:
-            self._emit_notification(data, source_ip, notification_id)
-
-    def _handle_conmon_response(self, data: bytes, source_ip: str) -> bool:
-        opcode = extract_conmon_opcode(data)
-
-        if opcode is None:
-            return False
-
-        if opcode == CONMON_OPCODE_EXPORT_FRAGMENT:
+    def _handle_conmon_response(self, data: bytes, source_ip: str, opcode: int, response_kind: str | None) -> bool:
+        if response_kind == "conmon_export_fragment":
             return self._handle_conmon_export_fragment(data, source_ip)
 
-        parse = CONMON_STATUS_PARSERS.get(opcode)
+        parse = CONMON_STATUS_PARSERS.get(response_kind)
         if parse is None:
             return False
 
@@ -559,8 +497,6 @@ class NotificationPacketHandlers:
         waiters = self.waiters_for("conmon_export", source_ip)
         if not waiters:
             return False
-        from netaudio import core
-
         try:
             fragment = core.parse_response("conmon_export_fragment", data)
         except core.NetaudioCoreError as exception:

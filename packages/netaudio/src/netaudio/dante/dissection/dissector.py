@@ -4,19 +4,7 @@ import logging
 from pathlib import Path
 
 from netaudio.dante.const import (
-    ARC_PROTOCOL_IDS,
-    ARC_RESULT_LABELS,
-    ARC_SUCCESS_RESULT_CODES,
-    OPCODE_CHANNEL_COUNT,
-    OPCODE_DEVICE_INFO,
-    OPCODE_DEVICE_NAME,
-    OPCODE_DEVICE_SETTINGS,
-    OPCODE_PROPERTY_DIRECTORY,
-    OPCODE_RX_CHANNELS,
-    OPCODE_TX_CHANNEL_INFO,
-    OPCODE_TX_CHANNEL_NAMES,
     PROTOCOL_LABELS,
-    PROTOCOL_SETTINGS,
     RESULT_CODE_REQUEST,
 )
 from netaudio.dante.dissection.header import parse_packet_header
@@ -24,52 +12,6 @@ from netaudio.dante.dissection.models import DissectedPacket, Span
 from netaudio.dante.dissection.values import _extract_value, _format_detail, _humanize_value
 
 logger = logging.getLogger("netaudio")
-
-ARC_RESPONSE_PARSE_KINDS = {
-    OPCODE_CHANNEL_COUNT: "channel_count",
-    OPCODE_DEVICE_INFO: "device_info",
-    OPCODE_DEVICE_NAME: "device_name",
-    OPCODE_DEVICE_SETTINGS: "device_settings",
-    OPCODE_PROPERTY_DIRECTORY: "property_directory",
-    0x2200: "tx_flows",
-    0x2400: "modern_arc_transmitter_channel_status_page",
-    0x2600: "transmitter_flow_status_page",
-    0x3200: "receiver_flow_page",
-    0x3400: "modern_arc_receiver_channel_status_page",
-    0x3600: "modern_arc_receiver_flow_status_page",
-}
-
-ARC_RESPONSE_PAGE_KINDS = {
-    OPCODE_RX_CHANNELS: "rx",
-    OPCODE_TX_CHANNEL_INFO: "tx_info",
-    OPCODE_TX_CHANNEL_NAMES: "tx_friendly",
-}
-
-CONMON_PARSE_KINDS = {
-    0x0011: "interface_status",
-    0x0014: "switch_configuration_status",
-    0x0020: "ptp_clock_status",
-    0x0022: "clock_master_status",
-    0x0024: "clock_unicast_status",
-    0x0026: "clock_identifier_status",
-    0x0040: "interface_statistics_status",
-    0x0060: "dante_model",
-    0x0078: "clear_configuration_status",
-    0x0080: "sample_rate_status",
-    0x0082: "encoding_status",
-    0x0084: "sample_rate_pullup_status",
-    0x0086: "unmapped_0086_status",
-    0x00C0: "make_model",
-    0x00E0: "unmapped_00e0_status",
-    0x0100: "routing_capacity_status",
-    0x0102: "unmapped_0102_status",
-    0x0106: "unmapped_0106_status",
-    0x1007: "aes67_status",
-    0x1009: "lock_reset_status",
-    0x100B: "codec_status",
-    0x100E: "panel_status",
-    0xFF05: "conmon_export_fragment",
-}
 
 
 def _load_facts_for_packet(
@@ -132,6 +74,7 @@ def _build_span(
     fact_ref: str,
     section_name: str,
     all_facts: list[dict],
+    header: dict | None,
 ) -> Span:
     offset = field_def.get("offset", 0)
     length = field_def.get("length", 0)
@@ -154,14 +97,19 @@ def _build_span(
     int_val, display = _extract_value(payload, offset, length, dtype, name)
 
     detail = ""
-    if name == "protocol_id" and isinstance(int_val, int):
+    if (
+        name == "message_type"
+        and header is not None
+        and header["protocol_name"] == "PROTOCOL_SETTINGS"
+        and int_val == header["opcode"]
+    ):
+        detail = (header.get("response_decoder") or {}).get("kind") or section_name
+    elif name == "protocol_id" and isinstance(int_val, int):
         label = PROTOCOL_LABELS.get(int_val)
         if label:
             detail = label
-    elif name == "status" and isinstance(int_val, int):
-        label = ARC_RESULT_LABELS.get(int_val)
-        if label:
-            detail = label
+    elif name == "status" and header is not None and int_val == header.get("result_code"):
+        detail = header.get("result_label") or ""
     elif name == "opcode" and isinstance(int_val, int):
         opcode_fact = _find_opcode_fact(all_facts, int_val)
         if opcode_fact:
@@ -185,32 +133,16 @@ def _build_span(
     )
 
 
-def core_parse_kind(header: dict) -> tuple[str, bool] | None:
-    protocol_id = header["protocol_id"]
-    opcode = header["opcode"]
-    if protocol_id == PROTOCOL_SETTINGS:
-        kind = CONMON_PARSE_KINDS.get(opcode)
-        return (kind, False) if kind else None
-    if protocol_id not in ARC_PROTOCOL_IDS:
-        return None
-    result_code = header["result_code"]
-    if result_code == RESULT_CODE_REQUEST:
-        return None
-    if opcode in ARC_RESPONSE_PAGE_KINDS:
-        return (ARC_RESPONSE_PAGE_KINDS[opcode], True)
-    kind = ARC_RESPONSE_PARSE_KINDS.get(opcode)
-    if kind is None or result_code not in ARC_SUCCESS_RESULT_CODES:
-        return None
-    return (kind, False)
-
-
 def _core_fields(payload: bytes, header: dict, request: bytes | None) -> tuple[str | None, dict | None]:
     from netaudio import core
 
-    parse_kind = core_parse_kind(header)
-    if parse_kind is None:
+    decoder = header.get("response_decoder")
+
+    if decoder is None:
         return None, None
-    kind, paged = parse_kind
+
+    kind, paged = decoder["kind"], decoder["paged"]
+
     try:
         if paged:
             if request is not None:
@@ -245,6 +177,7 @@ def dissect(
         facts = _load_facts_for_packet(payload, facts_path)
 
     result = DissectedPacket(payload=payload)
+    header = parse_packet_header(payload)
     span_by_offset: dict[int, Span] = {}
     covered = set()
 
@@ -260,7 +193,7 @@ def dissect(
             field_direction = field_def.get("direction")
             if field_direction is not None and field_direction != direction:
                 continue
-            span = _build_span(payload, field_def, fact_ref, section_name, facts)
+            span = _build_span(payload, field_def, fact_ref, section_name, facts, header)
             span_by_offset[span.offset] = span
 
             for byte_offset in range(span.offset, span.offset + span.length):
@@ -268,7 +201,6 @@ def dissect(
 
     result.spans = list(span_by_offset.values())
 
-    header = parse_packet_header(payload)
     if header is not None:
         result.core_kind, result.core_fields = _core_fields(payload, header, request)
         protocol_label = PROTOCOL_LABELS.get(header["protocol_id"], f"0x{header['protocol_id']:04X}")

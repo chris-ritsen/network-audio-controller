@@ -67,6 +67,8 @@ const FIELDS = [
   "clock_status",
   "clock_observed_at",
   "clock_source_code",
+  "clock_source",
+  "clock_source_choices",
   "clock_subdomain",
   "dante_model",
   "interfaces",

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import ctypes
-import json
 import logging
 import threading
 from collections.abc import Callable
@@ -20,44 +18,6 @@ DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 1000
 
 WireObserver = Callable[[bytes, str, int, str], None]
 ClientKey = tuple[str, int, int, int, Optional[str], Optional[str], int]
-
-
-def _wire_capture_functions(library):
-    clear_function = library.netaudio_client_clear_wire_captures
-    read_function = library.netaudio_client_get_wire_captures_json
-    if not getattr(read_function, "argtypes", None):
-        clear_function.argtypes = [ctypes.c_void_p]
-        clear_function.restype = ctypes.c_int
-        read_function.argtypes = [
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_uint8),
-            ctypes.c_size_t,
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        read_function.restype = ctypes.c_int
-    return clear_function, read_function
-
-
-def clear_wire_captures(client) -> None:
-    clear_function, _ = _wire_capture_functions(client._require_library())
-    status = clear_function(client._handle)
-    if status != core.STATUS_OK:
-        raise core.NetaudioCoreError(status, "clear_wire_captures")
-
-
-def take_wire_captures(client) -> list[dict]:
-    _, read_function = _wire_capture_functions(client._require_library())
-    capacity = 262144
-    out = (ctypes.c_uint8 * capacity)()
-    length = ctypes.c_size_t(0)
-    status = read_function(client._handle, out, capacity, ctypes.byref(length))
-    if status == 6 and length.value > capacity:
-        capacity = length.value
-        out = (ctypes.c_uint8 * capacity)()
-        status = read_function(client._handle, out, capacity, ctypes.byref(length))
-    if status != core.STATUS_OK:
-        raise core.NetaudioCoreError(status, "get_wire_captures_json")
-    return json.loads(bytes(out[: length.value]))
 
 
 class CoreTransport:
@@ -186,14 +146,14 @@ class CoreTransport:
             with client_lock:
                 return operation(client)
         with client_lock:
-            clear_wire_captures(client)
+            client.clear_wire_captures()
             try:
                 return operation(client)
             finally:
-                for capture in take_wire_captures(client):
+                for capture in client.get_wire_captures():
                     observer(
                         bytes.fromhex(capture["payload_hex"]),
-                        client._device_ip,
+                        client.device_ip,
                         capture["port"],
                         capture["direction"],
                     )

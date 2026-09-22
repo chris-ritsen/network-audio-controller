@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from netaudio.cli_support.execution import readback_after_notification
+from netaudio.dante.readback import readback_after_notification
 from netaudio.cli_support.selection import parse_channel_reference
 from netaudio.commands import channel as channel_commands
 from netaudio.commands.device import cli as device_commands
@@ -16,6 +16,61 @@ from netaudio.dante.services.notification import (
 )
 
 from tests.cli_test_support import FakeApplication, FakeChannelDevice, FakeDevice, invoke
+
+
+@pytest.mark.parametrize(
+    "status,exit_code",
+    [({"current_value": 2}, 0), ({"current_value": 0, "requested_value": 2}, 1), (None, 1)],
+)
+def test_pullup_write_uses_the_setters_fresh_readback(status, exit_code):
+    from netaudio.commands.config.cli import run_sample_rate_pullup
+
+    device = FakeDevice("Desk")
+    device.supported_sample_rate_pullup_raw_values = [0, 2]
+    application = SimpleNamespace(
+        set_sample_rate_pullup=AsyncMock(return_value=status),
+        probe_sample_rate_pullup_status=AsyncMock(side_effect=AssertionError("duplicate readback")),
+    )
+
+    result = invoke(run_sample_rate_pullup, application, {"desk.local.": device}, "2", False)
+
+    assert result.exception is None
+    assert result.exit_code == exit_code
+    assert ("(verified)" in result.output) is (exit_code == 0)
+    application.set_sample_rate_pullup.assert_awaited_once_with(device, 2)
+    application.probe_sample_rate_pullup_status.assert_not_awaited()
+
+
+def test_pullup_readback_updates_real_device_and_renders_applied_value():
+    from ipaddress import IPv4Address
+    from netaudio import DanteDevice
+    from netaudio.commands.config.cli import run_sample_rate_pullup
+
+    device = DanteDevice("desk.local.")
+    device.name = "Desk"
+    device.ipv4 = IPv4Address("192.0.2.10")
+    device.online = True
+    application = SimpleNamespace(
+        probe_encoding_status=AsyncMock(),
+        probe_sample_rate_status=AsyncMock(),
+        probe_sample_rate_pullup_status=AsyncMock(
+            return_value={
+                "current_value": 2,
+                "requested_value": 3,
+                "update_mode": 2,
+                "available_values": [0, 2, 3],
+                "flags": 0,
+            }
+        ),
+    )
+
+    result = invoke(run_sample_rate_pullup, application, {device.server_name: device}, None, False)
+
+    assert result.exit_code == 0, result.exception
+    assert "+0.1%" in result.output
+    assert device.sample_rate_pullup_raw_value == 2
+    assert device.requested_sample_rate_pullup_raw_value == 3
+    assert device.supported_sample_rate_pullup_raw_values == [0, 2, 3]
 
 
 class RecordingDevice:
@@ -327,14 +382,14 @@ async def test_encoding_operation_rejects_known_unsupported_value_without_sendin
     application = DanteApplication()
     application.transport = SimpleNamespace(execute=AsyncMock(return_value=None))
 
-    with pytest.raises(ValueError, match="requested encoding 32 is not supported"):
+    with pytest.raises(RuntimeError, match="value_not_advertised"):
         await application.send_set_encoding(device, 32)
 
     application.transport.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("supported_encodings", [[16, 24, 32], None])
+@pytest.mark.parametrize("supported_encodings", [[16, 24, 32], [], None])
 async def test_encoding_operation_sends_supported_or_unknown_value(supported_encodings):
     device = RecordingDevice(supported_encodings=supported_encodings)
     application = DanteApplication()
@@ -345,7 +400,7 @@ async def test_encoding_operation_sends_supported_or_unknown_value(supported_enc
     assert address == "192.168.1.61"
     assert specification["command"] == "set_encoding"
     assert specification["encoding"] == 32
-    assert 1 <= specification["sequence"] <= 0xFFFF
+    assert 1 <= specification["message_id"] <= 0xFFFF
 
 
 def test_device_name_only_reports_success_after_matching_readback():

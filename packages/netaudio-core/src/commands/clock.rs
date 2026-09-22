@@ -57,7 +57,9 @@ pub fn build_clock_control(
         return Err(reject);
     }
     if let Some(source) = c.clock_source {
-        if source > 2 || (source != 0 && !c.supported_clock_sources.contains(&source)) {
+        if crate::clock_configuration::clock_source_name(source).is_none()
+            || (source != 0 && !c.supported_clock_sources.contains(&source))
+        {
             return Err(reject);
         }
     }

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.dante import flows
 from netaudio.dante.sample_rate_topology import (
@@ -9,6 +10,8 @@ from netaudio.dante.sample_rate_topology import (
     SampleRateTopologyConfirmationRequired,
     SampleRateTopologyMutationOutcomeUnknownError,
     SampleRateTopologyUnsupportedError,
+    SampleRateTopologyReadbackError,
+    SampleRateTopologyVerificationError,
     change_sample_rate_topology_safe,
     preflight_sample_rate_change,
 )
@@ -28,7 +31,10 @@ class FakeA32:
         self.sample_rate_configuration_supported = True
         self.is_locked = False
         self.diagnostic_log_export_supported = False
-        self.sample_rate_channel_capacities = None
+        self.sample_rate_channel_capacities = [
+            {"sample_rate_hertz": rate, "receive_channel_count": count, "transmit_channel_count": count}
+            for rate, count in [(44100, 64), (48000, 64), (88200, 32), (96000, 32), (176400, 16), (192000, 16)]
+        ]
         self.rx_channels = {}
         self.tx_channels = {}
         self.subscriptions = []
@@ -91,6 +97,123 @@ def _sample_rate_status(current_value, available_values):
     }
 
 
+@pytest.mark.parametrize(
+    "current,available",
+    [(0, [0]), (True, [1]), (48_000, []), (48_000, [96_000]), (48_000, [48_000, 48_000]), (48_000, [48_000, -1])],
+)
+def test_native_sample_rate_evidence_rejects_unusable_status(current, available):
+    with pytest.raises(core.NetaudioCoreError):
+        core.sample_rate_status_evidence(_sample_rate_status(current, available))
+
+
+def test_native_sample_rate_evidence_preserves_advertised_order():
+    assert core.sample_rate_status_evidence(_sample_rate_status(48_000, [96_000, 48_000])) == {
+        "current_value": 48_000,
+        "available_values": [96_000, 48_000],
+    }
+
+
+def test_native_capacity_evidence_distinguishes_unknown_from_conflicting_reports():
+    capacity = {"sample_rate_hertz": 48_000, "receive_channel_count": 8, "transmit_channel_count": 8}
+    assert core.sample_rate_capacity(None, 48_000) is None
+    assert core.sample_rate_capacity([capacity], 96_000) is None
+    assert core.sample_rate_capacity([capacity, capacity], 48_000) == capacity
+
+    with pytest.raises(core.NetaudioCoreError, match="conflicting"):
+        core.sample_rate_capacity([capacity, {**capacity, "transmit_channel_count": 4}], 48_000)
+
+
+@pytest.mark.parametrize("count", [True, -1, 65536])
+def test_native_capacity_evidence_does_not_coerce_invalid_channel_counts(count):
+    with pytest.raises(core.NetaudioCoreError):
+        core.sample_rate_capacity(
+            [{"sample_rate_hertz": 48_000, "receive_channel_count": count, "transmit_channel_count": 8}], 48_000
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,error", [(0, SampleRateTopologyUnsupportedError), (77, SampleRateTopologyReadbackError)])
+async def test_sample_rate_preflight_uses_fresh_update_mode_before_any_write(mode, error, install_flow_inventory):
+    device = FakeA32([_phase(64, [])])
+    install_flow_inventory(device)
+    writes = []
+
+    async def probe():
+        status = _sample_rate_status(48_000, [48_000, 96_000])
+        status["update_mode"] = mode
+        return status
+
+    async def mutate():
+        writes.append(96_000)
+
+    with pytest.raises(error, match="update mode"):
+        await change_sample_rate_topology_safe(device, 96_000, probe, mutate)
+
+    assert writes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory", ["rekeyed", "duplicate_identity", "boolean_identity"])
+async def test_sample_rate_inventory_checks_channel_identity_not_mapping_keys(inventory, install_flow_inventory):
+    device = FakeA32([_phase(64, [])])
+    install_flow_inventory(device)
+    read_channels = device.get_rx_channels
+
+    async def read_rekeyed_channels():
+        await read_channels()
+
+        if inventory == "rekeyed":
+            device.rx_channels = {f"channel-{key}": channel for key, channel in device.rx_channels.items()}
+        elif inventory == "duplicate_identity":
+            device.rx_channels[2].number = 1
+        else:
+            device.rx_channels[1].number = True
+
+    device.get_rx_channels = read_rekeyed_channels
+
+    async def probe():
+        return _sample_rate_status(48_000, [48_000, 96_000])
+
+    if inventory == "rekeyed":
+        result = await preflight_sample_rate_change(device, 96_000, probe)
+        assert result.current_snapshot.capacity.receive_channel_count == 64
+    else:
+        with pytest.raises(SampleRateTopologyVerificationError, match="receiver inventory"):
+            await preflight_sample_rate_change(device, 96_000, probe)
+
+
+@pytest.mark.asyncio
+async def test_sample_rate_preflight_rejects_conflicting_flow_identities(install_flow_inventory):
+    device = FakeA32([_phase(64, [_multicast_flow(3, [1, 33]), _multicast_flow(3, [2, 34])])])
+    install_flow_inventory(device)
+
+    async def probe():
+        return _sample_rate_status(48_000, [48_000, 96_000])
+
+    with pytest.raises(SampleRateTopologyVerificationError, match="duplicate.*flow"):
+        await preflight_sample_rate_change(device, 96_000, probe)
+
+
+@pytest.mark.asyncio
+async def test_sample_rate_readback_rejects_duplicate_flow_identity(install_flow_inventory):
+    device = FakeA32(
+        [
+            _phase(64, [_multicast_flow(3, [1, 2])]),
+            _phase(32, [_multicast_flow(3, [1, 2], 96_000), _multicast_flow(3, [1, 2], 96_000)]),
+        ]
+    )
+    install_flow_inventory(device)
+
+    async def probe():
+        return _sample_rate_status(48_000 if device.phase_index == 0 else 96_000, [48_000, 96_000])
+
+    async def mutate():
+        device.phase_index = 1
+
+    with pytest.raises(SampleRateTopologyChangedButUnverifiedError, match="duplicate.*flow"):
+        await change_sample_rate_topology_safe(device, 96_000, probe, mutate)
+
+
 def _multicast_flow(flow_number, members, sample_rate=48_000):
     return {
         "flow_number": flow_number,
@@ -101,6 +224,78 @@ def _multicast_flow(flow_number, members, sample_rate=48_000):
         "encoding": 24,
         "frames_per_packet": 1,
     }
+
+
+def _native_topology_snapshot(rate=48_000):
+    return {
+        "capacity": {"sample_rate_hertz": rate, "receive_channel_count": 64, "transmit_channel_count": 64},
+        "receiver_subscriptions": [],
+        "transmitter_flows": [],
+        "flow_protocol_identifier": 0x2729,
+    }
+
+
+@pytest.mark.parametrize(
+    "members,target_count,confirmation",
+    [([], None, False), ([1, 32], None, True), ([1, 32], 16, True), ([1, 32], 64, False)],
+)
+def test_native_topology_owns_destructive_confirmation_requirement(members, target_count, confirmation):
+    snapshot = _native_topology_snapshot()
+
+    if members:
+        snapshot["transmitter_flows"] = [core.transmit_flow_topology(_multicast_flow(1, members), protocol_id=0x2729)]
+
+    target = (
+        {"sample_rate_hertz": 96_000, "receive_channel_count": target_count, "transmit_channel_count": target_count}
+        if target_count is not None
+        else None
+    )
+    impact = core.sample_rate_topology_impact(snapshot, target)
+
+    assert impact["requires_destructive_confirmation"] is confirmation
+
+
+@pytest.mark.parametrize("known_capacity", [True, False])
+def test_native_topology_readback_requires_target_rate_even_without_flows(known_capacity):
+    before = _native_topology_snapshot()
+    after = _native_topology_snapshot()
+    target = _native_topology_snapshot(96_000)["capacity"] if known_capacity else None
+
+    with pytest.raises(core.NetaudioCoreError, match="sample rate"):
+        core.verify_sample_rate_topology(before, after, target, 96_000)
+
+
+@pytest.mark.parametrize("field", ["sample_rate_hertz", "receive_channel_count", "transmit_channel_count"])
+def test_native_topology_readback_requires_exact_target_capacity(field):
+    before = _native_topology_snapshot()
+    after = _native_topology_snapshot(96_000)
+    target = {**after["capacity"], field: 32}
+
+    with pytest.raises(core.NetaudioCoreError, match="capacity"):
+        core.verify_sample_rate_topology(before, after, target, 96_000)
+
+
+@pytest.mark.parametrize("operation", ["impact", "readback"])
+def test_native_topology_rejects_flow_rate_inconsistent_with_snapshot(operation):
+    snapshot = _native_topology_snapshot()
+    snapshot["transmitter_flows"] = [core.transmit_flow_topology(_multicast_flow(1, [1], 96_000), protocol_id=0x2729)]
+
+    with pytest.raises(core.NetaudioCoreError, match="sample rate"):
+        if operation == "impact":
+            core.sample_rate_topology_impact(snapshot, None)
+        else:
+            core.verify_sample_rate_topology(snapshot, snapshot, snapshot["capacity"], 48_000)
+
+
+def test_native_topology_cannot_verify_lost_multicast_flow_using_caller_retirement_flag():
+    before = _native_topology_snapshot()
+    flow = core.transmit_flow_topology(_multicast_flow(1, [1]), protocol_id=0x2729)
+    flow["may_retire_after_sample_rate_change"] = True
+    before["transmitter_flows"] = [flow]
+    after = _native_topology_snapshot(96_000)
+
+    with pytest.raises(core.NetaudioCoreError, match="retirement"):
+        core.verify_sample_rate_topology(before, after, after["capacity"], 96_000)
 
 
 def _unicast_flow(flow_number, channel_count=1):
@@ -118,7 +313,7 @@ def _unicast_flow(flow_number, channel_count=1):
 @pytest.fixture
 def install_flow_inventory(monkeypatch):
     def install(device):
-        async def detect_flow_protocol(device_ip, arc_port):
+        async def detect_flow_protocol(device_ip, arc_port, *, device):
             assert device_ip == "192.0.2.10"
             assert arc_port == 4440
             return 0x2729
@@ -128,7 +323,7 @@ def install_flow_inventory(monkeypatch):
             assert arc_port == 4440
             assert flow_protocol_identifier == 0x2729
             return {
-                "max_flow_slots": 32,
+                "maximum_flow_slots": 32,
                 "flows": device.phases[device.phase_index]["flows"],
             }
 
@@ -444,9 +639,13 @@ async def test_preflight_accepts_proven_zero_directional_capacities(
 
 
 @pytest.mark.asyncio
-async def test_unknown_model_with_reported_rates_proceeds_and_verifies_by_readback(install_flow_inventory):
+@pytest.mark.parametrize(
+    "model", ["Different Device", "A32 Dante AD/DA Converter", "AVIO-DAI2", "AVIO-DAO2", "WING-DANTE64"]
+)
+async def test_model_name_cannot_replace_capacity_readback(install_flow_inventory, model):
     device = FakeA32([_phase(8, [], transmit_channel_count=8), _phase(4, [], transmit_channel_count=4)])
-    device.dante_model = "Different Device"
+    device.dante_model = model
+    device.sample_rate_channel_capacities = None
     install_flow_inventory(device)
     loads = []
 
@@ -475,9 +674,13 @@ async def test_unknown_model_with_reported_rates_proceeds_and_verifies_by_readba
 
 
 @pytest.mark.asyncio
-async def test_unknown_capacity_with_transmitter_flows_requires_confirmation(install_flow_inventory):
+@pytest.mark.parametrize(
+    "model", ["Different Device", "A32 Dante AD/DA Converter", "AVIO-DAI2", "AVIO-DAO2", "WING-DANTE64"]
+)
+async def test_unknown_capacity_with_transmitter_flows_requires_confirmation(install_flow_inventory, model):
     device = FakeA32([_phase(8, [_multicast_flow(1, [1, 2])], transmit_channel_count=8)])
-    device.dante_model = "Different Device"
+    device.dante_model = model
+    device.sample_rate_channel_capacities = None
     install_flow_inventory(device)
 
     async def probe():
@@ -544,7 +747,10 @@ async def test_unknown_family_authoritative_same_rate_is_a_no_op_without_sending
 
 
 @pytest.mark.asyncio
-async def test_application_sample_rate_write_uses_notification_readback_and_per_device_lock(install_flow_inventory):
+@pytest.mark.parametrize("cached_mode,cached_choices", [(2, [48_000, 96_000]), (1, [48_000]), (None, None)])
+async def test_application_sample_rate_write_uses_notification_readback_and_per_device_lock(
+    install_flow_inventory, cached_mode, cached_choices
+):
     from netaudio.dante.application import DanteApplication
 
     device = FakeA32(
@@ -554,6 +760,8 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
         ]
     )
     install_flow_inventory(device)
+    device.sample_rate_update_mode = cached_mode
+    device.supported_sample_rates = cached_choices
     application = DanteApplication()
     calls = []
 
@@ -588,25 +796,25 @@ async def test_application_sample_rate_write_uses_notification_readback_and_per_
     ]
 
 
-@pytest.mark.parametrize(
-    "model,rate,counts",
-    [
-        ("wing-dante64", 44100, (64, 64)),
-        ("wing-dante64", 48000, (64, 64)),
-        ("AVIO-DAI2", 96000, (0, 2)),
-        ("A32 Dante AD/DA Converter", 192000, (16, 16)),
-    ],
-)
-def test_fallback_capacity_table_covers_observed_models_and_rates(model, rate, counts):
-    from netaudio.dante.sample_rate_topology import _capacity_for_rate
+@pytest.mark.asyncio
+async def test_sample_rate_permission_rejection_is_not_reported_as_attempted_mutation(install_flow_inventory):
+    from netaudio.dante.application import DanteApplication
 
-    device = SimpleNamespace(model=model, dante_model="Brooklyn-3", board_name=None)
-    capacity = _capacity_for_rate(device, rate)
-    assert (capacity.receive_channel_count, capacity.transmit_channel_count) == counts
+    device = FakeA32([_phase(64, [])])
+    install_flow_inventory(device)
+    application = DanteApplication()
 
+    async def probe(target, timeout):
+        target.is_locked = True
+        return _sample_rate_status(48_000, [48_000, 96_000])
 
-@pytest.mark.parametrize("model,rate", [("wing-dante64", 96000), ("unknown", 48000)])
-def test_capacity_is_unknown_rather_than_refused_outside_the_fallback_table(model, rate):
-    from netaudio.dante.sample_rate_topology import _capacity_for_rate
+    async def refuse_write(*args):
+        raise AssertionError("a locked device must not receive a write")
 
-    assert _capacity_for_rate(SimpleNamespace(model=model, dante_model="Brooklyn-3", board_name=None), rate) is None
+    application.probe_sample_rate_status = probe
+    application.send_set_sample_rate = refuse_write
+
+    with pytest.raises(RuntimeError, match="not writable: device_locked") as error:
+        await application.set_sample_rate(device, 96_000)
+
+    assert not isinstance(error.value, SampleRateTopologyMutationOutcomeUnknownError)

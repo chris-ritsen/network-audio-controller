@@ -44,7 +44,7 @@ def test_wing_native_channel_name_request_and_acknowledgement(direction):
         "channel_type": direction,
         "channel_number": 1,
         "name": f"parity-{direction}",
-        "sequence": 0,
+        "message_id": 0,
     }
     assert core.build_command(specification) == observed
     assert core.parse_response("result_code", packet(f"{direction}_name_response")) == 1
@@ -78,9 +78,8 @@ def test_wing_redundancy_uses_verified_interface_mode_command(case, mode):
         core.build_command(
             {
                 "command": "set_dante_redundancy",
-                "record_protocol_identifier": 0x073D,
                 "mode": mode,
-                "sequence": int.from_bytes(observed[4:6], "big"),
+                "message_id": int.from_bytes(observed[4:6], "big"),
                 "host_mac": "020000000062",
             }
         )
@@ -140,11 +139,11 @@ def test_wing_both_advertised_rates_retain_channel_capacity(suffix, rate):
     assert (counts["rx_count"], counts["tx_count"]) == (64, 64)
 
 
-def test_interface_probes_get_distinct_sequences():
+def test_interface_probes_get_distinct_message_ids():
     commands = DanteCommands()
     first = commands.probe_interface_status("020000000062")
     second = commands.probe_interface_status("020000000062")
-    assert first["sequence"] != second["sequence"]
+    assert first["message_id"] != second["message_id"]
     for specification in (first, second):
         data = core.build_command(specification)
-        assert int.from_bytes(data[4:6], "big") == specification["sequence"]
+        assert int.from_bytes(data[4:6], "big") == specification["message_id"]

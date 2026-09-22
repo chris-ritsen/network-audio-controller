@@ -4,13 +4,16 @@ import asyncio
 import logging
 import math
 
+from netaudio import core
 from netaudio.common.app_config import settings as app_settings
 from netaudio.core.binding import STATUS_TIMEOUT, NetaudioCoreError
-from netaudio.dante.const import RESULT_CODE_SUCCESS
 from netaudio.dante.flows import FlowValidationError
 from netaudio.dante.discovery import discovery_destination
 from netaudio.dante.lock import validate_pin
 from netaudio.dante.application import CapabilityProbeTimeout
+from netaudio.dante.arc_protocol import ArcProtocolError, require_arc_protocol_for_device
+from netaudio.dante.channel import channels_by_number
+from netaudio.dante.channel_frontend import ChannelRenameCapabilityError, require_channel_rename_supported
 from netaudio.dante.network_configuration import (
     network_snapshot,
     probe_switch_configuration_if_reported,
@@ -27,11 +30,8 @@ from netaudio.dante.self_connection import (
     SelfConnectionCapabilityUnavailableError,
     SelfConnectionUnsupportedError,
 )
-from netaudio.dante.services.notification import mutate_and_wait_for_capability_value
+from netaudio.dante.subscription_operations import plan_receiver_subscription_commands
 from netaudio.daemon.subscription_batching import (
-    DIRECT_BATCH_LIMIT,
-    MANAGED_BATCH_LIMIT,
-    MODERN_ARC_BATCH_LIMIT,
     parse_routes,
     plan_batches,
 )
@@ -271,68 +271,61 @@ class DaemonDeviceHandlers:
         if not device:
             return
 
-        subscriptions = params.get("subscriptions")
-        if subscriptions is not None:
-            try:
-                records = [(entry["rx_channel"], entry["tx_channel"], entry["tx_device"]) for entry in subscriptions]
-            except (KeyError, TypeError) as exception:
-                await self._send_json(writer, {"error": f"invalid subscription entry: {exception}"}, 400)
-                return
-            if not records:
-                await self._send_json(writer, {"error": "subscriptions list is empty"}, 400)
-                return
-
-            try:
-                response = await self.application.add_subscriptions(device, records)
-            except (SelfConnectionCapabilityUnavailableError, SelfConnectionUnsupportedError) as error:
-                await self._send_self_connection_capability_error(writer, error)
-                return
-            if not await self._require_arc_write_success(writer, response, "subscription change"):
-                return
-            for rx_channel_number, tx_channel_name, tx_device_name in records:
-                await self._broadcast_sse(
-                    {
-                        "event": "subscription_pending",
-                        "action": "add",
-                        "rx_device": rx_device_name,
-                        "rx_channel": rx_channel_number,
-                        "tx_channel": tx_channel_name,
-                        "tx_device": tx_device_name,
-                    }
-                )
-            self.subscription_readback.request(device, records)
-            await self._send_json(writer, {"success": True, "count": len(records)})
-            return
-
-        rx_channel_number = params.get("rx_channel")
-        tx_channel_name = params.get("tx_channel")
-        tx_device_name = params.get("tx_device")
-        if rx_channel_number is None or not tx_channel_name or not tx_device_name:
-            await self._send_json(writer, {"error": "rx_channel, tx_channel, tx_device required"}, 400)
-            return
+        batch = "subscriptions" in params
+        entries = (
+            params["subscriptions"]
+            if batch
+            else [{key: params.get(key) for key in ("rx_channel", "tx_channel", "tx_device")}]
+        )
 
         try:
-            response = await self.application.add_subscriptions(
-                device,
-                [(rx_channel_number, tx_channel_name, tx_device_name)],
-            )
+            if not isinstance(entries, list):
+                raise ValueError("subscriptions must be a non-empty list")
+
+            for entry in entries:
+                if not isinstance(entry, dict) or set(entry) - {"rx_channel", "tx_channel", "tx_device"}:
+                    raise ValueError("invalid subscription entry")
+
+            routes = parse_routes([{**entry, "rx_device": rx_device_name} for entry in entries])
+
+            if any(route.clears for route in routes):
+                raise ValueError("tx_channel and tx_device are required")
+        except ValueError as error:
+            await self._send_json(writer, {"error": str(error)}, 400)
+            return
+
+        records = [(route.rx_channel, route.tx_channel, route.tx_device) for route in routes]
+
+        try:
+            response = await self.application.add_subscriptions(device, records)
+        except ArcProtocolError as error:
+            await self._send_json(writer, {"error": str(error)}, 409)
+            return
         except (SelfConnectionCapabilityUnavailableError, SelfConnectionUnsupportedError) as error:
             await self._send_self_connection_capability_error(writer, error)
             return
         if not await self._require_arc_write_success(writer, response, "subscription change"):
             return
-        await self._broadcast_sse(
-            {
-                "event": "subscription_pending",
-                "action": "add",
-                "rx_device": rx_device_name,
-                "rx_channel": rx_channel_number,
-                "tx_channel": tx_channel_name,
-                "tx_device": tx_device_name,
-            }
-        )
-        self.subscription_readback.request(device, [(rx_channel_number, tx_channel_name, tx_device_name)])
-        await self._send_json(writer, {"success": True})
+
+        for rx_channel_number, tx_channel_name, tx_device_name in records:
+            await self._broadcast_sse(
+                {
+                    "event": "subscription_pending",
+                    "action": "add",
+                    "rx_device": rx_device_name,
+                    "rx_channel": rx_channel_number,
+                    "tx_channel": tx_channel_name,
+                    "tx_device": tx_device_name,
+                }
+            )
+
+        self.subscription_readback.request(device, records)
+        result = {"success": True}
+
+        if batch:
+            result["count"] = len(records)
+
+        await self._send_json(writer, result)
 
     async def _handle_subscribe_external_rtp(self, writer, params):
         device = await self._require_device(writer, params.get("rx_device"), "rx device not found")
@@ -381,36 +374,47 @@ class DaemonDeviceHandlers:
         if not device:
             return
 
-        rx_channel_numbers = params.get("rx_channels")
-        if rx_channel_numbers:
-            rx_channels = []
-            for number in rx_channel_numbers:
-                channel = device.rx_channels.get(number)
-                if not channel:
-                    await self._send_json(writer, {"error": f"rx channel {number} not found"}, 404)
-                    return
-                rx_channels.append(channel)
+        batch = "rx_channels" in params
+        numbers = params["rx_channels"] if batch else [params.get("rx_channel")]
 
-            response = await self.application.remove_subscriptions(
-                device,
-                [channel.number for channel in rx_channels],
-            )
-            if not await self._require_arc_write_success(writer, response, "subscription removal"):
+        try:
+            if not isinstance(numbers, list):
+                raise ValueError("rx_channels must be a non-empty list")
+
+            routes = parse_routes([{"rx_device": params["rx_device"], "rx_channel": number} for number in numbers])
+        except ValueError as error:
+            await self._send_json(writer, {"error": str(error)}, 400)
+            return
+
+        try:
+            channels = channels_by_number(device.rx_channels.values())
+        except RuntimeError as error:
+            await self._send_json(writer, {"error": str(error)}, 409)
+            return
+
+        for route in routes:
+            if route.rx_channel not in channels:
+                await self._send_json(writer, {"error": f"rx channel {route.rx_channel} not found"}, 404)
                 return
-            self.subscription_readback.request(device, [(channel.number, "", "") for channel in rx_channels])
-            await self._send_json(writer, {"success": True, "count": len(rx_channels)})
+
+        numbers = [route.rx_channel for route in routes]
+
+        try:
+            response = await self.application.remove_subscriptions(device, numbers)
+        except ArcProtocolError as error:
+            await self._send_json(writer, {"error": str(error)}, 409)
             return
 
-        rx_channel = device.rx_channels.get(params.get("rx_channel"))
-        if not rx_channel:
-            await self._send_json(writer, {"error": "rx channel not found"}, 404)
-            return
-
-        response = await self.application.remove_subscriptions(device, [rx_channel.number])
         if not await self._require_arc_write_success(writer, response, "subscription removal"):
             return
-        self.subscription_readback.request(device, [(rx_channel.number, "", "")])
-        await self._send_json(writer, {"success": True})
+
+        self.subscription_readback.request(device, [(number, "", "") for number in numbers])
+        result = {"success": True}
+
+        if batch:
+            result["count"] = len(numbers)
+
+        await self._send_json(writer, result)
 
     async def _handle_apply_subscriptions(self, writer, params):
         try:
@@ -420,14 +424,58 @@ class DaemonDeviceHandlers:
             return
 
         devices = {route.rx_device: self._find_device(route.rx_device) for route in routes}
+        receivers = set()
+
+        for route in routes:
+            device = devices[route.rx_device]
+
+            if device is None:
+                continue
+
+            receiver = (device.server_name, route.rx_channel)
+
+            if receiver in receivers:
+                await self._send_json(writer, {"error": "routes address the same receiver channel more than once"}, 400)
+                return
+
+            receivers.add(receiver)
+
         results = {(route.rx_device, route.rx_channel): {**route.to_dict(), "ok": False} for route in routes}
         for route in routes:
             if devices[route.rx_device] is None:
                 results[(route.rx_device, route.rx_channel)]["error"] = "rx device not found"
-        plan = plan_batches(
-            [route for route in routes if devices[route.rx_device] is not None],
-            lambda name: self._subscription_batch_limit(devices[name]),
-        )
+        try:
+            plan = plan_batches(
+                [route for route in routes if devices[route.rx_device] is not None],
+                lambda name: require_arc_protocol_for_device(devices[name])["subscription_batch_limit"],
+            )
+
+            for rx_device, batches in plan.items():
+                device = devices[rx_device]
+
+                if getattr(device, "requires_managed_control", False):
+                    continue
+
+                plan_receiver_subscription_commands(
+                    device,
+                    [
+                        (
+                            {"action": "clear", "rx_channel": route.rx_channel}
+                            if route.clears
+                            else {
+                                "action": "set",
+                                "rx_channel": route.rx_channel,
+                                "tx_channel": route.tx_channel,
+                                "tx_device": route.tx_device,
+                            }
+                        )
+                        for batch in batches
+                        for route in batch.routes
+                    ],
+                )
+        except (ArcProtocolError, NetaudioCoreError) as error:
+            await self._send_json(writer, {"error": str(error)}, 409)
+            return
 
         async def apply_device(rx_device, batches):
             device = devices[rx_device]
@@ -477,14 +525,6 @@ class DaemonDeviceHandlers:
             200 if applied else 409,
         )
 
-    def _subscription_batch_limit(self, device) -> int:
-        if getattr(device, "requires_managed_control", False):
-            return MANAGED_BATCH_LIMIT
-        modern = getattr(self.application, "_uses_modern_arc_280f", None)
-        if callable(modern) and modern(device) is True:
-            return MODERN_ARC_BATCH_LIMIT
-        return DIRECT_BATCH_LIMIT
-
     async def _handle_identify(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
         if not device:
@@ -528,17 +568,17 @@ class DaemonDeviceHandlers:
             return
         channel_type = params.get("channel_type")
         channel_number = params.get("channel_number")
-        if channel_type == "rx" and not getattr(device, "requires_managed_control", False):
-            channel = device.rx_channels.get(channel_number) if isinstance(device.rx_channels, dict) else None
-            capability = getattr(channel, "can_rename", None) if channel is not None else None
-            if capability is not True:
-                reason = "prohibited" if capability is False else "unavailable"
-                await self._send_json(
-                    writer,
-                    {"error": f"receiver channel rename capability is {reason}", "mutation_sent": False},
-                    409 if capability is False else 503,
-                )
-                return
+        try:
+            require_channel_rename_supported(device, channel_type, channel_number)
+        except ChannelRenameCapabilityError as error:
+            await self._send_json(
+                writer,
+                {"error": str(error), "mutation_sent": False},
+                409 if error.prohibited else 503,
+            )
+
+            return
+
         if name.strip():
             response = await self.application.set_channel_name(device, channel_type, channel_number, name)
         else:
@@ -548,56 +588,46 @@ class DaemonDeviceHandlers:
         await self._send_json(writer, {"success": True})
 
     @staticmethod
-    def _arc_write_failure(response, operation) -> str | None:
+    def _arc_write_error(response, operation) -> tuple[int, dict] | None:
         from netaudio.ddm.device_transport import ManagedOperationResult
 
         if isinstance(response, ManagedOperationResult):
             if response.successful:
                 return None
-            return getattr(response, "message", None) or f"device rejected {operation}"
+
+            return 409, {"error": f"device rejected {operation}"}
+
         if not response:
-            return "device did not respond"
+            return 504, {"error": "device did not respond"}
+
         try:
             from netaudio import core
 
-            result_code = core.parse_response("result_code", response)
+            acknowledgement = core.parse_response("command_acknowledgement", response)
         except NetaudioCoreError as exception:
-            return f"invalid device response: {exception}"
-        if not isinstance(result_code, int):
-            return "invalid device response: missing result code"
-        if result_code != RESULT_CODE_SUCCESS:
-            return f"device rejected {operation} (result code 0x{result_code:04x})"
+            return 500, {"error": f"invalid device response: {exception}"}
+
+        if not acknowledgement["accepted"]:
+            return 409, {"error": f"device rejected {operation}", "result_code": acknowledgement["result_code"]}
+
         return None
 
+    @classmethod
+    def _arc_write_failure(cls, response, operation) -> str | None:
+        error = cls._arc_write_error(response, operation)
+
+        return error[1]["error"] if error is not None else None
+
     async def _require_arc_write_success(self, writer, response, operation):
-        from netaudio.ddm.device_transport import ManagedOperationResult
+        error = self._arc_write_error(response, operation)
 
-        if isinstance(response, ManagedOperationResult):
-            return response.successful
-        if not response:
-            await self._send_json(writer, {"error": "device did not respond"}, 504)
-            return False
-        try:
-            from netaudio import core
+        if error is None:
+            return True
 
-            result_code = core.parse_response("result_code", response)
-        except NetaudioCoreError as exception:
-            await self._send_json(writer, {"error": f"invalid device response: {exception}"}, 500)
-            return False
-        if not isinstance(result_code, int):
-            await self._send_json(writer, {"error": "invalid device response: missing result code"}, 500)
-            return False
-        if result_code != RESULT_CODE_SUCCESS:
-            await self._send_json(
-                writer,
-                {
-                    "error": f"device rejected {operation}",
-                    "result_code": result_code,
-                },
-                409,
-            )
-            return False
-        return True
+        status, body = error
+        await self._send_json(writer, body, status)
+
+        return False
 
     async def _handle_set_latency(self, writer, params):
         device = await self._require_device(writer, params.get("device"))
@@ -615,19 +645,22 @@ class DaemonDeviceHandlers:
                 writer, {"error": "latency must be a finite, nonnegative number of milliseconds"}, 400
             )
             return
-        response = await self.application.set_latency(device, latency)
-        if not await self._require_arc_write_success(writer, response, "latency change"):
+        result = await self.application.set_latency(device, latency)
+
+        if result["state"] == "rejected":
+            await self._send_json(writer, {"error": "device rejected latency change"}, 409)
             return
-        settings = await self.application.get_latency_settings(device)
-        configured = settings.get("configured_latency_ns") if isinstance(settings, dict) else None
-        if configured is None:
+
+        if result["state"] == "unavailable":
             await self._send_json(writer, {"error": "latency readback was unavailable; refresh before retrying"}, 504)
             return
+
         self._emit_device_updated(device)
-        if configured != round(latency * 1_000_000):
+
+        if not result["effective_state_confirmed"]:
             await self._send_json(
                 writer,
-                {"error": "latency change was not applied", "configured_latency_ms": configured / 1_000_000},
+                {"error": "latency change was not applied", "configured_latency_ms": result["configured_latency_ms"]},
                 409,
             )
             return
@@ -986,78 +1019,41 @@ class DaemonDeviceHandlers:
         if not device:
             return
         requested_encoding = params.get("encoding")
+
         if not await self._require_audio_capability_value(writer, requested_encoding, "encoding"):
             return
-        await self._set_and_verify_audio_capability(
-            writer,
-            device,
-            requested_encoding,
-            lambda value: self.application.send_set_encoding(device, value),
-            self.application.probe_encoding_status,
-            "encoding",
-            "supported_encodings",
-            "encoding",
-        )
-
-    async def _require_audio_capability_value(self, writer, value, field_name):
-        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 0xFFFFFFFF:
-            await self._send_json(writer, {"error": f"{field_name} must be an integer from 1 through 4294967295"}, 400)
-            return False
-        return True
-
-    async def _set_and_verify_audio_capability(
-        self,
-        writer,
-        device,
-        requested_value,
-        set_value,
-        probe_status,
-        current_value_field,
-        supported_values_field,
-        capability_description,
-    ):
-        target_key = self.application._control_key(device)
-
-        async def mutate() -> None:
-            await set_value(requested_value)
-
-        async def probe():
-            return await probe_status(device)
 
         try:
-            status = await mutate_and_wait_for_capability_value(
-                self.application.notifications,
-                current_value_field,
-                target_key,
-                requested_value,
-                mutate,
-                probe,
-                self.audio_capability_verification_timeout,
+            status = await self.application.set_encoding(
+                device, requested_encoding, timeout=self.audio_capability_verification_timeout
             )
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
 
-        if status is None:
-            await self._send_json(writer, {"error": f"{capability_description} readback was unavailable"}, 504)
+        result = core.audio_capability_readback(status, requested_encoding)
+
+        if result["state"] == "unavailable":
+            await self._send_json(writer, {"error": "encoding readback was unavailable"}, 504)
             return
 
-        observed_value = status["current_value"]
-        supported_values = status["available_values"]
-        setattr(device, current_value_field, observed_value)
-        setattr(device, f"requested_{current_value_field}", status["requested_value"])
-        setattr(device, f"{current_value_field}_update_mode", status["update_mode"])
-        setattr(device, supported_values_field, supported_values)
-        if observed_value != requested_value:
+        if not result["effective_state_confirmed"]:
             await self._send_json(
                 writer,
                 {
-                    "error": f"{capability_description} change was not applied",
-                    "observed": observed_value,
-                    "supported": supported_values,
+                    "error": "encoding change was not applied",
+                    "observed": result["current_value"],
+                    "supported": status["available_values"],
                 },
                 409,
             )
             return
 
         await self._send_json(writer, {"success": True})
+
+    async def _require_audio_capability_value(self, writer, value, field_name):
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 0xFFFFFFFF:
+            await self._send_json(writer, {"error": f"{field_name} must be an integer from 1 through 4294967295"}, 400)
+            return False
+
+        return True

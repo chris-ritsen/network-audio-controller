@@ -206,7 +206,7 @@ export function drawMeters(node, width, numbers, values, presence, names, peaks,
 
     const filled = Math.round(barWidth * fraction);
     if (filled > 0) {
-      context.fillStyle = raw === 0 || (decibels !== null && decibels >= -3) ? COLORS.clip
+      context.fillStyle = format.meteringSignalPresence(raw) === "clipping" || (decibels !== null && decibels >= -3) ? COLORS.clip
         : decibels !== null && decibels >= -12 ? COLORS.hot : COLORS.nominal;
       context.fillRect(barLeft, y + 5, filled, ROW_HEIGHT - 10);
     }

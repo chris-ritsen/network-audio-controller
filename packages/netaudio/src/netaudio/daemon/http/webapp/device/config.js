@@ -312,8 +312,7 @@ function ClockingControls({ device, requestName }) {
               <${FieldRow} label="Clock source">
                 <select ref=${source} disabled=${!fresh}>
                   <option value="keep">Keep current setting</option>
-                  <option value="0">Internal</option>
-                  ${(device.supported_clock_sources || []).filter((value) => value === 1 || value === 2).map((value) => html`<option value=${value}>${value === 1 ? "External/BNC" : "AES"}</option>`)}
+                  ${(device.clock_source_choices || []).map((choice) => html`<option value=${choice.code}>${choice.label}</option>`)}
                 </select>
               <//>
               <${FieldRow} label="Clock subdomain">

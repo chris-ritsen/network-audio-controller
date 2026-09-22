@@ -8,14 +8,14 @@
   "device_name:1": {
     "spec": {
       "command": "device_name",
-      "transaction_id": 7
+      "message_id": 7
     },
     "hex": "27ff000a000710020000"
   },
   "channel_count:2": {
     "spec": {
       "command": "channel_count",
-      "transaction_id": 1
+      "message_id": 1
     },
     "hex": "27ff000a000110000000"
   },
@@ -49,7 +49,7 @@
     "spec": {
       "command": "receivers",
       "page": 3,
-      "transaction_id": 9
+      "message_id": 9
     },
     "hex": "27ff0010000930000000000100310000"
   },
@@ -89,7 +89,8 @@
       "command": "set_channel_name",
       "channel_type": "rx",
       "channel_number": 3,
-      "name": "mic-mix-1"
+      "name": "mic-mix-1",
+      "protocol_id": 10025
     },
     "hex": "2729001e000030010000020100030014000000006d69632d6d69782d3100"
   },
@@ -98,7 +99,8 @@
       "command": "set_channel_name",
       "channel_type": "tx",
       "channel_number": 8,
-      "name": "out-left"
+      "name": "out-left",
+      "protocol_id": 10025
     },
     "hex": "2729002100002013000002010000000800180000000000006f75742d6c65667400"
   },
@@ -192,7 +194,7 @@
   "identify:22": {
     "spec": {
       "command": "identify",
-      "sequence": 3017
+      "message_id": 3017
     },
     "hex": "ffff00200bc900000000000000000000417564696e6174650731006300000064"
   },
@@ -235,7 +237,7 @@
       "gain_level": 4,
       "device_type": "input",
       "host_mac": "842f5774e86d",
-      "sequence": 49153
+      "message_id": 49153
     },
     "hex": "ffff0034c0010000842f5774e86d0000417564696e617465073a100a0000000000010001000c0010010200000000000100000004"
   },
@@ -246,7 +248,7 @@
       "gain_level": 1,
       "device_type": "output",
       "host_mac": "842f5774e86d",
-      "sequence": 53505
+      "message_id": 53505
     },
     "hex": "ffff0034d1010000842f5774e86d0000417564696e617465073a100a0000000000010001000c0010020100000000000200000001"
   },
@@ -307,7 +309,7 @@
     "spec": {
       "command": "probe_aes67",
       "host_mac": "001dc1502368",
-      "sequence": 4097
+      "message_id": 4097
     },
     "hex": "ffff002410010000001dc15023680000417564696e617465073a10060000006400000000"
   },
@@ -351,7 +353,7 @@
   "query_latency_config:39": {
     "spec": {
       "command": "query_latency_config",
-      "transaction_id": 3
+      "message_id": 3
     },
     "hex": "2809003a00031100000000170201820482050210021182188219830183028306031003110303802100f080600022006300640065022202128321"
   },
@@ -401,7 +403,7 @@
   "cmc_register:46": {
     "spec": {
       "command": "cmc_register",
-      "sequence": 4660,
+      "message_id": 4660,
       "host_mac": "001dc1502368"
     },
     "hex": "120000141234100100000000001dc15023680000"
@@ -410,7 +412,7 @@
     "spec": {
       "command": "probe_sample_rate",
       "host_mac": "3e42274cff24",
-      "sequence": 66
+      "message_id": 66
     },
     "hex": "ffff0028004200003e42274cff240000417564696e617465073a0081000000640000000000000000"
   },
@@ -418,7 +420,7 @@
     "spec": {
       "command": "probe_encoding",
       "host_mac": "3e42274cff24",
-      "sequence": 39002
+      "message_id": 39002
     },
     "hex": "ffff0028985a00003e42274cff240000417564696e617465073a0083000000640000000000000000"
   },
@@ -426,14 +428,14 @@
     "spec": {
       "command": "probe_codec_status",
       "host_mac": "842f5774e86d",
-      "sequence": 1114
+      "message_id": 1114
     },
     "hex": "ffff0028045a0000842f5774e86d0000417564696e617465073a100a000000000000000000000000"
   },
   "property_directory_packet_548323": {
     "spec": {
       "command": "property_directory",
-      "transaction_id": 4660
+      "message_id": 4660
     },
     "hex": "27ff000a123411020000"
   },

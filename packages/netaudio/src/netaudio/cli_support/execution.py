@@ -4,9 +4,8 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from glob import has_magic
-from typing import Any, Optional
+from typing import Any
 
 import typer
 
@@ -16,43 +15,17 @@ from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.common.app_config import settings
 from netaudio.daemon.client import append_operation_event_on_daemon, get_devices_from_daemon
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
-from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
 from netaudio.dante.state import apply_device_status
 from netaudio.monitoring import MonitoringEventJournal, MutationAuditRecorder, remote_recorder
 
 __all__ = [
     "CapabilityProbeTimeout",
-    "ReadbackResult",
     "ansi",
-    "readback_after_notification",
     "run_command",
     "select_device",
 ]
 
 logger = logging.getLogger("netaudio")
-
-
-@dataclass(frozen=True)
-class ReadbackResult:
-    matched: bool
-    observed: Any = None
-    observed_available: bool = False
-    error: Optional[Exception] = None
-
-
-async def readback_after_notification(
-    read: Callable[[], Awaitable[Any]],
-    expected: Any,
-) -> ReadbackResult:
-    try:
-        observed = await read()
-    except (RuntimeError, OSError, TimeoutError, ValueError) as exception:
-        return ReadbackResult(matched=False, error=exception)
-    return ReadbackResult(
-        matched=observed == expected,
-        observed=observed,
-        observed_available=True,
-    )
 
 
 def ansi(code: str, text: str) -> str:
@@ -94,14 +67,6 @@ async def _discover_with_application(application: DanteApplication) -> dict[str,
     else:
         configure_recorder(recorder)
     return await application.discover_and_populate(timeout=settings.mdns_timeout) or {}
-
-
-def _get_arc_port(device: DanteDevice) -> int:
-    if device.services:
-        for service_data in device.services.values():
-            if service_data.get("type") == SERVICE_ARC:
-                return service_data.get("port", DEVICE_ARC_PORT)
-    return DEVICE_ARC_PORT
 
 
 async def _populate_audio_capabilities(application: DanteApplication, device: DanteDevice) -> None:
@@ -333,9 +298,11 @@ async def _populate_controls(
 
     population_results = await asyncio.gather(
         *(
-            application._populate_device_controls(device, include_channels=include_channels)
-            if device.requires_managed_control
-            else device.populate_from_core()
+            (
+                application._populate_device_controls(device, include_channels=include_channels)
+                if device.requires_managed_control
+                else device.populate_from_core()
+            )
             for device, include_channels in population_requests
         ),
         return_exceptions=True,

@@ -18,12 +18,11 @@ function parseChannels(text) {
       "Enter comma-separated positive transmitter channel numbers.",
     );
   }
-  if (new Set(values).size !== values.length)
-    throw new Error("Transmitter channels must be unique.");
   return values;
 }
 
 export function canonicalFlowRequest({
+  authoring,
   channels,
   encoding,
   flowId,
@@ -32,7 +31,6 @@ export function canonicalFlowRequest({
   mediaMode = "native_dante",
   primaryAddress = "",
   primaryPort = "",
-  protocolId,
   sampleRate,
   secondaryAddress = "",
   secondaryPort = "",
@@ -40,22 +38,20 @@ export function canonicalFlowRequest({
   const channelNumbers = Array.isArray(channels)
     ? channels
     : parseChannels(channels);
-  const modernAllocation = Number(protocolId) === 0x2809;
+  if (!authoring)
+    throw new Error("Flow authoring capabilities are unavailable.");
+
   if (
     !Number.isInteger(Number(flowId)) ||
     Number(flowId) < 1 ||
-    Number(flowId) > (modernAllocation ? 65535 : 32)
+    Number(flowId) > authoring.identifier_max
   ) {
     throw new Error(
-      modernAllocation
-        ? "Modern creation needs a media-local flow identifier from 1 through 65535."
-        : "Legacy creation needs a global flow identifier from 1 through 32.",
+      `Enter a flow identifier from 1 through ${authoring.identifier_max}.`,
     );
   }
-  if (!["native_dante", "rtp_aes67"].includes(mediaMode))
-    throw new Error("Select native Dante or RTP/AES67 audio.");
-  if (!modernAllocation && mediaMode !== "native_dante")
-    throw new Error("RTP/AES67 authoring is scoped to ARC 0x2809.");
+  if (!authoring.media_modes.includes(mediaMode))
+    throw new Error("This audio mode is not available for flow creation.");
   const socket = (address, port, label) => {
     if (!address && !port) return null;
     if (
@@ -79,15 +75,6 @@ export function canonicalFlowRequest({
     secondaryPort,
     "Secondary destination",
   );
-  if (
-    mediaMode === "native_dante" &&
-    (primaryDestination || secondaryDestination)
-  )
-    throw new Error(
-      "Native Dante authoring does not accept explicit destinations.",
-    );
-  if (mediaMode === "rtp_aes67" && !primaryDestination)
-    throw new Error("RTP/AES67 authoring needs a primary IPv4 destination.");
   const fpp = framesPerPacket === "" ? null : Number(framesPerPacket);
   if (fpp !== null && (!Number.isInteger(fpp) || fpp < 1 || fpp > 65535))
     throw new Error("Frames per packet must be from 1 through 65535.");
@@ -113,17 +100,18 @@ export function canonicalFlowRequest({
     secondary_destination: secondaryDestination,
     redundancy: "device_default",
     identity: {
-      global_flow_id: modernAllocation ? null : Number(flowId),
-      media_type_code: 3,
-      media_local_flow_id: modernAllocation ? Number(flowId) : null,
+      global_flow_id: null,
+      media_type_code: null,
+      media_local_flow_id: null,
+      [authoring.identity_field]: Number(flowId),
     },
     protocol: {
-      protocol_id: Number(protocolId),
+      protocol_id: authoring.protocol_id,
       protocol_version: null,
-      cohort: modernAllocation ? "modern_2809" : "legacy_2729",
+      cohort: null,
       required_capabilities: [],
     },
-    raw_fields: modernAllocation ? { request_options_word: 0 } : {},
+    raw_fields: {},
   };
 }
 
@@ -216,39 +204,65 @@ export function ReceiverFlows({ device }) {
     : [];
   return html`<${Panel} title=${`Receiver flows (${flows.length})`}>
     <p class="text-sm">
-      Inventory: ${device.receiver_flow_completeness || "unknown"}. ARC effective
-      state, SDP correlation, RTP reception, clock lock, persistence, and decoded
-      audio are separate observations.
+      Inventory: ${device.receiver_flow_completeness || "unknown"}. ARC
+      effective state, SDP correlation, RTP reception, clock lock, persistence,
+      and decoded audio are separate observations.
     </p>
-    ${device.receiver_flow_completeness !== "complete"
-      ? html`<${Notice}>Complete fresh receiver-flow inventory is unavailable.<//>`
-      : null}
-    ${flows.length
-      ? html`<div class="table-wrapper">
-          <table class="data">
-            <thead><tr>
-              <th>Flow</th><th>Type / transport</th><th>Status</th>
-              <th>Slot:receiver channels</th><th>Interface destinations</th>
-              <th>External identity</th><th>SDP</th>
-            </tr></thead>
-            <tbody>${flows.map(
-              (flow) => html`<tr key=${flow.flow_number ?? flow.global_flow_id}>
-                <td>${flow.flow_number ?? flow.global_flow_id ?? "unknown"}</td>
-                <td>${flow.flow_type || "unknown"} / ${flow.transport ?? "unknown"}</td>
-                <td>${flow.subscription_status_code ?? flow.status_code ?? "unknown"}</td>
-                <td>${receiverFlowChannels(flow)}</td>
-                <td>${receiverFlowEndpoints(flow) || "Not reported"}</td>
-                <td>${externalIdentityLabel(flow)}</td>
-                <td>${flow.sdp_correlation?.matched === true
-                  ? "Matched"
-                  : flow.external_identity
-                    ? "Not matched"
-                    : "Not applicable"}</td>
-              </tr>`,
-            )}</tbody>
-          </table>
-        </div>`
-      : html`<${Notice}>No active receiver flows in the complete inventory.<//>`}
+    ${
+      device.receiver_flow_completeness !== "complete"
+        ? html`<${Notice}
+            >Complete fresh receiver-flow inventory is unavailable.<//
+          >`
+        : null
+    }
+    ${
+      flows.length
+        ? html`<div class="table-wrapper">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>Flow</th>
+                  <th>Type / transport</th>
+                  <th>Status</th>
+                  <th>Slot:receiver channels</th>
+                  <th>Interface destinations</th>
+                  <th>External identity</th>
+                  <th>SDP</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${flows.map(
+                  (flow) =>
+                    html`<tr key=${flow.flow_number}>
+                      <td>${flow.flow_number ?? "unknown"}</td>
+                      <td>
+                        ${flow.flow_type || "unknown"} /
+                        ${flow.transport ?? "unknown"}
+                      </td>
+                      <td>
+                        ${flow.subscription_status_code ?? flow.status_code ?? "unknown"}
+                      </td>
+                      <td>${receiverFlowChannels(flow)}</td>
+                      <td>${receiverFlowEndpoints(flow) || "Not reported"}</td>
+                      <td>${externalIdentityLabel(flow)}</td>
+                      <td>
+                        ${
+                      flow.sdp_correlation?.matched === true
+                        ? "Matched"
+                        : flow.external_identity
+                          ? "Not matched"
+                          : "Not applicable"
+                    }
+                      </td>
+                    </tr>`,
+                )}
+              </tbody>
+            </table>
+          </div>`
+        : html`<${Notice}
+            >No active receiver flows in the complete inventory.<//
+          >`
+    }
   <//>`;
 }
 
@@ -295,7 +309,7 @@ export function TransmitFlows({ device }) {
   const [secondaryPort, setSecondaryPort] = useState("");
   const [plan, setPlan] = useState(null);
   const [result, setResult] = useState(null);
-  const protocolId = inventory?.flow_protocol_id;
+  const authoring = device.transmit_flow_authoring;
   const refresh = async () => {
     try {
       setInventory(await api.getTransmitFlows(requestName));
@@ -320,7 +334,7 @@ export function TransmitFlows({ device }) {
       mediaMode,
       primaryAddress,
       primaryPort,
-      protocolId,
+      authoring,
       sampleRate: device.sample_rate,
       secondaryAddress,
       secondaryPort,
@@ -348,7 +362,7 @@ export function TransmitFlows({ device }) {
     await refresh();
   };
   const flowEntries = inventory?.flows || [];
-  const modernAllocation = Number(protocolId) === 0x2809;
+  const supportsFlowOptions = authoring?.supports_flow_options === true;
   return html`<${Panel} title=${`Transmit flows (${flowEntries.length})`}>
     <p class="text-sm">
       Fresh readback uses the canonical flow schema and retains raw fields.
@@ -401,10 +415,10 @@ export function TransmitFlows({ device }) {
             placeholder="1,2"
         /></label>
         <label
-          >${modernAllocation ? "Media-local flow identifier" : "Global flow identifier"}<input
+          >${{ media_local_flow_id: "Media-local flow identifier", global_flow_id: "Global flow identifier" }[authoring?.identity_field] || "Flow identifier"}<input
             type="number"
             min="1"
-            max=${modernAllocation ? "65535" : "32"}
+            max=${authoring?.identifier_max}
             aria-label="Transmit flow identifier"
             value=${flowId}
             onInput=${(event) => {
@@ -413,7 +427,7 @@ export function TransmitFlows({ device }) {
             }}
         /></label>
         ${
-          modernAllocation
+          authoring?.media_modes.length > 1
             ? html`<label
                 >Mode<select
                   aria-label="Transmit flow media mode"
@@ -423,14 +437,13 @@ export function TransmitFlows({ device }) {
                     setPlan(null);
                   }}
                 >
-                  <option value="native_dante">Native Dante</option>
-                  <option value="rtp_aes67">RTP/AES67</option>
+                  ${authoring.media_modes.map((mode) => html`<option value=${mode}>${mode === "native_dante" ? "Native Dante" : "RTP/AES67"}</option>`)}
                 </select></label
               >`
             : null
         }
         ${
-          modernAllocation
+          supportsFlowOptions
             ? html`<label
                 >Flow name<input
                   aria-label="Transmit flow name"
@@ -443,7 +456,7 @@ export function TransmitFlows({ device }) {
             : null
         }
         ${
-          modernAllocation
+          supportsFlowOptions
             ? html`<label
                 >Frames per packet<input
                   type="number"
@@ -460,7 +473,7 @@ export function TransmitFlows({ device }) {
         }
       </div>
       ${
-        modernAllocation && mediaMode === "rtp_aes67"
+        supportsFlowOptions && mediaMode === "rtp_aes67"
           ? html`<div class="flex flex-wrap gap-3">
               <label
                 >Primary IPv4<input
@@ -505,7 +518,7 @@ export function TransmitFlows({ device }) {
           : null
       }
       ${
-        modernAllocation
+        supportsFlowOptions
           ? html`<p class="text-sm">
               The media-local identifier is requested; the device allocates the
               global flow identifier. Sample rate and encoding are checked as
@@ -518,7 +531,7 @@ export function TransmitFlows({ device }) {
         <button
           class="btn btn-sm"
           type="submit"
-          disabled=${protocolId == null || !channels.trim()}
+          disabled=${authoring == null || !channels.trim()}
         >
           Validate and plan
         </button>

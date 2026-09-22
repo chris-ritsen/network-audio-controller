@@ -11,6 +11,7 @@ from netaudio.daemon.server import NetaudioDaemon
 from netaudio.dante.application import DanteApplication
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.events import DanteEvent, EventType
+from netaudio.ddm.device_transport import ManagedOperationResult
 from tests.http_api_test_support import FakeWriter
 
 
@@ -38,9 +39,10 @@ def server_with_inventory(*records):
     inventory = {record["server_name"]: record for record in records}
     registry = SimpleNamespace(enabled=True, serialize_devices=lambda _: copy.deepcopy(inventory))
     application = DanteApplication()
-    return DaemonHTTPServer(
-        application, application.state, managed_inventory=registry, mcp_token="test-token"
-    ), inventory
+    return (
+        DaemonHTTPServer(application, application.state, managed_inventory=registry, mcp_token="test-token"),
+        inventory,
+    )
 
 
 def test_managed_controls_survive_polls_without_creating_a_direct_inventory_source():
@@ -158,7 +160,13 @@ def test_logout_does_not_turn_a_correlated_enrolled_device_into_a_direct_control
 def test_inventory_restores_subscription_channel_identity():
     record = managed_record()
     record["subscriptions"] = [
-        {"rx_channel": "Input", "rx_device": record["name"], "tx_channel": "Left", "tx_device": "Source"}
+        {
+            "rx_channel": "Input",
+            "rx_channel_number": 1,
+            "rx_device": record["name"],
+            "tx_channel": "Left",
+            "tx_device": "Source",
+        }
     ]
     server, inventory = server_with_inventory(record)
     device = server._find_device(record["server_name"])
@@ -254,7 +262,7 @@ async def test_managed_latency_requires_matching_readback(configured, status):
     server, _ = server_with_inventory(record)
     device = server._find_device(record["server_name"])
     app = server.application
-    app.set_latency = AsyncMock(return_value=bytes.fromhex("2809000a123411010001"))
+    app.mutate_and_wait_for_notification = AsyncMock(return_value=ManagedOperationResult("set_latency"))
     app.get_latency_settings = AsyncMock(
         return_value={"configured_latency_ns": configured, "active_latency_ns": 250000}
     )
@@ -263,7 +271,7 @@ async def test_managed_latency_requires_matching_readback(configured, status):
         "POST", "/set-latency", json.dumps({"device": device.server_name, "latency": 2}).encode(), writer
     )
     assert writer.response()[0] == status
-    app.set_latency.assert_awaited_once_with(device, 2)
+    app.mutate_and_wait_for_notification.assert_awaited_once()
     app.get_latency_settings.assert_awaited_once_with(device)
 
 

@@ -7,16 +7,25 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Mapping
 from pathlib import Path
+
+from . import _requests, _types
+
+from ._abi import (
+    ABI_VERSION,
+    PORT_ARC as _PORT_ARC,
+    STATUS_INVALID_SEQUENCE,
+    STATUS_IO_ERROR as _STATUS_IO_ERROR,
+    STATUS_OK,
+)
+from ._abi import STATUS_BUFFER_TOO_SMALL as _STATUS_BUFFER_TOO_SMALL
+from ._abi import STATUS_TIMEOUT as STATUS_TIMEOUT
+from ._abi import configure as _configure
 
 logger = logging.getLogger("netaudio")
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-
-ABI_VERSION = 8
-
-LOCK_NONCE_LENGTH = 24
-LOCK_KEY_LENGTH = 32
 
 
 def _library_names():
@@ -27,70 +36,15 @@ def _library_names():
     return ("libnetaudio_core.so",)
 
 
-STATUS_INVALID_SEQUENCE = 31
-STATUS_OK = 0
-STATUS_TIMEOUT = 9
-
-_STATUS_NAMES = {
-    1: "null pointer",
-    2: "invalid utf-8",
-    3: "name too long",
-    4: "name cannot begin or end with a hyphen",
-    5: "name contains unsupported characters",
-    6: "buffer too small",
-    7: "invalid address",
-    8: "io error",
-    9: "device did not respond",
-    10: "malformed binary response",
-    11: "FFI/API serialization failure",
-    12: "subscription count must be 1-16",
-    13: "invalid command json",
-    14: "invalid mac",
-    15: "invalid ip",
-    16: "invalid channel type",
-    17: "invalid lock key",
-    18: "pin must be exactly 4 digits",
-    19: "crypto error",
-    20: "page exceeds the protocol channel range",
-    21: "subscription receiver channel must fit in one byte",
-    22: "device type must be 'input' or 'output'",
-    23: "command packet exceeds the protocol length limit",
-    24: "channel number must be at least 1",
-    25: "latency must be finite, nonnegative, and fit on the wire",
-    26: "sample rate must be nonzero",
-    27: "encoding value must be nonzero",
-    28: "gain level must be an integer from 1 through 5",
-    29: "flow slot must be from 1 through 32",
-    30: "flow protocol must be 0x2729, 0x2801, or 0x2809",
-    31: "sequence must be nonzero",
-    32: "the selected protocol does not support this operation",
-    33: "internal panic",
-    34: "unknown response or page kind",
-    35: "byte buffer has the wrong length",
-    36: "invalid external RTP destination",
-    37: "invalid external flow identity",
-    38: "invalid external receiver mapping",
-}
-
-_MESSAGE_ID_KEYS = ("message_id", "sequence", "transaction_id")
-_message_id_lock = threading.Lock()
-_message_id_counter = 0
-
-
 class NetaudioCoreError(RuntimeError):
     def __init__(self, status: int, context: str = ""):
         self.status = status
         self.context = context
-        self.category = {
-            8: "transport",
-            9: "transport",
-            10: "binary_response",
-            11: "api_serialization",
-            13: "json_input",
-        }.get(status, "api")
         self.detail = last_error_message()
-        message = _STATUS_NAMES.get(status, f"status {status}")
-        if self.detail:
+        library = require()
+        self.category = library.netaudio_status_category(status).decode("ascii")
+        message = library.netaudio_status_description(status).decode("utf-8")
+        if self.detail and self.detail != message:
             message = f"{message} ({self.detail})"
         super().__init__(f"{context}: {message}" if context else message)
 
@@ -110,7 +64,7 @@ def _decode_json_output(data: bytes, context: str):
         raise NetaudioCoreJsonError("json_decoding", context) from exception
 
 
-def _encode_command_spec(spec: dict) -> bytes:
+def _encode_command_spec(spec: dict | str) -> bytes:
     try:
         return json.dumps(spec, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError) as exception:
@@ -134,9 +88,10 @@ def _candidate_paths():
 _library = None
 _load_attempted = False
 _load_failures: list[tuple[Path, str]] = []
+_library_lock = threading.Lock()
 
 
-def _abi_compatibility_failure(lib, path) -> str | None:
+def _abi_compatibility_failure(lib) -> str | None:
     try:
         version_function = lib.netaudio_abi_version
     except AttributeError:
@@ -151,197 +106,45 @@ def _abi_compatibility_failure(lib, path) -> str | None:
 
 def _load():
     global _library, _load_attempted, _load_failures
-    if _load_attempted:
-        return _library
-    _load_attempted = True
-    _load_failures = []
-    for path in _candidate_paths():
-        if not path:
-            continue
-        if not path.exists():
-            _load_failures.append((path, "not found"))
-            continue
-        try:
-            lib = ctypes.CDLL(str(path))
-        except OSError as exception:
-            _load_failures.append((path, str(exception)))
-            continue
-        compatibility_failure = _abi_compatibility_failure(lib, path)
-        if compatibility_failure is not None:
-            logger.warning(f"netaudio-core at {path} {compatibility_failure}, skipping")
-            _load_failures.append((path, compatibility_failure))
-            continue
-        _library = _configure(lib)
-        return _library
-    return None
 
+    with _library_lock:
+        if _load_attempted:
+            return _library
 
-def _configure(lib):
-    u8p = ctypes.POINTER(ctypes.c_uint8)
-    buffer_out = [
-        u8p,
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    lib.netaudio_subscription_status.argtypes = [ctypes.c_uint16, ctypes.c_uint16, ctypes.c_bool, *buffer_out]
-    lib.netaudio_subscription_status.restype = ctypes.c_int
-    lib.netaudio_subscription_state_for_identifier.argtypes = [ctypes.c_char_p, *buffer_out]
-    lib.netaudio_subscription_state_for_identifier.restype = ctypes.c_int
-    lib.netaudio_build_command.argtypes = [ctypes.c_char_p, *buffer_out]
-    lib.netaudio_build_command.restype = ctypes.c_int
-    lib.netaudio_last_error_message.argtypes = buffer_out
-    lib.netaudio_last_error_message.restype = ctypes.c_int
-    lib.netaudio_parse_response.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_parse_response.restype = ctypes.c_int
-    lib.netaudio_parse_page.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        ctypes.c_uint16,
-        *buffer_out,
-    ]
-    lib.netaudio_parse_page.restype = ctypes.c_int
-    lib.netaudio_lock_token.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_uint8),
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_lock_token.restype = ctypes.c_int
-    lib.netaudio_dapi_build_session_open.argtypes = buffer_out
-    lib.netaudio_dapi_build_session_open.restype = ctypes.c_int
-    lib.netaudio_dapi_build_authentication.argtypes = [u8p, ctypes.c_size_t, *buffer_out]
-    lib.netaudio_dapi_build_authentication.restype = ctypes.c_int
-    lib.netaudio_dapi_build_domain_subscription.argtypes = [
-        u8p,
-        ctypes.c_size_t,
-        ctypes.c_uint16,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_domain_subscription.restype = ctypes.c_int
-    lib.netaudio_dapi_build_device_inventory_subscription.argtypes = [
-        u8p,
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_device_inventory_subscription.restype = ctypes.c_int
-    lib.netaudio_dapi_build_inventory_initialization.argtypes = [
-        u8p,
-        ctypes.c_size_t,
-        ctypes.c_uint16,
-        ctypes.c_uint16,
-        u8p,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_inventory_initialization.restype = ctypes.c_int
-    lib.netaudio_dapi_build_identify.argtypes = [
-        ctypes.c_uint16,
-        ctypes.c_uint16,
-        ctypes.c_uint16,
-        u8p,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_identify.restype = ctypes.c_int
-    lib.netaudio_dapi_build_arc_request.argtypes = [
-        ctypes.c_uint16,
-        ctypes.c_uint16,
-        u8p,
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_arc_request.restype = ctypes.c_int
-    lib.netaudio_dapi_build_settings_request.argtypes = [
-        ctypes.c_uint16,
-        ctypes.c_uint16,
-        u8p,
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_dapi_build_settings_request.restype = ctypes.c_int
-    lib.netaudio_dapi_build_service_acknowledgement.argtypes = [u8p, ctypes.c_size_t, *buffer_out]
-    lib.netaudio_dapi_build_service_acknowledgement.restype = ctypes.c_int
+        _load_failures = []
 
-    lib.netaudio_client_new.argtypes = [
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.c_uint16,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    lib.netaudio_client_new.restype = ctypes.c_int
-    lib.netaudio_client_free.argtypes = [ctypes.c_void_p]
-    lib.netaudio_client_free.restype = None
-    lib.netaudio_client_set_host_mac.argtypes = [ctypes.c_void_p, u8p]
-    lib.netaudio_client_set_host_mac.restype = ctypes.c_int
-    lib.netaudio_client_request.argtypes = [
-        ctypes.c_void_p,
-        u8p,
-        ctypes.c_size_t,
-        ctypes.c_uint16,
-        ctypes.c_bool,
-        ctypes.c_uint32,
-        ctypes.c_uint64,
-        *buffer_out,
-    ]
-    lib.netaudio_client_request.restype = ctypes.c_int
-    lib.netaudio_client_lock.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_char_p,
-        u8p,
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_client_lock.restype = ctypes.c_int
-    lib.netaudio_client_unlock.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_char_p,
-        u8p,
-        ctypes.c_size_t,
-        *buffer_out,
-    ]
-    lib.netaudio_client_unlock.restype = ctypes.c_int
-    lib.netaudio_host_mac.argtypes = [u8p]
-    lib.netaudio_host_mac.restype = ctypes.c_int
-    lib.netaudio_host_mac_for_ipv4.argtypes = [ctypes.c_char_p, u8p]
-    lib.netaudio_host_mac_for_ipv4.restype = ctypes.c_int
-    lib.netaudio_client_execute.argtypes = [ctypes.c_void_p, ctypes.c_char_p, *buffer_out]
-    lib.netaudio_client_execute.restype = ctypes.c_int
-    lib.netaudio_client_get_channel_count.argtypes = [
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_uint16),
-        ctypes.POINTER(ctypes.c_int32),
-    ]
-    lib.netaudio_client_get_channel_count.restype = ctypes.c_int
-    lib.netaudio_client_get_aes67_configured.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int32)]
-    lib.netaudio_client_get_aes67_configured.restype = ctypes.c_int
-    lib.netaudio_client_get_rx_inventory_json.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint16,
-        *buffer_out,
-    ]
-    lib.netaudio_client_get_rx_inventory_json.restype = ctypes.c_int
-    for getter in (
-        "netaudio_client_get_rx_channels_json",
-        "netaudio_client_get_tx_channels_json",
-        "netaudio_client_get_device_name_json",
-        "netaudio_client_get_device_info_json",
-        "netaudio_client_get_device_settings_json",
-        "netaudio_client_get_property_directory_json",
-    ):
-        function = getattr(lib, getter)
-        function.argtypes = [ctypes.c_void_p, *buffer_out]
-        function.restype = ctypes.c_int
-    return lib
+        for path in _candidate_paths():
+            if not path:
+                continue
+
+            if not path.exists():
+                _load_failures.append((path, "not found"))
+                continue
+
+            try:
+                lib = ctypes.CDLL(str(path))
+            except OSError as exception:
+                _load_failures.append((path, str(exception)))
+                continue
+
+            compatibility_failure = _abi_compatibility_failure(lib)
+
+            if compatibility_failure is not None:
+                logger.warning(f"netaudio-core at {path} {compatibility_failure}, skipping")
+                _load_failures.append((path, compatibility_failure))
+                continue
+
+            try:
+                _library = _configure(lib)
+            except AttributeError as exception:
+                _load_failures.append((path, str(exception)))
+                continue
+
+            _load_attempted = True
+            return _library
+
+        _load_attempted = True
+        return None
 
 
 def available() -> bool:
@@ -369,7 +172,7 @@ def _call_buffer(function, *leading_args, capacity=8192):
     out = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = function(*leading_args, out, capacity, ctypes.byref(length))
-    if status == 6 and length.value > capacity:
+    if status == _STATUS_BUFFER_TOO_SMALL and length.value > capacity:
         out = (ctypes.c_uint8 * length.value)()
         capacity = length.value
         status = function(*leading_args, out, capacity, ctypes.byref(length))
@@ -384,7 +187,7 @@ def last_error_message() -> str:
     out = (ctypes.c_uint8 * capacity)()
     length = ctypes.c_size_t(0)
     status = lib.netaudio_last_error_message(out, capacity, ctypes.byref(length))
-    if status == 6 and length.value > capacity:
+    if status == _STATUS_BUFFER_TOO_SMALL and length.value > capacity:
         capacity = length.value
         out = (ctypes.c_uint8 * capacity)()
         status = lib.netaudio_last_error_message(out, capacity, ctypes.byref(length))
@@ -394,22 +197,362 @@ def last_error_message() -> str:
 
 
 def next_message_id() -> int:
-    global _message_id_counter
-    with _message_id_lock:
-        _message_id_counter = (_message_id_counter + 1) & 0xFFFF
-        if _message_id_counter == 0:
-            _message_id_counter = 1
-        return _message_id_counter
+    return require().netaudio_next_message_id()
+
+
+def next_publication_id(previous: int) -> int:
+    if isinstance(previous, bool) or not isinstance(previous, int) or not 0 <= previous <= 65535:
+        raise ValueError("previous publication ID must be an unsigned 16-bit integer")
+
+    return require().netaudio_next_publication_id(previous)
+
+
+def next_panel_sequence() -> int:
+    return require().netaudio_next_panel_sequence()
+
+
+def next_dapi_wrapper_id(previous: int) -> int:
+    if isinstance(previous, bool) or not isinstance(previous, int) or not 0 <= previous <= 65535:
+        raise ValueError("previous wrapper ID must be an unsigned 16-bit integer")
+
+    return require().netaudio_dapi_next_wrapper_id(previous)
+
+
+def _call_json(function, value, context):
+    status, data = _call_buffer(function, _encode_command_spec(value))
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, context)
+
+    return _decode_json_output(data, context)
+
+
+def performance_capabilities(facts: _requests.PerformanceFacts) -> _types.PerformanceCapabilities:
+    return _call_json(require().netaudio_performance_capabilities, facts, "performance capabilities")
+
+
+def panel_profile(facts: _requests.PanelProfileRequest) -> _types.PanelProfile:
+    return _call_json(require().netaudio_panel_profile, facts, "panel profile")
+
+
+def plan_panel(request: _requests.PanelPlanRequest) -> _types.PanelPlan:
+    return _call_json(require().netaudio_plan_panel, request, "panel plan")
+
+
+def panel_readback_matches(request: _requests.PanelReadbackRequest) -> bool:
+    return _call_json(require().netaudio_panel_readback_matches, request, "panel readback")
+
+
+def performance_completion(request: _requests.PerformanceCompletionRequest) -> _types.PerformanceCompletion:
+    return _call_json(require().netaudio_performance_completion, request, "performance completion")
+
+
+def operation_availability(facts: _requests.AvailabilityRequest) -> _types.Availability:
+    return _call_json(require().netaudio_operation_availability, facts, "operation availability")
+
+
+def connection_health_update(request: _requests.ConnectionHealthUpdateRequest) -> _types.ConnectionHealthUpdate | None:
+    return _call_json(require().netaudio_connection_health_update, request, "connection-health update")
+
+
+def sample_rate_status_evidence(status: _requests.SampleRateStatus) -> _types.SampleRateStatus:
+    return _call_json(
+        require().netaudio_sample_rate_evidence, {"kind": "status", "status": status}, "sample-rate status"
+    )
+
+
+def sample_rate_capacity(
+    capacities: list[_requests.ChannelCapacity] | None, sample_rate_hertz: int
+) -> _types.ChannelCapacity | None:
+    return _call_json(
+        require().netaudio_sample_rate_evidence,
+        {"kind": "capacity", "capacities": capacities, "sample_rate_hertz": sample_rate_hertz},
+        "sample-rate capacity",
+    )
+
+
+def verify_sample_rate_receiver_inventory(channel_numbers: list[int], receive_channel_count: int) -> None:
+    _call_json(
+        require().netaudio_sample_rate_evidence,
+        {
+            "kind": "receiver_inventory",
+            "channel_numbers": channel_numbers,
+            "receive_channel_count": receive_channel_count,
+        },
+        "sample-rate receiver inventory",
+    )
+
+
+def latency_configuration(settings: Mapping[str, _requests.JsonValue]) -> _types.LatencyConfiguration:
+    return _call_json(require().netaudio_latency_configuration, dict(settings), "latency configuration")
+
+
+def latency_control(
+    requested_milliseconds: float,
+    settings: dict[str, _requests.JsonValue] | None = None,
+    acknowledged: bool | None = None,
+) -> _types.LatencyCompletion:
+    return _call_json(
+        require().netaudio_latency_control,
+        {"requested_milliseconds": requested_milliseconds, "settings": settings, "acknowledged": acknowledged},
+        "latency control",
+    )
+
+
+def settings_capabilities(facts: _requests.SettingsCapabilityFacts) -> _types.SettingsCapabilities:
+    return _call_json(require().netaudio_settings_capabilities, facts, "settings capabilities")
+
+
+def clock_sources(facts: _requests.ClockSourceFacts) -> _types.ClockSources:
+    return _call_json(require().netaudio_clock_sources, facts, "clock sources")
+
+
+def performance_snapshot(facts: _requests.PerformanceSnapshotFacts) -> _types.PerformanceSnapshot:
+    return _call_json(require().netaudio_performance_snapshot, facts, "performance snapshot")
+
+
+def plan_performance_command(spec: dict) -> list[dict]:
+    return _call_json(require().netaudio_plan_performance_command, spec, "performance command plan")
+
+
+def build_managed_command(
+    specification: dict, *, host_mac: bytes | None = None, message_id: int
+) -> _types.ManagedCommand:
+    request: _requests.ManagedCommandRequest = {
+        "specification": specification,
+        "host_mac": host_mac.hex() if host_mac is not None else None,
+        "message_id": message_id,
+    }
+    return _call_json(require().netaudio_build_managed_command, request, "managed command plan")
+
+
+def audio_capability_readback(status: dict | None, requested_value: int) -> _types.AudioReadbackResult:
+    request: _requests.AudioCapabilityReadback = {"status": status, "requested_value": requested_value}
+
+    return _call_json(
+        require().netaudio_audio_capability_readback,
+        request,
+        "audio capability readback",
+    )
+
+
+def flow_format_readback(status: dict | None, requested_value: int) -> _types.AudioReadbackResult:
+    request: _requests.AudioCapabilityReadback = {"status": status, "requested_value": requested_value}
+
+    return _call_json(require().netaudio_flow_format_readback, request, "flow format readback")
+
+
+def audio_capability_control(update_mode, available_values, requested_value=None, host_disabled=None) -> list[str]:
+    return _call_json(
+        require().netaudio_audio_capability_control,
+        {
+            "update_mode": update_mode,
+            "available_values": available_values,
+            "requested_value": requested_value,
+            "host_disabled": host_disabled,
+        },
+        "audio capability control",
+    )
+
+
+def redundancy_control(
+    state: dict | None, mode: str | None = None, *, readback: dict | None = None
+) -> _types.RedundancyControl:
+    return _call_json(
+        require().netaudio_redundancy_control,
+        {"state": state, "mode": mode, "readback": readback},
+        "redundancy control",
+    )
+
+
+def interface_configuration(request: _requests.InterfaceConfigurationRequest) -> _types.InterfaceConfiguration:
+    return _call_json(require().netaudio_interface_configuration, request, "interface configuration")
+
+
+def analog_access(facts: _requests.AnalogAccess) -> str | None:
+    return _call_json(require().netaudio_analog_access, facts, "analog access")
+
+
+def analog_level_control(
+    adapter: _requests.GainStatus | None, channel: int, level: int, direction: str | None = None
+) -> _types.AnalogLevelPlan:
+    return _call_json(
+        require().netaudio_analog_level_control,
+        {"adapter": adapter, "channel": channel, "level": level, "direction": direction},
+        "analog level control",
+    )
+
+
+def verify_interface_configuration(request: _requests.InterfaceReadbackRequest) -> None:
+    _call_json(require().netaudio_verify_interface_configuration, request, "interface configuration readback")
+
+
+def metering_scale() -> list[dict]:
+    status, data = _call_buffer(require().netaudio_metering_scale)
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "metering scale")
+
+    return _decode_json_output(data, "metering scale")
+
+
+def gain_metadata() -> _types.GainMetadata:
+    status, data = _call_buffer(require().netaudio_gain_metadata)
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "gain metadata")
+
+    return _decode_json_output(data, "gain metadata")
+
+
+def network_control_state(facts: _requests.NetworkControlFacts) -> _types.NetworkControlState:
+    return _call_json(require().netaudio_network_control_state, facts, "network control state")
+
+
+def interface_redundancy_status(
+    observation: _requests.InterfaceRedundancyObservation,
+) -> _types.InterfaceRedundancyResult | None:
+    return _call_json(require().netaudio_interface_redundancy_status, observation, "interface redundancy status")
+
+
+def external_subscription_readback(request: _requests.ExternalReadbackRequest) -> _types.ExternalSubscriptionReadback:
+    return _call_json(
+        require().netaudio_external_subscription_readback,
+        request,
+        "external subscription readback",
+    )
+
+
+def build_response(spec: dict) -> bytes:
+    status, data = _call_buffer(require().netaudio_build_response, _encode_command_spec(spec))
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "build response")
+
+    return data
 
 
 def build_command(spec: dict) -> bytes:
     lib = require()
     status, data = _call_buffer(lib.netaudio_build_command, _encode_command_spec(spec))
-    if status == STATUS_INVALID_SEQUENCE and not any(key in spec for key in _MESSAGE_ID_KEYS):
+    if status == STATUS_INVALID_SEQUENCE and "message_id" not in spec:
         spec = {**spec, "message_id": next_message_id()}
         status, data = _call_buffer(lib.netaudio_build_command, _encode_command_spec(spec))
     if status != STATUS_OK:
         raise NetaudioCoreError(status, f"build_command {spec.get('command')}")
+    return data
+
+
+def plan_transmit_flow_delete(spec: _requests.FlowDeleteRequest) -> _types.FlowCommandPlan:
+    return _call_json(require().netaudio_plan_transmit_flow_delete, spec, "plan transmit flow deletion")
+
+
+def verify_sample_rate_topology(
+    before: _requests.TopologySnapshot,
+    after: _requests.TopologySnapshot,
+    target_capacity: _requests.ChannelCapacity | None,
+    target_sample_rate_hertz: int,
+) -> None:
+    status, _ = _call_buffer(
+        require().netaudio_verify_sample_rate_topology,
+        _encode_command_spec(
+            {
+                "before": before,
+                "after": after,
+                "target_capacity": target_capacity,
+                "target_sample_rate_hertz": target_sample_rate_hertz,
+            }
+        ),
+    )
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "sample-rate topology readback")
+
+
+def sample_rate_topology_impact(
+    snapshot: _requests.TopologySnapshot, target_capacity: _requests.ChannelCapacity | None
+) -> _types.TopologyImpact:
+    return _call_json(
+        require().netaudio_sample_rate_topology_impact,
+        {"snapshot": snapshot, "target_capacity": target_capacity},
+        "sample-rate topology impact",
+    )
+
+
+def transmit_flow_topology(record: dict, *, protocol_id: int) -> _types.FlowTopology:
+    request: _requests.FlowReadbackRequest = {"record": record, "protocol_id": protocol_id}
+    return _call_json(require().netaudio_transmit_flow_topology, request, "transmitter flow topology")
+
+
+def transmit_flow_specification(record: dict, *, protocol_id: int) -> _types.ObservedTransmitFlowSpecification:
+    request: _requests.FlowReadbackRequest = {"record": record, "protocol_id": protocol_id}
+    return _call_json(require().netaudio_transmit_flow_specification, request, "transmitter flow specification")
+
+
+def validate_transmit_flow_specification(specification: _requests.TransmitFlowSpecification) -> None:
+    _call_json(require().netaudio_validate_transmit_flow_specification, specification, "transmitter flow specification")
+
+
+def plan_transmit_flow_create(spec: _requests.FlowCreateRequest) -> _types.FlowCommandPlan:
+    return _call_json(require().netaudio_plan_transmit_flow_create, spec, "plan transmit flow creation")
+
+
+def compare_transmit_flows(
+    requested: _requests.TransmitFlowSpecification, effective: _requests.TransmitFlowSpecification
+) -> _types.FlowComparison:
+    return _call_json(
+        require().netaudio_compare_transmit_flows,
+        {"requested": requested, "effective": effective},
+        "transmit flow readback",
+    )
+
+
+def flow_creation_candidate(request: _requests.FlowCandidateRequest) -> _types.FlowCandidate:
+    return _call_json(require().netaudio_flow_creation_candidate, request, "flow creation readback")
+
+
+def flow_inventory_complete(inventory: dict | None) -> bool:
+    return _call_json(require().netaudio_flow_inventory_complete, inventory, "flow inventory completeness")
+
+
+def flow_create_preflight(request: _requests.FlowCreatePreflightRequest) -> _types.FlowCreatePreflight:
+    return _call_json(require().netaudio_flow_create_preflight, request, "flow creation preflight")
+
+
+def flow_topology_change(request: _requests.FlowTopologyChangeRequest) -> _types.FlowTopologyChange | None:
+    return _call_json(require().netaudio_flow_topology_change, request, "flow topology change")
+
+
+def flow_verification(request: _requests.FlowVerificationRequest) -> _types.FlowVerification:
+    return _call_json(require().netaudio_flow_verification, request, "flow verification")
+
+
+def canonical_device_mac(value: str | None) -> str | None:
+    if not isinstance(value, str) or "\0" in value:
+        return None
+
+    status, data = _call_buffer(require().netaudio_canonical_device_mac, value.encode("utf-8"))
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "canonical device MAC")
+
+    return _decode_json_output(data, "canonical device MAC")
+
+
+def channel_audio_publication(spec: _requests.ChannelAudioConfiguration) -> _types.ChannelAudioPublication | None:
+    return _call_json(require().netaudio_channel_audio_publication, spec, "channel audio publication")
+
+
+def virtual_device_advertisements(spec: _requests.VirtualDeviceAdvertisement) -> list[_types.ServiceAdvertisement]:
+    return _call_json(require().netaudio_virtual_device_advertisements, spec, "virtual device advertisements")
+
+
+def build_publication(spec: dict) -> bytes:
+    status, data = _call_buffer(require().netaudio_build_publication, _encode_command_spec(spec))
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "build publication")
+
     return data
 
 
@@ -422,6 +565,18 @@ def parse_response(kind: str, data: bytes):
     return _decode_json_output(out, f"parse {kind}")
 
 
+def parse_connection_health(data: bytes) -> _requests.HeartbeatConnectionHealthRecords:
+    return parse_response("heartbeat_connection_health", data)
+
+
+def parse_sap(data: bytes) -> _types.SapAnnouncement:
+    return parse_response("sap", data)
+
+
+def parse_sdp(text: str) -> _types.SdpDocument:
+    return parse_response("sdp", text.encode("utf-8"))
+
+
 def parse_page(kind: str, data: bytes, starting_channel: int):
     lib = require()
     in_buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
@@ -431,11 +586,19 @@ def parse_page(kind: str, data: bytes, starting_channel: int):
     return _decode_json_output(out, f"parse {kind}")
 
 
+def lock_key_length() -> int:
+    return require().netaudio_lock_key_length()
+
+
+def validate_lock_pin(pin: str) -> None:
+    status = require().netaudio_validate_lock_pin(_encode_command_spec(pin))
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "validate_lock_pin")
+
+
 def lock_token(pin: str, nonce: bytes, key: bytes) -> bytes:
-    if len(nonce) != LOCK_NONCE_LENGTH:
-        raise ValueError(f"nonce must be exactly {LOCK_NONCE_LENGTH} bytes")
-    if len(key) != LOCK_KEY_LENGTH:
-        raise ValueError(f"key must be exactly {LOCK_KEY_LENGTH} bytes")
+    validate_lock_pin(pin)
     lib = require()
     nonce_buffer = (ctypes.c_uint8 * len(nonce)).from_buffer_copy(nonce)
     key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
@@ -485,6 +648,14 @@ def build_dapi_session_open() -> bytes:
     return _checked_dapi_frame(require().netaudio_dapi_build_session_open)
 
 
+def correlate_managed_arc(request: _requests.ManagedArcCorrelationRequest) -> _types.ManagedArcResponse | None:
+    return _call_json(require().netaudio_dapi_correlate_arc_response, request, "managed ARC response")
+
+
+def advance_managed_settings(request: _requests.ManagedSettingsRequest) -> _types.ManagedSettingsResult:
+    return _call_json(require().netaudio_dapi_advance_settings_exchange, request, "managed settings exchange")
+
+
 def build_dapi_authentication(credential: str) -> bytes:
     encoded = credential.encode("ascii")
     return _checked_dapi_frame(
@@ -494,24 +665,7 @@ def build_dapi_authentication(credential: str) -> bytes:
     )
 
 
-def build_dapi_domain_subscription(domain_id: bytes, subscription_id: int) -> bytes:
-    return _checked_dapi_frame(
-        require().netaudio_dapi_build_domain_subscription,
-        _as_buffer(domain_id),
-        len(domain_id),
-        subscription_id,
-    )
-
-
-def build_dapi_device_inventory_subscription(domain_id: bytes) -> bytes:
-    return _checked_dapi_frame(
-        require().netaudio_dapi_build_device_inventory_subscription,
-        _as_buffer(domain_id),
-        len(domain_id),
-    )
-
-
-def build_dapi_inventory_initialization(
+def build_dapi_domain_initialization(
     domain_id: bytes,
     first_message_id: int,
     notification_port: int,
@@ -520,7 +674,7 @@ def build_dapi_inventory_initialization(
     if len(local_ipv4) != 4:
         raise ValueError("local IPv4 address must be exactly 4 bytes")
     return _checked_dapi_frame(
-        require().netaudio_dapi_build_inventory_initialization,
+        require().netaudio_dapi_build_domain_initialization,
         _as_buffer(domain_id),
         len(domain_id),
         first_message_id,
@@ -573,11 +727,134 @@ def _as_buffer(data: bytes):
     return (ctypes.c_uint8 * len(data)).from_buffer_copy(data) if data else (ctypes.c_uint8 * 0)()
 
 
+def command_acknowledgement(response: bytes | None) -> _types.CommandReceipt | None:
+    if response is None:
+        return None
+
+    return parse_response("command_receipt", response)
+
+
+def flow_authoring_capabilities(capability_word: int) -> _types.FlowAuthoringCapabilities:
+    if isinstance(capability_word, bool) or not isinstance(capability_word, int) or not 0 <= capability_word <= 65535:
+        raise ValueError("capability word must be an unsigned 16-bit integer")
+
+    status, data = _call_buffer(require().netaudio_flow_authoring_capabilities, capability_word)
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "flow authoring capabilities")
+
+    return _decode_json_output(data, "flow authoring capabilities")
+
+
+def transmit_flow_inventory_protocols(advertised: int, observed: int) -> list[int]:
+    for value in (advertised, observed):
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65535:
+            raise ValueError("protocol identifier must fit an unsigned 16-bit integer")
+
+    status, data = _call_buffer(require().netaudio_transmit_flow_inventory_protocols, advertised, observed)
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "transmitter inventory protocols")
+
+    return _decode_json_output(data, "transmitter inventory protocols")
+
+
+def arc_protocol(version: str | None, *, managed: bool = False) -> _types.ArcProtocol | None:
+    if version is not None and (not isinstance(version, str) or "\0" in version):
+        raise ValueError("ARC version must be a string without null bytes")
+
+    status, data = _call_buffer(
+        require().netaudio_arc_protocol, version.encode("utf-8") if version is not None else None, managed
+    )
+
+    if status != STATUS_OK:
+        raise NetaudioCoreError(status, "ARC protocol")
+
+    return _decode_json_output(data, "ARC protocol")
+
+
+class _Inventory:
+    def __init__(self, kind: str, protocol_id: int, maximum_pages: int = 256):
+        self._native_lock = threading.RLock()
+        self._handle = ctypes.c_void_p()
+        self._lib = require()
+
+        if not isinstance(protocol_id, int) or isinstance(protocol_id, bool) or not 0 <= protocol_id <= 65535:
+            raise ValueError("protocol_id must fit an unsigned 16-bit integer")
+
+        if (
+            not isinstance(maximum_pages, int)
+            or isinstance(maximum_pages, bool)
+            or not 0 <= maximum_pages <= ctypes.c_size_t(-1).value
+        ):
+            raise ValueError("maximum_pages must fit an unsigned size_t integer")
+
+        status = self._lib.netaudio_inventory_new(
+            kind.encode("utf-8"), protocol_id, maximum_pages, ctypes.byref(self._handle)
+        )
+
+        if status != STATUS_OK:
+            raise NetaudioCoreError(status, "inventory")
+
+    def close(self):
+        with self._native_lock:
+            if self._handle:
+                self._lib.netaudio_inventory_free(self._handle)
+                self._handle = ctypes.c_void_p()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exception_information):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+    def _require_open(self):
+        if not self._handle:
+            raise RuntimeError("inventory is closed")
+
+    def accept(self, response: bytes):
+        with self._native_lock:
+            self._require_open()
+            data = (ctypes.c_uint8 * len(response)).from_buffer_copy(response)
+            status = self._lib.netaudio_inventory_accept(self._handle, data, len(response))
+
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "inventory")
+
+    def state(self) -> _types.InventoryState:
+        with self._native_lock:
+            self._require_open()
+            status, data = _call_buffer(self._lib.netaudio_inventory_state, self._handle)
+
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "inventory")
+
+            return _decode_json_output(data, "inventory")
+
+
+class ChannelInventory(_Inventory):
+    def __init__(self, channel_type: str, protocol_id: int, maximum_pages: int = 256):
+        super().__init__(f"{channel_type}_channels", protocol_id, maximum_pages)
+
+
+class ReceiverFlowInventory(_Inventory):
+    def __init__(self, protocol_id: int, maximum_pages: int = 256):
+        super().__init__("rx_flows", protocol_id, maximum_pages)
+
+
+class TransmitFlowInventory(_Inventory):
+    def __init__(self, protocol_id: int, maximum_pages: int = 256):
+        super().__init__("tx_flows", protocol_id, maximum_pages)
+
+
 class CoreClient:
     def __init__(
         self,
         device_ip: str,
-        arc_port: int = 4440,
+        arc_port: int = _PORT_ARC,
         timeout_ms: int = 1000,
         attempts: int = 3,
         *,
@@ -593,8 +870,6 @@ class CoreClient:
         library = require()
         self._lib = library
         self._device_ip = device_ip
-        self._arc_port = arc_port
-        self.observer = None
         with self._native_lock:
             status = library.netaudio_client_new(
                 device_ip.encode("ascii"),
@@ -627,8 +902,32 @@ class CoreClient:
 
     def _require_library(self):
         if self._lib is None:
-            raise NetaudioCoreError(8, "netaudio-core library not loaded")
+            raise NetaudioCoreError(_STATUS_IO_ERROR, "netaudio-core library not loaded")
         return self._lib
+
+    @property
+    def device_ip(self) -> str:
+        return self._device_ip
+
+    def clear_wire_captures(self) -> None:
+        library = self._require_library()
+
+        with self._native_lock:
+            status = library.netaudio_client_clear_wire_captures(self._handle)
+
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "clear_wire_captures")
+
+    def get_wire_captures(self) -> list[dict]:
+        library = self._require_library()
+
+        with self._native_lock:
+            status, data = _call_buffer(library.netaudio_client_get_wire_captures_json, self._handle, capacity=262144)
+
+            if status != STATUS_OK:
+                raise NetaudioCoreError(status, "get_wire_captures")
+
+        return _decode_json_output(data, "wire captures")
 
     def set_host_mac(self, mac: bytes):
         if len(mac) != 6:
@@ -663,8 +962,6 @@ class CoreClient:
         if status != STATUS_OK:
             raise NetaudioCoreError(status, "client_request")
         response = data if expect_response else None
-        if self.observer is not None:
-            self.observer(packet, response, self._device_ip, target_port)
         return response
 
     def execute(self, spec: dict):
@@ -680,12 +977,12 @@ class CoreClient:
             raise NetaudioCoreError(status, f"execute {spec.get('command')}")
         return data if data else None
 
-    def _json_getter(self, name):
+    def _json_getter(self, name, *arguments):
         out = (ctypes.c_uint8 * 262144)()
         length = ctypes.c_size_t(0)
         library = self._require_library()
         with self._native_lock:
-            status = getattr(library, name)(self._handle, out, 262144, ctypes.byref(length))
+            status = getattr(library, name)(self._handle, *arguments, out, 262144, ctypes.byref(length))
             data = bytes(out[: length.value])
         if status != STATUS_OK:
             raise NetaudioCoreError(status, name)
@@ -727,24 +1024,11 @@ class CoreClient:
         return self._json_getter("netaudio_client_get_property_directory_json")
 
     def get_channel_audio_metadata(self, tx_count: int, rx_count: int):
-        candidates = (
-            (tx_count, {"command": "transmitters", "page": 0}),
-            (rx_count, {"command": "receivers", "page": 0}),
-        )
-        for channel_count, specification in candidates:
-            if channel_count <= 0:
-                continue
-            try:
-                packet = build_command(specification)
-                response = self.request(packet, self._arc_port)
-                if response is not None:
-                    return parse_response("channel_audio_metadata", response)
-            except NetaudioCoreError as exception:
-                logger.debug(
-                    f"Channel audio metadata query failed for {self._device_ip} "
-                    f"using {specification['command']}: {exception}"
-                )
-        return None
+        for count in (tx_count, rx_count):
+            if type(count) is not int or not 0 <= count <= 65535:
+                raise ValueError("channel count must be an unsigned 16-bit integer")
+
+        return self._json_getter("netaudio_client_get_channel_audio_metadata_json", tx_count, rx_count)
 
     def get_channel_count(self):
         tx = ctypes.c_uint16(0)
@@ -781,8 +1065,7 @@ class CoreClient:
         return self._lock_op("netaudio_client_unlock", pin, key)
 
     def _lock_op(self, name, pin, key):
-        if len(key) != LOCK_KEY_LENGTH:
-            raise ValueError(f"key must be exactly {LOCK_KEY_LENGTH} bytes")
+        validate_lock_pin(pin)
         key_buffer = (ctypes.c_uint8 * len(key)).from_buffer_copy(key)
         out = (ctypes.c_uint8 * 4096)()
         length = ctypes.c_size_t(0)
@@ -803,7 +1086,57 @@ class CoreClient:
         return _decode_json_output(data, "Rust API response")
 
 
-def subscription_status(code: int, receiver_status_code: int | None = None) -> dict:
+def normalize_clock_subdomain(value) -> bytes:
+    if isinstance(value, (bytes, bytearray)):
+        value = list(value)
+
+    return bytes(_call_json(require().netaudio_normalize_clock_subdomain, value, "clock subdomain"))
+
+
+def clock_record_revision(facts: dict) -> int:
+    return _call_json(require().netaudio_clock_record_revision, facts, "clock record revision")
+
+
+def plan_subscription_commands(spec: dict) -> list[dict]:
+    return _call_json(require().netaudio_plan_subscription_commands, spec, "subscription page plan")
+
+
+def subscription_readback(spec: _requests.SubscriptionReadbackRequest) -> _types.SubscriptionReadback:
+    return _call_json(require().netaudio_subscription_readback, spec, "subscription readback")
+
+
+def plan_subscription_reconciliation(spec: _requests.SubscriptionReconciliationRequest) -> _types.SubscriptionPlan:
+    return _call_json(require().netaudio_plan_subscription_reconciliation, spec, "subscription reconciliation")
+
+
+def receiver_self_connection_capabilities(spec: _requests.ReceiverCapabilityRequest) -> _types.ReceiverCapabilities:
+    return _call_json(require().netaudio_receiver_self_connection_capabilities, spec, "receiver capabilities")
+
+
+def plan_clock_configuration(spec: dict) -> _types.ClockPlan:
+    spec = dict(spec)
+
+    for field in ("status", "changes"):
+        if isinstance(spec.get(field), dict):
+            spec[field] = {
+                key: list(value) if isinstance(value, (bytes, bytearray)) else value
+                for key, value in spec[field].items()
+            }
+
+    return _call_json(require().netaudio_plan_clock_configuration, spec, "clock configuration plan")
+
+
+def clock_configuration_matches(observed: dict, requested: dict) -> bool:
+    observed = {key: list(value) if isinstance(value, bytes) else value for key, value in observed.items()}
+
+    return _call_json(
+        require().netaudio_clock_configuration_matches,
+        {"status": observed, "requested": requested},
+        "clock configuration readback",
+    )
+
+
+def subscription_status(code: int, receiver_status_code: int | None = None) -> _types.SubscriptionStatus:
     values = (code,) if receiver_status_code is None else (code, receiver_status_code)
     for value in values:
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 0xFFFF:
@@ -816,12 +1149,18 @@ def subscription_status(code: int, receiver_status_code: int | None = None) -> d
     return _decode_json_output(data, "Rust API response")
 
 
-def subscription_state_for_identifier(identifier: str | None) -> str:
+def subscription_classification_for_identifier(identifier: str | None) -> _types.SubscriptionClassification:
     if identifier is None:
-        return "unknown"
+        identifier = ""
+
     if not isinstance(identifier, str) or "\0" in identifier:
         raise ValueError("subscription status identifier must be a string without null bytes")
-    status, data = _call_buffer(require().netaudio_subscription_state_for_identifier, identifier.encode("utf-8"))
+
+    status, data = _call_buffer(
+        require().netaudio_subscription_classification_for_identifier, identifier.encode("utf-8")
+    )
+
     if status != STATUS_OK:
-        raise NetaudioCoreError(status, "subscription_state_for_identifier")
+        raise NetaudioCoreError(status, "subscription_classification_for_identifier")
+
     return _decode_json_output(data, "Rust API response")

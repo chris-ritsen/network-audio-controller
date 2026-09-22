@@ -3,6 +3,8 @@ from __future__ import annotations
 import ipaddress
 import json
 
+from netaudio import core
+from netaudio.core import NetaudioCoreError
 from netaudio.dante import flows
 from netaudio.dante.flow_lifecycle import (
     create_transmit_flow,
@@ -198,7 +200,7 @@ class DaemonConfigurationHandlers:
         try:
             operation = getattr(self.application, "delete_transmit_flow", None)
             if operation is None:
-                flow_id = flows.validate_flow_slot(params.get("flow_id"))
+                flow_id = flows.validate_flow_identifier(params.get("flow_id"))
                 result = await self.operation_recorder.run_operation(
                     device,
                     "delete_transmit_flow",
@@ -231,10 +233,13 @@ class DaemonConfigurationHandlers:
         if status is None:
             await self._send_json(writer, {"error": "gain readback was unavailable"}, 504)
             return
-        observed_device_type, channel_levels = status
+        observed_device_type = status["device_type"]
+        channel_levels = status["channel_levels"]
         channel_index = channel_number - 1
         observed_level = channel_levels[channel_index] if 0 <= channel_index < len(channel_levels) else None
-        if observed_device_type != device_type or observed_level != gain_level:
+        readback = core.analog_level_control(status, channel_number, gain_level, device_type)
+
+        if readback["action"] != "unchanged":
             await self._send_json(
                 writer,
                 {
@@ -255,7 +260,15 @@ class DaemonConfigurationHandlers:
         if not isinstance(expected, bool):
             await self._send_json(writer, {"error": "preferred must be a boolean"}, 400)
             return
-        observed = await self.application.set_preferred_leader(device, expected)
+        try:
+            observed = await self.application.set_preferred_leader(device, expected)
+        except NetaudioCoreError as exception:
+            if exception.category != "json_input":
+                raise
+
+            await self._send_json(writer, {"error": exception.detail or str(exception)}, 409)
+            return
+
         if observed is None:
             await self._send_json(writer, {"error": "preferred leader readback was unavailable"}, 504)
             return
@@ -278,6 +291,12 @@ class DaemonConfigurationHandlers:
             return
         try:
             observed = await self.application.set_clock_source(device, clock_source)
+        except NetaudioCoreError as exception:
+            if exception.category != "json_input":
+                raise
+
+            await self._send_json(writer, {"error": exception.detail or str(exception)}, 409)
+            return
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
@@ -310,6 +329,12 @@ class DaemonConfigurationHandlers:
             return
         try:
             observed = await self.application.set_clock_subdomain(device, requested)
+        except NetaudioCoreError as exception:
+            if exception.category != "json_input":
+                raise
+
+            await self._send_json(writer, {"error": exception.detail or str(exception)}, 409)
+            return
         except ValueError as exception:
             await self._send_json(writer, {"error": str(exception)}, 409)
             return
@@ -341,9 +366,17 @@ class DaemonConfigurationHandlers:
             return
         from netaudio.monitoring.model import _json_safe
 
-        result = await self.application.set_clock_configuration(
-            device, changes, record_revision=params.get("record_revision")
-        )
+        try:
+            result = await self.application.set_clock_configuration(
+                device, changes, record_revision=params.get("record_revision")
+            )
+        except NetaudioCoreError as exception:
+            if exception.category != "json_input":
+                raise
+
+            await self._send_json(writer, {"error": exception.detail or str(exception)}, 409)
+            return
+
         result["success"] = result["effective_state_confirmed"]
         await self._send_json(writer, _json_safe(result), 200 if result["success"] else 409)
 
@@ -353,7 +386,15 @@ class DaemonConfigurationHandlers:
         device = await self._require_device(writer, params.get("device"))
         if not device:
             return
-        parsed = await self.application.probe_clocking_status(device, record_revision=params.get("record_revision"))
+        try:
+            parsed = await self.application.probe_clocking_status(device, record_revision=params.get("record_revision"))
+        except NetaudioCoreError as exception:
+            if exception.category != "json_input":
+                raise
+
+            await self._send_json(writer, {"error": exception.detail or str(exception)}, 409)
+            return
+
         await self._send_json(writer, {"success": True, **_json_safe(parsed)})
 
     async def _handle_set_aes67(self, writer, params):

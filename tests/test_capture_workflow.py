@@ -33,6 +33,7 @@ def build_conmon_packet(message_type: int, sequence: int = 1) -> bytes:
     packet = bytearray(28)
     struct.pack_into(">HH", packet, 0, 0xFFFF, len(packet))
     struct.pack_into(">H", packet, 4, sequence)
+    packet[16:24] = b"Audinate"
     struct.pack_into(">H", packet, 26, message_type)
     return bytes(packet)
 

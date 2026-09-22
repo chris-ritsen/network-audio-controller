@@ -435,6 +435,7 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
     assert record["subscriptions"] == [
         {
             "rx_channel": "managed-rx",
+            "rx_channel_number": 1,
             "rx_device": "managed-device",
             "tx_channel": "source-channel",
             "tx_device": "source-device",
@@ -444,6 +445,7 @@ def test_ddm_only_device_has_normalized_channels_raw_signal_and_subscription_sta
                 "icon": "",
                 "label": "Subscribed (unicast)",
                 "severity": "ok",
+                "settled": True,
                 "state": "connected",
                 "status": "DYNAMIC",
             },
@@ -482,6 +484,7 @@ def test_direct_and_managed_capabilities_share_canonical_field_and_retain_confli
     direct_receiver.name = "managed-rx"
     direct_receiver.receiver_flags = 0x000F
     direct_receiver.can_subscribe_self = True
+    direct_receiver.direct_can_subscribe_self = True
     direct.rx_channels[1] = direct_receiver
     managed = _managed_device()
 

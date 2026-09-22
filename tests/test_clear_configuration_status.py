@@ -6,7 +6,6 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.application import DanteApplication
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.events import EventType
 from tests.status_test_support import application_with_device, count_events, receive_packets
@@ -28,32 +27,23 @@ def test_status_probe_builder_matches_shipping_controller_request():
     specification = {
         "command": "probe_clear_configuration_status",
         "host_mac": "fec9ca09a6d5",
-        "sequence": 0x01ED,
+        "message_id": 0x01ED,
     }
     assert core.build_command(specification) == CONTROLLER_REQUEST
 
-    packet, service, port = DanteDeviceCommands().command_probe_clear_configuration_status(
-        host_mac=bytes.fromhex("fec9ca09a6d5"),
-        sequence=0x01ED,
-    )
-    assert packet == CONTROLLER_REQUEST
-    assert service is None
-    assert port == 8700
-
 
 def test_action_builders_match_authentic_mode_one_and_mode_two_requests():
-    host_mac = bytes.fromhex("fec9ca09a6d5")
-    commands = DanteDeviceCommands(settings_sequence=0x01EC)
-
-    clear_all_packet, _, clear_all_port = commands.command_clear_all_configuration(host_mac=host_mac)
-    preserve_network_packet, _, preserve_network_port = (
-        commands.command_clear_all_configuration_preserving_internet_protocol_settings(
-            host_mac=host_mac,
-        )
+    clear_all_packet = core.build_command(
+        {"command": "clear_all_configuration", "host_mac": "fec9ca09a6d5", "message_id": 0x01ED}
+    )
+    preserve_network_packet = core.build_command(
+        {
+            "command": "clear_all_configuration_preserving_internet_protocol_settings",
+            "host_mac": "fec9ca09a6d5",
+            "message_id": 0x01EE,
+        }
     )
 
-    assert clear_all_port == 8700
-    assert preserve_network_port == 8700
     assert clear_all_packet == bytes.fromhex("ffff002401ed0000fec9ca09a6d50000417564696e617465073e00770000006400000001")
     assert preserve_network_packet == bytes.fromhex(
         "ffff002401ee0000fec9ca09a6d50000417564696e617465073e00770000006400000002"
@@ -74,7 +64,14 @@ def test_parser_preserves_authentic_action_masks_and_result_codes():
             "unmapped_first_word": 0,
             "available_actions_mask": available_actions_mask,
             "action_result_code": action_result_code,
+            "completed_action": {
+                1: "clear_all_configuration",
+                2: "clear_all_configuration_preserving_internet_protocol_settings",
+            }.get(action_result_code),
         }
+
+    unknown = MODE_ONE_STATUS[:-4] + bytes.fromhex("ffffffff")
+    assert core.parse_response("clear_configuration_status", unknown)["completed_action"] is None
 
 
 def test_state_service_applies_and_serializes_clear_configuration_status_once():
@@ -106,7 +103,7 @@ async def test_application_executes_typed_status_probe():
     assert address == "192.168.1.108"
     assert specification["command"] == "probe_clear_configuration_status"
     assert specification["host_mac"] == "102030405060"
-    assert 1 <= specification["sequence"] <= 0xFFFF
+    assert 1 <= specification["message_id"] <= 0xFFFF
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ async def test_probe_clear_configuration_status_waits_for_the_matching_conmon_re
         "unmapped_first_word": 0,
         "available_actions_mask": 3,
         "action_result_code": 0,
+        "completed_action": None,
     }
     application.send_probe_clear_configuration_status = AsyncMock(
         side_effect=lambda ip_address: application.notifications._on_packet(
@@ -70,6 +71,7 @@ async def test_clear_configuration_waits_for_the_requested_action_result(
     )
 
     assert result["action_result_code"] == expected_result_code
+    assert result["completed_action"] == method_name.removeprefix("send_")
     command.assert_awaited_once_with(device_ip_address)
     assert not application.notifications.is_waiting("clear_configuration_status", device_ip_address)
 
@@ -85,7 +87,7 @@ async def test_clear_configuration_rejects_a_nonmatching_status_result():
         )
     )
 
-    with pytest.raises(RuntimeError, match="returned result 0 instead of 1"):
+    with pytest.raises(RuntimeError, match="did not confirm the requested action"):
         await application.clear_configuration(
             device_ip_address,
             preserve_internet_protocol_settings=False,

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from netaudio.dante import debug_formatter
-from netaudio.dante.debug_formatter import get_opcode_name
 from netaudio.dante.dissection.header import parse_packet_header
 from netaudio.dante.packet_store import PacketRecord, PacketStore
 
@@ -33,20 +32,117 @@ def store(tmp_path):
 
 
 class TestParseHeader:
+    @pytest.mark.parametrize("length", [8, 9, 10, 11])
+    def test_truncated_ddp_header_is_not_reinterpreted_as_arc(self, store, length):
+        packet = bytes.fromhex("0008000110000200000c2ffe0004000000070000")[:length]
+        assert parse_packet_header(packet) is None
+
+        packet_id = store.store_packet(PacketRecord(payload=packet, source_type="test"))
+        stored = store.get_packet(packet_id)
+        assert stored["opcode"] is None
+        assert stored["transaction_id"] is None
+
+    def test_unknown_protocol_is_not_assigned_arc_fields(self, store):
+        packet = _make_response(protocol=0x9999)
+        assert parse_packet_header(packet) is None
+
+        packet_id = store.store_packet(PacketRecord(payload=packet, source_type="test"))
+        assert store.get_packet(packet_id)["opcode"] is None
+
+    @pytest.mark.parametrize(
+        "packet,expected",
+        [
+            (
+                bytes.fromhex("27ff000800421002"),
+                {
+                    "family": "arc",
+                    "protocol_name": "PROTOCOL_ARC",
+                    "opcode_name": "device_name",
+                    "result_name": None,
+                    "protocol_id": 0x27FF,
+                    "length": 8,
+                    "transaction_id": 66,
+                    "opcode": 0x1002,
+                    "result_code": None,
+                },
+            ),
+            (
+                bytes.fromhex("0008000110000200000c2ffe0004000000070000"),
+                {
+                    "family": "ddp_lock",
+                    "protocol_name": "DDP_LOCK",
+                    "opcode_name": None,
+                    "result_name": None,
+                    "protocol_id": 8,
+                    "length": 1,
+                    "transaction_id": 7,
+                    "opcode": 0x2FFE,
+                    "result_code": 0x0200,
+                },
+            ),
+        ],
+    )
+    def test_native_diagnostic_headers_preserve_request_metadata(self, packet, expected):
+        from netaudio import core
+
+        assert core.parse_response("packet_header", packet) == expected
+        presentation = parse_packet_header(packet)
+        assert {key: presentation[key] for key in expected if key not in {"family", "opcode_name"}} == {
+            key: value for key, value in expected.items() if key not in {"family", "opcode_name"}
+        }
+
+    @pytest.mark.parametrize(
+        "protocol,expected",
+        [(0x2729, None), (0x2809, "transmitter_channel_status"), (0x280F, "transmitter_channel_status")],
+    )
+    def test_native_opcode_label_is_scoped_to_its_protocol(self, protocol, expected):
+        from netaudio import core
+
+        assert (
+            core.parse_response("packet_header", _make_packet(protocol=protocol, opcode=0x2400))["opcode_name"]
+            == expected
+        )
+
+    @pytest.mark.parametrize("damage", ["length", "magic", "reserved", "truncated"])
+    def test_rejected_settings_envelope_is_not_reinterpreted_as_a_header(self, damage, store):
+        from netaudio import core
+
+        packet = bytearray(
+            core.build_command({"command": "probe_encoding", "host_mac": "020000000001", "message_id": 1})
+        )
+        valid = parse_packet_header(bytes(packet))
+
+        assert valid["opcode"] == 0x0083
+
+        if damage == "length":
+            packet[2:4] = (len(packet) + 1).to_bytes(2, "big")
+        elif damage == "magic":
+            packet[16] = 0
+        elif damage == "reserved":
+            packet[7] = 1
+        else:
+            packet = packet[:16]
+
+        assert parse_packet_header(bytes(packet)) is None
+        packet_id = store.store_packet(PacketRecord(payload=bytes(packet), source_type="test"))
+        stored = store.get_packet(packet_id)
+
+        assert stored["opcode"] is None
+
     def test_valid_request(self):
         data = _make_packet(opcode=0x1002, transaction_id=0x0042)
         h = parse_packet_header(data)
         assert h["protocol_id"] == 0x27FF
         assert h["transaction_id"] == 0x0042
         assert h["opcode"] == 0x1002
-        assert h["opcode_name"] == get_opcode_name(0x27FF, 0x1002)
+        assert h["opcode_name"] == "device_name"
         assert h["protocol_name"] == "PROTOCOL_ARC"
 
     def test_valid_response(self):
         data = _make_response(opcode=0x3010, result=0x0001)
         h = parse_packet_header(data)
         assert h["opcode"] == 0x3010
-        assert h["opcode_name"] == "0x3010"
+        assert h["opcode_name"] == "add_subscriptions"
         assert h["result_code"] == 0x0001
         assert h["result_name"] == "RESULT_CODE_SUCCESS"
 
@@ -57,17 +153,18 @@ class TestParseHeader:
         data = _make_packet(opcode=0x9999)
         h = parse_packet_header(data)
         assert h["opcode"] == 0x9999
-        assert h["opcode_name"] == "0x9999"
+        assert h["opcode_name"] == "unknown"
 
-    def test_opcode_name_marks_labels_borrowed_from_another_arc_wrapper(self, monkeypatch):
+    def test_opcode_labels_are_revision_scoped_and_cannot_override_native_meaning(self, monkeypatch):
         monkeypatch.setattr(
             debug_formatter,
             "_external_labels",
-            lambda: ({(0x2729, 0x2200): "query_tx_flows"}, {}),
+            lambda: ({(0x2729, 0x9999): "observed operation", (0x27FF, 0x1002): "wrong operation"}, {}),
         )
 
-        assert get_opcode_name(0x2729, 0x2200) == "query_tx_flows"
-        assert get_opcode_name(0x2801, 0x2200) == "query_tx_flows [0x2729 label]"
+        assert parse_packet_header(_make_packet(protocol=0x2729, opcode=0x9999))["opcode_name"] == "observed operation"
+        assert parse_packet_header(_make_packet(protocol=0x2801, opcode=0x9999))["opcode_name"] == "unknown"
+        assert parse_packet_header(_make_packet(opcode=0x1002))["opcode_name"] == "device_name"
 
 
 class TestStorePacket:

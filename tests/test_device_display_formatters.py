@@ -20,7 +20,6 @@ from netaudio.commands.device.display import (
 )
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DEVICE_JSON_FIELD_NAMES, DanteDeviceSerializer
-from netaudio.dante.latency import latency_controls_from_settings, latency_state_from_settings
 
 
 def make_device() -> DanteDevice:
@@ -169,23 +168,6 @@ def test_format_latency_range_milliseconds():
 )
 def test_formatters_render_units_and_blank_for_missing_values(formatter, value, expected):
     assert formatter(value) == expected
-
-
-def test_latency_controls_and_state_derive_milliseconds_identically():
-    settings = {
-        "active_latency_ns": 750_000,
-        "configured_latency_ns": 250_000,
-        "default_latency_ns": 1_000_000,
-        "max_latency_ns": 5_000_000,
-        "min_latency_ns": 150_000,
-    }
-
-    controls = latency_controls_from_settings(settings)
-    state = latency_state_from_settings(settings)
-
-    for field_name in ("active", "configured", "default", "max", "min"):
-        assert controls[f"{field_name}_latency"] == state[f"{field_name}_latency_ms"]
-    assert controls["latency"] == state["active_latency_ms"]
 
 
 def test_show_rows_read_preferred_leader_and_lock_as_words():

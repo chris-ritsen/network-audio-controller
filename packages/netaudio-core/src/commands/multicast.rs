@@ -250,7 +250,7 @@ mod tests {
                 "request_options_word": exchange["request_options_word"],
                 "media_local_flow_id": 2,
                 "transport": "native",
-                "transaction_id": exchange["transaction_id"],
+                "message_id": exchange["transaction_id"],
             });
             assert_eq!(
                 crate::spec::build_command_from_json(&specification.to_string()).unwrap(),

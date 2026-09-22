@@ -121,6 +121,82 @@ fn last_error_message_call() -> String {
 }
 
 #[test]
+fn output_wrappers_validate_pointers_before_running_operations() {
+    let called = std::cell::Cell::new(false);
+    let mut length = usize::MAX;
+    let status = unsafe {
+        json_output((ptr::null_mut(), 1, &mut length), || {
+            called.set(true);
+            Ok(42)
+        })
+    };
+
+    assert_eq!(status, NetaudioStatus::NullPointer);
+    assert_eq!(length, 0);
+    assert!(!called.get());
+}
+
+#[test]
+fn output_wrappers_preserve_sizing_and_contain_panics() {
+    let mut output = [0xAA];
+    let mut length = usize::MAX;
+    let status =
+        unsafe { json_output((output.as_mut_ptr(), output.len(), &mut length), || Ok(42)) };
+    assert_eq!(status, NetaudioStatus::BufferTooSmall);
+    assert_eq!(length, 2);
+    assert_eq!(output, [0xAA]);
+
+    let status = unsafe {
+        json_output::<()>((output.as_mut_ptr(), output.len(), &mut length), || {
+            panic!("operation failed")
+        })
+    };
+    assert_eq!(status, NetaudioStatus::InternalPanic);
+    assert_eq!(length, 0);
+    assert!(last_error_message_call().contains("operation failed"));
+}
+
+#[test]
+fn json_interfaces_preserve_input_errors_and_clear_output_lengths() {
+    type Interface =
+        unsafe extern "C" fn(*const c_char, *mut u8, usize, *mut usize) -> NetaudioStatus;
+    let interfaces: &[Interface] = &[
+        netaudio_build_command,
+        netaudio_build_response,
+        netaudio_build_publication,
+        netaudio_plan_clock_configuration,
+        netaudio_clock_configuration_matches,
+        netaudio_audio_capability_readback,
+        netaudio_latency_control,
+        netaudio_interface_configuration,
+        netaudio_redundancy_control,
+        netaudio_plan_transmit_flow_create,
+        netaudio_plan_transmit_flow_delete,
+        netaudio_verify_sample_rate_topology,
+        netaudio_plan_subscription_reconciliation,
+        netaudio_operation_availability,
+        netaudio_connection_health_update,
+        netaudio_performance_capabilities,
+        netaudio_performance_snapshot,
+    ];
+    let invalid_utf8 = [0xFFu8, 0];
+
+    for interface in interfaces {
+        for (input, expected) in [
+            (ptr::null(), NetaudioStatus::NullPointer),
+            (invalid_utf8.as_ptr().cast(), NetaudioStatus::InvalidUtf8),
+            (c"{".as_ptr(), NetaudioStatus::InvalidJson),
+        ] {
+            let mut length = usize::MAX;
+            let status = unsafe { interface(input, ptr::null_mut(), 0, &mut length) };
+            assert_eq!(status, expected);
+            assert_eq!(length, 0);
+            assert!(!last_error_message_call().is_empty());
+        }
+    }
+}
+
+#[test]
 fn status_name_handles_unknown_c_discriminants_without_enum_ub() {
     for status in [-1, NetaudioStatus::ALL.len() as i32, i32::MAX] {
         let name = unsafe { CStr::from_ptr(netaudio_status_name(status)) };
@@ -696,19 +772,19 @@ fn invalid_wire_values_are_reported_across_ffi() {
             NetaudioStatus::InvalidFlowProtocol,
         ),
         (
-            r#"{"command":"reboot","host_mac":"001122334455","sequence":0}"#,
+            r#"{"command":"reboot","host_mac":"001122334455","message_id":0}"#,
             NetaudioStatus::InvalidSequence,
         ),
         (
-            r#"{"command":"factory_reset","host_mac":"001122334455","sequence":0}"#,
+            r#"{"command":"factory_reset","host_mac":"001122334455","message_id":0}"#,
             NetaudioStatus::InvalidSequence,
         ),
         (
-            r#"{"command":"clear_all_configuration","host_mac":"001122334455","sequence":0}"#,
+            r#"{"command":"clear_all_configuration","host_mac":"001122334455","message_id":0}"#,
             NetaudioStatus::InvalidSequence,
         ),
         (
-            r#"{"command":"clear_all_configuration_preserving_internet_protocol_settings","host_mac":"001122334455","sequence":0}"#,
+            r#"{"command":"clear_all_configuration_preserving_internet_protocol_settings","host_mac":"001122334455","message_id":0}"#,
             NetaudioStatus::InvalidSequence,
         ),
     ] {

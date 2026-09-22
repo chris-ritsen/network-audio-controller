@@ -180,19 +180,17 @@ def config_show():
 
 
 from netaudio.commands.config.readback import (
-    MUTATION_ERRORS,
     _collect_target_readings,
     _device_advertises_aes67_multicast_prefix,
     _read_aes67_configured,
     _read_aes67_multicast_prefix,
-    _read_sample_rate_pullup_status,
-    _read_sample_rate_pullup_status_result,
     _render_cached_reading,
     _report_reading_failures,
     _send_requested_change,
     _send_verified_change,
     _targets_supporting_value,
 )
+from netaudio.dante.readback import MUTATION_ERRORS, read_audio_capability
 
 
 def _sample_rate_rows(label, result, exception):
@@ -360,7 +358,7 @@ def _pullup_cell(exception, value):
 async def _render_sample_rate_pullup(application, targets, all_devices: bool) -> None:
     readings = await _collect_target_readings(
         targets,
-        lambda server_name, device: _read_sample_rate_pullup_status_result(application, device),
+        lambda server_name, device: read_audio_capability(application, device, "sample_rate_pullup"),
     )
     hard_failures = [
         reading for reading in readings if reading[2] is not None and not isinstance(reading[2], CapabilityProbeTimeout)
@@ -423,7 +421,7 @@ async def run_sample_rate_pullup(application, devices, selection: str | None, al
     for server_name, device in targets:
         if device.supported_sample_rate_pullup_raw_values is None:
             try:
-                await _read_sample_rate_pullup_status_result(application, device)
+                await read_audio_capability(application, device, "sample_rate_pullup")
             except MUTATION_ERRORS as exception:
                 typer.echo(
                     f"Error: sample-rate pull-up capabilities are unavailable for {device.name or server_name}: "
@@ -448,7 +446,6 @@ async def run_sample_rate_pullup(application, devices, selection: str | None, al
         raw_value,
         "sample-rate pull-up change",
         lambda label: f"Set sample-rate pull-up for {label}: {sample_rate_pullup_label(raw_value)} (verified)",
-        read_for=lambda device: _read_sample_rate_pullup_status(application, device),
     )
     if failures + capability_failures:
         raise typer.Exit(code=ExitCode.ERROR)
@@ -686,6 +683,13 @@ async def run_aes67(
     multicast_prefix: str | None,
     all_devices: bool,
 ) -> None:
+    if enabled is not None:
+        enabled = enabled.lower()
+
+        if enabled not in ("on", "off"):
+            typer.echo("Error: expected 'on' or 'off'.", err=True)
+            raise typer.Exit(code=ExitCode.ERROR)
+
     targets = select_device(filter_devices(devices), allow_many=all_devices)
 
     if multicast_prefix is not None:
@@ -697,11 +701,7 @@ async def run_aes67(
         await _render_aes67(application, targets, all_devices)
         return
 
-    if enabled.lower() not in ("on", "off"):
-        typer.echo("Error: expected 'on' or 'off'.", err=True)
-        raise typer.Exit(code=ExitCode.ERROR)
-
-    is_enabled = enabled.lower() == "on"
+    is_enabled = enabled == "on"
     supported_targets = []
     capability_failures = 0
     for server_name, device in targets:
@@ -719,7 +719,7 @@ async def run_aes67(
         lambda device: application.set_aes67_enabled(device, is_enabled),
         is_enabled,
         "AES67 configuration change",
-        lambda label: f"Set AES67 configured state for {label}: {enabled.lower()} (verified)",
+        lambda label: f"Set AES67 configured state for {label}: {enabled} (verified)",
         read_for=lambda device: _read_aes67_configured(application, device),
     )
     if failures + capability_failures:
@@ -816,7 +816,7 @@ async def run_clock_source(application, devices, selection: str | None, all_devi
             "Clock Source",
             _read_target,
             lambda device: format_clock_source_code(device.clock_source_code),
-            lambda device: {"clock_source_code": device.clock_source_code},
+            lambda device: {"clock_source": format_clock_source_code(device.clock_source_code)},
         )
         return
 
@@ -864,9 +864,9 @@ async def run_clock_subdomain(application, devices, selection: str | None, all_d
             _read_target,
             lambda device: format_clock_subdomain(device.clock_subdomain),
             lambda device: {
-                "clock_subdomain": None
-                if device.clock_subdomain is None
-                else format_clock_subdomain(device.clock_subdomain),
+                "clock_subdomain": (
+                    None if device.clock_subdomain is None else format_clock_subdomain(device.clock_subdomain)
+                ),
                 "clock_subdomain_bytes": None if device.clock_subdomain is None else list(device.clock_subdomain),
             },
         )

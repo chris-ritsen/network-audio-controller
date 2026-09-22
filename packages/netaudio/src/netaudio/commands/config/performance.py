@@ -7,7 +7,7 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.output import output_table
 from netaudio.cli_support.selection import filter_devices, select_device
-from netaudio.commands.config.readback import MUTATION_ERRORS
+from netaudio.dante.readback import MUTATION_ERRORS
 
 
 async def _run_operation(application, devices, operation_name: str, arguments: tuple, all_devices: bool) -> None:

@@ -2,14 +2,9 @@ import asyncio
 
 import typer
 
-from netaudio import core
 from netaudio._exit_codes import ExitCode
-from netaudio.cli_support.execution import ReadbackResult, readback_after_notification
+from netaudio.dante.readback import MUTATION_ERRORS, audio_readback_result, readback_after_notification
 from netaudio.cli_support.output import output_single, output_table, structured_output_selected
-from netaudio.dante.latency import nanoseconds_to_milliseconds
-from netaudio.dante.state import apply_device_status
-
-MUTATION_ERRORS = (core.NetaudioCoreError, OSError, RuntimeError, TimeoutError, ValueError)
 
 
 async def _read_aes67_configured(application, device):
@@ -31,62 +26,6 @@ def _device_advertises_aes67_multicast_prefix(device) -> bool:
     from netaudio.dante.device import device_advertises_aes67_multicast_prefix
 
     return device_advertises_aes67_multicast_prefix(device)
-
-
-async def _read_latency_milliseconds(application, device):
-    settings = await application.get_device_settings(device)
-    if not isinstance(settings, dict):
-        raise RuntimeError("active latency readback was unavailable")
-    latency_nanoseconds = settings.get("active_latency_ns")
-    if latency_nanoseconds is None:
-        raise RuntimeError("active latency readback was unavailable")
-    return nanoseconds_to_milliseconds(latency_nanoseconds)
-
-
-async def _read_capability_status(application, device, kind: str, supported_field: str):
-    probe = {
-        "encoding": application.probe_encoding_status,
-        "sample_rate": application.probe_sample_rate_status,
-        "sample_rate_pullup": application.probe_sample_rate_pullup_status,
-    }[kind]
-    status = await probe(device)
-    fields = {
-        kind: status["current_value"],
-        f"requested_{kind}": status["requested_value"],
-        f"{kind}_update_mode": status["update_mode"],
-        supported_field: status["available_values"],
-    }
-    if kind == "sample_rate_pullup":
-        fields["sample_rate_pullup_flags"] = status["flags"]
-    apply_device_status(device, kind, fields)
-    return status
-
-
-async def _read_sample_rate_status_result(application, device):
-    return await _read_capability_status(application, device, "sample_rate", "supported_sample_rates")
-
-
-async def _read_encoding_status_result(application, device):
-    return await _read_capability_status(application, device, "encoding", "supported_encodings")
-
-
-async def _read_encoding_status(application, device):
-    status = await _read_encoding_status_result(application, device)
-    return status["current_value"]
-
-
-async def _read_sample_rate_pullup_status_result(application, device):
-    return await _read_capability_status(
-        application,
-        device,
-        "sample_rate_pullup",
-        "supported_sample_rate_pullup_raw_values",
-    )
-
-
-async def _read_sample_rate_pullup_status(application, device):
-    status = await _read_sample_rate_pullup_status_result(application, device)
-    return status["current_value"]
 
 
 async def _collect_target_readings(targets, read_target):
@@ -126,12 +65,14 @@ async def _render_cached_reading(
                 ]
                 for server_name, device, exception in readings
             ],
-            json_data=None
-            if structured_value is None
-            else {
-                server_name: (structured_value(device) if exception is None else None)
-                for server_name, device, exception in readings
-            },
+            json_data=(
+                None
+                if structured_value is None
+                else {
+                    server_name: (structured_value(device) if exception is None else None)
+                    for server_name, device, exception in readings
+                }
+            ),
         )
     else:
         server_name, device, exception = readings[0]
@@ -178,22 +119,18 @@ def _targets_supporting_value(
     return supported_targets, failures
 
 
-def _readback_from_status(status, expected) -> ReadbackResult:
-    if status is None:
-        return ReadbackResult(matched=False)
-    observed_value = status["current_value"]
-    return ReadbackResult(matched=observed_value == expected, observed=observed_value, observed_available=True)
-
-
 async def _send_verified_change(targets, mutate_for, expected, action, success_message, read_for=None, describe=repr):
     async def _send_and_read(server_name, device):
         label = device.name or server_name
+
         try:
             status = await mutate_for(device)
         except MUTATION_ERRORS as exception:
             return label, None, exception
+
         if read_for is None:
-            return label, _readback_from_status(status, expected), None
+            return label, audio_readback_result(status, expected), None
+
         return label, await readback_after_notification(lambda: read_for(device), expected), None
 
     results = await asyncio.gather(*(_send_and_read(server_name, device) for server_name, device in targets))

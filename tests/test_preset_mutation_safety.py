@@ -5,6 +5,7 @@ import pytest
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.cli_support import output as output_module
 from netaudio.commands.preset import cli as preset_commands
+from netaudio.dante.const import SERVICE_ARC
 from typer.testing import CliRunner
 
 from tests.cli_test_support import FakeApplication
@@ -131,7 +132,11 @@ def _preset_device(
         static_ipv4_configuration_read_only=False,
         interfaces=[],
         interface_reboot_required=False,
-        settings={"sample_rate": sample_rate, "active_latency_ns": active_latency_ns},
+        settings={
+            "sample_rate": sample_rate,
+            "active_latency_ns": active_latency_ns,
+            "configured_latency_ns": active_latency_ns,
+        },
         settings_calls=0,
         topology_mutation_lock=DeferredAsyncioLock(),
     )
@@ -139,6 +144,7 @@ def _preset_device(
 
 def _preset_receiver_device(name, source_state):
     device = _preset_device(name)
+    device.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.255"}}}
     device.rx_channels = {
         receiver_channel_number: _channel(receiver_channel_number, f"Rx{receiver_channel_number}")
         for receiver_channel_number in source_state
@@ -149,9 +155,13 @@ def _preset_receiver_device(name, source_state):
         for receiver_channel_number, source in source_state.items():
             receiver_channel_name = device.rx_channels[receiver_channel_number].name
             if source is None:
-                device.subscriptions.append(_subscription(receiver_channel_name, None, None))
+                device.subscriptions.append(
+                    _subscription(receiver_channel_name, None, None, channel_number=receiver_channel_number)
+                )
             else:
-                device.subscriptions.append(_subscription(receiver_channel_name, source[0], source[1]))
+                device.subscriptions.append(
+                    _subscription(receiver_channel_name, source[0], source[1], channel_number=receiver_channel_number)
+                )
 
     async def get_receiver_channels():
         refresh_subscriptions()
@@ -359,7 +369,7 @@ def test_preset_classifies_unsupported_action_without_sending_that_mutation(monk
     )
     devices = {
         "first.local.": _preset_device("First"),
-        "second.local.": _preset_device("Second", supported_encodings=[16]),
+        "second.local.": _preset_device("Second", encoding=16, supported_encodings=[16]),
     }
 
     application = _install_preset_context(monkeypatch, devices)
@@ -372,19 +382,26 @@ def test_preset_classifies_unsupported_action_without_sending_that_mutation(monk
     assert application.sent == []
 
 
-def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_path):
+@pytest.mark.parametrize("choices", [[16, 24, 32], []])
+def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_path, choices):
     preset = tmp_path / "audio-settings.xml"
     _write_preset(preset, [{"name": "Device", "encoding": 16, "latency_us": 200}])
-    device = _preset_device("Device", encoding=24, active_latency_ns=150_000)
+    device = _preset_device("Device", encoding=24, supported_encodings=choices, active_latency_ns=150_000)
 
     class ApplyingApplication(PresetApplication):
         async def set_encoding(self, target, encoding):
             target.encoding = encoding
-            return self._record("set_encoding", target, encoding)
+            self._record("set_encoding", target, encoding)
+
+            return {"current_value": encoding}
 
         async def set_latency(self, target, milliseconds):
-            target.settings = {"sample_rate": target.settings["sample_rate"], "active_latency_ns": 200_000}
-            return self._record("set_latency", target, milliseconds)
+            target.settings = {
+                "sample_rate": target.settings["sample_rate"],
+                "active_latency_ns": 150_000,
+                "configured_latency_ns": 200_000,
+            }
+            return await super().set_latency(target, milliseconds)
 
     devices = {"device.local.": device}
     application = _install_preset_context(monkeypatch, devices, ApplyingApplication(devices))
@@ -397,7 +414,37 @@ def test_preset_load_applies_and_verifies_encoding_and_latency(monkeypatch, tmp_
     assert _sent_operations(application) == ["set_encoding", "set_latency"]
 
 
-def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode,state", [(0, "unsupported"), (77, "unavailable")])
+def test_preset_audio_modes_distinguish_fixed_from_unknown(monkeypatch, tmp_path, mode, state):
+    preset = tmp_path / "encoding.xml"
+    _write_preset(preset, [{"name": "Device", "encoding": 16}])
+    devices = {"device.local.": _preset_device("Device")}
+
+    class ReadbackApplication(PresetApplication):
+        async def probe_encoding_status(self, target, timeout=2.0):
+            status = await super().probe_encoding_status(target, timeout=timeout)
+            status["update_mode"] = mode
+            return status
+
+    application = _install_preset_context(monkeypatch, devices, ReadbackApplication(devices))
+    result = runner.invoke(preset_commands.app, ["load", str(preset)])
+
+    assert result.exit_code == (1 if state == "unavailable" else 0)
+    assert f"encoding: {state}" in result.output
+    assert application.sent == []
+
+
+@pytest.mark.parametrize(
+    "version,managed,batch_sizes",
+    [
+        ("2.7.255", False, [16, 16, 1]),
+        ("2.8.15", False, [32, 1]),
+        (None, True, [32, 1]),
+        (None, False, None),
+        ("2.8.16", False, None),
+    ],
+)
+def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path, version, managed, batch_sizes):
     preset = tmp_path / "subscriptions.xml"
     _write_preset(
         preset,
@@ -405,35 +452,48 @@ def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path):
             {
                 "name": "Receiver",
                 "receiver_channels": [
-                    {
-                        "number": 1,
-                        "name": "Rx1",
-                        "transmitter_channel": "NewTx",
-                        "transmitter_device": "Transmitter",
-                    },
-                    {"number": 2, "name": "Rx2"},
+                    *[
+                        {
+                            "number": number,
+                            "name": f"Rx{number}",
+                            "transmitter_channel": "NewTx",
+                            "transmitter_device": "Transmitter",
+                        }
+                        for number in range(1, 34)
+                    ],
+                    *[{"number": number, "name": f"Rx{number}"} for number in range(34, 67)],
                 ],
             }
         ],
     )
-    source_state = {
-        1: ("OldTx", "OldTransmitter"),
-        2: ("Tx2", "Transmitter"),
-    }
+    source_state = {number: ("OldTx", "OldTransmitter") for number in range(1, 67)}
     receiver_device = _preset_receiver_device("Receiver", source_state)
+    receiver_device.services["arc"]["properties"]["arcp_vers"] = version
+    receiver_device.requires_managed_control = managed
+
+    for channel in receiver_device.rx_channels.values():
+        channel.media_type_code = 3
+
+    sent = {"clear": [], "set": []}
 
     class ReconcilingApplication(PresetApplication):
         async def remove_subscriptions(self, device, channel_numbers):
-            assert list(channel_numbers) == [2]
-            source_state[2] = None
+            sent["clear"].append(len(channel_numbers))
+
+            for number in channel_numbers:
+                source_state[number] = None
+
             return self._record("remove_subscriptions", device, tuple(channel_numbers))
 
         async def add_subscriptions(self, device, records):
-            assert list(records) == [(1, "NewTx", "Transmitter")]
-            source_state[1] = ("NewTx", "Transmitter")
+            sent["set"].append(len(records))
+
+            for number, channel, transmitter in records:
+                source_state[number] = (channel, transmitter)
+
             return self._record("add_subscriptions", device, tuple(records))
 
-    application = _install_preset_context(
+    _install_preset_context(
         monkeypatch,
         {"receiver.local.": receiver_device},
         ReconcilingApplication({"receiver.local.": receiver_device}),
@@ -441,10 +501,20 @@ def test_preset_load_reconciles_receiver_subscriptions(monkeypatch, tmp_path):
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
+    if batch_sizes is None:
+        assert result.exit_code != 0
+        assert sent == {"clear": [], "set": []}
+        assert source_state == {number: ("OldTx", "OldTransmitter") for number in range(1, 67)}
+        return
+
     assert result.exit_code == 0
-    assert _sent_operations(application) == ["remove_subscriptions", "add_subscriptions"]
+    assert sent == {"clear": batch_sizes, "set": batch_sizes}
+    assert source_state == {
+        **{number: ("NewTx", "Transmitter") for number in range(1, 34)},
+        **{number: None for number in range(34, 67)},
+    }
     assert "receiver channel 1 <- NewTx@Transmitter (verified)" in result.output
-    assert "receiver channel 2 unsubscribed (verified)" in result.output
+    assert "receiver channel 66 unsubscribed (verified)" in result.output
 
 
 def test_preset_load_reconciles_transmitter_channel_names(monkeypatch, tmp_path):
@@ -499,7 +569,7 @@ def test_preset_marks_missing_transmitter_channel_unavailable(monkeypatch, tmp_p
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "transmitter channel names: unavailable" in result.output
     assert "did not report channel(s) 3" in result.output
     assert application.sent == []
@@ -532,7 +602,7 @@ def test_preset_marks_missing_receiver_channel_unavailable(monkeypatch, tmp_path
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "receiver channel names: unavailable" in result.output
     assert "receiver subscriptions: unavailable" in result.output
     assert application.sent == []
@@ -710,6 +780,20 @@ def test_preset_preflight_rejects_incomplete_static_interface(monkeypatch, tmp_p
     assert application.sent == []
 
 
+def test_preset_preflight_rejects_latency_outside_wire_range(monkeypatch, tmp_path):
+    preset = tmp_path / "latency.xml"
+    _write_preset(preset, [{"name": "Device", "latency_us": 4_294_968}])
+    devices = {"device.local.": _preset_device("Device")}
+    application = _install_preset_context(monkeypatch, devices)
+
+    result = runner.invoke(preset_commands.app, ["load", str(preset)])
+
+    assert result.exit_code == 1
+    assert "fit on the wire" in result.output
+    assert result.output.count("Device:") == 1
+    assert application.sent == []
+
+
 def test_preset_unavailable_planning_readback_sends_no_requests(monkeypatch, tmp_path):
     preset = tmp_path / "requested.xml"
     interface = '<interface><ipv4_address mode="dynamic" /></interface>'
@@ -722,23 +806,16 @@ def test_preset_unavailable_planning_readback_sends_no_requests(monkeypatch, tmp
 
     result = runner.invoke(preset_commands.app, ["load", str(preset)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert application.sent == []
     assert "clock configuration: unavailable" in result.output
     assert "interface: unavailable" in result.output
 
 
-@pytest.mark.parametrize(
-    ("pending_interface_config", "expects_reboot"),
-    [
-        (None, False),
-        ({"mode": "dynamic"}, True),
-    ],
-)
+@pytest.mark.parametrize("expects_reboot", [False, True])
 def test_preset_verifies_preferred_leader_and_interface_when_available(
     monkeypatch,
     tmp_path,
-    pending_interface_config,
     expects_reboot,
 ):
     preset = tmp_path / "verified-state.xml"
@@ -749,11 +826,12 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
     )
     device = _preset_device("Device")
     device.interface_reboot_required = expects_reboot
+    device.dante_redundancy = None
     devices = {"device.local.": device}
 
     class ReadbackApplication(PresetApplication):
         preferred_reads = 0
-        interface_reads = 0
+        interface_mode = "static"
 
         async def probe_preferred_leader_state(self, _device_ip, timeout):
             self.preferred_reads += 1
@@ -761,10 +839,19 @@ def test_preset_verifies_preferred_leader_and_interface_when_available(
             return self.preferred_reads > 1
 
         async def probe_interface_status(self, _device_ip, timeout):
-            self.interface_reads += 1
             assert timeout in {1.0, 2.0}
-            mode = "static" if self.interface_reads == 1 else "dynamic"
-            return [{"mode": mode, "ip_address": "192.0.2.40"}]
+
+            return [{"interface": "primary", "configured": {"mode": self.interface_mode}}]
+
+        async def set_interface(self, device, mode, configuration, *, interface):
+            from netaudio.dante.network_configuration import set_interface
+
+            return await set_interface(self, device, mode, configuration, interface=interface)
+
+        async def send_set_interface_dhcp(self, device, *, interface):
+            assert interface == "primary"
+            self._record("set_interface_dhcp", device)
+            self.interface_mode = "dynamic"
 
     _install_preset_context(monkeypatch, devices, ReadbackApplication(devices))
 

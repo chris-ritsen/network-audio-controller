@@ -1,9 +1,20 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
 const REQUEST_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x26];
 const RESPONSE_MARKER: [u8; 4] = [0xB9, 0x1A, 0x37, 0x25];
 const NORMAL_MESSAGE: u32 = 2;
+const LAST_INITIALIZATION_WRAPPER_ID: u16 = 5;
+
+/// Zero denotes a new session; initialization reserves wrappers through five.
+pub fn next_wrapper_id(previous: u16) -> u16 {
+    if previous == 0 {
+        LAST_INITIALIZATION_WRAPPER_ID + 1
+    } else {
+        previous.wrapping_add(1).max(1)
+    }
+}
+
 const SESSION_DESCRIPTION: u32 = 3;
 const SESSION_OPEN: u32 = 5;
 const AUTHENTICATION: u32 = 1;
@@ -53,6 +64,7 @@ pub struct IdentifyConfirmation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ArcResponse {
     pub wrapper_id: u16,
     pub protocol_id: u16,
@@ -63,9 +75,151 @@ pub struct ArcResponse {
     pub alignment_bytes_hex: String,
 }
 
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct ArcCorrelationRequest {
+    pub request_packet: Vec<u8>,
+    pub wrapper_id: u16,
+    pub response_frame: Vec<u8>,
+}
+
+pub fn correlate_arc_response(
+    request: ArcCorrelationRequest,
+) -> Result<Option<ArcResponse>, &'static str> {
+    let expected = parse_arc_request_header(&request.request_packet)
+        .ok_or("invalid or unsupported ARC request packet")?;
+
+    if request.wrapper_id == 0 {
+        return Err("managed ARC wrapper identifier must be nonzero");
+    }
+
+    let Some(response) = parse_arc_response(&request.response_frame) else {
+        return Ok(None);
+    };
+
+    if response.wrapper_id != request.wrapper_id {
+        return Ok(None);
+    }
+
+    if Some(response.transaction_id) != expected.transaction_id
+        || response.opcode != expected.opcode
+        || response.protocol_id != expected.protocol_id
+    {
+        return Err("DDM returned a mismatched managed ARC response");
+    }
+
+    Ok(Some(response))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SettingsAcknowledgement {
     pub wrapper_id: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", schemars(extend("required" = ["device_id", "wrapper_id", "response_opcode", "acknowledged", "packet_hex"])))]
+pub struct SettingsExchange {
+    device_id: String,
+    wrapper_id: u16,
+    #[serde(deserialize_with = "Option::deserialize")]
+    response_opcode: Option<u16>,
+    acknowledged: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub packet_hex: Option<String>,
+}
+
+impl SettingsExchange {
+    pub fn new(
+        device_id: &str,
+        wrapper_id: u16,
+        response_opcode: Option<u16>,
+    ) -> Result<Self, &'static str> {
+        if wrapper_id == 0
+            || device_id.len() != 16
+            || !device_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(
+                "managed settings requires a nonzero wrapper and a 16-digit device identity",
+            );
+        }
+
+        Ok(Self {
+            device_id: device_id.to_ascii_lowercase(),
+            wrapper_id,
+            response_opcode,
+            acknowledged: false,
+            packet_hex: None,
+        })
+    }
+
+    pub fn complete(&self) -> bool {
+        self.acknowledged && (self.response_opcode.is_none() || self.packet_hex.is_some())
+    }
+
+    pub fn accept(&mut self, frame: &[u8]) {
+        if self.complete() {
+            return;
+        }
+
+        if parse_settings_acknowledgement(frame)
+            .is_some_and(|ack| ack.wrapper_id == self.wrapper_id)
+        {
+            self.acknowledged = true;
+        }
+
+        if let Some(publication) = parse_settings_publication(frame) {
+            if publication.device_id == self.device_id
+                && Some(publication.opcode) == self.response_opcode
+            {
+                self.packet_hex = Some(publication.packet_hex);
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SettingsExchangeRequest {
+    pub device_id: String,
+    pub wrapper_id: u16,
+    pub response_opcode: Option<u16>,
+    pub frame: Vec<u8>,
+    pub state: Option<SettingsExchange>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SettingsExchangeResult {
+    pub state: SettingsExchange,
+    pub complete: bool,
+}
+
+pub fn advance_settings_exchange(
+    request: SettingsExchangeRequest,
+) -> Result<SettingsExchangeResult, &'static str> {
+    let initial = SettingsExchange::new(
+        &request.device_id,
+        request.wrapper_id,
+        request.response_opcode,
+    )?;
+    let mut state = request.state.unwrap_or_else(|| initial.clone());
+
+    if state.device_id != initial.device_id
+        || state.wrapper_id != initial.wrapper_id
+        || state.response_opcode != initial.response_opcode
+    {
+        return Err("managed settings evidence belongs to a different exchange");
+    }
+
+    state.accept(&request.frame);
+    Ok(SettingsExchangeResult {
+        complete: state.complete(),
+        state,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -243,7 +397,7 @@ pub fn parse_session_description(bytes: &[u8]) -> Option<SessionDescription> {
     })
 }
 
-pub fn build_domain_subscription(domain_id: &[u8], subscription_id: u16) -> Option<Vec<u8>> {
+fn build_domain_subscription(domain_id: &[u8], subscription_id: u16) -> Option<Vec<u8>> {
     if domain_id.len() != 16 || !(2..=5).contains(&subscription_id) {
         return None;
     }
@@ -264,7 +418,7 @@ pub fn build_domain_subscription(domain_id: &[u8], subscription_id: u16) -> Opti
     append_frame(NORMAL_MESSAGE, &payload)
 }
 
-pub fn build_device_inventory_subscription(domain_id: &[u8]) -> Option<Vec<u8>> {
+fn build_device_inventory_subscription(domain_id: &[u8]) -> Option<Vec<u8>> {
     if domain_id.len() != 16 {
         return None;
     }
@@ -282,7 +436,26 @@ pub fn build_device_inventory_subscription(domain_id: &[u8]) -> Option<Vec<u8>> 
     append_frame(NORMAL_MESSAGE, &payload)
 }
 
-pub fn build_inventory_initialization(
+pub fn build_domain_initialization(
+    domain_id: &[u8],
+    first_message_id: u16,
+    notification_port: u16,
+    local_ipv4: [u8; 4],
+) -> Option<Vec<u8>> {
+    let inventory =
+        build_inventory_initialization(domain_id, first_message_id, notification_port, local_ipv4)?;
+    let mut frames = Vec::new();
+
+    for subscription in 2..=LAST_INITIALIZATION_WRAPPER_ID {
+        frames.extend(build_domain_subscription(domain_id, subscription)?);
+    }
+
+    frames.extend(inventory);
+    frames.extend(build_device_inventory_subscription(domain_id)?);
+    Some(frames)
+}
+
+fn build_inventory_initialization(
     domain_id: &[u8],
     first_message_id: u16,
     notification_port: u16,
@@ -431,13 +604,24 @@ pub fn build_service_acknowledgement(announcement_frame: &[u8]) -> Option<Vec<u8
     append_frame(NORMAL_MESSAGE, &payload)
 }
 
+pub fn parse_arc_request_header(bytes: &[u8]) -> Option<crate::protocol::DiagnosticPacketHeader> {
+    let envelope = valid_arc_packet(bytes)?;
+
+    if envelope.result_code != 0 {
+        return None;
+    }
+
+    crate::protocol::diagnostic_packet_header(bytes)
+}
+
 pub fn build_arc_request(
     target_selector: u16,
     wrapper_id: u16,
     arc_packet: &[u8],
 ) -> Option<Vec<u8>> {
-    let envelope = valid_arc_packet(arc_packet)?;
-    if wrapper_id == 0 || envelope.result_code != 0 {
+    parse_arc_request_header(arc_packet)?;
+
+    if wrapper_id == 0 {
         return None;
     }
     let aligned_packet_length = aligned_to_four(arc_packet.len())?;
@@ -634,6 +818,28 @@ pub fn parse_identify_confirmation(bytes: &[u8]) -> Option<IdentifyConfirmation>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn domain_initialization_orders_all_subscriptions_and_inventory() {
+        let domain = [17; 16];
+        let mut expected = Vec::new();
+        for subscription in 2..=5 {
+            expected.extend(super::build_domain_subscription(&domain, subscription).unwrap());
+        }
+        expected.extend(
+            super::build_inventory_initialization(&domain, 7, 12345, [127, 0, 0, 1]).unwrap(),
+        );
+        expected.extend(super::build_device_inventory_subscription(&domain).unwrap());
+        assert_eq!(
+            super::build_domain_initialization(&domain, 7, 12345, [127, 0, 0, 1]),
+            Some(expected)
+        );
+        assert!(
+            super::build_domain_initialization(&domain[..15], 7, 12345, [127, 0, 0, 1]).is_none()
+        );
+        assert!(super::build_domain_initialization(&domain, 0, 12345, [127, 0, 0, 1]).is_none());
+        assert!(super::build_domain_initialization(&domain, 7, 0, [127, 0, 0, 1]).is_none());
+    }
+
     #[test]
     fn observed_avio_signal_publications_validate_envelope_and_channel_ranges() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(

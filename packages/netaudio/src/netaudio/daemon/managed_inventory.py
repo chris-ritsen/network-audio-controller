@@ -5,10 +5,11 @@ import copy
 import inspect
 import ipaddress
 import logging
-import re
 import time
 from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable, Iterable, Optional
+
+from netaudio.core import canonical_device_mac
 
 from netaudio.common.managed_api import (
     MANAGED_PERMISSION_OPERATIONS,
@@ -17,7 +18,7 @@ from netaudio.common.managed_api import (
     ManagedAPIConfiguration,
 )
 from netaudio.dante.device_serializer import DanteDeviceSerializer
-from netaudio.dante.self_connection import receiver_self_connection_support
+from netaudio.dante.self_connection import receiver_self_connection_support, self_connection_capability
 from netaudio.dante.subscription import managed_subscription_status
 from netaudio.ddm import Device, Domain, InventoryResult, ManagedAPIClient, ManagedAPIError
 
@@ -39,22 +40,8 @@ class ManagedDeviceObservation:
     operation_permissions: frozenset[str] | None = None
 
 
-def _normalized_mac(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    hexadecimal = re.sub(r"[^0-9a-fA-F]", "", value).lower()
-    if len(hexadecimal) == 16:
-        if hexadecimal[6:10] == "fffe":
-            hexadecimal = f"{hexadecimal[:6]}{hexadecimal[10:]}"
-        elif hexadecimal.endswith("0000"):
-            hexadecimal = hexadecimal[:12]
-    if len(hexadecimal) not in {12, 16} or set(hexadecimal) == {"0"}:
-        return None
-    return hexadecimal
-
-
 def _direct_macs(record: dict) -> set[str]:
-    identity = _normalized_mac(record.get("mac_address"))
+    identity = canonical_device_mac(record.get("mac_address"))
     if identity is not None:
         # Distinct logical devices can report the same host network interface.
         # Interface addresses must not override a known device identity.
@@ -63,7 +50,7 @@ def _direct_macs(record: dict) -> set[str]:
     for interface in record.get("interfaces") or []:
         if isinstance(interface, dict):
             values.extend((interface.get("mac_address"), interface.get("macAddress")))
-    return {normalized for value in values if (normalized := _normalized_mac(value)) is not None}
+    return {normalized for value in values if (normalized := canonical_device_mac(value)) is not None}
 
 
 def _managed_macs(device: Device) -> set[str]:
@@ -71,7 +58,7 @@ def _managed_macs(device: Device) -> set[str]:
         normalized
         for interface in device.interfaces or ()
         if interface is not None
-        if (normalized := _normalized_mac(interface.mac_address)) is not None
+        if (normalized := canonical_device_mac(interface.mac_address)) is not None
     }
 
 
@@ -195,6 +182,7 @@ def _managed_subscriptions(device: Device) -> list[dict]:
         subscriptions.append(
             {
                 "rx_channel": channel.name,
+                "rx_channel_number": channel.index,
                 "rx_device": _managed_name(device),
                 "tx_channel": channel.subscribed_channel,
                 "tx_device": _managed_name(device) if channel.subscribed_device == "." else channel.subscribed_device,
@@ -240,9 +228,9 @@ def _managed_metadata(observation: ManagedDeviceObservation, synced_at: float) -
         "ddm_clocking_state": asdict(device.clocking_state) if device.clocking_state else None,
         "ddm_parameters": [asdict(item) for item in device.parameters] if device.parameters is not None else None,
         "ddm_inputs": [asdict(item) if item else None for item in device.inputs] if device.inputs is not None else None,
-        "ddm_outputs": [asdict(item) if item else None for item in device.outputs]
-        if device.outputs is not None
-        else None,
+        "ddm_outputs": (
+            [asdict(item) if item else None for item in device.outputs] if device.outputs is not None else None
+        ),
     }
 
 
@@ -319,16 +307,18 @@ def _overlay_channel_metadata(direct_channels: dict, managed_channels: dict) -> 
                         direct_channel[key] = copy.deepcopy(value)
                 if direction != "receivers":
                     continue
-                direct_value = direct_channel.get("can_subscribe_self")
-                managed_value = managed_channel.get("can_subscribe_self")
-                if isinstance(direct_value, bool) and isinstance(managed_value, bool):
-                    if direct_value != managed_value:
-                        direct_channel["can_subscribe_self"] = None
-                        direct_channel["can_subscribe_self_conflict"] = True
-                    else:
-                        direct_channel.pop("can_subscribe_self_conflict", None)
-                elif not isinstance(direct_value, bool):
-                    direct_channel["can_subscribe_self"] = managed_value if isinstance(managed_value, bool) else None
+                capability = self_connection_capability(
+                    direct_channel.get("direct_can_subscribe_self"),
+                    managed_channel.get("managed_can_subscribe_self"),
+                    managed_channel.get("managed_can_subscribe_self_fresh"),
+                    authority="observed",
+                )
+                direct_channel["can_subscribe_self"] = capability["supported"]
+
+                if capability["conflict"]:
+                    direct_channel["can_subscribe_self_conflict"] = True
+                else:
+                    direct_channel.pop("can_subscribe_self_conflict", None)
 
 
 def _merge_observation(direct_record: dict, managed_record: dict) -> dict:
@@ -629,7 +619,7 @@ class ManagedInventoryService:
         by_primary: dict[str, list[ManagedDeviceObservation]] = {}
         for observation in observations.values():
             interfaces = observation.device.interfaces or ()
-            primary = _normalized_mac(interfaces[0].mac_address) if interfaces and interfaces[0] else None
+            primary = canonical_device_mac(interfaces[0].mac_address) if interfaces and interfaces[0] else None
             if primary is not None:
                 by_primary.setdefault(primary, []).append(observation)
         self._superseded_enrollments.intersection_update(

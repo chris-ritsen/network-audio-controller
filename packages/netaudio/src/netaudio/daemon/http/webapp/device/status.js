@@ -162,7 +162,7 @@ export function StatusSection({ device }) {
               ],
               [
                 "Clock source",
-                format.clockSourceCode(device.clock_source_code),
+                format.text(device.clock_source || "Unknown"),
               ],
               [
                 "Clock subdomain",

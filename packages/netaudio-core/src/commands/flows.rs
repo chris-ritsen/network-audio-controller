@@ -1,5 +1,7 @@
 use super::*;
 
+pub const MAX_LEGACY_FLOW_ID: u16 = 32;
+
 fn flow_create_opcode(flow_protocol_id: u16) -> Result<u16, NetaudioError> {
     match flow_protocol_id {
         PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801 => Ok(OPCODE_CREATE_TX_FLOW),
@@ -27,7 +29,7 @@ pub fn build_query_tx_flows_from(
     starting_flow: u16,
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
-    if !(1..=32).contains(&starting_flow) {
+    if !(1..=MAX_LEGACY_FLOW_ID).contains(&starting_flow) {
         return Err(NetaudioError::InvalidFlowSlot);
     }
     match flow_protocol_id {
@@ -302,7 +304,7 @@ pub fn build_create_tx_flow(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let create_opcode = flow_create_opcode(flow_protocol_id)?;
-    if !(1..=32).contains(&flow_slot) {
+    if !(1..=MAX_LEGACY_FLOW_ID).contains(&flow_slot) {
         return Err(NetaudioError::InvalidFlowSlot);
     }
     if channels.is_empty() || channels.contains(&0) {
@@ -362,7 +364,7 @@ pub fn build_delete_tx_flow(
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let delete_opcode = flow_delete_opcode(flow_protocol_id)?;
-    if !(1..=32).contains(&flow_slot) {
+    if !(1..=MAX_LEGACY_FLOW_ID).contains(&flow_slot) {
         return Err(NetaudioError::InvalidFlowSlot);
     }
     if flow_protocol_id == PROTOCOL_ARC_2809 {

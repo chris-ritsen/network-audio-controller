@@ -5,31 +5,14 @@ from typing import Optional
 import typer
 
 from netaudio import DanteDevice
+from netaudio.core import canonical_device_mac
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import _get_state
 
 
-def _normalize_mac(mac: str) -> str:
-    raw = mac.replace(":", "").replace("-", "").replace(".", "").lower()
-    if len(raw) == 16 and raw[6:10] == "fffe":
-        raw = raw[:6] + raw[10:]
-    elif len(raw) == 16 and raw.endswith("0000"):
-        raw = raw[:12]
-    return raw
-
-
-def _strip_separators(mac: str) -> str:
-    return mac.replace(":", "").replace("-", "").replace(".", "").lower()
-
-
 def _mac_matches(device_mac: str, pattern: str) -> bool:
-    raw_device = _strip_separators(device_mac)
-    raw_pattern = _strip_separators(pattern)
-
-    if raw_device == raw_pattern:
-        return True
-
-    return _normalize_mac(device_mac) == _normalize_mac(pattern)
+    identity = canonical_device_mac(device_mac)
+    return identity is not None and identity == canonical_device_mac(pattern)
 
 
 def selection_is_explicit() -> bool:

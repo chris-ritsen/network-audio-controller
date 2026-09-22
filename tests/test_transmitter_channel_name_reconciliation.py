@@ -22,7 +22,7 @@ class _Application(DanteApplication):
 def _device(routing_name_state, respond):
     device = SimpleNamespace(
         ipv4="192.0.2.50",
-        services={},
+        services={"arc": {"type": "_netaudio-arc._udp.local.", "properties": {"arcp_vers": "2.8.9"}}},
         topology_mutation_lock=DeferredAsyncioLock(),
         transmitter_channel_name_protocol_identifier=None,
     )
@@ -46,6 +46,26 @@ def _device(routing_name_state, respond):
 
     device.get_tx_channels = get_transmitter_channels
     return device
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("numbers", [(2,), (1, 1), (True,), (1.0,)])
+async def test_reconciliation_rejects_missing_or_ambiguous_channel_identity_before_writes(numbers):
+    device = _device({}, lambda specification: pytest.fail("invalid inventory must not write"))
+
+    async def read():
+        device.tx_channels = {
+            key: SimpleNamespace(number=number, name="Current", friendly_name=None)
+            for key, number in enumerate(numbers, 1)
+        }
+
+    device.get_tx_channels = read
+    application = _Application()
+
+    with pytest.raises(RuntimeError, match="channel"):
+        await reconcile_transmitter_channel_names(application, device, {1: "Current"})
+
+    assert application.renames == []
 
 
 @pytest.mark.asyncio
@@ -95,3 +115,26 @@ async def test_reconciliation_is_idempotent_and_sends_nothing():
     assert result.failures == {}
     assert device.executed == []
     assert application.renames == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response,detail",
+    [
+        (None, "did not receive a response"),
+        (b"invalid", "invalid response"),
+        (bytes.fromhex("2729000c0302201300070000"), "not acknowledged"),
+    ],
+)
+async def test_reconciliation_reports_unacknowledged_rename_without_raw_status(response, detail):
+    def respond(specification):
+        if specification["command"] == "query_modern_arc_transmitter_channel_status":
+            return bytes.fromhex("2809000a285224000030")
+        return response
+
+    device = _device({1: "Old"}, respond)
+    result = await reconcile_transmitter_channel_names(_Application(), device, {1: "New"})
+
+    assert result.verified == {}
+    assert detail in result.failures[1]
+    assert "0x" not in result.failures[1]

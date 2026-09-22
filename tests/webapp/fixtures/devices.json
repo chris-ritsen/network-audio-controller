@@ -2473,7 +2473,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "01",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 1
       },
       {
         "rx_channel": "02",
@@ -2488,7 +2489,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "02",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 2
       },
       {
         "rx_channel": "03",
@@ -2503,7 +2505,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "03",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 3
       },
       {
         "rx_channel": "04",
@@ -2517,14 +2520,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "123",
-        "tx_device": "lx-dante"
+        "tx_device": "lx-dante",
+        "rx_channel_number": 4
       },
       {
         "rx_channel": "05",
@@ -2539,7 +2543,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "05",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 5
       },
       {
         "rx_channel": "06",
@@ -2553,14 +2558,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "88",
-        "tx_device": "lx-dante"
+        "tx_device": "lx-dante",
+        "rx_channel_number": 6
       },
       {
         "rx_channel": "07",
@@ -2575,7 +2581,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "07",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 7
       },
       {
         "rx_channel": "08",
@@ -2590,7 +2597,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "08",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 8
       },
       {
         "rx_channel": "09",
@@ -2605,7 +2613,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "09",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 9
       },
       {
         "rx_channel": "10",
@@ -2620,7 +2629,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "10",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 10
       },
       {
         "rx_channel": "11",
@@ -2635,7 +2645,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "11",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 11
       },
       {
         "rx_channel": "12",
@@ -2650,7 +2661,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "12",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 12
       },
       {
         "rx_channel": "13",
@@ -2665,7 +2677,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "13",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 13
       },
       {
         "rx_channel": "14",
@@ -2680,7 +2693,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "14",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 14
       },
       {
         "rx_channel": "15",
@@ -2695,7 +2709,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "15",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 15
       },
       {
         "rx_channel": "16",
@@ -2710,7 +2725,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "16",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 16
       },
       {
         "rx_channel": "17",
@@ -2725,7 +2741,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "17",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 17
       },
       {
         "rx_channel": "18",
@@ -2740,7 +2757,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "18",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 18
       },
       {
         "rx_channel": "19",
@@ -2755,7 +2773,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "19",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 19
       },
       {
         "rx_channel": "20",
@@ -2770,7 +2789,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "20",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 20
       },
       {
         "rx_channel": "21",
@@ -2785,7 +2805,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "21",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 21
       },
       {
         "rx_channel": "22",
@@ -2800,7 +2821,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "22",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 22
       },
       {
         "rx_channel": "23",
@@ -2815,7 +2837,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "23",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 23
       },
       {
         "rx_channel": "24",
@@ -2830,7 +2853,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "24",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 24
       },
       {
         "rx_channel": "25",
@@ -2845,7 +2869,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "25",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 25
       },
       {
         "rx_channel": "26",
@@ -2860,7 +2885,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "26",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 26
       },
       {
         "rx_channel": "27",
@@ -2875,7 +2901,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "27",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 27
       },
       {
         "rx_channel": "28",
@@ -2890,7 +2917,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "28",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 28
       },
       {
         "rx_channel": "29",
@@ -2905,7 +2933,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "29",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 29
       },
       {
         "rx_channel": "30",
@@ -2920,7 +2949,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "30",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 30
       },
       {
         "rx_channel": "31",
@@ -2935,7 +2965,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "31",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 31
       },
       {
         "rx_channel": "32",
@@ -2950,7 +2981,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "32",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 32
       },
       {
         "rx_channel": "33",
@@ -2965,7 +2997,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "33",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 33
       },
       {
         "rx_channel": "34",
@@ -2980,7 +3013,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "34",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 34
       },
       {
         "rx_channel": "35",
@@ -2995,7 +3029,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "35",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 35
       },
       {
         "rx_channel": "36",
@@ -3010,7 +3045,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "36",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 36
       },
       {
         "rx_channel": "37",
@@ -3025,7 +3061,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "37",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 37
       },
       {
         "rx_channel": "38",
@@ -3040,7 +3077,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "38",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 38
       },
       {
         "rx_channel": "39",
@@ -3055,7 +3093,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "39",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 39
       },
       {
         "rx_channel": "40",
@@ -3070,7 +3109,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "40",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 40
       },
       {
         "rx_channel": "41",
@@ -3085,7 +3125,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "41",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 41
       },
       {
         "rx_channel": "42",
@@ -3100,7 +3141,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "42",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 42
       },
       {
         "rx_channel": "43",
@@ -3115,7 +3157,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "43",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 43
       },
       {
         "rx_channel": "44",
@@ -3130,7 +3173,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "44",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 44
       },
       {
         "rx_channel": "45",
@@ -3145,7 +3189,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "45",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 45
       },
       {
         "rx_channel": "46",
@@ -3160,7 +3205,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "46",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 46
       },
       {
         "rx_channel": "47",
@@ -3175,7 +3221,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "47",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 47
       },
       {
         "rx_channel": "48",
@@ -3190,7 +3237,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "48",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 48
       },
       {
         "rx_channel": "49",
@@ -3205,7 +3253,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "49",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 49
       },
       {
         "rx_channel": "50",
@@ -3220,7 +3269,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "50",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 50
       },
       {
         "rx_channel": "51",
@@ -3235,7 +3285,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "51",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 51
       },
       {
         "rx_channel": "52",
@@ -3250,7 +3301,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "52",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 52
       },
       {
         "rx_channel": "53",
@@ -3265,7 +3317,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "53",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 53
       },
       {
         "rx_channel": "54",
@@ -3280,7 +3333,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "54",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 54
       },
       {
         "rx_channel": "55",
@@ -3295,7 +3349,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "55",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 55
       },
       {
         "rx_channel": "56",
@@ -3310,7 +3365,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "56",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 56
       },
       {
         "rx_channel": "57",
@@ -3325,7 +3381,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "57",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 57
       },
       {
         "rx_channel": "58",
@@ -3340,7 +3397,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "58",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 58
       },
       {
         "rx_channel": "59",
@@ -3355,7 +3413,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "59",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 59
       },
       {
         "rx_channel": "60",
@@ -3370,7 +3429,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "60",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 60
       },
       {
         "rx_channel": "61",
@@ -3385,7 +3445,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "61",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 61
       },
       {
         "rx_channel": "62",
@@ -3400,7 +3461,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "62",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 62
       },
       {
         "rx_channel": "63",
@@ -3415,7 +3477,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "63",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 63
       },
       {
         "rx_channel": "64",
@@ -3430,7 +3493,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "64",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 64
       }
     ],
     "tx_count": 64,
@@ -3877,14 +3941,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "mic-mix:high",
-        "tx_device": "lx-dante"
+        "tx_device": "lx-dante",
+        "rx_channel_number": 1
       }
     ],
     "supported_encodings": [
@@ -4418,14 +4483,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "mic-mix:high",
-        "tx_device": "lx-dante"
+        "tx_device": "lx-dante",
+        "rx_channel_number": 1
       },
       {
         "rx_channel": "mic-mix-2",
@@ -4439,14 +4505,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "mic-mix:high",
-        "tx_device": "lx-dante"
+        "tx_device": "lx-dante",
+        "rx_channel_number": 2
       }
     ],
     "supported_encodings": [
@@ -7049,14 +7116,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "01",
-        "tx_device": "ad4d"
+        "tx_device": "ad4d",
+        "rx_channel_number": 1
       },
       {
         "rx_channel": "wireless-mic:2",
@@ -7070,14 +7138,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "02",
-        "tx_device": "ad4d"
+        "tx_device": "ad4d",
+        "rx_channel_number": 2
       },
       {
         "rx_channel": "shelford-channel:minus-6db",
@@ -7091,14 +7160,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "shelford-channel:minus-6db",
-        "tx_device": "a32"
+        "tx_device": "a32",
+        "rx_channel_number": 3
       },
       {
         "rx_channel": "shelford-channel:0dB",
@@ -7112,14 +7182,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "shelford-channel:0db",
-        "tx_device": "a32"
+        "tx_device": "a32",
+        "rx_channel_number": 4
       },
       {
         "rx_channel": "di-box:left",
@@ -7134,7 +7205,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "di-box:left",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 5
       },
       {
         "rx_channel": "di-box:right",
@@ -7149,7 +7221,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "di-box:right",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 6
       },
       {
         "rx_channel": "windows-gaming:left",
@@ -7163,14 +7236,15 @@
         "status": {
           "code": 10,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (multicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_MULTICAST"
         },
         "tx_channel": "windows-gaming:left",
-        "tx_device": "avio-usb-1"
+        "tx_device": "avio-usb-1",
+        "rx_channel_number": 7
       },
       {
         "rx_channel": "windows-gaming:right",
@@ -7184,14 +7258,15 @@
         "status": {
           "code": 10,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (multicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_MULTICAST"
         },
         "tx_channel": "windows-gaming:right",
-        "tx_device": "avio-usb-1"
+        "tx_device": "avio-usb-1",
+        "rx_channel_number": 8
       },
       {
         "rx_channel": "dinet:left",
@@ -7206,7 +7281,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "dinet:left",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 9
       },
       {
         "rx_channel": "dinet:right",
@@ -7221,7 +7297,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "dinet:right",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 10
       },
       {
         "rx_channel": "macbook-personal-1:left",
@@ -7235,14 +7312,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "macbook-personal-1:left",
-        "tx_device": "avio-usb-macbook-1"
+        "tx_device": "avio-usb-macbook-1",
+        "rx_channel_number": 11
       },
       {
         "rx_channel": "macbook-personal-1:right",
@@ -7256,14 +7334,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "macbook-personal-1:right",
-        "tx_device": "avio-usb-macbook-1"
+        "tx_device": "avio-usb-macbook-1",
+        "rx_channel_number": 12
       },
       {
         "rx_channel": "13",
@@ -7278,7 +7357,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "13",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 13
       },
       {
         "rx_channel": "14",
@@ -7293,7 +7373,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "14",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 14
       },
       {
         "rx_channel": "vrroom:left",
@@ -7308,7 +7389,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "vrroom:left",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 15
       },
       {
         "rx_channel": "vrroom:right",
@@ -7323,7 +7405,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "vrroom:right",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 16
       },
       {
         "rx_channel": "macbook-work-1:left",
@@ -7337,14 +7420,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "macbook-work-1:left",
-        "tx_device": "avio-usb-work-macbook-1"
+        "tx_device": "avio-usb-work-macbook-1",
+        "rx_channel_number": 17
       },
       {
         "rx_channel": "macbook-work-1:right",
@@ -7358,14 +7442,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "macbook-work-1:right",
-        "tx_device": "avio-usb-work-macbook-1"
+        "tx_device": "avio-usb-work-macbook-1",
+        "rx_channel_number": 18
       },
       {
         "rx_channel": "adat:left",
@@ -7379,14 +7464,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "adat-1",
-        "tx_device": "a32"
+        "tx_device": "a32",
+        "rx_channel_number": 19
       },
       {
         "rx_channel": "adat:right",
@@ -7400,14 +7486,15 @@
         "status": {
           "code": 1,
           "detail": "The transmitting device isn't currently on the network.",
-          "icon": "\u001b[33m\u26a0\u001b[0m",
+          "icon": "\u001b[33m⚠\u001b[0m",
           "label": "Unresolved",
           "severity": "warning",
           "state": "unresolved",
           "status": "UNRESOLVED"
         },
         "tx_channel": "adat-2",
-        "tx_device": "a32"
+        "tx_device": "a32",
+        "rx_channel_number": 20
       },
       {
         "rx_channel": "bluetooth:left",
@@ -7421,14 +7508,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "bluetooth:left",
-        "tx_device": "avio-bt-1"
+        "tx_device": "avio-bt-1",
+        "rx_channel_number": 21
       },
       {
         "rx_channel": "bluetooth:right",
@@ -7442,14 +7530,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "bluetooth:right",
-        "tx_device": "avio-bt-1"
+        "tx_device": "avio-bt-1",
+        "rx_channel_number": 22
       },
       {
         "rx_channel": "tv:left",
@@ -7464,7 +7553,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "tv:left",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 23
       },
       {
         "rx_channel": "tv:right",
@@ -7479,7 +7569,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "tv:right",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 24
       },
       {
         "rx_channel": "windows-workstation:left",
@@ -7493,14 +7584,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "windows-workstation:left",
-        "tx_device": "avio-usb-4"
+        "tx_device": "avio-usb-4",
+        "rx_channel_number": 25
       },
       {
         "rx_channel": "windows-workstation:right",
@@ -7514,14 +7606,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "windows-workstation:right",
-        "tx_device": "avio-usb-4"
+        "tx_device": "avio-usb-4",
+        "rx_channel_number": 26
       },
       {
         "rx_channel": "27",
@@ -7536,7 +7629,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "27",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 27
       },
       {
         "rx_channel": "28",
@@ -7551,7 +7645,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "28",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 28
       },
       {
         "rx_channel": "29",
@@ -7566,7 +7661,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "29",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 29
       },
       {
         "rx_channel": "30",
@@ -7581,7 +7677,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "30",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 30
       },
       {
         "rx_channel": "31",
@@ -7596,7 +7693,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "31",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 31
       },
       {
         "rx_channel": "32",
@@ -7611,7 +7709,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "32",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 32
       },
       {
         "rx_channel": "33",
@@ -7626,7 +7725,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "33",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 33
       },
       {
         "rx_channel": "34",
@@ -7641,7 +7741,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "34",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 34
       },
       {
         "rx_channel": "35",
@@ -7656,7 +7757,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "35",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 35
       },
       {
         "rx_channel": "36",
@@ -7671,7 +7773,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "36",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 36
       },
       {
         "rx_channel": "37",
@@ -7686,7 +7789,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "37",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 37
       },
       {
         "rx_channel": "38",
@@ -7701,7 +7805,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "38",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 38
       },
       {
         "rx_channel": "39",
@@ -7716,7 +7821,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "39",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 39
       },
       {
         "rx_channel": "40",
@@ -7731,7 +7837,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "40",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 40
       },
       {
         "rx_channel": "41",
@@ -7746,7 +7853,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "41",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 41
       },
       {
         "rx_channel": "42",
@@ -7761,7 +7869,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "42",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 42
       },
       {
         "rx_channel": "43",
@@ -7776,7 +7885,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "43",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 43
       },
       {
         "rx_channel": "44",
@@ -7791,7 +7901,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "44",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 44
       },
       {
         "rx_channel": "45",
@@ -7806,7 +7917,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "45",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 45
       },
       {
         "rx_channel": "46",
@@ -7821,7 +7933,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "46",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 46
       },
       {
         "rx_channel": "47",
@@ -7836,7 +7949,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "47",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 47
       },
       {
         "rx_channel": "48",
@@ -7851,7 +7965,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "48",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 48
       },
       {
         "rx_channel": "49",
@@ -7866,7 +7981,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "49",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 49
       },
       {
         "rx_channel": "50",
@@ -7881,7 +7997,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "50",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 50
       },
       {
         "rx_channel": "51",
@@ -7896,7 +8013,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "51",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 51
       },
       {
         "rx_channel": "52",
@@ -7911,7 +8029,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "52",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 52
       },
       {
         "rx_channel": "53",
@@ -7926,7 +8045,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "53",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 53
       },
       {
         "rx_channel": "54",
@@ -7941,7 +8061,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "54",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 54
       },
       {
         "rx_channel": "55",
@@ -7956,7 +8077,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "55",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 55
       },
       {
         "rx_channel": "56",
@@ -7971,7 +8093,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "56",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 56
       },
       {
         "rx_channel": "57",
@@ -7986,7 +8109,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "57",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 57
       },
       {
         "rx_channel": "58",
@@ -8001,7 +8125,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "58",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 58
       },
       {
         "rx_channel": "59",
@@ -8016,7 +8141,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "59",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 59
       },
       {
         "rx_channel": "60",
@@ -8031,7 +8157,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "60",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 60
       },
       {
         "rx_channel": "61",
@@ -8046,7 +8173,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "61",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 61
       },
       {
         "rx_channel": "62",
@@ -8061,7 +8189,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "62",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 62
       },
       {
         "rx_channel": "63",
@@ -8076,7 +8205,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "63",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 63
       },
       {
         "rx_channel": "64",
@@ -8091,7 +8221,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "64",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 64
       },
       {
         "rx_channel": "65",
@@ -8106,7 +8237,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "65",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 65
       },
       {
         "rx_channel": "66",
@@ -8121,7 +8253,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "66",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 66
       },
       {
         "rx_channel": "67",
@@ -8136,7 +8269,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "67",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 67
       },
       {
         "rx_channel": "68",
@@ -8151,7 +8285,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "68",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 68
       },
       {
         "rx_channel": "69",
@@ -8166,7 +8301,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "69",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 69
       },
       {
         "rx_channel": "70",
@@ -8181,7 +8317,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "70",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 70
       },
       {
         "rx_channel": "71",
@@ -8196,7 +8333,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "71",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 71
       },
       {
         "rx_channel": "72",
@@ -8211,7 +8349,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "72",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 72
       },
       {
         "rx_channel": "73",
@@ -8226,7 +8365,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "73",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 73
       },
       {
         "rx_channel": "74",
@@ -8241,7 +8381,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "74",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 74
       },
       {
         "rx_channel": "75",
@@ -8256,7 +8397,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "75",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 75
       },
       {
         "rx_channel": "76",
@@ -8271,7 +8413,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "76",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 76
       },
       {
         "rx_channel": "77",
@@ -8286,7 +8429,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "77",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 77
       },
       {
         "rx_channel": "78",
@@ -8301,7 +8445,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "78",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 78
       },
       {
         "rx_channel": "79",
@@ -8316,7 +8461,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "79",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 79
       },
       {
         "rx_channel": "80",
@@ -8331,7 +8477,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "80",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 80
       },
       {
         "rx_channel": "81",
@@ -8346,7 +8493,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "81",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 81
       },
       {
         "rx_channel": "82",
@@ -8361,7 +8509,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "82",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 82
       },
       {
         "rx_channel": "83",
@@ -8376,7 +8525,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "83",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 83
       },
       {
         "rx_channel": "84",
@@ -8391,7 +8541,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "84",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 84
       },
       {
         "rx_channel": "85",
@@ -8406,7 +8557,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "85",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 85
       },
       {
         "rx_channel": "86",
@@ -8421,7 +8573,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "86",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 86
       },
       {
         "rx_channel": "87",
@@ -8436,7 +8589,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "87",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 87
       },
       {
         "rx_channel": "88",
@@ -8451,7 +8605,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "88",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 88
       },
       {
         "rx_channel": "89",
@@ -8466,7 +8621,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "89",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 89
       },
       {
         "rx_channel": "90",
@@ -8481,7 +8637,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "90",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 90
       },
       {
         "rx_channel": "91",
@@ -8496,7 +8653,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "91",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 91
       },
       {
         "rx_channel": "92",
@@ -8511,7 +8669,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "92",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 92
       },
       {
         "rx_channel": "93",
@@ -8526,7 +8685,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "93",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 93
       },
       {
         "rx_channel": "94",
@@ -8541,7 +8701,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "94",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 94
       },
       {
         "rx_channel": "95",
@@ -8556,7 +8717,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "95",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 95
       },
       {
         "rx_channel": "96",
@@ -8571,7 +8733,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "96",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 96
       },
       {
         "rx_channel": "97",
@@ -8586,7 +8749,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "97",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 97
       },
       {
         "rx_channel": "98",
@@ -8601,7 +8765,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "98",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 98
       },
       {
         "rx_channel": "99",
@@ -8616,7 +8781,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "99",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 99
       },
       {
         "rx_channel": "100",
@@ -8631,7 +8797,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "100",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 100
       },
       {
         "rx_channel": "101",
@@ -8646,7 +8813,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "101",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 101
       },
       {
         "rx_channel": "102",
@@ -8661,7 +8829,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "102",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 102
       },
       {
         "rx_channel": "103",
@@ -8676,7 +8845,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "103",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 103
       },
       {
         "rx_channel": "104",
@@ -8691,7 +8861,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "104",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 104
       },
       {
         "rx_channel": "105",
@@ -8706,7 +8877,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "105",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 105
       },
       {
         "rx_channel": "106",
@@ -8721,7 +8893,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "106",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 106
       },
       {
         "rx_channel": "107",
@@ -8736,7 +8909,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "107",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 107
       },
       {
         "rx_channel": "108",
@@ -8751,7 +8925,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "108",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 108
       },
       {
         "rx_channel": "109",
@@ -8766,7 +8941,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "109",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 109
       },
       {
         "rx_channel": "110",
@@ -8781,7 +8957,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "110",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 110
       },
       {
         "rx_channel": "111",
@@ -8796,7 +8973,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "111",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 111
       },
       {
         "rx_channel": "112",
@@ -8811,7 +8989,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "112",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 112
       },
       {
         "rx_channel": "113",
@@ -8826,7 +9005,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "113",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 113
       },
       {
         "rx_channel": "114",
@@ -8841,7 +9021,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "114",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 114
       },
       {
         "rx_channel": "115",
@@ -8856,7 +9037,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "115",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 115
       },
       {
         "rx_channel": "116",
@@ -8870,14 +9052,15 @@
         "status": {
           "code": 9,
           "detail": null,
-          "icon": "\u001b[32m\u25cf\u001b[0m",
+          "icon": "\u001b[32m●\u001b[0m",
           "label": "Subscribed (unicast)",
           "severity": "ok",
           "state": "connected",
           "status": "SUBSCRIBED_UNICAST"
         },
         "tx_channel": "05",
-        "tx_device": "Windows-PC"
+        "tx_device": "Windows-PC",
+        "rx_channel_number": 116
       },
       {
         "rx_channel": "117",
@@ -8892,7 +9075,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "117",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 117
       },
       {
         "rx_channel": "118",
@@ -8907,7 +9091,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "118",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 118
       },
       {
         "rx_channel": "119",
@@ -8922,7 +9107,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "119",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 119
       },
       {
         "rx_channel": "120",
@@ -8937,7 +9123,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "120",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 120
       },
       {
         "rx_channel": "121",
@@ -8952,7 +9139,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "121",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 121
       },
       {
         "rx_channel": "122",
@@ -8967,7 +9155,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "122",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 122
       },
       {
         "rx_channel": "123",
@@ -8982,7 +9171,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "123",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 123
       },
       {
         "rx_channel": "124",
@@ -8997,7 +9187,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "124",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 124
       },
       {
         "rx_channel": "125",
@@ -9012,7 +9203,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "125",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 125
       },
       {
         "rx_channel": "126",
@@ -9027,7 +9219,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "126",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 126
       },
       {
         "rx_channel": "127",
@@ -9042,7 +9235,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "127",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 127
       },
       {
         "rx_channel": "128",
@@ -9057,7 +9251,8 @@
           "status": "NOT_SUBSCRIBED"
         },
         "tx_channel": "128",
-        "tx_device": null
+        "tx_device": null,
+        "rx_channel_number": 128
       }
     ],
     "supported_encodings": [

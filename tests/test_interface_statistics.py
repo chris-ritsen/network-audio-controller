@@ -8,9 +8,7 @@ import pytest
 
 from netaudio import core
 from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
-from netaudio.dante.const import DEVICE_SETTINGS_PORT
 from netaudio.dante.device import DanteDevice
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.events import DanteEventDispatcher
 from netaudio.dante.interface_statistics import (
     InterfaceStatisticsErrorBaselines,
@@ -53,15 +51,11 @@ def _observation(packet: bytes, source: str = "192.0.2.10", monotonic: float = 1
 
 
 def test_interface_statistics_probe_preserves_generic_and_extended_073a_variants():
-    commands = DanteDeviceCommands()
-    generic, service, port = commands.command_probe_interface_statistics(
-        host_mac=bytes.fromhex("52550a000202"),
-        sequence=0x0047,
+    generic = core.build_command(
+        {"command": "probe_interface_statistics", "host_mac": "52550a000202", "message_id": 0x47}
     )
-    extended, _, _ = commands.command_probe_interface_statistics(
-        host_mac=bytes.fromhex("52550a000202"),
-        sequence=0x0047,
-        extended_073a=True,
+    extended = core.build_command(
+        {"command": "probe_interface_statistics", "host_mac": "52550a000202", "message_id": 0x47, "extended_073a": True}
     )
 
     assert generic.hex() == "ffff00220047000052550a0002020000417564696e617465073a0041000000000000"
@@ -69,8 +63,6 @@ def test_interface_statistics_probe_preserves_generic_and_extended_073a_variants
         "ffff00380047000052550a0002020000417564696e617465073a0041"
         "00000000000000000000000000000000000000000000000000000000"
     )
-    assert service is None
-    assert port == DEVICE_SETTINGS_PORT
 
 
 @pytest.mark.parametrize(

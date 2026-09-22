@@ -1,6 +1,7 @@
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MulticastFlowCreation2809 {
     pub global_flow_id: u16,
     pub media_type_code: u16,

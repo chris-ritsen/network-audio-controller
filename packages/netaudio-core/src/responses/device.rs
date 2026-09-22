@@ -129,6 +129,7 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
         aes67_multicast_prefix: None,
         inline_values: Vec::new(),
         referenced_values: Vec::new(),
+        performance_values: Vec::new(),
         unavailable_property_ids: Vec::new(),
     };
     let mut info_codes = HashSet::with_capacity(record_count);
@@ -176,6 +177,16 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
                 info_code,
                 value: value_pointer,
             });
+
+            if crate::commands::PERFORMANCE_PROPERTY_IDS.contains(&info_code) {
+                settings
+                    .performance_values
+                    .push(crate::commands::PerformanceProperty {
+                        property_id: info_code,
+                        value: u32::from(value_pointer),
+                    });
+            }
+
             continue;
         }
         let value_pointer_offset = usize::from(value_pointer);
@@ -189,6 +200,15 @@ pub fn parse_device_settings(response: &[u8]) -> Option<DeviceSettings> {
             return None;
         }
         let value = read_u32(value_bytes, 0)?;
+
+        if crate::commands::PERFORMANCE_PROPERTY_IDS.contains(&info_code) {
+            settings
+                .performance_values
+                .push(crate::commands::PerformanceProperty {
+                    property_id: info_code,
+                    value,
+                });
+        }
 
         settings
             .referenced_values
@@ -609,6 +629,46 @@ pub fn parse_dante_model(data: &[u8]) -> Option<PlatformVersions> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CommandAcknowledgement {
+    pub result_code: u16,
+    pub accepted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allocation: Option<MulticastFlowCreation2809>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CommandReceipt {
+    received: bool,
+    parseable: bool,
+    raw_response_hexadecimal: String,
+    #[serde(flatten)]
+    acknowledgement: Option<CommandAcknowledgement>,
+}
+
+pub fn command_receipt(response: &[u8]) -> CommandReceipt {
+    let acknowledgement = parse_command_acknowledgement(response);
+
+    CommandReceipt {
+        received: true,
+        parseable: acknowledgement.is_some(),
+        raw_response_hexadecimal: bytes_to_hex(response),
+        acknowledgement,
+    }
+}
+
+pub fn parse_command_acknowledgement(response: &[u8]) -> Option<CommandAcknowledgement> {
+    let result_code = parse_result_code(response)?;
+
+    Some(CommandAcknowledgement {
+        result_code,
+        allocation: parse_multicast_flow_creation_2809(response),
+        accepted: crate::protocol::arc_result_status(result_code).accepted,
+    })
+}
+
 pub fn parse_result_code(response: &[u8]) -> Option<u16> {
     let envelope = response_envelope(response)?;
     let common_opcode = matches!(
@@ -675,12 +735,12 @@ pub fn parse_cmc_registration_response(response: &[u8]) -> Option<CmcRegistratio
     if response.len() < 10
         || read_u16(response, 0)? != PROTOCOL_CMC
         || usize::from(read_u16(response, 2)?) != response.len()
-        || read_u16(response, 6)? != 0x1001
+        || read_u16(response, 6)? != crate::commands::OPCODE_CMC_REGISTER
     {
         return None;
     }
     Some(CmcRegistrationResponse {
         sequence: read_u16(response, 4)?,
-        status: read_u16(response, 8)?,
+        accepted: read_u16(response, 8)? == RESULT_CODE_SUCCESS,
     })
 }

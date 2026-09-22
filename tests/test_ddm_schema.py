@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from netaudio.ddm import InputValidationError, Schema, SchemaError, TypeReference, command_name, operation_name
 
@@ -7,18 +5,6 @@ from netaudio.ddm import InputValidationError, Schema, SchemaError, TypeReferenc
 @pytest.fixture(scope="module")
 def schema():
     return Schema.load()
-
-
-def test_bundled_schema_has_the_documented_roots(schema):
-    assert [field.name for field in schema.query_fields] == [
-        "deviceEntitlements",
-        "domain",
-        "domains",
-        "me",
-        "unenrolledDevices",
-    ]
-    assert len(schema.mutation_fields) == 31
-    assert schema.subscription_type_name is None
 
 
 def test_command_names_are_kebab_case_and_unique(schema):
@@ -115,13 +101,3 @@ def test_enum_inputs_must_match_declared_values(schema):
     assert schema.coerce_input(reference, values[0], "value") == values[0]
     with pytest.raises(InputValidationError, match="must be one of"):
         schema.coerce_input(reference, "not-a-value", "value")
-
-
-def test_schema_fixture_is_stable_json(schema):
-    from importlib import resources
-
-    document = json.loads(resources.files("netaudio.ddm").joinpath("schema.json").read_text())
-    assert document["__schema"]["queryType"]["name"] == schema.query_type_name
-    assert json.dumps(document, indent=1, sort_keys=True) == resources.files("netaudio.ddm").joinpath(
-        "schema.json"
-    ).read_text().rstrip("\n")

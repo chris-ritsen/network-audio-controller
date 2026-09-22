@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 from netaudio.core.binding import NetaudioCoreError
@@ -383,11 +382,11 @@ class DaemonPresetHandlers:
                 )
             except (ValueError, OSError, RuntimeError, asyncio.TimeoutError, NetaudioCoreError) as exception:
                 interrupted = True
-                report.record(
+                report.operation(
                     "Preset",
+                    "apply_preset",
+                    "unverified",
                     f"Load interrupted; some changes may have been applied: {exception}",
-                    failed=True,
-                    verified=False,
                 )
             await self.publish_inventory_snapshot()
             await self._send_json(
@@ -396,6 +395,6 @@ class DaemonPresetHandlers:
                     "name": name,
                     "complete": not (report.failures or report.unverified or interrupted),
                     "interrupted": interrupted,
-                    "report": asdict(report),
+                    "report": report.to_dict(),
                 },
             )

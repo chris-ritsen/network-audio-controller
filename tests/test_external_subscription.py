@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,7 +14,6 @@ from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.commands import flow as flow_commands
 from netaudio.dante.commands import DanteCommands
 from netaudio.dante.const import SERVICE_ARC
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante import flows
 from netaudio.dante.flows import (
     FlowValidationError,
@@ -71,18 +71,103 @@ def test_external_subscription_digest_bound_goldens(fixture_name, specification)
     assert core.build_command(specification) == expected
 
 
-def test_external_subscription_modern_packet_caps_protocol_and_retains_opcode():
-    packet = core.build_command(MODERN_SPEC)
-
-    assert packet[:2] == bytes.fromhex("2809")
-    assert packet[6:8] == bytes.fromhex("3201")
-    assert packet[8:12] == bytes.fromhex("00000202")
-    assert packet[8 + 0x12 : 8 + 0x1E] == bytes.fromhex("00200028004c005000540058")
+@pytest.mark.parametrize("protocol", [0, 0x2808, 0x2810, 0xFFFF])
+def test_external_subscription_rejects_unknown_protocol_before_encoding(protocol):
+    with pytest.raises(core.NetaudioCoreError):
+        core.build_command({**MODERN_SPEC, "device_protocol": protocol})
 
 
-def test_command_frontends_expose_the_same_external_subscription_specification():
+def test_native_external_readback_uses_encoded_defaults_and_slot_removal():
+    specification = {**MODERN_SPEC, "flow_slot_assignments": [1, 2, 0, 4]}
+    pending = core.external_subscription_readback(
+        {"kind": "command", "specification": specification, "inventory": None}
+    )
+    expected = pending["requested_effective_identities"]
+
+    assert pending["arc_effective_state_confirmed"] is None
+    assert pending["sdp_correlation_confirmed"] is None
+    assert [identity["receiver_channel"] for identity in expected] == [1, 3, 20]
+    assert expected[0]["interface_endpoints"] == [
+        {"ipv4_address": "239.69.1.10", "udp_port": 4321},
+        {"ipv4_address": "239.69.1.11", "udp_port": 5006},
+    ]
+    inventory = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "flows": [
+            {
+                "external_identity": {
+                    "source_ipv4": specification["source_address"],
+                    "session_id": specification["session_id"],
+                },
+                "effective_subscription_identities": list(reversed(expected)),
+                "sdp_correlation": {"matched": True},
+            }
+        ],
+    }
+    confirmed = core.external_subscription_readback(
+        {"kind": "command", "specification": specification, "inventory": inventory}
+    )
+
+    assert confirmed["arc_effective_state_confirmed"] is True
+    assert confirmed["sdp_correlation_confirmed"] is True
+
+    inventory["flows"][0]["effective_subscription_identities"].append({**expected[0], "receiver_channel": 12})
+
+    assert (
+        core.external_subscription_readback(
+            {"kind": "command", "specification": specification, "inventory": inventory}
+        )["arc_effective_state_confirmed"]
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "inventory",
+    [
+        {},
+        {"result_code": 1, "page_disposition": "more_pages", "flows": []},
+        {"result_code": 0, "page_disposition": "complete", "flows": []},
+        {"result_code": 1, "page_disposition": "complete", "flows": [{}]},
+        {"result_code": 1, "page_disposition": "complete", "flows": [{"effective_subscription_identities": [{}]}]},
+    ],
+)
+def test_native_external_readback_never_confirms_removal_from_incomplete_inventory(inventory):
+    specification = {**LEGACY_SPEC, "flow_slot_assignments": [0, 0, 0]}
+
+    assert (
+        core.external_subscription_readback(
+            {"kind": "command", "specification": specification, "inventory": inventory}
+        )["arc_effective_state_confirmed"]
+        is None
+    )
+
+
+def test_native_external_readback_confirms_only_the_requested_flow_membership():
+    specification = {**LEGACY_SPEC, "flow_slot_assignments": [0, 0, 0]}
+    other = {
+        "receiver_channel": 1,
+        "flow_slot": 1,
+        "source_ipv4": "192.0.2.99",
+        "session_id": 99,
+        "interface_endpoints": [{"ipv4_address": "239.69.1.99", "udp_port": 5004}],
+    }
+    inventory = {
+        "result_code": 1,
+        "page_disposition": "complete",
+        "flows": [{"effective_subscription_identities": [other]}],
+    }
+    result = core.external_subscription_readback(
+        {"kind": "command", "specification": specification, "inventory": inventory}
+    )
+
+    assert result["arc_effective_state_confirmed"] is True
+    assert result["sdp_correlation_confirmed"] is None
+    assert result["observed_effective_identities"] == []
+
+
+def test_command_frontend_exposes_external_subscription_specification():
     commands = DanteCommands()
-    commands._sequence = 0x1233
     specification = commands.subscribe_external_rtp(
         device_protocol=LEGACY_SPEC["device_protocol"],
         receiver_channel_ids=LEGACY_SPEC["receiver_channel_ids"],
@@ -93,24 +178,8 @@ def test_command_frontends_expose_the_same_external_subscription_specification()
         clock_offset=LEGACY_SPEC["clock_offset"],
         primary_destination=LEGACY_SPEC["primary_destination"],
     )
-    assert specification == {
-        **{key: value for key, value in LEGACY_SPEC.items() if key != "message_id"},
-        "sequence": 0x1234,
-    }
-
-    packet, service = DanteDeviceCommands().command_subscribe_external_rtp(
-        device_protocol=LEGACY_SPEC["device_protocol"],
-        receiver_channel_ids=LEGACY_SPEC["receiver_channel_ids"],
-        flow_slot_assignments=LEGACY_SPEC["flow_slot_assignments"],
-        advertised_flow_slot_count=LEGACY_SPEC["advertised_flow_slot_count"],
-        source_address=LEGACY_SPEC["source_address"],
-        session_id=LEGACY_SPEC["session_id"],
-        clock_offset=LEGACY_SPEC["clock_offset"],
-        primary_destination=LEGACY_SPEC["primary_destination"],
-        transaction_id=0x1234,
-    )
-    assert packet == (FIXTURE_DIRECTORY / "legacy-2729-3201.bin").read_bytes()
-    assert service == SERVICE_ARC
+    specification["message_id"] = LEGACY_SPEC["message_id"]
+    assert core.build_command(specification) == (FIXTURE_DIRECTORY / "legacy-2729-3201.bin").read_bytes()
 
 
 def discovered_flow():
@@ -127,6 +196,7 @@ def discovered_flow():
 
 def device(*, protocol="2.8.9", rx_channels=None, managed=False):
     return SimpleNamespace(
+        _arc_port=lambda: 4440,
         name="Receiver",
         server_name="receiver.local.",
         ipv4="192.0.2.10",
@@ -137,7 +207,9 @@ def device(*, protocol="2.8.9", rx_channels=None, managed=False):
                 "properties": {"arcp_vers": protocol},
             }
         },
-        rx_channels={number: object() for number in ([1, 2] if rx_channels is None else rx_channels)},
+        rx_channels={
+            number: SimpleNamespace(number=number) for number in ([1, 2] if rx_channels is None else rx_channels)
+        },
         topology_mutation_lock=DeferredAsyncioLock(),
         execute=AsyncMock(),
     )
@@ -145,7 +217,6 @@ def device(*, protocol="2.8.9", rx_channels=None, managed=False):
 
 def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_destination():
     commands = DanteCommands()
-    commands._sequence = 7
     flow = discovered_flow()
     target = device()
 
@@ -157,7 +228,6 @@ def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_desti
         [1, 2],
         receiver_supports_multiple_interfaces=False,
     )
-    assert primary_only["sequence"] == 8
     assert primary_only["source_address"] == "192.0.2.44"
     assert primary_only["session_id"] == 123456789012
     assert primary_only["clock_offset"] == 17
@@ -177,22 +247,69 @@ def test_discovered_flow_maps_to_external_subscription_and_gates_secondary_desti
 
 
 @pytest.mark.parametrize(
-    ("receiver_ids", "assignments", "message"),
+    ("receiver_ids", "assignments", "status"),
     [
-        ([1], [], "parallel non-empty"),
-        ([1, 1], [1, 2], "must be unique"),
-        ([1, 2], [1, 3], "advertised slot count"),
-        ([1, 3], [1, 2], "receiver channel not found"),
+        ([1], [], 400),
+        ([1, 1], [1, 2], 400),
+        ([1, 2], [1, 3], 400),
+        ([True], [1], 400),
+        ([[1]], [1], 400),
+        ([1], [False], 400),
+        ([1, 3], [1, 2], 404),
     ],
 )
-def test_high_level_external_mapping_fails_closed(receiver_ids, assignments, message):
-    with pytest.raises(FlowValidationError, match=message):
+def test_high_level_external_mapping_fails_closed(receiver_ids, assignments, status):
+    with pytest.raises(FlowValidationError) as error:
         external_receiver_subscription_specification(
             DanteCommands(),
             device(),
             discovered_flow(),
             receiver_ids,
             assignments,
+            receiver_supports_multiple_interfaces=False,
+        )
+
+    assert error.value.status == status
+
+
+def test_discovered_flow_accepts_native_default_destination_port():
+    specification = external_receiver_subscription_specification(
+        DanteCommands(),
+        device(),
+        replace(discovered_flow(), primary_destination_port=0),
+        [1],
+        [1],
+        receiver_supports_multiple_interfaces=False,
+    )
+    explicit = {
+        **specification,
+        "primary_destination": {
+            **specification["primary_destination"],
+            "port": 4321,
+        },
+    }
+
+    assert core.build_command(specification) == core.build_command(explicit)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"channel_count": 65536},
+        {"session_id": 0},
+        {"source_ipv4": "0.0.0.0"},
+        {"primary_destination_port": -1},
+        {"primary_destination_address": "invalid"},
+    ],
+)
+def test_discovered_flow_is_validated_before_a_command_is_returned(changes):
+    with pytest.raises(FlowValidationError):
+        external_receiver_subscription_specification(
+            DanteCommands(),
+            device(),
+            replace(discovered_flow(), **changes),
+            [1],
+            [1],
             receiver_supports_multiple_interfaces=False,
         )
 
@@ -327,6 +444,19 @@ def test_receiver_subscription_requires_known_receiver_channel_inventory():
         )
 
 
+@pytest.mark.parametrize("numbers,status", [([2], 404), ([1, 1], 409), ([True], 409), ([1.0], 409)])
+def test_external_subscription_uses_channel_identity_not_inventory_key(numbers, status):
+    target = device()
+    target.rx_channels = {key: SimpleNamespace(number=number) for key, number in enumerate(numbers, 1)}
+
+    with pytest.raises(FlowValidationError) as error:
+        external_receiver_subscription_specification(
+            DanteCommands(), target, discovered_flow(), [1], [1], receiver_supports_multiple_interfaces=False
+        )
+
+    assert error.value.status == status
+
+
 def populated_inventory() -> SapFlowInventory:
     inventory = SapFlowInventory()
     inventory.ingest(
@@ -392,6 +522,32 @@ def test_cli_external_subscribe_reports_acknowledgement_without_claiming_media()
     assert "acknowledged" in result.output
     assert result.output.count("not confirmed") == 6
     application.subscribe_external_rtp.assert_awaited_once()
+
+
+@pytest.mark.parametrize("code,detail", [(1536, "device rejected the request"), (None, "no device response")])
+def test_cli_external_rejection_uses_readable_error(code, detail):
+    target = device()
+    application = SimpleNamespace(
+        external_flows=populated_inventory(),
+        subscribe_external_rtp=AsyncMock(return_value={"request_acknowledged": False, "result_code": code}),
+    )
+
+    result = invoke(
+        flow_commands.run_external_flow_subscribe,
+        application,
+        {target.server_name: target},
+        "192.0.2.44",
+        123456789012,
+        [1, 2],
+        [1, 2],
+        True,
+        0,
+    )
+
+    assert result.exit_code != 0
+    assert detail in result.output
+    assert "0x" not in result.output
+    assert "1536" not in result.output
 
 
 @pytest.mark.asyncio

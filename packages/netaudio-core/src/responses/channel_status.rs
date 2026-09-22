@@ -1,5 +1,34 @@
 use super::*;
 
+pub fn parse_channel_name_protocol(response: &[u8], receiver: bool) -> Option<u16> {
+    let opcode = if receiver {
+        OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
+    } else {
+        OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
+    };
+    let envelope = validate_response_envelope(
+        response,
+        &modern_arc_protocol_opcodes(opcode),
+        &[
+            RESULT_CODE_SUCCESS,
+            crate::protocol::RESULT_CODE_MORE_PAGES,
+            crate::protocol::RESULT_CODE_FRONTEND_UNAVAILABLE,
+        ],
+    )?;
+
+    if envelope.result_code == crate::protocol::RESULT_CODE_FRONTEND_UNAVAILABLE {
+        return envelope.body.is_empty().then_some(PROTOCOL_DANTE_FLOW);
+    }
+
+    if receiver {
+        parse_modern_arc_receiver_channel_status_page(response)?;
+    } else {
+        parse_modern_arc_transmitter_channel_status_page(response)?;
+    }
+
+    Some(envelope.protocol_id)
+}
+
 fn modern_arc_page_disposition(result_code: u16) -> Option<ModernArcPageDisposition> {
     match result_code {
         RESULT_CODE_SUCCESS => Some(ModernArcPageDisposition::Complete),
@@ -338,6 +367,12 @@ fn parse_modern_arc_receiver_channel_status_record(
         optional_status_string_at_pointer(response, source_device_name_pointer, minimum_pointer)?;
 
     let receiver_capability_flags = read_u32(record, RECEIVER_CAPABILITY_FLAGS_OFFSET)?;
+    let subscription_status_code = read_u16(record, subscription_status_offset)?;
+    let is_self_connection = crate::subscription_status::is_self_connection(
+        source_device_name.as_deref(),
+        subscription_status_code,
+    );
+
     Some(ModernArcReceiverChannelStatus {
         record_pointer,
         record_length_bytes: u16::try_from(record_size).ok()?,
@@ -358,7 +393,8 @@ fn parse_modern_arc_receiver_channel_status_record(
         source_channel_name,
         source_device_name_pointer,
         source_device_name,
-        subscription_status_code: read_u16(record, subscription_status_offset)?,
+        subscription_status_code,
+        is_self_connection,
         receiver_status_code: read_u16(record, receiver_status_offset)?,
         receiver_capability_flags,
         can_subscribe_self: receiver_capability_flags & CAN_SUBSCRIBE_SELF_MASK != 0,
@@ -433,8 +469,8 @@ pub fn parse_modern_arc_receiver_flow_status_page(
     )?;
     let mut flow_numbers = HashSet::with_capacity(flows.len());
     for flow in &flows {
-        if flow.global_flow_id > u16::from(maximum_flow_slots)
-            || !flow_numbers.insert(flow.global_flow_id)
+        if flow.flow_number > u16::from(maximum_flow_slots)
+            || !flow_numbers.insert(flow.flow_number)
         {
             return None;
         }
@@ -483,11 +519,11 @@ fn parse_receiver_flow_status_record_2809(
     if record_type_code != expected_record_type {
         return None;
     }
-    let global_flow_id = read_u16(record, RECEIVER_FLOW_STATUS_RECORD_FLOW_NUMBER)?;
+    let flow_number = read_u16(record, RECEIVER_FLOW_STATUS_RECORD_FLOW_NUMBER)?;
     let media_type_code = read_u16(record, RECEIVER_FLOW_STATUS_RECORD_MEDIA_TYPE)?;
     let media_local_flow_id = read_u16(record, RECEIVER_FLOW_STATUS_RECORD_MEDIA_LOCAL_ID)?;
     let local_receiver_channel_count = read_u16(record, local_receiver_count_offset)?;
-    if global_flow_id == 0
+    if flow_number == 0
         || !matches!(media_type_code, MEDIA_TYPE_AUDIO | MEDIA_TYPE_VIDEO)
         || media_local_flow_id == 0
         || local_receiver_channel_count == 0
@@ -553,7 +589,8 @@ fn parse_receiver_flow_status_record_2809(
         record_pointer,
         record_length_bytes: u16::try_from(record_size).ok()?,
         record_type_code,
-        global_flow_id,
+        flow_number,
+        flow_type: None,
         media_type_code,
         media_local_flow_id,
         flow_type_code: read_u16(record, RECEIVER_FLOW_STATUS_RECORD_FLOW_TYPE)?,

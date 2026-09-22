@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 
+from netaudio import core
+
 from netaudio.dante.events import DanteEvent, EventType
 from netaudio.dante.panel_plan import matches, plan_panel
 from netaudio.dante.panel_state import (
-    QUERY_SELECTORS,
+    panel_profile,
     observation_time,
     observe_panel,
     panel_family,
@@ -20,7 +22,6 @@ from netaudio.dante.panel_state import (
 class PanelTransport:
     def __init__(self, application):
         self.application = application
-        self.sequence = 0
         self.pending = set()
         self.locks = defaultdict(asyncio.Lock)
 
@@ -42,9 +43,9 @@ class PanelTransport:
 
     def next_sequence(self):
         while True:
-            self.sequence = (self.sequence + 1) & 0xFFFFFFFF
-            if self.sequence and self.sequence not in self.pending:
-                return self.sequence
+            sequence = core.next_panel_sequence()
+            if sequence not in self.pending:
+                return sequence
 
     def require(self, device, *, write=False):
         reason = panel_permission(device, write=write)
@@ -96,13 +97,14 @@ class PanelTransport:
             self.application.notifications.unregister_waiter(waiter)
 
     async def query(self, device, category, timeout=1.0):
-        family = panel_family(device)
-        selector = QUERY_SELECTORS.get(family or "", {}).get(category)
-        if selector is None:
+        request = next(
+            (query["request"] for query in panel_profile(device)["queries"] if query["category"] == category), None
+        )
+        if request is None:
             raise RuntimeError("No query is established for that device and setting.")
         return await self.exchange(
             device,
-            {"operation": "bluetooth_query" if family == "bluetooth" else "video_query", "selector": selector},
+            request,
             category,
             timeout,
         )
@@ -110,14 +112,14 @@ class PanelTransport:
     async def inspect(self, device, *, timeout=1.0):
         self.require(device)
         async with self.locks[device.server_name]:
-            for category in QUERY_SELECTORS.get(panel_family(device) or "", {}):
+            for query in panel_profile(device)["queries"]:
+                category = query["category"]
                 result = await self.query(device, category, timeout)
                 if result is None:
                     self.unavailable(device, category)
-                elif category == "visca":
-                    value = device.device_controls.get("observations", {}).get("visca", {}).get("value", {})
-                    if value.get("capability") == 1:
-                        await self.exchange(device, {"operation": "video_visca_query"}, "visca", timeout)
+                else:
+                    for request in result.get("followup_requests", []):
+                        await self.exchange(device, request, category, timeout)
             return panel_snapshot(device)
 
     async def plan(self, device, category, requested, *, confirm_clear=False, timeout=1.0):
@@ -126,10 +128,8 @@ class PanelTransport:
             return await self._plan(device, category, requested, confirm_clear, timeout)
 
     async def _plan(self, device, category, requested, confirm_clear, timeout):
-        needed = [category]
-        if category in {"video_format", "bandwidth"}:
-            needed += ["video_format", "visca"] if category == "video_format" else ["video_format"]
-        for item in dict.fromkeys(needed):
+        query = next((query for query in panel_profile(device)["queries"] if query["category"] == category), None)
+        for item in query["prerequisites"] if query else []:
             result = await self.query(device, item, timeout)
             if result is None:
                 self.unavailable(device, item)
@@ -208,7 +208,9 @@ def audit_control_result(result):
     return {
         "state": "confirmed" if result["effective_state_confirmed"] else "unverified",
         "requested_values": result["plan"]["requested"],
-        "effective_values": result["plan"].get("expected") if result["effective_state_confirmed"] else None,
+        "effective_values": (
+            result.get("status", result["plan"].get("expected")) if result["effective_state_confirmed"] else None
+        ),
         "effective_state_confirmation": True if result["effective_state_confirmed"] else None,
         "persistence_confirmation": None,
         "request_sent": result["request_sent"],

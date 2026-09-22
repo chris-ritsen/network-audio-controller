@@ -1,4 +1,6 @@
 import ipaddress
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,7 +24,7 @@ def test_receiver_port_range_query_and_parser_match_shipping_controller():
     request = _packet(0x3300, 8175)
     response = _packet(0x3300, 8176)
 
-    assert core.build_command({"command": "query_receiver_port_ranges", "transaction_id": 0x033C}) == request
+    assert core.build_command({"command": "query_receiver_port_ranges", "message_id": 0x033C}) == request
     assert request.hex() == "2729000a033c33000000"
     assert response.hex() == "27290012033c330000013800397f398039ff"
     assert core.parse_response("receiver_port_ranges", response) == {
@@ -64,44 +66,32 @@ def test_authentic_fallback_setup_uses_the_same_endpoint_descriptor_layout():
 
 
 @pytest.mark.asyncio
-async def test_receiver_port_range_product_query_uses_the_controller_request(
-    monkeypatch,
-):
-    command_specifications = []
+async def test_receiver_port_range_product_query_uses_the_controller_request():
+    device = SimpleNamespace(execute=AsyncMock(return_value=_packet(0x3300, 8176)))
 
-    async def request(
-        device_ip,
-        arc_port,
-        command_specification,
-        timeout_ms,
-        attempts,
-    ):
-        command_specifications.append(
-            {
-                "device_ip": device_ip,
-                "arc_port": arc_port,
-                "command_specification": command_specification,
-                "timeout_ms": timeout_ms,
-                "attempts": attempts,
-            }
-        )
-        return _packet(0x3300, 8176)
-
-    monkeypatch.setattr(flows, "_request", request)
-
-    assert await flows.query_receiver_port_ranges("192.0.2.10", 4440) == {
+    assert await flows.query_receiver_port_ranges("192.0.2.10", 4440, device=device) == {
         "first_port_range_start": 0x3800,
         "first_port_range_end": 0x397F,
         "second_port_range_start": 0x3980,
         "second_port_range_end": 0x39FF,
         "second_port_range_available": True,
     }
-    assert command_specifications == [
-        {
-            "device_ip": "192.0.2.10",
-            "arc_port": 4440,
-            "command_specification": {"command": "query_receiver_port_ranges"},
-            "timeout_ms": 1000,
-            "attempts": 2,
-        }
-    ]
+    device.execute.assert_awaited_once()
+    specification = device.execute.call_args.args[0]
+    assert core.build_command({**specification, "message_id": 0x033C}) == _packet(0x3300, 8175)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing", "empty", "truncated", "rejected", "wrong_opcode"])
+async def test_product_query_rejects_missing_malformed_and_failed_responses(failure):
+    packet = _packet(0x3300, 8176)
+    response = {
+        "missing": None,
+        "empty": b"",
+        "truncated": packet[:9],
+        "rejected": packet[:8] + b"\x00\x02" + packet[10:],
+        "wrong_opcode": packet[:6] + b"\xff\xff" + packet[8:],
+    }[failure]
+    device = SimpleNamespace(execute=AsyncMock(return_value=response))
+
+    assert await flows.query_receiver_port_ranges("192.0.2.10", 4440, device=device) is None

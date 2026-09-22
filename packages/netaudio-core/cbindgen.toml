@@ -11,5 +11,5 @@ rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
 
 [export]
-include = ["NetaudioStatus"]
+include = ["NetaudioStatus", "NetaudioProtocol", "NetaudioPort", "NetaudioNotification", "NetaudioResultCode"]
 item_types = ["enums", "structs", "opaque", "functions"]

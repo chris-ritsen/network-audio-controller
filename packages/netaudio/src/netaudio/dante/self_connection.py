@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from netaudio.core import canonical_device_mac, receiver_self_connection_capabilities
+
 
 class SelfConnectionCapabilityError(RuntimeError):
     """A self-connection request cannot pass capability preflight."""
@@ -20,17 +22,32 @@ def receiver_self_connection_support(channels: Iterable[object]) -> str:
         channel.get("can_subscribe_self") if isinstance(channel, dict) else getattr(channel, "can_subscribe_self", None)
         for channel in channels
     ]
-    conclusive = {value for value in values if isinstance(value, bool)}
-    has_unknown = any(not isinstance(value, bool) for value in values)
-    if not conclusive:
-        return "unknown"
-    if has_unknown:
-        return "partial"
-    if conclusive == {True}:
-        return "supported"
-    if conclusive == {False}:
-        return "unsupported"
-    return "mixed"
+    return receiver_self_connection_capabilities(
+        {
+            "authority": "observed",
+            "channels": [{"direct": value, "managed": None, "managed_fresh": False} for value in values],
+        }
+    )["support"]
+
+
+def self_connection_capability(direct, managed, managed_fresh, *, authority):
+    return receiver_self_connection_capabilities(
+        {
+            "authority": authority,
+            "channels": [{"direct": direct, "managed": managed, "managed_fresh": managed_fresh is True}],
+        }
+    )["channels"][0]
+
+
+def apply_self_connection_capability(channel, *, authority):
+    result = self_connection_capability(
+        channel.direct_can_subscribe_self,
+        channel.managed_can_subscribe_self,
+        channel.managed_can_subscribe_self_fresh,
+        authority=authority,
+    )
+    channel.can_subscribe_self = result["supported"]
+    channel.can_subscribe_self_conflict = True if result["conflict"] else None
 
 
 def normalized_device_identities(device: object) -> frozenset[tuple[str, str]]:
@@ -49,15 +66,9 @@ def normalized_device_identities(device: object) -> frozenset[tuple[str, str]]:
         if isinstance(interface, dict):
             mac_values.append(interface.get("mac_address"))
     for value in mac_values:
-        if not isinstance(value, str):
-            continue
-        normalized = value.replace(":", "").replace("-", "").casefold()
-        if len(normalized) == 16:
-            if normalized[6:10] == "fffe":
-                normalized = f"{normalized[:6]}{normalized[10:]}"
-            elif normalized.endswith("0000"):
-                normalized = normalized[:12]
-        if len(normalized) in {12, 16} and all(character in "0123456789abcdef" for character in normalized):
+        normalized = canonical_device_mac(value)
+
+        if normalized is not None:
             identities.add(("mac", normalized))
     return frozenset(identities)
 

@@ -1,39 +1,46 @@
-from netaudio.dante.const import (
-    subscription_status_entry,
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from netaudio.dante.channel import DanteChannel
+    from netaudio.dante.device import DanteDevice
+
+from netaudio.core import (
+    subscription_status,
 )
 
 
 def managed_subscription_status(status, status_message, summary) -> dict:
-    from netaudio.core import subscription_state_for_identifier
+    from netaudio.core import subscription_classification_for_identifier
     from netaudio.dante.subscription_status import managed_status_presentation
 
     normalized_summary = summary.casefold() if isinstance(summary, str) and summary else None
     label, detail = managed_status_presentation(status, status_message, summary)
     return {
+        **subscription_classification_for_identifier(status),
         "code": None,
         "detail": detail,
         "icon": "",
         "label": label,
         "severity": {"connected": "ok", "error": "error", "warning": "warning"}.get(normalized_summary, "info"),
-        "state": subscription_state_for_identifier(status),
         "status": status,
     }
 
 
 class DanteSubscription:
     def __init__(self):
-        self._error = None
-        self._rx_channel = None
-        self._netaudio_rx_channel_number = None
-        self._rx_channel_name = None
-        self._rx_channel_status_code = None
-        self._rx_device = None
+        self.error = None
+        self.rx_channel: DanteChannel | None = None
+        self.rx_channel_name = None
+        self.rx_channel_status_code: int | None = None
+        self.rx_device: DanteDevice | None = None
         self._rx_device_name = None
-        self._status_code = None
-        self._status_message = []
-        self._tx_channel = None
-        self._tx_channel_name = None
-        self._tx_device = None
+        self.status_code: int | None = None
+        self.status_message = []
+        self.tx_channel: DanteChannel | None = None
+        self.tx_channel_name = None
+        self.tx_device: DanteDevice | None = None
         self._tx_device_name = None
         self._is_self_connection: bool | None = None
         self.ddm_status = None
@@ -76,37 +83,13 @@ class DanteSubscription:
 
             label, detail = managed_status_presentation(self.ddm_status, self.ddm_status_message, self.ddm_summary)
             return (label, *((detail,) if detail else ()), *self.status_message)
-        entry = subscription_status_entry(self.status_code, self.rx_channel_status_code)
+        entry = subscription_status(self.status_code, self.rx_channel_status_code)
         return (str(entry["label"]), *self.status_message)
 
     def to_json(self):
         from netaudio.dante.device_serializer import DanteDeviceSerializer
 
         return DanteDeviceSerializer.subscription_to_json(self)
-
-    @property
-    def error(self):
-        return self._error
-
-    @error.setter
-    def error(self, error):
-        self._error = error
-
-    @property
-    def rx_channel_name(self):
-        return self._rx_channel_name
-
-    @rx_channel_name.setter
-    def rx_channel_name(self, rx_channel_name):
-        self._rx_channel_name = rx_channel_name
-
-    @property
-    def tx_channel_name(self):
-        return self._tx_channel_name
-
-    @tx_channel_name.setter
-    def tx_channel_name(self, tx_channel_name):
-        self._tx_channel_name = tx_channel_name
 
     @property
     def rx_device_name(self):
@@ -120,30 +103,6 @@ class DanteSubscription:
         self._rx_device_name = rx_device_name
 
     @property
-    def rx_channel_status_code(self):
-        return self._rx_channel_status_code
-
-    @rx_channel_status_code.setter
-    def rx_channel_status_code(self, rx_channel_status_code):
-        self._rx_channel_status_code = rx_channel_status_code
-
-    @property
-    def status_code(self):
-        return self._status_code
-
-    @status_code.setter
-    def status_code(self, status_code):
-        self._status_code = status_code
-
-    @property
-    def status_message(self):
-        return self._status_message
-
-    @status_message.setter
-    def status_message(self, status_message):
-        self._status_message = status_message
-
-    @property
     def tx_device_name(self):
         if self.tx_device is not None:
             return getattr(self.tx_device, "name", None) or self._tx_device_name
@@ -152,35 +111,3 @@ class DanteSubscription:
     @tx_device_name.setter
     def tx_device_name(self, tx_device_name):
         self._tx_device_name = tx_device_name
-
-    @property
-    def rx_channel(self):
-        return self._rx_channel
-
-    @rx_channel.setter
-    def rx_channel(self, rx_channel):
-        self._rx_channel = rx_channel
-
-    @property
-    def tx_channel(self):
-        return self._tx_channel
-
-    @tx_channel.setter
-    def tx_channel(self, tx_channel):
-        self._tx_channel = tx_channel
-
-    @property
-    def rx_device(self):
-        return self._rx_device
-
-    @rx_device.setter
-    def rx_device(self, rx_device):
-        self._rx_device = rx_device
-
-    @property
-    def tx_device(self):
-        return self._tx_device
-
-    @tx_device.setter
-    def tx_device(self, tx_device):
-        self._tx_device = tx_device

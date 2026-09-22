@@ -4,6 +4,23 @@ use crate::client::fire_repeated;
 use crate::spec::IoMode;
 
 #[no_mangle]
+pub extern "C" fn netaudio_lock_key_length() -> usize {
+    crate::lock::KEY_LENGTH
+}
+
+/// Validate a JSON PIN string without truncating embedded null characters.
+#[no_mangle]
+pub unsafe extern "C" fn netaudio_validate_lock_pin(json: *const c_char) -> NetaudioStatus {
+    guard(|| {
+        let json = unsafe { c_string(json)? };
+        let pin: String =
+            serde_json::from_str(json).map_err(|_| crate::lock::LockError::InvalidPin)?;
+        crate::lock::validate_pin(&pin)?;
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn netaudio_client_execute(
     client: *mut NetaudioClient,
     json: *const c_char,

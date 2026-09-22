@@ -1,11 +1,35 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from netaudio.core import binding
+from netaudio import core
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
+
+
+@pytest.mark.parametrize(
+    "status,expected,state,observed",
+    [
+        ({"current_value": 24, "requested_value": 16}, 24, "confirmed", 24),
+        ({"current_value": 16, "requested_value": 24}, 24, "unverified", 16),
+        ({"current_value": 0}, 0, "confirmed", 0),
+        (None, 24, "unavailable", None),
+        ({"requested_value": 24}, 24, "unavailable", None),
+        ({"current_value": True}, 1, "unavailable", None),
+        ({"current_value": "24"}, 24, "unavailable", None),
+        ({"current_value": -1}, 24, "unavailable", None),
+        ({"current_value": 2**32}, 24, "unavailable", None),
+    ],
+)
+def test_audio_readback_requires_an_applied_unsigned_value(status, expected, state, observed):
+    result = core.audio_capability_readback(status, expected)
+
+    assert result == {
+        "state": state,
+        "requested_value": expected,
+        "current_value": observed,
+        "effective_state_confirmed": state == "confirmed",
+    }
 
 
 def controls_input(channel_audio_metadata):
@@ -20,60 +44,39 @@ def controls_input(channel_audio_metadata):
     }
 
 
-def test_core_client_reads_metadata_from_first_available_inventory(monkeypatch):
-    requests = []
+@pytest.mark.parametrize(
+    "capability_word,protocol,identity_field,identifier_max,media_modes",
+    [
+        (0, 0x2729, "global_flow_id", 32, ["native_dante"]),
+        (0x1000, 0x2809, "media_local_flow_id", 65535, ["native_dante", "rtp_aes67"]),
+    ],
+)
+def test_native_authoring_profile_survives_device_serialization(
+    capability_word, protocol, identity_field, identifier_max, media_modes
+):
+    device = DanteDevice()
+    data = controls_input(None)
+    data["counts"] = (1, 1, False, capability_word)
+    device.apply_controls(device.controls_data_from_core(data))
 
-    def request(packet, port):
-        requests.append((packet, port))
-        return b"transmitter-response"
+    serialized = DanteDeviceSerializer.to_json(device)
+    assert serialized["transmit_flow_authoring"] == {
+        "protocol_id": protocol,
+        "identity_field": identity_field,
+        "identifier_max": identifier_max,
+        "media_modes": media_modes,
+        "supports_flow_options": capability_word == 0x1000,
+    }
 
-    client = SimpleNamespace(_arc_port=4440, _device_ip="192.168.1.108", request=request)
-    monkeypatch.setattr(binding, "build_command", lambda specification: specification["command"].encode())
-    monkeypatch.setattr(
-        binding,
-        "parse_response",
-        lambda kind, response: {
-            "kind": kind,
-            "response": response.decode(),
-            "current_encoding": 24,
-            "supported_encodings": [24],
-        },
-    )
-
-    result = binding.CoreClient.get_channel_audio_metadata(client, 128, 128)
-
-    assert result["kind"] == "channel_audio_metadata"
-    assert result["response"] == "transmitter-response"
-    assert requests == [(b"transmitters", 4440)]
-
-
-def test_core_client_falls_back_from_tx_to_rx_inventory(monkeypatch):
-    requests = []
-
-    def request(packet, port):
-        requests.append((packet, port))
-        return packet + b"-response"
-
-    def parse_response(kind, response):
-        if response == b"transmitters-response":
-            raise binding.NetaudioCoreError(10, kind)
-        return {"current_encoding": 24, "supported_encodings": [24]}
-
-    client = SimpleNamespace(_arc_port=4440, _device_ip="192.168.1.108", request=request)
-    monkeypatch.setattr(binding, "build_command", lambda specification: specification["command"].encode())
-    monkeypatch.setattr(binding, "parse_response", parse_response)
-
-    result = binding.CoreClient.get_channel_audio_metadata(client, 128, 128)
-
-    assert result == {"current_encoding": 24, "supported_encodings": [24]}
-    assert requests == [(b"transmitters", 4440), (b"receivers", 4440)]
+    data["counts"] = (1, 1, False, None)
+    device.apply_controls(device.controls_data_from_core(data))
+    assert getattr(device, "transmit_flow_authoring", None) is None
 
 
 @pytest.mark.asyncio
 async def test_control_fetch_reuses_rx_inventory_metadata_and_applies_property_capabilities(monkeypatch):
     device = DanteDevice()
     core_client = MagicMock()
-    core_client.observer = None
     core_client.get_channel_count.return_value = (2, 2, False, 0)
     core_client.get_rx_inventory.return_value = {
         "channels": [],

@@ -9,7 +9,8 @@ import pytest
 from netaudio.daemon import metering as metering_module
 from netaudio.daemon.metering import MeteringManager
 from netaudio.dante.events import EventType
-from netaudio.dante.metering import parse_metering_levels
+from netaudio.dante.metering import classify_signal_presence, metering_value_dbfs, parse_metering_levels
+from tests.http_api_test_support import make_http_server
 
 METERING_FRAME = bytes.fromhex("ffff00211f810000001dc119245c0000417564696e617465020302fefe7da08800")
 METERING_FRAME_V3 = bytes.fromhex("ffff011eddfb0000001dc10812580000417564696e617465030000800080") + bytes([0xFE] * 256)
@@ -28,6 +29,34 @@ PASSIVE_RECORD = {
     "rx_levels": [0x6D],
     "padding_length": 1,
 }
+
+
+def test_native_metering_scale_reaches_clients_with_signal_boundaries_and_special_states():
+    scale = make_http_server()._snapshot_payload()["metering_scale"]
+    expected = {
+        0: (None, "clipping"),
+        1: (0.0, "signal_present"),
+        2: (-0.5, "signal_present"),
+        123: (-61.0, "signal_present"),
+        124: (-61.5, "below_threshold"),
+        253: (-126.0, "below_threshold"),
+        254: (None, "muted"),
+        255: (None, "unknown"),
+    }
+
+    assert len(scale) == 256
+
+    for raw, (dbfs, state) in expected.items():
+        assert scale[raw] == {"dbfs": dbfs, "state": state}
+        assert metering_value_dbfs(raw) == dbfs
+        assert classify_signal_presence(raw) == state
+
+
+@pytest.mark.parametrize("value", [None, True, -1, 256, 1.5, "1"])
+def test_metering_interpretation_requires_a_byte(value):
+    for interpret in (metering_value_dbfs, classify_signal_presence):
+        with pytest.raises(ValueError):
+            interpret(value)
 
 
 def make_manager():

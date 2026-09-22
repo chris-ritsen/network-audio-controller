@@ -17,9 +17,20 @@ def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts
     device = DanteDevice("managed-adapter")
     device.model = model
     device.management_state = "managed"
+    device.managed_operation_permissions = {"sample_rate": True}
+    device.sample_rate_configuration_supported = True
+    device.is_locked = False
     device.ipv4 = None
     device.execute = AsyncMock(return_value=b"synthetic channel counts")
     output = model == "AVIO-DAO2"
+    device.sample_rate_channel_capacities = [
+        {
+            "sample_rate_hertz": rate,
+            "receive_channel_count": 2 if output else 0,
+            "transmit_channel_count": 0 if output else 2,
+        }
+        for rate in (44100, 48000, 88200, 96000)
+    ]
     phase = {"rate": 48000}
     monkeypatch.setattr(
         core,
@@ -31,7 +42,7 @@ def setup_adapter(monkeypatch, model, *, changed_members=False, incorrect_counts
     )
 
     async def receivers():
-        device.apply_receiver_channel_status_page(
+        device.apply_receiver_channel_inventory(
             {
                 "records": [
                     {

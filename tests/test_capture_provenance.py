@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from netaudio import core
 from netaudio.capture import provenance
 from netaudio.capture.provenance import (
     _decode_packet_payload,
@@ -17,10 +18,25 @@ from netaudio.capture.provenance import (
 )
 
 
-def test_arc_extended_success_is_not_reported_as_failure():
-    payload = struct.pack(">HHHHH", 0x2729, 10, 1, 0x3000, 0x8112)
+@pytest.mark.parametrize(
+    "code,accepted,label",
+    [
+        (0, False, "request"),
+        (1, True, "success"),
+        (0x8112, True, "success (paginated)"),
+        (0x0022, False, "error"),
+        (0x0030, False, None),
+        (0xFFFF, False, None),
+    ],
+)
+def test_capture_and_acknowledgement_share_native_result_interpretation(code, accepted, label):
+    payload = struct.pack(">HHHHH", 0x2729, 10, 1, 0x3000, code)
+    header = core.parse_response("packet_header", payload)
 
-    assert _decode_packet_payload(payload)["status_ok"] is True
+    assert header["result_accepted"] is accepted
+    assert header.get("result_label") == label
+    assert _decode_packet_payload(payload)["status_ok"] is accepted
+    assert core.command_acknowledgement(payload)["accepted"] is accepted
 
 
 def _subscription_status_packet(status_code: int) -> bytes:

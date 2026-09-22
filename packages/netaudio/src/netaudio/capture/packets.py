@@ -7,7 +7,6 @@ from netaudio.dante.const import (
     ARC_PROTOCOL_IDS,
     DANTE_CONTROLLER_METERING_PORT,
     DEVICE_INFO_PORT,
-    PROTOCOL_NAMES,
     PROTOCOL_SETTINGS,
 )
 from netaudio.dante.dissection.header import parse_packet_header
@@ -72,12 +71,10 @@ def _label_packet(payload: bytes, *, include_code: bool = False):
 
     if protocol_id == PROTOCOL_SETTINGS:
         fact_name = fact_labels.get(f"conmon:{code}") or fact_labels.get(f"multicast:{code}")
-    elif protocol_id in PROTOCOL_NAMES:
+    else:
         fact_name = None
         if protocol_id in ARC_PROTOCOL_IDS:
             fact_name = fact_labels.get(f"arc:0x{protocol_id:04X}:{code}") or fact_labels.get(f"arc:{code}")
-    else:
-        return f"proto:0x{protocol_id:04X}"
 
     if fact_name:
         return f"{code} {fact_name}" if include_code else fact_name

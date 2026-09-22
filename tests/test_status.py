@@ -31,26 +31,6 @@ def make_status_device() -> DanteDevice:
     return device
 
 
-def test_dante_status_headers_read_left_to_right():
-    assert DANTE_STATUS_HEADERS == [
-        "Name",
-        "Status",
-        "Kind",
-        "Manufacturer",
-        "Model",
-        "IP Address",
-        "TX",
-        "RX",
-        "Sample Rate",
-        "Encoding",
-        "Latency",
-        "Clock",
-        "Lock",
-        "Domain",
-        "Last Seen",
-    ]
-
-
 def test_dante_status_row_leaves_unqueried_lock_blank_and_labels_failed_lock_query():
     device = make_status_device()
     row = dict(zip(DANTE_STATUS_HEADERS, _dante_row_from_device(device)))

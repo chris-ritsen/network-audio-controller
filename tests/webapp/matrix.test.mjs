@@ -7,6 +7,40 @@ const matrix = await import(`${WEBAPP}matrix.js`);
 const store = await import(`${WEBAPP}store.js`);
 const devices = fixture("devices");
 
+test("duplicate receiver labels retain separate routes and pending readback", async () => {
+  const { receiverChannels } = await import(`${WEBAPP}routing-controls.js`);
+  const receiver = {
+    name: "Receiver", server_name: "rx",
+    channels: { receivers: { 1: { name: "Duplicate" }, 2: { name: "Duplicate" } } },
+    subscriptions: [
+      { rx_channel: "Duplicate", rx_channel_number: 2, tx_device: "Source", tx_channel: "Right", status: { severity: "ok" } },
+      { rx_channel: "Duplicate", rx_channel_number: 1, tx_device: "Source", tx_channel: "Left", status: { severity: "ok" } },
+    ],
+  };
+  const built = matrix.buildMatrixModel({
+    devices: { rx: receiver }, expandedReceivers: new Set(["Receiver"]),
+    expandedTransmitters: new Set(), receiverFilter: "", transmitterFilter: "",
+  });
+
+  assert.deepEqual(built.rows.filter((row) => row.kind === "channel").map((row) => row.subscription.tx_channel), ["Left", "Right"]);
+  assert.deepEqual(receiverChannels(receiver).map((row) => row.subscription.tx_channel), ["Left", "Right"]);
+
+  const previous = store.pendingSubscriptions.value;
+
+  try {
+    const first = store.pendingKey("Receiver", 1);
+    const second = store.pendingKey("Receiver", 2);
+    store.pendingSubscriptions.value = {
+      [first]: { action: "add", tx_device: "Source", tx_channel: "Right" },
+      [second]: { action: "add", tx_device: "Source", tx_channel: "Right" },
+    };
+    store.clearPendingForDevice(receiver);
+    assert.deepEqual(Object.keys(store.pendingSubscriptions.value), [first]);
+  } finally {
+    store.pendingSubscriptions.value = previous;
+  }
+});
+
 test("matrix column headers grow to fit labels and subscription text never affects layout", () => {
   const context = { measureText: (text) => ({ width: text.length * 8 }) };
   const theme = { dataFont: "monospace" };
@@ -22,8 +56,8 @@ const { groupChannels } = await import(`${WEBAPP}channel-groups.js`);
 test("channel groups partition by channel number, expand independently, and retain scoped subscriptions", () => {
   const channels = Object.fromEntries(Array.from({ length: 33 }, (_, index) => [index + 1, { name: `ch${index + 1}` }]));
   const receiver = { name: "Receiver", server_name: "rx", channels: { receivers: channels }, subscriptions: [
-    { rx_channel: "ch1", tx_device: "Source", tx_channel: "ch17", status: { severity: "ok" } },
-    { rx_channel: "ch17", tx_device: "Source", tx_channel: "ch1", status: { severity: "warning" } },
+    { rx_channel: "ch1", rx_channel_number: 1, tx_device: "Source", tx_channel: "ch17", status: { severity: "ok" } },
+    { rx_channel: "ch17", rx_channel_number: 17, tx_device: "Source", tx_channel: "ch1", status: { severity: "warning" } },
   ] };
   const transmitter = { name: "Source", server_name: "tx", channels: { transmitters: channels } };
   const options = { devices: { rx: receiver, tx: transmitter }, expandedReceivers: new Set(["Receiver"]),
@@ -200,7 +234,7 @@ test("collapsed receiver shows a partial marker against a transmitter device it 
 
 test("receiver-reported connection progress remains pending until connected", () => {
   const receiver = { name: "Receiver", server_name: "receiver", channels: { receivers: { 1: { name: "Input" } } }, subscriptions: [
-    { rx_channel: "Input", tx_device: "Source", tx_channel: "Output", status: { state: "in_progress", severity: "progress" } },
+    { rx_channel: "Input", rx_channel_number: 1, tx_device: "Source", tx_channel: "Output", status: { state: "in_progress", severity: "progress" } },
   ] };
   const source = { name: "Source", server_name: "source", channels: { transmitters: { 1: { name: "Output" } } } };
   const options = { devices: { receiver, source }, expandedReceivers: new Set(["Receiver"]), expandedTransmitters: new Set(["Source"]), receiverFilter: "", transmitterFilter: "" };
@@ -216,7 +250,7 @@ test("receiver-reported connection progress remains pending until connected", ()
 
 test("pending subscriptions update channel, collapsed group, and crosspoint status together", () => {
   for (const action of ["add", "remove"]) {
-    const subscription = { rx_channel: "Input", tx_device: "Source", tx_channel: "Output", status: { state: "connected", severity: "ok" } };
+    const subscription = { rx_channel: "Input", rx_channel_number: 1, tx_device: "Source", tx_channel: "Output", status: { state: "connected", severity: "ok" } };
     const receiver = { name: "Receiver", server_name: "receiver", channels: { receivers: { 1: { name: "Input" } } }, subscriptions: action === "remove" ? [subscription] : [] };
     const source = { name: "Source", server_name: "source", channels: { transmitters: { 1: { name: "Output" } } } };
     const options = { devices: { receiver, source }, expandedReceivers: new Set(["Receiver"]), expandedTransmitters: new Set(["Source"]), receiverFilter: "", transmitterFilter: "",
@@ -244,8 +278,8 @@ test("pending routes survive unrelated readbacks and clear only for matching cha
     [second]: { action: "remove" },
   };
   const device = { name: "Receiver", channels: { receivers: { 1: { name: "One" }, 2: { name: "Two" } } },
-    subscriptions: [{ rx_channel: "One", tx_device: "Source", tx_channel: "Old" },
-      { rx_channel: "Two", tx_device: "Source", tx_channel: "Old" }] };
+    subscriptions: [{ rx_channel: "One", rx_channel_number: 1, tx_device: "Source", tx_channel: "Old" },
+      { rx_channel: "Two", rx_channel_number: 2, tx_device: "Source", tx_channel: "Old" }] };
   store.clearPendingForDevice(device);
   assert.equal(Object.keys(store.pendingSubscriptions.value).length, 2);
   device.subscriptions[0].tx_channel = "New";

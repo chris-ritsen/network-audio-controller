@@ -1,6 +1,29 @@
-pub const PROTOCOL_ID: u16 = 0x27FF;
-pub const PROTOCOL_ARC_2809: u16 = 0x2809;
-pub const PROTOCOL_ARC_280F: u16 = 0x280F;
+#[repr(u16)]
+pub enum NetaudioProtocol {
+    DefaultArc = 0x27FF,
+    Arc2729 = 0x2729,
+    Arc2801 = 0x2801,
+    Arc2809 = 0x2809,
+    Arc280F = 0x280F,
+    Cmc = 0x1200,
+    Settings = 0xFFFF,
+}
+
+#[repr(u16)]
+pub enum NetaudioPort {
+    Arc = 4440,
+    ArcSecondary = 4455,
+    Settings = 8700,
+    Info = 8702,
+    Heartbeat = 8708,
+    Control = 8800,
+    ControllerMetering = 8751,
+    MulticastMetering = 8752,
+}
+
+pub const PROTOCOL_ID: u16 = NetaudioProtocol::DefaultArc as u16;
+pub const PROTOCOL_ARC_2809: u16 = NetaudioProtocol::Arc2809 as u16;
+pub const PROTOCOL_ARC_280F: u16 = NetaudioProtocol::Arc280F as u16;
 pub const OPCODE_CHANNEL_COUNT: u16 = 0x1000;
 pub const OPCODE_DEVICE_NAME_SET: u16 = 0x1001;
 pub const OPCODE_TX_CHANNEL_INFO: u16 = 0x2000;
@@ -9,14 +32,182 @@ pub const OPCODE_RX_CHANNELS: u16 = 0x3000;
 pub const SERVICE_ARC: &str = "_netaudio-arc._udp.local.";
 pub const DANTE_NAME_MAX_LENGTH: usize = 31;
 pub const RESPONSE_HEADER_SIZE: usize = 10;
-pub const RESULT_CODE_SUCCESS: u16 = 0x0001;
-pub const RESULT_CODE_MORE_PAGES: u16 = 0x8112;
-pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [PROTOCOL_ID, 0x2729, PROTOCOL_ARC_2809];
-pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] =
-    [PROTOCOL_ID, 0x2729, 0x2801, PROTOCOL_ARC_2809];
+#[repr(u16)]
+pub enum NetaudioResultCode {
+    Request = 0,
+    Success = 1,
+    Error = 0x0022,
+    FrontendUnavailable = 0x0030,
+    MorePages = 0x8112,
+}
+
+pub const RESULT_CODE_SUCCESS: u16 = NetaudioResultCode::Success as u16;
+pub const RESULT_CODE_MORE_PAGES: u16 = NetaudioResultCode::MorePages as u16;
+pub const RESULT_CODE_FRONTEND_UNAVAILABLE: u16 = NetaudioResultCode::FrontendUnavailable as u16;
+
+pub struct ArcResultStatus {
+    pub accepted: bool,
+    pub name: Option<&'static str>,
+    pub label: Option<&'static str>,
+}
+
+pub fn arc_result_status(code: u16) -> ArcResultStatus {
+    let (accepted, name, label) = match code {
+        RESULT_CODE_SUCCESS => (true, Some("RESULT_CODE_SUCCESS"), Some("success")),
+        RESULT_CODE_MORE_PAGES => (
+            true,
+            Some("RESULT_CODE_SUCCESS_EXTENDED"),
+            Some("success (paginated)"),
+        ),
+        value if value == NetaudioResultCode::Request as u16 => (false, None, Some("request")),
+        value if value == NetaudioResultCode::Error as u16 => {
+            (false, Some("RESULT_CODE_ERROR"), Some("error"))
+        }
+        _ => (false, None, None),
+    };
+
+    ArcResultStatus {
+        accepted,
+        name,
+        label,
+    }
+}
+pub const COMMON_ARC_PROTOCOL_IDS: [u16; 3] = [
+    PROTOCOL_ID,
+    NetaudioProtocol::Arc2729 as u16,
+    PROTOCOL_ARC_2809,
+];
+pub const DEVICE_SETTINGS_ARC_PROTOCOL_IDS: [u16; 4] = [
+    PROTOCOL_ID,
+    NetaudioProtocol::Arc2729 as u16,
+    NetaudioProtocol::Arc2801 as u16,
+    PROTOCOL_ARC_2809,
+];
 pub const MODERN_ARC_PROTOCOL_IDS: [u16; 2] = [PROTOCOL_ARC_2809, PROTOCOL_ARC_280F];
 
+pub fn next_message_id(previous: u16) -> u16 {
+    previous.wrapping_add(1).max(1)
+}
+
+pub fn allocate_message_id() -> u16 {
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    static MESSAGE_ID: AtomicU16 = AtomicU16::new(0);
+    let previous = MESSAGE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+            Some(next_message_id(previous))
+        })
+        .expect("message ID allocation always advances");
+
+    next_message_id(previous)
+}
+
+pub fn is_supported_arc_protocol(protocol_id: u16) -> bool {
+    DEVICE_SETTINGS_ARC_PROTOCOL_IDS.contains(&protocol_id) || is_modern_arc_protocol(protocol_id)
+}
+
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ArcProtocol {
+    pub protocol_id: u16,
+    pub modern_channel_inventory: bool,
+    pub subscription_page: bool,
+    pub subscription_batch_limit: usize,
+    pub channel_name_probe_protocol_id: u16,
+    pub flow_query_protocol_ids: Vec<u16>,
+}
+
+pub fn arc_protocol(
+    version: Option<&str>,
+    managed: bool,
+) -> Result<Option<ArcProtocol>, &'static str> {
+    let protocol_id = if managed {
+        // Managed control's observed ARC transport uses this explicit revision.
+        PROTOCOL_ARC_2809
+    } else {
+        let Some(version) = version else {
+            return Ok(None);
+        };
+
+        let mut parts = version.split('.');
+        let mut component = || {
+            let part = parts.next()?;
+            if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+
+            part.parse::<u16>().ok()
+        };
+        let components = (component(), component(), component());
+        let (Some(major), Some(minor), Some(patch)) = components else {
+            return Err("unsupported ARC protocol version");
+        };
+
+        if parts.next().is_some() || major > 15 || minor > 15 || patch > 255 {
+            return Err("unsupported ARC protocol version");
+        }
+
+        (major << 12) | (minor << 8) | patch
+    };
+
+    arc_protocol_for_identifier(protocol_id, managed).map(Some)
+}
+
+pub fn arc_protocol_for_identifier(
+    protocol_id: u16,
+    managed: bool,
+) -> Result<ArcProtocol, &'static str> {
+    if !is_supported_arc_protocol(protocol_id) {
+        return Err("unsupported ARC protocol version");
+    }
+
+    Ok(ArcProtocol {
+        protocol_id,
+        modern_channel_inventory: is_modern_arc_protocol(protocol_id),
+        subscription_page: protocol_id == PROTOCOL_ARC_280F,
+        subscription_batch_limit: if managed || protocol_id == PROTOCOL_ARC_280F {
+            crate::commands::SUBSCRIPTION_PAGE_CAPACITY
+        } else {
+            crate::commands::LEGACY_SUBSCRIPTION_BATCH_CAPACITY
+        },
+        channel_name_probe_protocol_id: if is_modern_arc_protocol(protocol_id) {
+            protocol_id
+        } else {
+            PROTOCOL_ARC_2809
+        },
+        flow_query_protocol_ids: if is_modern_arc_protocol(protocol_id) {
+            vec![protocol_id]
+        } else {
+            vec![0x2729, 0x2801, PROTOCOL_ARC_2809, PROTOCOL_ARC_280F]
+        },
+    })
+}
+
 const PROTOCOL_SETTINGS: u16 = 0xFFFF;
+
+pub fn transmit_flow_inventory_protocols(
+    advertised: u16,
+    observed: u16,
+) -> Result<Vec<u16>, &'static str> {
+    use crate::commands::{PROTOCOL_DANTE_FLOW, PROTOCOL_DANTE_FLOW_2801};
+
+    if !is_supported_arc_protocol(advertised)
+        || (!matches!(observed, PROTOCOL_DANTE_FLOW | PROTOCOL_DANTE_FLOW_2801)
+            && !is_modern_arc_protocol(observed))
+    {
+        return Err("unsupported transmitter inventory protocol");
+    }
+
+    if is_modern_arc_protocol(advertised) {
+        return Ok(vec![advertised]);
+    }
+
+    if is_modern_arc_protocol(observed) {
+        return Ok(vec![observed]);
+    }
+
+    Ok(vec![PROTOCOL_ARC_2809, observed])
+}
 const CONMON_MINIMUM_SIZE: usize = 28;
 const CONMON_MAGIC_OFFSET: usize = 16;
 const CONMON_OPCODE_OFFSET: usize = 26;
@@ -91,6 +282,243 @@ pub fn conmon_opcode(data: &[u8]) -> Option<u16> {
     crate::bytes::read_u16(data, CONMON_OPCODE_OFFSET)
 }
 
+#[derive(serde::Serialize)]
+pub struct DiagnosticPacketHeader {
+    pub family: &'static str,
+    pub protocol_name: &'static str,
+    pub result_name: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_accepted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_label: Option<&'static str>,
+    pub protocol_id: u16,
+    pub length: u16,
+    pub transaction_id: Option<u16>,
+    pub opcode: u16,
+    pub opcode_name: Option<ArcOperation>,
+    pub result_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_decoder: Option<ResponseDecoder>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ResponseDecoder {
+    kind: &'static str,
+    paged: bool,
+}
+
+fn response_decoder(protocol: u16, opcode: u16, result: Option<u16>) -> Option<ResponseDecoder> {
+    if protocol == PROTOCOL_SETTINGS {
+        let kind = crate::responses::conmon_response_kind(opcode)?;
+        return Some(ResponseDecoder { kind, paged: false });
+    }
+
+    let result = result?;
+    if result == 0 {
+        return None;
+    }
+
+    use ArcOperation::*;
+    let operation = arc_operation(protocol, opcode)?;
+    let page = match operation {
+        ReceiverChannels => Some("rx"),
+        TransmitterChannels => Some("tx_info"),
+        TransmitterChannelNames => Some("tx_friendly"),
+        _ => None,
+    };
+    if let Some(kind) = page {
+        return Some(ResponseDecoder { kind, paged: true });
+    }
+
+    if !matches!(result, RESULT_CODE_SUCCESS | RESULT_CODE_MORE_PAGES) {
+        return None;
+    }
+
+    let kind = match operation {
+        ChannelCount => "channel_count",
+        DeviceInfo => "device_info",
+        DeviceName => "device_name",
+        DeviceSettings => "device_settings",
+        PropertyDirectory => "property_directory",
+        TransmitterFlows => "tx_flows",
+        TransmitterChannelStatus => "modern_arc_transmitter_channel_status_page",
+        TransmitterFlowStatus => "transmitter_flow_status_page",
+        ReceiverFlows => "receiver_flow_page",
+        ReceiverChannelStatus => "modern_arc_receiver_channel_status_page",
+        ReceiverFlowStatus => "modern_arc_receiver_flow_status_page",
+        _ => return None,
+    };
+    Some(ResponseDecoder { kind, paged: false })
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArcOperation {
+    CmcRegistration,
+    ChannelCount,
+    SetDeviceName,
+    DeviceName,
+    DeviceInfo,
+    DeviceSettings,
+    SetLatency,
+    PropertyDirectory,
+    StoreCurrentConfiguration,
+    TransmitterChannels,
+    TransmitterChannelNames,
+    ReceiverChannels,
+    SetChannelName,
+    AddSubscriptions,
+    RemoveSubscriptions,
+    TransmitterFlows,
+    TransmitterFlowLabels,
+    ReceiverFlows,
+    ReceiverPortRanges,
+    TransmitterChannelStatus,
+    TransmitterFlowStatus,
+    ReceiverChannelStatus,
+    Subscriptions,
+    ReceiverFlowStatus,
+}
+
+fn arc_operation(protocol: u16, opcode: u16) -> Option<ArcOperation> {
+    use crate::commands;
+    use ArcOperation::*;
+
+    if !is_supported_arc_protocol(protocol) {
+        return None;
+    }
+
+    if is_modern_arc_protocol(protocol) {
+        let name = match opcode {
+            commands::OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809 => {
+                Some(TransmitterChannelStatus)
+            }
+            commands::OPCODE_QUERY_TX_FLOWS_2809 => Some(TransmitterFlowStatus),
+            commands::OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809 => Some(ReceiverChannelStatus),
+            commands::OPCODE_MODERN_ARC_SUBSCRIPTION => Some(Subscriptions),
+            commands::OPCODE_QUERY_RECEIVER_FLOW_STATUS_2809 => Some(ReceiverFlowStatus),
+            commands::OPCODE_SET_RECEIVER_CHANNEL_NAME_2809 => Some(SetChannelName),
+            _ => None,
+        };
+
+        if name.is_some() {
+            return name;
+        }
+    }
+
+    match opcode {
+        OPCODE_CHANNEL_COUNT => Some(ChannelCount),
+        OPCODE_DEVICE_NAME_SET => Some(SetDeviceName),
+        commands::OPCODE_DEVICE_NAME => Some(DeviceName),
+        commands::OPCODE_DEVICE_INFO => Some(DeviceInfo),
+        commands::OPCODE_DEVICE_SETTINGS => Some(DeviceSettings),
+        commands::OPCODE_DEVICE_SETTINGS_SET => Some(SetLatency),
+        commands::OPCODE_PROPERTY_DIRECTORY => Some(PropertyDirectory),
+        commands::OPCODE_STORE_CURRENT_CONFIGURATION => Some(StoreCurrentConfiguration),
+        OPCODE_TX_CHANNEL_INFO => Some(TransmitterChannels),
+        OPCODE_TX_CHANNEL_NAMES => Some(TransmitterChannelNames),
+        OPCODE_RX_CHANNELS => Some(ReceiverChannels),
+        commands::OPCODE_TX_CHANNEL_NAME_SET | commands::OPCODE_RX_CHANNEL_NAME_SET => {
+            Some(SetChannelName)
+        }
+        commands::OPCODE_SUBSCRIPTION_ADD => Some(AddSubscriptions),
+        commands::OPCODE_SUBSCRIPTION_REMOVE => Some(RemoveSubscriptions),
+        commands::OPCODE_QUERY_TX_FLOWS => Some(TransmitterFlows),
+        commands::OPCODE_QUERY_TX_FLOW_LABELS => Some(TransmitterFlowLabels),
+        commands::OPCODE_QUERY_RECEIVER_FLOWS => Some(ReceiverFlows),
+        commands::OPCODE_QUERY_RECEIVER_PORT_RANGES => Some(ReceiverPortRanges),
+        _ => None,
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct ControlRequestHeader {
+    pub(crate) protocol_id: u16,
+    pub(crate) transaction_id: u16,
+    pub(crate) opcode: u16,
+    operation: ArcOperation,
+}
+
+/// Validate the complete request envelope; operation-specific decoders validate its body.
+pub fn control_request_header(data: &[u8]) -> Option<ControlRequestHeader> {
+    use crate::bytes::read_u16;
+
+    if usize::from(read_u16(data, 2)?) != data.len() || read_u16(data, 8)? != 0 {
+        return None;
+    }
+
+    let protocol_id = read_u16(data, 0)?;
+    let opcode = read_u16(data, 6)?;
+    let operation = if protocol_id == crate::commands::PROTOCOL_CMC
+        && opcode == crate::commands::OPCODE_CMC_REGISTER
+    {
+        ArcOperation::CmcRegistration
+    } else {
+        arc_operation(protocol_id, opcode)?
+    };
+
+    Some(ControlRequestHeader {
+        protocol_id,
+        transaction_id: read_u16(data, 4)?,
+        opcode,
+        operation,
+    })
+}
+
+/// Extract diagnostic header fields, not a command acknowledgement or body.
+/// ARC captures can be partial; command-specific parsers validate full framing.
+pub fn diagnostic_packet_header(data: &[u8]) -> Option<DiagnosticPacketHeader> {
+    use crate::bytes::read_u16;
+
+    let protocol_id = read_u16(data, 0)?;
+    let length = read_u16(data, 2)?;
+    let (family, transaction_id, opcode, result_code) = match protocol_id {
+        PROTOCOL_SETTINGS => ("settings", None, conmon_opcode(data)?, None),
+        0x0008 => (
+            "ddp_lock",
+            read_u16(data, 16),
+            read_u16(data, 10)?,
+            read_u16(data, 6),
+        ),
+        PROTOCOL_ID | 0x2729 | 0x2801 | PROTOCOL_ARC_2809 | PROTOCOL_ARC_280F | 0x1200 => (
+            "arc",
+            read_u16(data, 4),
+            read_u16(data, 6)?,
+            read_u16(data, 8),
+        ),
+        _ => return None,
+    };
+
+    let result = result_code
+        .filter(|_| family == "arc")
+        .map(arc_result_status);
+
+    Some(DiagnosticPacketHeader {
+        family,
+        protocol_name: match protocol_id {
+            PROTOCOL_SETTINGS => "PROTOCOL_SETTINGS",
+            PROTOCOL_ID => "PROTOCOL_ARC",
+            PROTOCOL_ARC_2809 => "PROTOCOL_ARC_SETTINGS",
+            PROTOCOL_ARC_280F => "PROTOCOL_ARC_280F",
+            crate::commands::PROTOCOL_CMC => "PROTOCOL_CMC",
+            crate::commands::PROTOCOL_DANTE_FLOW => "PROTOCOL_ARC_2729",
+            crate::commands::PROTOCOL_DANTE_FLOW_2801 => "PROTOCOL_ARC_2801",
+            0x0008 => "DDP_LOCK",
+            _ => return None,
+        },
+        result_name: result.as_ref().and_then(|status| status.name),
+        result_accepted: result.as_ref().map(|status| status.accepted),
+        result_label: result.as_ref().and_then(|status| status.label),
+        protocol_id,
+        length,
+        transaction_id,
+        opcode,
+        opcode_name: arc_operation(protocol_id, opcode),
+        result_code,
+        response_decoder: response_decoder(protocol_id, opcode, result_code),
+    })
+}
+
 pub fn validate_conmon_envelope(data: &[u8], expected_opcode: u16) -> Option<()> {
     (conmon_opcode(data)? == expected_opcode).then_some(())
 }
@@ -104,6 +532,7 @@ pub enum NetaudioError {
     InvalidFlowProtocol,
     InvalidFlowSlot,
     InvalidGainLevel,
+    InvalidNetworkConfiguration(&'static str),
     InvalidLatency,
     InvalidPage,
     InvalidReceiverMapping,
@@ -134,6 +563,7 @@ impl std::fmt::Display for NetaudioError {
             NetaudioError::InvalidFlowProtocol => "unsupported flow protocol for this operation",
             NetaudioError::InvalidFlowSlot => "flow slot must be from 1 through 32",
             NetaudioError::InvalidGainLevel => "gain level must be an integer from 1 through 5",
+            NetaudioError::InvalidNetworkConfiguration(reason) => reason,
             NetaudioError::InvalidLatency => {
                 "latency must be finite, nonnegative, and fit on the wire"
             }
@@ -320,13 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn set_device_name_transaction_id() {
-        let packet = build_set_device_name("AVIO", 0xBEEF).unwrap();
-        assert_eq!(&packet[4..6], &[0xBE, 0xEF]);
-        assert_eq!(&packet[0..4], &[0x28, 0x09, 0x00, 0x0F]);
-    }
-
-    #[test]
     fn set_device_name_matches_controller_request() {
         let packet = build_set_device_name("avio-bt-11", 0x261B).unwrap();
         let expected = [
@@ -334,13 +757,6 @@ mod tests {
             0x2D, 0x62, 0x74, 0x2D, 0x31, 0x31, 0x00,
         ];
         assert_eq!(packet, expected);
-    }
-
-    #[test]
-    fn set_device_name_length_field_matches_packet_length() {
-        let packet = build_set_device_name("Studio-AVIO", 0).unwrap();
-        let length = u16::from_be_bytes([packet[2], packet[3]]) as usize;
-        assert_eq!(length, packet.len());
     }
 
     #[test]

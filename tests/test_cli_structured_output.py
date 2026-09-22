@@ -131,7 +131,7 @@ def test_preset_show_json_returns_the_parsed_preset(monkeypatch, tmp_path):
     monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0, "name": "avio"}}))
     device = SimpleNamespace(name="avio", server_name="avio.local.")
 
-    application = SimpleNamespace(get_device_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}))
+    application = SimpleNamespace(get_latency_settings=AsyncMock(return_value={"configured_latency_ns": 1_000_000}))
 
     def run_command(run, *arguments, **_options):
         return asyncio.run(run(application, {device.server_name: device}, *arguments))
@@ -172,7 +172,7 @@ def test_preset_show_plain_prints_the_header_on_stdout(monkeypatch, tmp_path):
     monkeypatch.setattr(preset_cli, "parse_preset", lambda path: ("probe", {"avio": {"latency": 1.0}}))
     device = SimpleNamespace(name="avio", server_name="avio.local.")
 
-    application = SimpleNamespace(get_device_settings=AsyncMock(return_value={"active_latency_ns": 1_000_000}))
+    application = SimpleNamespace(get_latency_settings=AsyncMock(return_value={"configured_latency_ns": 1_000_000}))
 
     def run_command(run, *arguments, **_options):
         return asyncio.run(run(application, {device.server_name: device}, *arguments))
@@ -253,9 +253,9 @@ def _invoke_with_device(arguments, device, **application_patches):
         return runner.invoke(app, ["-j", "-n", "avio", *arguments])
 
 
-def test_clock_source_json_is_a_numeric_code():
+def test_clock_source_json_uses_the_native_source_name():
     result = _invoke_with_device(["device", "config", "clock-source"], _daemon_device())
-    assert _json(result) == {"clock_source_code": 0}
+    assert _json(result) == {"clock_source": "internal"}
 
 
 def test_clock_subdomain_json_carries_text_and_bytes():

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import struct
 
-from netaudio.dante.const import CONMON_MESSAGE_NAMES
 from netaudio.dante.dissection.models import DECIMAL_FIELD_NAMES, NANOSECOND_FIELD_NAMES
 
 
@@ -47,11 +46,6 @@ def _format_detail(name: str, raw: bytes, int_val, dtype: str) -> str:
         major = (int_val >> 8) & 0xFF
         minor = int_val & 0xFF
         return f"v{major}.{minor}"
-
-    if name == "message_type" and isinstance(int_val, int):
-        label = CONMON_MESSAGE_NAMES.get(int_val)
-        if label:
-            return label
 
     if name == "link_speed_mbps" and isinstance(int_val, int):
         return f"{int_val} Mbps"

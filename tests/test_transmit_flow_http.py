@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from netaudio import core
 from netaudio.daemon.http import configuration
 from netaudio.dante.transmit_flow import FlowLifecycleState, FlowOperationResult
 from tests.http_api_test_support import get, make_device, make_http_server, post
@@ -40,9 +41,8 @@ def server():
     device.is_locked = False
     device.flow_protocol_id = 0x2729
     device.transmit_flow_authoring_capability_word = 0
-    device.transmit_flow_authoring_opcode = 0x2201
-    device.transmit_flow_authoring_protocol_id = 0x2729
-    device.receiver_flow_inventory_opcode = 0x3200
+    device.transmit_flow_authoring = core.flow_authoring_capabilities(0)["transmit_flow_authoring"]
+    device.receiver_flow_inventory_family = "legacy"
     device.tx_channels = {1: object()}
     device.sample_rate = 48_000
     device.encoding = 24
@@ -70,9 +70,8 @@ async def test_http_plan_preserves_modern_rtp_authoring_scope_and_preconditions(
     device = instance.application.devices["dev1"]
     device.flow_protocol_id = 0x2809
     device.transmit_flow_authoring_capability_word = 0x1000
-    device.transmit_flow_authoring_opcode = 0x2601
-    device.transmit_flow_authoring_protocol_id = 0x2809
-    device.receiver_flow_inventory_opcode = 0x3600
+    device.transmit_flow_authoring = core.flow_authoring_capabilities(0x1000)["transmit_flow_authoring"]
+    device.receiver_flow_inventory_family = "modern"
     source = canonical_specification()
     source.update(
         {
@@ -116,7 +115,7 @@ async def test_http_inspect_returns_canonical_inventory(monkeypatch):
     inventory = {
         "schema_version": 1,
         "flow_protocol_id": 0x2729,
-        "max_flow_slots": 4,
+        "maximum_flow_slots": 4,
         "reported_flow_count": 0,
         "flows": [],
         "unparsed_records": [],

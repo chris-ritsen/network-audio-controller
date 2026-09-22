@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from netaudio import core
 from tests.http_api_test_support import FakeWriter, get, make_device, make_http_server, post
 
 
@@ -258,12 +259,12 @@ class TestMutationVerification:
     async def test_arc_mutations_report_device_rejection(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_latency.return_value = bytes.fromhex("27ff000a000010010600")
+        http_server.application.set_latency.return_value = core.latency_control(1.0, None, False)
 
         status, response = await post(http_server, "/set-latency", {"device": "dev1", "latency": 1.0})
 
         assert status == 409
-        assert response["result_code"] == 0x0600
+        assert response == {"error": "device rejected latency change"}
 
     @pytest.mark.asyncio
     async def test_gain_mutation_requires_matching_multicast_readback(self):
@@ -281,10 +282,15 @@ class TestMutationVerification:
         http_server.application.set_gain_level.assert_awaited_once_with(device, 1, 3, "input")
 
     @pytest.mark.asyncio
-    async def test_gain_mutation_reports_mismatched_readback(self):
+    @pytest.mark.parametrize("observed,supported", [(5, [1, 2, 3, 4, 5]), (3, [])])
+    async def test_gain_mutation_reports_mismatched_readback(self, observed, supported):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        http_server.application.set_gain_level.return_value = ("input", [5])
+        http_server.application.set_gain_level.return_value = {
+            "device_type": "input",
+            "channel_levels": [observed],
+            "supported_levels": supported,
+        }
 
         status, response = await post(
             http_server,
@@ -296,7 +302,7 @@ class TestMutationVerification:
         assert response == {
             "error": "gain change was not applied",
             "observed_device_type": "input",
-            "observed_level": 5,
+            "observed_level": observed,
         }
 
     @pytest.mark.asyncio
@@ -314,113 +320,79 @@ class TestMutationVerification:
         assert status == 504
         assert response == {"error": "gain readback was unavailable"}
 
-    @pytest.mark.parametrize(
-        ("path", "body", "method_name", "probe_name", "expected_status"),
-        [
-            (
-                "/set-encoding",
-                {"device": "dev1", "encoding": 24},
-                "send_set_encoding",
-                "probe_encoding_status",
-                {
-                    "current_value": 24,
-                    "requested_value": 24,
-                    "update_mode": 2,
-                    "available_values": [16, 24, 32],
-                    "flags": None,
-                },
-            ),
-        ],
-    )
+    @pytest.mark.parametrize("observed,expected_status", [(32, 200), (24, 409), (None, 504)])
     @pytest.mark.asyncio
-    async def test_audio_capability_mutations_require_matching_readback(
-        self,
-        path,
-        body,
-        method_name,
-        probe_name,
-        expected_status,
-    ):
+    async def test_encoding_http_consumes_shared_application_readback(self, observed, expected_status):
         device = make_device()
-        http_server = make_http_server({"dev1": device})
-        getattr(http_server.application, probe_name).return_value = expected_status
+        server = make_http_server({"dev1": device})
+        application = server.application
+        readback = {
+            "current_value": observed,
+            "requested_value": observed,
+            "update_mode": 2,
+            "available_values": [16, 24, 32],
+            "flags": None,
+        }
+        application.probe_encoding_status.return_value = readback if observed is not None else None
 
-        status, response = await post(http_server, path, body)
+        status, response = await post(server, "/set-encoding", {"device": "dev1", "encoding": 32})
 
-        assert status == 200
-        assert response == {"success": True}
-        requested_value = next(value for field_name, value in body.items() if field_name != "device")
-        getattr(http_server.application, method_name).assert_awaited_once_with(device, requested_value)
-        getattr(http_server.application, probe_name).assert_awaited_once_with(device)
+        assert status == expected_status
+        application.set_encoding.assert_awaited_once_with(
+            device, 32, timeout=server.audio_capability_verification_timeout
+        )
+        application.send_set_encoding.assert_awaited_once_with(device, 32)
+        application.probe_encoding_status.assert_awaited_once_with(
+            device, timeout=server.audio_capability_verification_timeout
+        )
 
-    @pytest.mark.parametrize(
-        ("path", "body", "method_name", "probe_name", "capability_name", "old_status", "requested_status"),
-        [
-            (
-                "/set-encoding",
-                {"device": "dev1", "encoding": 32},
-                "send_set_encoding",
-                "probe_encoding_status",
-                "encoding",
-                {
-                    "current_value": 24,
-                    "requested_value": 24,
-                    "update_mode": 2,
-                    "available_values": [16, 24, 32],
-                    "flags": None,
-                },
-                {
-                    "current_value": 32,
-                    "requested_value": 32,
-                    "update_mode": 2,
-                    "available_values": [16, 24, 32],
-                    "flags": None,
-                },
-            ),
-        ],
-    )
+        if observed is not None:
+            assert device.encoding == observed
+            assert device.supported_encodings == [16, 24, 32]
+
+        if status == 200:
+            assert response == {"success": True}
+        elif status == 409:
+            assert response["observed"] == observed
+            assert response["supported"] == [16, 24, 32]
+        else:
+            assert response == {"error": "encoding readback was unavailable"}
+
     @pytest.mark.asyncio
-    async def test_audio_capability_mutation_ignores_old_status_until_requested_value_arrives(
-        self,
-        path,
-        body,
-        method_name,
-        probe_name,
-        capability_name,
-        old_status,
-        requested_status,
-    ):
+    async def test_encoding_mutation_ignores_old_and_other_device_status(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
         old_status_observed = asyncio.Event()
+        old_status = http_server.application.probe_encoding_status.return_value
+        requested_status = {**old_status, "current_value": 32, "requested_value": 32}
 
-        async def probe_status(_device_ip_address):
+        async def probe_status(_device_ip_address, **_options):
             http_server.application.notifications.notify_waiters(
-                capability_name,
+                "encoding",
                 "192.168.1.50",
                 old_status,
             )
             old_status_observed.set()
             return old_status
 
-        setattr(http_server.application, probe_name, AsyncMock(side_effect=probe_status))
-        request_task = asyncio.create_task(post(http_server, path, body))
+        http_server.application.probe_encoding_status = AsyncMock(side_effect=probe_status)
+        request_task = asyncio.create_task(post(http_server, "/set-encoding", {"device": "dev1", "encoding": 32}))
         await old_status_observed.wait()
 
         assert not request_task.done()
         http_server.application.notifications.notify_waiters(
-            capability_name,
+            "encoding",
             "192.168.1.99",
             requested_status,
         )
         http_server.application.notifications.notify_waiters(
-            "encoding" if capability_name == "sample_rate" else "sample_rate",
+            "sample_rate",
             "192.168.1.50",
             requested_status,
         )
         assert not request_task.done()
         http_server.application.notifications.notify_waiters(
-            capability_name,
+            "encoding",
             "192.168.1.50",
             requested_status,
         )
@@ -429,102 +401,19 @@ class TestMutationVerification:
 
         assert status == 200
         assert response == {"success": True}
-        requested_value = next(value for field_name, value in body.items() if field_name != "device")
-        getattr(http_server.application, method_name).assert_awaited_once_with(device, requested_value)
+        http_server.application.send_set_encoding.assert_awaited_once_with(device, 32)
 
-    @pytest.mark.parametrize(
-        ("path", "body", "probe_name", "observed", "supported"),
-        [
-            (
-                "/set-encoding",
-                {"device": "dev1", "encoding": 32},
-                "probe_encoding_status",
-                24,
-                [16, 24, 32],
-            ),
-        ],
-    )
     @pytest.mark.asyncio
-    async def test_audio_capability_mutation_mismatch_is_conflict(
-        self,
-        path,
-        body,
-        probe_name,
-        observed,
-        supported,
-    ):
+    async def test_encoding_rejection_is_conflict_without_readback(self):
         device = make_device()
         http_server = make_http_server({"dev1": device})
-        getattr(http_server.application, probe_name).return_value = {
-            "current_value": observed,
-            "requested_value": observed,
-            "update_mode": 2,
-            "available_values": supported,
-            "flags": None,
-        }
+        http_server.application.send_set_encoding.side_effect = ValueError("requested value is not supported")
 
-        status, response = await post(http_server, path, body)
-
-        assert status == 409
-        assert response["observed"] == observed
-        assert response["supported"] == supported
-
-    @pytest.mark.parametrize(
-        ("path", "body", "probe_name", "description"),
-        [
-            (
-                "/set-encoding",
-                {"device": "dev1", "encoding": 24},
-                "probe_encoding_status",
-                "encoding",
-            ),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_audio_capability_mutation_missing_readback_is_gateway_timeout(
-        self,
-        path,
-        body,
-        probe_name,
-        description,
-    ):
-        device = make_device()
-        http_server = make_http_server({"dev1": device})
-        getattr(http_server.application, probe_name).return_value = None
-
-        status, response = await post(http_server, path, body)
-
-        assert status == 504
-        assert response == {"error": f"{description} readback was unavailable"}
-
-    @pytest.mark.parametrize(
-        ("path", "body", "method_name", "probe_name"),
-        [
-            (
-                "/set-encoding",
-                {"device": "dev1", "encoding": 32},
-                "send_set_encoding",
-                "probe_encoding_status",
-            ),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_audio_capability_rejection_is_conflict_without_readback(
-        self,
-        path,
-        body,
-        method_name,
-        probe_name,
-    ):
-        device = make_device()
-        http_server = make_http_server({"dev1": device})
-        getattr(http_server.application, method_name).side_effect = ValueError("requested value is not supported")
-
-        status, response = await post(http_server, path, body)
+        status, response = await post(http_server, "/set-encoding", {"device": "dev1", "encoding": 32})
 
         assert status == 409
         assert response == {"error": "requested value is not supported"}
-        getattr(http_server.application, probe_name).assert_not_awaited()
+        http_server.application.probe_encoding_status.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_sample_rate_change_uses_topology_safe_application_operation(self):
@@ -1028,7 +917,7 @@ class TestRenameReset:
     @pytest.mark.parametrize(("capability", "expected_status"), [(False, 409), (None, 503)])
     async def test_direct_receiver_rename_fails_closed_without_capability(self, capability, expected_status):
         device = make_device()
-        device.rx_channels = {1: SimpleNamespace(can_rename=capability)}
+        device.rx_channels = {1: SimpleNamespace(number=1, can_rename=capability)}
         http_server = make_http_server({"dev1": device})
 
         status, body = await post(
@@ -1042,6 +931,35 @@ class TestRenameReset:
         assert "rename capability" in body["error"]
         http_server.application.set_channel_name.assert_not_awaited()
         http_server.application.reset_channel_name.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("inventory", ["rekeyed", "wrong_channel", "duplicate"])
+    async def test_receiver_rename_permission_follows_channel_identity(self, inventory):
+        device = make_device()
+        channel = SimpleNamespace(number=1, can_rename=True)
+
+        if inventory == "rekeyed":
+            device.rx_channels = {"Input": channel}
+        elif inventory == "wrong_channel":
+            channel.number = 2
+            device.rx_channels = {1: channel}
+        else:
+            device.rx_channels = {1: channel, 2: SimpleNamespace(number=1, can_rename=False)}
+
+        http_server = make_http_server({"dev1": device})
+        status, body = await post(
+            http_server,
+            "/rename-channel",
+            {"device": "dev1", "channel_type": "rx", "channel_number": 1, "name": "Input-1"},
+        )
+
+        if inventory == "rekeyed":
+            assert status == 200
+            http_server.application.set_channel_name.assert_awaited_once_with(device, "rx", 1, "Input-1")
+        else:
+            assert status == 503
+            assert body["mutation_sent"] is False
+            http_server.application.set_channel_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_locked_name_reset_reports_device_rejection(self):
@@ -1081,21 +999,19 @@ class TestRenameReset:
 @pytest.mark.asyncio
 async def test_latency_write_verifies_configured_value_when_active_latency_differs():
     server = make_http_server({"dev1": make_device()})
-    server.application.set_latency.return_value = bytes.fromhex("27ff000a000011010001")
-    server.application.get_latency_settings.return_value = {
-        "configured_latency_ns": 1000000,
-        "active_latency_ns": 250000,
-    }
+    server.application.set_latency.return_value = core.latency_control(
+        1.0, {"configured_latency_ns": 1000000, "active_latency_ns": 250000}, True
+    )
     status, response = await post(server, "/set-latency", {"device": "dev1", "latency": 1.0})
     assert status == 200
     assert response == {"success": True}
+    server.application.get_latency_settings.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_latency_write_requires_configured_readback():
     server = make_http_server({"dev1": make_device()})
-    server.application.set_latency.return_value = bytes.fromhex("27ff000a000011010001")
-    server.application.get_latency_settings.return_value = {"active_latency_ns": 1000000}
+    server.application.set_latency.return_value = core.latency_control(1.0, {"active_latency_ns": 1000000}, True)
     status, response = await post(server, "/set-latency", {"device": "dev1", "latency": 1.0})
     assert status == 504
     assert "readback" in response["error"]
@@ -1129,6 +1045,34 @@ async def test_accepted_subscription_starts_targeted_readback(managed, path, par
     status, body = await post(server, path, {"rx_device": "dev1", **params})
     assert status == 200 and body["success"]
     server.subscription_readback.request.assert_called_once_with(device, records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("/subscribe", {"rx_channel": 1, "tx_channel": "Out", "tx_device": "Mixer"}),
+        ("/unsubscribe", {"rx_channel": 1}),
+    ],
+)
+async def test_rejected_subscription_returns_response_without_starting_readback(managed, path, params):
+    from netaudio.ddm.device_transport import ManagedOperationResult
+
+    device = make_device()
+    device.rx_channels = {1: SimpleNamespace(number=1)}
+    server = make_http_server({"dev1": device})
+    server.subscription_readback.request = MagicMock()
+    response = (
+        ManagedOperationResult("subscription", successful=False) if managed else bytes.fromhex("27ff000a000010010600")
+    )
+    server.application.add_subscriptions.return_value = response
+    server.application.remove_subscriptions.return_value = response
+    status, body = await post(server, path, {"rx_device": "dev1", **params})
+    assert status == 409
+    assert "device rejected subscription" in body["error"]
+    assert "0x" not in body["error"]
+    server.subscription_readback.request.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1166,7 +1110,7 @@ async def test_partial_receiver_inventory_does_not_replace_complete_cached_recor
     device = DanteDevice(server_name="receiver.local.")
     device.name = "Receiver"
     device.apply_receiver_flow_status_page(
-        {"result_code": 1, "page_disposition": "complete", "flows": [{"global_flow_id": i} for i in range(1, 17)]}
+        {"result_code": 1, "page_disposition": "complete", "flows": [{"flow_number": i} for i in range(1, 17)]}
     )
     partial = core.parse_response("modern_arc_receiver_flow_status_page", packet("receiver_flow_partial.bin"))
     device.apply_receiver_flow_status_page(partial)

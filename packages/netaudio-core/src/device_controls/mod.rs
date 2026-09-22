@@ -1,11 +1,29 @@
 //! Device controls scoped by the supplied interoperability specification.
 mod models;
+pub mod planning;
+mod profile;
+pub use profile::{profile, PanelFamily, PanelProfile, PanelProfileRequest};
 mod protobuf;
 use crate::bytes::{read_u16, read_u32};
 use crate::protocol::{validate_conmon_envelope, ConmonHeader, NetaudioError};
 pub use models::*;
 use protobuf as pb;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+fn next_panel_sequence(counter: &AtomicU32) -> u32 {
+    let previous = counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            Some(value.wrapping_add(1).max(1))
+        })
+        .expect("panel sequence update always supplies a value");
+    previous.wrapping_add(1).max(1)
+}
+
+pub fn allocate_panel_sequence() -> u32 {
+    static SEQUENCE: AtomicU32 = AtomicU32::new(0);
+    next_panel_sequence(&SEQUENCE)
+}
 #[derive(Debug, Clone, Serialize)]
 pub struct PanelStatus {
     pub record_revision: u16,
@@ -18,6 +36,7 @@ pub struct PanelStatus {
     pub application_payload: Vec<u8>,
     pub raw_record: Vec<u8>,
     pub observations: Vec<PanelObservation>,
+    pub followup_requests: Vec<PanelRequest>,
     pub diagnostic_error: Option<String>,
 }
 pub fn parse_panel_status(data: &[u8], family: Option<&str>) -> Option<PanelStatus> {
@@ -47,6 +66,17 @@ pub fn parse_panel_status(data: &[u8], family: Option<&str>) -> Option<PanelStat
         Some(None) => (Vec::new(), Some("Malformed application payload".to_owned())),
         None => (Vec::new(), None),
     };
+    let followup_requests = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            PanelObservation::Visca(status)
+                if status.capability == 1 && status.reply.is_empty() =>
+            {
+                Some(PanelRequest::VideoViscaQuery)
+            }
+            _ => None,
+        })
+        .collect();
     Some(PanelStatus {
         record_revision: read_u16(r, 0)?,
         common_word: read_u32(r, 4)?,
@@ -58,10 +88,12 @@ pub fn parse_panel_status(data: &[u8], family: Option<&str>) -> Option<PanelStat
         application_payload: payload.to_vec(),
         raw_record: r.to_vec(),
         observations,
+        followup_requests,
         diagnostic_error,
     })
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PanelRequest {
     BluetoothQuery {

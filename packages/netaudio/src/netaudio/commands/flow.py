@@ -10,7 +10,7 @@ import typer
 
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.context import HELP_CONTEXT_SETTINGS
-from netaudio.cli_support.execution import _get_arc_port, run_command
+from netaudio.cli_support.execution import run_command
 from netaudio.cli_support.output import output_single, output_table, structured_output_selected
 from netaudio.cli_support.selection import filter_devices, select_device
 from netaudio.commands.device.display import (
@@ -20,7 +20,7 @@ from netaudio.commands.device.display import (
 )
 from netaudio.core.binding import NetaudioCoreError
 from netaudio.dante import flows
-from netaudio.dante.const import subscription_status_entry
+from netaudio.core import subscription_status
 from netaudio.dante.flow_lifecycle import (
     create_transmit_flow,
     delete_transmit_flow,
@@ -76,7 +76,7 @@ async def _detect_flow_protocol(application, device, arc_port):
     if device.flow_protocol_id is not None:
         return device.flow_protocol_id
 
-    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port, **_managed_transport_option(device))
+    flow_protocol_id = await flows.detect_flow_protocol(str(device.ipv4), arc_port, device=device)
     if flow_protocol_id is not None:
         device.flow_protocol_id = flow_protocol_id
     return flow_protocol_id
@@ -84,7 +84,7 @@ async def _detect_flow_protocol(application, device, arc_port):
 
 def _selected_device(devices):
     [(_, device)] = select_device(filter_devices(devices))
-    return device, _get_arc_port(device)
+    return device, device._arc_port()
 
 
 def _read_specification(path: str) -> TransmitFlowSpecification:
@@ -200,18 +200,12 @@ def flow_apply(
 
 
 async def run_receiver_flow_list(application, devices) -> None:
-    device, arc_port = _selected_device(devices)
-    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device, require_complete=False)
+    device, _arc_port = _selected_device(devices)
+    flow_inventory = await flows.query_preferred_receiver_flow_inventory(device)
     if flow_inventory is None:
         typer.echo("Error: failed to query receiver flows.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
     receiver_flows = flow_inventory["flows"]
-    complete = flow_inventory.get("page_disposition") == "complete"
-    if not complete:
-        typer.echo(
-            f"Partial receiver-flow inventory: {len(receiver_flows)} flows returned; remaining flows unavailable.",
-            err=True,
-        )
     headers = [
         "Slot",
         "Type",
@@ -227,11 +221,7 @@ async def run_receiver_flow_list(application, devices) -> None:
         "Latency",
     ]
 
-    empty_message = (
-        f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
-        if complete
-        else "Receiver-flow inventory unavailable."
-    )
+    empty_message = f"No receiver flows configured (0/{flow_inventory['maximum_flow_slots']} slots used)."
 
     rows = []
     for receiver_flow in receiver_flows:
@@ -245,7 +235,7 @@ async def run_receiver_flow_list(application, devices) -> None:
             receiver_channel_mapping = "unknown"
         subscription_status_code = receiver_flow.get("subscription_status_code")
         if subscription_status_code is not None:
-            status_display = str(subscription_status_entry(subscription_status_code)["label"])
+            status_display = str(subscription_status(subscription_status_code)["label"])
         else:
             status_display = "unknown"
         flow_type = receiver_flow["flow_type"]
@@ -279,13 +269,13 @@ async def run_receiver_flow_list(application, devices) -> None:
             else "native"
         )
         correlation = receiver_flow.get("sdp_correlation")
-        sdp_display = (
-            "matched"
-            if isinstance(correlation, dict) and correlation.get("matched") is True
-            else "not matched"
-            if isinstance(external_identity, dict)
-            else "not applicable"
-        )
+        if isinstance(correlation, dict) and correlation.get("matched") is True:
+            sdp_display = "matched"
+        elif isinstance(external_identity, dict):
+            sdp_display = "not matched"
+        else:
+            sdp_display = "not applicable"
+
         rows.append(
             [
                 str(receiver_flow["flow_number"]),
@@ -386,9 +376,11 @@ async def run_external_flow_list(application, devices, listen_seconds: float) ->
                 "yes" if flow.routable else "no",
                 str(flow.channel_count or ""),
                 format_sample_rate_hertz(flow.sample_rate) if flow.sample_rate else "",
-                format_encoding(int(flow.encoding[1:]))
-                if flow.encoding and flow.encoding.startswith("L")
-                else flow.encoding or "",
+                (
+                    format_encoding(int(flow.encoding[1:]))
+                    if flow.encoding and flow.encoding.startswith("L")
+                    else flow.encoding or ""
+                ),
                 f"{flow.packet_time_microseconds} us" if flow.packet_time_microseconds is not None else "",
                 primary,
                 secondary,
@@ -469,7 +461,7 @@ async def run_external_flow_subscribe(
         typer.echo(f"Error: external subscription request failed: {exception}", err=True)
         raise typer.Exit(code=ExitCode.ERROR) from exception
     if not result["request_acknowledged"]:
-        detail = f"result 0x{result['result_code']:04X}" if result["result_code"] is not None else "no device response"
+        detail = "device rejected the request" if result["result_code"] is not None else "no device response"
         typer.echo(f"Error: external subscription was not acknowledged ({detail}).", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
 
@@ -634,7 +626,7 @@ def flow_delete(
     """Delete a TX multicast flow."""
 
     try:
-        flow_slot = flows.validate_flow_slot(slot)
+        flow_slot = flows.validate_flow_identifier(slot)
     except flows.FlowValidationError as exception:
         _fail_validation(exception)
     if not confirmed:

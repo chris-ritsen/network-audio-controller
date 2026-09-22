@@ -7,6 +7,7 @@ from weakref import WeakKeyDictionary
 
 from netaudio.common.app_config import settings as app_settings
 from netaudio.dante import flows
+from netaudio.dante.audio_capabilities import audio_capability_fields
 from netaudio.dante.const import (
     NOTIFICATION_AES67_STATUS,
     NOTIFICATION_CLEAR_CONFIG_STATUS,
@@ -124,6 +125,10 @@ def _assign_changed(device, fields: dict) -> bool:
             setattr(device, field_name, value)
             changed = True
     return changed
+
+
+def apply_audio_capability(device, status: dict, *, kind: str) -> bool:
+    return apply_device_status(device, kind, audio_capability_fields(status, kind=kind))
 
 
 def apply_device_status(device, kind: str, status) -> bool:
@@ -261,10 +266,6 @@ class DanteStateService:
         if not pending:
             return
         for kind, status in pending:
-            if kind == "codec" and isinstance(status, dict):
-                from netaudio.dante.gain import codec_status_fields
-
-                status = codec_status_fields(device, {"parameters": status.get("codec_parameters") or []})
             apply_device_status(device, kind, status)
         logger.debug(f"Applied pending status for {device.ipv4}: {sorted({kind for kind, _ in pending})}")
 
@@ -362,7 +363,7 @@ class DanteStateService:
                     flow_protocol_identifier = await flows.detect_flow_protocol(
                         device_address,
                         arc_port,
-                        **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
+                        device=device,
                     )
                     if flow_protocol_identifier is None:
                         logger.warning(f"No supported transmitter flow frontend for {server_name}")
@@ -372,7 +373,7 @@ class DanteStateService:
                     device_address,
                     arc_port,
                     flow_protocol_identifier,
-                    **({"device": device} if getattr(device, "requires_managed_control", False) else {}),
+                    device=device,
                 )
                 if flow_inventory is None:
                     logger.warning(f"Transmitter flow inventory unavailable for {server_name}")

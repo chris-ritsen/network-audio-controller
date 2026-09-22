@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from netaudio.cli_support.selection import parse_channel_reference
@@ -7,13 +8,30 @@ from netaudio.commands import channel as channel_commands
 from netaudio.commands.config import cli as config_commands
 from netaudio.commands.config import interface as config_network_commands
 from netaudio.commands.device import lock as lock_commands
-from netaudio.dante.application import CapabilityProbeTimeout
+from netaudio import core
+from netaudio.dante.application import CapabilityProbeTimeout, DanteApplication
 from netaudio.dante.lock_status import LockStatusObservation
 from typer.testing import CliRunner
 
 from tests.cli_test_support import FakeApplication, FakeChannelDevice, FakeDevice, invoke
 
 runner = CliRunner()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation,field", [("set_encoding", "encoding"), ("set_sample_rate_pullup", "raw_value")])
+@pytest.mark.parametrize("value", [True, -1, 2**32, 1.5, "24", None])
+async def test_audio_setters_use_native_command_validation_before_mutation(operation, field, value):
+    with pytest.raises(core.NetaudioCoreError) as expected:
+        core.build_command({"command": operation, field: value})
+
+    application = SimpleNamespace(mutate_and_wait_for_capability_value=AsyncMock())
+
+    with pytest.raises(core.NetaudioCoreError) as actual:
+        await getattr(DanteApplication, operation)(application, SimpleNamespace(), value)
+
+    assert actual.value.status == expected.value.status
+    application.mutate_and_wait_for_capability_value.assert_not_called()
 
 
 def _gain(application, channel, level=None):
@@ -62,11 +80,12 @@ def test_gain_setter_reports_success_only_after_matching_readback():
     assert device.gain_levels == [3]
 
 
-def test_gain_setter_rejects_mismatched_readback():
+@pytest.mark.parametrize("observed,supported", [(5, [1, 2, 3, 4, 5]), (3, [])])
+def test_gain_setter_rejects_mismatched_readback(observed, supported):
     device = FakeChannelDevice(
         channel_reads="unused",
         gain_adapter_status=("input", [5]),
-        gain_write_status=("input", [5]),
+        gain_write_status={"device_type": "input", "channel_levels": [observed], "supported_levels": supported},
     )
     application = FakeApplication({"avio.local.": device})
 
@@ -241,23 +260,23 @@ def _latency(application, value, all_devices=False):
 
 
 def test_fractional_latency_verifies_rounded_nanoseconds():
-    device = FakeDevice("AVIO", settings={"active_latency_ns": 150_000})
+    device = FakeDevice("AVIO", settings={"configured_latency_ns": 150_000})
     application = FakeApplication({"avio.local.": device})
 
     result = _latency(application, 0.15)
 
     assert result.exit_code == 0
-    assert "Set latency for AVIO: 0.15 ms (verified)" in result.output
+    assert "Set configured latency for AVIO: 0.15 ms (verified)" in result.output
 
 
 def test_latency_mismatch_is_reported_in_milliseconds():
-    device = FakeDevice("AVIO", settings={"active_latency_ns": 1_000_000}, min_latency=1.0, max_latency=10.979167)
+    device = FakeDevice("AVIO", settings={"configured_latency_ns": 1_000_000}, min_latency=1.0, max_latency=10.979167)
     application = FakeApplication({"avio.local.": device})
 
     result = _latency(application, 2)
 
     assert result.exit_code == 1
-    assert "the device reports 1 ms instead of 2 ms" in result.output
+    assert "device reports 1 ms instead of 2 ms" in result.output
     assert "1000000" not in result.output
 
 
@@ -494,7 +513,7 @@ def test_latency_get_fails_when_every_reported_latency_value_is_unavailable():
     assert "latency readback was unavailable" in result.output
 
 
-def test_clock_source_get_reports_the_raw_code():
+def test_clock_source_get_reports_unknown_instead_of_a_raw_code():
     device = FakeDevice("Clocked")
     device.clock_source_code = 57044
     application = FakeApplication({"clocked.local.": device})
@@ -502,7 +521,7 @@ def test_clock_source_get_reports_the_raw_code():
     result = invoke(config_commands.run_clock_source, application, application.devices, None, False)
 
     assert result.exit_code == 0
-    assert result.output.strip() == "57044 (0xDED4)"
+    assert result.output.strip() == "unknown"
 
 
 def test_clock_source_set_requires_matching_readback():
@@ -510,14 +529,14 @@ def test_clock_source_set_requires_matching_readback():
     device.clock_source_code = 0
     application = FakeApplication({"clocked.local.": device})
 
-    result = invoke(config_commands.run_clock_source, application, application.devices, "0xDED4", False)
+    result = invoke(config_commands.run_clock_source, application, application.devices, "1", False)
 
     assert result.exit_code == 0
-    assert result.output.strip() == "Set clock source for Clocked: 57044 (0xDED4) (verified)"
+    assert result.output.strip() == "Set clock source for Clocked: external/BNC (verified)"
     assert _operations(application) == ["set_clock_source"]
 
 
-def test_latency_does_not_treat_configured_value_as_applied():
+def test_latency_verifies_configured_value_without_claiming_active_latency_changed():
     device = FakeDevice(
         "AVIO",
         settings={
@@ -529,9 +548,8 @@ def test_latency_does_not_treat_configured_value_as_applied():
 
     result = _latency(application, 0.15)
 
-    assert result.exit_code == 1
-    assert "reports 1 ms instead of 0.15 ms" in result.output
-    assert "Set latency for AVIO" not in result.output
+    assert result.exit_code == 0
+    assert "Set configured latency for AVIO: 0.15 ms (verified)" in result.output
 
 
 def test_latency_range_does_not_block_device_verified_nonstandard_value():
@@ -539,14 +557,14 @@ def test_latency_range_does_not_block_device_verified_nonstandard_value():
         "AVIO",
         min_latency=1.0,
         max_latency=5.0,
-        settings={"active_latency_ns": 250_000},
+        settings={"active_latency_ns": 150_000, "configured_latency_ns": 250_000},
     )
     application = FakeApplication({"avio.local.": device})
 
     result = _latency(application, 0.25)
 
     assert result.exit_code == 0
-    assert "Set latency for AVIO: 0.25 ms (verified)" in result.output
+    assert "Set configured latency for AVIO: 0.25 ms (verified)" in result.output
     assert _operations(application) == ["set_latency"]
 
 
@@ -560,6 +578,29 @@ def test_latency_rejects_nonfinite_or_negative_values_before_sending(value):
     assert result.exit_code == 1
     assert "finite, nonnegative" in result.output
     assert application.sent == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "value,error_type",
+    [
+        (True, core.NetaudioCoreError),
+        (False, core.NetaudioCoreError),
+        ("0.25", core.NetaudioCoreError),
+        (-0.1, core.NetaudioCoreError),
+        (float("nan"), core.NetaudioCoreJsonError),
+        (float("inf"), core.NetaudioCoreJsonError),
+        (5000, core.NetaudioCoreError),
+    ],
+)
+async def test_application_latency_uses_native_validation_before_mutation(value, error_type):
+    application = DanteApplication()
+    application.mutate_and_wait_for_notification = AsyncMock()
+
+    with pytest.raises(error_type):
+        await application.set_latency(SimpleNamespace(), value)
+
+    application.mutate_and_wait_for_notification.assert_not_awaited()
 
 
 def _aes67(application, enabled, multicast_prefix=None, all_devices=False):
@@ -584,6 +625,18 @@ def test_aes67_verifies_configured_state_not_current_state():
     assert device.aes67_calls == 1
     assert "AES67 configured state for AVIO: on (verified)" in result.output
     assert [(sent.operation, sent.arguments) for sent in application.sent] == [("set_aes67_enabled", (True,))]
+
+
+def test_aes67_invalid_enable_does_not_partially_apply_multicast_prefix():
+    device = FakeDevice("AVIO", aes67=True)
+    device.aes67_multicast_prefix = "239.69.0.0"
+    application = FakeApplication({"avio.local.": device})
+
+    result = _aes67(application, "false", multicast_prefix="239.238.0.0")
+
+    assert result.exit_code == 1
+    assert "expected 'on' or 'off'" in result.output
+    assert application.sent == []
 
 
 def test_aes67_rejects_known_unsupported_device_without_sending():

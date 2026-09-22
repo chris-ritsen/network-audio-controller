@@ -1,7 +1,28 @@
-.PHONY: core header prune-core example example-swift test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.PHONY: core header core-types prune-core test test-webapp quality wheel-smoke install restart deploy dev check-label-provenance check-local seed-opcode-fixtures label-observed-opcodes man install-man
+.DEFAULT_GOAL := help
+PYTHON ?= .venv/bin/python
+TEST_CASES ?=
+WEB_TESTS ?=
+RUST_TEST ?=
+LINT_FILES ?=
+BOUNDED := python3 scripts/run_bounded_tests.py
+
+.PHONY: help test-python-full test-webapp-full test-full test-rust test-browser lint
+help:
+	@echo "test TEST_CASES='tests/test_name.py::test_name'  Focused Python checks; no build or dependency sync"
+	@echo "test-webapp WEB_TESTS='tests/webapp/name.test.mjs'  Focused JavaScript checks"
+	@echo "test-rust RUST_TEST='test_name'                  Focused Rust checks"
+	@echo "test-browser WEB_TESTS='path/to/browser.test.mjs'  Explicit browser UI checks"
+	@echo "lint LINT_FILES='path/to/changed.py'             Focused Python lint"
+	@echo "test-full / quality                           Explicit broad checks; not routine"
+	@echo "core / install / deploy                        Explicit build and deployment commands"
 
 header:
 	cbindgen --config packages/netaudio-core/cbindgen.toml --crate netaudio-core --output packages/netaudio-core/include/netaudio_core.h packages/netaudio-core
+	python3 scripts/generate_core_binding.py
+
+core-types:
+	$(PYTHON) scripts/generate_core_types.py
 
 CORE_PACKAGE_DIR := packages/netaudio/src/netaudio/core
 CORE_DIR := packages/netaudio-core
@@ -13,7 +34,6 @@ prune-core:
 
 core: header
 	cargo build --release --manifest-path $(CORE_DIR)/Cargo.toml
-	@$(MAKE) --no-print-directory prune-core
 	@if [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.so ]; then \
 		cp -f $(CORE_RELEASE_DIR)/libnetaudio_core.so $(CORE_PACKAGE_DIR)/libnetaudio_core.so; \
 	elif [ -f $(CORE_RELEASE_DIR)/libnetaudio_core.dylib ]; then \
@@ -25,18 +45,8 @@ core: header
 		exit 1; \
 	fi
 
-example: core
-	gcc -o packages/netaudio-core/examples/rename_channel packages/netaudio-core/examples/rename_channel.c \
-		-Ipackages/netaudio-core/include -Lpackages/netaudio-core/target/release -lnetaudio_core
-
-example-swift: core
-	swiftc -O -import-objc-header packages/netaudio-core/include/netaudio_core.h \
-		packages/netaudio-core/examples/rename_channel.swift \
-		-Lpackages/netaudio-core/target/release -lnetaudio_core \
-		-o packages/netaudio-core/examples/rename_channel_swift
-
-install: core
-	uv tool install netaudio --from . --force --no-cache
+install:
+	uv tool install netaudio --from . --force --reinstall-package netaudio
 
 restart:
 	launchctl kickstart -k gui/$$(id -u)/com.netaudio.daemon
@@ -47,21 +57,44 @@ dev:
 	@echo "Watching for changes... (restart daemon on *.py save)"
 	@find packages/netaudio/src -name '*.py' | entr -r make restart
 
-test: test-webapp
-	uv run pytest -q
+test:
+	@test -n "$(strip $(TEST_CASES))" || { echo "Set TEST_CASES to the affected test file or method; use test-full only for an explicit full run."; exit 2; }
+	$(BOUNDED) $(PYTHON) -m pytest -q $(TEST_CASES)
 
 test-webapp:
+	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected JavaScript test files."; exit 2; }
+	$(BOUNDED) node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test $(WEB_TESTS)
+
+test-rust:
+	@test -n "$(strip $(RUST_TEST))" || { echo "Set RUST_TEST to the affected Rust test name."; exit 2; }
+	$(BOUNDED) cargo test --locked --offline --manifest-path $(CORE_DIR)/Cargo.toml $(RUST_TEST)
+
+test-browser:
+	@test -n "$(strip $(WEB_TESTS))" || { echo "Set WEB_TESTS to the affected browser test files."; exit 2; }
+	$(BOUNDED) ./node_modules/.bin/playwright test --project=chromium --workers=1 --retries=0 $(WEB_TESTS)
+
+test-python-full:
+	$(PYTHON) -m pytest -q
+
+test-webapp-full:
 	node --import ./tests/webapp/loader.mjs --import ./tests/webapp/setup.mjs --test "tests/webapp/*.test.mjs"
+
+test-full: test-webapp-full test-python-full
+
+lint:
+	@test -n "$(strip $(LINT_FILES))" || { echo "Set LINT_FILES to the changed Python files; use quality for a full check."; exit 2; }
+	$(BOUNDED) $(PYTHON) -m ruff check $(LINT_FILES)
 
 quality:
 	uv lock --check
-	uv run ruff check .
-	uv run ruff format --check .
-	uv run pyright
+	$(PYTHON) -m ruff check .
+	$(PYTHON) -m ruff format --check .
+	.venv/bin/pyright
+	$(PYTHON) scripts/generate_core_binding.py --check
+	$(PYTHON) scripts/generate_core_types.py --check
 	cargo fmt --manifest-path packages/netaudio-core/Cargo.toml -- --check
-	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets -- -D warnings
+	cargo clippy --manifest-path packages/netaudio-core/Cargo.toml --all-targets --features schema -- -D warnings
 	cargo test --manifest-path packages/netaudio-core/Cargo.toml
-	@$(MAKE) --no-print-directory prune-core
 
 wheel-smoke:
 	@tmp=$$(mktemp -d) || exit 1; \
@@ -84,7 +117,7 @@ wheel-smoke:
 check-label-provenance:
 	uv run netaudio lab provenance check
 
-check-local: check-label-provenance test
+check-local: test
 
 seed-opcode-fixtures:
 	uv run netaudio lab provenance seed --clean
@@ -98,4 +131,3 @@ man:
 install-man: man
 	install -d $(HOME)/.local/share/man/man1
 	install -m644 packages/netaudio/man/*.1 $(HOME)/.local/share/man/man1/
-

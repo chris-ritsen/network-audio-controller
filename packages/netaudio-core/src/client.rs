@@ -20,8 +20,8 @@ use crate::responses::{
 };
 use crate::spec::{build_routed_command, IoMode, SpecError, Target};
 
-pub const DEVICE_SETTINGS_PORT: u16 = 8700;
-pub const DEVICE_CONTROL_PORT: u16 = 8800;
+pub const DEVICE_SETTINGS_PORT: u16 = crate::protocol::NetaudioPort::Settings as u16;
+pub const DEVICE_CONTROL_PORT: u16 = crate::protocol::NetaudioPort::Control as u16;
 
 const MAX_WIRE_CAPTURES: usize = 256;
 const MAX_WIRE_CAPTURE_BYTES: usize = 4 * 1024 * 1024;
@@ -121,10 +121,7 @@ fn page_count(channel_count: u16, per_page: u16) -> u16 {
 }
 
 fn next_message_id(counter: &mut u16) -> u16 {
-    *counter = counter.wrapping_add(1);
-    if *counter == 0 {
-        *counter = 1;
-    }
+    *counter = crate::protocol::next_message_id(*counter);
     *counter
 }
 
@@ -401,6 +398,33 @@ impl Client {
         let packet = commands::build_channel_count(message_id)?;
         let response = self.request(&packet, message_id)?;
         parse_channel_count(&response).ok_or(ClientError::MalformedResponse)
+    }
+
+    pub fn get_channel_audio_metadata(
+        &mut self,
+        tx_count: u16,
+        rx_count: u16,
+    ) -> Result<Option<ChannelAudioMetadata>, ClientError> {
+        for (count, transmitter) in [(tx_count, true), (rx_count, false)] {
+            if count == 0 {
+                continue;
+            }
+
+            let message_id = self.next_message_id();
+            let packet = if transmitter {
+                commands::build_transmitters(0, false, message_id)?
+            } else {
+                commands::build_receivers(0, message_id)?
+            };
+
+            if let Ok(response) = self.request(&packet, message_id) {
+                if let Some(metadata) = parse_channel_audio_metadata(&response) {
+                    return Ok(Some(metadata));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn get_rx_channels(&mut self) -> Result<Vec<RxChannel>, ClientError> {
@@ -731,12 +755,13 @@ mod tests {
             sender.send(request).unwrap();
         });
 
-        let spec = "{\"command\":\"set_channel_name\",\"channel_type\":\"rx\",\"channel_number\":1,\"name\":\"label\"}";
+        let spec = r#"{"command":"set_channel_name","channel_type":"rx","channel_number":1,"name":"label","protocol_id":10025}"#;
         let response = client.execute(spec).unwrap();
         let request = receiver.recv().unwrap();
         device_thread.join().unwrap();
 
-        let expected = crate::commands::build_set_channel_name(
+        let expected = crate::commands::build_set_channel_name_for_protocol(
+            crate::commands::PROTOCOL_DANTE_FLOW,
             crate::commands::ChannelType::Rx,
             1,
             "label",
@@ -759,7 +784,7 @@ mod tests {
         .unwrap();
         let started = Instant::now();
         let response = client
-            .execute("{\"command\":\"identify\",\"sequence\":1}")
+            .execute("{\"command\":\"identify\",\"message_id\":1}")
             .unwrap();
         assert!(response.is_empty());
         assert!(started.elapsed() < Duration::from_millis(500));

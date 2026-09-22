@@ -6,6 +6,7 @@ import pytest
 from netaudio import core
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
+from tests.protocol_test_fixtures import load_protocol_packet
 
 
 TX_RAW_4CH_48K = bytes.fromhex(
@@ -166,22 +167,42 @@ def test_build_rx_channels_from_core_records(load_fixture, test_case: RxParserTe
         assert sub.rx_device_name == test_case.device_id
 
 
-def test_build_rx_self_subscription_resolves_dot():
+@pytest.mark.parametrize("modern", [False, True])
+@pytest.mark.parametrize("source_is_self", [False, True])
+@pytest.mark.parametrize("status_code", [4, 9])
+def test_native_receiver_readback_preserves_loopback_identity(load_fixture, modern, source_is_self, status_code):
+    if modern:
+        packet = bytearray(load_protocol_packet("receiver_channel_status", "protocol_2809_opcode_3400_id_28729.bin"))
+        source_pointer = 33
+        status_offset = 68 + 48
+    else:
+        packet = bytearray(load_fixture("20250517_200646_289003_lx-dante_get_receivers_response.bin"))
+        source_pointer = int.from_bytes(packet[20:22], "big")
+        status_offset = 26
+
+    assert source_pointer > 0
+    packet[status_offset : status_offset + 2] = status_code.to_bytes(2, "big")
+
+    if source_is_self:
+        packet[source_pointer : source_pointer + 2] = b".\0"
+
     device = make_device("self-device")
-    records = [
-        {
-            "number": 1,
-            "rx_channel_name": "loop",
-            "tx_channel_name": "loop",
-            "tx_device_name": ".",
-            "rx_status_code": 257,
-            "subscription_status_code": 9,
-        }
-    ]
+    expected = source_is_self or status_code == 4
 
-    _, subscriptions = device._build_rx_from_records(records)
+    if modern:
+        page = core.parse_response("modern_arc_receiver_channel_status_page", bytes(packet))
+        record = page["records"][0]
+        device.apply_receiver_channel_inventory(page)
+        subscription = device.subscriptions[0]
+    else:
+        records = core.parse_page("rx", bytes(packet), 1)
+        record = records[0]
+        _, subscriptions = device._build_rx_from_records(records)
+        subscription = subscriptions[0]
 
-    assert subscriptions[0].tx_device_name == "self-device"
+    assert record["is_self_connection"] is expected
+    assert (subscription.tx_device is device) is expected
+    assert (subscription.tx_device_name == device.name) is expected
 
 
 def test_fixed_receiver_refresh_retains_conflicting_managed_capability(load_fixture):
@@ -249,36 +270,3 @@ def test_build_tx_channels_without_friendly_names():
     assert len(tx_channels) == 4
     assert tx_channels[1].name == "ch-01"
     assert tx_channels[1].friendly_name is None
-
-
-class TestParsePanelStatus:
-    def test_connected_name_and_numeric_state(self, load_fixture):
-        parsed = core.parse_response("panel_bluetooth_status", load_fixture("avio-bt-1_bluetooth_status_connected.bin"))
-        assert parsed["observations"][0]["value"] == {"state": 1, "peer_name": "s00pcan-iphone-17"}
-
-    def test_disconnected_is_distinct_from_invalid_input(self, load_fixture):
-        parsed = core.parse_response(
-            "panel_bluetooth_status", load_fixture("avio-bt-1_bluetooth_status_disconnected.bin")
-        )
-        assert parsed["observations"][0]["value"] == {"state": 2, "peer_name": ""}
-        with pytest.raises(core.NetaudioCoreError):
-            core.parse_response("panel_bluetooth_status", b"invalid")
-
-
-def test_receiver_status_readback_resolves_self_subscription():
-    device = make_device("self-device")
-    device.apply_receiver_channel_status_page(
-        {
-            "records": [
-                {
-                    "channel_number": 1,
-                    "local_channel_name": "Input",
-                    "source_device_name": ".",
-                    "source_channel_name": "Output",
-                    "subscription_status_code": 9,
-                }
-            ]
-        }
-    )
-    assert device.subscriptions[0].tx_device_name == "self-device"
-    assert device.subscriptions[0].tx_channel_name == "Output"

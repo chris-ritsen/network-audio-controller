@@ -1,32 +1,55 @@
 from __future__ import annotations
 
-from netaudio.dante.const import (
-    PROTOCOL_ARC_2729,
-    PROTOCOL_ARC_2809,
-    PROTOCOL_ARC_280F,
-    RESULT_CODE_FRONTEND_UNAVAILABLE,
-    RESULT_CODE_SUCCESS,
-    RESULT_CODE_SUCCESS_EXTENDED,
-)
+from netaudio import core
+from netaudio.dante.channel import channel_by_number
 
 
 class ChannelFrontendError(RuntimeError):
     pass
 
 
-def channel_result_code(response: bytes | None, operation: str) -> int:
-    if response is None:
-        raise ChannelFrontendError(f"{operation} did not receive a response")
+class ChannelRenameCapabilityError(ValueError):
+    def __init__(self, message: str, *, prohibited: bool = False):
+        super().__init__(message)
+        self.prohibited = prohibited
 
-    from netaudio import core
+
+def require_channel_rename_supported(device, channel_type: str, channel_number: int) -> None:
+    if channel_type != "rx" or getattr(device, "requires_managed_control", False):
+        return
+
+    channels = getattr(device, "rx_channels", None)
 
     try:
-        result_code = core.parse_response("result_code", response)
-    except core.NetaudioCoreError as exception:
-        raise ChannelFrontendError(f"{operation} returned an invalid response") from exception
-    if not isinstance(result_code, int):
+        channel = channel_by_number(channels.values(), channel_number) if isinstance(channels, dict) else None
+    except RuntimeError as error:
+        raise ChannelRenameCapabilityError(str(error)) from error
+
+    if channel is None:
+        raise ChannelRenameCapabilityError(f"receiver channel {channel_number} is unavailable")
+
+    capability = getattr(channel, "can_rename", None)
+
+    if capability is False:
+        raise ChannelRenameCapabilityError(
+            f"receiver channel {channel_number} rename capability prohibits renaming", prohibited=True
+        )
+
+    if capability is not True:
+        raise ChannelRenameCapabilityError(f"receiver channel {channel_number} rename capability is unavailable")
+
+
+def require_channel_acknowledgement(response: bytes | None, operation: str) -> None:
+    acknowledgement = core.command_acknowledgement(response)
+
+    if acknowledgement is None:
+        raise ChannelFrontendError(f"{operation} did not receive a response")
+
+    if acknowledgement.get("parseable") is not True:
         raise ChannelFrontendError(f"{operation} returned an invalid response")
-    return result_code
+
+    if acknowledgement.get("accepted") is not True:
+        raise ChannelFrontendError(f"{operation} was not acknowledged by the device")
 
 
 def _channel_name_protocol_identifier_from_probe(
@@ -34,31 +57,20 @@ def _channel_name_protocol_identifier_from_probe(
     operation: str,
     response_kind: str,
 ) -> int:
-    result_code = channel_result_code(response, operation)
-    if result_code == RESULT_CODE_FRONTEND_UNAVAILABLE:
-        return PROTOCOL_ARC_2729
-    if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
-        raise ChannelFrontendError(f"{operation} failed with result 0x{result_code:04X}")
-
-    from netaudio import core
+    if response is None:
+        raise ChannelFrontendError(f"{operation} did not receive a response")
 
     try:
-        page = core.parse_response(response_kind, response)
+        return core.parse_response(response_kind, response)
     except core.NetaudioCoreError as exception:
-        raise ChannelFrontendError(f"{operation} returned an invalid status page") from exception
-    if not isinstance(page, dict):
-        raise ChannelFrontendError(f"{operation} returned an invalid status page")
-    protocol_id = page.get("protocol_id")
-    if protocol_id not in (PROTOCOL_ARC_2809, PROTOCOL_ARC_280F):
-        raise ChannelFrontendError(f"{operation} returned an unsupported protocol identifier")
-    return protocol_id
+        raise ChannelFrontendError(f"{operation} returned an invalid response") from exception
 
 
 def receiver_channel_name_protocol_identifier_from_probe(response: bytes | None) -> int:
     return _channel_name_protocol_identifier_from_probe(
         response,
         "receiver channel frontend probe",
-        "modern_arc_receiver_channel_status_page",
+        "receiver_channel_name_protocol",
     )
 
 
@@ -66,5 +78,5 @@ def transmitter_channel_name_protocol_identifier_from_probe(response: bytes | No
     return _channel_name_protocol_identifier_from_probe(
         response,
         "transmitter channel frontend probe",
-        "modern_arc_transmitter_channel_status_page",
+        "transmitter_channel_name_protocol",
     )

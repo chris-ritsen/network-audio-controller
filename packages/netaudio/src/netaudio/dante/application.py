@@ -3,32 +3,37 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
-import math
 import time
 from collections.abc import Awaitable, Callable
+from functools import partial
 
+from netaudio import core
+from netaudio.dante.channel import channel_by_number
 from netaudio.dante.capability_partition import (
     CapabilityPartitionExport,
     parse_capability_partition_export,
 )
 from netaudio.dante.channel_frontend import (
-    channel_result_code,
+    require_channel_rename_supported,
     receiver_channel_name_protocol_identifier_from_probe,
     transmitter_channel_name_protocol_identifier_from_probe,
 )
-from netaudio.dante.channel_status_paging import (
-    ChannelStatusPageAccumulator,
+from netaudio.dante.arc_protocol import (
+    ArcProtocolError,
+    arc_protocol_for_device,
     modern_arc_protocol_identifier_for_device,
 )
-from netaudio.dante.commands import DanteCommands, channel_status_query_specification, validate_dante_name
+from netaudio.dante.commands import DanteCommands, validate_dante_name
 from netaudio.dante.conmon_export import ConmonExport, ConmonExportError, ConmonExportUnavailableError
 from netaudio.dante.const import (
     DEVICE_ARC_PORT,
-    OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809,
-    OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809,
-    PROTOCOL_ARC_2809,
-    RESULT_CODE_SUCCESS,
-    RESULT_CODE_SUCCESS_EXTENDED,
+    NOTIFICATION_PROPERTY_CHANGE,
+    NOTIFICATION_ROUTING_DEVICE_CHANGE,
+    NOTIFICATION_RX_CHANNEL_CHANGE,
+    NOTIFICATION_RX_FLOW_CHANGE,
+    NOTIFICATION_SETTINGS_CHANGE,
+    NOTIFICATION_TX_CHANNEL_CHANGE,
+    NOTIFICATION_TX_LABEL_CHANGE,
     SERVICE_ARC,
     SERVICE_CMC,
     SERVICE_DBC,
@@ -43,7 +48,7 @@ from netaudio.dante.diagnostic_logs import (
 from netaudio.dante.events import DanteEvent, DanteEventDispatcher, EventType
 from netaudio.dante.panel_state import panel_family
 from netaudio.dante.panel_transport import audit_control_result
-from netaudio.dante.gain import SUPPORTED_GAIN_LEVELS, codec_status_fields, gain_adapter_from_codec_status
+from netaudio.dante.gain import codec_status_fields
 from netaudio.dante.latency import latency_controls_from_settings, nanoseconds_to_milliseconds
 from netaudio.dante.interface_statistics import InterfaceStatisticsObservation
 from netaudio.dante.lock import _validate_lock_key, core_lock_device, core_unlock_device
@@ -51,20 +56,14 @@ from netaudio.dante.lock_status import LockStatusObservation
 from netaudio.dante.operation_availability import probe_supported, require_writable
 from netaudio.dante.sap import SapFlowInventory, SapInventoryChange
 from netaudio.dante.self_connection import (
+    apply_self_connection_capability,
+    SelfConnectionCapabilityError,
     SelfConnectionCapabilityUnavailableError,
     SelfConnectionUnsupportedError,
     is_self_connection_request,
 )
 from netaudio.dante.services.cmc import DanteCMCService
 from netaudio.dante.services.notification import (
-    NOTIFICATION_LATENCY_CHANGE,
-    NOTIFICATION_PROPERTY_CHANGE,
-    NOTIFICATION_ROUTING_DEVICE_CHANGE,
-    NOTIFICATION_RX_CHANNEL_CHANGE,
-    NOTIFICATION_RX_FLOW_CHANGE,
-    NOTIFICATION_SETTINGS_CHANGE,
-    NOTIFICATION_TX_CHANNEL_CHANGE,
-    NOTIFICATION_TX_LABEL_CHANGE,
     DanteNotificationService,
     mutate_and_wait_for_capability_value,
     mutate_and_wait_for_clear_configuration_status,
@@ -73,16 +72,19 @@ from netaudio.dante.services.notification import (
 from netaudio.dante.services.notification_packet_handlers import (
     STATUS_KIND_AES67,
     STATUS_KIND_CLOCK,
-    STATUS_KIND_ENCODING,
     STATUS_KIND_CODEC,
     STATUS_KIND_INTERFACE,
     STATUS_KIND_INTERFACE_STATISTICS,
-    STATUS_KIND_SAMPLE_RATE,
-    STATUS_KIND_SAMPLE_RATE_PULLUP,
     STATUS_KIND_SWITCH_CONFIGURATION,
 )
 from netaudio.dante.services.sap import SapDiscoveryService
-from netaudio.dante.state import STATUS_KIND_DIAGNOSTIC_LOG_EXPORT, DanteStateService, apply_device_status
+from netaudio.dante.subscription_operations import plan_receiver_subscription_commands
+from netaudio.dante.state import (
+    STATUS_KIND_DIAGNOSTIC_LOG_EXPORT,
+    DanteStateService,
+    apply_audio_capability,
+    apply_device_status,
+)
 
 logger = logging.getLogger("netaudio")
 
@@ -253,63 +255,8 @@ class DanteApplication:
         return device
 
     @staticmethod
-    def _apply_encoding_capability(device, status: dict) -> None:
-        apply_device_status(
-            device,
-            STATUS_KIND_ENCODING,
-            {
-                "encoding": status["current_value"],
-                "requested_encoding": status["requested_value"],
-                "encoding_update_mode": status["update_mode"],
-                "supported_encodings": status["available_values"],
-            },
-        )
-
-    @staticmethod
     def _apply_codec_status(device, status: dict) -> None:
-        apply_device_status(device, STATUS_KIND_CODEC, codec_status_fields(device, status))
-
-    @staticmethod
-    def _apply_gain_adapter(device, device_type: str, channel_levels: list[int]) -> None:
-        apply_device_status(
-            device,
-            STATUS_KIND_CODEC,
-            {
-                "gain_device_type": device_type,
-                "gain_levels": channel_levels,
-                "supported_gain_levels": list(SUPPORTED_GAIN_LEVELS),
-            },
-        )
-
-    @staticmethod
-    def _apply_sample_rate_capability(device, status: dict) -> None:
-        apply_device_status(
-            device,
-            STATUS_KIND_SAMPLE_RATE,
-            {
-                "sample_rate": status["current_value"],
-                "requested_sample_rate": status["requested_value"],
-                "sample_rate_update_mode": status["update_mode"],
-                "supported_sample_rates": status["available_values"],
-            },
-        )
-
-    @staticmethod
-    def _apply_sample_rate_pullup_capability(
-        device,
-        status: dict,
-    ) -> None:
-        apply_device_status(
-            device,
-            STATUS_KIND_SAMPLE_RATE_PULLUP,
-            {
-                "sample_rate_pullup_raw_value": status["current_value"],
-                "requested_sample_rate_pullup_raw_value": status["requested_value"],
-                "sample_rate_pullup_update_mode": status["update_mode"],
-                "sample_rate_pullup_flags": status["flags"],
-                "supported_sample_rate_pullup_raw_values": status["available_values"],
-            },
-        )
+        apply_device_status(device, STATUS_KIND_CODEC, codec_status_fields(status))
 
     def _capability_probe_lock(self, capability_name: str, device_ip_address: str) -> asyncio.Lock:
         lock_key = (capability_name, device_ip_address)
@@ -450,18 +397,6 @@ class DanteApplication:
             return
         source_type = "netaudio_request" if direction == "request" else "netaudio_response"
         loop.call_soon_threadsafe(queue.put_nowait, (payload, device_ip, port, direction, source_type))
-
-    @staticmethod
-    def _parse_status_page(response, description, page_kind):
-        from netaudio import core
-
-        try:
-            page = core.parse_response(page_kind, response)
-        except core.NetaudioCoreError as exception:
-            raise RuntimeError(f"{description} returned an invalid status page") from exception
-        if not isinstance(page, dict):
-            raise RuntimeError(f"{description} returned an invalid status page")
-        return page
 
     async def _populate_device_controls(
         self,
@@ -604,7 +539,7 @@ class DanteApplication:
     async def _probe_encodings_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
             lambda device: device.supported_encodings is not None or not probe_supported(device, "encoding"),
-            self._apply_encoding_capability,
+            partial(apply_audio_capability, kind="encoding"),
             self.probe_encoding_status,
             "encodings",
             timeout,
@@ -664,7 +599,7 @@ class DanteApplication:
                 device.supported_sample_rate_pullup_raw_values is not None
                 or not probe_supported(device, "sample_rate_pullup")
             ),
-            self._apply_sample_rate_pullup_capability,
+            partial(apply_audio_capability, kind="sample_rate_pullup"),
             self.probe_sample_rate_pullup_status,
             "sample rate pull-ups",
             timeout,
@@ -674,7 +609,7 @@ class DanteApplication:
     async def _probe_sample_rates_all(self, timeout: float = 3.0, devices: dict | None = None) -> None:
         await self._probe_capabilities_all(
             lambda device: device.supported_sample_rates is not None or not probe_supported(device, "sample_rate"),
-            self._apply_sample_rate_capability,
+            partial(apply_audio_capability, kind="sample_rate"),
             self.probe_sample_rate_status,
             "sample rates",
             timeout,
@@ -720,38 +655,24 @@ class DanteApplication:
 
     async def _query_channel_status_pages(self, device, channel_type):
         protocol_id = modern_arc_protocol_identifier_for_device(device)
-        if channel_type == "rx":
-            opcode = OPCODE_QUERY_RECEIVER_CHANNEL_STATUS_2809
-            page_kind = "modern_arc_receiver_channel_status_page"
-            description = "receiver channel status query"
-            cache_attribute = "receiver_channel_name_protocol_identifier"
-        else:
-            opcode = OPCODE_QUERY_TRANSMITTER_CHANNEL_STATUS_2809
-            page_kind = "modern_arc_transmitter_channel_status_page"
-            description = "transmitter channel status query"
-            cache_attribute = "transmitter_channel_name_protocol_identifier"
 
-        accumulator = ChannelStatusPageAccumulator(protocol_id, opcode)
-        request_range = (1, 1, 0)
-        while request_range is not None:
-            media_selector, starting_channel_identifier, ending_channel_identifier = request_range
-            response = await device.execute(
-                channel_status_query_specification(
-                    channel_type,
-                    protocol_id=protocol_id,
-                    media_selector=media_selector,
-                    starting_channel_identifier=starting_channel_identifier,
-                    ending_channel_identifier=ending_channel_identifier,
-                )
-            )
-            result_code = channel_result_code(response, description)
-            if result_code not in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED):
-                raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
-            page = self._parse_status_page(response, description, page_kind)
-            request_range = accumulator.add(page)
+        with core.ChannelInventory(channel_type, protocol_id) as inventory:
+            state = inventory.state()
+
+            while state["next_command"] is not None:
+                response = await device.execute(state["next_command"])
+                inventory.accept(response)
+                state = inventory.state()
+
+        cache_attribute = (
+            "receiver_channel_name_protocol_identifier"
+            if channel_type == "rx"
+            else "transmitter_channel_name_protocol_identifier"
+        )
 
         setattr(device, cache_attribute, protocol_id)
-        return accumulator.result()
+
+        return state["inventory"]
 
     async def _query_conmon_all(self, timeout: float = 10.0, devices: dict | None = None) -> None:
         target_devices = self.devices if devices is None else devices
@@ -832,36 +753,17 @@ class DanteApplication:
             if isinstance(result, Exception):
                 logger.debug(f"Bluetooth status unavailable: {result}")
 
-    async def _query_modern_arc_status_page(
-        self, device, specification, description, page_kind, *, allow_partial=False
-    ):
-        from netaudio import core
-
-        response = await device.execute(specification)
-        if response is None:
-            raise RuntimeError(f"{description} did not receive a response")
-        try:
-            result_code = core.parse_response("result_code", response)
-        except core.NetaudioCoreError as exception:
-            raise RuntimeError(f"{description} returned an invalid response") from exception
-        if not isinstance(result_code, int):
-            raise RuntimeError(f"{description} returned an invalid response")
-        if result_code != RESULT_CODE_SUCCESS and not (allow_partial and result_code == RESULT_CODE_SUCCESS_EXTENDED):
-            raise RuntimeError(f"{description} failed with result 0x{result_code:04X}")
-        return self._parse_status_page(response, description, page_kind)
-
     async def _send_conmon_query_for_device(self, device, request: Callable[[object, str], Awaitable[None]]) -> None:
         from netaudio import core
 
         if device.requires_managed_control or not device.ipv4 or not device.mac_address:
             return
 
-        mac_hex = device.mac_address.replace(":", "").replace("-", "")
+        mac_hex = core.canonical_device_mac(device.mac_address)
 
-        if len(mac_hex) == 16 and mac_hex[6:10].upper() == "FFFE":
-            mac_hex = mac_hex[:6] + mac_hex[10:]
-        elif len(mac_hex) == 16 and mac_hex.upper().endswith("0000"):
-            mac_hex = mac_hex[:12]
+        if mac_hex is None or len(mac_hex) != 12:
+            logger.warning("Device MAC address is unavailable for %s", device.server_name)
+            return
 
         try:
             await request(device, mac_hex)
@@ -968,7 +870,7 @@ class DanteApplication:
                     by_number[managed_channel.index] = managed_channel
                 for number in target_channels:
                     managed_channel = by_number.get(number)
-                    channel = device.rx_channels.get(number)
+                    channel = channel_by_number(device.rx_channels.values(), number)
                     if managed_channel is None or channel is None:
                         raise SelfConnectionCapabilityUnavailableError(
                             f"self-connection capability is unavailable for receiver channel {number}"
@@ -976,48 +878,36 @@ class DanteApplication:
                     managed_value = managed_channel.can_subscribe_self
                     channel.managed_can_subscribe_self = managed_value
                     channel.managed_can_subscribe_self_fresh = True
-                    direct_value = None
-                    if isinstance(channel.receiver_flags, int):
-                        direct_value = bool(channel.receiver_flags & 0x0008)
-                    elif isinstance(channel.receiver_capability_flags, int):
-                        direct_value = bool(channel.receiver_capability_flags & 0x0000_0008)
-                    if (
-                        isinstance(managed_value, bool)
-                        and isinstance(direct_value, bool)
-                        and managed_value != direct_value
-                    ):
-                        channel.can_subscribe_self = None
-                        channel.can_subscribe_self_conflict = True
-                    else:
-                        channel.can_subscribe_self = managed_value if isinstance(managed_value, bool) else None
-                        channel.can_subscribe_self_conflict = None
+                    apply_self_connection_capability(channel, authority="managed")
             else:
                 await device.get_rx_channels()
-        except SelfConnectionCapabilityUnavailableError:
+
+            for number in sorted(target_channels):
+                channel = channel_by_number(device.rx_channels.values(), number)
+                capability = getattr(channel, "can_subscribe_self", None)
+
+                if capability is False:
+                    raise SelfConnectionUnsupportedError(
+                        f"receiver channel {number} does not advertise self-connection support"
+                    )
+
+                if capability is not True:
+                    raise SelfConnectionCapabilityUnavailableError(
+                        f"self-connection capability is unavailable for receiver channel {number}"
+                    )
+        except SelfConnectionCapabilityError:
             raise
         except (OSError, RuntimeError, TimeoutError) as error:
             raise SelfConnectionCapabilityUnavailableError(
                 f"fresh self-connection capability is unavailable: {error}"
             ) from error
 
-        for number in sorted(target_channels):
-            channel = device.rx_channels.get(number)
-            capability = getattr(channel, "can_subscribe_self", None)
-            if capability is False:
-                raise SelfConnectionUnsupportedError(
-                    f"receiver channel {number} does not advertise self-connection support"
-                )
-            if capability is not True:
-                raise SelfConnectionCapabilityUnavailableError(
-                    f"self-connection capability is unavailable for receiver channel {number}"
-                )
-
     async def apply_modern_arc_status_pages(self, device) -> None:
         pages = (
             (self.query_modern_arc_receiver_flow_status, device.apply_receiver_flow_status_page),
-            (self.query_modern_arc_transmitter_channel_status, device.apply_transmitter_channel_status_page),
+            (self.query_modern_arc_transmitter_channel_status, device.apply_transmitter_channel_inventory),
             (self.query_modern_arc_transmitter_flow_status, device.apply_transmitter_flow_status_page),
-            (self.query_modern_arc_receiver_channel_status, device.apply_receiver_channel_status_page),
+            (self.query_modern_arc_receiver_channel_status, device.apply_receiver_channel_inventory),
         )
         for query, apply in pages:
             try:
@@ -1070,31 +960,30 @@ class DanteApplication:
         timeout: float = 2.0,
     ) -> dict:
         key = self._control_key(target)
-        expected_action_result_code = 2 if preserve_internet_protocol_settings else 1
-        command = (
-            self.send_clear_all_configuration_preserving_internet_protocol_settings
+        action = (
+            "clear_all_configuration_preserving_internet_protocol_settings"
             if preserve_internet_protocol_settings
-            else self.send_clear_all_configuration
+            else "clear_all_configuration"
         )
 
         async def mutate() -> None:
-            await command(target)
+            await getattr(self, f"send_{action}")(target)
 
         async with self._capability_probe_lock("clear_configuration_action", key):
             status = await mutate_and_wait_for_clear_configuration_status(
                 self.notifications,
                 key,
-                expected_action_result_code,
+                action,
                 mutate,
                 timeout,
             )
+
         if status is None:
             raise CapabilityProbeTimeout(f"clear-configuration status timed out for {key}")
-        if status["action_result_code"] != expected_action_result_code:
-            raise RuntimeError(
-                f"clear-configuration returned result {status['action_result_code']} "
-                f"instead of {expected_action_result_code} for {key}"
-            )
+
+        if status["completed_action"] != action:
+            raise RuntimeError(f"clear-configuration did not confirm the requested action for {key}")
+
         return status
 
     async def discover_and_populate(self, timeout: float = 5.0) -> dict:
@@ -1455,6 +1344,7 @@ class DanteApplication:
             device.requested_sample_rate_pullup_raw_value = None
             device.sample_rate_pullup_update_mode = None
             device.sample_rate_pullup_flags = None
+            device.sample_rate_pullup_host_disabled = None
             device.supported_sample_rate_pullup_raw_values = None
             device.codec_parameters = None
             device.gain_adapter = None
@@ -1674,7 +1564,11 @@ class DanteApplication:
             from netaudio.dante.analog_control import apply_analog
 
             return await self._run_configuration_operation(
-                device, "analog_level", requested, lambda: apply_analog(self, device, **requested, timeout=timeout)
+                device,
+                "analog_level",
+                requested,
+                lambda: apply_analog(self, device, **requested, timeout=timeout),
+                result_adapter=audit_control_result,
             )
         return await self._run_configuration_operation(
             device,
@@ -1751,14 +1645,16 @@ class DanteApplication:
         self,
         target,
         timeout: float = 2.0,
-    ) -> tuple[str, list[int]]:
+    ) -> dict:
         device = self._control_target(target)
         status = await self.probe_codec_status(target, timeout=timeout)
-        adapter = gain_adapter_from_codec_status(device, status)
+        adapter = status.get("gain_adapter")
+
         if adapter is None:
             raise RuntimeError(f"codec status has no established gain adapter for {self._control_key(target)}")
+
         self._apply_codec_status(device, status)
-        return adapter["device_type"], adapter["channel_levels"]
+        return adapter
 
     async def probe_interface_status(self, target, timeout: float = 2.0) -> list[dict]:
         status = await self._probe_once(
@@ -1873,74 +1769,30 @@ class DanteApplication:
         return await self._query_channel_status_pages(device, "rx")
 
     async def query_modern_arc_receiver_flow_status(self, device):
+        return await self._query_flow_status(device, core.ReceiverFlowInventory, "receiver")
+
+    async def _query_flow_status(self, device, inventory_type, direction):
         protocol_id = modern_arc_protocol_identifier_for_device(device)
-        starting_flow = 1
-        maximum_flow_slots = None
-        seen_flow_ids = set()
-        aggregate_flows = []
-        pages = []
-        while True:
-            page = await self._query_modern_arc_status_page(
-                device,
-                self.commands.query_modern_arc_receiver_flow_status(protocol_id, starting_flow),
-                "receiver flow status query",
-                "modern_arc_receiver_flow_status_page",
-                allow_partial=True,
-            )
-            page_maximum = page.get("maximum_flow_slots")
-            page_flows = page.get("flows")
-            if (
-                isinstance(page_maximum, bool)
-                or not isinstance(page_maximum, int)
-                or not 1 <= page_maximum <= 32
-                or not isinstance(page_flows, list)
-                or page.get("reported_flow_count") != len(page_flows)
-            ):
-                raise RuntimeError("receiver flow status query returned a malformed page")
-            if maximum_flow_slots is None:
-                maximum_flow_slots = page_maximum
-            elif page_maximum != maximum_flow_slots:
-                raise RuntimeError("receiver flow status query changed capacity between pages")
-            page_flow_ids = []
-            for flow in page_flows:
-                flow_id = flow.get("global_flow_id") if isinstance(flow, dict) else None
-                if (
-                    isinstance(flow_id, bool)
-                    or not isinstance(flow_id, int)
-                    or not starting_flow <= flow_id <= maximum_flow_slots
-                    or flow_id in seen_flow_ids
-                ):
-                    raise RuntimeError("receiver flow status query returned invalid pagination")
-                seen_flow_ids.add(flow_id)
-                page_flow_ids.append(flow_id)
-                aggregate_flows.append(flow)
-            pages.append(page)
-            if page.get("result_code") == RESULT_CODE_SUCCESS and page.get("page_disposition") == "complete":
-                aggregate = dict(page)
-                aggregate["reported_flow_count"] = len(aggregate_flows)
-                aggregate["flows"] = aggregate_flows
-                aggregate["pages"] = pages
-                return aggregate
-            if page.get("result_code") != RESULT_CODE_SUCCESS_EXTENDED or page.get("page_disposition") != "more_pages":
-                raise RuntimeError("receiver flow status query did not terminate successfully")
-            if not page_flow_ids:
-                raise RuntimeError("receiver flow status query returned an empty continuation page")
-            next_starting_flow = max(page_flow_ids) + 1
-            if next_starting_flow <= starting_flow or next_starting_flow > maximum_flow_slots:
-                raise RuntimeError("receiver flow status query returned invalid continuation state")
-            starting_flow = next_starting_flow
+
+        with inventory_type(protocol_id) as inventory:
+            state = inventory.state()
+
+            while state["next_command"] is not None:
+                response = await device.execute(state["next_command"])
+
+                if not response:
+                    raise RuntimeError(f"{direction} flow status query returned no response")
+
+                inventory.accept(response)
+                state = inventory.state()
+
+            return state["inventory"]
 
     async def query_modern_arc_transmitter_channel_status(self, device):
         return await self._query_channel_status_pages(device, "tx")
 
     async def query_modern_arc_transmitter_flow_status(self, device):
-        protocol_id = modern_arc_protocol_identifier_for_device(device)
-        return await self._query_modern_arc_status_page(
-            device,
-            self.commands.query_modern_arc_transmitter_flow_status(protocol_id),
-            "transmitter flow status query",
-            "transmitter_flow_status_page",
-        )
+        return await self._query_flow_status(device, core.TransmitFlowInventory, "transmitter")
 
     def plan_transmit_flow(self, device, specification):
         """Validate a canonical transmit-flow request without sending traffic."""
@@ -2071,26 +1923,16 @@ class DanteApplication:
                     "effective_state_confirmation": None,
                     "message": "association-removal request completed; fresh subscription readback is pending",
                 }
-            result_code = None
-            if response:
-                from netaudio import core
+            acknowledgement = core.command_acknowledgement(response)
 
-                try:
-                    result_code = core.parse_response("result_code", response)
-                except core.NetaudioCoreError:
-                    pass
-            accepted = result_code in (RESULT_CODE_SUCCESS, RESULT_CODE_SUCCESS_EXTENDED)
+            if acknowledgement is None or not acknowledgement["parseable"]:
+                state = "unverified"
+            else:
+                state = "request_acknowledged" if acknowledgement["accepted"] else "rejected"
+
             return {
-                "state": "request_acknowledged"
-                if accepted
-                else "rejected"
-                if result_code is not None
-                else "unverified",
-                "request_acknowledgement": {
-                    "accepted": accepted,
-                    "received": response is not None,
-                    "result_code": result_code,
-                },
+                "state": state,
+                "request_acknowledgement": acknowledgement,
                 "effective_state_confirmation": None,
                 "message": "association-removal request completed; fresh subscription readback is pending",
             }
@@ -2140,22 +1982,8 @@ class DanteApplication:
         )
 
     async def reset_channel_name(self, device, channel_type: str, channel_number: int):
-        self._require_receiver_channel_rename_supported(device, channel_type, channel_number)
+        require_channel_rename_supported(device, channel_type, channel_number)
         return await device.execute(self.commands.reset_channel_name(channel_type, channel_number))
-
-    @staticmethod
-    def _require_receiver_channel_rename_supported(device, channel_type: str, channel_number: int) -> None:
-        if channel_type != "rx" or getattr(device, "requires_managed_control", False):
-            return
-        channels = getattr(device, "rx_channels", None)
-        channel = channels.get(channel_number) if isinstance(channels, dict) else None
-        if channel is None:
-            raise ValueError(f"receiver channel {channel_number} is unavailable")
-        capability = getattr(channel, "can_rename", None)
-        if capability is False:
-            raise ValueError(f"receiver channel {channel_number} prohibits renaming")
-        if capability is not True:
-            raise ValueError(f"receiver channel {channel_number} rename capability is unavailable")
 
     async def reset_device_name(self, device):
         if getattr(device, "requires_managed_control", False):
@@ -2163,23 +1991,27 @@ class DanteApplication:
         return await device.execute(self.commands.reset_name())
 
     async def resolve_channel_name_protocol_identifier(self, device, channel_type: str):
+        protocol = arc_protocol_for_device(device)
+
+        if protocol is None:
+            raise ArcProtocolError("device has no ARC service metadata")
+
+        with core.ChannelInventory(channel_type, protocol["channel_name_probe_protocol_id"]) as inventory:
+            specification = inventory.state()["next_command"]
+
         if channel_type == "rx":
             attribute_name = "receiver_channel_name_protocol_identifier"
             resolve = receiver_channel_name_protocol_identifier_from_probe
         else:
             attribute_name = "transmitter_channel_name_protocol_identifier"
             resolve = transmitter_channel_name_protocol_identifier_from_probe
+
         cached_protocol_identifier = getattr(device, attribute_name, None)
+
         if cached_protocol_identifier is not None:
             return cached_protocol_identifier
 
-        try:
-            protocol_identifier = modern_arc_protocol_identifier_for_device(device)
-        except RuntimeError:
-            protocol_identifier = PROTOCOL_ARC_2809
-        response = await device.execute(
-            channel_status_query_specification(channel_type, protocol_id=protocol_identifier)
-        )
+        response = await device.execute(specification)
         protocol_identifier = resolve(response)
         setattr(device, attribute_name, protocol_identifier)
         return protocol_identifier
@@ -2191,55 +2023,26 @@ class DanteApplication:
             return await self._send_add_subscriptions_locked(device, records)
 
     async def _send_add_subscriptions_locked(self, device, records):
-        if self._uses_modern_arc_280f(device):
-            return await self._send_modern_arc_subscription_records(
-                device,
-                [
-                    {
-                        "action": "set",
-                        "rx_channel": rx_channel,
-                        "tx_channel": tx_channel,
-                        "tx_device": tx_device,
-                    }
-                    for rx_channel, tx_channel, tx_device in records
-                ],
-            )
-        return await device.execute(self.commands.add_subscriptions(records))
-
-    @staticmethod
-    def _uses_modern_arc_280f(device) -> bool:
-        return any(
-            service.get("type") == SERVICE_ARC and (service.get("properties") or {}).get("arcp_vers") == "2.8.15"
-            for service in (getattr(device, "services", None) or {}).values()
-            if isinstance(service, dict)
+        return await self._send_subscription_records(
+            device,
+            [
+                {"action": "set", "rx_channel": number, "tx_channel": channel, "tx_device": transmitter}
+                for number, channel, transmitter in records
+            ],
         )
 
-    async def _send_modern_arc_subscription_records(self, device, records: list[dict]):
-        protocol_id = modern_arc_protocol_identifier_for_device(device)
-        receiver_count = len(device.rx_channels)
-        if receiver_count == 0:
-            raise RuntimeError("modern ARC subscription requires populated receiver channels")
-        page_capacity = min(32, receiver_count)
-        grouped: dict[int, list[dict]] = {}
-        for record in records:
-            channel_number = record["rx_channel"]
-            channel = device.rx_channels.get(channel_number)
-            media_type_code = getattr(channel, "media_type_code", None)
-            if media_type_code not in (3, 4):
-                raise RuntimeError(f"receiver channel {channel_number} has no supported media type")
-            grouped.setdefault(media_type_code, []).append(record)
+    async def _send_subscription_records(self, device, records: list[dict]):
+        pages = plan_receiver_subscription_commands(device, records)
 
         response = None
-        for media_type_code, media_records in grouped.items():
-            for start in range(0, len(media_records), page_capacity):
-                response = await device.execute(
-                    self.commands.modern_arc_subscription_page(
-                        protocol_id,
-                        page_capacity,
-                        media_type_code,
-                        media_records[start : start + page_capacity],
-                    )
-                )
+
+        for specification in pages:
+            response = await device.execute(specification)
+            acknowledgement = core.command_acknowledgement(response)
+
+            if not acknowledgement or acknowledgement.get("accepted") is not True:
+                return response
+
         return response
 
     async def send_capability_partition_export_request(self, device_ip_address, host_mac=None) -> None:
@@ -2300,7 +2103,9 @@ class DanteApplication:
             self.commands.probe_interface_statistics(host_mac, extended_073a=extended_073a),
         )
 
-    async def send_probe_lock_reset_status(self, device_ip_address, host_mac=None, request_value: int = 100) -> None:
+    async def send_probe_lock_reset_status(
+        self, device_ip_address, host_mac=None, request_value: int | None = None
+    ) -> None:
         await self._send_settings(device_ip_address, self.commands.probe_lock_reset_status(host_mac, request_value))
 
     async def send_probe_sample_rate(self, device_ip_address, host_mac=None) -> None:
@@ -2313,22 +2118,20 @@ class DanteApplication:
         await self._send_settings(device_ip_address, self.commands.probe_switch_configuration(host_mac))
 
     async def send_refresh_clock_status(
-        self, target, host_mac=None, sequence: int = 0x0021, record_revision=None
+        self, target, host_mac=None, message_id: int | None = None, record_revision=None
     ) -> None:
         from netaudio.dante.clock_control import clock_record_revision
 
         device = self._control_target(target)
         revision = clock_record_revision(device, record_revision)
-        await self._send_settings(device, self.commands.refresh_clock_status(revision, host_mac, sequence))
+        await self._send_settings(device, self.commands.refresh_clock_status(revision, host_mac, message_id))
 
     async def send_remove_subscriptions(self, device, channel_numbers):
         async with device.topology_mutation_lock:
-            if self._uses_modern_arc_280f(device):
-                return await self._send_modern_arc_subscription_records(
-                    device,
-                    [{"action": "clear", "rx_channel": channel_number} for channel_number in channel_numbers],
-                )
-            return await device.execute(self.commands.remove_subscriptions(channel_numbers))
+            return await self._send_subscription_records(
+                device,
+                [{"action": "clear", "rx_channel": channel_number} for channel_number in channel_numbers],
+            )
 
     async def send_set_channel_name(self, device, channel_type, channel_number, name, protocol_id=None):
         if protocol_id is None:
@@ -2336,9 +2139,7 @@ class DanteApplication:
         return await device.execute(self.commands.set_channel_name(channel_type, channel_number, name, protocol_id))
 
     async def send_set_encoding(self, device, encoding: int) -> None:
-        supported_encodings = device.supported_encodings
-        if supported_encodings is not None and encoding not in supported_encodings:
-            raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
+        require_writable(device, "encoding", encoding)
         await self._send_settings(device, self.commands.set_encoding(encoding))
 
     async def send_set_gain_level(
@@ -2354,14 +2155,10 @@ class DanteApplication:
             self.commands.set_gain_level(channel_number, gain_level, device_type, host_mac),
         )
 
-    async def send_set_interface_dhcp(
-        self, device_ip_address, host_mac=None, *, interface="primary", record_protocol_identifier=None
-    ) -> None:
+    async def send_set_interface_dhcp(self, device_ip_address, host_mac=None, *, interface="primary") -> None:
         await self._send_settings(
             device_ip_address,
-            self.commands.set_interface_dhcp(
-                host_mac, interface=interface, record_protocol_identifier=record_protocol_identifier
-            ),
+            self.commands.set_interface_dhcp(host_mac, interface=interface),
         )
 
     async def send_set_interface_static(
@@ -2374,7 +2171,6 @@ class DanteApplication:
         host_mac=None,
         *,
         interface="primary",
-        record_protocol_identifier=None,
     ) -> None:
         await self._send_settings(
             device_ip_address,
@@ -2385,7 +2181,6 @@ class DanteApplication:
                 gateway,
                 host_mac,
                 interface=interface,
-                record_protocol_identifier=record_protocol_identifier,
             ),
         )
 
@@ -2426,7 +2221,7 @@ class DanteApplication:
         return device.aes67_multicast_prefix
 
     async def set_channel_name(self, device, channel_type: str, channel_number: int, name: str):
-        self._require_receiver_channel_rename_supported(device, channel_type, channel_number)
+        require_channel_rename_supported(device, channel_type, channel_number)
         return await self.mutate_and_wait_for_notification(
             device,
             lambda: self.send_set_channel_name(device, channel_type, channel_number, name),
@@ -2463,8 +2258,6 @@ class DanteApplication:
         )
 
     async def _set_clock_configuration(self, device, changes: dict, timeout: float = 5.0, record_revision=None) -> dict:
-        from netaudio.dante.clock_control import clock_configuration_matches
-
         async with self._capability_probe_lock("clock_configuration", self._control_key(device)):
             preview = await self.preview_clock_configuration(
                 device, changes, timeout=timeout, record_revision=record_revision
@@ -2478,10 +2271,13 @@ class DanteApplication:
                 "requested": preview["requested"],
                 "status": _clock_status_snapshot(device),
             }
+
             if not sent:
                 return result
+
             await self._send_settings(device, self.commands.clock_control(preview["control"]))
             deadline = asyncio.get_running_loop().time() + timeout
+
             while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
                 try:
                     status = await self.probe_clocking_status(
@@ -2489,12 +2285,16 @@ class DanteApplication:
                     )
                 except (CapabilityProbeTimeout, RuntimeError, OSError):
                     status = None
+
                 if status is not None:
                     result["status"] = status
-                    if clock_configuration_matches(status, preview["requested"]):
+
+                    if core.clock_configuration_matches(status, preview["requested"]):
                         result["effective_state_confirmed"] = True
                         break
+
                 await asyncio.sleep(min(0.2, max(0, deadline - asyncio.get_running_loop().time())))
+
             return result
 
     async def set_clock_source(self, device, clock_source: int, timeout: float = 4.0) -> int | None:
@@ -2523,12 +2323,8 @@ class DanteApplication:
         )
 
     async def set_encoding(self, device, encoding: int, timeout: float = 2.0) -> dict | None:
-        if isinstance(encoding, bool) or not isinstance(encoding, int) or not 0 < encoding <= 0xFFFFFFFF:
-            raise ValueError("encoding must be an integer from 1 through 4294967295")
+        core.build_command({"command": "set_encoding", "encoding": encoding})
         require_writable(device, "encoding", encoding)
-        supported_encodings = device.supported_encodings
-        if supported_encodings is not None and encoding not in supported_encodings:
-            raise ValueError(f"requested encoding {encoding} is not supported; device reports {supported_encodings}")
 
         async def mutate() -> None:
             await self.send_set_encoding(device, encoding)
@@ -2542,7 +2338,7 @@ class DanteApplication:
             timeout,
         )
         if result is not None:
-            self._apply_encoding_capability(device, result)
+            apply_audio_capability(device, result, kind="encoding")
         return result
 
     async def set_gain_level(
@@ -2552,19 +2348,18 @@ class DanteApplication:
         gain_level: int,
         device_type: str,
         timeout: float = 4.0,
-    ) -> tuple[str, list[int]] | None:
-        from netaudio.dante.analog_control import apply_analog
-
-        result = await self._run_configuration_operation(
+    ) -> dict:
+        result = await self.apply_device_control(
             device,
             "analog_level",
             {"channel": channel_number, "level": gain_level, "direction": device_type},
-            lambda: apply_analog(self, device, channel_number, gain_level, device_type, timeout),
-            result_adapter=audit_control_result,
+            timeout=timeout,
         )
+
         if not result["effective_state_confirmed"]:
             raise RuntimeError(result.get("reason") or "Analog setting was sent but fresh readback did not confirm it.")
-        return device.gain_device_type, device.gain_levels
+
+        return result["status"]
 
     async def set_interface(
         self, device, mode: str, static_configuration: dict | None = None, *, interface="primary", timeout=2.0
@@ -2596,14 +2391,26 @@ class DanteApplication:
         )
 
     async def set_latency(self, device, milliseconds: float):
-        latency_milliseconds = float(milliseconds)
-        if not math.isfinite(latency_milliseconds) or latency_milliseconds < 0:
-            raise ValueError("latency must be a finite, nonnegative number")
-        return await self.mutate_and_wait_for_notification(
+        from netaudio.ddm.device_transport import ManagedOperationResult
+
+        specification = self.commands.set_latency(milliseconds)
+        core.build_command(specification)
+
+        response = await self.mutate_and_wait_for_notification(
             device,
-            lambda: device.execute(self.commands.set_latency(latency_milliseconds)),
-            (NOTIFICATION_LATENCY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
+            lambda: device.execute(specification),
+            (NOTIFICATION_PROPERTY_CHANGE, NOTIFICATION_SETTINGS_CHANGE),
         )
+
+        if isinstance(response, ManagedOperationResult):
+            acknowledgement = {"accepted": response.successful}
+        else:
+            acknowledgement = core.parse_response("command_acknowledgement", response) if response else None
+
+        accepted = acknowledgement["accepted"] if acknowledgement is not None else None
+        settings = await self.get_latency_settings(device) if accepted is True else None
+
+        return {**core.latency_control(milliseconds, settings, accepted), "request_acknowledgement": acknowledgement}
 
     async def set_receive_flow_performance(self, device, latency_microseconds: int, frames_per_packet: int):
         from netaudio.dante.performance_configuration import set_receive_flow_performance
@@ -2678,8 +2485,6 @@ class DanteApplication:
     ):
         from netaudio.dante.sample_rate_topology import change_sample_rate_topology_safe
 
-        require_writable(device, "sample_rate", sample_rate_hertz)
-
         async def probe():
             return await self.probe_sample_rate_status(device, timeout=timeout)
 
@@ -2712,15 +2517,9 @@ class DanteApplication:
         raw_value: int,
         timeout: float = 4.0,
     ) -> dict | None:
-        if isinstance(raw_value, bool) or not isinstance(raw_value, int) or not 0 <= raw_value <= 0xFFFFFFFF:
-            raise ValueError("raw_value must be an integer from 0 through 4294967295")
+        # Validate the native scalar before mutation; packet encoding also needs transport identity.
+        core.audio_capability_readback(None, raw_value)
         require_writable(device, "sample_rate_pullup", raw_value)
-        supported_raw_values = device.supported_sample_rate_pullup_raw_values
-        if supported_raw_values is not None and raw_value not in supported_raw_values:
-            raise ValueError(
-                f"requested sample rate pull-up value {raw_value} is not supported; "
-                f"device reports {supported_raw_values}"
-            )
 
         async def mutate() -> None:
             await self.send_set_sample_rate_pullup(device, raw_value)
@@ -2734,7 +2533,7 @@ class DanteApplication:
             timeout,
         )
         if result is not None:
-            self._apply_sample_rate_pullup_capability(device, result)
+            apply_audio_capability(device, result, kind="sample_rate_pullup")
         return result
 
     async def shutdown(self) -> None:

@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from generate_core_binding import check_generated
+
 
 def _exported_netaudio_symbols(library: Path) -> set[str] | None:
     if sys.platform == "win32":
@@ -83,7 +85,7 @@ def main() -> None:
     parser.add_argument(
         "--python-binding",
         type=Path,
-        default=Path("packages/netaudio/src/netaudio/core/binding.py"),
+        default=Path("packages/netaudio/src/netaudio/core/_abi.py"),
     )
     parser.add_argument(
         "--rust-source",
@@ -91,6 +93,7 @@ def main() -> None:
         default=Path("packages/netaudio-core/src/ffi/mod.rs"),
     )
     args = parser.parse_args()
+    check_generated(args.header, args.rust_source, args.python_binding)
     python_abi = _source_abi(args.python_binding, r"(?m)^ABI_VERSION\s*=\s*(\d+)\s*$")
     rust_abi = _source_abi(args.rust_source, r"NETAUDIO_ABI_VERSION:\s*u32\s*=\s*(\d+)")
     if python_abi != rust_abi:

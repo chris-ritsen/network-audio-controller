@@ -18,7 +18,7 @@ def device(family="bluetooth"):
     app, d = application_with_device("controls.local.", "192.0.2.5")
     d.platform_versions_record = {
         "platform_model_identifier": "DIOBT" if family == "bluetooth" else "DanteAV",
-        "plugin_identifiers": [],
+        "plugin_identifiers": ["DIOBT" if family == "bluetooth" else "DanteAV"],
     }
     d.virtual_panel_supported = True
     d.video_transmission_supported = family == "dante_av"
@@ -114,6 +114,10 @@ def synthetic_peer(app, d, values, *, delayed=0, wrong=False, revoke=False):
 def test_retained_bluetooth_fixtures_decode_typed_envelope(load_fixture, fixture, state):
     parsed = core.parse_response("panel_bluetooth_status", load_fixture(fixture))
     assert parsed["observations"][0]["value"]["state"] == state
+    assert parsed["observations"][0]["value"]["connected"] is (state == 1)
+    _, d = device()
+    observe_panel(d, {**parsed, "observed_at_unix": observation_time()})
+    assert d.bluetooth_connected is (state == 1)
     assert parsed["raw_record"] and parsed["source_identifier"]
     assert parsed["diagnostic_error"] is None
 
@@ -275,6 +279,8 @@ def test_hdcp_modes_use_supported_list_and_presets_skip_noops():
     capture = capture_device_controls(d)
     assert capture["settings"]["hdcp"] == {"mode": 3}
     assert capture["observed_extensions"]["latest_diagnostic"]["raw_record"] == [1, 2, 3]
+    observation(d, "hdcp", {"configured_mode": 99, "supported_modes": [99]})
+    assert plan_panel(d, "hdcp", {"mode": 99})["action"] == "unsupported"
 
 
 def test_malformed_observation_retains_raw_and_marks_existing_state_unavailable():
@@ -405,15 +411,40 @@ def test_preset_control_categories_and_unknown_fields_roundtrip():
     assert parsed["Panel"]["device_controls"] == config["device_controls"]
 
 
-def test_exact_advertised_model_selects_default_panel_but_never_overrides_panel_identity():
+def test_model_name_does_not_establish_panel_capability():
     _, d = device()
     d.platform_versions_record = {}
     d.model_id = "DIOBT"
-    assert panel_family(d) == "bluetooth"
+    assert panel_family(d) is None
+    observation(d, "bluetooth_discovery", 2)
+    assert plan_panel(d, "bluetooth_discovery", True)["action"] == "unsupported"
     d.platform_versions_record["plugin_identifiers"] = ["DanteAV"]
     assert panel_family(d) == "dante_av"
     d.platform_versions_record["plugin_identifiers"] = ["unsupported"]
     assert panel_family(d) is None
+
+
+@pytest.mark.parametrize(
+    "field,value,readable,writable",
+    [
+        ("management_state", "managed", False, False),
+        ("ipv4", None, False, False),
+        ("online", False, False, False),
+        ("virtual_panel_supported", False, False, False),
+        ("panel_read_allowed", False, False, False),
+        ("panel_write_allowed", False, True, False),
+        ("is_locked", True, True, False),
+        ("is_locked", None, True, False),
+        ("is_locked", False, True, True),
+    ],
+)
+def test_panel_permissions_keep_read_and_write_authority_distinct(field, value, readable, writable):
+    _, d = device()
+    setattr(d, field, value)
+    snapshot = panel_snapshot(d)
+
+    assert snapshot["readable"] is readable
+    assert snapshot["writable"] is writable
 
 
 def test_panel_observation_uses_journal_clock_resolution(monkeypatch, load_fixture):

@@ -8,28 +8,14 @@ import typer
 from netaudio._exit_codes import ExitCode
 from netaudio.cli_support.output import output_single, output_table
 from netaudio.cli_support.selection import filter_devices, select_device
-from netaudio.commands.config.readback import MUTATION_ERRORS, _send_verified_change
+from netaudio.dante.readback import MUTATION_ERRORS
 from netaudio.commands.device.display import _format_latency_milliseconds as format_latency_milliseconds
 from netaudio.dante.latency import latency_state_from_settings
 
 
-async def _read_latency_settings(application, device):
-    reader = getattr(application, "get_latency_settings", None)
-    if reader is None:
-        reader = application.get_device_settings
-    return await reader(device)
-
-
-async def _read_latency_setting_value(application, device, key):
-    settings = await _read_latency_settings(application, device)
-    if not isinstance(settings, dict) or settings.get(key) is None:
-        raise RuntimeError(f"{key} readback was unavailable")
-    return settings[key]
-
-
 async def _read_latency_target(application, server_name, device):
     try:
-        settings = await _read_latency_settings(application, device)
+        settings = await application.get_latency_settings(device)
         values = latency_state_from_settings(settings)
         if not values or not any(key.endswith("latency_ns") and value is not None for key, value in values.items()):
             raise RuntimeError("latency readback was unavailable")
@@ -131,17 +117,36 @@ async def run_latency(application, devices, value: float | None, all_devices: bo
         typer.echo("Error: latency must be a finite, nonnegative number.", err=True)
         raise typer.Exit(code=ExitCode.ERROR)
 
-    expected_nanoseconds = int(round(value * 1_000_000))
-    failures = await _send_verified_change(
-        targets,
-        lambda device: application.set_latency(device, value),
-        expected_nanoseconds,
-        "latency change",
-        lambda label: f"Set latency for {label}: {value:g} ms (verified)",
-        read_for=lambda device: _read_latency_setting_value(application, device, "active_latency_ns"),
-        describe=lambda nanoseconds: (
-            f"{nanoseconds / 1_000_000:g} ms" if isinstance(nanoseconds, int) else repr(nanoseconds)
-        ),
-    )
+    async def set_target(server_name, device):
+        label = device.name or server_name
+
+        try:
+            return label, await application.set_latency(device, value), None
+        except MUTATION_ERRORS as exception:
+            return label, None, exception
+
+    results = await asyncio.gather(*(set_target(server_name, device) for server_name, device in targets))
+    failures = 0
+
+    for label, result, exception in results:
+        if exception is not None:
+            typer.echo(f"Error: could not set latency for {label}: {exception}", err=True)
+            failures += 1
+            continue
+
+        if result["effective_state_confirmed"]:
+            typer.echo(f"Set configured latency for {label}: {result['configured_latency_ms']:g} ms (verified)")
+            continue
+
+        failures += 1
+        if result["state"] == "rejected":
+            detail = "device rejected the request"
+        elif result["configured_latency_ms"] is None:
+            detail = "configured latency readback was unavailable"
+        else:
+            detail = f"device reports {result['configured_latency_ms']:g} ms instead of {value:g} ms"
+
+        typer.echo(f"Error: latency change for {label}: {detail}", err=True)
+
     if failures:
         raise typer.Exit(code=ExitCode.ERROR)

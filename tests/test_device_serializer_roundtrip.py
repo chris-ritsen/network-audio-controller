@@ -1,9 +1,40 @@
 import json
 
+import pytest
+
 from netaudio.dante.channel import DanteChannel
 from netaudio.dante.device import DanteDevice
 from netaudio.dante.device_serializer import DanteDeviceSerializer
 from netaudio.dante.subscription import DanteSubscription
+
+
+@pytest.mark.parametrize("direction,channel_type,label", [("input", "tx", "+24 dBu"), ("output", "rx", "+18 dBu")])
+def test_gain_presentation_uses_direction_and_preserves_unknown_levels(direction, channel_type, label):
+    device = DanteDevice(server_name="analog.local.")
+    device.gain_device_type = direction
+    device.gain_levels = [1, 99]
+    device.supported_gain_levels = [1, 99]
+
+    serialized = DanteDeviceSerializer.to_json(device)
+
+    assert serialized["gain_level_choices"] == [{"value": 1, "label": label}, {"value": 99, "label": "Unknown"}]
+    assert device.gain_level_label_for_channel(1, channel_type) == label
+    assert device.gain_level_label_for_channel(2, channel_type) == "Unknown"
+    assert device.gain_level_for_channel(1, "rx" if channel_type == "tx" else "tx") is None
+
+
+def test_device_clock_source_presentation_matches_native_choices():
+    device = DanteDevice(server_name="clock.local.")
+    device.clock_source_code = 1
+    device.supported_clock_sources = [1, 99]
+
+    serialized = DanteDeviceSerializer.to_json(device)
+
+    assert serialized["clock_source"] == "external/BNC"
+    assert serialized["clock_source_choices"] == [
+        {"code": 0, "label": "internal"},
+        {"code": 1, "label": "external/BNC"},
+    ]
 
 
 def make_device():
@@ -72,6 +103,8 @@ def make_device():
     device.tx_channels[1] = tx_channel
 
     subscription = DanteSubscription()
+    subscription.rx_channel = device.rx_channels[1]
+    subscription.rx_device = device
     subscription.rx_channel_name = "ch1"
     subscription.rx_device_name = "Studio-AVIO"
     subscription.tx_channel_name = "out1"
@@ -86,6 +119,100 @@ def make_device():
 def roundtrip(device):
     wire = json.loads(json.dumps(DanteDeviceSerializer.to_json(device), default=str))
     return DanteDeviceSerializer.device_from_json(wire)
+
+
+def test_subscription_identity_survives_duplicate_labels_reordering_and_preset_export():
+    from netaudio.dante.subscription_operations import subscription_sources
+    from netaudio.monitoring.signals import snapshot_from_device
+    from netaudio.presets.serialization import device_preset_config
+
+    device = make_device()
+
+    for channel in device.rx_channels.values():
+        channel.name = "Duplicate"
+        channel.friendly_name = None
+
+    second = DanteSubscription()
+    second.rx_channel = device.rx_channels[2]
+    second.rx_device = device
+    second.tx_channel_name = "out2"
+    second.tx_device_name = "Mixer"
+    device.subscriptions.insert(0, second)
+    wire = json.loads(json.dumps(DanteDeviceSerializer.to_json(device), default=str))
+
+    assert [item["rx_channel_number"] for item in wire["subscriptions"]] == [2, 1]
+
+    restored = DanteDeviceSerializer.device_from_json(wire)
+    assert restored.subscriptions[0].rx_channel is restored.rx_channels[2]
+    assert restored.subscriptions[1].rx_channel is restored.rx_channels[1]
+    assert subscription_sources(restored, [1, 2]) == {1: ("out1", "Mixer"), 2: ("out2", "Mixer")}
+
+    saved = device_preset_config(restored, {"routing"})
+    assert saved["rx_subscriptions"][1]["tx_channel"] == "out1"
+    assert saved["rx_subscriptions"][2]["tx_channel"] == "out2"
+    assert snapshot_from_device(restored)["subscriptions"] == DanteDeviceSerializer.to_json(restored)["subscriptions"]
+
+
+@pytest.mark.parametrize("identity", [None, True, 0, "1", 99])
+def test_missing_or_invalid_subscription_identity_never_resolves_by_label(identity):
+    from netaudio.dante.subscription_operations import subscription_sources
+    from netaudio.presets.serialization import device_preset_config
+
+    wire = DanteDeviceSerializer.to_json(make_device())
+    wire["subscriptions"][0]["rx_channel_number"] = identity
+    restored = DanteDeviceSerializer.device_from_json(wire)
+
+    assert restored.subscriptions[0].rx_channel is None
+
+    with pytest.raises(RuntimeError, match="identity"):
+        subscription_sources(restored, [1])
+
+    with pytest.raises(ValueError, match="identity"):
+        device_preset_config(restored, {"routing"})
+
+
+def test_channel_status_refresh_keeps_same_name_subscriptions_separate():
+    device = make_device()
+
+    for channel in device.rx_channels.values():
+        channel.name = "Duplicate"
+
+    device.apply_receiver_channel_inventory(
+        {
+            "records": [
+                {
+                    "channel_number": 2,
+                    "local_channel_name": "Duplicate",
+                    "source_device_name": "Mixer",
+                    "source_channel_name": "out2",
+                },
+                {
+                    "channel_number": 1,
+                    "local_channel_name": "Renamed",
+                    "source_device_name": "Mixer",
+                    "source_channel_name": "out1",
+                },
+            ]
+        }
+    )
+
+    assert {item.rx_channel.number: item.tx_channel_name for item in device.subscriptions} == {1: "out1", 2: "out2"}
+
+    device.apply_receiver_channel_inventory(
+        {
+            "records": [
+                {"channel_number": 2, "local_channel_name": "Renamed"},
+                {
+                    "channel_number": 1,
+                    "local_channel_name": "Renamed",
+                    "source_device_name": "Mixer",
+                    "source_channel_name": "out1",
+                },
+            ]
+        }
+    )
+
+    assert [(item.rx_channel.number, item.tx_channel_name) for item in device.subscriptions] == [(1, "out1")]
 
 
 class TestSerializerRoundtrip:

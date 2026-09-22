@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from netaudio.cli_support.execution import readback_after_notification
+from netaudio.dante.readback import readback_after_notification
+from netaudio.dante.channel import channel_by_number
 from netaudio.dante.channel_frontend import (
     ChannelFrontendError,
-    channel_result_code,
+    require_channel_acknowledgement,
 )
-from netaudio.dante.const import RESULT_CODE_SUCCESS
 
 
 @dataclass(frozen=True)
@@ -17,21 +17,13 @@ class TransmitterChannelNameReconciliationResult:
     failures: dict[int, str]
 
 
-def _channel_by_number(device, channel_number):
-    channels = getattr(device, "tx_channels", None) or {}
-    channel = channels.get(channel_number)
-    if channel is not None:
-        return channel
-    return next(
-        (candidate for candidate in channels.values() if candidate.number == channel_number),
-        None,
-    )
-
-
 def _routing_name(device, channel_number):
-    channel = _channel_by_number(device, channel_number)
+    channels = getattr(device, "tx_channels", None) or {}
+    channel = channel_by_number(channels.values(), channel_number)
+
     if channel is None:
         raise RuntimeError(f"TX channel {channel_number} was unavailable during readback")
+
     return channel.friendly_name or channel.name
 
 
@@ -81,9 +73,7 @@ async def reconcile_transmitter_channel_names(
         try:
             async with device.topology_mutation_lock:
                 response = await application.set_channel_name(device, "tx", channel_number, desired_name)
-            result_code = channel_result_code(response, "transmitter channel name change")
-            if result_code != RESULT_CODE_SUCCESS:
-                raise ChannelFrontendError(f"transmitter channel name change failed with result 0x{result_code:04X}")
+            require_channel_acknowledgement(response, "transmitter channel name change")
         except (core.NetaudioCoreError, ChannelFrontendError, OSError, RuntimeError) as exception:
             failures[channel_number] = f"request failed: {exception}"
             continue

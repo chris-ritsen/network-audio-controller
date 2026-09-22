@@ -2,7 +2,8 @@ use crate::bytes::{read_u16, read_u32};
 use crate::heartbeat::{
     parse_heartbeat_device_extended_unique_identifier, parse_heartbeat_records,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 const FLOW_LATENCY_RECORD_TYPE: u16 = 0x8003;
 const LATE_PACKET_RECORD_TYPE: u16 = 0x8004;
@@ -11,13 +12,15 @@ const FLOW_LATENCY_VECTOR_OFFSET: u16 = 24;
 const LATE_PACKET_VECTOR_OFFSET: u16 = 20;
 const VECTOR_ENTRY_WIDTH: usize = 4;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatFlowLatencyEntry {
     pub receiver_flow_index: u16,
     pub latency_sample_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatFlowLatencyRecord {
     pub record_length: u16,
     pub extension_length: u16,
@@ -32,13 +35,15 @@ pub struct HeartbeatFlowLatencyRecord {
     pub entries: Vec<HeartbeatFlowLatencyEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatLatePacketEntry {
     pub receiver_flow_index: u16,
     pub late_packet_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatLatePacketRecord {
     pub record_length: u16,
     pub extension_length: u16,
@@ -52,7 +57,8 @@ pub struct HeartbeatLatePacketRecord {
     pub entries: Vec<HeartbeatLatePacketEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HeartbeatConnectionHealthRecords {
     pub device_extended_unique_identifier: String,
     pub latency_records: Vec<HeartbeatFlowLatencyRecord>,
@@ -186,6 +192,225 @@ pub fn parse_heartbeat_connection_health_packet(
         latency_records,
         late_packet_records,
     })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PreviousStream {
+    pub sequence: u16,
+    pub elapsed_seconds: f64,
+    pub fresh: bool,
+    pub late_counts: Vec<HeartbeatLatePacketEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UpdateRequest {
+    pub records: HeartbeatConnectionHealthRecords,
+    pub freshness_seconds: f64,
+    pub latency_previous: Option<PreviousStream>,
+    pub late_previous: Option<PreviousStream>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct LatencySample {
+    pub receiver_flow_index: u16,
+    pub latency_sample_count: u32,
+    pub sample_rate_hertz: u32,
+    pub latency_nanoseconds: u64,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct LatencyUpdate {
+    pub sequence: u16,
+    pub preserve_history: bool,
+    pub samples: Vec<LatencySample>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct LateSample {
+    pub receiver_flow_index: u16,
+    pub late_packet_count: u32,
+    pub late_packet_delta: Option<u32>,
+    pub preserve_history: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct LateUpdate {
+    pub sequence: u16,
+    pub samples: Vec<LateSample>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ConnectionHealthUpdate {
+    pub device_extended_unique_identifier: String,
+    pub latency: Option<LatencyUpdate>,
+    pub late_packets: Option<LateUpdate>,
+}
+
+fn sequence_progress(
+    previous: Option<&PreviousStream>,
+    sequence: u16,
+    freshness: f64,
+) -> Option<(bool, bool)> {
+    let Some(previous) = previous else {
+        return Some((false, false));
+    };
+
+    if !previous.elapsed_seconds.is_finite() || previous.elapsed_seconds < 0.0 {
+        return None;
+    }
+
+    if !previous.fresh || previous.elapsed_seconds >= freshness {
+        return Some((false, false));
+    }
+
+    let delta = sequence.wrapping_sub(previous.sequence);
+    (delta != 0 && delta < 0x8000).then_some((true, delta == 1))
+}
+
+fn common_sequence(sequences: impl Iterator<Item = u16>) -> Result<Option<u16>, String> {
+    let mut sequence = None;
+
+    for current in sequences {
+        if sequence.is_some_and(|previous| previous != current) {
+            return Err("connection-health records disagree on sequence".into());
+        }
+
+        sequence = Some(current);
+    }
+
+    Ok(sequence)
+}
+
+/// Validate both record families before returning any state change. The caller
+/// owns retention and observation timestamps; sequence and counter semantics live here.
+pub fn plan_update(request: UpdateRequest) -> Result<Option<ConnectionHealthUpdate>, String> {
+    let records = request.records;
+    let identity = &records.device_extended_unique_identifier;
+
+    if identity.len() != 16
+        || !identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || identity.bytes().all(|byte| byte == b'0')
+        || !request.freshness_seconds.is_finite()
+        || request.freshness_seconds <= 0.0
+    {
+        return Err("invalid connection-health identity or freshness interval".into());
+    }
+
+    let latency_sequence =
+        common_sequence(records.latency_records.iter().map(|record| record.sequence))?;
+    let late_sequence = common_sequence(
+        records
+            .late_packet_records
+            .iter()
+            .map(|record| record.sequence),
+    )?;
+    let mut seen = HashSet::new();
+    let mut samples = Vec::new();
+
+    for record in records.latency_records {
+        if record.sample_rate_hertz == 0 || usize::from(record.entry_count) != record.entries.len()
+        {
+            return Err("invalid connection-health latency record".into());
+        }
+
+        for entry in record.entries {
+            if !seen.insert(entry.receiver_flow_index) {
+                return Err("duplicate connection-health latency flow".into());
+            }
+
+            let numerator = u64::from(entry.latency_sample_count) * 1_000_000_000;
+            let denominator = u64::from(record.sample_rate_hertz);
+            let quotient = numerator / denominator;
+            let twice_remainder = (numerator % denominator) * 2;
+            let round_up = twice_remainder > denominator
+                || (twice_remainder == denominator && quotient % 2 != 0);
+            samples.push(LatencySample {
+                receiver_flow_index: entry.receiver_flow_index,
+                latency_sample_count: entry.latency_sample_count,
+                sample_rate_hertz: record.sample_rate_hertz,
+                latency_nanoseconds: quotient + u64::from(round_up),
+            });
+        }
+    }
+
+    let latency = latency_sequence.and_then(|sequence| {
+        let (preserve_history, _) = sequence_progress(
+            request.latency_previous.as_ref(),
+            sequence,
+            request.freshness_seconds,
+        )?;
+        Some(LatencyUpdate {
+            sequence,
+            preserve_history,
+            samples,
+        })
+    });
+    seen.clear();
+    let mut late_values = Vec::new();
+
+    for record in records.late_packet_records {
+        if usize::from(record.entry_count) != record.entries.len() {
+            return Err("invalid connection-health late-packet record".into());
+        }
+
+        for entry in record.entries {
+            if !seen.insert(entry.receiver_flow_index) {
+                return Err("duplicate connection-health late-packet flow".into());
+            }
+
+            late_values.push(entry);
+        }
+    }
+
+    let late_packets = late_sequence.and_then(|sequence| {
+        let (preserve, consecutive) = sequence_progress(
+            request.late_previous.as_ref(),
+            sequence,
+            request.freshness_seconds,
+        )?;
+        let previous: HashMap<_, _> = request
+            .late_previous
+            .as_ref()
+            .into_iter()
+            .flat_map(|stream| &stream.late_counts)
+            .map(|entry| (entry.receiver_flow_index, entry.late_packet_count))
+            .collect();
+        let samples = late_values
+            .into_iter()
+            .map(|entry| {
+                let prior = previous
+                    .get(&entry.receiver_flow_index)
+                    .filter(|count| preserve && **count <= entry.late_packet_count);
+                LateSample {
+                    receiver_flow_index: entry.receiver_flow_index,
+                    late_packet_count: entry.late_packet_count,
+                    late_packet_delta: prior
+                        .filter(|_| consecutive)
+                        .map(|count| entry.late_packet_count - count),
+                    preserve_history: prior.is_some(),
+                }
+            })
+            .collect();
+
+        Some(LateUpdate { sequence, samples })
+    });
+
+    Ok(
+        (latency.is_some() || late_packets.is_some()).then_some(ConnectionHealthUpdate {
+            device_extended_unique_identifier: records.device_extended_unique_identifier,
+            latency,
+            late_packets,
+        }),
+    )
 }
 
 #[cfg(test)]

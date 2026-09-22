@@ -105,7 +105,6 @@ class DanteCMCService:
         host_media_access_control_address: bytes | None = None,
     ):
         self._transport = transport
-        self._sequence_counter = 0
         self._registered_devices: set[str] = set()
         self._heartbeat_task: asyncio.Task | None = None
         self._host_media_access_control_address = host_media_access_control_address
@@ -130,7 +129,7 @@ class DanteCMCService:
         return frozenset(self._registered_devices)
 
     @staticmethod
-    def _registration_response_is_successful(sequence: int, response: bytes | None) -> bool:
+    def _registration_response_is_successful(message_id: int, response: bytes | None) -> bool:
         if response is None:
             return False
         from netaudio import core
@@ -139,7 +138,7 @@ class DanteCMCService:
             parsed = core.parse_response("cmc_registration", response)
         except core.NetaudioCoreError:
             return False
-        return parsed == {"sequence": sequence, "status": 1}
+        return parsed["sequence"] == message_id and parsed["accepted"]
 
     async def register_device(
         self,
@@ -148,12 +147,13 @@ class DanteCMCService:
     ) -> bytes | None:
         from netaudio import core
 
-        sequence = self._sequence_counter
-        self._sequence_counter = (self._sequence_counter + 1) & 0xFFFF
+        message_id = core.next_message_id()
         host_mac = host_media_access_control_address or self._host_media_access_control_address
-        specification = {"command": "cmc_register", "sequence": sequence}
+        specification = {"command": "cmc_register", "message_id": message_id}
+
         if host_mac is not None:
             specification["host_mac"] = host_mac.hex()
+
         try:
             response = await self._transport.execute(
                 str(device_ip),
@@ -163,7 +163,7 @@ class DanteCMCService:
             logger.debug(f"CMC registration request failed for {device_ip}: {exception}")
             response = None
 
-        if self._registration_response_is_successful(sequence, response):
+        if self._registration_response_is_successful(message_id, response):
             self._registered_devices.add(device_ip)
             logger.debug(f"CMC registered with {device_ip}")
             return response

@@ -7,6 +7,7 @@ pub trait Wire: Sized {
 macro_rules! numbers {
     ($name:ident { $($field:ident : $n:literal),* $(,)? }) => {
         #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         #[serde(deny_unknown_fields)]
         pub struct $name { $(pub $field:u32,)* }
         impl Wire for $name {
@@ -40,6 +41,7 @@ numbers!(BandwidthSettings {
     enabled: 4
 });
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct SelectionMode {
     pub manual_resolution: bool,
@@ -126,6 +128,7 @@ pub struct ViscaStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BluetoothConnection {
     pub state: u32,
+    pub connected: Option<bool>,
     pub peer_name: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,8 +173,14 @@ pub fn decode_application(family: &str, data: &[u8]) -> Option<Vec<PanelObservat
                     let Some(d) = pb::nested(&v, 1)? else {
                         continue;
                     };
+                    let state = pb::uint(&d, 1)?;
                     PanelObservation::BluetoothConnection(BluetoothConnection {
-                        state: pb::uint(&d, 1)?,
+                        state,
+                        connected: match state {
+                            1 => Some(true),
+                            2 => Some(false),
+                            _ => None,
+                        },
                         peer_name: pb::string(&d, 2)?,
                     })
                 }

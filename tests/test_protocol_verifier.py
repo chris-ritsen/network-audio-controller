@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from netaudio import core
 from netaudio.dante.const import DEVICE_ARC_PORT, SERVICE_ARC
-from netaudio.dante.device_commands import DanteDeviceCommands
 from netaudio.dante.packet_store import PacketQuery, PacketRecord
 from netaudio.dante.protocol_verifier import ProtocolVerifier
 
@@ -140,13 +140,7 @@ async def test_bundle_export(temp_db, output_dir):
 
 @pytest.mark.asyncio
 async def test_send_command_unwraps_tuple(temp_db, output_dir):
-    commands = DanteDeviceCommands()
-    command_tuple = commands.command_device_name()
-
-    assert isinstance(command_tuple, tuple)
-    assert len(command_tuple) == 2
-    assert isinstance(command_tuple[0], bytes)
-    assert command_tuple[1] == SERVICE_ARC
+    command_tuple = (core.build_command({"command": "device_name"}), SERVICE_ARC)
 
     fake_response = _fake_response(opcode=0x1002)
 

@@ -5,7 +5,6 @@ from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import netaudio._capture as capture_module
 import netaudio.cli_support.execution as common_module
 import pytest
 from netaudio.commands.device import cli as device_commands
@@ -206,17 +205,33 @@ def test_device_show_csv_is_a_two_column_summary(monkeypatch):
     assert all(len(row) == 2 for row in rows)
 
 
-def test_device_show_distinguishes_disconnected_bluetooth_from_unknown():
+@pytest.mark.parametrize("model", ["DIOBT", "Unfamiliar adapter", None])
+def test_bluetooth_presentation_follows_reported_state_in_list_and_detail(model):
     device = make_show_device()
-    device.model_id = "DIOBT"
+    device.model_id = model
+
+    def bluetooth_list_value():
+        row = dict(
+            zip(
+                device_display.device_list_headers(True),
+                device_display.device_list_row(device.server_name, device, True),
+            )
+        )
+        return row["Bluetooth"]
+
+    assert "Bluetooth" not in dict(device_commands._device_show_rows(device))
+    assert bluetooth_list_value() == ""
+
     device.bluetooth_connected = False
     rows = dict(device_commands._device_show_rows(device))
     assert rows["Bluetooth"] == "disconnected"
+    assert bluetooth_list_value() == rows["Bluetooth"]
 
     device.bluetooth_connected = True
     device.bluetooth_device = "studio-phone"
     rows = dict(device_commands._device_show_rows(device))
     assert rows["Bluetooth"] == "studio-phone"
+    assert bluetooth_list_value() == rows["Bluetooth"]
 
 
 def test_device_show_distinguishes_receiver_flow_setting_from_measured_latency():
@@ -495,6 +510,8 @@ def test_device_show_clock_port_states_use_standard_ptp_names():
             "network_interface_index": 2,
             "state_code": 9,
             "link_down": False,
+            "state": "follower",
+            "role": "Follower",
         },
         {
             "record_number": 2,
@@ -504,6 +521,7 @@ def test_device_show_clock_port_states_use_standard_ptp_names():
             "network_interface_index": 2,
             "state_code": 3,
             "link_down": False,
+            "state": "disabled",
         },
         {
             "record_number": 3,
@@ -522,7 +540,14 @@ def test_device_show_clock_port_states_use_standard_ptp_names():
         "Disabled",
         "Link down",
     ]
-    assert device_display.ptp_port_state_name(0xDED4) == "Unknown state (0xDED4)"
+
+
+@pytest.mark.parametrize(
+    "code,state,label", [(0, "startup", "Startup"), (10, "passive-l", "Passive-L"), (65535, None, "Unknown")]
+)
+def test_clock_port_presentation_uses_native_state_without_exposing_unknown_codes(code, state, label):
+    record = {"state_code": code, "state": state, "role": None, "link_down": False}
+    assert device_display._format_clock_port_record(record) == label
 
 
 def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
@@ -546,9 +571,8 @@ def test_explicitly_fetched_empty_channel_inventory_clears_stale_channels():
 
     assert device.tx_count == device.rx_count == 0
     assert device.transmit_flow_authoring_capability_word == 0
-    assert device.transmit_flow_authoring_opcode == 0x2201
-    assert device.transmit_flow_authoring_protocol_id == 0x2729
-    assert device.receiver_flow_inventory_opcode == 0x3200
+    assert device.transmit_flow_authoring["protocol_id"] == 0x2729
+    assert device.receiver_flow_inventory_family == "legacy"
     assert device.tx_channels == {}
     assert device.rx_channels == {}
     assert device.subscriptions == []
@@ -585,66 +609,6 @@ def test_format_clock_frequency_offset_preserves_parts_per_billion_resolution(
 )
 def test_format_link_speed_preserves_generic_numeric_values(link_speed_mbps, expected):
     assert device_display._format_link_speed(link_speed_mbps) == expected
-
-
-def test_instrumented_summary_fetch_skips_channel_pages(monkeypatch):
-    fetch_rx_records = MagicMock()
-    fetch_tx_records = MagicMock()
-
-    def query_response(client, specification, port, parse_kind=None, starting_channel=None):
-        if specification["command"] == "channel_count":
-            return {
-                "tx_count": 128,
-                "rx_count": 128,
-                "locked": False,
-                "transmit_flow_authoring_capability_word": 0,
-            }
-        if specification["command"] == "device_settings":
-            return {"sample_rate": 48_000}
-        if specification["command"] == "query_latency_config":
-            return bytes.fromhex(
-                "28090094180011000001171702010001820400688205006c021000100211001000008218000082198301007083020074830600780310001003110010030300028021007c000000f08060008c002200010063000100000064000000650222138c0212003083210090000f4240000f4240000f42400135f1b4000f424000000000000000000000000000000000ef450000001e8480"
-            )
-        raise AssertionError(f"Unexpected command: {specification['command']}")
-
-    monkeypatch.setattr(capture_module, "fetch_device_name", lambda client, port: "lx-dante")
-    monkeypatch.setattr(capture_module, "fetch_rx_records", fetch_rx_records)
-    monkeypatch.setattr(capture_module, "fetch_tx_records", fetch_tx_records)
-    monkeypatch.setattr(capture_module, "_query", query_response)
-
-    controls = capture_module._fetch_instrumented(MagicMock(), 4440, include_channels=False)
-
-    assert controls["name"] == "lx-dante"
-    assert controls["counts"] == (128, 128, False, 0)
-    assert controls["aes67"] is False
-    assert controls["aes67_multicast_prefix"] == "239.69.0.0"
-    assert controls["rx"] == []
-    assert controls["tx"] == []
-    fetch_rx_records.assert_not_called()
-    fetch_tx_records.assert_not_called()
-
-
-def test_instrumented_fetch_keeps_missing_authoring_capability_unavailable(monkeypatch):
-    monkeypatch.setattr(capture_module, "fetch_device_name", lambda client, port: "unavailable")
-    monkeypatch.setattr(capture_module, "fetch_rx_records", MagicMock(return_value=[]))
-    monkeypatch.setattr(capture_module, "fetch_tx_records", MagicMock(return_value=[]))
-    monkeypatch.setattr(capture_module, "_query", lambda *_args, **_kwargs: None)
-    client = MagicMock()
-    client.get_channel_audio_metadata.return_value = None
-
-    controls = capture_module._fetch_instrumented(client, 4440)
-    device = make_show_device()
-    device.transmit_flow_authoring_capability_word = 0x1000
-    device.transmit_flow_authoring_opcode = 0x2601
-    device.transmit_flow_authoring_protocol_id = 0x2809
-    device.receiver_flow_inventory_opcode = 0x3600
-    device.apply_controls(device.controls_data_from_core(controls))
-
-    assert controls["counts"] == (0, 0, None, None)
-    assert device.transmit_flow_authoring_capability_word is None
-    assert device.transmit_flow_authoring_opcode is None
-    assert device.transmit_flow_authoring_protocol_id is None
-    assert device.receiver_flow_inventory_opcode is None
 
 
 @pytest.mark.asyncio
@@ -880,10 +844,9 @@ async def test_show_loader_uses_exact_name_resolution_and_selected_population(mo
 async def test_summary_control_fetch_skips_channel_pages(monkeypatch):
     device = make_show_device()
     core_client = MagicMock()
-    core_client.observer = None
     core_client.get_device_name.return_value = "lx-dante"
     core_client.get_channel_count.return_value = (128, 128, False, 0)
-    core_client.get_device_settings.return_value = {"sample_rate": 48_000}
+    core_client.get_device_settings.return_value = {"sample_rate": 48_000, "performance_values": []}
     core_client.get_property_directory.return_value = None
     core_client.get_aes67_configured.return_value = False
     core_client.execute.return_value = bytes.fromhex(

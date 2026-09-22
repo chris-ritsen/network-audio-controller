@@ -50,14 +50,13 @@ function SubscriptionTable({ all }) {
   const rows = [];
   for (const device of all) {
     const receiveChannels = device.channels ? device.channels.receivers || {} : {};
-    const numbers = format.sortedChannelNumbers(receiveChannels);
     for (const subscription of device.subscriptions || []) {
       if (!subscription.tx_device || !subscription.tx_channel) {
         continue;
       }
       rows.push({
         device,
-        receiveNumber: numbers.find((number) => receiveChannels[number].name === subscription.rx_channel),
+        receiveNumber: receiveChannels[subscription.rx_channel_number] ? subscription.rx_channel_number : undefined,
         subscription,
       });
     }
@@ -70,7 +69,7 @@ function SubscriptionTable({ all }) {
             tableId="subscriptions"
             columns=${subscriptionColumns()}
             rows=${rows}
-            rowKey=${(row) => `${row.device.server_name}:${row.subscription.rx_channel}`}
+            rowKey=${(row) => `${row.device.server_name}:${row.subscription.rx_channel_number}`}
           />`}
     <//>
   `;

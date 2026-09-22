@@ -4,13 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from netaudio import DanteDevice
+from netaudio import DanteDevice, core
 from netaudio.dante.const import SERVICE_ARC
 from netaudio.dante.performance_configuration import (
-    PROPERTY_RX_FLOW_FRAMES_PER_PACKET,
-    PROPERTY_RX_FLOW_LATENCY_NS,
-    PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET,
-    PROPERTY_UNICAST_CONFIGURED_LATENCY_NS,
     PerformanceOperationResult,
 )
 from netaudio.presets.loading import MatchedPresetDevice, apply_preset_plan, build_preset_plan
@@ -25,8 +21,8 @@ def _device() -> DanteDevice:
     device.platform_software_version = "3.0.0"
     device.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.8.9"}}}
     device.settings_properties = [
-        {"property_id": PROPERTY_RX_FLOW_LATENCY_NS, "flags": 0},
-        {"property_id": PROPERTY_RX_FLOW_FRAMES_PER_PACKET, "flags": 0},
+        {"property_id": 0x8301, "flags": 0},
+        {"property_id": 0x0310, "flags": 0},
     ]
     return device
 
@@ -53,8 +49,8 @@ def test_schema_v3_round_trips_typed_performance_fields():
 def test_device_preset_save_projects_observed_performance_values():
     device = _device()
     device.performance_settings = {
-        PROPERTY_RX_FLOW_LATENCY_NS: 250_000,
-        PROPERTY_RX_FLOW_FRAMES_PER_PACKET: 8,
+        0x8301: 250_000,
+        0x0310: 8,
     }
 
     config = device_preset_config(device, {"audio"})
@@ -63,6 +59,89 @@ def test_device_preset_save_projects_observed_performance_values():
         "latency_microseconds": 250,
         "frames_per_packet": 8,
     }
+
+
+def test_empty_native_settings_refresh_removes_stale_performance_from_presets():
+    device = _device()
+    device.performance_settings = {0x8301: 250000, 0x0310: 8}
+    packet = bytes.fromhex("2809000c0001110000010200")
+    controls = device.controls_data_from_core(
+        {
+            "name": None,
+            "counts": (0, 0, None, None),
+            "settings": core.parse_response("device_settings", packet),
+            "rx": [],
+            "tx": [],
+            "channels_included": False,
+        }
+    )
+    device.apply_controls(controls)
+
+    config = device_preset_config(device, {"audio"})
+
+    assert device.performance_settings == {}
+    assert "receive_flow_performance" not in config
+    assert "unicast_performance" not in config
+
+
+@pytest.mark.parametrize(
+    "operation,values,expected",
+    [
+        (
+            "receive_flow_performance",
+            {0x8301: 250000, 0x0310: 8},
+            {"latency_microseconds": 250, "frames_per_packet": 8},
+        ),
+        (
+            "transmit_flow_performance",
+            {0x8204: 500000, 0x0210: 4},
+            {"latency_microseconds": 500, "frames_per_packet": 4},
+        ),
+        ("unicast_performance", {0x8205: 1000000, 0x0211: 16}, {"latency_microseconds": 1000, "frames_per_packet": 16}),
+        ("receive_flow_default_slots", {0x0303: 4}, 4),
+    ],
+)
+def test_native_performance_snapshot_round_trips_through_presets_and_command_plan(operation, values, expected):
+    snapshot = core.performance_snapshot({"property_ids": list(values), "values": values})
+    assert snapshot[operation] == expected
+
+    device = _device()
+    device.settings_properties = [{"property_id": property_id, "flags": 0} for property_id in values]
+    device.performance_settings = values
+    xml = format_preset_configs({"Desk": device_preset_config(device, {"audio"})}, sections={"audio"})
+    _, parsed = parse_preset_xml(xml)
+    payload = parsed["Desk"][operation]
+    assert payload == expected
+
+    specification = {
+        "command": f"set_{operation}",
+        "negotiated_protocol_id": 0x2809,
+        "supported_property_ids": list(values),
+        **({"default_slots": payload} if operation == "receive_flow_default_slots" else payload),
+    }
+
+    if operation in ("receive_flow_performance", "unicast_performance"):
+        specification["platform_software_version"] = [3, 0, 0]
+
+    plan = core.plan_performance_command(specification)
+    assert {entry["property_id"]: entry["value"] for entry in plan} == values
+
+
+@pytest.mark.parametrize(
+    "properties,values",
+    [
+        ([], {0x8301: 250000, 0x0310: 8}),
+        ([0x8301, 0x0310], {0x8301: 250000}),
+        ([0x8301, 0x0310], {0x8301: 250001, 0x0310: 8}),
+        ([0x8301, 0x0310], {0x8301: -1000, 0x0310: 8}),
+        ([0x8301, 0x0310], {0x8301: 250000, 0x0310: 65536}),
+        ([0x8301, 0x0310], {0x8301: 250000, 0x0310: True}),
+        ([0x0303], {0x0303: 65536}),
+        ([0x8304], {0x8304: 1000}),
+    ],
+)
+def test_native_performance_snapshot_omits_unknown_incomplete_or_unrepresentable_settings(properties, values):
+    assert core.performance_snapshot({"property_ids": properties, "values": values}) == {}
 
 
 def test_device_preset_preserves_distinct_version_namespaces_and_provenance():
@@ -113,14 +192,14 @@ def test_device_preset_does_not_collapse_incomplete_or_disagreeing_unicast_prope
     assert device.settings_properties is not None
     device.settings_properties.extend(
         [
-            {"property_id": PROPERTY_UNICAST_CONFIGURED_LATENCY_NS, "flags": 0},
-            {"property_id": PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET, "flags": 0},
+            {"property_id": 0x8205, "flags": 0},
+            {"property_id": 0x0211, "flags": 0},
         ]
     )
     device.performance_settings = {
-        PROPERTY_UNICAST_CONFIGURED_LATENCY_NS: 250_000,
-        PROPERTY_UNICAST_CONFIGURED_FRAMES_PER_PACKET: 8,
-        PROPERTY_RX_FLOW_LATENCY_NS: 500_000,
+        0x8205: 250_000,
+        0x0211: 8,
+        0x8301: 500_000,
     }
 
     config = device_preset_config(device, {"audio"})
@@ -132,13 +211,11 @@ def test_device_preset_does_not_collapse_incomplete_or_disagreeing_unicast_prope
 async def test_preset_plans_fresh_readback_then_stores_only_after_confirmation():
     device = _device()
     expected = {
-        PROPERTY_RX_FLOW_LATENCY_NS: 250_000,
-        PROPERTY_RX_FLOW_FRAMES_PER_PACKET: 8,
+        0x8301: 250_000,
+        0x0310: 8,
     }
     application = type("Application", (), {})()
-    application.get_performance_settings = AsyncMock(
-        return_value={PROPERTY_RX_FLOW_LATENCY_NS: 500_000, PROPERTY_RX_FLOW_FRAMES_PER_PACKET: 8}
-    )
+    application.get_performance_settings = AsyncMock(return_value={0x8301: 500_000, 0x0310: 8})
     application.set_receive_flow_performance = AsyncMock(
         return_value=PerformanceOperationResult(
             "set_receive_flow_performance",
@@ -192,4 +269,72 @@ async def test_preset_plans_fresh_readback_then_stores_only_after_confirmation()
     assert storage.persistence_request_acknowledgement == {"accepted": True}
     assert storage.persistence_confirmation is None
     assert report.failures == 0
-    assert report.unverified == 0
+    assert report.unverified == 1
+
+    from netaudio.commands.preset.loading import _report_preset_load
+    from typer import Exit
+
+    with pytest.raises(Exit) as exit_status:
+        _report_preset_load(report)
+
+    assert exit_status.value.exit_code != 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,failures,unverified",
+    [
+        ("rejected", 1, 0),
+        ("contradicted", 1, 0),
+        ("request_acknowledged", 0, 1),
+        ("unverified", 0, 1),
+        ("unknown_result", 0, 1),
+    ],
+)
+async def test_uncertain_or_failed_preset_stops_before_remaining_changes_and_storage(state, failures, unverified):
+    from types import SimpleNamespace
+    from netaudio.presets.loading import PresetAction, PresetActionState, PresetDeviceActions, PresetLoadPlan
+
+    device = _device()
+    result = PerformanceOperationResult(
+        "set_receive_flow_performance",
+        state,
+        {},
+        {},
+        {"accepted": state != "rejected"},
+        None,
+        None,
+        None,
+        None,
+        "device outcome",
+    )
+    application = SimpleNamespace(
+        set_receive_flow_performance=AsyncMock(return_value=result),
+        store_current_configuration=AsyncMock(),
+    )
+    plan = PresetLoadPlan(
+        [
+            PresetDeviceActions(
+                actions=[
+                    PresetAction(
+                        "receive_flow_performance",
+                        {"latency_microseconds": value, "frames_per_packet": 8},
+                        PresetActionState.CHANGE,
+                    )
+                    for value in (250, 500)
+                ],
+                config={},
+                device=device,
+                device_name=device.name,
+                server_name=device.server_name,
+            )
+        ]
+    )
+
+    report = await apply_preset_plan(application, plan, stop_on_failure=True, store_current_configuration=True)
+
+    application.set_receive_flow_performance.assert_awaited_once()
+    application.store_current_configuration.assert_not_awaited()
+    assert [operation.state for operation in report.operations] == [state]
+    assert report.failures == failures
+    assert report.unverified == unverified

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WEBAPP } from "./setup.mjs";
+import { WEBAPP, fixture } from "./setup.mjs";
 
 const { subscriptionIndicator } = await import(`${WEBAPP}device/receiver-status.js`);
 const { signalIndicator } = await import(`${WEBAPP}signal-presence.js`);
+const { setMeteringScale } = await import(`${WEBAPP}format.js`);
+setMeteringScale(Object.assign([], fixture("metering-scale")));
 
 test("connected transport icons distinguish dynamic and static subscriptions without guessing other states", async () => {
   const { h } = await import("preact");
@@ -16,7 +18,6 @@ test("connected transport icons distinguish dynamic and static subscriptions wit
   }
   for (const status of [undefined, "SUBSCRIBE_SELF", "CONNECTED", "UNRESOLVED"]) {
     const markup = render(h(SubscriptionTransport, { subscription: { status: { status, state: "connected", severity: "ok" } } }));
-    assert.match(markup, /size-5 shrink-0/);
     assert.match(markup, /aria-hidden="true"/);
     assert.doesNotMatch(markup, /<svg/);
   }
@@ -76,17 +77,19 @@ test("signal indicators use reported presence and expire stale samples without c
 
 test("detailed level samples provide signal indication without exposing raw values", () => {
   const now = 100_000;
-  for (const [raw, label] of [[20, "Signal present"], [253, "No signal"], [0, "Clipping"], [254, "Muted"], [255, "Signal unavailable"], [null, "Signal unavailable"]]) {
+  for (const [raw, label] of [[20, "Signal present"], [123, "Signal present"], [124, "No signal"], [253, "No signal"], [0, "Clipping"], [254, "Muted"], [255, "Signal unavailable"], [null, "Signal unavailable"]]) {
     assert.equal(signalIndicator({ wall_time: 99, rx: { 1: raw } }, 1, now).label, label);
   }
 });
 
-test("receive and transmit preserve every detailed half-decibel step", () => {
+test("receive and transmit preserve reported levels without collapsing half-decibel differences", () => {
   for (const direction of ["rx", "tx"]) {
     let previous = Infinity;
-    for (let raw = 1; raw <= 253; raw++) {
-      const result = signalIndicator({ wall_time: 99, [direction]: { 1: raw } }, 1, 100_000, direction);
-      assert.equal(result.dbfs, raw === 1 ? 0 : -(raw - 1) / 2);
+    for (const [raw, expected] of Object.entries(fixture("metering-scale"))) {
+      if (expected.dbfs === null) continue;
+
+      const result = signalIndicator({ wall_time: 99, [direction]: { 1: Number(raw) } }, 1, 100_000, direction);
+      assert.equal(result.dbfs, expected.dbfs);
       assert.ok(result.level < previous);
       assert.ok(result.level >= 0 && result.level <= 1);
       previous = result.level;

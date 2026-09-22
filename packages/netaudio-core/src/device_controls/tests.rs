@@ -1,6 +1,14 @@
 //! Synthetic vectors constructed from the supplied device-control specification (2026-09-18).
 //! Specification SHA-256: affe89a224d5f9004f37e0e3f01f80cdbe15c8e724bc56d00b57e42bfad8096d
 use super::*;
+
+#[test]
+fn panel_sequence_wraps_without_issuing_zero() {
+    let counter = std::sync::atomic::AtomicU32::new(u32::MAX - 1);
+    assert_eq!(next_panel_sequence(&counter), u32::MAX);
+    assert_eq!(next_panel_sequence(&counter), 1);
+    assert_eq!(next_panel_sequence(&counter), 2);
+}
 fn status(payload: &[u8], family: &str) -> PanelStatus {
     let mut contents = pb::message(1, b"opaque");
     pb::put_uint(&mut contents, 3, 133);
@@ -62,6 +70,14 @@ fn bluetooth_defaults_unknowns_utf8_and_reordering() {
             panic!()
         };
         assert_eq!(c.state, state);
+        assert_eq!(
+            c.connected,
+            match state {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            }
+        );
         assert_eq!(c.peer_name.chars().count(), 80);
     }
     for selector in 1..=4 {
@@ -111,6 +127,24 @@ fn bluetooth_defaults_unknowns_utf8_and_reordering() {
         &pb::message(2, &pb::message(1, &pb::message(2, &[0xff]))),
     );
     assert!(status(&invalid, "bluetooth").diagnostic_error.is_some());
+}
+#[test]
+fn visca_followup_requires_advertised_support_and_no_existing_reply() {
+    for capability in [0, 1, 2, 99] {
+        for reply in [vec![], vec![0x90, 0x50, 0xff]] {
+            let mut payload = pb::scalar(1, capability);
+            pb::put_bytes(&mut payload, 2, &reply);
+            let parsed = status(&pb::message(11, &payload), "dante_av");
+            assert_eq!(
+                parsed.followup_requests.len(),
+                usize::from(capability == 1 && reply.is_empty())
+            );
+            for request in parsed.followup_requests {
+                assert!(matches!(request, PanelRequest::VideoViscaQuery));
+                assert!(request.encode().is_ok());
+            }
+        }
+    }
 }
 #[test]
 fn video_alternatives_and_optional_fields() {

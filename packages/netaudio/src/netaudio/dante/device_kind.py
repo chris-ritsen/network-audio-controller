@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ipaddress
 
+from netaudio.core import canonical_device_mac
+
 DEVICE_KIND_EMULATED = "emulated"
 DEVICE_KIND_HARDWARE = "hardware"
 DEVICE_KIND_MANAGED = "managed"
@@ -14,17 +16,6 @@ VIRTUAL_DEVICE_MANUFACTURER = "netaudio"
 VIRTUAL_DEVICE_MODEL = "netaudio"
 
 
-def _normalized_mac_address(mac_address) -> str:
-    if not mac_address:
-        return ""
-    raw = str(mac_address).replace(":", "").replace("-", "").lower()
-    if len(raw) == 16 and raw[6:10] == "fffe":
-        return raw[:6] + raw[10:]
-    if len(raw) == 16 and raw.endswith("0000"):
-        return raw[:12]
-    return raw
-
-
 def _packed_ipv4_hexadecimal(ipv4) -> str | None:
     if ipv4 is None:
         return None
@@ -35,7 +26,7 @@ def _packed_ipv4_hexadecimal(ipv4) -> str | None:
 
 
 def mac_address_encodes_ipv4(mac_address, ipv4=None) -> bool:
-    normalized = _normalized_mac_address(mac_address)
+    normalized = canonical_device_mac(mac_address) or ""
     if len(normalized) != 12 or not normalized.startswith("0000"):
         return False
     if normalized.startswith(EMULATED_PRIVATE_NETWORK_MAC_PREFIX):
@@ -72,7 +63,7 @@ def device_kind(device) -> str:
     identity_values = _identity_values(device)
     if VIRTUAL_DEVICE_MODEL.casefold() in identity_values or VIRTUAL_DEVICE_MANUFACTURER.casefold() in identity_values:
         return DEVICE_KIND_VIRTUAL
-    mac_address = _normalized_mac_address(getattr(device, "mac_address", None))
+    mac_address = canonical_device_mac(getattr(device, "mac_address", None)) or ""
     if mac_address.startswith(QEMU_ORGANIZATIONALLY_UNIQUE_IDENTIFIER):
         return DEVICE_KIND_EMULATED
     if mac_address_encodes_ipv4(mac_address, getattr(device, "ipv4", None)):

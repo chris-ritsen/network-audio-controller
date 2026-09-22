@@ -1,12 +1,61 @@
 use serde::Serialize;
 
+fn presentation(identifier: &str) -> Option<(&'static str, Option<&'static str>)> {
+    Some(match identifier {
+        "BUNDLE_FORMAT" => ("Multicast flow format mismatch", Some("The multicast flow format isn't compatible with the receiver.")),
+        "CHANNEL_FORMAT" => ("Channel format mismatch", Some("The source and destination channel formats differ.")),
+        "CHANNEL_LATENCY" => ("Incorrect channel latencies", Some("The source requires more latency than the receiver supports.")),
+        "CLOCK_DOMAIN" => ("Clock domain mismatch", Some("The transmitter and receiver aren't in the same clock domain.")),
+        "DYNAMIC" => ("Subscribed (unicast)", None),
+        "DYNAMIC_PROTOCOL" => ("Dynamic protocol", None),
+        "IDLE" => ("Idle", None),
+        "IN_PROGRESS" => ("Establishing flow", Some("Setting up the flow with the transmitter.")),
+        "INVALID_CHANNEL" => ("Invalid channel", Some("The subscription can't complete because the channel is invalid.")),
+        "INVALID_MSG" => ("Request rejected by transmitter", Some("The transmitter couldn't interpret the receiver's request.")),
+        "MANUAL" => ("Manually configured", None),
+        "NONE" => ("Not subscribed", None),
+        "NO_CONNECTION" => ("No connection", Some("Couldn't reach the transmitter.")),
+        "NO_RX" => ("No more flows (Rx)", Some("The receiver can't take on any more flows.")),
+        "NO_TX" => ("No more flows (Tx)", Some("The transmitter can't supply any more flows.")),
+        "QOS_FAIL_RX" => ("Rx bandwidth exceeded", Some("The receiver can't reliably take on more inbound flows.")),
+        "QOS_FAIL_TX" => ("Tx bandwidth exceeded", Some("The transmitter can't reliably take on more outbound flows.")),
+        "RESOLVED" => ("Resolved", Some("The source was found; the flow is being set up.")),
+        "RESOLVED_NONE" => ("Source not present", Some("The source channel isn't present on the network.")),
+        "RESOLVE_FAIL" => ("Resolve failed", Some("An error occurred while looking up the source channel.")),
+        "RX_FAIL" => ("Receiver setup failed", Some("An error occurred on the receiver.")),
+        "RX_LINK_DOWN" => ("Receiver link down", Some("The subscription can't complete while the receiver's link is down.")),
+        "RX_NOT_READY" => ("External receiver not ready", None),
+        "STATIC" => ("Subscribed (multicast)", None),
+        "SUBSCRIBE_SELF" => ("Subscribed (self)", Some("Subscribed to a channel on this same device.")),
+        "SUBSCRIBE_SELF_POLICY" => ("Self-subscription not allowed", Some("This device doesn't permit local subscriptions between these channels.")),
+        "TX_CHANNEL_ENCRYPTED" => ("Encryption unsupported (Rx)", Some("The receiver doesn't support the required signal encryption.")),
+        "TX_FAIL" => ("Transmitter setup failed", Some("An error occurred on the transmitter.")),
+        "TX_FANOUT_LIMIT_REACHED" => ("No more unicast flows (Tx)", Some("The transmitter can't supply any more unicast flows.")),
+        "TX_LINK_DOWN" => ("Transmitter link down", Some("The subscription can't complete while the transmitter's link is down.")),
+        "TX_NOT_READY" => ("External transmitter not ready", None),
+        "TX_REJECTED_ADDR" => ("Address rejected by transmitter", Some("The transmitter can't reach the receiver's address.")),
+        "TX_SCHEDULER_FAILURE" => ("Tx scheduler failure", Some("Often caused by a receiver asking for under 1 ms unicast latency from a transmitter on a 100 Mbps link.")),
+        "UNRESOLVED" => ("Unresolved", Some("The transmitting device isn't currently on the network.")),
+        "UNSUPPORTED" => ("Unsupported feature", Some("The subscription needs a feature this device doesn't support.")),
+        _ => return None,
+    })
+}
+
+const SUBSCRIBE_SELF: u16 = 0x0004;
+
+pub fn is_self_connection(source_device: Option<&str>, status_code: u16) -> bool {
+    source_device == Some(".") || status_code == SUBSCRIBE_SELF
+}
+
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubscriptionStatus {
     pub code: u16,
     pub receiver_status_code: Option<u16>,
     pub status: Option<&'static str>,
     pub state: &'static str,
     pub severity: &'static str,
+    pub settled: bool,
     pub label: &'static str,
     pub detail: Option<&'static str>,
     pub observed_summary: Option<&'static str>,
@@ -23,7 +72,7 @@ pub fn decode(code: u16, receiver_status_code: Option<u16>) -> SubscriptionStatu
         0x0000 => ("NONE", "none", "none", "NONE", Some("No subscription for this channel"), "NONE"),
         0x0002 => ("RESOLVED", "resolved", "progress", "RESOLVED", Some("Channel Name has been found, but not yet processed"), "IN_PROGRESS"),
         0x0003 => ("RESOLVE_FAIL", "error", "error", "RESOLVE_FAIL", Some("Error: an error occurred while trying to resolve the channel name"), "ERROR"),
-        0x0004 => ("SUBSCRIBE_SELF", "connected", "ok", "SUBSCRIBE_SELF", Some("Channel is successfully subscribed to own TX channels (local loopback mode)"), "CONNECTED"),
+        SUBSCRIBE_SELF => ("SUBSCRIBE_SELF", "connected", "ok", "SUBSCRIBE_SELF", Some("Channel is successfully subscribed to own TX channels (local loopback mode)"), "CONNECTED"),
         0x0005 => ("RESOLVED_NONE", "error", "error", "RESOLVED_NONE", Some("Error: Channel Name explicitly does not exist on this network"), "ERROR"),
         0x0007 => ("IDLE", "idle", "none", "IDLE", Some("A flow has been configured but does not have sufficient information to establish an audio connection"), "NONE"),
         0x0008 => ("IN_PROGRESS", "in_progress", "progress", "IN_PROGRESS", Some("Channel Name has been found and processed; setting up flow now"), "IN_PROGRESS"),
@@ -72,14 +121,17 @@ pub fn decode(code: u16, receiver_status_code: Option<u16>) -> SubscriptionStatu
     };
     let observed =
         receiver_status_code == Some(0x0101) || (code == 1 && receiver_status_code == Some(0));
+    let (label, detail) = presentation(definition.0).unwrap_or((definition.3, None));
+
     SubscriptionStatus {
         code,
         receiver_status_code,
         status: Some(definition.0),
         state: definition.1,
         severity: definition.2,
-        label: definition.3,
-        detail: definition.4,
+        settled: matches!(definition.1, "connected" | "error" | "unresolved"),
+        label,
+        detail: detail.or(definition.4),
         observed_summary: observed.then_some(definition.5),
         interpretation: if observed {
             "observed"
@@ -100,6 +152,7 @@ fn unknown(
         status: None,
         state: "unknown",
         severity: "warning",
+        settled: false,
         label: "Unknown subscription status",
         detail: Some("The available observations do not establish a classification for this value and receiver context."),
         observed_summary: None,
@@ -107,12 +160,31 @@ fn unknown(
     }
 }
 
-pub fn state_for_identifier(identifier: &str) -> &'static str {
-    (0..=255)
+#[derive(Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SubscriptionClassification {
+    pub state: &'static str,
+    pub severity: &'static str,
+    pub settled: bool,
+    pub label: Option<&'static str>,
+    pub detail: Option<&'static str>,
+}
+
+pub fn classification_for_identifier(identifier: &str) -> SubscriptionClassification {
+    let entry = (0..=255)
         .map(|code| decode(code, Some(0x0101)))
         .chain(std::iter::once(decode(1, Some(0))))
         .find(|entry| entry.status == Some(identifier))
-        .map_or("unknown", |entry| entry.state)
+        .unwrap_or_else(|| unknown(0, None, "unknown"));
+    let display = presentation(identifier);
+
+    SubscriptionClassification {
+        state: entry.state,
+        severity: entry.severity,
+        settled: entry.settled,
+        label: display.map(|(label, _)| label),
+        detail: display.and_then(|(_, detail)| detail),
+    }
 }
 
 #[cfg(test)]

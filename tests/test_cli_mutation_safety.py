@@ -4,10 +4,12 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from netaudio import core
 from netaudio.asynchronous_primitives import DeferredAsyncioLock
 from netaudio.commands import flow as flow_commands
 from netaudio.commands import subscription as subscription_commands
 from netaudio.dante import flows
+from netaudio.dante.const import SERVICE_ARC
 from tests.cli_test_support import FakeApplication, invoke
 
 runner = CliRunner()
@@ -43,8 +45,9 @@ def _channel(number, name):
     )
 
 
-def _subscription(rx_name, tx_name, tx_device):
+def _subscription(rx_name, tx_name, tx_device, *, channel_number=1):
     return SimpleNamespace(
+        rx_channel=_channel(channel_number, rx_name),
         rx_channel_name=rx_name,
         tx_channel_name=tx_name,
         tx_device_name=tx_device,
@@ -80,6 +83,7 @@ def _subscription_devices(refresh_rx=None):
             refresh_rx(rx)
 
     rx.get_rx_channels = get_rx_channels
+    rx.services = {"arc": {"type": SERVICE_ARC, "properties": {"arcp_vers": "2.7.255"}}}
     return {"tx.local.": tx, "rx.local.": rx}, tx, rx
 
 
@@ -154,15 +158,11 @@ def test_subscription_bulk_skips_already_satisfied_pairs():
 
 
 def test_subscription_bulk_reports_unchanged_and_modified_exactly():
-    refresh_count = 0
-
     def refresh_rx(device):
-        nonlocal refresh_count
-        refresh_count += 1
-        if refresh_count >= 2:
+        if application.sent:
             device.subscriptions = [
                 _subscription("Rx1", "Tx1", "TX"),
-                _subscription("Rx2", "Tx2", "TX"),
+                _subscription("Rx2", "Tx2", "TX", channel_number=2),
             ]
 
     devices, _, rx = _subscription_devices(refresh_rx=refresh_rx)
@@ -180,12 +180,8 @@ def test_subscription_bulk_reports_unchanged_and_modified_exactly():
 
 
 def test_subscription_bulk_reports_partial_readback_per_channel():
-    refresh_count = 0
-
     def refresh_rx(device):
-        nonlocal refresh_count
-        refresh_count += 1
-        if refresh_count >= 2:
+        if application.sent:
             device.subscriptions = [_subscription("Rx1", "Tx1", "TX")]
 
     devices, _, _ = _subscription_devices(refresh_rx=refresh_rx)
@@ -196,7 +192,50 @@ def test_subscription_bulk_reports_partial_readback_per_channel():
     assert result.exit_code == 1
     assert "MODIFIED Rx1@RX <- Tx1@TX (verified)" in result.output
     assert "FAILED Rx2@RX <- Tx2@TX" in result.output
-    assert "fresh readback was None" in result.output
+    assert "fresh readback reports None" in result.output
+
+
+@pytest.mark.parametrize(
+    "version,managed,batch_sizes",
+    [("2.7.255", False, [16, 16, 1]), ("2.8.15", False, [32, 1]), (None, True, [32, 1])],
+)
+def test_bulk_subscription_uses_native_revision_limits_and_verifies_every_channel(version, managed, batch_sizes):
+    def refresh_rx(device):
+        device.subscriptions = [
+            _subscription(f"Rx{number}", channel, transmitter, channel_number=number)
+            for sent in application.sent
+            for number, channel, transmitter in sent.arguments[0]
+        ]
+
+    devices, tx, rx = _subscription_devices(refresh_rx=refresh_rx)
+    tx.tx_channels = {number: _channel(number, f"Tx{number}") for number in range(1, 34)}
+    rx.rx_channels = {number: _channel(number, f"Rx{number}") for number in range(1, 34)}
+    rx.requires_managed_control = managed
+    rx.services["arc"]["properties"]["arcp_vers"] = version
+
+    for channel in rx.rx_channels.values():
+        channel.media_type_code = 3
+
+    application = FakeApplication(devices)
+
+    result = _add_bulk(application)
+
+    assert result.exit_code == 0, result.output
+    assert [len(sent.arguments[0]) for sent in application.sent] == batch_sizes
+    assert result.output.count("(verified)") == 33
+    assert len(rx.subscriptions) == 33
+
+
+def test_bulk_subscription_unknown_revision_never_writes():
+    devices, _, rx = _subscription_devices()
+    rx.services["arc"]["properties"]["arcp_vers"] = "2.9.0"
+    application = FakeApplication(devices)
+
+    result = _add_bulk(application)
+
+    assert result.exit_code == 1
+    assert application.sent == []
+    assert "unsupported ARC protocol version" in result.output
 
 
 def test_subscription_add_requires_fresh_readback():
@@ -223,13 +262,11 @@ def test_subscription_readback_uses_channel_identity_when_labels_collide():
     device = SimpleNamespace(
         rx_channels={1: _channel(1, "Duplicate"), 2: _channel(2, "Duplicate")},
         subscriptions=[
-            _subscription("Duplicate", "Tx1", "TX"),
-            _subscription("Duplicate", "Tx2", "TX"),
+            _subscription("Duplicate", "Tx2", "TX", channel_number=2),
+            _subscription("Duplicate", "Tx1", "TX", channel_number=1),
         ],
     )
-    subscription_commands._index_fresh_subscriptions(device)
-
-    assert subscription_commands._subscription_signature(device, 2) == ("Tx2", "TX")
+    assert subscription_commands.subscription_sources(device, [1, 2]) == {1: ("Tx1", "TX"), 2: ("Tx2", "TX")}
 
 
 def test_subscription_remove_all_uses_global_filters_and_verifies(reset_cli_state):
@@ -284,6 +321,55 @@ def test_subscription_remove_refreshes_before_claiming_channel_is_subscribed():
     assert application.sent == []
 
 
+def test_single_subscription_skips_verified_existing_source():
+    devices, _, rx = _subscription_devices()
+    rx.subscriptions = [_subscription("Rx1", "Tx1", "TX")]
+    application = FakeApplication(devices)
+
+    result = invoke(subscription_commands.run_subscription_add_single, application, devices, "Tx1@TX", "Rx1@RX")
+
+    assert result.exit_code == 0
+    assert application.sent == []
+    assert "already subscribed" in result.output
+
+
+@pytest.mark.parametrize("action", ["add", "remove"])
+def test_single_subscription_unknown_revision_never_writes(action):
+    devices, _, rx = _subscription_devices()
+    rx.services["arc"]["properties"]["arcp_vers"] = "2.9.0"
+    rx.subscriptions = [_subscription("Rx1", "Other", "TX")]
+    application = FakeApplication(devices)
+
+    if action == "add":
+        result = invoke(subscription_commands.run_subscription_add_single, application, devices, "Tx1@TX", "Rx1@RX")
+    else:
+        result = invoke(subscription_commands.run_subscription_remove, application, devices, ["Rx1@RX"], False)
+
+    assert result.exit_code == 1
+    assert application.sent == []
+    assert "unsupported ARC protocol version" in result.output
+
+
+def test_subscription_removal_batches_and_reports_partial_readback(reset_cli_state):
+    def refresh_rx(device):
+        removed = {number for sent in application.sent for number in sent.arguments[0] if number != 2}
+        device.subscriptions = [item for item in device.subscriptions if item.rx_channel.number not in removed]
+
+    devices, _, rx = _subscription_devices(refresh_rx=refresh_rx)
+    rx.rx_channels = {number: _channel(number, f"Rx{number}") for number in range(1, 34)}
+    rx.subscriptions = [_subscription(f"Rx{number}", "Source", "TX", channel_number=number) for number in range(1, 34)]
+    reset_cli_state.names = ["RX"]
+    application = FakeApplication(devices)
+
+    result = invoke(subscription_commands.run_subscription_remove, application, devices, None, True)
+
+    assert result.exit_code == 1
+    assert [len(sent.arguments[0]) for sent in application.sent] == [16, 16, 1]
+    assert result.output.count("(verified)") == 32
+    assert "FAILED Rx2@RX" in result.output
+    assert "Removed: Rx2@RX" not in result.output
+
+
 def _flow_device():
     return SimpleNamespace(
         name="Flow Device",
@@ -292,9 +378,8 @@ def _flow_device():
         mac_address="00:1d:c1:00:00:30",
         flow_protocol_id=0x2729,
         transmit_flow_authoring_capability_word=0,
-        transmit_flow_authoring_opcode=0x2201,
-        transmit_flow_authoring_protocol_id=0x2729,
-        receiver_flow_inventory_opcode=0x3200,
+        transmit_flow_authoring=core.flow_authoring_capabilities(0)["transmit_flow_authoring"],
+        receiver_flow_inventory_family="legacy",
         is_locked=False,
         sample_rate=48000,
         encoding=24,
@@ -337,7 +422,7 @@ def test_empty_flow_inspect_preserves_canonical_structured_output(monkeypatch):
     flow_inventory = {
         "schema_version": 1,
         "flow_protocol_id": 0x2729,
-        "max_flow_slots": 16,
+        "maximum_flow_slots": 16,
         "reported_flow_count": 0,
         "flows": [],
         "unparsed_records": [],
@@ -381,8 +466,7 @@ def test_receiver_flow_list_preserves_structured_output(monkeypatch):
 
     application, devices, _ = _flow_context()
 
-    async def query(*_args, require_complete):
-        assert require_complete is False
+    async def query(*_args):
         return RECEIVER_FLOW_INVENTORY
 
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
@@ -399,8 +483,7 @@ def test_receiver_flow_list_displays_endpoint_type_and_port(monkeypatch):
 
     application, devices, _ = _flow_context()
 
-    async def query(*_args, require_complete):
-        assert require_complete is False
+    async def query(*_args):
         return RECEIVER_FLOW_INVENTORY
 
     monkeypatch.setattr(flows, "query_preferred_receiver_flow_inventory", query)
@@ -558,7 +641,7 @@ def test_flow_delete_refuses_non_multicast_flow(monkeypatch):
     delete_calls = 0
 
     async def query(*_args, **_kwargs):
-        return {"max_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "unicast"}]}
+        return {"maximum_flow_slots": 32, "flows": [{"flow_number": 17, "flow_type": "unicast"}]}
 
     async def delete(*_args):
         nonlocal delete_calls

@@ -104,7 +104,8 @@ fn switch_configuration_status_parses_shipping_controller_response() {
     assert_eq!(parsed.referenced_value_pointer, 0x0010);
     assert_eq!(parsed.referenced_value_size, 4);
     assert_eq!(parsed.referenced_value_hexadecimal, "0000007f");
-    assert_eq!(parsed.mode_codes_at_record_offsets_20_and_22, [1, 1]);
+    assert_eq!(parsed.current_mode_evidence.raw_code, 1);
+    assert_eq!(parsed.configured_mode_evidence.raw_code, 1);
     assert_eq!(
         parsed
             .choices
@@ -154,7 +155,8 @@ fn switch_configuration_unknown_label_keeps_raw_choice_without_guessing_mode() {
     response[52..63].copy_from_slice(b"Future Mode");
 
     let parsed = parse_switch_configuration_status(&response).unwrap();
-    assert_eq!(parsed.mode_codes_at_record_offsets_20_and_22, [1, 1]);
+    assert_eq!(parsed.current_mode_evidence.raw_code, 1);
+    assert_eq!(parsed.current_mode_evidence.status, "unknown_raw");
     assert_eq!(parsed.redundancy.current, None);
     assert_eq!(parsed.redundancy.configured, None);
     assert_eq!(parsed.choices[0].code, 1);
@@ -261,6 +263,7 @@ fn encoding_uses_the_shared_configurable_u32_layout() {
             update_mode: 2,
             available_values: vec![24, 16, 32],
             flags: None,
+            host_disabled: None,
         }
     );
 }
@@ -330,6 +333,11 @@ fn codec_status_preserves_generic_parameter_type_mode_and_raw_values() {
             descriptor_stride: 8,
             descriptor_offset: 16,
             raw_record: captured_avio_input_codec_status_packet_1528()[24..].to_vec(),
+            gain_adapter: Some(GainStatus {
+                channel_levels: vec![5, 1],
+                device_type: "input".to_owned(),
+                supported_levels: vec![1, 2, 3, 4, 5],
+            }),
             parameters: vec![CodecParameterStatus {
                 parameter_type: 1,
                 mode: 2,
@@ -349,7 +357,9 @@ fn codec_status_preserves_generic_parameter_type_mode_and_raw_values() {
 #[test]
 fn gain_status_reads_avio_input_levels_from_codec_status() {
     assert_eq!(
-        parse_gain_status(&captured_avio_input_codec_status_packet_1528()),
+        parse_codec_status(&captured_avio_input_codec_status_packet_1528())
+            .unwrap()
+            .gain_adapter,
         Some(GainStatus {
             channel_levels: vec![5, 1],
             device_type: "input".to_owned(),
@@ -360,15 +370,25 @@ fn gain_status_reads_avio_input_levels_from_codec_status() {
     let mut output = captured_avio_input_codec_status_packet_1528();
     output[40] = 2;
     output[41] = 1;
-    assert_eq!(parse_gain_status(&output).unwrap().device_type, "output");
+    assert_eq!(
+        parse_codec_status(&output)
+            .unwrap()
+            .gain_adapter
+            .unwrap()
+            .device_type,
+        "output"
+    );
 
     let mut unknown = captured_avio_input_codec_status_packet_1528();
     unknown[40] = 0xA5;
-    assert_eq!(parse_gain_status(&unknown), None);
+    assert_eq!(parse_codec_status(&unknown).unwrap().gain_adapter, None);
 
     let mut out_of_range = captured_avio_input_codec_status_packet_1528();
     out_of_range[51] = 9;
-    assert_eq!(parse_gain_status(&out_of_range), None);
+    assert_eq!(
+        parse_codec_status(&out_of_range).unwrap().gain_adapter,
+        None
+    );
 }
 
 #[test]
@@ -831,6 +851,7 @@ fn clear_configuration_status_parses_authentic_publications_and_preserves_unknow
             unmapped_first_word: 0,
             available_actions_mask: 3,
             action_result_code: 1,
+            completed_action: Some("clear_all_configuration"),
         })
     );
 
@@ -848,6 +869,7 @@ fn clear_configuration_status_parses_authentic_publications_and_preserves_unknow
     assert_eq!(parsed_unknown.unmapped_first_word, 0x11223344);
     assert_eq!(parsed_unknown.available_actions_mask, 0x80000003);
     assert_eq!(parsed_unknown.action_result_code, u32::MAX);
+    assert_eq!(parsed_unknown.completed_action, None);
 
     assert_eq!(parse_clear_configuration_status(&mode_one[..39]), None);
     let mut wrong_record_identifier = mode_one.clone();

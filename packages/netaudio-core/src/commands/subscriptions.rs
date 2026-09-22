@@ -5,7 +5,8 @@ const SUBSCRIPTION_PACKET_HEADER_SIZE: usize = 8;
 const SUBSCRIPTION_PAYLOAD_PREFIX_SIZE: usize = 4;
 const SUBSCRIPTION_RECORD_SIZE: usize = 6;
 const SUBSCRIPTION_STRING_TABLE_ALIGNMENT: usize = 44;
-const SUBSCRIPTION_PAGE_CAPACITY: usize = 32;
+pub(crate) const SUBSCRIPTION_PAGE_CAPACITY: usize = 32;
+pub(crate) const LEGACY_SUBSCRIPTION_BATCH_CAPACITY: usize = 16;
 const SUBSCRIPTION_PAGE_STRING_TABLE_OFFSET: usize = 0x028C;
 const RECEIVE_CHANNEL_NAME_PAGE_CAPACITY: usize = 32;
 const RECEIVE_CHANNEL_NAME_PAGE_STRING_TABLE_OFFSET: usize = 0x008C;
@@ -95,7 +96,7 @@ pub fn build_modern_arc_subscription_page(
     if ![PROTOCOL_ARC_2809, PROTOCOL_ARC_280F].contains(&protocol_id)
         || (protocol_id == PROTOCOL_ARC_2809 && media_type_code != MODERN_ARC_AUDIO_MEDIA_TYPE)
         || page_capacity == 0
-        || page_capacity > 32
+        || usize::from(page_capacity) > SUBSCRIPTION_PAGE_CAPACITY
         || records.is_empty()
         || records.len() > usize::from(page_capacity)
         || !matches!(
@@ -273,12 +274,78 @@ pub fn build_subscription_page_2729(
     )
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct SubscriptionTarget {
+    pub rx_channel: u8,
+    pub tx_channel: String,
+    pub tx_device: String,
+}
+
+/// Decode the batch format authored by build_add_subscriptions.
+pub fn parse_add_subscriptions_request(data: &[u8]) -> Option<Vec<SubscriptionTarget>> {
+    use crate::bytes::{read_u16, string_at_pointer};
+
+    if read_u16(data, 0)? != crate::protocol::PROTOCOL_ID
+        || usize::from(read_u16(data, 2)?) != data.len()
+        || read_u16(data, 6)? != OPCODE_SUBSCRIPTION_ADD
+        || read_u16(data, 8)? != 0
+        || *data.get(10)? != 2
+    {
+        return None;
+    }
+
+    let count = usize::from(*data.get(11)?);
+
+    if !(1..=LEGACY_SUBSCRIPTION_BATCH_CAPACITY).contains(&count) {
+        return None;
+    }
+
+    let records_end = SUBSCRIPTION_PACKET_HEADER_SIZE
+        + SUBSCRIPTION_PAYLOAD_PREFIX_SIZE
+        + SUBSCRIPTION_RECORD_SIZE * count;
+    let minimum_pointer =
+        records_end.max(SUBSCRIPTION_PACKET_HEADER_SIZE + SUBSCRIPTION_STRING_TABLE_ALIGNMENT);
+    let mut targets = Vec::with_capacity(count);
+
+    for index in 0..count {
+        let offset = SUBSCRIPTION_PACKET_HEADER_SIZE
+            + SUBSCRIPTION_PAYLOAD_PREFIX_SIZE
+            + SUBSCRIPTION_RECORD_SIZE * index;
+        let rx_channel = u8::try_from(read_u16(data, offset)?).ok()?;
+        let channel_pointer = read_u16(data, offset + 2)?;
+        let device_pointer = read_u16(data, offset + 4)?;
+
+        if rx_channel == 0
+            || usize::from(channel_pointer) < minimum_pointer
+            || usize::from(device_pointer) < minimum_pointer
+        {
+            return None;
+        }
+
+        let tx_channel = string_at_pointer(data, channel_pointer)?;
+        let tx_device = string_at_pointer(data, device_pointer)?;
+        validate_dante_channel_reference(&tx_channel).ok()?;
+
+        if tx_device != "." {
+            validate_dante_name(&tx_device).ok()?;
+        }
+
+        targets.push(SubscriptionTarget {
+            rx_channel,
+            tx_channel,
+            tx_device,
+        });
+    }
+
+    Some(targets)
+}
+
 pub fn build_add_subscriptions(
     subscriptions: &[(u16, String, String)],
     transaction_id: u16,
 ) -> Result<Vec<u8>, NetaudioError> {
     let count = subscriptions.len();
-    if !(1..=16).contains(&count) {
+    if !(1..=LEGACY_SUBSCRIPTION_BATCH_CAPACITY).contains(&count) {
         return Err(NetaudioError::SubscriptionCount);
     }
 
@@ -337,6 +404,34 @@ pub fn build_add_subscriptions(
     payload.extend_from_slice(&string_table);
 
     build_control_packet(OPCODE_SUBSCRIPTION_ADD, &payload, transaction_id)
+}
+
+/// Decode the disconnect request emitted by the legacy ARC subscription encoder.
+/// Validate the complete batch before a caller applies any routing changes.
+pub fn parse_remove_subscriptions_request(data: &[u8]) -> Option<Vec<u32>> {
+    use crate::bytes::{read_u16, read_u32};
+
+    if read_u16(data, 0)? != crate::protocol::PROTOCOL_ID
+        || usize::from(read_u16(data, 2)?) != data.len()
+        || read_u16(data, 6)? != OPCODE_SUBSCRIPTION_REMOVE
+    {
+        return None;
+    }
+
+    let count = usize::try_from(read_u32(data, 8)?).ok()?;
+    let records = data.get(12..)?;
+
+    if count == 0 || count.checked_mul(4)? != records.len() {
+        return None;
+    }
+
+    records
+        .chunks_exact(4)
+        .map(|record| {
+            let channel = read_u32(record, 0)?;
+            (channel != 0).then_some(channel)
+        })
+        .collect()
 }
 
 pub fn build_remove_subscriptions(
